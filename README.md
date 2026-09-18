@@ -17,9 +17,11 @@ Primeira entrega funcional da fundação de um SaaS para agências. React/TypeSc
 
 ## Links compartilháveis
 
-Cada página tem sua URL: `/visao-geral`, `/tarefas`, `/clientes`, `/projetos`, `/horas`, `/relatorios` e `/configuracoes`. A raiz `/` também abre a visão geral. O menu usa links que podem ser copiados ou abertos em outra aba.
+`/login` é a entrada pública. Abrir `/` ou uma página protegida sem sessão redireciona para o login. Após autenticar, o usuário retorna ao destino solicitado; quando não existe um destino, abre a visão geral. A demonstração depende de escolha explícita na tela de login, inclusive quando não há configuração do Supabase.
 
-O login preserva a rota solicitada. A URL também guarda empresa, busca, filtros, paginação, período e visualização de tarefas. Exemplo: `/tarefas?visualizacao=board&status=review`. Voltar, Avançar e recarregar restauram o estado da URL. Os dados continuam sujeitos à autenticação e às permissões RLS; compartilhar o endereço não concede acesso à empresa. Endereços desconhecidos exibem página não encontrada. Os formulários de criação e detalhes em modal continuam sendo estados temporários da página.
+As URLs usam o nome da agência, por exemplo `/agencias/make-acelerador-de-vendas/clientes`. As páginas disponíveis são `visao-geral`, `tarefas`, `clientes`, `projetos`, `horas`, `relatorios` e `configuracoes`. Links antigos como `/clientes?empresa=UUID` continuam aceitos e são convertidos para a URL amigável após carregar as empresas autorizadas. O menu permite copiar links ou abrir em outra aba.
+
+Busca, filtros, paginação, período e visualização de tarefas continuam na query string quando selecionados. Voltar, Avançar e recarregar restauram a URL. O destino pós-login aceita apenas rotas internas conhecidas e remove parâmetros de autenticação. Os dados continuam sujeitos às permissões RLS: compartilhar o endereço não concede acesso à agência. Empresas com nomes equivalentes recebem um sufixo para evitar ambiguidade; alterar o nome de uma agência altera sua URL legível. Endereços desconhecidos exibem página não encontrada. Formulários e detalhes em modal são estados temporários da página.
 
 ## Executar
 

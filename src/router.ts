@@ -22,8 +22,70 @@ function subscribe(listener: () => void) {
 function snapshot() {
   return window.location.pathname + window.location.search;
 }
-export function resolvePage(path: string): Page | null {
+export function useLocation() {
+  return useSyncExternalStore(subscribe, snapshot);
+}
+export function routeParts(path: string) {
   const normalized = path.replace(/\/+$/, "") || "/";
+  const match = normalized.match(/^\/agencias\/([a-z0-9-]+)(\/.*)?$/);
+  return {
+    company: match?.[1] ?? "",
+    path: match ? match[2] || "/visao-geral" : normalized,
+  };
+}
+export function companySlug(
+  company: { id: string; name: string },
+  companies: { id: string; name: string }[],
+) {
+  const slug = (name: string) =>
+    name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "agencia";
+  const base = slug(company.name);
+  return companies.filter((c) => slug(c.name) === base).length > 1
+    ? `${base}-${company.id}`
+    : base;
+}
+export function safeReturnPath(value: string | null) {
+  if (
+    !value ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    /[\\\r\n]/.test(value)
+  )
+    return pagePaths.overview;
+  const url = new URL(value, "https://mavi.invalid");
+  if (url.origin !== "https://mavi.invalid" || !resolvePage(url.pathname))
+    return pagePaths.overview;
+  // Never persist auth tokens or arbitrary parameters in the login destination.
+  const allowed = new Set([
+    "empresa",
+    "busca",
+    "status",
+    "produto",
+    "minhas",
+    "atrasadas",
+    "cliente",
+    "projeto",
+    "pagina",
+    "periodo",
+    "visualizacao",
+  ]);
+  for (const key of [...url.searchParams.keys()])
+    if (!allowed.has(key)) url.searchParams.delete(key);
+  return url.pathname + url.search;
+}
+export function loginDestination(current: string) {
+  const next = safeReturnPath(current);
+  return next === "/" || next === pagePaths.overview
+    ? "/login"
+    : `/login?retorno=${encodeURIComponent(next)}`;
+}
+export function resolvePage(path: string): Page | null {
+  const normalized = routeParts(path).path;
   if (normalized === "/") return "overview";
   return (
     (Object.keys(pagePaths) as Page[]).find(
@@ -38,7 +100,8 @@ export function navigate(url: string, replace = false) {
 }
 export function pageUrl(page: Page, company = "") {
   return (
-    pagePaths[page] + (company ? `?empresa=${encodeURIComponent(company)}` : "")
+    (company ? `/agencias/${encodeURIComponent(company)}` : "") +
+    pagePaths[page]
   );
 }
 export function usePage() {
@@ -65,16 +128,25 @@ export function useUrlState<T extends string | number | boolean>(
   fallback: T,
 ): [T, (next: SetStateAction<T>) => void] {
   const url = useSyncExternalStore(subscribe, snapshot);
-  const value = readParam(
-    new URLSearchParams(url.split("?")[1]),
-    key,
-    fallback,
-  );
+  const value = readParam(paramsForUrl(url), key, fallback);
   const setValue = useCallback(
     (next: SetStateAction<T>) => {
       const current = new URL(window.location.href);
-      const previous = readParam(current.searchParams, key, fallback);
+      const previous = readParam(
+        paramsForUrl(current.pathname + current.search),
+        key,
+        fallback,
+      );
       const value = typeof next === "function" ? next(previous) : next;
+      if (key === "empresa") {
+        const path = routeParts(current.pathname).path;
+        current.pathname = value
+          ? `/agencias/${encodeURIComponent(String(value))}${path === "/" ? "/visao-geral" : path}`
+          : path;
+        current.searchParams.delete("empresa");
+        navigate(current.pathname + current.search + current.hash, true);
+        return;
+      }
       if (value === fallback || value === "") current.searchParams.delete(key);
       else
         current.searchParams.set(
@@ -86,4 +158,11 @@ export function useUrlState<T extends string | number | boolean>(
     [key, fallback],
   );
   return [value, setValue];
+}
+function paramsForUrl(url: string) {
+  const [path, search] = url.split("?");
+  const params = new URLSearchParams(search);
+  const company = routeParts(path).company;
+  if (company) params.set("empresa", company);
+  return params;
 }

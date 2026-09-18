@@ -1,4 +1,15 @@
-import { usePage, useUrlState, navigate, pageUrl, type Page } from "./router";
+import {
+  usePage,
+  useUrlState,
+  useLocation,
+  navigate,
+  pageUrl,
+  companySlug,
+  safeReturnPath,
+  loginDestination,
+  resolvePage,
+  type Page,
+} from "./router";
 import { Input, Select, SelectOption, Button } from "./ui";
 import {
   useEffect,
@@ -88,13 +99,27 @@ export default function App() {
       new URLSearchParams(window.location.hash.slice(1)).get("type") ===
         "recovery",
   );
-  const [demo, setDemo] = useState(!supabase),
+  const [demo, setDemo] = useState(false),
     [session, setSession] = useState<Session | null>(null),
     [authReady, setAuthReady] = useState(!supabase);
   const [data, setData] = useState<Snapshot>(
       demo ? demoStore.current.data : emptySnapshot,
     ),
-    [company, setCompany] = useUrlState<string>("empresa", "");
+    [companyRef, setCompanyRef] = useUrlState<string>("empresa", "");
+  const location = useLocation();
+  const isLogin = location.split("?")[0].replace(/\/+$/, "") === "/login";
+  const requestedCompany = data.companies.find(
+    (c) => c.id === companyRef || companySlug(c, data.companies) === companyRef,
+  );
+  const activeCompany = companyRef ? requestedCompany : data.companies[0];
+  const company = activeCompany?.id ?? "";
+  const companyPath = activeCompany
+    ? companySlug(activeCompany, data.companies)
+    : companyRef;
+  function setCompany(id: string) {
+    const next = data.companies.find((c) => c.id === id);
+    setCompanyRef(next ? companySlug(next, data.companies) : "");
+  }
   const page = usePage();
   const [sidebar, setSidebar] = useState(false),
     [viewValue, setView] = useUrlState<string>("visualizacao", "list");
@@ -132,6 +157,44 @@ export default function App() {
   const period = /^\d{4}-(0[1-9]|1[0-2])$/.test(periodValue)
     ? periodValue
     : dateKey().slice(0, 7);
+  useEffect(() => {
+    if (!authReady || (session && needsPassword)) return;
+    if (!demo && !session && !isLogin) {
+      navigate(loginDestination(location), true);
+    } else if ((demo || session) && isLogin) {
+      navigate(
+        safeReturnPath(
+          new URLSearchParams(window.location.search).get("retorno"),
+        ),
+        true,
+      );
+    }
+  }, [authReady, demo, session, isLogin, location, needsPassword]);
+  useEffect(() => {
+    if (
+      !authReady ||
+      (!demo && !session) ||
+      !page ||
+      !activeCompany ||
+      needsPassword
+    )
+      return;
+    if (
+      companyRef !== companyPath ||
+      new URLSearchParams(window.location.search).has("empresa")
+    )
+      setCompanyRef(companyPath);
+  }, [
+    authReady,
+    demo,
+    session,
+    page,
+    companyRef,
+    companyPath,
+    activeCompany,
+    needsPassword,
+    setCompanyRef,
+  ]);
   useEffect(() => {
     const id = setTimeout(() => {
       setQuery(search);
@@ -181,7 +244,6 @@ export default function App() {
       .then((list) => {
         if (alive) {
           setData((d) => ({ ...d, companies: list }));
-          setCompany((c) => c || (list[0]?.id ?? ""));
         }
       })
       .catch((e) => {
@@ -196,7 +258,6 @@ export default function App() {
   }, [demo, session]);
   useEffect(() => {
     if (demo) {
-      if (!company) setCompany("demo-agency");
       setData({ ...demoStore.current.data });
       setLoading(false);
       return;
@@ -298,7 +359,7 @@ export default function App() {
     }
   }
   function go(next: Page) {
-    navigate(pageUrl(next, company));
+    navigate(pageUrl(next, companyPath));
     setSidebar(false);
     setSelected(null);
     setForm(null);
@@ -320,10 +381,11 @@ export default function App() {
     if (demo) {
       setDemo(false);
       setData(emptySnapshot);
-      setCompany("");
+      navigate("/login", true);
       return;
     }
     await supabase?.auth.signOut();
+    navigate("/login", true);
   }
   const selectedTask = data.tasks.find((t) => t.id === selected);
   const filtered = data.tasks.filter(
@@ -396,30 +458,48 @@ export default function App() {
         }}
       />
     );
-  if (!demo && !session)
+  if (!demo && !session && !isLogin) return <Loading />;
+  if (!demo && !session && isLogin)
     return (
       <Login
         onDemo={() => {
           setDemo(true);
-          setCompany("demo-agency");
           setData(demoStore.current.data);
+          const target = safeReturnPath(
+            new URLSearchParams(window.location.search).get("retorno"),
+          );
+          const demoCompany = demoStore.current.data.companies[0];
+          navigate(
+            pageUrl(
+              resolvePage(target.split("?")[0]) ?? "overview",
+              companySlug(demoCompany, demoStore.current.data.companies),
+            ),
+            true,
+          );
         }}
         notify={notify}
       />
     );
+  if (isLogin) return <Loading />;
   if (!page)
     return (
       <Empty
         title="Página não encontrada"
         body="Confira o endereço ou volte para a visão geral."
         action={
-          <a className="btn primary" href={pageUrl("overview", company)}>
+          <a className="btn primary" href={pageUrl("overview", companyPath)}>
             Ir para visão geral
           </a>
         }
       />
     );
-  if (!demo && company && data.companies.length && !currentCompany)
+  if (
+    !demo &&
+    companyRef &&
+    companiesReady &&
+    data.companies.length &&
+    !currentCompany
+  )
     return (
       <Empty
         title="Empresa indisponível"
@@ -488,7 +568,7 @@ export default function App() {
           {navigation.map((item) => (
             <a
               key={item.id}
-              href={pageUrl(item.id, company)}
+              href={pageUrl(item.id, companyPath)}
               aria-current={page === item.id ? "page" : undefined}
               className={page === item.id ? "active" : ""}
               onClick={(event) => followLink(event, item.id)}
@@ -522,7 +602,7 @@ export default function App() {
             className={
               page === "settings" ? "settings-link active" : "settings-link"
             }
-            href={pageUrl("settings", company)}
+            href={pageUrl("settings", companyPath)}
             aria-current={page === "settings" ? "page" : undefined}
             onClick={(event) => followLink(event, "settings")}
           >

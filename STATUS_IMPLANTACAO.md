@@ -12,7 +12,7 @@
 
 ## Verificações concluídas
 
-- Build de produção aprovado. Sete testes de domínio e roteamento passaram. Login real preservou `/clientes`; recarga de `/projetos` e navegação Voltar/Avançar verificadas no navegador.
+- Build de produção aprovado. Dez testes de domínio e roteamento passaram. Entrada sem sessão redireciona para `/login`; login retorna ao destino compartilhado. URLs com nome da agência substituem o UUID; links legados são normalizados. Navegação e recarga verificadas no navegador.
 - Conteúdo central verificado em monitor amplo: 1.937 px disponíveis e 1.937 px ocupados pelo `main`. Formulário mobile validado; criação de tarefa demonstrativa preservou prioridade e aprovação do cliente usando os novos componentes React.
 - Quatro testes de domínio e 31 verificações de banco aprovadas no PostgreSQL embarcado, incluindo isolamento, aprovações, horas, anexos, revogação e provisionamento do administrador.
 - `supabase/tests/remote_smoke.sql` executado no PostgreSQL hospedado: isolamento de empresas, leitura de relatórios, bloqueio de escrita direta, aprovação e bloqueio anônimo. Fixtures revertidas na mesma transação.
