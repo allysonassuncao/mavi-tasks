@@ -1,3 +1,4 @@
+import { usePage, useUrlState, navigate, pageUrl, type Page } from "./router";
 import { Input, Select, SelectOption, Button } from "./ui";
 import {
   useEffect,
@@ -5,6 +6,7 @@ import {
   useState,
   useCallback,
   type FormEvent,
+  type MouseEvent,
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
@@ -71,14 +73,6 @@ import {
 } from "./domain";
 import { CreateForm, TaskDetail } from "./forms";
 
-type Page =
-  | "overview"
-  | "tasks"
-  | "clients"
-  | "projects"
-  | "hours"
-  | "reports"
-  | "settings";
 const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "tasks", label: "Tarefas", icon: CheckCheck },
@@ -100,23 +94,27 @@ export default function App() {
   const [data, setData] = useState<Snapshot>(
       demo ? demoStore.current.data : emptySnapshot,
     ),
-    [company, setCompany] = useState(demo ? "demo-agency" : "");
-  const [page, setPage] = useState<Page>("overview"),
-    [sidebar, setSidebar] = useState(false),
-    [view, setView] = useState("list");
-  const [search, setSearch] = useState(""),
-    [query, setQuery] = useState(""),
-    [status, setStatus] = useState(""),
-    [product, setProduct] = useState(""),
-    [mine, setMine] = useState(false),
-    [late, setLate] = useState(false),
-    [clientFilter, setClientFilter] = useState(""),
-    [projectFilter, setProjectFilter] = useState(""),
-    [offset, setOffset] = useState(0),
+    [company, setCompany] = useUrlState<string>("empresa", "");
+  const page = usePage();
+  const [sidebar, setSidebar] = useState(false),
+    [viewValue, setView] = useUrlState<string>("visualizacao", "list");
+  const view = ["list", "board", "calendar"].includes(viewValue)
+    ? viewValue
+    : "list";
+  const [search, setSearch] = useUrlState<string>("busca", ""),
+    [query, setQuery] = useState(search),
+    [status, setStatus] = useUrlState<string>("status", ""),
+    [product, setProduct] = useUrlState<string>("produto", ""),
+    [mine, setMine] = useUrlState<boolean>("minhas", false),
+    [late, setLate] = useUrlState<boolean>("atrasadas", false),
+    [clientFilter, setClientFilter] = useUrlState<string>("cliente", ""),
+    [projectFilter, setProjectFilter] = useUrlState<string>("projeto", ""),
+    [offset, setOffset] = useUrlState<number>("pagina", 0),
     [count, setCount] = useState(0);
   const [selected, setSelected] = useState<string | null>(null),
     [form, setForm] = useState<string | null>(null),
     [loading, setLoading] = useState(false),
+    [companiesReady, setCompaniesReady] = useState(!supabase),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [toast, setToast] = useState(""),
@@ -130,14 +128,21 @@ export default function App() {
     isAdmin = member?.role === "admin";
   const today = dateKey(new Date(), currentCompany?.timezone),
     activeTimer = data.hours.find((h) => h.user_id === user && !h.ended_at);
-  const [period, setPeriod] = useState(dateKey().slice(0, 7));
+  const [periodValue, setPeriod] = useUrlState<string>("periodo", "");
+  const period = /^\d{4}-(0[1-9]|1[0-2])$/.test(periodValue)
+    ? periodValue
+    : dateKey().slice(0, 7);
   useEffect(() => {
     const id = setTimeout(() => {
       setQuery(search);
-      setOffset(0);
     }, 250);
     return () => clearTimeout(id);
   }, [search]);
+  useEffect(() => {
+    setSelected(null);
+    setForm(null);
+    setSidebar(false);
+  }, [page]);
   useEffect(() => {
     const id = setInterval(() => setTick(Date.now()), 1000);
     return () => clearInterval(id);
@@ -163,7 +168,6 @@ export default function App() {
       if (!s) {
         setData(emptySnapshot);
         setSelected(null);
-        setCompany("");
       }
     });
     return () => subscription.unsubscribe();
@@ -171,23 +175,28 @@ export default function App() {
   useEffect(() => {
     if (demo || !session) return;
     let alive = true;
+    setCompaniesReady(false);
     api
       .companies()
       .then((list) => {
         if (alive) {
           setData((d) => ({ ...d, companies: list }));
-          setCompany((c) =>
-            list.some((x) => x.id === c) ? c : (list[0]?.id ?? ""),
-          );
+          setCompany((c) => c || (list[0]?.id ?? ""));
         }
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => {
+        if (alive) setError(e.message);
+      })
+      .finally(() => {
+        if (alive) setCompaniesReady(true);
+      });
     return () => {
       alive = false;
     };
   }, [demo, session]);
   useEffect(() => {
     if (demo) {
+      if (!company) setCompany("demo-agency");
       setData({ ...demoStore.current.data });
       setLoading(false);
       return;
@@ -215,7 +224,11 @@ export default function App() {
         }
       })
       .catch((e) => {
-        if (id === request.current) setError(e.message);
+        if (id === request.current) {
+          // A shared link may reference a page removed by later data changes.
+          if (e.code === "PGRST103" && offset > 0) setOffset(0);
+          else setError(e.message);
+        }
       })
       .finally(() => {
         if (id === request.current) setLoading(false);
@@ -285,17 +298,23 @@ export default function App() {
     }
   }
   function go(next: Page) {
-    setPage(next);
+    navigate(pageUrl(next, company));
     setSidebar(false);
-    setSearch("");
+    setSelected(null);
+    setForm(null);
     setQuery("");
-    setOffset(0);
-    setStatus("");
-    setLate(false);
-    setMine(false);
-    setProduct("");
-    setClientFilter("");
-    setProjectFilter("");
+  }
+  function followLink(event: MouseEvent<HTMLAnchorElement>, next: Page) {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    event.preventDefault();
+    go(next);
   }
   async function logout() {
     if (demo) {
@@ -371,7 +390,9 @@ export default function App() {
       <SetPassword
         onDone={() => {
           setNeedsPassword(false);
-          window.history.replaceState(null, "", "/");
+          const url = new URL(window.location.href);
+          url.searchParams.delete("setup");
+          navigate(url.pathname + url.search, true);
         }}
       />
     );
@@ -384,6 +405,33 @@ export default function App() {
           setData(demoStore.current.data);
         }}
         notify={notify}
+      />
+    );
+  if (!page)
+    return (
+      <Empty
+        title="Página não encontrada"
+        body="Confira o endereço ou volte para a visão geral."
+        action={
+          <a className="btn primary" href={pageUrl("overview", company)}>
+            Ir para visão geral
+          </a>
+        }
+      />
+    );
+  if (!demo && company && data.companies.length && !currentCompany)
+    return (
+      <Empty
+        title="Empresa indisponível"
+        body="Este link pertence a uma empresa à qual sua conta não tem acesso."
+        action={
+          <Button
+            className="btn primary"
+            onClick={() => setCompany(data.companies[0].id)}
+          >
+            Abrir minha empresa
+          </Button>
+        }
       />
     );
   return (
@@ -438,17 +486,19 @@ export default function App() {
         <span className="nav-label">PRINCIPAL</span>
         <nav aria-label="Navegação principal">
           {navigation.map((item) => (
-            <Button
+            <a
               key={item.id}
+              href={pageUrl(item.id, company)}
+              aria-current={page === item.id ? "page" : undefined}
               className={page === item.id ? "active" : ""}
-              onClick={() => go(item.id)}
+              onClick={(event) => followLink(event, item.id)}
             >
               <item.icon size={19} />
               <span>{item.label}</span>
               {item.id === "tasks" && !!stats?.total && (
                 <span className="nav-count">{stats.total}</span>
               )}
-            </Button>
+            </a>
           ))}
         </nav>
         <div className="sidebar-products">
@@ -468,14 +518,16 @@ export default function App() {
           ))}
         </div>
         <div className="sidebar-bottom">
-          <Button
+          <a
             className={
               page === "settings" ? "settings-link active" : "settings-link"
             }
-            onClick={() => go("settings")}
+            href={pageUrl("settings", company)}
+            aria-current={page === "settings" ? "page" : undefined}
+            onClick={(event) => followLink(event, "settings")}
           >
             <Settings2 size={18} /> Equipe e configurações
-          </Button>
+          </a>
           <div className="profile">
             <Avatar name={member?.name ?? "Usuário"} />
             <div>
@@ -622,12 +674,12 @@ export default function App() {
               </Button>
             </div>
           )}
-          {!company && !loading ? (
+          {!company && !loading && (demo || companiesReady) ? (
             <Empty
               title="Seu acesso está quase pronto"
               body="Peça ao administrador para vincular sua conta a uma empresa."
             />
-          ) : loading ? (
+          ) : loading || (!demo && !companiesReady) ? (
             <Loading />
           ) : (
             <>
@@ -901,7 +953,10 @@ export default function App() {
                       <Input
                         placeholder="Buscar tarefa…"
                         value={search}
-                        onChange={(e) => setSearch(e.target.value)}
+                        onChange={(e) => {
+                          setSearch(e.target.value);
+                          setOffset(0);
+                        }}
                       />
                     </label>
                     <Select

@@ -211,7 +211,7 @@ textarea {
   flex-direction: column;
   gap: 6px;
 }
-.sidebar nav button {
+.sidebar nav :is(a, button) {
   display: flex;
   align-items: center;
   gap: 13px;
@@ -221,10 +221,10 @@ textarea {
   text-align: left;
   border-radius: 7px;
 }
-.sidebar nav button:hover {
+.sidebar nav :is(a, button):hover {
   background: #293a37;
 }
-.sidebar nav button.active {
+.sidebar nav :is(a, button).active {
   background: #c8ed8d;
   color: #293b27;
   font-weight: 650;
@@ -1953,7 +1953,7 @@ textarea::placeholder {
   }
 }
 /* Operational text remains at readable sizes; metadata alone is smaller. */
-.sidebar nav button,
+.sidebar nav :is(a, button),
 .sidebar-products button,
 .settings-link {
   font-size: 0.875rem;

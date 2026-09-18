@@ -13,7 +13,13 @@ Primeira entrega funcional da fundação de um SaaS para agências. React/TypeSc
 - Migrações com isolamento por empresa, RLS, integridade de vínculos e operações transacionais autorizadas.
 - Dados demonstrativos locais **somente em memória**, identificados por uma faixa na interface. Recarregar descarta as alterações da demonstração. Nenhum registro demonstrativo é enviado ao Supabase.
 
-**Conectado ao projeto Supabase MAVI (`zajlipvbotjafkowohmn`).** Cinco migrações aplicadas; agência Make Acelerador de Vendas cadastrada e administrador `allyson@makevendas.com.br` criado no Supabase Auth e vinculado à agência. A confirmação do e-mail e a definição da senha estão pendentes; nenhum e-mail foi enviado. A publicação será feita pelo proprietário na Vercel, por integração com o GitHub. Consulte `STATUS_IMPLANTACAO.md` para verificações e pendências.
+**Conectado ao projeto Supabase MAVI (`zajlipvbotjafkowohmn`).** Cinco migrações aplicadas; agência Make Acelerador de Vendas cadastrada e administrador `allyson@makevendas.com.br` criado no Supabase Auth e vinculado à agência. A senha foi definida por solicitação do proprietário e o login real foi validado; nenhum e-mail foi enviado pelo agente. A publicação será feita pelo proprietário na Vercel, por integração com o GitHub. Consulte `STATUS_IMPLANTACAO.md` para verificações e pendências.
+
+## Links compartilháveis
+
+Cada página tem sua URL: `/visao-geral`, `/tarefas`, `/clientes`, `/projetos`, `/horas`, `/relatorios` e `/configuracoes`. A raiz `/` também abre a visão geral. O menu usa links que podem ser copiados ou abertos em outra aba.
+
+O login preserva a rota solicitada. A URL também guarda empresa, busca, filtros, paginação, período e visualização de tarefas. Exemplo: `/tarefas?visualizacao=board&status=review`. Voltar, Avançar e recarregar restauram o estado da URL. Os dados continuam sujeitos à autenticação e às permissões RLS; compartilhar o endereço não concede acesso à empresa. Endereços desconhecidos exibem página não encontrada. Os formulários de criação e detalhes em modal continuam sendo estados temporários da página.
 
 ## Executar
 
@@ -38,7 +44,7 @@ Não colocar service role, chaves secretas ou senha de banco em variáveis com p
 2. Aplicar primeiro em ambiente de desenvolvimento/homologação as migrações de `supabase/migrations`, na ordem do nome. O bucket `mavi-attachments` também deve estar disponível para criação; não reutilizar um bucket público existente.
 3. Manter `mavi_private` fora dos schemas expostos pela Data API. As funções de autorização têm `search_path` vazio e referências qualificadas.
 4. Desabilitar cadastro público e login anônimo em Auth. Configurar domínio, Site URL e redirects exatos para convite/recuperação; não aceitar destinos arbitrários.
-5. Para MAVI, a empresa e o vínculo administrativo já existem: não repetir o bootstrap abaixo. O usuário foi criado pelo Admin Auth API, sem senha definida e sem marcar o e-mail como confirmado; o provisionamento inicial foi consumido. O primeiro acesso ainda exige confirmar o e-mail e definir uma senha. Para outras empresas, provisionar administrativamente a empresa e seu vínculo. Não há endpoint público de criação de empresas.
+5. Para MAVI, a empresa e o vínculo administrativo já existem: não repetir o bootstrap abaixo. O usuário foi criado pelo Admin Auth API; o provisionamento inicial foi consumido. A senha foi atualizada administrativamente por solicitação do proprietário, e o login real foi validado. Para outras empresas, provisionar administrativamente a empresa e seu vínculo. Não há endpoint público de criação de empresas.
 6. Para convites, configurar SMTP e políticas de senha no Supabase, publicar `invite-user` e definir `APP_ORIGIN` como a origem HTTPS exata do frontend. A função valida o JWT e o vínculo administrativo no banco antes de usar service role. Não enviar convites reais durante testes sem instrução com destinatários.
 7. Verificar os testes listados abaixo por API real antes de liberar produção.
 
