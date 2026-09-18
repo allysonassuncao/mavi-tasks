@@ -184,7 +184,7 @@ textarea {
   display: block;
   margin-bottom: 4px;
 }
-.workspace select {
+.workspace .ui-select {
   border: 0;
   appearance: none;
   background: transparent;
@@ -407,7 +407,8 @@ textarea {
 }
 main {
   padding: 34px 35px 0;
-  max-width: 1720px;
+  width: 100%;
+  max-width: none;
   margin: auto;
 }
 .page-heading {
@@ -985,7 +986,7 @@ tbody tr:last-child td {
   width: 100%;
   background: none;
 }
-.filterbar select {
+.filterbar .ui-select {
   font-size: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1409,18 +1410,6 @@ tbody tr:last-child td {
   margin-top: 4px;
   color: #95a982;
 }
-.loading {
-  min-height: 300px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: #8c9b7c;
-  font-size: 0.9rem;
-}
-.spin {
-  animation: rotate 1s linear infinite;
-}
 .empty {
   text-align: center;
   padding: 45px 20px;
@@ -1523,7 +1512,7 @@ label {
   font-weight: 500;
 }
 label input:not([type="checkbox"]),
-label select,
+label .ui-select,
 label textarea {
   width: 100%;
   border: 1px solid #dfe6d8;
@@ -1975,7 +1964,7 @@ textarea::placeholder {
 .due,
 .text-btn,
 .btn,
-.filterbar select,
+.filterbar .ui-select,
 .filter-chip,
 .view-switch button,
 .team-person strong,
@@ -2428,7 +2417,7 @@ th,
     flex-basis: 100%;
     max-width: none;
   }
-  .filterbar select {
+  .filterbar .ui-select {
     flex: 1;
     max-width: 50%;
     font-size: 0.75rem;
@@ -2681,4 +2670,266 @@ th,
   border: 1px solid #e3e9dc;
   border-radius: 14px;
   padding: 35px;
+}
+
+/* Shared React controls and loading placeholders. */
+.ui-input,
+label .ui-input,
+.ui-select,
+label .ui-select {
+  min-width: 0;
+  min-height: 44px;
+  padding: 11px 13px;
+  border: 1px solid #dce3e1;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  box-shadow: 0 1px 2px #152c2010;
+  transition:
+    border-color 150ms,
+    box-shadow 150ms;
+}
+.ui-input:hover,
+.ui-select:hover {
+  border-color: #a7b8ae;
+}
+.ui-input:focus,
+.ui-select:focus-visible {
+  border-color: #83a657;
+  outline: none;
+  box-shadow: 0 0 0 3px #a9cc762b;
+}
+.ui-input:disabled,
+.ui-select:disabled {
+  background: #f3f5f4;
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+.ui-textarea {
+  resize: vertical;
+}
+.ui-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  width: 100%;
+}
+.ui-select > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-select > span:last-child {
+  display: flex;
+  flex-shrink: 0;
+  color: #8a9790;
+}
+.ui-select-menu {
+  z-index: 100;
+  width: var(--radix-select-trigger-width);
+  min-width: 180px;
+  max-width: calc(100vw - 32px);
+  max-height: min(320px, var(--radix-select-content-available-height));
+  overflow: hidden;
+  padding: 5px;
+  border: 1px solid #e0e6e2;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 12px 40px #152c2026;
+  font-size: 0.875rem;
+  font-weight: 450;
+}
+.ui-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  outline: none;
+}
+.ui-select-option[data-highlighted] {
+  background: #eef5e5;
+  color: #344827;
+}
+.ui-select-option[data-state="checked"] {
+  font-weight: 600;
+}
+.ui-select-option[data-disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ui-select-scroll {
+  display: flex;
+  justify-content: center;
+  padding: 4px;
+}
+.ui-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  padding: 0;
+  border: 1.5px solid #becbc2;
+  border-radius: 6px;
+  background: white;
+  color: #30451d;
+}
+.ui-checkbox[data-state="checked"] {
+  border-color: #97bc64;
+  background: var(--green);
+}
+.ui-checkbox > span {
+  display: flex;
+}
+.workspace .ui-select {
+  min-height: 30px;
+  padding: 0;
+  box-shadow: none;
+}
+.workspace > svg {
+  display: none;
+}
+.searchbox .ui-input {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+  min-height: 28px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.skeleton {
+  display: block;
+  border-radius: 7px;
+  background: linear-gradient(90deg, #e8ece8 25%, #f5f7f4 50%, #e8ece8 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton-layout {
+  width: 100%;
+  padding: 20px 0;
+}
+#root > .skeleton-layout {
+  padding: 40px;
+}
+.skeleton-heading {
+  height: 30px;
+  width: 34%;
+  margin-bottom: 28px;
+}
+.skeleton-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+  margin-bottom: 28px;
+}
+.skeleton-card {
+  height: 125px;
+  border-radius: 12px;
+}
+.skeleton-rows {
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: white;
+}
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 0;
+}
+.skeleton-row + .skeleton-row {
+  border-top: 1px solid #f1f3f1;
+}
+.skeleton-avatar {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+.skeleton-row > div {
+  flex: 1;
+}
+.skeleton-title {
+  width: 70%;
+  height: 14px;
+  margin-bottom: 9px;
+}
+.skeleton-description {
+  width: 42%;
+  height: 10px;
+}
+.skeleton-badge {
+  width: 72px;
+  height: 24px;
+}
+.ui-button-loading {
+  position: relative;
+  opacity: 1 !important;
+  cursor: wait !important;
+}
+.ui-button-placeholder {
+  visibility: hidden;
+  display: contents;
+}
+.skeleton-button {
+  position: absolute;
+  inset: 28% 16%;
+  border-radius: 5px;
+}
+.skeleton-upload {
+  width: 200px;
+  height: 20px;
+}
+@media (max-width: 600px) {
+  .skeleton-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .skeleton-heading {
+    width: 65%;
+  }
+  .skeleton-badge {
+    width: 48px;
+  }
+  .ui-input,
+  label .ui-input {
+    font-size: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+  .ui-input,
+  .ui-select {
+    transition: none;
+  }
 }

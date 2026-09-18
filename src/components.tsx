@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { X, LoaderCircle } from "lucide-react";
+import { X } from "lucide-react";
 import { statuses, type Status } from "./types";
 import { initials } from "./domain";
 export function Avatar({
@@ -82,10 +82,4 @@ export function Empty({
     </div>
   );
 }
-export function Loading() {
-  return (
-    <div className="loading" role="status">
-      <LoaderCircle className="spin" size={24} /> Carregando seu espaço…
-    </div>
-  );
-}
+export { Loading } from "./ui";

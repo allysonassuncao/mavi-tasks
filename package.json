@@ -13,6 +13,8 @@
     "format:check": "prettier --check src scripts supabase/functions *.json *.ts *.html *.md"
   },
   "dependencies": {
+    "@radix-ui/react-checkbox": "1.3.11",
+    "@radix-ui/react-select": "2.3.7",
     "@supabase/supabase-js": "2.116.0",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",

@@ -1,3 +1,4 @@
+import { Input, Select, SelectOption, Button } from "./ui";
 import {
   useEffect,
   useRef,
@@ -388,7 +389,7 @@ export default function App() {
   return (
     <div className="app-shell">
       {sidebar && (
-        <button
+        <Button
           className="sidebar-backdrop"
           aria-label="Fechar menu"
           onClick={() => setSidebar(false)}
@@ -415,29 +416,29 @@ export default function App() {
           </span>
           <div>
             <small>Seu espaço de trabalho</small>
-            <select
+            <Select
               aria-label="Empresa ativa"
               value={company}
-              onChange={(e) => {
+              onValueChange={(value) => {
                 setData({ ...emptySnapshot, companies: data.companies });
                 setSelected(null);
-                setCompany(e.target.value);
+                setCompany(value);
                 setOffset(0);
               }}
             >
               {data.companies.map((c) => (
-                <option key={c.id} value={c.id}>
+                <SelectOption key={c.id} value={c.id}>
                   {c.name}
-                </option>
+                </SelectOption>
               ))}
-            </select>
+            </Select>
           </div>
           <ChevronsUpDown size={14} />
         </div>
         <span className="nav-label">PRINCIPAL</span>
         <nav aria-label="Navegação principal">
           {navigation.map((item) => (
-            <button
+            <Button
               key={item.id}
               className={page === item.id ? "active" : ""}
               onClick={() => go(item.id)}
@@ -447,13 +448,13 @@ export default function App() {
               {item.id === "tasks" && !!stats?.total && (
                 <span className="nav-count">{stats.total}</span>
               )}
-            </button>
+            </Button>
           ))}
         </nav>
         <div className="sidebar-products">
           <span className="nav-label">PRODUTOS</span>
           {data.products.map((p) => (
-            <button
+            <Button
               key={p.id}
               onClick={() => {
                 go("tasks");
@@ -463,18 +464,18 @@ export default function App() {
               <span className="product-dot" style={{ background: p.color }} />
               {p.name}
               <ChevronRight size={13} />
-            </button>
+            </Button>
           ))}
         </div>
         <div className="sidebar-bottom">
-          <button
+          <Button
             className={
               page === "settings" ? "settings-link active" : "settings-link"
             }
             onClick={() => go("settings")}
           >
             <Settings2 size={18} /> Equipe e configurações
-          </button>
+          </Button>
           <div className="profile">
             <Avatar name={member?.name ?? "Usuário"} />
             <div>
@@ -488,13 +489,13 @@ export default function App() {
               </small>
             </div>
             {supabase && (
-              <button
+              <Button
                 className="icon-btn"
                 aria-label="Sair"
                 onClick={() => void logout()}
               >
                 <LogOut size={17} />
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -502,13 +503,13 @@ export default function App() {
       <div className="main-shell">
         <header className="topbar">
           <div className="breadcrumb">
-            <button
+            <Button
               className="icon-btn menu-toggle"
               aria-label="Abrir menu"
               onClick={() => setSidebar(true)}
             >
               <Menu size={21} />
-            </button>
+            </Button>
             <span>Workspace</span>
             <ChevronRight size={14} />
             <strong>
@@ -517,7 +518,7 @@ export default function App() {
           </div>
           <div className="topbar-right">
             {activeTimer && (
-              <button
+              <Button
                 className="timer-live"
                 onClick={() => {
                   go("hours");
@@ -525,7 +526,7 @@ export default function App() {
               >
                 <span className="pulse" />
                 {duration(minutes(activeTimer, tick))}
-              </button>
+              </Button>
             )}
             <span className="online-label">
               <span /> {demo ? "Demonstração" : "Conectado"}
@@ -540,9 +541,9 @@ export default function App() {
               alterações desta sessão não são salvas.
             </span>
             {supabase ? (
-              <button onClick={() => void logout()}>
+              <Button onClick={() => void logout()}>
                 Entrar na minha conta <ArrowRight size={14} />
-              </button>
+              </Button>
             ) : (
               <span className="demo-detail">Conexão com Supabase pendente</span>
             )}
@@ -580,7 +581,7 @@ export default function App() {
                 }
               </p>
             </div>
-            <button
+            <Button
               className="btn primary"
               onClick={() =>
                 setForm(
@@ -606,19 +607,19 @@ export default function App() {
                     : page === "settings"
                       ? "Nova equipe"
                       : "Nova tarefa"}
-            </button>
+            </Button>
           </div>
           {error && (
             <div className="error-banner" role="alert">
               <TriangleAlert size={18} />
               <span>{error}</span>
-              <button
+              <Button
                 className="icon-btn"
                 aria-label="Fechar erro"
                 onClick={() => setError("")}
               >
                 <X size={16} />
-              </button>
+              </Button>
             </div>
           )}
           {!company && !loading ? (
@@ -640,7 +641,7 @@ export default function App() {
                     </span>
                     <label className="period">
                       <CalendarDays size={16} />
-                      <input
+                      <Input
                         aria-label="Período dos relatórios"
                         type="month"
                         value={period}
@@ -704,9 +705,9 @@ export default function App() {
                         </h2>
                         <p>Os próximos passos da sua equipe</p>
                       </div>
-                      <button className="text-btn" onClick={() => go("tasks")}>
+                      <Button className="text-btn" onClick={() => go("tasks")}>
                         Ver tarefas <ArrowUpRight size={16} />
-                      </button>
+                      </Button>
                     </div>
                     <TaskTable
                       tasks={focus}
@@ -719,12 +720,12 @@ export default function App() {
                         <span className="legend-dot" /> Prazos ordenados por
                         prioridade de data
                       </span>
-                      <button
+                      <Button
                         className="text-btn"
                         onClick={() => setForm("task")}
                       >
                         <Plus size={15} /> Adicionar tarefa
-                      </button>
+                      </Button>
                     </div>
                   </section>
                   <aside className="dashboard-aside">
@@ -744,14 +745,14 @@ export default function App() {
                         }{" "}
                         tarefas suas nesta seleção.
                       </p>
-                      <button
+                      <Button
                         onClick={() => {
                           go("tasks");
                           setMine(true);
                         }}
                       >
                         Abrir minhas tarefas <ArrowUpRight size={18} />
-                      </button>
+                      </Button>
                       <div className="spotlight-lines" aria-hidden="true">
                         <span />
                         <span />
@@ -781,13 +782,13 @@ export default function App() {
                                     : "Colaboração"}
                               </small>
                             </div>
-                            <button
+                            <Button
                               className="icon-btn"
                               title={`Ver equipe de ${m.name}`}
                               onClick={() => go("settings")}
                             >
                               <ArrowUpRight size={16} />
-                            </button>
+                            </Button>
                           </div>
                         ))}
                     </section>
@@ -798,12 +799,12 @@ export default function App() {
                         <h2>Projetos em movimento</h2>
                         <p>Um olhar sobre as próximas entregas</p>
                       </div>
-                      <button
+                      <Button
                         className="text-btn"
                         onClick={() => go("projects")}
                       >
                         Ver projetos <ArrowUpRight size={16} />
-                      </button>
+                      </Button>
                     </div>
                     <div className="mini-projects">
                       {data.projects.slice(0, 3).map((p, i) => {
@@ -814,7 +815,7 @@ export default function App() {
                             (c) => c.id === contract?.client_id,
                           );
                         return (
-                          <button
+                          <Button
                             key={p.id}
                             className="mini-project"
                             onClick={() => go("projects")}
@@ -833,7 +834,7 @@ export default function App() {
                                 Ver projeto <ChevronRight size={14} />
                               </span>
                             </footer>
-                          </button>
+                          </Button>
                         );
                       })}
                     </div>
@@ -853,17 +854,17 @@ export default function App() {
                         { id: "board", label: "Quadro", icon: Columns3 },
                         { id: "calendar", label: "Agenda", icon: CalendarDays },
                       ].map((v) => (
-                        <button
+                        <Button
                           key={v.id}
                           className={view === v.id ? "selected" : ""}
                           onClick={() => setView(v.id)}
                         >
                           <v.icon size={16} />
                           {v.label}
-                        </button>
+                        </Button>
                       ))}
                     </div>
-                    <button
+                    <Button
                       className={`filter-chip ${mine ? "selected" : ""}`}
                       onClick={() => {
                         setMine(!mine);
@@ -871,7 +872,7 @@ export default function App() {
                       }}
                     >
                       <Users size={15} /> Minhas tarefas
-                    </button>
+                    </Button>
                   </div>
                   {(clientFilter || projectFilter) && (
                     <div className="active-context">
@@ -882,7 +883,7 @@ export default function App() {
                           : data.projects.find((p) => p.id === projectFilter)
                               ?.name}
                       </span>
-                      <button
+                      <Button
                         className="text-btn"
                         onClick={() => {
                           setClientFilter("");
@@ -891,49 +892,49 @@ export default function App() {
                         }}
                       >
                         Limpar seleção <X size={14} />
-                      </button>
+                      </Button>
                     </div>
                   )}
                   <div className="filterbar">
                     <label className="searchbox">
                       <Search size={17} />
-                      <input
+                      <Input
                         placeholder="Buscar tarefa…"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                       />
                     </label>
-                    <select
+                    <Select
                       aria-label="Filtrar status"
                       value={status}
-                      onChange={(e) => {
-                        setStatus(e.target.value);
+                      onValueChange={(value) => {
+                        setStatus(value);
                         setOffset(0);
                       }}
                     >
-                      <option value="">Todos os status</option>
+                      <SelectOption value="">Todos os status</SelectOption>
                       {Object.entries(statuses).map(([k, v]) => (
-                        <option key={k} value={k}>
+                        <SelectOption key={k} value={k}>
                           {v.label}
-                        </option>
+                        </SelectOption>
                       ))}
-                    </select>
-                    <select
+                    </Select>
+                    <Select
                       aria-label="Filtrar produto"
                       value={product}
-                      onChange={(e) => {
-                        setProduct(e.target.value);
+                      onValueChange={(value) => {
+                        setProduct(value);
                         setOffset(0);
                       }}
                     >
-                      <option value="">Todos os produtos</option>
+                      <SelectOption value="">Todos os produtos</SelectOption>
                       {data.products.map((p) => (
-                        <option key={p.id} value={p.id}>
+                        <SelectOption key={p.id} value={p.id}>
                           {p.name}
-                        </option>
+                        </SelectOption>
                       ))}
-                    </select>
-                    <button
+                    </Select>
+                    <Button
                       className={`filter-chip ${late ? "selected" : ""}`}
                       onClick={() => {
                         setLate(!late);
@@ -941,7 +942,7 @@ export default function App() {
                       }}
                     >
                       <SlidersHorizontal size={15} /> Atrasadas
-                    </button>
+                    </Button>
                   </div>
                   {view === "list" ? (
                     <TaskTable
@@ -966,7 +967,7 @@ export default function App() {
                             .map((t) => {
                               const n = names(data, t);
                               return (
-                                <button
+                                <Button
                                   className="task-card"
                                   key={t.id}
                                   onClick={() => setSelected(t.id)}
@@ -987,7 +988,7 @@ export default function App() {
                                       size="small"
                                     />
                                   </footer>
-                                </button>
+                                </Button>
                               );
                             })}
                         </section>
@@ -1006,7 +1007,7 @@ export default function App() {
                             {filtered
                               .filter((t) => t.due_date === d)
                               .map((t) => (
-                                <button
+                                <Button
                                   onClick={() => setSelected(t.id)}
                                   key={t.id}
                                 >
@@ -1016,7 +1017,7 @@ export default function App() {
                                     name={names(data, t).member?.name ?? "?"}
                                     size="small"
                                   />
-                                </button>
+                                </Button>
                               ))}
                           </section>
                         ))}
@@ -1034,22 +1035,22 @@ export default function App() {
                       {demo ? "demonstração" : `página ${offset + 1}`}
                     </span>
                     <div>
-                      <button
+                      <Button
                         className="icon-btn"
                         disabled={offset === 0 || demo}
                         aria-label="Página anterior"
                         onClick={() => setOffset((v) => v - 1)}
                       >
                         <ChevronLeft size={18} />
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         className="icon-btn"
                         disabled={demo || (offset + 1) * 50 >= count}
                         aria-label="Próxima página"
                         onClick={() => setOffset((v) => v + 1)}
                       >
                         <ChevronRight size={18} />
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 </section>
@@ -1058,13 +1059,13 @@ export default function App() {
                 <>
                   <div className="section-top">
                     <span>{data.clients.length} clientes no espaço</span>
-                    <button
+                    <Button
                       className="btn secondary"
                       disabled={!isAdmin}
                       onClick={() => setForm("contract")}
                     >
                       <Plus size={16} /> Vincular produto
-                    </button>
+                    </Button>
                   </div>
                   <div className="client-grid">
                     {data.clients.map((c) => {
@@ -1103,7 +1104,7 @@ export default function App() {
                           </div>
                           <footer>
                             <span>{contracts.length} produtos contratados</span>
-                            <button
+                            <Button
                               className="text-btn"
                               onClick={() => {
                                 go("tasks");
@@ -1111,7 +1112,7 @@ export default function App() {
                               }}
                             >
                               Ver trabalho <ArrowUpRight size={17} />
-                            </button>
+                            </Button>
                           </footer>
                         </article>
                       );
@@ -1165,7 +1166,7 @@ export default function App() {
                           <span>
                             <CalendarDays size={15} /> {dateLabel(p.due_date)}
                           </span>
-                          <button
+                          <Button
                             className="text-btn"
                             onClick={() => {
                               go("tasks");
@@ -1173,7 +1174,7 @@ export default function App() {
                             }}
                           >
                             Ver tarefas <ArrowUpRight size={16} />
-                          </button>
+                          </Button>
                         </footer>
                       </article>
                     );
@@ -1212,9 +1213,10 @@ export default function App() {
                       </p>
                     </div>
                     {activeTimer ? (
-                      <button
+                      <Button
                         className="btn primary"
                         disabled={busy}
+                        loading={busy}
                         onClick={() =>
                           void mutate("stop_timer", {
                             p_entry: activeTimer.id,
@@ -1222,14 +1224,14 @@ export default function App() {
                         }
                       >
                         <Square size={15} /> Encerrar
-                      </button>
+                      </Button>
                     ) : (
-                      <button
+                      <Button
                         className="btn primary"
                         onClick={() => go("tasks")}
                       >
                         <Play size={16} /> Escolher tarefa
-                      </button>
+                      </Button>
                     )}
                   </section>
                   <section className="panel">
@@ -1394,14 +1396,14 @@ export default function App() {
                     <section className="panel">
                       <div className="panel-heading">
                         <h2>Catálogo de produtos</h2>
-                        <button
+                        <Button
                           className="icon-btn"
                           disabled={!isAdmin}
                           aria-label="Novo produto"
                           onClick={() => setForm("product")}
                         >
                           <Plus size={20} />
-                        </button>
+                        </Button>
                       </div>
                       {data.products.map((p) => (
                         <div className="product-row" key={p.id}>
@@ -1516,7 +1518,7 @@ function Stat({
   onClick: () => void;
 }) {
   return (
-    <button className={`stat-card ${tone}`} onClick={onClick}>
+    <Button className={`stat-card ${tone}`} onClick={onClick}>
       <div>
         <span>{label}</span>
         <Icon size={20} />
@@ -1526,7 +1528,7 @@ function Stat({
         <span>{caption}</span>
         <ArrowUpRight size={16} />
       </footer>
-    </button>
+    </Button>
   );
 }
 function TaskTable({
@@ -1558,7 +1560,7 @@ function TaskTable({
               return (
                 <tr key={t.id}>
                   <td>
-                    <button
+                    <Button
                       className="task-title"
                       onClick={() => onSelect(t.id)}
                     >
@@ -1576,7 +1578,7 @@ function TaskTable({
                           <Badge status={t.status} />
                         </span>
                       </span>
-                    </button>
+                    </Button>
                   </td>
                   <td>
                     <Badge status={t.status} />
@@ -1659,7 +1661,7 @@ function Login({
         <form onSubmit={submit}>
           <label>
             E-mail
-            <input
+            <Input
               name="email"
               type="email"
               autoComplete="email"
@@ -1669,7 +1671,7 @@ function Login({
           </label>
           <label>
             Senha
-            <input
+            <Input
               name="password"
               type="password"
               autoComplete="current-password"
@@ -1682,14 +1684,14 @@ function Login({
               {error}
             </p>
           )}
-          <button className="btn primary" disabled={busy}>
-            {busy ? "Entrando…" : "Entrar no workspace"}
+          <Button className="btn primary" disabled={busy} loading={busy}>
+            Entrar no workspace
             <ArrowRight size={17} />
-          </button>
+          </Button>
         </form>
-        <button className="text-btn demo-login" onClick={onDemo}>
+        <Button className="text-btn demo-login" onClick={onDemo}>
           Explorar demonstração <ExternalLink size={15} />
-        </button>
+        </Button>
         <small>
           Acesso por convite. Entre em contato com seu administrador.
         </small>
@@ -1728,7 +1730,7 @@ function SetPassword({ onDone }: { onDone: () => void }) {
         <form onSubmit={submit}>
           <label>
             Nova senha
-            <input
+            <Input
               name="password"
               type="password"
               minLength={12}
@@ -1738,7 +1740,7 @@ function SetPassword({ onDone }: { onDone: () => void }) {
           </label>
           <label>
             Confirme a senha
-            <input
+            <Input
               name="confirm"
               type="password"
               minLength={12}
@@ -1751,9 +1753,9 @@ function SetPassword({ onDone }: { onDone: () => void }) {
               {error}
             </p>
           )}
-          <button className="btn primary" disabled={busy}>
-            {busy ? "Salvando…" : "Salvar e entrar"}
-          </button>
+          <Button className="btn primary" disabled={busy} loading={busy}>
+            Salvar e entrar
+          </Button>
         </form>
       </div>
     </div>

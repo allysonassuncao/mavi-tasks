@@ -4,6 +4,7 @@ Primeira entrega funcional da fundação de um SaaS para agências. React/TypeSc
 
 ## Estado atual
 
+- Conteúdo central com largura total, skeletons para carregamento e ações assíncronas, componentes React reutilizáveis para campos e seletores/checkboxes Radix com navegação por teclado.
 - Interface responsiva em português: painel, tarefas em lista/quadro/agenda, clientes, contratações, projetos, horas, relatórios iniciais e equipes.
 - Cadastro de clientes, produtos, contratações, equipes, projetos, tarefas e subtarefas; edição de tarefas; busca e filtros por status, produto, cliente, projeto e responsável.
 - Fluxo de devolução, validação, aprovação interna e registro manual da aprovação do cliente, com histórico e controle de concorrência.
@@ -12,7 +13,7 @@ Primeira entrega funcional da fundação de um SaaS para agências. React/TypeSc
 - Migrações com isolamento por empresa, RLS, integridade de vínculos e operações transacionais autorizadas.
 - Dados demonstrativos locais **somente em memória**, identificados por uma faixa na interface. Recarregar descarta as alterações da demonstração. Nenhum registro demonstrativo é enviado ao Supabase.
 
-**Conectado ao projeto Supabase MAVI (`zajlipvbotjafkowohmn`).** Cinco migrações aplicadas; agência Make Acelerador de Vendas cadastrada e primeiro administrador reservado para `allyson@makevendas.com.br`. A conta ainda não foi criada e nenhum convite foi enviado. A publicação será feita pelo proprietário na Vercel, por integração com o GitHub. Consulte `STATUS_IMPLANTACAO.md` para verificações e pendências.
+**Conectado ao projeto Supabase MAVI (`zajlipvbotjafkowohmn`).** Cinco migrações aplicadas; agência Make Acelerador de Vendas cadastrada e administrador `allyson@makevendas.com.br` criado no Supabase Auth e vinculado à agência. A confirmação do e-mail e a definição da senha estão pendentes; nenhum e-mail foi enviado. A publicação será feita pelo proprietário na Vercel, por integração com o GitHub. Consulte `STATUS_IMPLANTACAO.md` para verificações e pendências.
 
 ## Executar
 
@@ -37,7 +38,7 @@ Não colocar service role, chaves secretas ou senha de banco em variáveis com p
 2. Aplicar primeiro em ambiente de desenvolvimento/homologação as migrações de `supabase/migrations`, na ordem do nome. O bucket `mavi-attachments` também deve estar disponível para criação; não reutilizar um bucket público existente.
 3. Manter `mavi_private` fora dos schemas expostos pela Data API. As funções de autorização têm `search_path` vazio e referências qualificadas.
 4. Desabilitar cadastro público e login anônimo em Auth. Configurar domínio, Site URL e redirects exatos para convite/recuperação; não aceitar destinos arbitrários.
-5. Para MAVI, a empresa e o provisionamento inicial já existem: não repetir o bootstrap abaixo. Após um convite administrativo autorizado e a confirmação do e-mail reservado, o trigger interno atribui o primeiro administrador uma única vez. Para outras empresas, provisionar administrativamente a empresa e seu vínculo. Não há endpoint público de criação de empresas.
+5. Para MAVI, a empresa e o vínculo administrativo já existem: não repetir o bootstrap abaixo. O usuário foi criado pelo Admin Auth API, sem senha definida e sem marcar o e-mail como confirmado; o provisionamento inicial foi consumido. O primeiro acesso ainda exige confirmar o e-mail e definir uma senha. Para outras empresas, provisionar administrativamente a empresa e seu vínculo. Não há endpoint público de criação de empresas.
 6. Para convites, configurar SMTP e políticas de senha no Supabase, publicar `invite-user` e definir `APP_ORIGIN` como a origem HTTPS exata do frontend. A função valida o JWT e o vínculo administrativo no banco antes de usar service role. Não enviar convites reais durante testes sem instrução com destinatários.
 7. Verificar os testes listados abaixo por API real antes de liberar produção.
 

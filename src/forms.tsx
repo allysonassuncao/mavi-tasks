@@ -1,3 +1,12 @@
+import {
+  Input,
+  Textarea,
+  Select,
+  SelectOption,
+  Checkbox,
+  Button,
+  Skeleton,
+} from "./ui";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   CalendarDays,
@@ -16,7 +25,7 @@ import {
   History,
   Save,
 } from "lucide-react";
-import { Modal, Avatar, Badge, Empty } from "./components";
+import { Modal, Avatar, Badge, Empty, Loading } from "./components";
 import {
   type Snapshot,
   type Task,
@@ -131,20 +140,18 @@ export function CreateForm({
   const contractSelect = (
     <label>
       Produto contratado
-      <select
-        required
-        value={contract}
-        onChange={(e) => setContract(e.target.value)}
-      >
+      <Select required value={contract} onValueChange={setContract}>
         {!data.contracts.length && (
-          <option value="">Vincule um produto a um cliente primeiro</option>
+          <SelectOption value="">
+            Vincule um produto a um cliente primeiro
+          </SelectOption>
         )}
         {data.contracts.map((c) => (
-          <option value={c.id} key={c.id}>
+          <SelectOption value={c.id} key={c.id}>
             {c.name}
-          </option>
+          </SelectOption>
         ))}
-      </select>
+      </Select>
     </label>
   );
   return (
@@ -154,7 +161,7 @@ export function CreateForm({
           <>
             <label>
               Nome da tarefa
-              <input
+              <Input
                 name="title"
                 placeholder="O que precisa ser feito?"
                 required
@@ -167,21 +174,21 @@ export function CreateForm({
             <div className="form-columns">
               <label>
                 Projeto
-                <select name="project" key={contract}>
-                  <option value="">Sem projeto · manutenção</option>
+                <Select name="project" key={contract}>
+                  <SelectOption value="">Sem projeto · manutenção</SelectOption>
                   {data.projects
                     .filter((p) => p.contract_id === contract)
                     .map((p) => (
-                      <option key={p.id} value={p.id}>
+                      <SelectOption key={p.id} value={p.id}>
                         {p.name}
-                      </option>
+                      </SelectOption>
                     ))}
-                </select>
+                </Select>
               </label>
               <label>
                 Equipe
-                <select name="team" key={contract}>
-                  <option value="">Sem equipe principal</option>
+                <Select name="team" key={contract}>
+                  <SelectOption value="">Sem equipe principal</SelectOption>
                   {data.teams
                     .filter((t) =>
                       data.contractTeams.some(
@@ -190,29 +197,29 @@ export function CreateForm({
                       ),
                     )
                     .map((t) => (
-                      <option key={t.id} value={t.id}>
+                      <SelectOption key={t.id} value={t.id}>
                         {t.name}
-                      </option>
+                      </SelectOption>
                     ))}
-                </select>
+                </Select>
               </label>
             </div>
             <div className="form-columns">
               <label>
                 Responsável
-                <select name="assignee" defaultValue={user} required>
+                <Select name="assignee" defaultValue={user} required>
                   {data.members
                     .filter((m) => m.active)
                     .map((m) => (
-                      <option key={m.user_id} value={m.user_id}>
+                      <SelectOption key={m.user_id} value={m.user_id}>
                         {m.name}
-                      </option>
+                      </SelectOption>
                     ))}
-                </select>
+                </Select>
               </label>
               <label>
                 Prazo combinado
-                <input
+                <Input
                   name="due"
                   type="date"
                   defaultValue={dateKey()}
@@ -223,17 +230,17 @@ export function CreateForm({
             <div className="form-columns">
               <label>
                 Prioridade
-                <select name="priority" defaultValue="normal">
+                <Select name="priority" defaultValue="normal">
                   {Object.entries(priorities).map(([id, label]) => (
-                    <option key={id} value={id}>
+                    <SelectOption key={id} value={id}>
                       {label}
-                    </option>
+                    </SelectOption>
                   ))}
-                </select>
+                </Select>
               </label>
               <label>
                 Estimativa em horas
-                <input
+                <Input
                   type="number"
                   name="estimated"
                   min="0"
@@ -245,28 +252,30 @@ export function CreateForm({
             </div>
             <label>
               Tarefa principal (opcional)
-              <select name="parent" key={contract}>
-                <option value="">Esta é uma tarefa principal</option>
+              <Select name="parent" key={contract}>
+                <SelectOption value="">
+                  Esta é uma tarefa principal
+                </SelectOption>
                 {data.tasks
                   .filter((t) => t.contract_id === contract)
                   .map((t) => (
-                    <option key={t.id} value={t.id}>
+                    <SelectOption key={t.id} value={t.id}>
                       {t.title}
-                    </option>
+                    </SelectOption>
                   ))}
-              </select>
+              </Select>
             </label>
             <label>
               Descrição
-              <textarea
+              <Textarea
                 name="description"
                 placeholder="Contexto, referências e critérios de entrega"
                 rows={3}
               />
             </label>
             <label className="checkbox-label">
-              <input type="checkbox" name="client_approval" /> Exigir aprovação
-              do cliente além da aprovação interna
+              <Checkbox name="client_approval" /> Exigir aprovação do cliente
+              além da aprovação interna
             </label>
           </>
         ) : null}
@@ -275,7 +284,7 @@ export function CreateForm({
         ) && (
           <label>
             {kind === "contract" ? "Nome da contratação" : "Nome"}
-            <input
+            <Input
               name="name"
               required
               minLength={2}
@@ -296,7 +305,7 @@ export function CreateForm({
         {kind === "client" && (
           <label>
             E-mail de contato
-            <input
+            <Input
               name="email"
               type="email"
               placeholder="contato@cliente.com.br"
@@ -308,7 +317,7 @@ export function CreateForm({
             {contractSelect}
             <label>
               Prazo do projeto
-              <input name="due" type="date" />
+              <Input name="due" type="date" />
             </label>
           </>
         )}
@@ -316,40 +325,46 @@ export function CreateForm({
           <>
             <label>
               Cliente
-              <select name="client" required>
+              <Select name="client" required>
                 {!data.clients.length && (
-                  <option value="">Cadastre um cliente primeiro</option>
+                  <SelectOption value="">
+                    Cadastre um cliente primeiro
+                  </SelectOption>
                 )}
                 {data.clients.map((c) => (
-                  <option key={c.id} value={c.id}>
+                  <SelectOption key={c.id} value={c.id}>
                     {c.name}
-                  </option>
+                  </SelectOption>
                 ))}
-              </select>
+              </Select>
             </label>
             <label>
               Produto
-              <select name="product" required>
+              <Select name="product" required>
                 {!data.products.length && (
-                  <option value="">Cadastre um produto primeiro</option>
+                  <SelectOption value="">
+                    Cadastre um produto primeiro
+                  </SelectOption>
                 )}
                 {data.products.map((p) => (
-                  <option key={p.id} value={p.id}>
+                  <SelectOption key={p.id} value={p.id}>
                     {p.name}
-                  </option>
+                  </SelectOption>
                 ))}
-              </select>
+              </Select>
             </label>
             <label>
               Equipe com acesso
-              <select name="team">
-                <option value="">Somente administradores por enquanto</option>
+              <Select name="team">
+                <SelectOption value="">
+                  Somente administradores por enquanto
+                </SelectOption>
                 {data.teams.map((t) => (
-                  <option key={t.id} value={t.id}>
+                  <SelectOption key={t.id} value={t.id}>
                     {t.name}
-                  </option>
+                  </SelectOption>
                 ))}
-              </select>
+              </Select>
             </label>
           </>
         )}
@@ -360,7 +375,7 @@ export function CreateForm({
               .filter((m) => m.active)
               .map((m) => (
                 <label className="checkbox-label" key={m.user_id}>
-                  <input type="checkbox" name="members" value={m.user_id} />
+                  <Checkbox name="members" value={m.user_id} />
                   {m.name}
                 </label>
               ))}
@@ -370,27 +385,27 @@ export function CreateForm({
           <>
             <label>
               Tarefa
-              <select name="task" required>
+              <Select name="task" required>
                 {data.tasks.map((t) => (
-                  <option key={t.id} value={t.id}>
+                  <SelectOption key={t.id} value={t.id}>
                     {t.title}
-                  </option>
+                  </SelectOption>
                 ))}
-              </select>
+              </Select>
             </label>
             <div className="form-columns">
               <label>
                 Início
-                <input type="datetime-local" name="start" required />
+                <Input type="datetime-local" name="start" required />
               </label>
               <label>
                 Fim
-                <input type="datetime-local" name="end" required />
+                <Input type="datetime-local" name="end" required />
               </label>
             </div>
             <label>
               Observação
-              <textarea name="note" rows={3} />
+              <Textarea name="note" rows={3} />
             </label>
             <small>
               Os períodos não podem se sobrepor a outros apontamentos.
@@ -403,22 +418,19 @@ export function CreateForm({
           </p>
         )}
         <div className="form-footer">
-          <button
+          <Button
             type="button"
             className="btn secondary"
             disabled={busy}
+            loading={busy}
             onClick={onClose}
           >
             Cancelar
-          </button>
-          <button className="btn primary" disabled={busy}>
-            {busy
-              ? "Salvando…"
-              : kind === "time"
-                ? "Registrar horas"
-                : "Salvar"}
+          </Button>
+          <Button className="btn primary" disabled={busy} loading={busy}>
+            {kind === "time" ? "Registrar horas" : "Salvar"}
             <Check size={17} />
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>
@@ -647,7 +659,7 @@ export function TaskDetail({
           <form className="entity-form inline-edit" onSubmit={edit}>
             <label>
               Título
-              <input
+              <Input
                 name="title"
                 defaultValue={task.title}
                 minLength={2}
@@ -657,7 +669,7 @@ export function TaskDetail({
             </label>
             <label>
               Descrição
-              <textarea
+              <Textarea
                 name="description"
                 defaultValue={task.description}
                 rows={4}
@@ -666,7 +678,7 @@ export function TaskDetail({
             <div className="form-columns">
               <label>
                 Prazo
-                <input
+                <Input
                   type="date"
                   name="due"
                   defaultValue={task.due_date}
@@ -675,7 +687,7 @@ export function TaskDetail({
               </label>
               <label>
                 Estimativa em horas
-                <input
+                <Input
                   type="number"
                   name="estimated"
                   defaultValue={task.estimated_minutes / 60}
@@ -686,25 +698,25 @@ export function TaskDetail({
             </div>
             <label>
               Prioridade
-              <select name="priority" defaultValue={task.priority}>
+              <Select name="priority" defaultValue={task.priority}>
                 {Object.entries(priorities).map(([k, v]) => (
-                  <option value={k} key={k}>
+                  <SelectOption value={k} key={k}>
                     {v}
-                  </option>
+                  </SelectOption>
                 ))}
-              </select>
+              </Select>
             </label>
             <div className="form-footer">
-              <button
+              <Button
                 type="button"
                 className="btn secondary"
                 onClick={() => setEditing(false)}
               >
                 Cancelar
-              </button>
-              <button className="btn primary" disabled={busy}>
+              </Button>
+              <Button className="btn primary" disabled={busy} loading={busy}>
                 <Save size={16} /> Salvar alterações
-              </button>
+              </Button>
             </div>
           </form>
         ) : (
@@ -712,9 +724,9 @@ export function TaskDetail({
             <div>
               <h3>Descrição</h3>
               {canEdit && task.status !== "done" && (
-                <button className="text-btn" onClick={() => setEditing(true)}>
+                <Button className="text-btn" onClick={() => setEditing(true)}>
                   Editar tarefa
-                </button>
+                </Button>
               )}
             </div>
             <p>{task.description || "Nenhuma descrição adicionada."}</p>
@@ -742,76 +754,84 @@ export function TaskDetail({
           {canEdit && (
             <>
               {["open", "returned"].includes(task.status) && (
-                <button
+                <Button
                   className="btn primary"
                   disabled={busy}
+                  loading={busy}
                   onClick={() => void transition("start")}
                 >
                   <Play size={15} /> Iniciar tarefa
-                </button>
+                </Button>
               )}
               {["open", "progress", "returned"].includes(task.status) && (
-                <button
+                <Button
                   className="btn primary"
                   disabled={busy}
+                  loading={busy}
                   onClick={() => void transition("submit")}
                 >
                   <Check size={16} /> Enviar para validação
-                </button>
+                </Button>
               )}
               {task.status === "review" && canApprove && (
                 <>
                   {!task.internal_approved_by && (
-                    <button
+                    <Button
                       className="btn primary"
                       disabled={busy}
+                      loading={busy}
                       onClick={() => void transition("approve_internal")}
                     >
                       <Check size={16} /> Aprovar internamente
-                    </button>
+                    </Button>
                   )}
                   {task.requires_client_approval &&
                     !task.client_approved_by && (
-                      <button
+                      <Button
                         className="btn secondary"
                         disabled={busy}
+                        loading={busy}
                         onClick={() => setAction("approve_client")}
                       >
                         Registrar aprovação do cliente
-                      </button>
+                      </Button>
                     )}
-                  <button
+                  <Button
                     className="btn secondary"
                     disabled={busy}
+                    loading={busy}
                     onClick={() => setAction("reject")}
                   >
                     Solicitar ajustes
-                  </button>
+                  </Button>
                 </>
               )}
               {["open", "progress", "review"].includes(task.status) && (
-                <button
+                <Button
                   className="btn secondary"
                   disabled={busy}
+                  loading={busy}
                   onClick={() => setAction("return")}
                 >
                   Devolver ao criador
-                </button>
+                </Button>
               )}
               {task.status === "done" && canApprove && (
-                <button
+                <Button
                   className="btn secondary"
                   disabled={busy}
+                  loading={busy}
                   onClick={() => setAction("reopen")}
                 >
                   Reabrir tarefa
-                </button>
+                </Button>
               )}
             </>
           )}
           {task.status !== "done" && (
-            <button
+            <Button
               className="btn secondary"
+              loading={busy}
               disabled={busy || (!!running && running.task_id !== task.id)}
               onClick={() =>
                 void mutate(
@@ -829,7 +849,7 @@ export function TaskDetail({
                   <Clock3 size={16} /> Cronometrar
                 </>
               )}
-            </button>
+            </Button>
           )}
         </div>
         {action && (
@@ -844,7 +864,7 @@ export function TaskDetail({
               {action === "approve_client"
                 ? "Quem aprovou, quando e por qual meio?"
                 : "Descreva o motivo"}
-              <textarea
+              <Textarea
                 required
                 minLength={action === "approve_client" ? 5 : 3}
                 value={note}
@@ -853,16 +873,16 @@ export function TaskDetail({
               />
             </label>
             <div className="form-footer">
-              <button
+              <Button
                 type="button"
                 className="btn secondary"
                 onClick={() => setAction("")}
               >
                 Cancelar
-              </button>
-              <button className="btn primary" disabled={busy}>
+              </Button>
+              <Button className="btn primary" disabled={busy} loading={busy}>
                 Confirmar
-              </button>
+              </Button>
             </div>
           </form>
         )}
@@ -872,18 +892,18 @@ export function TaskDetail({
             { id: "files", label: "Arquivos", icon: Paperclip },
             { id: "activity", label: "Histórico", icon: History },
           ].map((t) => (
-            <button
+            <Button
               className={tab === t.id ? "selected" : ""}
               key={t.id}
               onClick={() => setTab(t.id)}
             >
               <t.icon size={16} />
               {t.label}
-            </button>
+            </Button>
           ))}
         </div>
         {loading ? (
-          <p>Carregando…</p>
+          <Loading compact />
         ) : tab === "comments" ? (
           <>
             <form className="comment-form" onSubmit={comment}>
@@ -893,20 +913,22 @@ export function TaskDetail({
                   "Usuário"
                 }
               />
-              <textarea
+              <Textarea
                 name="body"
+                aria-label="Comentário"
                 required
                 rows={2}
                 maxLength={10000}
                 placeholder="Adicione contexto ou compartilhe uma atualização…"
               />
-              <button
+              <Button
                 className="icon-btn"
                 disabled={busy}
+                loading={busy}
                 aria-label="Enviar comentário"
               >
                 <Send size={19} />
-              </button>
+              </Button>
             </form>
             <div className="comment-list">
               {extras.comments.map((c) => (
@@ -943,16 +965,21 @@ export function TaskDetail({
             <label className={`upload-zone ${demo ? "disabled" : ""}`}>
               <Paperclip size={24} />
               <strong>
-                {demo
-                  ? "Arquivos disponíveis após conectar ao Supabase"
-                  : uploading
-                    ? "Enviando…"
-                    : "Clique para anexar um arquivo"}
+                {demo ? (
+                  "Arquivos disponíveis após conectar ao Supabase"
+                ) : uploading ? (
+                  <span role="status" aria-busy="true">
+                    <Skeleton className="skeleton-upload" />
+                    <span className="sr-only">Enviando arquivo…</span>
+                  </span>
+                ) : (
+                  "Clique para anexar um arquivo"
+                )}
               </strong>
               <small>
                 PDF, imagens, documentos, planilhas ou ZIP · até 20 MB
               </small>
-              <input
+              <Input
                 type="file"
                 disabled={demo || uploading}
                 accept=".pdf,.jpg,.jpeg,.png,.webp,.txt,.csv,.zip,.docx,.xlsx,.pptx"
@@ -970,13 +997,13 @@ export function TaskDetail({
                   {a.name}
                   <small>{(a.size_bytes / 1024).toFixed(0)} KB</small>
                 </span>
-                <button
+                <Button
                   className="icon-btn"
                   aria-label={`Baixar ${a.name}`}
                   onClick={() => void download(a)}
                 >
                   <Download size={18} />
-                </button>
+                </Button>
               </div>
             ))}
           </>
