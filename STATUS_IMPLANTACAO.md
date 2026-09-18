@@ -14,10 +14,10 @@
 
 - Build de produção aprovado. Dez testes de domínio e roteamento passaram. Entrada sem sessão redireciona para `/login`; login retorna ao destino compartilhado. URLs com nome da agência substituem o UUID; links legados são normalizados. Navegação e recarga verificadas no navegador.
 - Conteúdo central verificado em monitor amplo: 1.937 px disponíveis e 1.937 px ocupados pelo `main`. Formulário mobile validado; criação de tarefa demonstrativa preservou prioridade e aprovação do cliente usando os novos componentes React.
-- Quatro testes de domínio e 31 verificações de banco aprovadas no PostgreSQL embarcado, incluindo isolamento, aprovações, horas, anexos, revogação e provisionamento do administrador.
+- 17 testes de frontend (domínio, rotas, descrições e reenvio de anexos) e 31 verificações de banco aprovadas no PostgreSQL embarcado, incluindo isolamento, aprovações, horas, anexos, revogação e provisionamento do administrador.
 - `supabase/tests/remote_smoke.sql` executado no PostgreSQL hospedado: isolamento de empresas, leitura de relatórios, bloqueio de escrita direta, aprovação e bloqueio anônimo. Fixtures revertidas na mesma transação.
 - `node scripts/check-supabase.mjs`: Auth acessível; acesso anônimo negado a empresas, vínculos, tarefas e anexos pela API real.
-- Tela de login conectada verificada no navegador. Fluxos autenticados reais e transferência de arquivos ainda aguardam ativação da primeira conta.
+- Login real do administrador validado localmente. Catálogo, busca sem perda de foco, editor e seleção/remoção de arquivos verificados no navegador. A transferência final de arquivos ao Storage ainda precisa de homologação com um produto contratado real; o teste automatizado cobre a integração do upload com respostas simuladas, limpeza em falhas e reenvio sem duplicar tarefas.
 - Auditoria npm de dependências de produção: nenhum alerta. A auditoria completa ainda aponta alertas transitivos nas ferramentas locais Vercel CLI e Vitest; não são dependências do bundle de produção e precisam de acompanhamento antes de estabelecer CI.
 
 ## Avisos do Supabase revisados

@@ -4,6 +4,7 @@ export const pagePaths = {
   overview: "/visao-geral",
   tasks: "/tarefas",
   clients: "/clientes",
+  products: "/produtos",
   projects: "/projetos",
   hours: "/horas",
   reports: "/relatorios",

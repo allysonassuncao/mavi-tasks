@@ -56,6 +56,7 @@ import {
   X,
   ShieldCheck,
   Building2,
+  Package,
 } from "lucide-react";
 import { supabase } from "./supabase";
 import * as api from "./api";
@@ -88,6 +89,7 @@ const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "tasks", label: "Tarefas", icon: CheckCheck },
   { id: "clients", label: "Clientes", icon: Users },
+  { id: "products", label: "Produtos", icon: Package },
   { id: "projects", label: "Projetos", icon: FolderKanban },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
@@ -136,6 +138,7 @@ export default function App() {
     [projectFilter, setProjectFilter] = useUrlState<string>("projeto", ""),
     [offset, setOffset] = useUrlState<number>("pagina", 0),
     [count, setCount] = useState(0);
+  const [contractProduct, setContractProduct] = useState("");
   const [selected, setSelected] = useState<string | null>(null),
     [form, setForm] = useState<string | null>(null),
     [loading, setLoading] = useState(false),
@@ -705,6 +708,8 @@ export default function App() {
                     tasks: "Organize prioridades e acompanhe cada entrega.",
                     clients:
                       "Relacionamentos, produtos e trabalho em um só lugar.",
+                    products:
+                      "Cadastre os serviços da agência e vincule-os aos clientes.",
                     projects: "Do primeiro briefing à última entrega.",
                     hours: "Seu tempo, registrado com clareza.",
                     reports: "Entenda o ritmo e os resultados da operação.",
@@ -715,30 +720,35 @@ export default function App() {
             </div>
             <Button
               className="btn primary"
+              disabled={page === "products" && !isAdmin}
               onClick={() =>
                 setForm(
-                  page === "clients"
-                    ? "client"
-                    : page === "projects"
-                      ? "project"
-                      : page === "hours"
-                        ? "time"
-                        : page === "settings"
-                          ? "team"
-                          : "task",
+                  page === "products"
+                    ? "product"
+                    : page === "clients"
+                      ? "client"
+                      : page === "projects"
+                        ? "project"
+                        : page === "hours"
+                          ? "time"
+                          : page === "settings"
+                            ? "team"
+                            : "task",
                 )
               }
             >
               <Plus size={18} />
-              {page === "clients"
-                ? "Novo cliente"
-                : page === "projects"
-                  ? "Novo projeto"
-                  : page === "hours"
-                    ? "Registrar horas"
-                    : page === "settings"
-                      ? "Nova equipe"
-                      : "Nova tarefa"}
+              {page === "products"
+                ? "Novo produto"
+                : page === "clients"
+                  ? "Novo cliente"
+                  : page === "projects"
+                    ? "Novo projeto"
+                    : page === "hours"
+                      ? "Registrar horas"
+                      : page === "settings"
+                        ? "Nova equipe"
+                        : "Nova tarefa"}
             </Button>
           </div>
           {error && (
@@ -759,7 +769,7 @@ export default function App() {
               title="Seu acesso está quase pronto"
               body="Peça ao administrador para vincular sua conta a uma empresa."
             />
-          ) : loading || (!demo && !companiesReady) ? (
+          ) : (loading && page !== "tasks") || (!demo && !companiesReady) ? (
             <Loading />
           ) : (
             <>
@@ -1028,9 +1038,10 @@ export default function App() {
                     </div>
                   )}
                   <div className="filterbar">
-                    <label className="searchbox">
-                      <Search size={17} />
+                    <div className="searchbox">
                       <Input
+                        type="search"
+                        aria-label="Buscar tarefa"
                         placeholder="Buscar tarefa…"
                         value={search}
                         onChange={(e) => {
@@ -1038,7 +1049,19 @@ export default function App() {
                           setOffset(0);
                         }}
                       />
-                    </label>
+                      {search && (
+                        <Button
+                          className="icon-btn"
+                          aria-label="Limpar busca"
+                          onClick={() => {
+                            setSearch("");
+                            setOffset(0);
+                          }}
+                        >
+                          <X size={16} />
+                        </Button>
+                      )}
+                    </div>
                     <Select
                       aria-label="Filtrar status"
                       value={status}
@@ -1079,7 +1102,9 @@ export default function App() {
                       <SlidersHorizontal size={15} /> Atrasadas
                     </Button>
                   </div>
-                  {view === "list" ? (
+                  {loading ? (
+                    <Loading compact />
+                  ) : view === "list" ? (
                     <TaskTable
                       tasks={filtered}
                       data={data}
@@ -1158,7 +1183,7 @@ export default function App() {
                         ))}
                     </div>
                   )}
-                  {!filtered.length && view !== "list" && (
+                  {!loading && !filtered.length && view !== "list" && (
                     <Empty
                       title="Nenhuma tarefa encontrada"
                       body="Altere os filtros ou crie uma tarefa."
@@ -1172,7 +1197,7 @@ export default function App() {
                     <div>
                       <Button
                         className="icon-btn"
-                        disabled={offset === 0 || demo}
+                        disabled={loading || offset === 0 || demo}
                         aria-label="Página anterior"
                         onClick={() => setOffset((v) => v - 1)}
                       >
@@ -1180,7 +1205,7 @@ export default function App() {
                       </Button>
                       <Button
                         className="icon-btn"
-                        disabled={demo || (offset + 1) * 50 >= count}
+                        disabled={loading || demo || (offset + 1) * 50 >= count}
                         aria-label="Próxima página"
                         onClick={() => setOffset((v) => v + 1)}
                       >
@@ -1190,6 +1215,68 @@ export default function App() {
                   </div>
                 </section>
               )}
+              {page === "products" && (
+                <section className="panel product-catalog">
+                  <div className="panel-heading">
+                    <h2>Catálogo de produtos</h2>
+                    <span>{data.products.length} produtos</span>
+                  </div>
+                  {!isAdmin && (
+                    <p className="catalog-note">
+                      O cadastro de produtos é feito pelos administradores da
+                      agência.
+                    </p>
+                  )}
+                  {data.products.length ? (
+                    data.products.map((p) => {
+                      const contracts = data.contracts.filter(
+                        (c) => c.product_id === p.id && !c.archived,
+                      );
+                      return (
+                        <div className="catalog-row" key={p.id}>
+                          <span
+                            className="product-dot"
+                            style={{ background: p.color }}
+                          />
+                          <div>
+                            <strong>{p.name}</strong>
+                            <small>
+                              {contracts.length} contratação(ões) ·{" "}
+                              {new Set(contracts.map((c) => c.client_id)).size}{" "}
+                              cliente(s)
+                            </small>
+                          </div>
+                          <Button
+                            className="btn secondary"
+                            disabled={!isAdmin}
+                            onClick={() => {
+                              setContractProduct(p.id);
+                              setForm("contract");
+                            }}
+                          >
+                            <Plus size={16} /> Vincular a cliente
+                          </Button>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <Empty
+                      title="Cadastre seu primeiro produto"
+                      body="Adicione os serviços oferecidos pela agência, como Make Ads, Make CRM e Social Leads."
+                      action={
+                        isAdmin ? (
+                          <Button
+                            className="btn primary"
+                            onClick={() => setForm("product")}
+                          >
+                            <Plus size={17} /> Cadastrar produto
+                          </Button>
+                        ) : undefined
+                      }
+                    />
+                  )}
+                </section>
+              )}
               {page === "clients" && (
                 <>
                   <div className="section-top">
@@ -1197,7 +1284,10 @@ export default function App() {
                     <Button
                       className="btn secondary"
                       disabled={!isAdmin}
-                      onClick={() => setForm("contract")}
+                      onClick={() => {
+                        setContractProduct("");
+                        setForm("contract");
+                      }}
                     >
                       <Plus size={16} /> Vincular produto
                     </Button>
@@ -1532,12 +1622,12 @@ export default function App() {
                       <div className="panel-heading">
                         <h2>Catálogo de produtos</h2>
                         <Button
-                          className="icon-btn"
+                          className="btn secondary"
                           disabled={!isAdmin}
                           aria-label="Novo produto"
                           onClick={() => setForm("product")}
                         >
-                          <Plus size={20} />
+                          <Plus size={17} /> Novo produto
                         </Button>
                       </div>
                       {data.products.map((p) => (
@@ -1610,6 +1700,8 @@ export default function App() {
       {form && (
         <CreateForm
           kind={form}
+          initialProduct={contractProduct}
+          demo={demo}
           data={data}
           company={company}
           user={user}

@@ -7,7 +7,14 @@ import {
   Button,
   Skeleton,
 } from "./ui";
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   CalendarDays,
   Check,
@@ -38,9 +45,20 @@ import { dateKey, dateLabel, duration, minutes, names } from "./domain";
 import { supabase } from "./supabase";
 import { rpc, taskExtras } from "./api";
 import type { DemoStore } from "./demo-store";
+import { RichTextContent } from "./RichTextContent";
+import {
+  attachmentAccept,
+  validateAttachment,
+  uploadAttachment,
+  saveTaskWithAttachments,
+  type TaskUploadState,
+} from "./attachments";
+const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
 export function CreateForm({
   kind,
+  initialProduct,
+  demo,
   data,
   company,
   user,
@@ -49,6 +67,8 @@ export function CreateForm({
   onClose,
 }: {
   kind: string;
+  initialProduct?: string;
+  demo: boolean;
   data: Snapshot;
   company: string;
   user: string;
@@ -58,6 +78,36 @@ export function CreateForm({
 }) {
   const [contract, setContract] = useState(data.contracts[0]?.id ?? ""),
     [error, setError] = useState("");
+  const uploads = useRef<TaskUploadState>({ pending: [] });
+  const submitting = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [, updateUploads] = useState(0);
+  const redrawUploads = () => updateUploads((v) => v + 1);
+  const close = () => {
+    if (!submitting.current) onClose();
+  };
+  function addFiles(files: FileList | null) {
+    setError("");
+    const errors: string[] = [];
+    for (const file of Array.from(files ?? [])) {
+      try {
+        validateAttachment(file);
+        if (
+          !uploads.current.pending.some(
+            (f) =>
+              f.name === file.name &&
+              f.size === file.size &&
+              f.lastModified === file.lastModified,
+          )
+        )
+          uploads.current.pending.push(file);
+      } catch (e) {
+        errors.push((e as Error).message);
+      }
+    }
+    setError(errors.join(" "));
+    redrawUploads();
+  }
   const titles: Record<string, string> = {
     task: "Nova tarefa",
     client: "Novo cliente",
@@ -69,6 +119,7 @@ export function CreateForm({
   };
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submitting.current) return;
     setError("");
     const f = new FormData(e.currentTarget),
       s = (key: string) => String(f.get(key) ?? "");
@@ -130,11 +181,29 @@ export function CreateForm({
         };
         break;
     }
+    submitting.current = true;
+    setSaving(true);
     try {
-      await mutate(fn, a);
+      if (kind === "task") {
+        await saveTaskWithAttachments(
+          uploads.current,
+          () => mutate(fn, a),
+          uploadAttachment,
+          redrawUploads,
+        );
+      } else await mutate(fn, a);
       onClose();
     } catch (e) {
-      setError((e as Error).message);
+      const message =
+        (e as Error).message ?? "Não foi possível enviar o arquivo.";
+      setError(
+        uploads.current.taskId
+          ? `A tarefa foi salva. ${message} Tente reenviar os anexos pendentes ou feche para continuar depois.`
+          : message,
+      );
+    } finally {
+      submitting.current = false;
+      setSaving(false);
     }
   }
   const contractSelect = (
@@ -155,262 +224,330 @@ export function CreateForm({
     </label>
   );
   return (
-    <Modal title={titles[kind]} onClose={onClose}>
+    <Modal title={titles[kind]} onClose={close}>
       <form className="entity-form" onSubmit={submit}>
-        {kind === "task" ? (
-          <>
-            <label>
-              Nome da tarefa
-              <Input
-                name="title"
-                placeholder="O que precisa ser feito?"
-                required
-                minLength={2}
-                maxLength={240}
-                autoFocus
-              />
-            </label>
-            {contractSelect}
-            <div className="form-columns">
+        <fieldset
+          className="create-fields"
+          disabled={saving || !!uploads.current.taskId}
+        >
+          {kind === "task" ? (
+            <>
               <label>
-                Projeto
-                <Select name="project" key={contract}>
-                  <SelectOption value="">Sem projeto · manutenção</SelectOption>
-                  {data.projects
-                    .filter((p) => p.contract_id === contract)
-                    .map((p) => (
-                      <SelectOption key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectOption>
-                    ))}
-                </Select>
-              </label>
-              <label>
-                Equipe
-                <Select name="team" key={contract}>
-                  <SelectOption value="">Sem equipe principal</SelectOption>
-                  {data.teams
-                    .filter((t) =>
-                      data.contractTeams.some(
-                        (ct) =>
-                          ct.contract_id === contract && ct.team_id === t.id,
-                      ),
-                    )
-                    .map((t) => (
-                      <SelectOption key={t.id} value={t.id}>
-                        {t.name}
-                      </SelectOption>
-                    ))}
-                </Select>
-              </label>
-            </div>
-            <div className="form-columns">
-              <label>
-                Responsável
-                <Select name="assignee" defaultValue={user} required>
-                  {data.members
-                    .filter((m) => m.active)
-                    .map((m) => (
-                      <SelectOption key={m.user_id} value={m.user_id}>
-                        {m.name}
-                      </SelectOption>
-                    ))}
-                </Select>
-              </label>
-              <label>
-                Prazo combinado
+                Nome da tarefa
                 <Input
-                  name="due"
-                  type="date"
-                  defaultValue={dateKey()}
+                  name="title"
+                  placeholder="O que precisa ser feito?"
                   required
+                  minLength={2}
+                  maxLength={240}
+                  autoFocus
                 />
               </label>
-            </div>
-            <div className="form-columns">
+              {contractSelect}
+              <div className="form-columns">
+                <label>
+                  Projeto
+                  <Select name="project" key={contract}>
+                    <SelectOption value="">
+                      Sem projeto · manutenção
+                    </SelectOption>
+                    {data.projects
+                      .filter((p) => p.contract_id === contract)
+                      .map((p) => (
+                        <SelectOption key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectOption>
+                      ))}
+                  </Select>
+                </label>
+                <label>
+                  Equipe
+                  <Select name="team" key={contract}>
+                    <SelectOption value="">Sem equipe principal</SelectOption>
+                    {data.teams
+                      .filter((t) =>
+                        data.contractTeams.some(
+                          (ct) =>
+                            ct.contract_id === contract && ct.team_id === t.id,
+                        ),
+                      )
+                      .map((t) => (
+                        <SelectOption key={t.id} value={t.id}>
+                          {t.name}
+                        </SelectOption>
+                      ))}
+                  </Select>
+                </label>
+              </div>
+              <div className="form-columns">
+                <label>
+                  Responsável
+                  <Select name="assignee" defaultValue={user} required>
+                    {data.members
+                      .filter((m) => m.active)
+                      .map((m) => (
+                        <SelectOption key={m.user_id} value={m.user_id}>
+                          {m.name}
+                        </SelectOption>
+                      ))}
+                  </Select>
+                </label>
+                <label>
+                  Prazo combinado
+                  <Input
+                    name="due"
+                    type="date"
+                    defaultValue={dateKey()}
+                    required
+                  />
+                </label>
+              </div>
+              <div className="form-columns">
+                <label>
+                  Prioridade
+                  <Select name="priority" defaultValue="normal">
+                    {Object.entries(priorities).map(([id, label]) => (
+                      <SelectOption key={id} value={id}>
+                        {label}
+                      </SelectOption>
+                    ))}
+                  </Select>
+                </label>
+                <label>
+                  Estimativa em horas
+                  <Input
+                    type="number"
+                    name="estimated"
+                    min="0"
+                    max="10000"
+                    step="0.25"
+                    defaultValue="0"
+                  />
+                </label>
+              </div>
               <label>
-                Prioridade
-                <Select name="priority" defaultValue="normal">
-                  {Object.entries(priorities).map(([id, label]) => (
-                    <SelectOption key={id} value={id}>
-                      {label}
+                Tarefa principal (opcional)
+                <Select name="parent" key={contract}>
+                  <SelectOption value="">
+                    Esta é uma tarefa principal
+                  </SelectOption>
+                  {data.tasks
+                    .filter((t) => t.contract_id === contract)
+                    .map((t) => (
+                      <SelectOption key={t.id} value={t.id}>
+                        {t.title}
+                      </SelectOption>
+                    ))}
+                </Select>
+              </label>
+              <Suspense fallback={<Loading compact />}>
+                <RichTextEditor disabled={saving || !!uploads.current.taskId} />
+              </Suspense>
+              <label className="checkbox-label">
+                <Checkbox name="client_approval" /> Exigir aprovação do cliente
+                além da aprovação interna
+              </label>
+            </>
+          ) : null}
+          {["client", "product", "project", "team", "contract"].includes(
+            kind,
+          ) && (
+            <label>
+              {kind === "contract" ? "Nome da contratação" : "Nome"}
+              <Input
+                name="name"
+                required
+                minLength={2}
+                maxLength={120}
+                autoFocus
+                placeholder={
+                  kind === "client"
+                    ? "Ex.: Aurora Studio"
+                    : kind === "product"
+                      ? "Ex.: Make Ads"
+                      : kind === "contract"
+                        ? "Ex.: Make Ads · Aurora"
+                        : ""
+                }
+              />
+            </label>
+          )}
+          {kind === "client" && (
+            <label>
+              E-mail de contato
+              <Input
+                name="email"
+                type="email"
+                placeholder="contato@cliente.com.br"
+              />
+            </label>
+          )}
+          {kind === "project" && (
+            <>
+              {contractSelect}
+              <label>
+                Prazo do projeto
+                <Input name="due" type="date" />
+              </label>
+            </>
+          )}
+          {kind === "contract" && (
+            <>
+              <label>
+                Cliente
+                <Select name="client" required>
+                  {!data.clients.length && (
+                    <SelectOption value="">
+                      Cadastre um cliente primeiro
+                    </SelectOption>
+                  )}
+                  {data.clients.map((c) => (
+                    <SelectOption key={c.id} value={c.id}>
+                      {c.name}
                     </SelectOption>
                   ))}
                 </Select>
               </label>
               <label>
-                Estimativa em horas
-                <Input
-                  type="number"
-                  name="estimated"
-                  min="0"
-                  max="10000"
-                  step="0.25"
-                  defaultValue="0"
-                />
+                Produto
+                <Select
+                  name="product"
+                  required
+                  defaultValue={initialProduct || undefined}
+                >
+                  {!data.products.length && (
+                    <SelectOption value="">
+                      Cadastre um produto primeiro
+                    </SelectOption>
+                  )}
+                  {data.products.map((p) => (
+                    <SelectOption key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectOption>
+                  ))}
+                </Select>
               </label>
-            </div>
-            <label>
-              Tarefa principal (opcional)
-              <Select name="parent" key={contract}>
-                <SelectOption value="">
-                  Esta é uma tarefa principal
-                </SelectOption>
-                {data.tasks
-                  .filter((t) => t.contract_id === contract)
-                  .map((t) => (
+              <label>
+                Equipe com acesso
+                <Select name="team">
+                  <SelectOption value="">
+                    Somente administradores por enquanto
+                  </SelectOption>
+                  {data.teams.map((t) => (
+                    <SelectOption key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectOption>
+                  ))}
+                </Select>
+              </label>
+            </>
+          )}
+          {kind === "team" && (
+            <fieldset>
+              <legend>Pessoas da equipe</legend>
+              {data.members
+                .filter((m) => m.active)
+                .map((m) => (
+                  <label className="checkbox-label" key={m.user_id}>
+                    <Checkbox name="members" value={m.user_id} />
+                    {m.name}
+                  </label>
+                ))}
+            </fieldset>
+          )}
+          {kind === "time" && (
+            <>
+              <label>
+                Tarefa
+                <Select name="task" required>
+                  {data.tasks.map((t) => (
                     <SelectOption key={t.id} value={t.id}>
                       {t.title}
                     </SelectOption>
                   ))}
-              </Select>
-            </label>
-            <label>
-              Descrição
-              <Textarea
-                name="description"
-                placeholder="Contexto, referências e critérios de entrega"
-                rows={3}
+                </Select>
+              </label>
+              <div className="form-columns">
+                <label>
+                  Início
+                  <Input type="datetime-local" name="start" required />
+                </label>
+                <label>
+                  Fim
+                  <Input type="datetime-local" name="end" required />
+                </label>
+              </div>
+              <label>
+                Observação
+                <Textarea name="note" rows={3} />
+              </label>
+              <small>
+                Os períodos não podem se sobrepor a outros apontamentos.
+              </small>
+            </>
+          )}
+        </fieldset>
+        {kind === "task" && (
+          <section
+            className="creation-attachments"
+            aria-label="Anexos da nova tarefa"
+          >
+            <label
+              className={`upload-zone creation-upload ${saving || demo ? "disabled" : ""}`}
+            >
+              <Paperclip size={17} /> Adicionar anexos
+              <Input
+                type="file"
+                multiple
+                accept={attachmentAccept}
+                disabled={saving || demo}
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
               />
             </label>
-            <label className="checkbox-label">
-              <Checkbox name="client_approval" /> Exigir aprovação do cliente
-              além da aprovação interna
-            </label>
-          </>
-        ) : null}
-        {["client", "product", "project", "team", "contract"].includes(
-          kind,
-        ) && (
-          <label>
-            {kind === "contract" ? "Nome da contratação" : "Nome"}
-            <Input
-              name="name"
-              required
-              minLength={2}
-              maxLength={120}
-              autoFocus
-              placeholder={
-                kind === "client"
-                  ? "Ex.: Aurora Studio"
-                  : kind === "product"
-                    ? "Ex.: Make Ads"
-                    : kind === "contract"
-                      ? "Ex.: Make Ads · Aurora"
-                      : ""
-              }
-            />
-          </label>
-        )}
-        {kind === "client" && (
-          <label>
-            E-mail de contato
-            <Input
-              name="email"
-              type="email"
-              placeholder="contato@cliente.com.br"
-            />
-          </label>
-        )}
-        {kind === "project" && (
-          <>
-            {contractSelect}
-            <label>
-              Prazo do projeto
-              <Input name="due" type="date" />
-            </label>
-          </>
-        )}
-        {kind === "contract" && (
-          <>
-            <label>
-              Cliente
-              <Select name="client" required>
-                {!data.clients.length && (
-                  <SelectOption value="">
-                    Cadastre um cliente primeiro
-                  </SelectOption>
-                )}
-                {data.clients.map((c) => (
-                  <SelectOption key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectOption>
-                ))}
-              </Select>
-            </label>
-            <label>
-              Produto
-              <Select name="product" required>
-                {!data.products.length && (
-                  <SelectOption value="">
-                    Cadastre um produto primeiro
-                  </SelectOption>
-                )}
-                {data.products.map((p) => (
-                  <SelectOption key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectOption>
-                ))}
-              </Select>
-            </label>
-            <label>
-              Equipe com acesso
-              <Select name="team">
-                <SelectOption value="">
-                  Somente administradores por enquanto
-                </SelectOption>
-                {data.teams.map((t) => (
-                  <SelectOption key={t.id} value={t.id}>
-                    {t.name}
-                  </SelectOption>
-                ))}
-              </Select>
-            </label>
-          </>
-        )}
-        {kind === "team" && (
-          <fieldset>
-            <legend>Pessoas da equipe</legend>
-            {data.members
-              .filter((m) => m.active)
-              .map((m) => (
-                <label className="checkbox-label" key={m.user_id}>
-                  <Checkbox name="members" value={m.user_id} />
-                  {m.name}
-                </label>
-              ))}
-          </fieldset>
-        )}
-        {kind === "time" && (
-          <>
-            <label>
-              Tarefa
-              <Select name="task" required>
-                {data.tasks.map((t) => (
-                  <SelectOption key={t.id} value={t.id}>
-                    {t.title}
-                  </SelectOption>
-                ))}
-              </Select>
-            </label>
-            <div className="form-columns">
-              <label>
-                Início
-                <Input type="datetime-local" name="start" required />
-              </label>
-              <label>
-                Fim
-                <Input type="datetime-local" name="end" required />
-              </label>
-            </div>
-            <label>
-              Observação
-              <Textarea name="note" rows={3} />
-            </label>
             <small>
-              Os períodos não podem se sobrepor a outros apontamentos.
+              {demo
+                ? "Envio de arquivos disponível no ambiente conectado. O modo demonstração não armazena arquivos."
+                : "Até 20 MB por arquivo. PDF, imagens, TXT, CSV, ZIP, DOCX, XLSX e PPTX."}
             </small>
-          </>
+            {uploads.current.pending.map((file, index) => (
+              <div
+                className="pending-file"
+                key={`${file.name}-${file.size}-${file.lastModified}`}
+              >
+                <Paperclip size={15} />
+                <span>
+                  {file.name}
+                  <small>{(file.size / 1024).toFixed(1)} KB</small>
+                </span>
+                <Button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`Remover ${file.name}`}
+                  disabled={saving}
+                  onClick={() => {
+                    uploads.current.pending.splice(index, 1);
+                    redrawUploads();
+                  }}
+                >
+                  <X size={16} />
+                </Button>
+              </div>
+            ))}
+            {saving && uploads.current.taskId && (
+              <div role="status" aria-label="Enviando anexos">
+                <Skeleton className="skeleton-title" />
+              </div>
+            )}
+            {uploads.current.taskId && (
+              <small role="status">
+                Tarefa criada. {uploads.current.pending.length} anexo(s)
+                pendente(s).
+              </small>
+            )}
+          </section>
         )}
         {error && (
           <p className="form-error" role="alert">
@@ -421,14 +558,24 @@ export function CreateForm({
           <Button
             type="button"
             className="btn secondary"
-            disabled={busy}
-            loading={busy}
-            onClick={onClose}
+            disabled={busy || saving}
+            loading={busy || saving}
+            onClick={close}
           >
             Cancelar
           </Button>
-          <Button className="btn primary" disabled={busy} loading={busy}>
-            {kind === "time" ? "Registrar horas" : "Salvar"}
+          <Button
+            className="btn primary"
+            disabled={busy || saving}
+            loading={busy || saving}
+          >
+            {uploads.current.taskId
+              ? uploads.current.pending.length
+                ? "Reenviar anexos"
+                : "Concluir"
+              : kind === "time"
+                ? "Registrar horas"
+                : "Salvar"}
             <Check size={17} />
           </Button>
         </div>
@@ -558,31 +705,11 @@ export function TaskDetail({
     if (!supabase || demo) return;
     setUploading(true);
     setError("");
-    let attachment: Attachment | undefined;
     try {
-      if (file.size > 20971520 || file.size === 0)
-        throw Error("Escolha um arquivo de até 20 MB.");
-      attachment = await rpc("prepare_attachment", {
-        p_task: task.id,
-        p_name: file.name,
-        p_size: file.size,
-      });
-      const { error } = await supabase.storage
-        .from("mavi-attachments")
-        .upload(attachment!.path, file, { upsert: false });
-      if (error) throw error;
+      await uploadAttachment(task.id, file);
       setLocalRefresh((v) => v + 1);
       notify("Arquivo anexado.");
     } catch (e) {
-      if (attachment) {
-        try {
-          await rpc("discard_pending_attachment", {
-            p_attachment: attachment.id,
-          });
-        } catch {
-          /* retain record for reconciliation */
-        }
-      }
       setError((e as Error).message);
     } finally {
       setUploading(false);
@@ -667,14 +794,20 @@ export function TaskDetail({
                 required
               />
             </label>
-            <label>
-              Descrição
-              <Textarea
-                name="description"
-                defaultValue={task.description}
-                rows={4}
-              />
-            </label>
+            <Suspense
+              fallback={
+                <>
+                  <input
+                    type="hidden"
+                    name="description"
+                    value={task.description}
+                  />
+                  <Loading compact />
+                </>
+              }
+            >
+              <RichTextEditor defaultValue={task.description} disabled={busy} />
+            </Suspense>
             <div className="form-columns">
               <label>
                 Prazo
@@ -729,7 +862,7 @@ export function TaskDetail({
                 </Button>
               )}
             </div>
-            <p>{task.description || "Nenhuma descrição adicionada."}</p>
+            <RichTextContent value={task.description} />
           </section>
         )}
         <div className="approval-state">
@@ -982,7 +1115,7 @@ export function TaskDetail({
               <Input
                 type="file"
                 disabled={demo || uploading}
-                accept=".pdf,.jpg,.jpeg,.png,.webp,.txt,.csv,.zip,.docx,.xlsx,.pptx"
+                accept={attachmentAccept}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) void upload(file);

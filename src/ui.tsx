@@ -7,10 +7,45 @@ import {
 } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
-import { Check, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Type,
+  Mail,
+  LockKeyhole,
+  CalendarDays,
+  Hash,
+  Search,
+  type LucideIcon,
+} from "lucide-react";
 
-export function Input({ className = "", ...props }: ComponentProps<"input">) {
-  return <input className={`ui-input ${className}`} {...props} />;
+export function Input({
+  className = "",
+  icon,
+  ...props
+}: ComponentProps<"input"> & { icon?: LucideIcon }) {
+  if (["file", "hidden", "checkbox", "radio"].includes(props.type ?? ""))
+    return <input className={`ui-input ${className}`} {...props} />;
+  const Icon =
+    icon ??
+    (props.type === "email"
+      ? Mail
+      : props.type === "password"
+        ? LockKeyhole
+        : ["date", "datetime-local", "month", "time"].includes(props.type ?? "")
+          ? CalendarDays
+          : props.type === "number"
+            ? Hash
+            : props.type === "search"
+              ? Search
+              : Type);
+  return (
+    <span className="input-control">
+      <Icon size={17} aria-hidden="true" />
+      <input className={`ui-input ${className}`} {...props} />
+    </span>
+  );
 }
 export function Textarea({
   className = "",

@@ -8,7 +8,10 @@ Primeira entrega funcional da fundação de um SaaS para agências. React/TypeSc
 - Interface responsiva em português: painel, tarefas em lista/quadro/agenda, clientes, contratações, projetos, horas, relatórios iniciais e equipes.
 - Cadastro de clientes, produtos, contratações, equipes, projetos, tarefas e subtarefas; edição de tarefas; busca e filtros por status, produto, cliente, projeto e responsável.
 - Fluxo de devolução, validação, aprovação interna e registro manual da aprovação do cliente, com histórico e controle de concorrência.
-- Cronômetro, horas manuais, comentários e integração de anexos privados de até 20 MB.
+- Cronômetro, horas manuais, comentários e anexos privados de até 20 MB por arquivo, inclusive na criação da tarefa. Seleção múltipla, validação e reenvio dos pendentes sem recriar a tarefa; arquivos não são enviados na demonstração.
+- Catálogo de produtos em `/agencias/NOME-DA-AGENCIA/produtos`, com cadastro para administradores e vínculo aos clientes.
+- Descrição com editor Tiptap (negrito, itálico e listas), carregado sob demanda. Conteúdo estruturado com prefixo `mavi:richtext:v1:` no campo existente; renderização segura em React e compatibilidade com descrições antigas em texto simples.
+- Campos React com ícones Lucide; busca de tarefas mantém o foco durante as consultas, com skeleton apenas nos resultados.
 - Login e conclusão de convite/recuperação por definição de senha. Edge Function de convite preparada, ainda sem acionamento pela interface.
 - Migrações com isolamento por empresa, RLS, integridade de vínculos e operações transacionais autorizadas.
 - Dados demonstrativos locais **somente em memória**, identificados por uma faixa na interface. Recarregar descarta as alterações da demonstração. Nenhum registro demonstrativo é enviado ao Supabase.
@@ -19,7 +22,7 @@ Primeira entrega funcional da fundação de um SaaS para agências. React/TypeSc
 
 `/login` é a entrada pública. Abrir `/` ou uma página protegida sem sessão redireciona para o login. Após autenticar, o usuário retorna ao destino solicitado; quando não existe um destino, abre a visão geral. A demonstração depende de escolha explícita na tela de login, inclusive quando não há configuração do Supabase.
 
-As URLs usam o nome da agência, por exemplo `/agencias/make-acelerador-de-vendas/clientes`. As páginas disponíveis são `visao-geral`, `tarefas`, `clientes`, `projetos`, `horas`, `relatorios` e `configuracoes`. Links antigos como `/clientes?empresa=UUID` continuam aceitos e são convertidos para a URL amigável após carregar as empresas autorizadas. O menu permite copiar links ou abrir em outra aba.
+As URLs usam o nome da agência, por exemplo `/agencias/make-acelerador-de-vendas/clientes`. As páginas disponíveis são `visao-geral`, `tarefas`, `clientes`, `produtos`, `projetos`, `horas`, `relatorios` e `configuracoes`. Links antigos como `/clientes?empresa=UUID` continuam aceitos e são convertidos para a URL amigável após carregar as empresas autorizadas. O menu permite copiar links ou abrir em outra aba.
 
 Busca, filtros, paginação, período e visualização de tarefas continuam na query string quando selecionados. Voltar, Avançar e recarregar restauram a URL. O destino pós-login aceita apenas rotas internas conhecidas e remove parâmetros de autenticação. Os dados continuam sujeitos às permissões RLS: compartilhar o endereço não concede acesso à agência. Empresas com nomes equivalentes recebem um sufixo para evitar ambiguidade; alterar o nome de uma agência altera sua URL legível. Endereços desconhecidos exibem página não encontrada. Formulários e detalhes em modal são estados temporários da página.
 
@@ -94,7 +97,7 @@ Antes da produção ainda são obrigatórios: teste dos serviços Supabase reais
 - Catálogos auxiliares têm limite explícito de 1.000 registros por consulta; adicionar busca paginada para ultrapassar esse volume. Tarefas têm paginação de 50 itens; quadro e agenda representam a página filtrada. Horas exibem os 100 registros autorizados mais recentes; relatórios agregam no banco.
 - Relatórios atuais: atrasos atuais, validações atuais, eventos de entrega no período, horas por cliente e carga estimada por pessoa. Detalhamentos por produto/projeto/equipe, estimado versus realizado e cumprimento de prazo original/renegociado ainda pendentes.
 - Datas do período dos relatórios enviadas pela interface usam o fuso do navegador; normalizar os limites para o fuso cadastrado da empresa antes de operar empresas em fusos distintos.
-- Sem remoção ou substituição de anexos nesta primeira etapa; uploads falhos tentam limpar metadados pendentes. Prever reconciliação para interrupções de rede.
+- Sem remoção ou substituição de anexos nesta primeira etapa; uploads falhos tentam limpar metadados pendentes. O reenvio dos pendentes na criação permanece disponível enquanto o formulário está aberto; ao fechar, anexar os restantes pelos detalhes da tarefa salva. Prever reconciliação para interrupções de rede cujo resultado seja incerto.
 - Em caso de revogação durante um cronômetro ativo, o usuário perde acesso à tarefa e precisa da intervenção administrativa para encerrar a sessão; adicionar fluxo auditado de resolução.
 - Portal do cliente, integrações, automações configuráveis, cobrança de planos, pacotes de horas e SLA continuam fora desta fase, conforme o planejamento.
 
