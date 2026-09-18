@@ -5,6 +5,7 @@ export const pagePaths = {
   tasks: "/tarefas",
   clients: "/clientes",
   products: "/produtos",
+  contracts: "/produtos-contratados",
   projects: "/projetos",
   hours: "/horas",
   reports: "/relatorios",
@@ -74,6 +75,7 @@ export function safeReturnPath(value: string | null) {
     "pagina",
     "periodo",
     "visualizacao",
+    "mes",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);
@@ -88,6 +90,7 @@ export function loginDestination(current: string) {
 export function resolvePage(path: string): Page | null {
   const normalized = routeParts(path).path;
   if (normalized === "/") return "overview";
+  if (taskIdFromPath(path)) return "tasks";
   return (
     (Object.keys(pagePaths) as Page[]).find(
       (page) => pagePaths[page] === normalized,
@@ -166,4 +169,23 @@ function paramsForUrl(url: string) {
   const company = routeParts(path).company;
   if (company) params.set("empresa", company);
   return params;
+}
+
+export function taskIdFromPath(path: string) {
+  return (
+    routeParts(path).path.match(
+      /^\/tarefas\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/[a-z0-9-]+)?$/i,
+    )?.[1] ?? null
+  );
+}
+export function taskUrl(task: { id: string; title: string }, company: string) {
+  const slug =
+    task.title
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 100) || "tarefa";
+  return `${pageUrl("tasks", company)}/${task.id}/${slug}`;
 }

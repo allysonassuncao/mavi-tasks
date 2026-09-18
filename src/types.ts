@@ -62,6 +62,7 @@ export interface Task {
   assignee_id: string;
   due_date: string;
   original_due_date: string;
+  start_date?: string | null;
   estimated_minutes: number;
   requires_client_approval: boolean;
   internal_approved_by: string | null;

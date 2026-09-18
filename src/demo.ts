@@ -235,7 +235,7 @@ export function demoSnapshot(): Snapshot {
     ],
   ];
   const tasks = rows.map((r, i): Task => ({
-    id: `task-${i + 1}`,
+    id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
     company_id,
     contract_id: r[1],
     project_id: r[2],
@@ -282,17 +282,15 @@ export function demoSnapshot(): Snapshot {
     contractTeams: contracts.flatMap((c) =>
       teams.map((t) => ({ company_id, contract_id: c.id, team_id: t.id })),
     ),
-    hours: tasks
-      .slice(0, 6)
-      .map((t, i) => ({
-        id: `time-${i}`,
-        company_id,
-        task_id: t.id,
-        user_id: t.assignee_id,
-        started_at: day(-i) + "T12:00:00Z",
-        ended_at: day(-i) + `T${String(13 + (i % 2)).padStart(2, "0")}:00:00Z`,
-        note: "Execução da entrega",
-        source: "manual",
-      })),
+    hours: tasks.slice(0, 6).map((t, i) => ({
+      id: `time-${i}`,
+      company_id,
+      task_id: t.id,
+      user_id: t.assignee_id,
+      started_at: day(-i) + "T12:00:00Z",
+      ended_at: day(-i) + `T${String(13 + (i % 2)).padStart(2, "0")}:00:00Z`,
+      note: "Execução da entrega",
+      source: "manual",
+    })),
   };
 }

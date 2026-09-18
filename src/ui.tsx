@@ -1,3 +1,4 @@
+import { DateInput } from "./DateInput";
 import {
   Children,
   isValidElement,
@@ -18,6 +19,7 @@ import {
   Hash,
   Search,
   type LucideIcon,
+  ListFilter,
 } from "lucide-react";
 
 export function Input({
@@ -25,6 +27,8 @@ export function Input({
   icon,
   ...props
 }: ComponentProps<"input"> & { icon?: LucideIcon }) {
+  if (["date", "month", "datetime-local"].includes(props.type ?? ""))
+    return <DateInput {...props} />;
   if (["file", "hidden", "checkbox", "radio"].includes(props.type ?? ""))
     return <input className={`ui-input ${className}`} {...props} />;
   const Icon =
@@ -75,7 +79,7 @@ export function SelectOption(_props: OptionProps) {
 function optionsFrom(children: ReactNode): OptionProps[] {
   return Children.toArray(children).flatMap((child) => {
     if (!isValidElement<OptionProps>(child)) return [];
-    return child.type === SelectOption
+    return typeof child.props.value === "string"
       ? [child.props]
       : optionsFrom(child.props.children);
   });
@@ -126,7 +130,14 @@ export function Select({
         aria-labelledby={labelledBy}
         className={`ui-select ${className}`}
       >
-        <SelectPrimitive.Value placeholder={placeholder} />
+        <ListFilter
+          size={16}
+          className="select-leading-icon"
+          aria-hidden="true"
+        />
+        <SelectPrimitive.Value placeholder={placeholder}>
+          {options.find((option) => option.value === selected)?.children}
+        </SelectPrimitive.Value>
         <SelectPrimitive.Icon>
           <ChevronDown size={16} />
         </SelectPrimitive.Icon>

@@ -72,3 +72,25 @@ describe("task descriptions", () => {
     ).toContain("invalid");
   });
 });
+
+it("preserva apenas IDs de imagens privadas, sem aceitar URLs externas ou código", () => {
+  const valid = "00000000-0000-4000-8000-000000000001";
+  const value = serializeDescription({
+    type: "doc",
+    content: [
+      {
+        type: "inlineImage",
+        attrs: {
+          imageId: valid,
+          alt: "teste",
+          src: "https://evil.test/tracker",
+        },
+      },
+      { type: "inlineImage", attrs: { imageId: "javascript:alert(1)" } },
+    ],
+  });
+  expect(value).toContain(valid);
+  expect(value).not.toContain("https:");
+  expect(value).not.toContain("javascript:");
+  expect(parseDescription(value).content).toHaveLength(1);
+});

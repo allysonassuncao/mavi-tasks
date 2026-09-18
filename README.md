@@ -5,26 +5,38 @@ Primeira entrega funcional da fundação de um SaaS para agências. React/TypeSc
 ## Estado atual
 
 - Conteúdo central com largura total, skeletons para carregamento e ações assíncronas, componentes React reutilizáveis para campos e seletores/checkboxes Radix com navegação por teclado.
-- Interface responsiva em português: painel, tarefas em lista/quadro/agenda, clientes, contratações, projetos, horas, relatórios iniciais e equipes.
+- Interface responsiva em português: painel, tarefas em lista/quadro/calendário/Gantt, clientes, contratações, projetos, horas, relatórios iniciais e equipes.
 - Cadastro de clientes, produtos, contratações, equipes, projetos, tarefas e subtarefas; edição de tarefas; busca e filtros por status, produto, cliente, projeto e responsável.
 - Fluxo de devolução, validação, aprovação interna e registro manual da aprovação do cliente, com histórico e controle de concorrência.
 - Cronômetro, horas manuais, comentários e anexos privados de até 20 MB por arquivo, inclusive na criação da tarefa. Seleção múltipla, validação e reenvio dos pendentes sem recriar a tarefa; arquivos não são enviados na demonstração.
 - Catálogo de produtos em `/agencias/NOME-DA-AGENCIA/produtos`, com cadastro para administradores e vínculo aos clientes.
-- Descrição com editor Tiptap (negrito, itálico e listas), carregado sob demanda. Conteúdo estruturado com prefixo `mavi:richtext:v1:` no campo existente; renderização segura em React e compatibilidade com descrições antigas em texto simples.
+- Descrição e comentários com editor Tiptap (negrito, itálico, listas e imagens), carregado sob demanda. Conteúdo estruturado com prefixo `mavi:richtext:v1:` no campo existente; renderização segura em React e compatibilidade com descrições antigas em texto simples.
 - Campos React com ícones Lucide; busca de tarefas mantém o foco durante as consultas, com skeleton apenas nos resultados.
 - Login e conclusão de convite/recuperação por definição de senha. Edge Function de convite preparada, ainda sem acionamento pela interface.
 - Migrações com isolamento por empresa, RLS, integridade de vínculos e operações transacionais autorizadas.
 - Dados demonstrativos locais **somente em memória**, identificados por uma faixa na interface. Recarregar descarta as alterações da demonstração. Nenhum registro demonstrativo é enviado ao Supabase.
 
-**Conectado ao projeto Supabase MAVI (`zajlipvbotjafkowohmn`).** Cinco migrações aplicadas; agência Make Acelerador de Vendas cadastrada e administrador `allyson@makevendas.com.br` criado no Supabase Auth e vinculado à agência. A senha foi definida por solicitação do proprietário e o login real foi validado; nenhum e-mail foi enviado pelo agente. A publicação será feita pelo proprietário na Vercel, por integração com o GitHub. Consulte `STATUS_IMPLANTACAO.md` para verificações e pendências.
+**Conectado ao projeto Supabase MAVI (`zajlipvbotjafkowohmn`).** Seis migrações aplicadas; agência Make Acelerador de Vendas cadastrada e administrador `allyson@makevendas.com.br` criado no Supabase Auth e vinculado à agência. A senha foi definida por solicitação do proprietário e o login real foi validado; nenhum e-mail foi enviado pelo agente. A publicação será feita pelo proprietário na Vercel, por integração com o GitHub. Consulte `STATUS_IMPLANTACAO.md` para verificações e pendências.
 
 ## Links compartilháveis
 
 `/login` é a entrada pública. Abrir `/` ou uma página protegida sem sessão redireciona para o login. Após autenticar, o usuário retorna ao destino solicitado; quando não existe um destino, abre a visão geral. A demonstração depende de escolha explícita na tela de login, inclusive quando não há configuração do Supabase.
 
-As URLs usam o nome da agência, por exemplo `/agencias/make-acelerador-de-vendas/clientes`. As páginas disponíveis são `visao-geral`, `tarefas`, `clientes`, `produtos`, `projetos`, `horas`, `relatorios` e `configuracoes`. Links antigos como `/clientes?empresa=UUID` continuam aceitos e são convertidos para a URL amigável após carregar as empresas autorizadas. O menu permite copiar links ou abrir em outra aba.
+As URLs usam o nome da agência, por exemplo `/agencias/make-acelerador-de-vendas/clientes`. As páginas disponíveis são `visao-geral`, `tarefas`, `clientes`, `produtos`, `produtos-contratados`, `projetos`, `horas`, `relatorios` e `configuracoes`. Links antigos como `/clientes?empresa=UUID` continuam aceitos e são convertidos para a URL amigável após carregar as empresas autorizadas. O menu permite copiar links ou abrir em outra aba.
 
-Busca, filtros, paginação, período e visualização de tarefas continuam na query string quando selecionados. Voltar, Avançar e recarregar restauram a URL. O destino pós-login aceita apenas rotas internas conhecidas e remove parâmetros de autenticação. Os dados continuam sujeitos às permissões RLS: compartilhar o endereço não concede acesso à agência. Empresas com nomes equivalentes recebem um sufixo para evitar ambiguidade; alterar o nome de uma agência altera sua URL legível. Endereços desconhecidos exibem página não encontrada. Formulários e detalhes em modal são estados temporários da página.
+Busca, filtros, paginação, período e visualização de tarefas continuam na query string quando selecionados. Voltar, Avançar e recarregar restauram a URL. O destino pós-login aceita apenas rotas internas conhecidas e remove parâmetros de autenticação. Os dados continuam sujeitos às permissões RLS: compartilhar o endereço não concede acesso à agência. Empresas com nomes equivalentes recebem um sufixo para evitar ambiguidade; alterar o nome de uma agência altera sua URL legível. Endereços desconhecidos exibem página não encontrada. Os detalhes da tarefa têm URL própria: `/agencias/NOME/tarefas/UUID/titulo-da-tarefa`. O UUID mantém o link válido mesmo após editar o título. Abrir, recarregar e usar Voltar/Avançar restaura o modal; tarefas fora da página ou dos filtros são consultadas diretamente por ID sob RLS. Formulários de criação continuam temporários.
+
+## Experiência das tarefas e cadastros
+
+- Modal amplo e responsivo, com link compartilhável e botão de copiar endereço.
+- **Iniciar / Parar** registra tempo por usuário. Iniciar outra tarefa encerra automaticamente a sessão anterior, em uma transação protegida por lock e índice único. O cronômetro também pode ser iniciado em tarefas entregues para leitura/revisão, sem alterar o status da entrega.
+- A descrição fica oculta até o cronômetro pessoal desta tarefa estar ativo. O blur usa texto ilustrativo; o conteúdo real não é renderizado nessa área bloqueada. É um mecanismo de foco da interface, não uma restrição adicional de acesso à API. O estado do cronômetro sincroniza a cada 10 segundos e ao voltar à janela.
+- Apenas criador ou administrador edita a tarefa; responsáveis/gestores continuam podendo atuar no fluxo de execução e validação. Editar uma tarefa entregue invalida as aprovações e volta a exigir validação.
+- Cadastros e configurações administrativas são exibidos apenas para administradores. Clientes, produtos, projetos e produtos contratados têm edição. Projetos com tarefas mantêm o produto contratado para preservar a integridade dos vínculos.
+- **Cliente → produto contratado → projeto opcional → tarefa**. Produto é o serviço do catálogo; produto contratado é o serviço ativo daquele cliente; projeto é um grupo de entregas. Uma tarefa pode ser avulsa, mas sempre pertence a um produto contratado.
+- Calendário por prazo e Gantt por início planejado/prazo, navegáveis por mês, com filtros na URL. O período é carregado em lotes, independentemente da paginação da lista. Gantt sem arraste ou dependências nesta entrega.
+- Datas usam calendário React DayPicker em popover Radix; dropdowns usam Radix. Lucide fornece os ícones desses componentes.
+- Imagens PNG/JPG/WebP de até 5 MB podem ser inseridas, coladas ou arrastadas nos dois editores, inclusive na criação. Binários no bucket privado `mavi-inline-images`; o texto armazena somente IDs. Rascunhos pertencem exclusivamente ao autor e são vinculados atomicamente à tarefa ao salvar a descrição/comentário. A leitura usa download autenticado e URLs temporárias locais, sem links públicos persistidos.
 
 ## Executar
 
@@ -90,15 +102,16 @@ Antes da produção ainda são obrigatórios: teste dos serviços Supabase reais
 ## Limites e próximas etapas do escopo acordado
 
 - Espaços/pastas/listas livres ainda não implementados. A fundação atual organiza tarefas por contratação e projeto.
-- Modelos, recorrências, dependências, campos personalizados, cronograma e calendário mensal ainda pendentes. A agenda atual agrupa a seleção de tarefas por data.
+- Modelos, recorrências, dependências e campos personalizados ainda pendentes. Calendário mensal e Gantt básico já disponíveis.
 - O quadro permite abrir a tarefa e mudar seu estado pelo fluxo validado; arrastar cartões ainda não implementado.
-- Gestão completa de permissões, associação posterior de equipes e usuários, alteração de responsável, arquivamento e manutenção dos cadastros ainda pendentes. A versão atual permite os cadastros iniciais e edição do conteúdo/prazo da tarefa.
+- Gestão completa de permissões, associação posterior de equipes e usuários, alteração de responsável e arquivamento ainda pendentes. Cadastros e edição de cliente, produto, produto contratado e projeto estão disponíveis para administradores.
 - A interface de convites ainda não está ativa; a Edge Function foi preparada, mas não implantada ou testada contra Auth hospedado. Convidar uma conta já existente requer um fluxo adicional de vínculo, que ainda será desenvolvido. Falha de vínculo após envio exige revisão administrativa.
-- Catálogos auxiliares têm limite explícito de 1.000 registros por consulta; adicionar busca paginada para ultrapassar esse volume. Tarefas têm paginação de 50 itens; quadro e agenda representam a página filtrada. Horas exibem os 100 registros autorizados mais recentes; relatórios agregam no banco.
+- Catálogos auxiliares têm limite explícito de 1.000 registros por consulta; adicionar busca paginada para ultrapassar esse volume. Tarefas têm paginação de 50 itens; o quadro representa a página filtrada; calendário e Gantt carregam todo o período selecionado em lotes de 500. Horas exibem os 100 registros autorizados mais recentes; relatórios agregam no banco.
 - Relatórios atuais: atrasos atuais, validações atuais, eventos de entrega no período, horas por cliente e carga estimada por pessoa. Detalhamentos por produto/projeto/equipe, estimado versus realizado e cumprimento de prazo original/renegociado ainda pendentes.
 - Datas do período dos relatórios enviadas pela interface usam o fuso do navegador; normalizar os limites para o fuso cadastrado da empresa antes de operar empresas em fusos distintos.
 - Sem remoção ou substituição de anexos nesta primeira etapa; uploads falhos tentam limpar metadados pendentes. O reenvio dos pendentes na criação permanece disponível enquanto o formulário está aberto; ao fechar, anexar os restantes pelos detalhes da tarefa salva. Prever reconciliação para interrupções de rede cujo resultado seja incerto.
-- Em caso de revogação durante um cronômetro ativo, o usuário perde acesso à tarefa e precisa da intervenção administrativa para encerrar a sessão; adicionar fluxo auditado de resolução.
+- Imagens enviadas e abandonadas antes de salvar permanecem como rascunhos privados; implementar coleta de rascunhos órfãos antes de ampliar o uso do Storage.
+- A RPC de encerramento permite parar a própria sessão mesmo após revogação da tarefa. Iniciar outra tarefa autorizada também encerra a anterior; sem nenhuma tarefa acessível, a interface de resolução administrativa ainda precisa ser completada.
 - Portal do cliente, integrações, automações configuráveis, cobrança de planos, pacotes de horas e SLA continuam fora desta fase, conforme o planejamento.
 
 O escopo completo e as decisões de negócio estão em `PLANO_DO_SISTEMA.md`. Esta é uma entrega incremental, não o sistema completo pronto para produção.

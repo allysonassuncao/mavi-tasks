@@ -31,6 +31,9 @@ import {
   Plus,
   History,
   Save,
+  LockKeyhole,
+  Copy,
+  Pause,
 } from "lucide-react";
 import { Modal, Avatar, Badge, Empty, Loading } from "./components";
 import {
@@ -81,10 +84,11 @@ export function CreateForm({
   const uploads = useRef<TaskUploadState>({ pending: [] });
   const submitting = useRef(false);
   const [saving, setSaving] = useState(false);
+  const [editorUploading, setEditorUploading] = useState(false);
   const [, updateUploads] = useState(0);
   const redrawUploads = () => updateUploads((v) => v + 1);
   const close = () => {
-    if (!submitting.current) onClose();
+    if (!submitting.current && !editorUploading) onClose();
   };
   function addFiles(files: FileList | null) {
     setError("");
@@ -112,14 +116,14 @@ export function CreateForm({
     task: "Nova tarefa",
     client: "Novo cliente",
     product: "Novo produto",
-    contract: "Vincular produto ao cliente",
+    contract: "Adicionar produto contratado",
     project: "Novo projeto",
     time: "Registrar horas",
     team: "Nova equipe",
   };
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (submitting.current) return;
+    if (submitting.current || editorUploading) return;
     setError("");
     const f = new FormData(e.currentTarget),
       s = (key: string) => String(f.get(key) ?? "");
@@ -162,6 +166,7 @@ export function CreateForm({
           p_title: s("title"),
           p_assignee: s("assignee"),
           p_due: s("due"),
+          p_start: s("start_date") || null,
           p_project: s("project") || null,
           p_team: s("team") || null,
           p_description: s("description"),
@@ -217,14 +222,19 @@ export function CreateForm({
         )}
         {data.contracts.map((c) => (
           <SelectOption value={c.id} key={c.id}>
-            {c.name}
+            {data.clients.find((client) => client.id === c.client_id)?.name} ·{" "}
+            {data.products.find((p) => p.id === c.product_id)?.name} — {c.name}
           </SelectOption>
         ))}
       </Select>
     </label>
   );
   return (
-    <Modal title={titles[kind]} onClose={close}>
+    <Modal
+      title={titles[kind]}
+      onClose={close}
+      busy={saving || editorUploading}
+    >
       <form className="entity-form" onSubmit={submit}>
         <fieldset
           className="create-fields"
@@ -340,8 +350,17 @@ export function CreateForm({
                     ))}
                 </Select>
               </label>
+              <label>
+                Início planejado (opcional)
+                <Input name="start_date" type="date" />
+              </label>
               <Suspense fallback={<Loading compact />}>
-                <RichTextEditor disabled={saving || !!uploads.current.taskId} />
+                <RichTextEditor
+                  company={company}
+                  demo={demo}
+                  onUploading={setEditorUploading}
+                  disabled={saving || !!uploads.current.taskId}
+                />
               </Suspense>
               <label className="checkbox-label">
                 <Checkbox name="client_approval" /> Exigir aprovação do cliente
@@ -353,7 +372,7 @@ export function CreateForm({
             kind,
           ) && (
             <label>
-              {kind === "contract" ? "Nome da contratação" : "Nome"}
+              {kind === "contract" ? "Nome do serviço contratado" : "Nome"}
               <Input
                 name="name"
                 required
@@ -558,16 +577,16 @@ export function CreateForm({
           <Button
             type="button"
             className="btn secondary"
-            disabled={busy || saving}
-            loading={busy || saving}
+            disabled={busy || saving || editorUploading}
+            loading={busy || saving || editorUploading}
             onClick={close}
           >
             Cancelar
           </Button>
           <Button
             className="btn primary"
-            disabled={busy || saving}
-            loading={busy || saving}
+            disabled={busy || saving || editorUploading}
+            loading={busy || saving || editorUploading}
           >
             {uploads.current.taskId
               ? uploads.current.pending.length
@@ -585,6 +604,8 @@ export function CreateForm({
 }
 export function TaskDetail({
   task,
+  currentRunning,
+  tick,
   data,
   user,
   busy,
@@ -596,6 +617,8 @@ export function TaskDetail({
   notify,
 }: {
   task: Task;
+  currentRunning: import("./types").TimeEntry | null;
+  tick: number;
   data: Snapshot;
   user: string;
   busy: boolean;
@@ -619,6 +642,8 @@ export function TaskDetail({
     [note, setNote] = useState(""),
     [action, setAction] = useState(""),
     [uploading, setUploading] = useState(false);
+  const [editorUploading, setEditorUploading] = useState(false);
+  const [commentRevision, setCommentRevision] = useState(0);
   const n = names(data, task),
     member = data.members.find((m) => m.user_id === user),
     manager =
@@ -627,12 +652,26 @@ export function TaskDetail({
         (t) => t.team_id === task.team_id && t.user_id === user,
       ),
     canApprove = task.creator_id === user || manager,
-    canEdit =
-      canApprove || task.assignee_id === user || member?.role === "admin";
-  const running = data.hours.find((h) => h.user_id === user && !h.ended_at),
+    canEdit = task.creator_id === user || member?.role === "admin",
+    canWork = canEdit || manager || task.assignee_id === user;
+  const running = currentRunning,
     taskHours = data.hours
       .filter((h) => h.task_id === task.id)
       .reduce((s, h) => s + minutes(h), 0);
+  const isRunning = running?.task_id === task.id;
+  const elapsedSeconds = isRunning
+    ? Math.max(0, Math.floor((tick - Date.parse(running.started_at)) / 1000))
+    : 0;
+  const clock = [
+    Math.floor(elapsedSeconds / 3600),
+    Math.floor(elapsedSeconds / 60) % 60,
+    elapsedSeconds % 60,
+  ]
+    .map((v) => String(v).padStart(2, "0"))
+    .join(":");
+  useEffect(() => {
+    if (!isRunning) setEditing(false);
+  }, [isRunning]);
   useEffect(() => {
     let alive = true;
     if (demo) {
@@ -673,18 +712,21 @@ export function TaskDetail({
   }
   async function comment(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (editorUploading) return;
     const form = e.currentTarget,
       body = String(new FormData(form).get("body") ?? "").trim();
     if (!body) return;
     try {
       await mutate("add_comment", { p_task: task.id, p_body: body });
       form.reset();
+      setCommentRevision((v) => v + 1);
     } catch (e) {
       setError((e as Error).message);
     }
   }
   async function edit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (editorUploading || !isRunning || !canEdit) return;
     const fd = new FormData(e.currentTarget);
     try {
       await mutate("update_task", {
@@ -693,6 +735,7 @@ export function TaskDetail({
         p_title: fd.get("title"),
         p_description: fd.get("description"),
         p_due: fd.get("due"),
+        p_start: fd.get("start_date") || null,
         p_estimated: Number(fd.get("estimated")) * 60,
         p_priority: fd.get("priority"),
       });
@@ -732,7 +775,12 @@ export function TaskDetail({
     }
   }
   return (
-    <Modal title="Detalhes da tarefa" onClose={onClose} wide>
+    <Modal
+      title="Detalhes da tarefa"
+      onClose={onClose}
+      busy={busy || uploading || editorUploading}
+      wide
+    >
       <div className="task-detail">
         <div className="detail-breadcrumb">
           {n.client?.name}
@@ -782,7 +830,76 @@ export function TaskDetail({
             </strong>
           </div>
         </div>
-        {editing ? (
+        <section
+          className={`focus-timer ${isRunning ? "is-running" : ""}`}
+          aria-label="Controle de execução"
+        >
+          <Button
+            className={`timer-play ${isRunning ? "timer-stop" : ""}`}
+            loading={busy}
+            disabled={busy || editorUploading}
+            onClick={() =>
+              void mutate(
+                isRunning ? "stop_timer" : "start_timer",
+                isRunning ? { p_entry: running.id } : { p_task: task.id },
+              ).catch((e) => setError(e.message))
+            }
+          >
+            {isRunning ? (
+              <Pause size={27} fill="currentColor" />
+            ) : (
+              <Play size={27} fill="currentColor" />
+            )}
+            <span>{isRunning ? "Parar" : "Iniciar"}</span>
+          </Button>
+          <div>
+            <strong>{isRunning ? clock : "Pronto para começar"}</strong>
+            <p>
+              {isRunning
+                ? "Tempo sendo registrado nesta tarefa."
+                : running
+                  ? "Ao iniciar, sua outra tarefa será pausada automaticamente."
+                  : "Inicie para ler a descrição e registrar seu tempo."}
+            </p>
+          </div>
+          <Button
+            className="btn secondary share-task"
+            onClick={() =>
+              void navigator.clipboard
+                .writeText(window.location.href)
+                .then(() => notify("Link da tarefa copiado."))
+                .catch(() =>
+                  setError(
+                    "Copie o endereço da barra do navegador para compartilhar.",
+                  ),
+                )
+            }
+          >
+            <Copy size={16} /> Copiar link
+          </Button>
+        </section>
+        {!isRunning ? (
+          <section
+            className="description-locked"
+            aria-label="Descrição bloqueada até iniciar"
+          >
+            <div className="blurred-placeholder" aria-hidden="true">
+              <p>
+                Contexto, referências e orientações para realizar esta tarefa.
+              </p>
+              <p>
+                Instruções e detalhes do trabalho aparecem nesta área de
+                leitura.
+              </p>
+              <p>Entregáveis e critérios para validação.</p>
+            </div>
+            <div className="description-unlock">
+              <LockKeyhole size={24} />
+              <strong>Inicie a tarefa para visualizar a descrição</strong>
+              <span>Use o botão Iniciar acima.</span>
+            </div>
+          </section>
+        ) : editing ? (
           <form className="entity-form inline-edit" onSubmit={edit}>
             <label>
               Título
@@ -806,8 +923,22 @@ export function TaskDetail({
                 </>
               }
             >
-              <RichTextEditor defaultValue={task.description} disabled={busy} />
+              <RichTextEditor
+                company={task.company_id}
+                demo={demo}
+                defaultValue={task.description}
+                disabled={busy}
+                onUploading={setEditorUploading}
+              />
             </Suspense>
+            <label>
+              Início planejado (opcional)
+              <Input
+                type="date"
+                name="start_date"
+                defaultValue={task.start_date ?? ""}
+              />
+            </label>
             <div className="form-columns">
               <label>
                 Prazo
@@ -847,7 +978,11 @@ export function TaskDetail({
               >
                 Cancelar
               </Button>
-              <Button className="btn primary" disabled={busy} loading={busy}>
+              <Button
+                className="btn primary"
+                disabled={busy || editorUploading}
+                loading={busy || editorUploading}
+              >
                 <Save size={16} /> Salvar alterações
               </Button>
             </div>
@@ -856,7 +991,7 @@ export function TaskDetail({
           <section className="detail-description">
             <div>
               <h3>Descrição</h3>
-              {canEdit && task.status !== "done" && (
+              {canEdit && (
                 <Button className="text-btn" onClick={() => setEditing(true)}>
                   Editar tarefa
                 </Button>
@@ -884,7 +1019,7 @@ export function TaskDetail({
           </span>
         </div>
         <div className="detail-actions">
-          {canEdit && (
+          {canWork && (
             <>
               {["open", "returned"].includes(task.status) && (
                 <Button
@@ -893,7 +1028,7 @@ export function TaskDetail({
                   loading={busy}
                   onClick={() => void transition("start")}
                 >
-                  <Play size={15} /> Iniciar tarefa
+                  <Check size={15} /> Marcar em andamento
                 </Button>
               )}
               {["open", "progress", "returned"].includes(task.status) && (
@@ -961,29 +1096,6 @@ export function TaskDetail({
               )}
             </>
           )}
-          {task.status !== "done" && (
-            <Button
-              className="btn secondary"
-              loading={busy}
-              disabled={busy || (!!running && running.task_id !== task.id)}
-              onClick={() =>
-                void mutate(
-                  running ? "stop_timer" : "start_timer",
-                  running ? { p_entry: running.id } : { p_task: task.id },
-                ).catch((e) => setError(e.message))
-              }
-            >
-              {running?.task_id === task.id ? (
-                <>
-                  <Square size={14} /> Parar cronômetro
-                </>
-              ) : (
-                <>
-                  <Clock3 size={16} /> Cronometrar
-                </>
-              )}
-            </Button>
-          )}
         </div>
         {action && (
           <form
@@ -1046,18 +1158,21 @@ export function TaskDetail({
                   "Usuário"
                 }
               />
-              <Textarea
-                name="body"
-                aria-label="Comentário"
-                required
-                rows={2}
-                maxLength={10000}
-                placeholder="Adicione contexto ou compartilhe uma atualização…"
-              />
+              <Suspense fallback={<Loading compact />}>
+                <RichTextEditor
+                  key={commentRevision}
+                  company={task.company_id}
+                  demo={demo}
+                  name="body"
+                  label="Comentário"
+                  disabled={busy}
+                  onUploading={setEditorUploading}
+                />
+              </Suspense>
               <Button
                 className="icon-btn"
-                disabled={busy}
-                loading={busy}
+                disabled={busy || editorUploading}
+                loading={busy || editorUploading}
                 aria-label="Enviar comentário"
               >
                 <Send size={19} />
@@ -1082,7 +1197,7 @@ export function TaskDetail({
                         {new Date(c.created_at).toLocaleString("pt-BR")}
                       </small>
                     </strong>
-                    <p>{c.body}</p>
+                    <RichTextContent value={c.body} />
                   </div>
                 </article>
               ))}

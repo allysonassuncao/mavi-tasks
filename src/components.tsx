@@ -28,11 +28,13 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  busy = false,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  busy?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -43,10 +45,11 @@ export function Modal({
   return (
     <dialog
       ref={ref}
+      aria-label={title}
       className={wide ? "modal sheet" : "modal"}
       onCancel={(e) => {
         e.preventDefault();
-        onClose();
+        if (!busy) onClose();
       }}
     >
       <div className="modal-head">
@@ -55,6 +58,7 @@ export function Modal({
           type="button"
           className="icon-btn"
           onClick={onClose}
+          disabled={busy}
           aria-label="Fechar"
         >
           <X size={20} />

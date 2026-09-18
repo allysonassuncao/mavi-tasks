@@ -5,6 +5,7 @@ export type RichNode = {
   text?: string;
   content?: RichNode[];
   marks?: { type: string }[];
+  attrs?: { imageId: string; alt: string };
 };
 const blocks = new Set([
   "doc",
@@ -21,6 +22,23 @@ export function sanitizeDescription(value: unknown): RichNode {
     if (!value || typeof value !== "object" || depth > 30 || --remaining < 0)
       return null;
     const node = value as RichNode;
+    if (
+      node.type === "inlineImage" &&
+      typeof node.attrs?.imageId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        node.attrs.imageId,
+      )
+    )
+      return {
+        type: "inlineImage",
+        attrs: {
+          imageId: node.attrs.imageId,
+          alt:
+            typeof node.attrs.alt === "string"
+              ? node.attrs.alt.slice(0, 240)
+              : "Imagem anexada",
+        },
+      };
     if (node.type === "text" && typeof node.text === "string") {
       if (!node.text) return null;
       return {
@@ -73,6 +91,8 @@ export function parseDescription(value: string): RichNode {
 export function serializeDescription(value: unknown): string {
   const doc = sanitizeDescription(value);
   const hasText = (node: RichNode): boolean =>
-    !!node.text?.trim() || !!node.content?.some(hasText);
+    node.type === "inlineImage" ||
+    !!node.text?.trim() ||
+    !!node.content?.some(hasText);
   return hasText(doc) ? DESCRIPTION_PREFIX + JSON.stringify(doc) : "";
 }

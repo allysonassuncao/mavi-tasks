@@ -17,6 +17,7 @@ export interface Filters {
   late: boolean;
   client: string;
   project: string;
+  schedule?: { view: "calendar" | "gantt"; start: string; end: string };
 }
 export interface Summary {
   by_project: { id: string; total: number; done: number }[];
@@ -107,9 +108,29 @@ export async function snapshot(
     );
     query = query.lt("due_date", today).neq("status", "done");
   }
-  const result = await query.range(filters.page * 50, filters.page * 50 + 49);
+  if (filters.schedule) {
+    const { view, start, end } = filters.schedule;
+    query = query.gte("due_date", start);
+    if (view === "calendar") query = query.lte("due_date", end);
+    else
+      query = query.or(
+        `start_date.lte.${end},and(start_date.is.null,created_at.lte.${end}T23:59:59.999Z),and(start_date.is.null,due_date.lte.${end})`,
+      );
+  }
+  const result = await query.range(
+    filters.schedule ? 0 : filters.page * 50,
+    filters.schedule ? 499 : filters.page * 50 + 49,
+  );
   if (result.error) throw result.error;
   data.tasks = result.data as Task[];
+  if (filters.schedule) {
+    for (let offset = 500; offset < (result.count ?? 0); offset += 500) {
+      const next = await query.range(offset, offset + 499);
+      if (next.error) throw next.error;
+      data.tasks.push(...(next.data as Task[]));
+      if (next.data.length < 500) break;
+    }
+  }
   const hours = await supabase
     .from("time_entries")
     .select("*")
@@ -120,9 +141,7 @@ export async function snapshot(
   data.hours = hours.data;
   return { data, count: result.count ?? 0 };
 }
-export async function taskExtras(
-  id: string,
-): Promise<{
+export async function taskExtras(id: string): Promise<{
   comments: Comment[];
   attachments: Attachment[];
   events: TaskEvent[];
@@ -143,4 +162,31 @@ export async function taskExtras(
     attachments: values[1].data ?? [],
     events: values[2].data ?? [],
   };
+}
+
+export async function taskById(
+  company: string,
+  id: string,
+): Promise<Task | null> {
+  const { data, error } = await supabase!
+    .from("tasks")
+    .select("*")
+    .eq("company_id", company)
+    .eq("id", id)
+    .eq("archived", false)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+export async function currentTimer() {
+  const { data: session } = await supabase!.auth.getSession();
+  if (!session.session) return null;
+  const { data, error } = await supabase!
+    .from("time_entries")
+    .select("*")
+    .eq("user_id", session.session.user.id)
+    .is("ended_at", null)
+    .maybeSingle();
+  if (error) throw error;
+  return data as import("./types").TimeEntry | null;
 }

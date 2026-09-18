@@ -1,3 +1,4 @@
+import { InlineImage } from "./inline-images";
 import { Fragment, type ReactNode } from "react";
 import { parseDescription, type RichNode } from "./rich-text";
 function renderNode(node: RichNode, key: number): ReactNode {
@@ -12,6 +13,10 @@ function renderNode(node: RichNode, key: number): ReactNode {
     return <Fragment key={key}>{text}</Fragment>;
   }
   switch (node.type) {
+    case "inlineImage":
+      return (
+        <InlineImage key={key} id={node.attrs!.imageId} alt={node.attrs!.alt} />
+      );
     case "paragraph":
       return <p key={key}>{children?.length ? children : <br />}</p>;
     case "bulletList":

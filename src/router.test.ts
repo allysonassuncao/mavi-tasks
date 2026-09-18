@@ -8,6 +8,8 @@ import {
   safeReturnPath,
   loginDestination,
   routeParts,
+  taskUrl,
+  taskIdFromPath,
 } from "./router";
 
 describe("shareable routes", () => {
@@ -80,4 +82,20 @@ describe("shareable routes", () => {
       ).toBe(0);
     }
   });
+});
+
+it("abre diretamente tarefas compartilhadas e preserva o retorno após login", () => {
+  const task = {
+    id: "00000000-0000-4000-8000-000000000001",
+    title: "Revisão de anúncios",
+  };
+  const url = taskUrl(task, "make");
+  expect(url).toBe(
+    "/agencias/make/tarefas/00000000-0000-4000-8000-000000000001/revisao-de-anuncios",
+  );
+  expect(resolvePage(url)).toBe("tasks");
+  expect(taskIdFromPath(url)).toBe(task.id);
+  expect(safeReturnPath(url)).toBe(url);
+  expect(loginDestination(url)).toContain("retorno=");
+  expect(taskIdFromPath("/tarefas/invalid")).toBeNull();
 });

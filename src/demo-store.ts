@@ -26,6 +26,46 @@ export class DemoStore {
         created_at: now,
       });
     switch (name) {
+      case "update_client":
+      case "update_product":
+      case "update_project":
+      case "update_contract": {
+        if (
+          this.data.members.find((m) => m.user_id === demoUser)?.role !==
+          "admin"
+        )
+          throw Error("Sem permissão");
+        const kind = name.replace("update_", "");
+        const rows =
+          kind === "client"
+            ? this.data.clients
+            : kind === "product"
+              ? this.data.products
+              : kind === "project"
+                ? this.data.projects
+                : this.data.contracts;
+        const entity = rows.find((r) => r.id === a[`p_${kind}`]);
+        if (!entity) throw Error("Cadastro não encontrado");
+        const changes: Record<string, unknown> = { name: a.p_name };
+        if (kind === "client") changes.email = a.p_email;
+        if (kind === "project") {
+          if (
+            a.p_contract !== (entity as any).contract_id &&
+            this.data.tasks.some((t) => t.project_id === entity.id)
+          )
+            throw Error(
+              "Projetos com tarefas não podem mudar de produto contratado.",
+            );
+          changes.due_date = a.p_due;
+          changes.contract_id = a.p_contract;
+        }
+        if (kind === "contract") {
+          changes.client_id = a.p_client;
+          changes.product_id = a.p_product;
+        }
+        Object.assign(entity, changes);
+        break;
+      }
       case "create_client":
         this.data.clients.push({
           id,
@@ -91,6 +131,7 @@ export class DemoStore {
           assignee_id: a.p_assignee,
           due_date: a.p_due,
           original_due_date: a.p_due,
+          start_date: a.p_start ?? null,
           estimated_minutes: a.p_estimated ?? 0,
           requires_client_approval: a.p_client_approval ?? false,
           internal_approved_by: null,
@@ -105,12 +146,17 @@ export class DemoStore {
         break;
       case "update_task":
         if (!task) throw Error("Tarefa não encontrada");
-        if (task.status === "done")
-          throw Error("Reabra a tarefa antes de editar");
+        if (
+          task.creator_id !== demoUser &&
+          this.data.members.find((m) => m.user_id === demoUser)?.role !==
+            "admin"
+        )
+          throw Error("Sem permissão para editar");
         Object.assign(task, {
           title: a.p_title,
           description: a.p_description,
           due_date: a.p_due,
+          start_date: a.p_start ?? null,
           estimated_minutes: a.p_estimated,
           priority: a.p_priority,
           internal_approved_by: null,
@@ -118,7 +164,10 @@ export class DemoStore {
           client_approval_note: null,
           revision: task.revision + 1,
           version: task.version + 1,
-          status: task.status === "review" ? "progress" : task.status,
+          status: ["review", "done"].includes(task.status)
+            ? "progress"
+            : task.status,
+          delivered_at: null,
         });
         event("edited");
         break;
@@ -183,8 +232,13 @@ export class DemoStore {
         });
         break;
       case "start_timer":
-        if (this.data.hours.some((h) => h.user_id === demoUser && !h.ended_at))
-          throw Error("Já existe um cronômetro em andamento");
+        {
+          const active = this.data.hours.find(
+            (h) => h.user_id === demoUser && !h.ended_at,
+          );
+          if (active && active.task_id === a.p_task) return active.id;
+          if (active) active.ended_at = now;
+        }
         this.data.hours.unshift({
           id,
           company_id,

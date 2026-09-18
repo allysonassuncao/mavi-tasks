@@ -260,20 +260,344 @@ await check("revogar vínculo bloqueia sessão existente", async () => {
   );
   await denied(() => rpc("add_comment", [task, "Tentativa"]));
 });
-await db.exec('reset role');
-const bootstrapCompany=uid(30), bootstrapUser=uid(31);
-await db.query("insert into companies(id,name) values($1,'Bootstrap')",[bootstrapCompany]);
-await db.query("insert into mavi_private.admin_provisioning(company_id,email,name) values($1,'owner@example.test','Owner')",[bootstrapCompany]);
-await db.query("insert into auth.users(id,email) values($1,'owner@example.test')",[bootstrapUser]);
-await check('e-mail não confirmado não recebe administração',async()=>assert.equal((await db.query('select * from memberships where company_id=$1',[bootstrapCompany])).rows.length,0));
-await db.query('update auth.users set email_confirmed_at=now() where id=$1',[bootstrapUser]);
-await check('e-mail confirmado consome provisionamento uma única vez',async()=>{
- assert.equal((await db.query('select role from memberships where company_id=$1 and user_id=$2',[bootstrapCompany,bootstrapUser])).rows[0].role,'admin');
- await db.query('update auth.users set email_confirmed_at=now() where id=$1',[bootstrapUser]);
- assert.equal((await db.query('select * from memberships where company_id=$1',[bootstrapCompany])).rows.length,1);
-});
+await db.exec("reset role");
+const bootstrapCompany = uid(30),
+  bootstrapUser = uid(31);
+await db.query("insert into companies(id,name) values($1,'Bootstrap')", [
+  bootstrapCompany,
+]);
+await db.query(
+  "insert into mavi_private.admin_provisioning(company_id,email,name) values($1,'owner@example.test','Owner')",
+  [bootstrapCompany],
+);
+await db.query(
+  "insert into auth.users(id,email) values($1,'owner@example.test')",
+  [bootstrapUser],
+);
+await check("e-mail não confirmado não recebe administração", async () =>
+  assert.equal(
+    (
+      await db.query("select * from memberships where company_id=$1", [
+        bootstrapCompany,
+      ])
+    ).rows.length,
+    0,
+  ),
+);
+await db.query("update auth.users set email_confirmed_at=now() where id=$1", [
+  bootstrapUser,
+]);
+await check(
+  "e-mail confirmado consome provisionamento uma única vez",
+  async () => {
+    assert.equal(
+      (
+        await db.query(
+          "select role from memberships where company_id=$1 and user_id=$2",
+          [bootstrapCompany, bootstrapUser],
+        )
+      ).rows[0].role,
+      "admin",
+    );
+    await db.query(
+      "update auth.users set email_confirmed_at=now() where id=$1",
+      [bootstrapUser],
+    );
+    assert.equal(
+      (
+        await db.query("select * from memberships where company_id=$1", [
+          bootstrapCompany,
+        ])
+      ).rows.length,
+      1,
+    );
+  },
+);
 await as(bootstrapUser);
-await check('administrador não consulta allowlist interna',()=>denied(()=>db.query('select * from mavi_private.admin_provisioning')));
+await check("administrador não consulta allowlist interna", () =>
+  denied(() => db.query("select * from mavi_private.admin_provisioning")),
+);
+
+await db.exec("reset role");
+await db.query(
+  "update memberships set active=true where company_id=$1 and user_id=$2",
+  [A, member],
+);
+await as(admin);
+const task2 = await rpc("create_task", [
+  A,
+  contract,
+  "Segunda tarefa",
+  member,
+  "2026-10-15",
+  null,
+  team,
+  "",
+  "normal",
+  60,
+  false,
+]);
+const project = await rpc("create_project", [
+  A,
+  contract,
+  "Projeto editável",
+  null,
+]);
+await as(member);
+await check("responsável não pode editar conteúdo da tarefa", () =>
+  denied(() =>
+    rpc("update_task", [task2, 1, "Alterado", "", "2026-10-15", 60, "normal"]),
+  ),
+);
+await as(manager);
+await check("gestor não criador não pode editar tarefa", () =>
+  denied(() =>
+    rpc("update_task", [task2, 1, "Alterado", "", "2026-10-15", 60, "normal"]),
+  ),
+);
+await check("gestor não executa cadastros administrativos", async () => {
+  await denied(() =>
+    rpc("create_project", [A, contract, "Sem permissão", null]),
+  );
+  await denied(() => rpc("update_product", [product, "Sem permissão"]));
+  await denied(() => rpc("update_client", [client, "Sem permissão", ""]));
+  await denied(() =>
+    rpc("update_contract", [contract, "Sem permissão", client, product]),
+  );
+  await denied(() => rpc("update_project", [project, "Sem permissão", null]));
+});
+await as(admin);
+await check("administrador edita os quatro cadastros", async () => {
+  await rpc("update_product", [product, "Produto revisado"]);
+  await rpc("update_client", [
+    client,
+    "Cliente revisado",
+    "contato@example.test",
+  ]);
+  await rpc("update_contract", [contract, "Serviço revisado", client, product]);
+  await rpc("update_project", [
+    project,
+    "Projeto revisado",
+    "2026-11-01",
+    contract,
+  ]);
+  assert.equal(
+    (await db.query("select name from products where id=$1", [product])).rows[0]
+      .name,
+    "Produto revisado",
+  );
+});
+await check(
+  "administrador edita tarefa e define início planejado",
+  async () => {
+    await rpc("update_task", [
+      task2,
+      1,
+      "Segunda tarefa revisada",
+      "Descrição",
+      "2026-10-15",
+      60,
+      "normal",
+      "2026-10-01",
+    ]);
+    assert.equal(
+      (
+        await db.query("select start_date::text from tasks where id=$1", [
+          task2,
+        ])
+      ).rows[0].start_date,
+      "2026-10-01",
+    );
+  },
+);
+await check("início posterior ao prazo é rejeitado", () =>
+  denied(() =>
+    rpc("update_task", [
+      task2,
+      2,
+      "Inválida",
+      "",
+      "2026-10-15",
+      60,
+      "normal",
+      "2026-10-20",
+    ]),
+  ),
+);
+await as(member);
+const ownTask = await rpc("create_task", [
+  A,
+  contract,
+  "Tarefa do colaborador",
+  member,
+  "2026-10-15",
+  null,
+  team,
+]);
+await check("criador colaborador pode editar sua tarefa", async () => {
+  await rpc("update_task", [
+    ownTask,
+    1,
+    "Criador editou",
+    "texto",
+    "2026-10-15",
+    60,
+    "normal",
+  ]);
+});
+await check(
+  "iniciar outra tarefa pausa a anterior sem sobrepor horas",
+  async () => {
+    const a = await rpc("start_timer", [task]);
+    const b = await rpc("start_timer", [task2]);
+    const rows = (
+      await db.query("select * from time_entries where id in ($1,$2)", [a, b])
+    ).rows;
+    assert.deepEqual(
+      rows.find((r) => r.id === a).ended_at,
+      rows.find((r) => r.id === b).started_at,
+    );
+    assert.equal(
+      (
+        await db.query(
+          "select * from time_entries where user_id=$1 and ended_at is null",
+          [member],
+        )
+      ).rows.length,
+      1,
+    );
+    await denied(() => rpc("start_timer", [uid(999)]));
+    assert.equal(
+      (
+        await db.query(
+          "select id from time_entries where user_id=$1 and ended_at is null",
+          [member],
+        )
+      ).rows[0].id,
+      b,
+    );
+    await rpc("stop_timer", [b]);
+  },
+);
+const imageBody = (id) =>
+  "mavi:richtext:v1:" +
+  JSON.stringify({
+    type: "doc",
+    content: [{ type: "inlineImage", attrs: { imageId: id, alt: "Teste" } }],
+  });
+await as(admin);
+const draft = await rpc("prepare_inline_image", [A, "teste.png", 100]);
+await db.query(
+  "insert into storage.objects(bucket_id,name) values('mavi-inline-images',$1)",
+  [draft.path],
+);
+await as(member);
+await check(
+  "rascunho de imagem de outro usuário permanece privado",
+  async () => {
+    assert.equal(
+      (await db.query("select * from inline_images where id=$1", [draft.id]))
+        .rows.length,
+      0,
+    );
+    assert.equal(
+      (
+        await db.query("select * from storage.objects where name=$1", [
+          draft.path,
+        ])
+      ).rows.length,
+      0,
+    );
+    await denied(() => rpc("add_comment", [task2, imageBody(draft.id)]));
+  },
+);
+await as(admin);
+await check(
+  "salvar comentário vincula imagem à tarefa atomicamente",
+  async () => {
+    await rpc("add_comment", [task2, imageBody(draft.id)]);
+    assert.equal(
+      (
+        await db.query("select task_id from inline_images where id=$1", [
+          draft.id,
+        ])
+      ).rows[0].task_id,
+      task2,
+    );
+  },
+);
+await as(member);
+await check(
+  "usuário autorizado lê imagem vinculada, mas não a move",
+  async () => {
+    assert.equal(
+      (
+        await db.query("select * from storage.objects where name=$1", [
+          draft.path,
+        ])
+      ).rows.length,
+      1,
+    );
+    await denied(() => rpc("add_comment", [ownTask, imageBody(draft.id)]));
+  },
+);
+await as(foreignUser);
+await check("imagem vinculada é isolada por empresa", async () => {
+  assert.equal(
+    (await db.query("select * from inline_images where id=$1", [draft.id])).rows
+      .length,
+    0,
+  );
+  assert.equal(
+    (
+      await db.query("select * from storage.objects where name=$1", [
+        draft.path,
+      ])
+    ).rows.length,
+    0,
+  );
+  await denied(() => rpc("prepare_inline_image", [A, "intruso.png", 10]));
+  await denied(() => rpc("update_client", [client, "Intruso", ""]));
+});
+await as(admin);
+const incomplete = await rpc("prepare_inline_image", [
+  A,
+  "incompleta.png",
+  100,
+]);
+await check("imagem sem upload impede salvar conteúdo quebrado", () =>
+  denied(() => rpc("add_comment", [task2, imageBody(incomplete.id)])),
+);
+await check("imagem pode ser incluída ao criar tarefa", async () => {
+  const image = await rpc("prepare_inline_image", [A, "nova.png", 100]);
+  await db.query(
+    "insert into storage.objects(bucket_id,name) values('mavi-inline-images',$1)",
+    [image.path],
+  );
+  const newTask = await rpc("create_task", [
+    A,
+    contract,
+    "Com imagem",
+    member,
+    "2026-10-20",
+    null,
+    team,
+    imageBody(image.id),
+  ]);
+  assert.equal(
+    (
+      await db.query("select task_id from inline_images where id=$1", [
+        image.id,
+      ])
+    ).rows[0].task_id,
+    newTask,
+  );
+});
+await as(null);
+await check("anônimo não prepara imagens nem edita cadastros", async () => {
+  await denied(() => rpc("prepare_inline_image", [A, "anônimo.png", 100]));
+  await denied(() => rpc("update_product", [product, "Intruso"]));
+});
 await db.close();
 console.log(
   `\n${passed} verificações de banco aprovadas (PostgreSQL embarcado; Auth e Storage simulados).`,
