@@ -1,0 +1,1 @@
+create index admin_provisioning_consumed_by on mavi_private.admin_provisioning(consumed_by);

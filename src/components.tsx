@@ -1,0 +1,91 @@
+import { useEffect, useRef, type ReactNode } from "react";
+import { X, LoaderCircle } from "lucide-react";
+import { statuses, type Status } from "./types";
+import { initials } from "./domain";
+export function Avatar({
+  name,
+  size = "normal",
+}: {
+  name: string;
+  size?: "small" | "normal" | "large";
+}) {
+  return (
+    <span className={`avatar ${size}`} title={name}>
+      {initials(name)}
+    </span>
+  );
+}
+export function Badge({ status }: { status: Status }) {
+  return (
+    <span className={`badge ${status}`}>
+      <i style={{ background: statuses[status].color }} />
+      {statuses[status].label}
+    </span>
+  );
+}
+export function Modal({
+  title,
+  children,
+  onClose,
+  wide = false,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  wide?: boolean;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    d?.showModal();
+    return () => d?.close();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className={wide ? "modal sheet" : "modal"}
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+    >
+      <div className="modal-head">
+        <h2>{title}</h2>
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={onClose}
+          aria-label="Fechar"
+        >
+          <X size={20} />
+        </button>
+      </div>
+      {children}
+    </dialog>
+  );
+}
+export function Empty({
+  title,
+  body,
+  action,
+}: {
+  title: string;
+  body: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="empty">
+      <span className="empty-mark">◇</span>
+      <h3>{title}</h3>
+      <p>{body}</p>
+      {action}
+    </div>
+  );
+}
+export function Loading() {
+  return (
+    <div className="loading" role="status">
+      <LoaderCircle className="spin" size={24} /> Carregando seu espaço…
+    </div>
+  );
+}

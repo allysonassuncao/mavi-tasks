@@ -1,0 +1,33 @@
+{
+  "name": "mavi-tasks",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run",
+    "test:db": "node scripts/test-database.mjs",
+    "format": "prettier --write src scripts supabase/functions *.json *.ts *.html *.md",
+    "format:check": "prettier --check src scripts supabase/functions *.json *.ts *.html *.md"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.116.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.10",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "prettier": "^3.9.8",
+    "supabase": "2.117.0",
+    "typescript": "~5.8.3",
+    "vercel": "59.23.2",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
+  }
+}
