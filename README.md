@@ -97,7 +97,7 @@ Os testes de banco executam SQL real em PGlite, com papéis anônimo e autentica
 
 Também existem testes de fuso, atraso em validação e cálculo de tempo. A navegação demonstrativa é verificada no navegador, incluindo criação, comentário, cronômetro e aprovação.
 
-Antes da produção ainda são obrigatórios: teste dos serviços Supabase reais, revisão do plano e quotas, autenticação e convite por e-mail, tratamento operacional de convites parcialmente concluídos, testes de carga, monitoramento e ensaio de restauração do banco **e** dos objetos do Storage. Não há números de desempenho medidos nesta entrega.
+Antes da produção ainda são obrigatórios: teste dos serviços Supabase reais, revisão do plano e quotas, autenticação e convite por e-mail, tratamento operacional de convites parcialmente concluídos, testes de carga, monitoramento e ensaio de restauração do banco **e** dos objetos do Storage. O benchmark local de RLS com 50 mil tarefas e 100 mil eventos, seus limites e os planos completos estão em `docs/SCALABILITY.md`.
 
 ## Limites e próximas etapas do escopo acordado
 
@@ -105,13 +105,17 @@ Antes da produção ainda são obrigatórios: teste dos serviços Supabase reais
 - Modelos, recorrências, dependências e campos personalizados ainda pendentes. Calendário mensal e Gantt básico já disponíveis.
 - O quadro permite abrir a tarefa e mudar seu estado pelo fluxo validado; arrastar cartões ainda não implementado.
 - Gestão completa de permissões, associação posterior de equipes e usuários, alteração de responsável e arquivamento ainda pendentes. Cadastros e edição de cliente, produto, produto contratado e projeto estão disponíveis para administradores.
-- A interface de convites ainda não está ativa; a Edge Function foi preparada, mas não implantada ou testada contra Auth hospedado. Convidar uma conta já existente requer um fluxo adicional de vínculo, que ainda será desenvolvido. Falha de vínculo após envio exige revisão administrativa.
+- A interface de convites ainda não está ativa; a Edge Function foi implantada com autenticação, CORS e rate limit verificados. O envio real por e-mail ainda não foi testado. Convidar uma conta já existente requer um fluxo adicional de vínculo, que ainda será desenvolvido. Falha de vínculo após envio exige revisão administrativa.
 - Catálogos auxiliares têm limite explícito de 1.000 registros por consulta; adicionar busca paginada para ultrapassar esse volume. Tarefas têm paginação de 50 itens; o quadro representa a página filtrada; calendário e Gantt carregam todo o período selecionado em lotes de 500. Horas exibem os 100 registros autorizados mais recentes; relatórios agregam no banco.
 - Relatórios atuais: atrasos atuais, validações atuais, eventos de entrega no período, horas por cliente e carga estimada por pessoa. Detalhamentos por produto/projeto/equipe, estimado versus realizado e cumprimento de prazo original/renegociado ainda pendentes.
 - Datas do período dos relatórios enviadas pela interface usam o fuso do navegador; normalizar os limites para o fuso cadastrado da empresa antes de operar empresas em fusos distintos.
-- Sem remoção ou substituição de anexos nesta primeira etapa; uploads falhos tentam limpar metadados pendentes. O reenvio dos pendentes na criação permanece disponível enquanto o formulário está aberto; ao fechar, anexar os restantes pelos detalhes da tarefa salva. Prever reconciliação para interrupções de rede cujo resultado seja incerto.
-- Imagens enviadas e abandonadas antes de salvar permanecem como rascunhos privados; implementar coleta de rascunhos órfãos antes de ampliar o uso do Storage.
+- Sem remoção ou substituição de anexos pela interface nesta primeira etapa. A reconciliação automática de pendências e objetos órfãos está implantada e agendada, com carência de 24 horas; operação descrita em `docs/SCALABILITY.md`. Anexos cujo upload já terminou são preservados, mesmo quando a resposta ao navegador foi perdida.
+- Imagens enviadas e abandonadas antes de salvar são coletadas após 24 horas pela rotina de reconciliação implantada e agendada. Imagens já vinculadas a tarefas/comentários são preservadas.
 - A RPC de encerramento permite parar a própria sessão mesmo após revogação da tarefa. Iniciar outra tarefa autorizada também encerra a anterior; sem nenhuma tarefa acessível, a interface de resolução administrativa ainda precisa ser completada.
 - Portal do cliente, integrações, automações configuráveis, cobrança de planos, pacotes de horas e SLA continuam fora desta fase, conforme o planejamento.
 
 O escopo completo e as decisões de negócio estão em `PLANO_DO_SISTEMA.md`. Esta é uma entrega incremental, não o sistema completo pronto para produção.
+
+## Escalabilidade e manutenção
+
+Retenção da auditoria por um mês, limpeza de arquivos órfãos, RPC unificada de detalhes, RLS otimizada, cotas de convite e divisão do build estão documentadas em [docs/SCALABILITY.md](docs/SCALABILITY.md), incluindo testes e ordem de ativação no Supabase. Execute `npm run benchmark:rls` para reproduzir a comparação dos planos de consulta.

@@ -1,4 +1,3 @@
-import { TaskSchedule, ScheduleNavigation } from "./TaskSchedule";
 import { calendarDays, monthRange } from "./schedule";
 import { EditEntityForm, type EntityEdit } from "./EditEntityForm";
 import { taskIdFromPath, taskUrl } from "./router";
@@ -16,6 +15,8 @@ import {
 } from "./router";
 import { Input, Select, SelectOption, Button } from "./ui";
 import {
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -104,6 +105,14 @@ import {
 } from "./domain";
 import { useNow } from "./useClock";
 import { CreateForm, TaskDetail } from "./forms";
+
+const TaskSchedule = lazy(() =>
+  import("./TaskSchedule").then((m) => ({ default: m.TaskSchedule })),
+);
+const ScheduleNavigation = lazy(() =>
+  import("./TaskSchedule").then((m) => ({ default: m.ScheduleNavigation })),
+);
+const Reports = lazy(() => import("./Reports"));
 
 const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
@@ -1029,7 +1038,7 @@ export default function App() {
                       value={stats?.done}
                       icon={Check}
                       tone="green"
-                      caption="Trabalho que chegou ao destino"
+                      caption="Histórico disponível do último mês"
                       onClick={() => {
                         go("tasks");
                         setStatus("done");
@@ -1323,10 +1332,12 @@ export default function App() {
                     </Button>
                   </div>
                   {scheduleView && (
-                    <ScheduleNavigation
-                      month={scheduleMonth}
-                      onChange={setScheduleMonth}
-                    />
+                    <Suspense fallback={<Loading compact />}>
+                      <ScheduleNavigation
+                        month={scheduleMonth}
+                        onChange={setScheduleMonth}
+                      />
+                    </Suspense>
                   )}
                   {loading ? (
                     <Loading compact />
@@ -1381,13 +1392,15 @@ export default function App() {
                       ))}
                     </div>
                   ) : (
-                    <TaskSchedule
-                      view={view as "calendar" | "gantt"}
-                      month={scheduleMonth}
-                      tasks={filtered}
-                      lookup={nameLookup}
-                      onSelect={setSelected}
-                    />
+                    <Suspense fallback={<Loading compact />}>
+                      <TaskSchedule
+                        view={view as "calendar" | "gantt"}
+                        month={scheduleMonth}
+                        tasks={filtered}
+                        lookup={nameLookup}
+                        onSelect={setSelected}
+                      />
+                    </Suspense>
                   )}
                   {!loading && !filtered.length && view === "board" && (
                     <Empty
@@ -1826,66 +1839,9 @@ export default function App() {
                 </>
               )}
               {page === "reports" && (
-                <div className="report-grid">
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>Horas por cliente</h2>
-                        <p>Tempo registrado no período selecionado</p>
-                      </div>
-                      <Clock3 size={20} />
-                    </div>
-                    <div className="bar-list">
-                      {byClient.map((c) => (
-                        <div className="bar-row" key={c.id}>
-                          <div>
-                            <span>{c.name}</span>
-                            <strong>{duration(c.minutes)}</strong>
-                          </div>
-                          <div className="bar-track">
-                            <span
-                              style={{
-                                width: `${(c.minutes / Math.max(...byClient.map((x) => x.minutes), 1)) * 100}%`,
-                              }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                      {!byClient.length && (
-                        <Empty
-                          title="Sem horas no período"
-                          body="Selecione outro mês ou registre um apontamento."
-                        />
-                      )}
-                    </div>
-                  </section>
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>Carga de trabalho</h2>
-                        <p>Tarefas abertas e horas estimadas totais</p>
-                      </div>
-                      <Users size={20} />
-                    </div>
-                    <div className="workload">
-                      {byPerson.map((p) => (
-                        <div key={p.id}>
-                          <Avatar name={p.name} />
-                          <span>
-                            <strong>{p.name}</strong>
-                            <small>{p.tasks} tarefas abertas</small>
-                          </span>
-                          <b>{duration(p.estimated)}</b>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                  <div className="report-note">
-                    <ShieldCheck size={18} /> Os relatórios respeitam suas
-                    permissões. Estimativas não representam capacidade
-                    disponível.
-                  </div>
-                </div>
+                <Suspense fallback={<Loading compact />}>
+                  <Reports byClient={byClient} byPerson={byPerson} />
+                </Suspense>
               )}
               {page === "settings" && !isAdmin && (
                 <Empty

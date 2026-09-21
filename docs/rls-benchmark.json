@@ -1,0 +1,3217 @@
+{
+  "environment": "Local PGlite PostgreSQL, synthetic data; not hosted production latency",
+  "tasks": 50000,
+  "events": 100000,
+  "companies": 2,
+  "contracts": 200,
+  "method": "Warm query then EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) as authenticated, same dataset and indexes, only tasks_read policy changed",
+  "results": [
+    {
+      "phase": "before",
+      "role": "admin",
+      "query": "list",
+      "result": [
+        {
+          "id": "0018e743-1087-4cf0-87f2-5ad00d771f47",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "01357ebb-a8f3-45ce-bd42-638096f08337",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0344b0ea-1603-4c6f-bd33-eb9cd19e0916",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "060530b4-97d2-468b-9032-c3cf566f5d65",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "064478bf-13d9-4dee-92e6-0d9b70519395",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0709173f-8481-4d35-905f-9314c84def86",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "077f5ea7-09a5-4d3f-b479-bb6497878c8a",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "086f5dea-5db1-4707-87a2-95fdf5dcf952",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0880f144-98ae-4e9e-8733-d4027e081b3d",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "088ae5de-7b98-4efe-a5f2-b12dc7f66b93",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "089942c2-aea3-42f5-8c28-9dcca9993c5c",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "094315fe-5a99-42a0-9377-962e68d0ed6b",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0d028fa6-7b52-4de5-b664-b85e1a97bc84",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0ed6533c-e144-48d8-96ac-f36c9cd68118",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0f408a32-dc3d-42b1-b88e-478ad695ebbc",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "10efcb46-ac1d-4519-86f7-2324c74e6225",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "124a439c-23e3-4dd4-a52e-da1e570fb406",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "13130e9d-bc91-493c-b1d9-afc953af70f6",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "131fd202-377c-4f2d-bf6c-47ac5edb3965",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "141683cc-cc7f-4947-a1ed-d2c5f40c00d0",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "151148f4-f6b6-4f99-b426-bbd990ddc34a",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "15f22de7-db43-4384-a1c4-aaed3f3529fc",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "191b52b7-8453-4e77-b43b-e0571e509b08",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "191d1db3-0434-4c7d-968e-2db006cc67b8",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "1ee8cba7-54f6-4057-861c-05017b9ab4a8",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "21d9b9eb-c718-4f76-87fb-549984046027",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "22231f14-b575-4e1b-9bce-6dd8a8e7ed21",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "22a689b4-cb12-409f-a694-316812b89de7",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "24e3c24c-412b-427b-a223-26d81287e85a",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "25af73cc-140e-4a8c-80c2-5a00369aa033",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "26317417-c3b1-4e0a-91f3-8da62dc0b462",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "29c97ea9-446e-4e35-8c14-76638d8ec6be",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2a72e2ad-ddd7-4905-8779-e345acbb72b6",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2ac77737-2ff8-4b9a-9fe6-733e338f5cd1",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2dd389bf-986d-44dd-ae56-e6f4791f78ae",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2f752cae-7f20-47fd-b5f2-690ce514fe2c",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2f9236be-0d40-479b-a6b4-d8ef13c02a00",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3087131e-f9b4-4ec8-845b-e25a307bfb7e",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3279ad56-e177-40ab-8760-c981b8e7c471",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "329a0ff1-ad65-445b-86a8-2a6ca3cced18",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "35d16e5f-f856-4fb2-afba-ecbc126eb263",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3741a554-214d-4d8a-88da-67b8381ef6f5",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "38b51885-9825-4bbc-97f9-64da875d9177",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "39b670e3-7238-4410-b382-26ea1a35d3ee",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "39f3e97b-43cd-48d4-9993-3de1b4ba2225",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3a636e69-daa3-42d1-b6af-977a8364ff45",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3ab05b08-33ca-43cf-b84b-e59fccae104f",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3db38ee5-640b-4642-a57a-bed8a4651e35",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3e8bc70e-7958-4d36-b0e6-ce7448059351",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3e9c9d01-c935-42df-a112-c769101e730b",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        }
+      ],
+      "execution_ms": 13.434,
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.42,
+          "Total Cost": 78.57,
+          "Plan Rows": 50,
+          "Plan Width": 20,
+          "Actual Startup Time": 0.384,
+          "Actual Total Time": 13.265,
+          "Actual Rows": 50,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 500,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Index Only Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "tasks_late_due",
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 0.42,
+              "Total Cost": 9727.37,
+              "Plan Rows": 6223,
+              "Plan Width": 20,
+              "Actual Startup Time": 0.383,
+              "Actual Total Time": 13.224,
+              "Actual Rows": 50,
+              "Actual Loops": 1,
+              "Index Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE))",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "mavi_private.task_access(company_id, id)",
+              "Rows Removed by Filter": 0,
+              "Heap Fetches": 50,
+              "Shared Hit Blocks": 500,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.091,
+        "Triggers": [],
+        "Execution Time": 13.434
+      }
+    },
+    {
+      "phase": "before",
+      "role": "admin",
+      "query": "count",
+      "result": [
+        {
+          "count": 18700
+        }
+      ],
+      "execution_ms": 3805.62,
+      "plan": {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 7102.57,
+          "Total Cost": 7102.58,
+          "Plan Rows": 1,
+          "Plan Width": 8,
+          "Actual Startup Time": 3805.597,
+          "Actual Total Time": 3805.598,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 169376,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Bitmap Heap Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 908.65,
+              "Total Cost": 7087.01,
+              "Plan Rows": 6223,
+              "Plan Width": 0,
+              "Actual Startup Time": 1.452,
+              "Actual Total Time": 3800.535,
+              "Actual Rows": 18700,
+              "Actual Loops": 1,
+              "Recheck Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE) AND (NOT archived) AND (status <> 'done'::text))",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "mavi_private.task_access(company_id, id)",
+              "Rows Removed by Filter": 0,
+              "Exact Heap Blocks": 893,
+              "Lossy Heap Blocks": 0,
+              "Shared Hit Blocks": 169376,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Bitmap Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Index Name": "tasks_late_due",
+                  "Startup Cost": 0,
+                  "Total Cost": 907.1,
+                  "Plan Rows": 18668,
+                  "Plan Width": 0,
+                  "Actual Startup Time": 1.058,
+                  "Actual Total Time": 1.059,
+                  "Actual Rows": 18700,
+                  "Actual Loops": 1,
+                  "Index Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE))",
+                  "Shared Hit Blocks": 183,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.081,
+        "Triggers": [],
+        "Execution Time": 3805.62
+      }
+    },
+    {
+      "phase": "before",
+      "role": "member",
+      "query": "list",
+      "result": [
+        {
+          "id": "1ee8cba7-54f6-4057-861c-05017b9ab4a8",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "6854873b-5b4c-443b-8d9d-a2d97a324e56",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "b0fe5af9-2030-439a-a4d3-6ba38317194f",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "dfbb7192-8f1f-44df-ba64-0db6d5e72de8",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "058abefe-f003-4974-80cd-832c741c6967",
+          "due_date": "2026-06-25T00:00:00.000Z"
+        },
+        {
+          "id": "ec08b0dd-6514-4898-9142-69cd2e7a36a4",
+          "due_date": "2026-06-25T00:00:00.000Z"
+        },
+        {
+          "id": "a105bb90-745f-40fb-9b17-61f7e71e34ab",
+          "due_date": "2026-06-26T00:00:00.000Z"
+        },
+        {
+          "id": "afb5f910-6872-43f9-ad1a-63dbd7a4332d",
+          "due_date": "2026-06-26T00:00:00.000Z"
+        },
+        {
+          "id": "bbd29344-7163-4627-b8a5-49171a349dd5",
+          "due_date": "2026-06-26T00:00:00.000Z"
+        },
+        {
+          "id": "da52fd84-eca1-4a8a-8142-64e36cce6d3e",
+          "due_date": "2026-06-26T00:00:00.000Z"
+        },
+        {
+          "id": "197485e1-0dcf-4958-ad91-7b236fea8f73",
+          "due_date": "2026-06-27T00:00:00.000Z"
+        },
+        {
+          "id": "3c64586a-4b0a-48af-b4a1-4da22dc3bf1c",
+          "due_date": "2026-06-27T00:00:00.000Z"
+        },
+        {
+          "id": "58e87772-1c39-46d0-b5ca-303f9bc6e449",
+          "due_date": "2026-06-28T00:00:00.000Z"
+        },
+        {
+          "id": "702eccc5-3e8a-4334-94c5-e97261df0e82",
+          "due_date": "2026-06-28T00:00:00.000Z"
+        },
+        {
+          "id": "bf9a9eaf-4e3e-4c8e-b3da-d0b8662d2023",
+          "due_date": "2026-06-28T00:00:00.000Z"
+        },
+        {
+          "id": "d2c28397-0542-484d-8f5f-2f960bacae3a",
+          "due_date": "2026-06-28T00:00:00.000Z"
+        },
+        {
+          "id": "7c01fbb9-202f-4095-9efc-e3c003b8db0f",
+          "due_date": "2026-06-29T00:00:00.000Z"
+        },
+        {
+          "id": "e73f5d4c-fbfd-4406-9d9d-f82ac3622d5e",
+          "due_date": "2026-06-29T00:00:00.000Z"
+        },
+        {
+          "id": "4dc68bd2-cb4c-43ea-bab7-d413ad5eebcb",
+          "due_date": "2026-06-30T00:00:00.000Z"
+        },
+        {
+          "id": "56a7c69a-598e-4604-992e-21de8f2ae655",
+          "due_date": "2026-06-30T00:00:00.000Z"
+        },
+        {
+          "id": "96c92782-5026-40e9-92b5-32ac04ef097c",
+          "due_date": "2026-06-30T00:00:00.000Z"
+        },
+        {
+          "id": "d7171f5f-c524-4ad1-a3da-cbaf371956ef",
+          "due_date": "2026-06-30T00:00:00.000Z"
+        },
+        {
+          "id": "0c4565df-c498-4adc-9a88-e5b6ccd2d3d5",
+          "due_date": "2026-07-01T00:00:00.000Z"
+        },
+        {
+          "id": "246f534f-9a06-4d20-96d3-26e76c36e275",
+          "due_date": "2026-07-01T00:00:00.000Z"
+        },
+        {
+          "id": "34c1da39-25f3-4aa1-83e8-f83f4d62c2ef",
+          "due_date": "2026-07-02T00:00:00.000Z"
+        },
+        {
+          "id": "78265007-0661-44c2-9379-3ba1fa99f8e4",
+          "due_date": "2026-07-02T00:00:00.000Z"
+        },
+        {
+          "id": "a97fdd83-5705-4eaa-922c-0f8bfdce7321",
+          "due_date": "2026-07-02T00:00:00.000Z"
+        },
+        {
+          "id": "e269d24b-5146-452e-b071-734f6c57424d",
+          "due_date": "2026-07-02T00:00:00.000Z"
+        },
+        {
+          "id": "823e01f6-a430-4f24-bf56-fa9b08bae58a",
+          "due_date": "2026-07-03T00:00:00.000Z"
+        },
+        {
+          "id": "d08dd415-fe7f-4f54-8e6c-471b33b38bdc",
+          "due_date": "2026-07-03T00:00:00.000Z"
+        },
+        {
+          "id": "0b2839f5-8922-499c-8c43-1e20b907c229",
+          "due_date": "2026-07-04T00:00:00.000Z"
+        },
+        {
+          "id": "33b3a0d2-a4f6-428a-8d73-85cb4ffb611b",
+          "due_date": "2026-07-04T00:00:00.000Z"
+        },
+        {
+          "id": "b155960f-58f5-4bb2-a066-e66b36332f46",
+          "due_date": "2026-07-04T00:00:00.000Z"
+        },
+        {
+          "id": "da397f72-878a-43e7-b777-6e3b3fd86474",
+          "due_date": "2026-07-04T00:00:00.000Z"
+        },
+        {
+          "id": "09eea01a-8ce9-478e-b5e5-4d193a736ebe",
+          "due_date": "2026-07-05T00:00:00.000Z"
+        },
+        {
+          "id": "ea0c2f78-9908-40cf-81d6-7d90595faffc",
+          "due_date": "2026-07-05T00:00:00.000Z"
+        },
+        {
+          "id": "6f293647-3a05-40d8-b317-c7a0edf5e94f",
+          "due_date": "2026-07-06T00:00:00.000Z"
+        },
+        {
+          "id": "8462756f-fa82-4fc2-a2ca-aa04ec239e11",
+          "due_date": "2026-07-06T00:00:00.000Z"
+        },
+        {
+          "id": "963fd04c-ab20-455f-9ca9-0cd3845a1d59",
+          "due_date": "2026-07-06T00:00:00.000Z"
+        },
+        {
+          "id": "e15b1dbb-4893-4a50-a004-051d50258465",
+          "due_date": "2026-07-06T00:00:00.000Z"
+        },
+        {
+          "id": "6fd6d502-6168-428e-9787-2e04e23a16b2",
+          "due_date": "2026-07-07T00:00:00.000Z"
+        },
+        {
+          "id": "bc967ef1-ce66-4e90-924a-f7eb25be1403",
+          "due_date": "2026-07-07T00:00:00.000Z"
+        },
+        {
+          "id": "0481e864-b75d-4288-b01e-736eb6c08e52",
+          "due_date": "2026-07-08T00:00:00.000Z"
+        },
+        {
+          "id": "2a824de2-fa6b-4593-b1c0-49a0ba71a055",
+          "due_date": "2026-07-08T00:00:00.000Z"
+        },
+        {
+          "id": "9bf56045-3224-4666-a925-29df503fcccc",
+          "due_date": "2026-07-08T00:00:00.000Z"
+        },
+        {
+          "id": "eb8ca217-49d7-42f2-b662-755e14334552",
+          "due_date": "2026-07-08T00:00:00.000Z"
+        },
+        {
+          "id": "80345e6f-983b-4cc0-86f4-f5f208eb98e4",
+          "due_date": "2026-07-09T00:00:00.000Z"
+        },
+        {
+          "id": "aea76edd-d3e6-4b21-801b-80b5cf18beaf",
+          "due_date": "2026-07-09T00:00:00.000Z"
+        },
+        {
+          "id": "6d300e0b-bdb2-4e1d-8276-01212f710f87",
+          "due_date": "2026-07-10T00:00:00.000Z"
+        },
+        {
+          "id": "9937d563-438e-47c4-96b9-a053b5823c5b",
+          "due_date": "2026-07-10T00:00:00.000Z"
+        }
+      ],
+      "execution_ms": 504.916,
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.42,
+          "Total Cost": 78.57,
+          "Plan Rows": 50,
+          "Plan Width": 20,
+          "Actual Startup Time": 5.064,
+          "Actual Total Time": 504.896,
+          "Actual Rows": 50,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 27478,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Index Only Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "tasks_late_due",
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 0.42,
+              "Total Cost": 9727.37,
+              "Plan Rows": 6223,
+              "Plan Width": 20,
+              "Actual Startup Time": 5.058,
+              "Actual Total Time": 504.867,
+              "Actual Rows": 50,
+              "Actual Loops": 1,
+              "Index Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE))",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "mavi_private.task_access(company_id, id)",
+              "Rows Removed by Filter": 2464,
+              "Heap Fetches": 2514,
+              "Shared Hit Blocks": 27478,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.097,
+        "Triggers": [],
+        "Execution Time": 504.916
+      }
+    },
+    {
+      "phase": "before",
+      "role": "member",
+      "query": "count",
+      "result": [
+        {
+          "count": 374
+        }
+      ],
+      "execution_ms": 3837.845,
+      "plan": {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 7102.57,
+          "Total Cost": 7102.58,
+          "Plan Rows": 1,
+          "Plan Width": 8,
+          "Actual Startup Time": 3837.825,
+          "Actual Total Time": 3837.826,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 189198,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Bitmap Heap Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 908.65,
+              "Total Cost": 7087.01,
+              "Plan Rows": 6223,
+              "Plan Width": 0,
+              "Actual Startup Time": 1.345,
+              "Actual Total Time": 3837.581,
+              "Actual Rows": 374,
+              "Actual Loops": 1,
+              "Recheck Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE) AND (NOT archived) AND (status <> 'done'::text))",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "mavi_private.task_access(company_id, id)",
+              "Rows Removed by Filter": 18326,
+              "Exact Heap Blocks": 893,
+              "Lossy Heap Blocks": 0,
+              "Shared Hit Blocks": 189198,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Bitmap Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Index Name": "tasks_late_due",
+                  "Startup Cost": 0,
+                  "Total Cost": 907.1,
+                  "Plan Rows": 18668,
+                  "Plan Width": 0,
+                  "Actual Startup Time": 0.952,
+                  "Actual Total Time": 0.952,
+                  "Actual Rows": 18700,
+                  "Actual Loops": 1,
+                  "Index Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE))",
+                  "Shared Hit Blocks": 183,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.076,
+        "Triggers": [],
+        "Execution Time": 3837.845
+      }
+    },
+    {
+      "phase": "before",
+      "role": "isolated",
+      "query": "list",
+      "result": [],
+      "execution_ms": 3843.588,
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.42,
+          "Total Cost": 78.57,
+          "Plan Rows": 50,
+          "Plan Width": 20,
+          "Actual Startup Time": 3843.58,
+          "Actual Total Time": 3843.58,
+          "Actual Rows": 0,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 204841,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Index Only Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "tasks_late_due",
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 0.42,
+              "Total Cost": 9727.37,
+              "Plan Rows": 6223,
+              "Plan Width": 20,
+              "Actual Startup Time": 3843.577,
+              "Actual Total Time": 3843.578,
+              "Actual Rows": 0,
+              "Actual Loops": 1,
+              "Index Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE))",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "mavi_private.task_access(company_id, id)",
+              "Rows Removed by Filter": 18700,
+              "Heap Fetches": 18700,
+              "Shared Hit Blocks": 204841,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.083,
+        "Triggers": [],
+        "Execution Time": 3843.588
+      }
+    },
+    {
+      "phase": "before",
+      "role": "isolated",
+      "query": "count",
+      "result": [
+        {
+          "count": 0
+        }
+      ],
+      "execution_ms": 4215.687,
+      "plan": {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 7102.57,
+          "Total Cost": 7102.58,
+          "Plan Rows": 1,
+          "Plan Width": 8,
+          "Actual Startup Time": 4215.636,
+          "Actual Total Time": 4215.637,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 188824,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Bitmap Heap Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 908.65,
+              "Total Cost": 7087.01,
+              "Plan Rows": 6223,
+              "Plan Width": 0,
+              "Actual Startup Time": 4215.615,
+              "Actual Total Time": 4215.615,
+              "Actual Rows": 0,
+              "Actual Loops": 1,
+              "Recheck Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE) AND (NOT archived) AND (status <> 'done'::text))",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "mavi_private.task_access(company_id, id)",
+              "Rows Removed by Filter": 18700,
+              "Exact Heap Blocks": 893,
+              "Lossy Heap Blocks": 0,
+              "Shared Hit Blocks": 188824,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Bitmap Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Index Name": "tasks_late_due",
+                  "Startup Cost": 0,
+                  "Total Cost": 907.1,
+                  "Plan Rows": 18668,
+                  "Plan Width": 0,
+                  "Actual Startup Time": 1.497,
+                  "Actual Total Time": 1.497,
+                  "Actual Rows": 18700,
+                  "Actual Loops": 1,
+                  "Index Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE))",
+                  "Shared Hit Blocks": 183,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.152,
+        "Triggers": [],
+        "Execution Time": 4215.687
+      }
+    },
+    {
+      "phase": "after",
+      "role": "admin",
+      "query": "list",
+      "result": [
+        {
+          "id": "0018e743-1087-4cf0-87f2-5ad00d771f47",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "01357ebb-a8f3-45ce-bd42-638096f08337",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0344b0ea-1603-4c6f-bd33-eb9cd19e0916",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "060530b4-97d2-468b-9032-c3cf566f5d65",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "064478bf-13d9-4dee-92e6-0d9b70519395",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0709173f-8481-4d35-905f-9314c84def86",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "077f5ea7-09a5-4d3f-b479-bb6497878c8a",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "086f5dea-5db1-4707-87a2-95fdf5dcf952",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0880f144-98ae-4e9e-8733-d4027e081b3d",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "088ae5de-7b98-4efe-a5f2-b12dc7f66b93",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "089942c2-aea3-42f5-8c28-9dcca9993c5c",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "094315fe-5a99-42a0-9377-962e68d0ed6b",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0d028fa6-7b52-4de5-b664-b85e1a97bc84",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0ed6533c-e144-48d8-96ac-f36c9cd68118",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "0f408a32-dc3d-42b1-b88e-478ad695ebbc",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "10efcb46-ac1d-4519-86f7-2324c74e6225",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "124a439c-23e3-4dd4-a52e-da1e570fb406",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "13130e9d-bc91-493c-b1d9-afc953af70f6",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "131fd202-377c-4f2d-bf6c-47ac5edb3965",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "141683cc-cc7f-4947-a1ed-d2c5f40c00d0",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "151148f4-f6b6-4f99-b426-bbd990ddc34a",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "15f22de7-db43-4384-a1c4-aaed3f3529fc",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "191b52b7-8453-4e77-b43b-e0571e509b08",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "191d1db3-0434-4c7d-968e-2db006cc67b8",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "1ee8cba7-54f6-4057-861c-05017b9ab4a8",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "21d9b9eb-c718-4f76-87fb-549984046027",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "22231f14-b575-4e1b-9bce-6dd8a8e7ed21",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "22a689b4-cb12-409f-a694-316812b89de7",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "24e3c24c-412b-427b-a223-26d81287e85a",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "25af73cc-140e-4a8c-80c2-5a00369aa033",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "26317417-c3b1-4e0a-91f3-8da62dc0b462",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "29c97ea9-446e-4e35-8c14-76638d8ec6be",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2a72e2ad-ddd7-4905-8779-e345acbb72b6",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2ac77737-2ff8-4b9a-9fe6-733e338f5cd1",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2dd389bf-986d-44dd-ae56-e6f4791f78ae",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2f752cae-7f20-47fd-b5f2-690ce514fe2c",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "2f9236be-0d40-479b-a6b4-d8ef13c02a00",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3087131e-f9b4-4ec8-845b-e25a307bfb7e",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3279ad56-e177-40ab-8760-c981b8e7c471",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "329a0ff1-ad65-445b-86a8-2a6ca3cced18",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "35d16e5f-f856-4fb2-afba-ecbc126eb263",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3741a554-214d-4d8a-88da-67b8381ef6f5",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "38b51885-9825-4bbc-97f9-64da875d9177",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "39b670e3-7238-4410-b382-26ea1a35d3ee",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "39f3e97b-43cd-48d4-9993-3de1b4ba2225",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3a636e69-daa3-42d1-b6af-977a8364ff45",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3ab05b08-33ca-43cf-b84b-e59fccae104f",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3db38ee5-640b-4642-a57a-bed8a4651e35",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3e8bc70e-7958-4d36-b0e6-ce7448059351",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "3e9c9d01-c935-42df-a112-c769101e730b",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        }
+      ],
+      "execution_ms": 0.16,
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 23.75,
+          "Total Cost": 52.11,
+          "Plan Rows": 50,
+          "Plan Width": 20,
+          "Actual Startup Time": 0.095,
+          "Actual Total Time": 0.137,
+          "Actual Rows": 50,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 54,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 4",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0,
+              "Actual Total Time": 0,
+              "Actual Rows": 0,
+              "Actual Loops": 0,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 5",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0,
+              "Actual Total Time": 0,
+              "Actual Rows": 0,
+              "Actual Loops": 0,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "tasks_late_due",
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 23.71,
+              "Total Cost": 5317.01,
+              "Plan Rows": 9334,
+              "Plan Width": 20,
+              "Actual Startup Time": 0.094,
+              "Actual Total Time": 0.123,
+              "Actual Rows": 50,
+              "Actual Loops": 1,
+              "Index Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE))",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "((ANY (company_id = (hashed SubPlan 1).col1)) AND ((ANY (company_id = (hashed SubPlan 2).col1)) OR (ANY (contract_id = (hashed SubPlan 3).col1)) OR (creator_id = (InitPlan 4).col1) OR (assignee_id = (InitPlan 5).col1)))",
+              "Rows Removed by Filter": 0,
+              "Shared Hit Blocks": 54,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 1",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.037,
+                  "Actual Total Time": 0.041,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.034,
+                  "Actual Total Time": 0.038,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 3",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0,
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0,
+                  "Shared Hit Blocks": 0,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0,
+                      "Actual Rows": 0,
+                      "Actual Loops": 0,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.1,
+        "Triggers": [],
+        "Execution Time": 0.16
+      }
+    },
+    {
+      "phase": "after",
+      "role": "admin",
+      "query": "count",
+      "result": [
+        {
+          "count": 18700
+        }
+      ],
+      "execution_ms": 16.272,
+      "plan": {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 2270.97,
+          "Total Cost": 2270.98,
+          "Plan Rows": 1,
+          "Plan Width": 8,
+          "Actual Startup Time": 16.234,
+          "Actual Total Time": 16.238,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 1163,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 4",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0,
+              "Actual Total Time": 0,
+              "Actual Rows": 0,
+              "Actual Loops": 0,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 5",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0,
+              "Actual Total Time": 0,
+              "Actual Rows": 0,
+              "Actual Loops": 0,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Bitmap Heap Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 297.36,
+              "Total Cost": 2247.6,
+              "Plan Rows": 9334,
+              "Plan Width": 0,
+              "Actual Startup Time": 0.609,
+              "Actual Total Time": 12.817,
+              "Actual Rows": 18700,
+              "Actual Loops": 1,
+              "Recheck Cond": "(company_id = '10000000-0000-4000-8000-000000000001'::uuid)",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "((NOT archived) AND (ANY (company_id = (hashed SubPlan 1).col1)) AND (status <> 'done'::text) AND (due_date < CURRENT_DATE) AND ((ANY (company_id = (hashed SubPlan 2).col1)) OR (ANY (contract_id = (hashed SubPlan 3).col1)) OR (creator_id = (InitPlan 4).col1) OR (assignee_id = (InitPlan 5).col1)))",
+              "Rows Removed by Filter": 6300,
+              "Exact Heap Blocks": 1138,
+              "Lossy Heap Blocks": 0,
+              "Shared Hit Blocks": 1163,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Bitmap Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Index Name": "tasks_team",
+                  "Startup Cost": 0,
+                  "Total Cost": 271.73,
+                  "Plan Rows": 24992,
+                  "Plan Width": 0,
+                  "Actual Startup Time": 0.387,
+                  "Actual Total Time": 0.387,
+                  "Actual Rows": 25000,
+                  "Actual Loops": 1,
+                  "Index Cond": "(company_id = '10000000-0000-4000-8000-000000000001'::uuid)",
+                  "Shared Hit Blocks": 21,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 1",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.058,
+                  "Actual Total Time": 0.062,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.04,
+                  "Actual Total Time": 0.044,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 3",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0,
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0,
+                  "Shared Hit Blocks": 0,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0,
+                      "Actual Rows": 0,
+                      "Actual Loops": 0,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.129,
+        "Triggers": [],
+        "Execution Time": 16.272
+      }
+    },
+    {
+      "phase": "after",
+      "role": "member",
+      "query": "list",
+      "result": [
+        {
+          "id": "1ee8cba7-54f6-4057-861c-05017b9ab4a8",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "6854873b-5b4c-443b-8d9d-a2d97a324e56",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "b0fe5af9-2030-439a-a4d3-6ba38317194f",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "dfbb7192-8f1f-44df-ba64-0db6d5e72de8",
+          "due_date": "2026-06-24T00:00:00.000Z"
+        },
+        {
+          "id": "058abefe-f003-4974-80cd-832c741c6967",
+          "due_date": "2026-06-25T00:00:00.000Z"
+        },
+        {
+          "id": "ec08b0dd-6514-4898-9142-69cd2e7a36a4",
+          "due_date": "2026-06-25T00:00:00.000Z"
+        },
+        {
+          "id": "a105bb90-745f-40fb-9b17-61f7e71e34ab",
+          "due_date": "2026-06-26T00:00:00.000Z"
+        },
+        {
+          "id": "afb5f910-6872-43f9-ad1a-63dbd7a4332d",
+          "due_date": "2026-06-26T00:00:00.000Z"
+        },
+        {
+          "id": "bbd29344-7163-4627-b8a5-49171a349dd5",
+          "due_date": "2026-06-26T00:00:00.000Z"
+        },
+        {
+          "id": "da52fd84-eca1-4a8a-8142-64e36cce6d3e",
+          "due_date": "2026-06-26T00:00:00.000Z"
+        },
+        {
+          "id": "197485e1-0dcf-4958-ad91-7b236fea8f73",
+          "due_date": "2026-06-27T00:00:00.000Z"
+        },
+        {
+          "id": "3c64586a-4b0a-48af-b4a1-4da22dc3bf1c",
+          "due_date": "2026-06-27T00:00:00.000Z"
+        },
+        {
+          "id": "58e87772-1c39-46d0-b5ca-303f9bc6e449",
+          "due_date": "2026-06-28T00:00:00.000Z"
+        },
+        {
+          "id": "702eccc5-3e8a-4334-94c5-e97261df0e82",
+          "due_date": "2026-06-28T00:00:00.000Z"
+        },
+        {
+          "id": "bf9a9eaf-4e3e-4c8e-b3da-d0b8662d2023",
+          "due_date": "2026-06-28T00:00:00.000Z"
+        },
+        {
+          "id": "d2c28397-0542-484d-8f5f-2f960bacae3a",
+          "due_date": "2026-06-28T00:00:00.000Z"
+        },
+        {
+          "id": "7c01fbb9-202f-4095-9efc-e3c003b8db0f",
+          "due_date": "2026-06-29T00:00:00.000Z"
+        },
+        {
+          "id": "e73f5d4c-fbfd-4406-9d9d-f82ac3622d5e",
+          "due_date": "2026-06-29T00:00:00.000Z"
+        },
+        {
+          "id": "4dc68bd2-cb4c-43ea-bab7-d413ad5eebcb",
+          "due_date": "2026-06-30T00:00:00.000Z"
+        },
+        {
+          "id": "56a7c69a-598e-4604-992e-21de8f2ae655",
+          "due_date": "2026-06-30T00:00:00.000Z"
+        },
+        {
+          "id": "96c92782-5026-40e9-92b5-32ac04ef097c",
+          "due_date": "2026-06-30T00:00:00.000Z"
+        },
+        {
+          "id": "d7171f5f-c524-4ad1-a3da-cbaf371956ef",
+          "due_date": "2026-06-30T00:00:00.000Z"
+        },
+        {
+          "id": "0c4565df-c498-4adc-9a88-e5b6ccd2d3d5",
+          "due_date": "2026-07-01T00:00:00.000Z"
+        },
+        {
+          "id": "246f534f-9a06-4d20-96d3-26e76c36e275",
+          "due_date": "2026-07-01T00:00:00.000Z"
+        },
+        {
+          "id": "34c1da39-25f3-4aa1-83e8-f83f4d62c2ef",
+          "due_date": "2026-07-02T00:00:00.000Z"
+        },
+        {
+          "id": "78265007-0661-44c2-9379-3ba1fa99f8e4",
+          "due_date": "2026-07-02T00:00:00.000Z"
+        },
+        {
+          "id": "a97fdd83-5705-4eaa-922c-0f8bfdce7321",
+          "due_date": "2026-07-02T00:00:00.000Z"
+        },
+        {
+          "id": "e269d24b-5146-452e-b071-734f6c57424d",
+          "due_date": "2026-07-02T00:00:00.000Z"
+        },
+        {
+          "id": "823e01f6-a430-4f24-bf56-fa9b08bae58a",
+          "due_date": "2026-07-03T00:00:00.000Z"
+        },
+        {
+          "id": "d08dd415-fe7f-4f54-8e6c-471b33b38bdc",
+          "due_date": "2026-07-03T00:00:00.000Z"
+        },
+        {
+          "id": "0b2839f5-8922-499c-8c43-1e20b907c229",
+          "due_date": "2026-07-04T00:00:00.000Z"
+        },
+        {
+          "id": "33b3a0d2-a4f6-428a-8d73-85cb4ffb611b",
+          "due_date": "2026-07-04T00:00:00.000Z"
+        },
+        {
+          "id": "b155960f-58f5-4bb2-a066-e66b36332f46",
+          "due_date": "2026-07-04T00:00:00.000Z"
+        },
+        {
+          "id": "da397f72-878a-43e7-b777-6e3b3fd86474",
+          "due_date": "2026-07-04T00:00:00.000Z"
+        },
+        {
+          "id": "09eea01a-8ce9-478e-b5e5-4d193a736ebe",
+          "due_date": "2026-07-05T00:00:00.000Z"
+        },
+        {
+          "id": "ea0c2f78-9908-40cf-81d6-7d90595faffc",
+          "due_date": "2026-07-05T00:00:00.000Z"
+        },
+        {
+          "id": "6f293647-3a05-40d8-b317-c7a0edf5e94f",
+          "due_date": "2026-07-06T00:00:00.000Z"
+        },
+        {
+          "id": "8462756f-fa82-4fc2-a2ca-aa04ec239e11",
+          "due_date": "2026-07-06T00:00:00.000Z"
+        },
+        {
+          "id": "963fd04c-ab20-455f-9ca9-0cd3845a1d59",
+          "due_date": "2026-07-06T00:00:00.000Z"
+        },
+        {
+          "id": "e15b1dbb-4893-4a50-a004-051d50258465",
+          "due_date": "2026-07-06T00:00:00.000Z"
+        },
+        {
+          "id": "6fd6d502-6168-428e-9787-2e04e23a16b2",
+          "due_date": "2026-07-07T00:00:00.000Z"
+        },
+        {
+          "id": "bc967ef1-ce66-4e90-924a-f7eb25be1403",
+          "due_date": "2026-07-07T00:00:00.000Z"
+        },
+        {
+          "id": "0481e864-b75d-4288-b01e-736eb6c08e52",
+          "due_date": "2026-07-08T00:00:00.000Z"
+        },
+        {
+          "id": "2a824de2-fa6b-4593-b1c0-49a0ba71a055",
+          "due_date": "2026-07-08T00:00:00.000Z"
+        },
+        {
+          "id": "9bf56045-3224-4666-a925-29df503fcccc",
+          "due_date": "2026-07-08T00:00:00.000Z"
+        },
+        {
+          "id": "eb8ca217-49d7-42f2-b662-755e14334552",
+          "due_date": "2026-07-08T00:00:00.000Z"
+        },
+        {
+          "id": "80345e6f-983b-4cc0-86f4-f5f208eb98e4",
+          "due_date": "2026-07-09T00:00:00.000Z"
+        },
+        {
+          "id": "aea76edd-d3e6-4b21-801b-80b5cf18beaf",
+          "due_date": "2026-07-09T00:00:00.000Z"
+        },
+        {
+          "id": "6d300e0b-bdb2-4e1d-8276-01212f710f87",
+          "due_date": "2026-07-10T00:00:00.000Z"
+        },
+        {
+          "id": "9937d563-438e-47c4-96b9-a053b5823c5b",
+          "due_date": "2026-07-10T00:00:00.000Z"
+        }
+      ],
+      "execution_ms": 1.384,
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 23.75,
+          "Total Cost": 52.11,
+          "Plan Rows": 50,
+          "Plan Width": 20,
+          "Actual Startup Time": 0.319,
+          "Actual Total Time": 1.36,
+          "Actual Rows": 50,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 2200,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 4",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0.001,
+              "Actual Total Time": 0.001,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 5",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0.001,
+              "Actual Total Time": 0.001,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "tasks_late_due",
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 23.71,
+              "Total Cost": 5317.01,
+              "Plan Rows": 9334,
+              "Plan Width": 20,
+              "Actual Startup Time": 0.319,
+              "Actual Total Time": 1.347,
+              "Actual Rows": 50,
+              "Actual Loops": 1,
+              "Index Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE))",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "((ANY (company_id = (hashed SubPlan 1).col1)) AND ((ANY (company_id = (hashed SubPlan 2).col1)) OR (ANY (contract_id = (hashed SubPlan 3).col1)) OR (creator_id = (InitPlan 4).col1) OR (assignee_id = (InitPlan 5).col1)))",
+              "Rows Removed by Filter": 2464,
+              "Shared Hit Blocks": 2200,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 1",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.038,
+                  "Actual Total Time": 0.041,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.036,
+                  "Actual Total Time": 0.036,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 3",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.209,
+                  "Actual Total Time": 0.214,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 8,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.114,
+        "Triggers": [],
+        "Execution Time": 1.384
+      }
+    },
+    {
+      "phase": "after",
+      "role": "member",
+      "query": "count",
+      "result": [
+        {
+          "count": 374
+        }
+      ],
+      "execution_ms": 9.697,
+      "plan": {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 2270.97,
+          "Total Cost": 2270.98,
+          "Plan Rows": 1,
+          "Plan Width": 8,
+          "Actual Startup Time": 9.668,
+          "Actual Total Time": 9.672,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 1171,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 4",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0.001,
+              "Actual Total Time": 0.001,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 5",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0.001,
+              "Actual Total Time": 0.001,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Bitmap Heap Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 297.36,
+              "Total Cost": 2247.6,
+              "Plan Rows": 9334,
+              "Plan Width": 0,
+              "Actual Startup Time": 0.77,
+              "Actual Total Time": 9.611,
+              "Actual Rows": 374,
+              "Actual Loops": 1,
+              "Recheck Cond": "(company_id = '10000000-0000-4000-8000-000000000001'::uuid)",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "((NOT archived) AND (ANY (company_id = (hashed SubPlan 1).col1)) AND (status <> 'done'::text) AND (due_date < CURRENT_DATE) AND ((ANY (company_id = (hashed SubPlan 2).col1)) OR (ANY (contract_id = (hashed SubPlan 3).col1)) OR (creator_id = (InitPlan 4).col1) OR (assignee_id = (InitPlan 5).col1)))",
+              "Rows Removed by Filter": 24626,
+              "Exact Heap Blocks": 1138,
+              "Lossy Heap Blocks": 0,
+              "Shared Hit Blocks": 1171,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Bitmap Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Index Name": "tasks_team",
+                  "Startup Cost": 0,
+                  "Total Cost": 271.73,
+                  "Plan Rows": 24992,
+                  "Plan Width": 0,
+                  "Actual Startup Time": 0.364,
+                  "Actual Total Time": 0.364,
+                  "Actual Rows": 25000,
+                  "Actual Loops": 1,
+                  "Index Cond": "(company_id = '10000000-0000-4000-8000-000000000001'::uuid)",
+                  "Shared Hit Blocks": 21,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 1",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.042,
+                  "Actual Total Time": 0.044,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.036,
+                  "Actual Total Time": 0.037,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 3",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.21,
+                  "Actual Total Time": 0.215,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 8,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.095,
+        "Triggers": [],
+        "Execution Time": 9.697
+      }
+    },
+    {
+      "phase": "after",
+      "role": "isolated",
+      "query": "list",
+      "result": [],
+      "execution_ms": 7.416,
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 23.75,
+          "Total Cost": 52.11,
+          "Plan Rows": 50,
+          "Plan Width": 20,
+          "Actual Startup Time": 7.383,
+          "Actual Total Time": 7.387,
+          "Actual Rows": 0,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 17098,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 4",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0.001,
+              "Actual Total Time": 0.001,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 5",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0.001,
+              "Actual Total Time": 0.001,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "tasks_late_due",
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 23.71,
+              "Total Cost": 5317.01,
+              "Plan Rows": 9334,
+              "Plan Width": 20,
+              "Actual Startup Time": 7.38,
+              "Actual Total Time": 7.383,
+              "Actual Rows": 0,
+              "Actual Loops": 1,
+              "Index Cond": "((company_id = '10000000-0000-4000-8000-000000000001'::uuid) AND (due_date < CURRENT_DATE))",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "((ANY (company_id = (hashed SubPlan 1).col1)) AND ((ANY (company_id = (hashed SubPlan 2).col1)) OR (ANY (contract_id = (hashed SubPlan 3).col1)) OR (creator_id = (InitPlan 4).col1) OR (assignee_id = (InitPlan 5).col1)))",
+              "Rows Removed by Filter": 18700,
+              "Shared Hit Blocks": 17098,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 1",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.04,
+                  "Actual Total Time": 0.042,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.035,
+                  "Actual Total Time": 0.035,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 3",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.172,
+                  "Actual Total Time": 0.172,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 1,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.112,
+        "Triggers": [],
+        "Execution Time": 7.416
+      }
+    },
+    {
+      "phase": "after",
+      "role": "isolated",
+      "query": "count",
+      "result": [
+        {
+          "count": 0
+        }
+      ],
+      "execution_ms": 9.145,
+      "plan": {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 2270.97,
+          "Total Cost": 2270.98,
+          "Plan Rows": 1,
+          "Plan Width": 8,
+          "Actual Startup Time": 9.102,
+          "Actual Total Time": 9.106,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 1164,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 4",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0.001,
+              "Actual Total Time": 0.001,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 5",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 16,
+              "Actual Startup Time": 0.001,
+              "Actual Total Time": 0.001,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Bitmap Heap Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "tasks",
+              "Alias": "tasks",
+              "Startup Cost": 297.36,
+              "Total Cost": 2247.6,
+              "Plan Rows": 9334,
+              "Plan Width": 0,
+              "Actual Startup Time": 9.1,
+              "Actual Total Time": 9.103,
+              "Actual Rows": 0,
+              "Actual Loops": 1,
+              "Recheck Cond": "(company_id = '10000000-0000-4000-8000-000000000001'::uuid)",
+              "Rows Removed by Index Recheck": 0,
+              "Filter": "((NOT archived) AND (ANY (company_id = (hashed SubPlan 1).col1)) AND (status <> 'done'::text) AND (due_date < CURRENT_DATE) AND ((ANY (company_id = (hashed SubPlan 2).col1)) OR (ANY (contract_id = (hashed SubPlan 3).col1)) OR (creator_id = (InitPlan 4).col1) OR (assignee_id = (InitPlan 5).col1)))",
+              "Rows Removed by Filter": 25000,
+              "Exact Heap Blocks": 1138,
+              "Lossy Heap Blocks": 0,
+              "Shared Hit Blocks": 1164,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Bitmap Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Index Name": "tasks_team",
+                  "Startup Cost": 0,
+                  "Total Cost": 271.73,
+                  "Plan Rows": 24992,
+                  "Plan Width": 0,
+                  "Actual Startup Time": 0.423,
+                  "Actual Total Time": 0.423,
+                  "Actual Rows": 25000,
+                  "Actual Loops": 1,
+                  "Index Cond": "(company_id = '10000000-0000-4000-8000-000000000001'::uuid)",
+                  "Shared Hit Blocks": 21,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 1",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.096,
+                  "Actual Total Time": 0.101,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0.001,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.053,
+                  "Actual Total Time": 0.054,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 2,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 3",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0,
+                  "Total Cost": 5.27,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Actual Startup Time": 0.234,
+                  "Actual Total Time": 0.234,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 1,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Result",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 0,
+                      "Total Cost": 0.01,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 0,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.196,
+        "Triggers": [],
+        "Execution Time": 9.145
+      }
+    }
+  ]
+}

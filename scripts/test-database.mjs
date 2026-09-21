@@ -1,16 +1,6 @@
-import { PGlite } from "@electric-sql/pglite";
-import { readFile, readdir } from "node:fs/promises";
 import assert from "node:assert/strict";
-const db = new PGlite();
-await db.exec(`create role anon; create role authenticated; create schema auth; create schema storage;
-create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz);
-create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
-grant usage on schema auth,public,storage to authenticated,anon;grant execute on function auth.uid() to authenticated,anon;
-create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
-create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text);
-alter table storage.objects enable row level security;grant select,insert,update,delete on storage.objects to authenticated;`);
-for (const file of (await readdir("supabase/migrations")).sort())
-  await db.exec(await readFile(`supabase/migrations/${file}`, "utf8"));
+import { createTestDatabase } from "./database-fixture.mjs";
+const db = await createTestDatabase();
 const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const [A, B, admin, member, foreignUser, manager, isolated] = [
   1, 2, 10, 11, 12, 13, 14,
@@ -184,8 +174,8 @@ await check("reabrir invalida aprovações", async () => {
 await as(member);
 let timer;
 await check("iniciar cronômetro é idempotente", async () => {
-  timer = await rpc("start_timer", [task]);
-  assert.equal(await rpc("start_timer", [task]), timer);
+  timer = (await rpc("start_timer", [task])).id;
+  assert.equal((await rpc("start_timer", [task])).id, timer);
 });
 await check("parar cronômetro é idempotente", async () => {
   await rpc("stop_timer", [timer]);
@@ -448,8 +438,8 @@ await check("criador colaborador pode editar sua tarefa", async () => {
 await check(
   "iniciar outra tarefa pausa a anterior sem sobrepor horas",
   async () => {
-    const a = await rpc("start_timer", [task]);
-    const b = await rpc("start_timer", [task2]);
+    const a = (await rpc("start_timer", [task])).id;
+    const b = (await rpc("start_timer", [task2])).id;
     const rows = (
       await db.query("select * from time_entries where id in ($1,$2)", [a, b])
     ).rows;
@@ -597,6 +587,233 @@ await as(null);
 await check("anônimo não prepara imagens nem edita cadastros", async () => {
   await denied(() => rpc("prepare_inline_image", [A, "anônimo.png", 100]));
   await denied(() => rpc("update_product", [product, "Intruso"]));
+});
+
+await as(admin);
+await check(
+  "task_extras retorna coleções ordenadas e limitadas a 100",
+  async () => {
+    await db.exec("reset role");
+    await db.query(
+      `insert into comments(company_id,task_id,author_id,body,created_at)
+    select $1,$2,$3,'Comentário '||n,now()-n*interval '1 second' from generate_series(1,105) n`,
+      [A, task, admin],
+    );
+    await as(admin);
+    const extras = await rpc("task_extras", [task]);
+    assert.equal(extras.comments.length, 100);
+    assert.equal(extras.comments[0].body, "Comentário 1");
+    assert.ok(extras.attachments.some((a) => a.id === attachment.id));
+    assert.ok(extras.events.length > 0);
+  },
+);
+await as(foreignUser);
+await check(
+  "task_extras bloqueia ID de outra empresa e ID inexistente",
+  async () => {
+    await denied(() => rpc("task_extras", [task]));
+    await denied(() => rpc("task_extras", [uid(999)]));
+  },
+);
+await as(isolated);
+await check("task_extras bloqueia membro fora do escopo", () =>
+  denied(() => rpc("task_extras", [task])),
+);
+await as(null);
+await check("anônimo não chama RPC unificada", () =>
+  denied(() => rpc("task_extras", [task])),
+);
+await as(admin);
+await check(
+  "clientes não executam manutenção ou rate limit privilegiados",
+  async () => {
+    for (const [name, args] of [
+      ["claim_storage_cleanup", []],
+      ["complete_storage_cleanup", ["mavi-inline-images", []]],
+      ["consume_invite_limit", [A, admin]],
+    ])
+      await denied(() => rpc(name, args));
+    await denied(() => db.query("select mavi_private.prune_task_events()"));
+  },
+);
+await db.exec("reset role; set role service_role");
+await check(
+  "convites: cota por administrador rejeita a 11ª tentativa",
+  async () => {
+    for (let i = 0; i < 10; i++)
+      assert.equal(
+        (await rpc("consume_invite_limit", [A, admin])).allowed,
+        true,
+      );
+    const blocked = await rpc("consume_invite_limit", [A, admin]);
+    assert.equal(blocked.allowed, false);
+    assert.ok(blocked.retry_after > 0 && blocked.retry_after <= 3600);
+  },
+);
+await check(
+  "convites: não administrador e empresa alheia são rejeitados",
+  async () => {
+    await denied(() => rpc("consume_invite_limit", [A, member]));
+    await denied(() => rpc("consume_invite_limit", [B, admin]));
+  },
+);
+await db.exec("reset role");
+await db.query(
+  "update mavi_private.invite_limits set window_start=now()-interval '2 hours'",
+);
+await db.exec("set role service_role");
+await check("convites: nova janela libera o envio", async () =>
+  assert.equal((await rpc("consume_invite_limit", [A, admin])).allowed, true),
+);
+await db.exec("reset role");
+await db.query(
+  "update mavi_private.invite_limits set used=50 where company_id=$1 and scope='company'",
+  [A],
+);
+await db.exec("set role service_role");
+await check(
+  "convites: limite da empresa bloqueia mesmo com cota pessoal",
+  async () =>
+    assert.equal(
+      (await rpc("consume_invite_limit", [A, admin])).allowed,
+      false,
+    ),
+);
+await as(admin);
+const abandoned = await rpc("prepare_inline_image", [A, "abandonada.png", 100]);
+const freshDraft = await rpc("prepare_inline_image", [A, "recente.png", 100]);
+const pendingFile = await rpc("prepare_attachment", [
+  task,
+  "pendente.pdf",
+  100,
+]);
+await db.query(
+  "insert into storage.objects(bucket_id,name) values('mavi-inline-images',$1)",
+  [abandoned.path],
+);
+await db.exec("reset role");
+await db.query(
+  "update inline_images set created_at=now()-interval '2 days' where id in ($1,$2)",
+  [abandoned.id, draft.id],
+);
+await db.query(
+  "update attachments set created_at=now()-interval '2 days' where id in ($1,$2)",
+  [pendingFile.id, attachment.id],
+);
+await db.query(
+  "insert into storage.objects(bucket_id,name,created_at) values('mavi-attachments','orphan',now()-interval '2 days'),('mavi-inline-images','recent-orphan',now())",
+);
+await db.exec("set role service_role");
+await check(
+  "limpeza coleta abandonados, preserva vinculados e carência",
+  async () => {
+    const rows = (
+      await db.query("select * from public.claim_storage_cleanup()")
+    ).rows;
+    assert.equal(rows.length, 3);
+  },
+);
+await db.exec("reset role");
+await check("fila inclui blob órfão e pendência sem upload", async () => {
+  const rows = (await db.query("select * from mavi_private.storage_cleanup"))
+    .rows;
+  assert.deepEqual(
+    new Set(rows.map((r) => r.path)),
+    new Set([abandoned.path, pendingFile.path, "orphan"]),
+  );
+  assert.equal(
+    (
+      await db.query("select id from inline_images where id=$1", [
+        freshDraft.id,
+      ])
+    ).rows.length,
+    1,
+  );
+  assert.equal(
+    (await db.query("select id from inline_images where id=$1", [draft.id]))
+      .rows.length,
+    1,
+  );
+  assert.equal(
+    (await db.query("select id from attachments where id=$1", [attachment.id]))
+      .rows.length,
+    1,
+  );
+  assert.equal(
+    (
+      await db.query("select id from storage.objects where name=$1", [
+        abandoned.path,
+      ])
+    ).rows.length,
+    1,
+  );
+});
+await as(admin);
+await check(
+  "imagem reclamada pela limpeza não pode ser vinculada nem reenviada",
+  async () => {
+    await denied(() => rpc("add_comment", [task, imageBody(abandoned.id)]));
+    await denied(() =>
+      db.query(
+        "insert into storage.objects(bucket_id,name) values('mavi-inline-images',$1)",
+        [abandoned.path],
+      ),
+    );
+  },
+);
+await db.exec("reset role; set role service_role");
+await check(
+  "lease evita duplicar trabalho e conclusão libera fila",
+  async () => {
+    assert.equal(
+      (await db.query("select * from public.claim_storage_cleanup()")).rows
+        .length,
+      0,
+    );
+    // Simulate the successful Storage API delete before acknowledging the queue.
+    await db.exec("reset role");
+    await db.query(
+      "delete from storage.objects where bucket_id='mavi-attachments' and name='orphan'",
+    );
+    await db.exec("set role service_role");
+    await rpc("complete_storage_cleanup", [
+      "mavi-attachments",
+      [pendingFile.path, "orphan"],
+    ]);
+  },
+);
+await db.exec("reset role");
+await db.query(
+  "update mavi_private.storage_cleanup set next_attempt_at=now()-interval '1 minute'",
+);
+await db.exec("set role service_role");
+await check("falha do Storage é retomada após expiração do lease", async () => {
+  const rows = (await db.query("select * from public.claim_storage_cleanup()"))
+    .rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].path, abandoned.path);
+});
+await db.exec("reset role");
+await check("retenção exclui só eventos anteriores a um mês", async () => {
+  await db.query(
+    `insert into task_events(company_id,task_id,actor_id,action,created_at)
+    values($1,$2,$3,'expired',now()-interval '1 month'-interval '1 second'),
+    ($1,$2,$3,'retained',now()-interval '1 month'+interval '1 minute')`,
+    [A, task, admin],
+  );
+  const count = (await db.query("select mavi_private.prune_task_events() n"))
+    .rows[0].n;
+  assert.ok(count >= 1);
+  assert.equal(
+    (await db.query("select * from task_events where action='expired'")).rows
+      .length,
+    0,
+  );
+  assert.equal(
+    (await db.query("select * from task_events where action='retained'")).rows
+      .length,
+    1,
+  );
 });
 await db.close();
 console.log(

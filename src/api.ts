@@ -151,22 +151,7 @@ export async function taskExtras(id: string): Promise<{
   attachments: Attachment[];
   events: TaskEvent[];
 }> {
-  const values = await Promise.all(
-    ["comments", "attachments", "task_events"].map((t) =>
-      supabase!
-        .from(t)
-        .select("*")
-        .eq("task_id", id)
-        .order("created_at", { ascending: false })
-        .limit(100),
-    ),
-  );
-  for (const value of values) if (value.error) throw value.error;
-  return {
-    comments: values[0].data ?? [],
-    attachments: values[1].data ?? [],
-    events: values[2].data ?? [],
-  };
+  return rpc("task_extras", { p_task: id });
 }
 
 export async function taskById(

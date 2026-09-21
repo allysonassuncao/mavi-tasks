@@ -1,0 +1,12 @@
+[functions.invite-user]
+verify_jwt = true
+
+# Dedicated high-entropy scheduler secret is checked by the handler.
+[functions.storage-reconcile]
+verify_jwt = false
+
+[auth]
+additional_redirect_urls = [
+  "https://mavi-tasks.vercel.app/?setup=1",
+  "https://mavi.maso.app.br/?setup=1",
+]

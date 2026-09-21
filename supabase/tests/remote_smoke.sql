@@ -56,6 +56,35 @@ do $$ begin
  perform public.transition_task(current_setting('mavi.test.task')::uuid,2,'approve_internal');
  if (select status from public.tasks where id=current_setting('mavi.test.task')::uuid)<>'done' then raise exception 'Creator approval failed'; end if;
 end $$;
+-- New RPCs: verify hosted grants, RLS and persistent rate limits without email.
+do $$ declare extras jsonb; begin
+ extras:=public.task_extras(current_setting('mavi.test.task')::uuid);
+ if jsonb_typeof(extras->'comments')<>'array' or jsonb_array_length(extras->'events')<1
+ then raise exception 'task_extras payload failed'; end if;
+ begin
+  perform public.consume_invite_limit(current_setting('mavi.test.company_a')::uuid,current_setting('mavi.test.user_a')::uuid);
+  raise exception 'Authenticated quota access unexpectedly allowed';
+ exception when insufficient_privilege then null;
+ end;
+end $$;
+select set_config('request.jwt.claim.sub',current_setting('mavi.test.user_b'),true);
+do $$ begin
+ begin
+  perform public.task_extras(current_setting('mavi.test.task')::uuid);
+  raise exception 'Cross-company extras unexpectedly allowed';
+ exception when insufficient_privilege then null;
+ end;
+end $$;
+set local role service_role;
+do $$ declare quota jsonb; begin
+ for n in 1..10 loop
+  quota:=public.consume_invite_limit(current_setting('mavi.test.company_a')::uuid,current_setting('mavi.test.user_a')::uuid);
+  if not (quota->>'allowed')::boolean then raise exception 'Quota blocked too early'; end if;
+ end loop;
+ quota:=public.consume_invite_limit(current_setting('mavi.test.company_a')::uuid,current_setting('mavi.test.user_a')::uuid);
+ if (quota->>'allowed')::boolean or (quota->>'retry_after')::integer<1
+ then raise exception 'Quota failed to block'; end if;
+end $$;
 set local role anon;
 do $$ begin
  begin
@@ -65,4 +94,4 @@ do $$ begin
  end;
 end $$;
 rollback;
-select 'PASS: remote RLS, roles, approval flow and reporting; fixtures rolled back' as result;
+select 'PASS: remote RLS, roles, approvals, reports, task_extras and invite quota; fixtures rolled back' as result;

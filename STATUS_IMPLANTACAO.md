@@ -1,4 +1,20 @@
-# Estado da implantação — 18/09/2026
+# Estado da implantação — 21/09/2026
+
+## Atualização de escalabilidade — 21/09/2026
+
+- Migration `20260921113148_scalability_and_maintenance` aplicada ao projeto MAVI, com histórico remoto confirmado.
+- Retenção de auditoria por **um mês**, índices de atraso e auditoria, políticas de leitura otimizadas e RPC `task_extras` ativos.
+- Edge Functions `invite-user` e `storage-reconcile` publicadas e ativas (versão 1). Convites com autenticação, validação administrativa e cota por usuário/empresa. Reconciliação autenticada com segredo exclusivo no Vault.
+- Origens permitidas: `https://mavi.maso.app.br` e `https://mavi-tasks.vercel.app`. Retornos exatos `/?setup=1` adicionados à allowlist do Auth; outras configurações preservadas.
+- Quatro jobs ativos: retenção a cada 10 minutos, reconciliação a cada 15 minutos, expiração diária das cotas e limpeza diária do histórico dos jobs.
+- Primeira chamada autenticada da reconciliação: HTTP 200, um item processado, fila vazia. Execuções reais do cron de retenção e reconciliação bem-sucedidas.
+- Teste transacional hospedado aprovado para RLS, aprovações, relatórios, detalhes unificados e cota de convites, com rollback das fixtures. Testes HTTP confirmaram origens permitidas, bloqueio de origem ausente/desconhecida e de chamadas sem autenticação. Nenhum convite real enviado.
+- O frontend não foi publicado nesta atualização; as otimizações de build permanecem prontas nos arquivos locais.
+- Procedimento e limites operacionais em [docs/SCALABILITY.md](docs/SCALABILITY.md).
+
+## Histórico da implantação inicial — 18/09/2026
+
+Os itens abaixo registram o estado da entrega inicial; a atualização acima prevalece para as mudanças posteriores.
 
 ## Supabase
 
