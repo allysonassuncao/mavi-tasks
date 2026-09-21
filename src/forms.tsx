@@ -45,6 +45,7 @@ import {
   priorities,
 } from "./types";
 import { dateKey, dateLabel, duration, minutes, names } from "./domain";
+import { useNow } from "./useClock";
 import { supabase } from "./supabase";
 import { rpc, taskExtras } from "./api";
 import type { DemoStore } from "./demo-store";
@@ -605,7 +606,6 @@ export function CreateForm({
 export function TaskDetail({
   task,
   currentRunning,
-  tick,
   data,
   user,
   busy,
@@ -618,7 +618,6 @@ export function TaskDetail({
 }: {
   task: Task;
   currentRunning: import("./types").TimeEntry | null;
-  tick: number;
   data: Snapshot;
   user: string;
   busy: boolean;
@@ -659,8 +658,9 @@ export function TaskDetail({
       .filter((h) => h.task_id === task.id)
       .reduce((s, h) => s + minutes(h), 0);
   const isRunning = running?.task_id === task.id;
+  const now = useNow(isRunning);
   const elapsedSeconds = isRunning
-    ? Math.max(0, Math.floor((tick - Date.parse(running.started_at)) / 1000))
+    ? Math.max(0, Math.floor((now - Date.parse(running.started_at)) / 1000))
     : 0;
   const clock = [
     Math.floor(elapsedSeconds / 3600),
@@ -706,6 +706,9 @@ export function TaskDetail({
       });
       setAction("");
       setNote("");
+      // The task itself is patched optimistically by mutate(); only the
+      // activity/history tab still needs a (small, scoped) refetch.
+      setLocalRefresh((v) => v + 1);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -717,7 +720,17 @@ export function TaskDetail({
       body = String(new FormData(form).get("body") ?? "").trim();
     if (!body) return;
     try {
-      await mutate("add_comment", { p_task: task.id, p_body: body });
+      const result = await mutate("add_comment", {
+        p_task: task.id,
+        p_body: body,
+      });
+      // Demo mode already re-syncs extras from the demo store whenever
+      // mutate() bumps `refresh`; appending here too would double it up.
+      if (!demo && result)
+        setExtras((x) => ({
+          ...x,
+          comments: [result as Comment, ...x.comments],
+        }));
       form.reset();
       setCommentRevision((v) => v + 1);
     } catch (e) {
@@ -740,6 +753,7 @@ export function TaskDetail({
         p_priority: fd.get("priority"),
       });
       setEditing(false);
+      setLocalRefresh((v) => v + 1);
     } catch (e) {
       setError((e as Error).message);
     }

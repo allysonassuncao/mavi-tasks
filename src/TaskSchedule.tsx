@@ -11,8 +11,8 @@ import {
   ganttPlacement,
   addDays,
 } from "./schedule";
-import { statuses, type Task, type Snapshot } from "./types";
-import { dateKey, names, dateLabel } from "./domain";
+import { statuses, type Task } from "./types";
+import { dateKey, namesFrom, dateLabel, type NameLookup } from "./domain";
 export function ScheduleNavigation({
   month,
   onChange,
@@ -62,13 +62,13 @@ export function TaskSchedule({
   view,
   month,
   tasks,
-  data,
+  lookup,
   onSelect,
 }: {
   view: "calendar" | "gantt";
   month: string;
   tasks: Task[];
-  data: Snapshot;
+  lookup: NameLookup;
   onSelect: (id: string) => void;
 }) {
   const today = dateKey();
@@ -108,10 +108,10 @@ export function TaskSchedule({
                           key={t.id}
                           style={{ borderLeftColor: statuses[t.status].color }}
                           onClick={() => onSelect(t.id)}
-                          title={`${t.title} · ${names(data, t).client?.name ?? ""}`}
+                          title={`${t.title} · ${namesFrom(lookup, t).client?.name ?? ""}`}
                         >
                           <strong>{t.title}</strong>
-                          <small>{names(data, t).client?.name}</small>
+                          <small>{namesFrom(lookup, t).client?.name}</small>
                         </button>
                       ))}
                   </div>

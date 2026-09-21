@@ -1,7 +1,8 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
-import { statuses, type Status } from "./types";
-import { initials } from "./domain";
+import { statuses, type Status, type TimeEntry } from "./types";
+import { initials, duration, minutes } from "./domain";
+import { useNow } from "./useClock";
 export function Avatar({
   name,
   size = "normal",
@@ -87,3 +88,7 @@ export function Empty({
   );
 }
 export { Loading } from "./ui";
+export function LiveDuration({ entry }: { entry: TimeEntry }) {
+  const now = useNow(!entry.ended_at);
+  return <>{duration(minutes(entry, now))}</>;
+}

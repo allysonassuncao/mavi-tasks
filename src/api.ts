@@ -60,14 +60,20 @@ export async function snapshot(
     ["teamMembers", "team_members"],
     ["contractTeams", "contract_teams"],
   ] as const;
+  const LOOKUP_CAP = 1000;
   await Promise.all(
     tables.map(async ([key, table]) => {
       const { data: rows, error } = await supabase!
         .from(table)
         .select("*")
         .eq("company_id", company)
-        .limit(1000);
+        .limit(LOOKUP_CAP);
       if (error) throw error;
+      // Surface truncation loudly instead of silently dropping rows past the cap.
+      if ((rows ?? []).length >= LOOKUP_CAP)
+        throw Error(
+          `A lista de "${table}" tem mais de ${LOOKUP_CAP} registros e não pôde ser carregada por completo. Fale com o suporte.`,
+        );
       (data[key] as unknown) = rows ?? [];
     }),
   );
@@ -117,27 +123,26 @@ export async function snapshot(
         `start_date.lte.${end},and(start_date.is.null,created_at.lte.${end}T23:59:59.999Z),and(start_date.is.null,due_date.lte.${end})`,
       );
   }
-  const result = await query.range(
-    filters.schedule ? 0 : filters.page * 50,
-    filters.schedule ? 499 : filters.page * 50 + 49,
-  );
+  const SCHEDULE_CAP = 2000;
+  const [result, hours] = await Promise.all([
+    query.range(
+      filters.schedule ? 0 : filters.page * 50,
+      filters.schedule ? SCHEDULE_CAP - 1 : filters.page * 50 + 49,
+    ),
+    supabase
+      .from("time_entries")
+      .select("*")
+      .eq("company_id", company)
+      .order("started_at", { ascending: false })
+      .limit(100),
+  ]);
   if (result.error) throw result.error;
-  data.tasks = result.data as Task[];
-  if (filters.schedule) {
-    for (let offset = 500; offset < (result.count ?? 0); offset += 500) {
-      const next = await query.range(offset, offset + 499);
-      if (next.error) throw next.error;
-      data.tasks.push(...(next.data as Task[]));
-      if (next.data.length < 500) break;
-    }
-  }
-  const hours = await supabase
-    .from("time_entries")
-    .select("*")
-    .eq("company_id", company)
-    .order("started_at", { ascending: false })
-    .limit(100);
   if (hours.error) throw hours.error;
+  data.tasks = result.data as Task[];
+  if (filters.schedule && data.tasks.length >= SCHEDULE_CAP)
+    throw Error(
+      `Este período tem mais de ${SCHEDULE_CAP} tarefas e não pôde ser exibido por completo. Reduza o intervalo.`,
+    );
   data.hours = hours.data;
   return { data, count: result.count ?? 0 };
 }

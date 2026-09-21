@@ -17,6 +17,7 @@ import {
 import { Input, Select, SelectOption, Button } from "./ui";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   useCallback,
@@ -69,10 +70,18 @@ import { supabase } from "./supabase";
 import * as api from "./api";
 import { DemoStore } from "./demo-store";
 import { demoUser } from "./demo";
-import { Avatar, Badge, Modal, Empty, Loading } from "./components";
+import {
+  Avatar,
+  Badge,
+  Modal,
+  Empty,
+  Loading,
+  LiveDuration,
+} from "./components";
 import {
   type Task,
   type Snapshot,
+  type TimeEntry,
   type Comment,
   type Attachment,
   type TaskEvent,
@@ -87,9 +96,13 @@ import {
   duration,
   minutes,
   isLate,
-  names,
+  namesFrom,
+  buildNameLookup,
+  upsertById,
   initials,
+  type NameLookup,
 } from "./domain";
+import { useNow } from "./useClock";
 import { CreateForm, TaskDetail } from "./forms";
 
 const navigation = [
@@ -102,6 +115,13 @@ const navigation = [
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
 ] as const;
+// Mutations that return the affected row (see the RPCs in
+// supabase/migrations/20260921120000_performance_optimizations.sql) patch
+// local state directly instead of forcing a full snapshot refetch — the task
+// list and dashboards no longer flash a loading state for a one-row change.
+const TASK_ROW_MUTATIONS = new Set(["transition_task", "update_task"]);
+const TIMER_ROW_MUTATIONS = new Set(["start_timer", "stop_timer"]);
+const SELF_HANDLED_MUTATIONS = new Set(["add_comment"]);
 export default function App() {
   const demoStore = useRef(new DemoStore());
   const [needsPassword, setNeedsPassword] = useState(
@@ -181,9 +201,13 @@ export default function App() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [toast, setToast] = useState(""),
-    [refresh, setRefresh] = useState(0);
-  const [summary, setSummary] = useState<api.Summary | null>(null),
-    [tick, setTick] = useState(Date.now());
+    [refresh, setRefresh] = useState(0),
+    [reportRefresh, setReportRefresh] = useState(0);
+  const [summary, setSummary] = useState<api.Summary | null>(null);
+  // Only components that actually display a running clock subscribe to time
+  // ticking (see useNow/LiveDuration) — demoNow is the one exception, since the
+  // demo-mode stat cards below derive a live total from it directly.
+  const demoNow = useNow(demo);
   const request = useRef(0),
     user = demo ? demoUser : (session?.user.id ?? "");
   const currentCompany = data.companies.find((c) => c.id === company),
@@ -312,10 +336,6 @@ export default function App() {
     setEntityEdit(null);
     setSidebar(false);
   }, [page]);
-  useEffect(() => {
-    const id = setInterval(() => setTick(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(""), 4500);
@@ -455,7 +475,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [demo, company, session, period, refresh]);
+  }, [demo, company, session, period, refresh, reportRefresh]);
   const notify = useCallback((message: string) => setToast(message), []);
   async function mutate(name: string, args: Record<string, unknown>) {
     setBusy(true);
@@ -464,8 +484,24 @@ export default function App() {
       const result = demo
         ? demoStore.current.mutate(name, args)
         : await api.rpc(name, args);
-      if (demo) setData({ ...demoStore.current.data });
-      setRefresh((v) => v + 1);
+      if (demo) {
+        setData({ ...demoStore.current.data });
+        setRefresh((v) => v + 1);
+      } else if (TASK_ROW_MUTATIONS.has(name) && result) {
+        const updated = result as Task;
+        setData((d) => ({
+          ...d,
+          tasks: d.tasks.map((t) => (t.id === updated.id ? updated : t)),
+        }));
+        setDetailTask((t) => (t && t.id === updated.id ? updated : t));
+        setReportRefresh((v) => v + 1);
+      } else if (TIMER_ROW_MUTATIONS.has(name) && result) {
+        const entry = result as TimeEntry;
+        setCurrentRunning(entry.ended_at ? null : entry);
+        setData((d) => ({ ...d, hours: upsertById(d.hours, entry) }));
+      } else if (!SELF_HANDLED_MUTATIONS.has(name)) {
+        setRefresh((v) => v + 1);
+      }
       notify(demo ? "Alteração feita na demonstração." : "Alteração salva.");
       return result;
     } catch (e) {
@@ -511,64 +547,102 @@ export default function App() {
     detailTask?.id === selected && detailTask.company_id === company
       ? detailTask
       : undefined;
-  const filtered = data.tasks.filter(
-    (t) =>
-      (!clientFilter ||
-        data.contracts.find((c) => c.id === t.contract_id)?.client_id ===
-          clientFilter) &&
-      (!projectFilter || t.project_id === projectFilter) &&
-      (!query || t.title.toLowerCase().includes(query.toLowerCase())) &&
-      (!status || t.status === status) &&
-      (!mine || t.assignee_id === user) &&
-      (!late || isLate(t, today)) &&
-      (!product ||
-        data.contracts.find((c) => c.id === t.contract_id)?.product_id ===
-          product),
+  const nameLookup: NameLookup = useMemo(() => buildNameLookup(data), [data]);
+  const taskLookup = useMemo(
+    () => new Map(data.tasks.map((t) => [t.id, t])),
+    [data.tasks],
   );
-  const periodHours = data.hours.filter(
-    (h) => h.started_at.slice(0, 7) === period,
+  const filtered = useMemo(
+    () =>
+      data.tasks.filter(
+        (t) =>
+          (!clientFilter ||
+            nameLookup.contracts.get(t.contract_id)?.client_id ===
+              clientFilter) &&
+          (!projectFilter || t.project_id === projectFilter) &&
+          (!query || t.title.toLowerCase().includes(query.toLowerCase())) &&
+          (!status || t.status === status) &&
+          (!mine || t.assignee_id === user) &&
+          (!late || isLate(t, today)) &&
+          (!product ||
+            nameLookup.contracts.get(t.contract_id)?.product_id === product),
+      ),
+    [
+      data.tasks,
+      nameLookup,
+      clientFilter,
+      projectFilter,
+      query,
+      status,
+      mine,
+      user,
+      late,
+      today,
+      product,
+    ],
   );
-  const stats = demo
-    ? {
-        total: data.tasks.length,
-        late: data.tasks.filter((t) => isLate(t, today)).length,
-        review: data.tasks.filter((t) => t.status === "review").length,
-        done: data.tasks.filter((t) => t.delivered_at?.slice(0, 7) === period)
-          .length,
-        minutes: periodHours.reduce((sum, h) => sum + minutes(h, tick), 0),
-      }
-    : summary;
-  const focus = data.tasks
-    .filter((t) => t.status !== "done")
-    .sort((a, b) => a.due_date.localeCompare(b.due_date))
-    .slice(0, 6);
-  const byClient = demo
-    ? data.clients.map((c) => ({
-        id: c.id,
-        name: c.name,
-        minutes: periodHours
-          .filter(
-            (h) =>
-              names(
-                data,
-                data.tasks.find((t) => t.id === h.task_id)!,
-              ).client?.id === c.id,
-          )
-          .reduce((s, h) => s + minutes(h, tick), 0),
-      }))
-    : (summary?.by_client ?? []);
-  const byPerson = demo
-    ? data.members.map((m) => ({
-        id: m.user_id,
-        name: m.name,
-        tasks: data.tasks.filter(
-          (t) => t.assignee_id === m.user_id && t.status !== "done",
-        ).length,
-        estimated: data.tasks
-          .filter((t) => t.assignee_id === m.user_id && t.status !== "done")
-          .reduce((s, t) => s + t.estimated_minutes, 0),
-      }))
-    : (summary?.by_person ?? []);
+  const periodHours = useMemo(
+    () => data.hours.filter((h) => h.started_at.slice(0, 7) === period),
+    [data.hours, period],
+  );
+  const stats = useMemo(
+    () =>
+      demo
+        ? {
+            total: data.tasks.length,
+            late: data.tasks.filter((t) => isLate(t, today)).length,
+            review: data.tasks.filter((t) => t.status === "review").length,
+            done: data.tasks.filter(
+              (t) => t.delivered_at?.slice(0, 7) === period,
+            ).length,
+            minutes: periodHours.reduce(
+              (sum, h) => sum + minutes(h, demoNow),
+              0,
+            ),
+          }
+        : summary,
+    [demo, data.tasks, today, period, periodHours, demoNow, summary],
+  );
+  const focus = useMemo(
+    () =>
+      data.tasks
+        .filter((t) => t.status !== "done")
+        .sort((a, b) => a.due_date.localeCompare(b.due_date))
+        .slice(0, 6),
+    [data.tasks],
+  );
+  const byClient = useMemo(
+    () =>
+      demo
+        ? data.clients.map((c) => ({
+            id: c.id,
+            name: c.name,
+            minutes: periodHours
+              .filter((h) => {
+                const task = taskLookup.get(h.task_id);
+                return task && namesFrom(nameLookup, task).client?.id === c.id;
+              })
+              .reduce((s, h) => s + minutes(h, demoNow), 0),
+          }))
+        : (summary?.by_client ?? []),
+    [demo, data.clients, periodHours, taskLookup, nameLookup, demoNow, summary],
+  );
+  const byPerson = useMemo(
+    () =>
+      demo
+        ? data.members.map((m) => ({
+            id: m.user_id,
+            name: m.name,
+            tasks: data.tasks.filter(
+              (t) => t.assignee_id === m.user_id && t.status !== "done",
+            ).length,
+            estimated: data.tasks
+              .filter((t) => t.assignee_id === m.user_id && t.status !== "done")
+              .reduce((s, t) => s + t.estimated_minutes, 0),
+          }))
+        : (summary?.by_person ?? []),
+    [demo, data.members, data.tasks, summary],
+  );
   if (!authReady) return <Loading />;
   if (!demo && session && needsPassword)
     return (
@@ -781,7 +855,7 @@ export default function App() {
                 }}
               >
                 <span className="pulse" />
-                {duration(minutes(activeTimer, tick))}
+                <LiveDuration entry={activeTimer} />
               </Button>
             )}
             <span className="online-label">
@@ -989,7 +1063,7 @@ export default function App() {
                     </div>
                     <TaskTable
                       tasks={focus}
-                      data={data}
+                      lookup={nameLookup}
                       today={today}
                       onSelect={setSelected}
                     />
@@ -1259,7 +1333,7 @@ export default function App() {
                   ) : view === "list" ? (
                     <TaskTable
                       tasks={filtered}
-                      data={data}
+                      lookup={nameLookup}
                       today={today}
                       onSelect={setSelected}
                     />
@@ -1277,7 +1351,7 @@ export default function App() {
                           {filtered
                             .filter((t) => t.status === key)
                             .map((t) => {
-                              const n = names(data, t);
+                              const n = namesFrom(nameLookup, t);
                               return (
                                 <Button
                                   className="task-card"
@@ -1311,7 +1385,7 @@ export default function App() {
                       view={view as "calendar" | "gantt"}
                       month={scheduleMonth}
                       tasks={filtered}
-                      data={data}
+                      lookup={nameLookup}
                       onSelect={setSelected}
                     />
                   )}
@@ -1647,9 +1721,11 @@ export default function App() {
                           : "TEMPO DE CONCENTRAÇÃO"}
                       </small>
                       <h2>
-                        {activeTimer
-                          ? duration(minutes(activeTimer, tick))
-                          : "Pronto para começar?"}
+                        {activeTimer ? (
+                          <LiveDuration entry={activeTimer} />
+                        ) : (
+                          "Pronto para começar?"
+                        )}
                       </h2>
                       <p>
                         {activeTimer
@@ -1725,7 +1801,9 @@ export default function App() {
                                 {h.source === "timer" ? "Cronômetro" : "Manual"}
                               </td>
                               <td>
-                                <strong>{duration(minutes(h, tick))}</strong>
+                                <strong>
+                                  <LiveDuration entry={h} />
+                                </strong>
                                 {!h.ended_at && (
                                   <span className="running-label">
                                     {" "}
@@ -1967,7 +2045,6 @@ export default function App() {
           key={selectedTask.id}
           task={selectedTask}
           currentRunning={currentRunning}
-          tick={tick}
           data={data}
           user={user}
           busy={busy}
@@ -2014,12 +2091,12 @@ function Stat({
 }
 function TaskTable({
   tasks,
-  data,
+  lookup,
   today,
   onSelect,
 }: {
   tasks: Task[];
-  data: Snapshot;
+  lookup: NameLookup;
   today: string;
   onSelect: (id: string) => void;
 }) {
@@ -2037,7 +2114,7 @@ function TaskTable({
           </thead>
           <tbody>
             {tasks.map((t) => {
-              const n = names(data, t);
+              const n = namesFrom(lookup, t);
               return (
                 <tr key={t.id}>
                   <td>

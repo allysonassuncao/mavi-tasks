@@ -38,12 +38,38 @@ export function initials(name: string) {
     .join("")
     .toUpperCase();
 }
-export function names(data: Snapshot, task: Task) {
-  const contract = data.contracts.find((c) => c.id === task.contract_id);
+export interface NameLookup {
+  contracts: Map<string, Snapshot["contracts"][number]>;
+  clients: Map<string, Snapshot["clients"][number]>;
+  products: Map<string, Snapshot["products"][number]>;
+  projects: Map<string, Snapshot["projects"][number]>;
+  members: Map<string, Snapshot["members"][number]>;
+}
+export function buildNameLookup(data: Snapshot): NameLookup {
   return {
-    client: data.clients.find((c) => c.id === contract?.client_id),
-    product: data.products.find((p) => p.id === contract?.product_id),
-    project: data.projects.find((p) => p.id === task.project_id),
-    member: data.members.find((m) => m.user_id === task.assignee_id),
+    contracts: new Map(data.contracts.map((c) => [c.id, c])),
+    clients: new Map(data.clients.map((c) => [c.id, c])),
+    products: new Map(data.products.map((p) => [p.id, p])),
+    projects: new Map(data.projects.map((p) => [p.id, p])),
+    members: new Map(data.members.map((m) => [m.user_id, m])),
   };
+}
+export function namesFrom(lookup: NameLookup, task: Task) {
+  const contract = lookup.contracts.get(task.contract_id);
+  return {
+    client: contract ? lookup.clients.get(contract.client_id) : undefined,
+    product: contract ? lookup.products.get(contract.product_id) : undefined,
+    project: task.project_id ? lookup.projects.get(task.project_id) : undefined,
+    member: lookup.members.get(task.assignee_id),
+  };
+}
+export function names(data: Snapshot, task: Task) {
+  return namesFrom(buildNameLookup(data), task);
+}
+export function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
+  const index = list.findIndex((x) => x.id === item.id);
+  if (index === -1) return [item, ...list];
+  const next = list.slice();
+  next[index] = item;
+  return next;
 }
