@@ -69,6 +69,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./supabase";
 import * as api from "./api";
+import * as cache from "./cache";
 import { DemoStore } from "./demo-store";
 import { demoUser } from "./demo";
 import {
@@ -87,6 +88,7 @@ import {
   type Attachment,
   type TaskEvent,
   type Status,
+  type Company,
   emptySnapshot,
   statuses,
   priorities,
@@ -141,9 +143,13 @@ export default function App() {
   const [demo, setDemo] = useState(false),
     [session, setSession] = useState<Session | null>(null),
     [authReady, setAuthReady] = useState(!supabase);
-  const [data, setData] = useState<Snapshot>(
-      demo ? demoStore.current.data : emptySnapshot,
-    ),
+  const [data, setData] = useState<Snapshot>(() => {
+      if (demo) return demoStore.current.data;
+      const cachedCompanies = cache.get<Company[]>("companies");
+      return cachedCompanies && cachedCompanies.length
+        ? { ...emptySnapshot, companies: cachedCompanies }
+        : emptySnapshot;
+    }),
     [companyRef, setCompanyRef] = useUrlState<string>("empresa", "");
   const location = useLocation();
   const isLogin = location.split("?")[0].replace(/\/+$/, "") === "/login";
@@ -206,7 +212,11 @@ export default function App() {
   }
   const [form, setForm] = useState<string | null>(null),
     [loading, setLoading] = useState(false),
-    [companiesReady, setCompaniesReady] = useState(!supabase),
+    [companiesReady, setCompaniesReady] = useState(() => {
+      if (!supabase) return true;
+      const cached = cache.get<Company[]>("companies");
+      return Boolean(cached && cached.length > 0);
+    }),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [toast, setToast] = useState(""),
@@ -361,18 +371,30 @@ export default function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, s) => {
       if (event === "PASSWORD_RECOVERY") setNeedsPassword(true);
-      setSession(s);
-      setAuthReady(true);
-      if (!s) {
+      if (event === "SIGNED_OUT" || !s) {
+        api.clearAllCaches();
         setData(emptySnapshot);
       }
+      setSession(s);
+      setAuthReady(true);
     });
     return () => subscription.unsubscribe();
   }, []);
   useEffect(() => {
+    if (!company || demo) return;
+    const cached = api.getCachedSnapshot(company);
+    if (cached) {
+      setData((d) => ({
+        ...d,
+        ...cached,
+        companies: d.companies.length ? d.companies : cached.companies,
+      }));
+    }
+  }, [company, demo]);
+  useEffect(() => {
     if (demo || !session) return;
     let alive = true;
-    setCompaniesReady(false);
+    if (!data.companies.length) setCompaniesReady(false);
     api
       .companies()
       .then((list) => {
@@ -398,34 +420,42 @@ export default function App() {
     }
     if (!company || !session) return;
     const id = ++request.current;
-    setLoading(true);
+    const hasData = data.members.length > 0;
+    if (!hasData || page === "tasks") {
+      setLoading(true);
+    }
     setError("");
+    const forceRefresh = refresh > 0;
     api
-      .snapshot(company, {
-        search: page === "tasks" ? query : "",
-        status: page === "tasks" ? status : "",
-        product: page === "tasks" ? product : "",
-        mine: page === "tasks" ? mine : false,
-        user,
-        page: page === "tasks" ? offset : 0,
-        late: page === "tasks" ? late : false,
-        client: page === "tasks" ? clientFilter : "",
-        project: page === "tasks" ? projectFilter : "",
-        schedule:
-          page === "tasks" && scheduleView
-            ? {
-                view: view as "calendar" | "gantt",
-                start:
-                  view === "calendar"
-                    ? calendarDays(scheduleMonth)[0]
-                    : monthRange(scheduleMonth).start,
-                end:
-                  view === "calendar"
-                    ? calendarDays(scheduleMonth).at(-1)!
-                    : monthRange(scheduleMonth).end,
-              }
-            : undefined,
-      })
+      .snapshot(
+        company,
+        {
+          search: page === "tasks" ? query : "",
+          status: page === "tasks" ? status : "",
+          product: page === "tasks" ? product : "",
+          mine: page === "tasks" ? mine : false,
+          user,
+          page: page === "tasks" ? offset : 0,
+          late: page === "tasks" ? late : false,
+          client: page === "tasks" ? clientFilter : "",
+          project: page === "tasks" ? projectFilter : "",
+          schedule:
+            page === "tasks" && scheduleView
+              ? {
+                  view: view as "calendar" | "gantt",
+                  start:
+                    view === "calendar"
+                      ? calendarDays(scheduleMonth)[0]
+                      : monthRange(scheduleMonth).start,
+                  end:
+                    view === "calendar"
+                      ? calendarDays(scheduleMonth).at(-1)!
+                      : monthRange(scheduleMonth).end,
+                }
+              : undefined,
+        },
+        forceRefresh,
+      )
       .then((r) => {
         if (id === request.current) {
           setData(r.data);
@@ -459,24 +489,15 @@ export default function App() {
     clientFilter,
     projectFilter,
     refresh,
-    page,
-    view,
-    scheduleMonth,
+    page === "tasks",
+    page === "tasks" ? view : "list",
+    page === "tasks" ? scheduleMonth : "",
   ]);
   useEffect(() => {
     if (demo || !company || !session) return;
     let alive = true;
-    setSummary(null);
     api
-      .rpc("report_summary", {
-        p_company: company,
-        p_start: new Date(period + "-01T00:00:00").toISOString(),
-        p_end: new Date(
-          Number(period.slice(0, 4)),
-          Number(period.slice(5, 7)),
-          1,
-        ).toISOString(),
-      })
+      .reportSummary(company, period, refresh > 0 || reportRefresh > 0)
       .then((s) => {
         if (alive) setSummary(s);
       })
@@ -485,6 +506,61 @@ export default function App() {
       alive = false;
     };
   }, [demo, company, session, period, refresh, reportRefresh]);
+
+  // Realtime subscription: automatically detects changes from other users/tabs and updates cache & state
+  useEffect(() => {
+    if (!company || demo || !session) return;
+    const unsubscribe = api.subscribeToCompanyChanges(company, {
+      onTaskChange: (task, eventType) => {
+        if (eventType === "INSERT") {
+          setData((d) =>
+            d.tasks.some((t) => t.id === task.id)
+              ? d
+              : { ...d, tasks: [task, ...d.tasks] },
+          );
+        } else if (eventType === "UPDATE") {
+          setData((d) => ({
+            ...d,
+            tasks: d.tasks.map((t) => (t.id === task.id ? task : t)),
+          }));
+          setDetailTask((t) => (t && t.id === task.id ? task : t));
+        } else if (eventType === "DELETE") {
+          setData((d) => ({
+            ...d,
+            tasks: d.tasks.filter((t) => t.id !== task.id),
+          }));
+          setDetailTask((t) => (t && t.id === task.id ? null : t));
+        }
+        setReportRefresh((v) => v + 1);
+      },
+      onLookupChange: () => {
+        api
+          .companyLookups(company, true)
+          .then((lookups) => {
+            setData((d) => ({ ...d, ...lookups }));
+          })
+          .catch(() => {});
+      },
+      onHoursChange: (entry, eventType) => {
+        if (eventType !== "DELETE") {
+          setData((d) => ({ ...d, hours: upsertById(d.hours, entry) }));
+        } else {
+          setData((d) => ({
+            ...d,
+            hours: d.hours.filter((h) => h.id !== entry.id),
+          }));
+        }
+        setReportRefresh((v) => v + 1);
+      },
+      onTaskExtrasChange: (taskId) => {
+        if (selected === taskId) {
+          setRefresh((v) => v + 1);
+        }
+      },
+    });
+    return unsubscribe;
+  }, [company, demo, session]);
+
   const notify = useCallback((message: string) => setToast(message), []);
   async function mutate(name: string, args: Record<string, unknown>) {
     setBusy(true);
@@ -503,13 +579,50 @@ export default function App() {
           tasks: d.tasks.map((t) => (t.id === updated.id ? updated : t)),
         }));
         setDetailTask((t) => (t && t.id === updated.id ? updated : t));
+        api.patchCachedTask(company, updated);
+        api.invalidateTaskExtras(updated.id);
         setReportRefresh((v) => v + 1);
       } else if (TIMER_ROW_MUTATIONS.has(name) && result) {
         const entry = result as TimeEntry;
         setCurrentRunning(entry.ended_at ? null : entry);
         setData((d) => ({ ...d, hours: upsertById(d.hours, entry) }));
+        api.patchCachedHours(company, entry);
+      } else if (name === "add_comment" && args.p_task) {
+        api.invalidateTaskExtras(args.p_task as string);
       } else if (!SELF_HANDLED_MUTATIONS.has(name)) {
-        setRefresh((v) => v + 1);
+        if (name === "create_task" && result) {
+          const newTask = await api.taskById(company, result as string, true);
+          if (newTask) {
+            api.addCachedTask(company, newTask);
+            setData((d) => ({
+              ...d,
+              tasks: [newTask, ...d.tasks.filter((t) => t.id !== newTask.id)],
+            }));
+          }
+          setReportRefresh((v) => v + 1);
+        } else if (
+          name.startsWith("create_client") ||
+          name.startsWith("update_client") ||
+          name.startsWith("create_product") ||
+          name.startsWith("update_product") ||
+          name.startsWith("create_contract") ||
+          name.startsWith("update_contract") ||
+          name.startsWith("create_project") ||
+          name.startsWith("update_project") ||
+          name.startsWith("create_team")
+        ) {
+          api.invalidateLookupsCache(company);
+          const lookups = await api.companyLookups(company, true);
+          setData((d) => ({ ...d, ...lookups }));
+        } else if (name === "log_time") {
+          api.invalidateHoursCache(company);
+          const hours = await api.companyHours(company, true);
+          setData((d) => ({ ...d, hours }));
+          setReportRefresh((v) => v + 1);
+        } else {
+          api.invalidateCompanyCache(company);
+          setRefresh((v) => v + 1);
+        }
       }
       notify(demo ? "Alteração feita na demonstração." : "Alteração salva.");
       return result;
@@ -543,14 +656,20 @@ export default function App() {
     go(next);
   }
   async function logout() {
+    api.clearAllCaches();
     if (demo) {
       setDemo(false);
       setData(emptySnapshot);
       navigate("/login", true);
       return;
     }
-    await supabase?.auth.signOut();
-    navigate("/login", true);
+    try {
+      await supabase?.auth.signOut();
+    } finally {
+      api.clearAllCaches();
+      setData(emptySnapshot);
+      navigate("/login", true);
+    }
   }
   const selectedTask =
     detailTask?.id === selected && detailTask.company_id === company
@@ -988,7 +1107,8 @@ export default function App() {
               title="Seu acesso está quase pronto"
               body="Peça ao administrador para vincular sua conta a uma empresa."
             />
-          ) : (loading && page !== "tasks") || (!demo && !companiesReady) ? (
+          ) : (!data.members.length && loading && page !== "tasks") ||
+            (!demo && !companiesReady) ? (
             <Loading />
           ) : (
             <>

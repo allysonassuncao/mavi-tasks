@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({ rpc: vi.fn(), upload: vi.fn() }));
-vi.mock("./api", () => ({ rpc: mocks.rpc }));
+vi.mock("./api", () => ({ rpc: mocks.rpc, invalidateTaskExtras: vi.fn() }));
 vi.mock("./supabase", () => ({
   supabase: { storage: { from: () => ({ upload: mocks.upload }) } },
 }));

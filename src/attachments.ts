@@ -1,4 +1,4 @@
-import { rpc } from "./api";
+import { rpc, invalidateTaskExtras } from "./api";
 import { supabase } from "./supabase";
 import type { Attachment } from "./types";
 const mimeByExtension: Record<string, string> = {
@@ -40,6 +40,7 @@ export async function uploadAttachment(taskId: string, file: File) {
       .from("mavi-attachments")
       .upload(attachment.path, file, { upsert: false, contentType });
     if (error) throw error;
+    invalidateTaskExtras(taskId);
   } catch (error) {
     try {
       await rpc("discard_pending_attachment", { p_attachment: attachment.id });

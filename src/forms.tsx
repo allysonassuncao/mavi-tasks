@@ -47,7 +47,7 @@ import {
 import { dateKey, dateLabel, duration, minutes, names } from "./domain";
 import { useNow } from "./useClock";
 import { supabase } from "./supabase";
-import { rpc, taskExtras } from "./api";
+import { rpc, taskExtras, invalidateTaskExtras } from "./api";
 import type { DemoStore } from "./demo-store";
 import { RichTextContent } from "./RichTextContent";
 import {
@@ -683,7 +683,7 @@ export function TaskDetail({
       return;
     }
     setLoading(true);
-    taskExtras(task.id)
+    taskExtras(task.id, refresh > 0 || localRefresh > 0)
       .then((x) => {
         if (alive) setExtras(x);
       })
@@ -706,6 +706,7 @@ export function TaskDetail({
       });
       setAction("");
       setNote("");
+      invalidateTaskExtras(task.id);
       // The task itself is patched optimistically by mutate(); only the
       // activity/history tab still needs a (small, scoped) refetch.
       setLocalRefresh((v) => v + 1);
@@ -724,6 +725,7 @@ export function TaskDetail({
         p_task: task.id,
         p_body: body,
       });
+      invalidateTaskExtras(task.id);
       // Demo mode already re-syncs extras from the demo store whenever
       // mutate() bumps `refresh`; appending here too would double it up.
       if (!demo && result)
@@ -733,6 +735,7 @@ export function TaskDetail({
         }));
       form.reset();
       setCommentRevision((v) => v + 1);
+      setLocalRefresh((v) => v + 1);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -753,6 +756,7 @@ export function TaskDetail({
         p_priority: fd.get("priority"),
       });
       setEditing(false);
+      invalidateTaskExtras(task.id);
       setLocalRefresh((v) => v + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -764,6 +768,7 @@ export function TaskDetail({
     setError("");
     try {
       await uploadAttachment(task.id, file);
+      invalidateTaskExtras(task.id);
       setLocalRefresh((v) => v + 1);
       notify("Arquivo anexado.");
     } catch (e) {
