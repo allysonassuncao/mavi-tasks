@@ -1,7 +1,9 @@
 import {
   type Task,
   type TimeEntry,
+  type TaskEvent,
   type Snapshot,
+  type Status,
   type Project,
   type ProjectApprover,
 } from "./types";
@@ -160,13 +162,6 @@ export function contractProductLabel(data: Snapshot, contractId: string) {
   const { product, detail } = contractParts(data, contractId);
   return `${product?.name ?? "Produto"}${detail ? ` (${detail})` : ""}`;
 }
-/**
- * Mirrors transition_task's "submit": returned, rejected and in-validation
- * tasks must be resumed ("Marcar em andamento") before going to validation.
- */
-export function canSubmitTask(task: Pick<Task, "status">) {
-  return task.status === "open" || task.status === "progress";
-}
 /** Task search matches the title, the client's name or the project's name. */
 export function taskMatchesSearch(
   lookup: NameLookup,
@@ -218,6 +213,7 @@ export function canSeeTask(data: Snapshot, task: Task, userId: string) {
     me?.role === "manager" ||
     task.creator_id === userId ||
     task.assignee_id === userId ||
+    isParticipant(task, userId) ||
     isTaskSupervisor(data, task, userId)
   );
 }
@@ -278,8 +274,13 @@ export const REOPEN_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 /** A button that is shown but disabled, with the reason as its label. */
 export type BlockedAction = { blocked: string };
 /**
- * Which task actions the user sees (mirrors public.transition_task):
- * `true` shows the action, a BlockedAction shows it disabled, `false` hides it.
+ * What the user may do with a task (mirrors public.transition_task):
+ * `true` allows it, a BlockedAction shows it disabled, `false` hides it.
+ *
+ * The flow is free: the current assignee, the creator or a leader moves the
+ * task between its working statuses in any order, and picks who is
+ * responsible from then on. While in validation, whoever validates may move
+ * it too. Delivery still goes through the validator's approval.
  */
 export function taskActions(
   data: Snapshot,
@@ -297,29 +298,17 @@ export function taskActions(
   const review = projectReview(
     data.projects.find((p) => p.id === task.project_id),
   ).required;
-  const submitter = assignee || admin;
-  const canReturn =
-    !creator &&
-    ((assignee && ["open", "progress", "rejected"].includes(s)) ||
-      (admin && ["open", "progress", "review", "rejected"].includes(s)));
+  const mover =
+    !!me && (assignee || creator || leader || (s === "review" && approver));
   const reopenExpired =
     !admin &&
     !!task.delivered_at &&
     now - Date.parse(task.delivered_at) >= REOPEN_WINDOW_MS;
   return {
-    /** Resume open or rejected work. */
-    start:
-      (leader || creator || assignee) && (s === "open" || s === "rejected"),
-    /** A returned task goes back to execution through its creator. */
-    resend: s === "returned" && (creator || admin),
-    submit: submitter
-      ? canSubmitTask(task) ||
-        (s === "review" && review
-          ? ({ blocked: "Em validação…" } as BlockedAction)
-          : false)
-      : false,
-    /** Validation requests need a description; direct conclusions don't. */
-    submitNeedsNote: review,
+    /** Change the status (among the working ones) and/or the assignee. */
+    move: s !== "done" && mover,
+    /** Deliver straight from the status menu: projects without validation. */
+    deliver: s !== "done" && mover && !review,
     approveInternal: approver && s === "review" && !task.internal_approved_by,
     approveClient:
       approver &&
@@ -327,12 +316,6 @@ export function taskActions(
       task.requires_client_approval &&
       !!task.internal_approved_by &&
       !task.client_approved_by,
-    reject: approver && s === "review",
-    return: canReturn
-      ? true
-      : !creator && submitter && s === "returned"
-        ? ({ blocked: "Devolvida…" } as BlockedAction)
-        : false,
     reopen:
       s === "done" && (admin || creator || assignee || approver)
         ? reopenExpired
@@ -347,16 +330,23 @@ export function taskActions(
 export type TaskActions = ReturnType<typeof taskActions>;
 /**
  * Where a task stands for the person looking at the list: assigned to them,
- * created by them for someone else, in one of their teams, or elsewhere.
- * Mirrored on the server by the task list's `scope` filter (api.ts).
+ * created by them for someone else, one they take part in (they were
+ * responsible before, or were mentioned), in one of their teams, or
+ * elsewhere. Mirrored on the server by the task list's `scope` filter.
  */
-export type TaskScope = "mine" | "created" | "teams" | "others";
+export type TaskScope =
+  "mine" | "created" | "participating" | "teams" | "others";
 export const TASK_SCOPES: { id: TaskScope; label: string; hint: string }[] = [
   { id: "mine", label: "Para você", hint: "Você é o responsável" },
   {
     id: "created",
     label: "Criadas por você",
     hint: "Você criou para outra pessoa",
+  },
+  {
+    id: "participating",
+    label: "Participando",
+    hint: "Você já foi responsável ou foi mencionado",
   },
   {
     id: "teams",
@@ -379,6 +369,13 @@ export function myTeams(data: Snapshot, userId: string) {
   );
   return { teams, clients };
 }
+/** Takes part in the task: was responsible before, or was mentioned. */
+export function isParticipant(
+  task: Pick<Task, "participant_ids">,
+  userId: string,
+) {
+  return !!task.participant_ids?.includes(userId);
+}
 export function taskScope(
   data: Snapshot,
   task: Task,
@@ -387,6 +384,7 @@ export function taskScope(
 ): TaskScope {
   if (task.assignee_id === userId) return "mine";
   if (task.creator_id === userId) return "created";
+  if (isParticipant(task, userId)) return "participating";
   const inMyTeams = task.team_id
     ? mine.teams.has(task.team_id)
     : mine.clients.has(
@@ -400,4 +398,104 @@ export function taskTeamName(data: Snapshot, task: Task) {
     (task.team_id && data.teams.find((t) => t.id === task.team_id)?.name) ||
     "Sem equipe"
   );
+}
+/**
+ * Who should be responsible when the task moves to `target` — only a
+ * suggestion: the person moving the task confirms or picks someone else.
+ * Delegation and missing information go back to the creator, validation to
+ * whoever validates, execution and changes to whoever last executed it.
+ */
+export function suggestedAssignee(
+  data: Snapshot,
+  task: Task,
+  target: Status,
+  events: TaskEvent[] = [],
+): string {
+  const active = (id?: string | null) =>
+    !!id && data.members.some((m) => m.user_id === id && m.active);
+  const pick = (...ids: (string | null | undefined)[]) =>
+    ids.find(active) ?? task.assignee_id;
+  if (target === task.status) return task.assignee_id;
+  if (target === "open" || target === "returned") return pick(task.creator_id);
+  if (target === "review") {
+    const review = projectReview(
+      data.projects.find((p) => p.id === task.project_id),
+    );
+    if (!review.required) return task.assignee_id;
+    if (task.project_id && review.approver === "supervisor") {
+      const supervisors = data.members
+        .filter((m) => m.active && isTaskSupervisor(data, task, m.user_id))
+        .map((m) => m.user_id);
+      return supervisors.includes(task.assignee_id)
+        ? task.assignee_id
+        : pick(supervisors[0], task.creator_id);
+    }
+    return pick(task.creator_id);
+  }
+  return pick(lastExecutor(task, events));
+}
+/** Whoever last held the task while it was being executed or changed. */
+function lastExecutor(task: Task, events: TaskEvent[]) {
+  if (["progress", "rejected"].includes(task.status)) return task.assignee_id;
+  const executing = [...events]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .find(
+      (e) =>
+        ["progress", "rejected"].includes(String(e.detail.from)) &&
+        typeof e.detail.assignee_from === "string",
+    );
+  return executing
+    ? String(executing.detail.assignee_from)
+    : task.status === "open"
+      ? task.assignee_id
+      : null;
+}
+/**
+ * How long the task has spent in each status (as in ClickUp's status menu),
+ * from its history: each move records since when the previous status held
+ * (older events don't, and history older than a month is pruned, so that
+ * time is only partly counted). The current status runs from when the task
+ * entered it.
+ */
+export function statusDurations(
+  task: Pick<Task, "status" | "created_at" | "status_changed_at">,
+  events: TaskEvent[],
+  now = Date.now(),
+): Partial<Record<Status, number>> {
+  const result: Partial<Record<Status, number>> = {};
+  const add = (s: Status, ms: number) => {
+    if (ms > 0) result[s] = (result[s] ?? 0) + ms;
+  };
+  const moves = events
+    .filter(
+      (e) =>
+        typeof e.detail.from === "string" &&
+        typeof e.detail.to === "string" &&
+        e.detail.from !== e.detail.to,
+    )
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const created = events.some((e) => e.action === "created");
+  let since = created || !moves.length ? Date.parse(task.created_at) : NaN;
+  for (const e of moves) {
+    const at = Date.parse(e.created_at);
+    const start =
+      typeof e.detail.status_since === "string"
+        ? Date.parse(e.detail.status_since)
+        : since;
+    if (Number.isFinite(start)) add(e.detail.from as Status, at - start);
+    since = at;
+  }
+  const entered = task.status_changed_at
+    ? Date.parse(task.status_changed_at)
+    : since;
+  if (Number.isFinite(entered)) add(task.status, now - entered);
+  return result;
+}
+/** "3 d", "5 h", "12 min" — a compact time-in-status label. */
+export function shortSpan(ms: number) {
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `${Math.max(min, 1)} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} h`;
+  return `${Math.floor(h / 24)} d`;
 }

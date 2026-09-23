@@ -180,11 +180,13 @@ await check("executor pode iniciar e enviar para validação", async () => {
   await rpc("transition_task", [task, 2, "submit", ""]);
 });
 await check("executor não aprova internamente", () =>
-  denied(() => rpc("transition_task", [task, 3, "approve_internal", ""])),
+  denied(() =>
+    rpc("transition_task", [task, 3, "approve_internal", "Tudo certo"]),
+  ),
 );
 await as(manager);
 await check("gestor da equipe aprova mas aguarda cliente", async () => {
-  await rpc("transition_task", [task, 3, "approve_internal", ""]);
+  await rpc("transition_task", [task, 3, "approve_internal", "Tudo certo"]);
   assert.equal(
     (await db.query("select status from tasks where id=$1", [task])).rows[0]
       .status,
@@ -254,9 +256,11 @@ await check(
     await as(member);
     await rpc("transition_task", [id, 1, "start", ""]);
     await rpc("transition_task", [id, 2, "submit", ""]);
-    await denied(() => rpc("transition_task", [id, 3, "approve_internal", ""]));
+    await denied(() =>
+      rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]),
+    );
     await as(manager);
-    await rpc("transition_task", [id, 3, "approve_internal", ""]);
+    await rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]);
     assert.equal(await statusOf(id), "done");
   },
 );
@@ -268,7 +272,9 @@ await check("supervisores são escolhidos na equipe", async () => {
   await as(admin);
   await rpc("update_team", [team, "Equipe A", [manager, member], []]);
   await as(manager);
-  await denied(() => rpc("transition_task", [id, 3, "approve_internal", ""]));
+  await denied(() =>
+    rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]),
+  );
   await as(admin);
   await rpc("update_team", [team, "Equipe A", [member], [manager]]);
   const people = (
@@ -281,14 +287,13 @@ await check("supervisores são escolhidos na equipe", async () => {
   assert.equal(people.find((p) => p.user_id === manager)?.supervisor, true);
   assert.equal(people.find((p) => p.user_id === member)?.supervisor, false);
   await as(manager);
-  await rpc("transition_task", [id, 3, "approve_internal", ""]);
+  await rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]);
   assert.equal(await statusOf(id), "done");
 });
-await check("colaborador não pode ser supervisor", async () => {
+await check("colaborador também pode ser supervisor", async () => {
   await as(admin);
-  await denied(() =>
-    rpc("update_team", [team, "Equipe A", [manager, member], [member]]),
-  );
+  await rpc("update_team", [team, "Equipe A", [manager, member], [member]]);
+  await rpc("update_team", [team, "Equipe A", [member], [manager]]);
 });
 await check(
   "validação pelo criador: gestor não criador não aprova",
@@ -298,10 +303,211 @@ await check(
     await rpc("transition_task", [id, 1, "start", ""]);
     await rpc("transition_task", [id, 2, "submit", ""]);
     await as(manager);
-    await denied(() => rpc("transition_task", [id, 3, "approve_internal", ""]));
+    await denied(() =>
+      rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]),
+    );
     await as(member);
-    await rpc("transition_task", [id, 3, "approve_internal", ""]);
+    await rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]);
     assert.equal(await statusOf(id), "done");
+  },
+);
+const taskRow = async (id) =>
+  (await db.query("select * from tasks where id=$1", [id])).rows[0];
+const versionOf = async (id) => {
+  const who = (
+    await db.query("select current_setting('request.jwt.claim.sub',true) as u")
+  ).rows[0].u;
+  await as(admin);
+  const v = (await taskRow(id)).version;
+  await as(who || null);
+  return v;
+};
+const moveTo = async (id, status, note = "", assignee = null) => {
+  const v = await versionOf(id);
+  return rpc("transition_task", [id, v, "move", note, status, assignee]);
+};
+await check(
+  "fluxo livre: responsável muda o status e passa a tarefa adiante",
+  async () => {
+    const id = await projectTask(true, "creator", admin);
+    await as(member);
+    await moveTo(id, "review", "", admin);
+    await as(admin);
+    const t = await taskRow(id);
+    assert.equal(t.status, "review");
+    assert.equal(t.assignee_id, admin);
+  },
+);
+await check(
+  "quem já foi responsável continua vendo e comentando, mas não move",
+  async () => {
+    const id = await projectTask(true, "creator", admin);
+    await as(member);
+    await moveTo(id, "progress", "", admin);
+    assert.equal(
+      (await db.query("select id from tasks where id=$1", [id])).rows.length,
+      1,
+    );
+    await rpc("add_comment", [id, "Deixei os arquivos no Drive"]);
+    await denied(() => moveTo(id, "review"));
+  },
+);
+await check("alteração e devolvida exigem o texto do pedido", async () => {
+  const id = await projectTask(true, "creator", admin);
+  await as(admin);
+  await denied(() => moveTo(id, "rejected"));
+  await denied(() => moveTo(id, "returned"));
+  await moveTo(id, "rejected", "Trocar o título", member);
+  const t = await taskRow(id);
+  assert.equal(t.status, "rejected");
+  assert.equal(t.revision, 2);
+  const comments = (
+    await db.query("select body from comments where task_id=$1", [id])
+  ).rows;
+  assert.ok(comments.some((c) => c.body.includes("Alteração")));
+});
+await check("status vai e volta sem ordem fixa", async () => {
+  const id = await projectTask(true, "creator", admin);
+  await as(member);
+  await moveTo(id, "review");
+  await moveTo(id, "open");
+  await moveTo(id, "progress");
+  await as(admin);
+  const t = await taskRow(id);
+  assert.equal(t.status, "progress");
+  assert.ok(t.status_changed_at);
+  const events = (
+    await db.query(
+      "select detail from task_events where task_id=$1 and action='move'",
+      [id],
+    )
+  ).rows;
+  assert.equal(events.length, 3);
+});
+await check("entrega continua exigindo quem valida", async () => {
+  const id = await projectTask(true, "creator", admin);
+  await as(member);
+  await denied(() => moveTo(id, "done"));
+  await moveTo(id, "review");
+  await as(manager);
+  await denied(() => moveTo(id, "done"));
+  const v = await versionOf(id);
+  await denied(() => rpc("transition_task", [id, v, "approve_internal", "Ok"]));
+  await as(admin);
+  await rpc("transition_task", [
+    id,
+    await versionOf(id),
+    "approve_internal",
+    "Aprovado",
+  ]);
+  assert.equal(await statusOf(id), "done");
+});
+await check("em validação, quem valida pode pedir alteração", async () => {
+  const id = await projectTask(true, "supervisor", admin);
+  await as(member);
+  await moveTo(id, "review");
+  await as(manager);
+  await moveTo(id, "rejected", "Ajustar a arte", member);
+  await as(admin);
+  assert.equal(await statusOf(id), "rejected");
+});
+await check("projeto sem validação entrega pelo menu de status", async () => {
+  const id = await projectTask(false, "creator", admin);
+  await as(member);
+  await moveTo(id, "done");
+  await as(admin);
+  assert.equal(await statusOf(id), "done");
+});
+await check("pessoa sem acesso não muda o status", async () => {
+  const id = await projectTask(true, "creator", admin);
+  await as(isolated);
+  await denied(() => moveTo(id, "progress"));
+});
+const mentionBody = (...people) =>
+  "mavi:richtext:v1:" +
+  JSON.stringify({
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: "Veja isto " },
+          ...people.map(([id, label]) => ({
+            type: "mention",
+            attrs: { id, label },
+          })),
+        ],
+      },
+    ],
+  });
+await check("menção torna a pessoa participante e a notifica", async () => {
+  const id = await projectTask(true, "creator", admin);
+  await as(isolated);
+  assert.equal(
+    (await db.query("select id from tasks where id=$1", [id])).rows.length,
+    0,
+  );
+  await as(admin);
+  await rpc("add_comment", [
+    id,
+    mentionBody([isolated, "Isolado A"], [admin, "Admin A"]),
+  ]);
+  await as(isolated);
+  const t = (await db.query("select * from tasks where id=$1", [id])).rows[0];
+  assert.ok(t, "a pessoa mencionada passa a ver a tarefa");
+  assert.ok(t.participant_ids.includes(isolated));
+  const inbox = (
+    await db.query("select * from public.my_notifications($1)", [A])
+  ).rows;
+  assert.equal(inbox.length, 1);
+  assert.equal(inbox[0].task_id, id);
+  assert.equal(inbox[0].actor_name, "Admin A");
+  assert.match(inbox[0].excerpt, /@Isolado A/);
+  await rpc("add_comment", [id, "Obrigado!"]);
+  await rpc("read_notifications", [A, null]);
+  assert.equal(
+    (await db.query("select * from public.my_notifications($1)", [A])).rows[0]
+      .read_at !== null,
+    true,
+  );
+  await as(admin);
+  assert.equal(
+    (await db.query("select * from public.my_notifications($1)", [A])).rows
+      .length,
+    0,
+    "quem menciona a si mesmo não é notificado",
+  );
+});
+await check("notificações são só de quem foi mencionado", async () => {
+  await as(member);
+  assert.equal(
+    (await db.query("select * from notifications where user_id=$1", [isolated]))
+      .rows.length,
+    0,
+  );
+});
+await check("menção em nota de mudança de status também notifica", async () => {
+  const id = await projectTask(true, "creator", admin);
+  await as(admin);
+  await moveTo(id, "rejected", mentionBody([manager, "Gestor A"]), member);
+  await as(manager);
+  assert.equal(
+    (await db.query("select * from public.my_notifications($1)", [A])).rows
+      .length,
+    1,
+  );
+});
+await check(
+  "aba Participando: participante que não é responsável nem criador",
+  async () => {
+    await as(isolated);
+    const rows = (
+      await db.query(
+        "select id from tasks where participant_ids @> array[$1]::uuid[] and assignee_id<>$1 and creator_id<>$1",
+        [isolated],
+      )
+    ).rows;
+    assert.equal(rows.length, 1);
   },
 );
 await as(member);
@@ -619,12 +825,12 @@ await check("colaborador não edita pessoas", async () => {
     rpc("update_member", [A, isolated, "Isolado A", "member", true, []]),
   );
 });
-await check("quem deixa de ser gestor perde a supervisão", async () => {
+await check("quem deixa de ser gestor mantém a supervisão", async () => {
   await as(admin);
   await rpc("update_team", [team, "Equipe A", [member], [manager]]);
   await rpc("update_member", [A, manager, "Gestor A", "member", true, [team]]);
   assert.deepEqual(await memberTeams(manager), [
-    { team_id: team, supervisor: false },
+    { team_id: team, supervisor: true },
   ]);
   await rpc("update_member", [A, manager, "Gestor A", "manager", true, [team]]);
   await rpc("update_team", [team, "Equipe A", [member], [manager]]);

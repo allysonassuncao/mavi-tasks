@@ -55,6 +55,23 @@ describe("De quem é a tarefa (abas da lista)", () => {
     expect(
       taskScope(data, task(data, { contract_id: clientOf(1) }), ME, mine),
     ).toBe("others");
+    // Quem já foi responsável ou foi mencionado: "Participando".
+    expect(
+      taskScope(
+        data,
+        task(data, { team_id: "t-mine", participant_ids: ["y", ME] }),
+        ME,
+        mine,
+      ),
+    ).toBe("participating");
+    expect(
+      taskScope(
+        data,
+        task(data, { creator_id: ME, participant_ids: [ME] }),
+        ME,
+        mine,
+      ),
+    ).toBe("created");
   });
 
   // A tiny query builder that records the PostgREST filters.
@@ -64,6 +81,14 @@ describe("De quem é a tarefa (abas da lista)", () => {
       eq: (c: string, v: string) => (calls.push(`${c}=eq.${v}`), q),
       neq: (c: string, v: string) => (calls.push(`${c}=neq.${v}`), q),
       or: (f: string) => (calls.push(`or=(${f})`), q),
+      contains: (c: string, v: string[]) => (
+        calls.push(`${c}=cs.{${v.join(",")}}`),
+        q
+      ),
+      not: (c: string, op: string, v: string) => (
+        calls.push(`${c}=not.${op}.${v}`),
+        q
+      ),
     };
     return { q, calls };
   }
@@ -86,14 +111,21 @@ describe("De quem é a tarefa (abas da lista)", () => {
     };
     expect(f("mine")).toEqual(["assignee_id=eq.me"]);
     expect(f("created")).toEqual(["creator_id=eq.me", "assignee_id=neq.me"]);
+    expect(f("participating")).toEqual([
+      "assignee_id=neq.me",
+      "creator_id=neq.me",
+      "participant_ids=cs.{me}",
+    ]);
     expect(f("teams")).toEqual([
       "assignee_id=neq.me",
       "creator_id=neq.me",
+      "participant_ids=not.cs.{me}",
       `or=(team_id.in.(t-mine),and(team_id.is.null,contract_id.in.(${contractsOfMyClient})))`,
     ]);
     expect(f("others")).toEqual([
       "assignee_id=neq.me",
       "creator_id=neq.me",
+      "participant_ids=not.cs.{me}",
       `or=(and(team_id.not.is.null,team_id.not.in.(t-mine)),and(team_id.is.null,contract_id.not.in.(${contractsOfMyClient})))`,
     ]);
   });

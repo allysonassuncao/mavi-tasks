@@ -11,6 +11,7 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -18,6 +19,7 @@ import {
 import {
   CalendarDays,
   Check,
+  CircleDot,
   Clock3,
   Download,
   Flag,
@@ -38,9 +40,10 @@ import {
   ChevronsLeft,
   ChevronsRight,
   UserRoundPen,
+  Users,
   Eye,
 } from "lucide-react";
-import { Modal, Avatar, Badge, Empty, Loading } from "./components";
+import { Modal, Avatar, Empty, Loading } from "./components";
 import {
   type Snapshot,
   type Task,
@@ -48,7 +51,10 @@ import {
   type Attachment,
   type TaskEvent,
   type ProjectApprover,
+  type Status,
   priorities,
+  statuses,
+  workingStatuses,
 } from "./types";
 import {
   dateLabel,
@@ -58,9 +64,13 @@ import {
   names,
   formatClock,
   projectReview,
+  shortSpan,
+  statusDurations,
+  suggestedAssignee,
   taskActions,
   type BlockedAction,
 } from "./domain";
+import { StatusMenu, StatusPill, type StatusChoice } from "./StatusMenu";
 import { useTaskSeconds } from "./useTaskTime";
 import { supabase } from "./supabase";
 import { rpc, taskExtras, invalidateTaskExtras } from "./api";
@@ -474,45 +484,85 @@ export function CreateForm({
   );
 }
 const PANEL_KEY = "mavi:task-panel";
+const statusLabel = (value: unknown) =>
+  statuses[value as Status]?.label ?? String(value);
+/** How the history names each event, old linear-flow actions included. */
+function eventLabel(e: TaskEvent) {
+  const { from, to } = e.detail;
+  if (to === "done" && from !== "done") return "Tarefa entregue";
+  if (e.action === "move")
+    return from === to ? "Responsável alterado" : `Status: ${statusLabel(to)}`;
+  if (e.action === "reopen") return `Tarefa reaberta · ${statusLabel(to)}`;
+  if (e.action === "start" && from === "returned")
+    return "Reenviada ao responsável";
+  return (
+    (
+      {
+        created: "Tarefa criada",
+        start: "Trabalho iniciado",
+        submit: "Enviada para validação",
+        return: "Devolvida ao criador",
+        reject: "Reprovada na validação",
+        approve_internal: "Aprovada na validação",
+        approve_client: "Aprovação do cliente registrada",
+        edited: "Tarefa editada",
+      } as Record<string, string>
+    )[e.action] ?? e.action
+  );
+}
 const blocked = (value: unknown): value is BlockedAction =>
   typeof value === "object" && value !== null && "blocked" in value;
-/** Field label, submit label and confirmation for each action that takes a note. */
-const noteForm: Record<
-  string,
-  { label: string; submit: string; confirm?: string }
-> = {
-  start: {
-    label: "Parecer para reenviar ao responsável",
-    submit: "Enviar novamente",
-  },
-  submit: {
-    label: "Descreva o que foi entregue para a validação",
-    submit: "Confirmar solicitação",
-  },
-  approve_internal: {
-    label: "Observações da validação",
-    submit: "Aprovar tarefa",
-  },
-  approve_client: {
-    label: "Quem aprovou, quando e por qual meio?",
-    submit: "Registrar aprovação",
-  },
-  reject: {
-    label: "Descreva o motivo da reprovação",
-    submit: "Reprovar tarefa",
-    confirm: "Reprovar esta tarefa e devolvê-la para ajustes?",
-  },
-  return: {
-    label: "Descreva o motivo da devolução",
-    submit: "Confirmar devolução",
-    confirm: "Devolver esta tarefa ao criador?",
-  },
-  reopen: {
-    label: "Descreva o motivo da reabertura",
-    submit: "Confirmar reabertura",
-    confirm: "Reabrir esta tarefa?",
-  },
-};
+/**
+ * The note field of each action: its label, the shortest note accepted (0 =
+ * optional) and the submit label. Moves ask for the missing information
+ * (Devolvida) or the requested change (Alteração); the rest is optional.
+ */
+function noteForm(action: string, target: Status | null, current: Status) {
+  if (action === "approve_internal")
+    return {
+      label: "Observações da validação",
+      min: 3,
+      submit: "Aprovar entrega",
+    };
+  if (action === "approve_client")
+    return {
+      label: "Quem aprovou, quando e por qual meio?",
+      min: 5,
+      submit: "Registrar aprovação",
+    };
+  if (action === "reopen")
+    return {
+      label: "Descreva o motivo da reabertura",
+      min: 3,
+      submit: "Confirmar reabertura",
+    };
+  if (!target || target === current)
+    return {
+      label: "Comentário (opcional)",
+      min: 0,
+      submit: "Trocar responsável",
+    };
+  if (target === "returned")
+    return {
+      label: "Quais informações faltam?",
+      min: 3,
+      submit: "Mover para Devolvida",
+    };
+  if (target === "rejected")
+    return {
+      label: "O que precisa ser alterado?",
+      min: 3,
+      submit: "Mover para Alteração",
+    };
+  return {
+    label: "Comentário (opcional)",
+    min: 0,
+    submit:
+      target === "done"
+        ? "Entregar tarefa"
+        : `Mover para ${statuses[target].label}`,
+  };
+}
 /** Adds plain paragraphs (e.g. questionnaire answers) before a rich-text note. */
 function prependParagraphs(note: string, lines: string[]) {
   return serializeDescription({
@@ -562,6 +612,8 @@ export function TaskDetail({
     [editing, setEditing] = useState(false),
     [localRefresh, setLocalRefresh] = useState(0),
     [action, setAction] = useState(""),
+    // Where a move or reopening takes the task (its status, for reassigning).
+    [target, setTarget] = useState<Status | null>(null),
     [uploading, setUploading] = useState(false);
   const [editorUploading, setEditorUploading] = useState(false);
   const [commentRevision, setCommentRevision] = useState(0);
@@ -661,7 +713,87 @@ export function TaskDetail({
       alive = false;
     };
   }, [task.id, demo, demoStore, refresh, localRefresh]);
-  async function transition(value: string, message = "") {
+  const durations = useMemo(
+    () => statusDurations(task, extras.events),
+    // Recomputed when the task or its history changes, not on every tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [task.status, task.status_changed_at, task.created_at, extras.events],
+  );
+  const activeMembers = data.members.filter((m) => m.active);
+  // Who can be mentioned with "@": any active person of the company (a
+  // mention makes them a participant, so they can open the task).
+  const mentionPeople = useMemo(
+    () =>
+      activeMembers
+        .filter((m) => m.user_id !== user)
+        .map((m) => ({ id: m.user_id, label: m.name, avatar: m.avatar_url })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data.members, user],
+  );
+  // Past assignees and people mentioned, besides the current assignee.
+  const participants = (task.participant_ids ?? [])
+    .filter((id) => id !== task.assignee_id)
+    .map((id) => data.members.find((m) => m.user_id === id))
+    .filter((m): m is NonNullable<typeof m> => !!m);
+  const memberName = (id: string) =>
+    data.members.find((m) => m.user_id === id)?.name ?? "Usuário removido";
+  const moveHint =
+    "Somente o responsável, o criador ou um gestor muda o status";
+  const statusChoices: StatusChoice[] = [
+    ...workingStatuses.map((status) => ({
+      status,
+      disabled:
+        task.status === "done"
+          ? acts.reopen === true
+            ? undefined
+            : blocked(acts.reopen)
+              ? acts.reopen.blocked
+              : "Sem permissão para reabrir"
+          : acts.move
+            ? undefined
+            : moveHint,
+    })),
+    {
+      status: "done" as Status,
+      disabled:
+        task.status === "done" || acts.approveInternal || acts.deliver
+          ? undefined
+          : review.required
+            ? task.status === "review" && task.internal_approved_by
+              ? "Aguardando a aprovação do cliente"
+              : `A entrega é aprovada por ${reviewer}, com a tarefa em validação`
+            : moveHint,
+    },
+  ];
+  // The form opens below the description: bring it into view and focus
+  // its first field.
+  const actionForm = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const form = actionForm.current;
+    if (!action || !form) return;
+    form.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    form
+      .querySelector<HTMLElement>("button, [contenteditable=true]")
+      ?.focus({ preventScroll: true });
+  }, [action, target]);
+  function pickStatus(next: Status) {
+    setError("");
+    if (next === "done") {
+      if (task.status === "done") return;
+      if (acts.approveInternal) {
+        setTarget(null);
+        setAction("approve_internal");
+        return;
+      }
+    }
+    setTarget(next);
+    setAction(task.status === "done" ? "reopen" : "move");
+  }
+  async function transition(
+    value: string,
+    message = "",
+    move: { p_status?: Status | null; p_assignee?: string | null } = {},
+  ) {
     try {
       setError("");
       await mutate("transition_task", {
@@ -669,8 +801,10 @@ export function TaskDetail({
         p_version: task.version,
         p_action: value,
         p_note: message,
+        ...move,
       });
       setAction("");
+      setTarget(null);
       invalidateTaskExtras(task.id);
       // The task itself is patched optimistically by mutate(); only the
       // activity/history tab still needs a (small, scoped) refetch.
@@ -779,7 +913,6 @@ export function TaskDetail({
           </div>
           <div className="detail-title">
             <h2>{task.title}</h2>
-            <Badge status={task.status} />
           </div>
           {error && (
             <p className="form-error" role="alert">
@@ -789,16 +922,68 @@ export function TaskDetail({
           <div className="task-properties">
             <div>
               <span>
-                <UserRound size={16} /> Responsável
+                <CircleDot size={16} /> Status
               </span>
               <strong>
-                <Avatar
-                  name={n.member?.name ?? "?"}
-                  src={n.member?.avatar_url}
-                  size="small"
+                <StatusMenu
+                  current={task.status}
+                  choices={statusChoices}
+                  durations={durations}
+                  onPick={pickStatus}
                 />
-                {n.member?.name}
+                {durations[task.status] ? (
+                  <small className="status-time">
+                    há {shortSpan(durations[task.status]!)}
+                  </small>
+                ) : null}
               </strong>
+            </div>
+            <div>
+              <span>
+                <UserRound size={16} /> Responsável
+              </span>
+              {acts.move ? (
+                <button
+                  type="button"
+                  className="property-button"
+                  title="Trocar responsável"
+                  onClick={() => pickStatus(task.status)}
+                >
+                  <Avatar
+                    name={n.member?.name ?? "?"}
+                    src={n.member?.avatar_url}
+                    size="small"
+                  />
+                  {n.member?.name}
+                  <UserRoundPen size={14} />
+                </button>
+              ) : (
+                <strong>
+                  <Avatar
+                    name={n.member?.name ?? "?"}
+                    src={n.member?.avatar_url}
+                    size="small"
+                  />
+                  {n.member?.name}
+                </strong>
+              )}
+            </div>
+            <div>
+              <span>
+                <Users size={16} /> Participantes
+              </span>
+              {participants.length ? (
+                <strong className="participant-list">
+                  {participants.map((m) => (
+                    <span key={m.user_id} title={m.name}>
+                      <Avatar name={m.name} src={m.avatar_url} size="small" />
+                      {participants.length <= 3 && m.name}
+                    </span>
+                  ))}
+                </strong>
+              ) : (
+                <small>Mencione alguém com @ nos comentários</small>
+              )}
             </div>
             <div>
               <span>
@@ -1037,55 +1222,26 @@ export function TaskDetail({
               )}
             </span>
           </div>
-          {!action && (
+          {!action && (acts.approveInternal || acts.approveClient) && (
             <div className="detail-actions">
-              {acts.start && (
-                <Button
-                  className="btn primary"
-                  disabled={busy}
-                  loading={busy}
-                  onClick={() => void transition("start")}
-                >
-                  <Check size={15} /> Marcar em andamento
-                </Button>
-              )}
-              {acts.resend && (
-                <Button
-                  className="btn primary"
-                  disabled={busy}
-                  loading={busy}
-                  onClick={() => setAction("start")}
-                >
-                  <Send size={15} /> Enviar novamente
-                </Button>
-              )}
-              {acts.submit && (
-                <Button
-                  className="btn primary"
-                  disabled={busy || blocked(acts.submit)}
-                  loading={busy}
-                  onClick={() =>
-                    acts.submitNeedsNote
-                      ? setAction("submit")
-                      : void transition("submit")
-                  }
-                >
-                  <Check size={16} />{" "}
-                  {blocked(acts.submit)
-                    ? acts.submit.blocked
-                    : review.required
-                      ? "Enviar para validação"
-                      : "Concluir tarefa"}
-                </Button>
-              )}
               {acts.approveInternal && (
                 <Button
                   className="btn primary"
                   disabled={busy}
                   loading={busy}
-                  onClick={() => setAction("approve_internal")}
+                  onClick={() => pickStatus("done")}
                 >
-                  <Check size={16} /> Aprovar internamente
+                  <Check size={16} /> Aprovar entrega
+                </Button>
+              )}
+              {acts.approveInternal && (
+                <Button
+                  className="btn secondary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() => pickStatus("rejected")}
+                >
+                  Pedir alteração
                 </Button>
               )}
               {acts.approveClient && (
@@ -1093,42 +1249,12 @@ export function TaskDetail({
                   className="btn secondary"
                   disabled={busy}
                   loading={busy}
-                  onClick={() => setAction("approve_client")}
+                  onClick={() => {
+                    setTarget(null);
+                    setAction("approve_client");
+                  }}
                 >
                   Registrar aprovação do cliente
-                </Button>
-              )}
-              {acts.reject && (
-                <Button
-                  className="btn secondary"
-                  disabled={busy}
-                  loading={busy}
-                  onClick={() => setAction("reject")}
-                >
-                  Solicitar ajustes
-                </Button>
-              )}
-              {acts.return && (
-                <Button
-                  className="btn secondary"
-                  disabled={busy || blocked(acts.return)}
-                  loading={busy}
-                  onClick={() => setAction("return")}
-                >
-                  {blocked(acts.return)
-                    ? acts.return.blocked
-                    : "Devolver ao criador"}
-                </Button>
-              )}
-              {acts.reopen && (
-                <Button
-                  className="btn secondary"
-                  disabled={busy || blocked(acts.reopen)}
-                  loading={busy}
-                  title={blocked(acts.reopen) ? acts.reopen.blocked : undefined}
-                  onClick={() => setAction("reopen")}
-                >
-                  Reabrir tarefa
                 </Button>
               )}
             </div>
@@ -1138,19 +1264,24 @@ export function TaskDetail({
           )}
           {action && (
             <form
+              ref={actionForm}
               className="action-note"
+              key={`${action}-${target ?? ""}`}
               onSubmit={(e) => {
                 e.preventDefault();
                 if (editorUploading) return;
                 const fd = new FormData(e.currentTarget);
+                const form = noteForm(action, target, task.status);
                 let note = String(fd.get("note") ?? "");
-                const min = action === "approve_client" ? 5 : 3;
-                if (richTextPlain(note).length < min) {
+                const written = richTextPlain(note).trim().length;
+                if (written < form.min) {
                   setError(
-                    `Escreva ao menos ${min} caracteres no campo "${noteForm[action].label}".`,
+                    `Escreva ao menos ${form.min} caracteres no campo "${form.label}".`,
                   );
                   return;
                 }
+                // An empty optional note posts no comment.
+                if (!written) note = "";
                 if (action === "reopen") {
                   const kind = fd.get("reopen_kind"),
                     origin = fd.get("reopen_origin");
@@ -1164,15 +1295,65 @@ export function TaskDetail({
                     }`,
                     `Pedido de quem? ${origin === "client" ? "Cliente" : "Interno"}`,
                   ]);
+                  if (!window.confirm("Reabrir esta tarefa?")) return;
                 }
-                if (
-                  ["return", "reject", "reopen"].includes(action) &&
-                  !window.confirm(noteForm[action].confirm)
-                )
-                  return;
-                void transition(action, note);
+                const moving = action === "move" || action === "reopen";
+                void transition(
+                  action,
+                  note,
+                  moving
+                    ? {
+                        p_status: target,
+                        p_assignee: String(fd.get("assignee") ?? "") || null,
+                      }
+                    : {},
+                );
               }}
             >
+              {(action === "move" || action === "reopen") && target && (
+                <>
+                  <div className="move-head">
+                    {action === "move" && target === task.status ? (
+                      <>Trocar o responsável, mantendo</>
+                    ) : action === "reopen" ? (
+                      <>Reabrir em</>
+                    ) : (
+                      <>Mover para</>
+                    )}
+                    <StatusPill status={target} />
+                  </div>
+                  {target !== "done" && (
+                    <label className="move-assignee">
+                      Responsável a partir de agora
+                      <Select
+                        name="assignee"
+                        aria-label="Responsável a partir de agora"
+                        defaultValue={suggestedAssignee(
+                          data,
+                          task,
+                          target,
+                          extras.events,
+                        )}
+                      >
+                        {activeMembers.map((m) => (
+                          <SelectOption key={m.user_id} value={m.user_id}>
+                            {m.name}
+                            {m.user_id === task.assignee_id
+                              ? " (responsável atual)"
+                              : m.user_id === task.creator_id
+                                ? " (criador)"
+                                : ""}
+                          </SelectOption>
+                        ))}
+                      </Select>
+                      <small>
+                        Sugerido pelo novo status. Troque se outra pessoa
+                        cuidará da tarefa agora.
+                      </small>
+                    </label>
+                  )}
+                </>
+              )}
               {action === "reopen" && (
                 <div className="reopen-questions">
                   <fieldset>
@@ -1205,17 +1386,18 @@ export function TaskDetail({
               )}
               <Suspense fallback={<Loading compact />}>
                 <RichTextEditor
-                  key={action}
+                  key={`${action}-${target ?? ""}`}
                   company={task.company_id}
                   demo={demo}
+                  mentions={mentionPeople}
                   name="note"
-                  label={noteForm[action].label}
+                  label={noteForm(action, target, task.status).label}
                   disabled={busy}
                   onUploading={setEditorUploading}
                 />
               </Suspense>
               <small>
-                Este texto também será publicado nos comentários da tarefa.
+                O texto escrito também é publicado nos comentários da tarefa.
               </small>
               <div className="form-footer">
                 <Button
@@ -1223,6 +1405,7 @@ export function TaskDetail({
                   className="btn secondary"
                   onClick={() => {
                     setAction("");
+                    setTarget(null);
                     setError("");
                   }}
                 >
@@ -1233,7 +1416,7 @@ export function TaskDetail({
                   disabled={busy || editorUploading}
                   loading={busy || editorUploading}
                 >
-                  {noteForm[action].submit}
+                  {noteForm(action, target, task.status).submit}
                 </Button>
               </div>
             </form>
@@ -1391,27 +1574,15 @@ export function TaskDetail({
                     <div key={e.id}>
                       <span className="event-dot" />
                       <div>
-                        <strong>
-                          {e.action === "submit" && e.detail.to === "done"
-                            ? "Tarefa concluída"
-                            : e.action === "start" &&
-                                e.detail.from === "returned"
-                              ? "Reenviada ao responsável"
-                              : ((
-                                  {
-                                    created: "Tarefa criada",
-                                    start: "Trabalho iniciado",
-                                    submit: "Enviada para validação",
-                                    return: "Devolvida ao criador",
-                                    reject: "Reprovada na validação",
-                                    approve_internal: "Aprovada na validação",
-                                    approve_client:
-                                      "Aprovação do cliente registrada",
-                                    reopen: "Tarefa reaberta",
-                                    edited: "Tarefa editada",
-                                  } as Record<string, string>
-                                )[e.action] ?? e.action)}
-                        </strong>
+                        <strong>{eventLabel(e)}</strong>
+                        {typeof e.detail.assignee_to === "string" &&
+                          e.detail.assignee_to !== e.detail.assignee_from && (
+                            <span className="event-assignee">
+                              Responsável:{" "}
+                              {memberName(String(e.detail.assignee_from))} →{" "}
+                              {memberName(String(e.detail.assignee_to))}
+                            </span>
+                          )}
                         <small>
                           {new Date(e.created_at).toLocaleString("pt-BR")}
                         </small>
@@ -1439,6 +1610,7 @@ export function TaskDetail({
                     key={commentRevision}
                     company={task.company_id}
                     demo={demo}
+                    mentions={mentionPeople}
                     name="body"
                     label="Comentário"
                     disabled={busy}

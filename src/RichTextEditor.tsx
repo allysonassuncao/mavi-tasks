@@ -20,6 +20,7 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { parseDescription, serializeDescription } from "./rich-text";
+import { mentionExtension, type MentionPerson } from "./mentions";
 import { Loading } from "./ui";
 function ImageNodeView({ node }: NodeViewProps) {
   return (
@@ -57,6 +58,7 @@ export default function RichTextEditor({
   label = "Descrição",
   company,
   demo = false,
+  mentions,
   onUploading,
 }: {
   name?: string;
@@ -65,8 +67,12 @@ export default function RichTextEditor({
   label?: string;
   company: string;
   demo?: boolean;
+  /** People who can be mentioned with "@" (none: no mentions). */
+  mentions?: MentionPerson[];
   onUploading?: (busy: boolean) => void;
 }) {
+  const people = useRef<MentionPerson[]>(mentions ?? []);
+  people.current = mentions ?? [];
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -75,6 +81,7 @@ export default function RichTextEditor({
   const editor = useEditor({
     extensions: [
       ImageNode,
+      mentionExtension(people),
       StarterKit.configure({
         heading: false,
         blockquote: false,
@@ -249,7 +256,7 @@ export default function RichTextEditor({
       )}
       <small>
         Formate o texto e insira, cole ou arraste imagens JPG, PNG e WebP (até 5
-        MB).
+        MB).{mentions?.length ? " Digite @ para mencionar alguém." : ""}
       </small>
     </div>
   );

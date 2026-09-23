@@ -30,6 +30,7 @@ import {
   LayoutDashboard,
   CheckCheck,
   Users,
+  AtSign,
   FolderKanban,
   Clock3,
   ChartNoAxesCombined,
@@ -92,6 +93,7 @@ import {
 } from "./components";
 import {
   type Task,
+  type AppNotification,
   type Project,
   type Snapshot,
   type TimeEntry,
@@ -143,6 +145,7 @@ import { MemberForm } from "./MemberForm";
 import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
 import { useTaskSeconds } from "./useTaskTime";
+import { NotificationInbox } from "./NotificationInbox";
 import {
   notificationState,
   showNotification,
@@ -330,10 +333,14 @@ export default function App() {
     isManager = member?.role === "manager",
     isLeader = isAdmin || isManager;
   // Leaders' task list tabs (see TASK_SCOPES): "" is every task.
-  const listScope: TaskScope | "" =
-    isLeader && TASK_SCOPES.some((t) => t.id === scopeParam)
-      ? (scopeParam as TaskScope)
-      : "";
+  // Collaborators have no tabs, only the "Participando" view.
+  const listScope: TaskScope | "" = (
+    isLeader
+      ? TASK_SCOPES.some((t) => t.id === scopeParam)
+      : scopeParam === "participating"
+  )
+    ? (scopeParam as TaskScope)
+    : "";
   const today = dateKey(new Date(), currentCompany?.timezone);
   const [periodValue, setPeriod] = useUrlState<string>("periodo", "");
   const [currentRunning, setCurrentRunning] = useState<
@@ -743,12 +750,62 @@ export default function App() {
   }, [demo, company, session, period, refresh, reportRefresh]);
 
   // Latest values for the long-lived realtime subscription below.
-  const live = useRef({ user, openTask: setSelected });
-  live.current = { user, openTask: setSelected };
+  // Inbox: who mentioned the person, and where.
+  const [inbox, setInbox] = useState<AppNotification[]>([]);
+  const loadInbox = useCallback(() => {
+    if (!company || (!demo && !session)) return;
+    if (demo) {
+      setInbox(demoStore.current.inbox(user));
+      return;
+    }
+    api
+      .myNotifications(company)
+      .then(setInbox)
+      .catch(() => {});
+  }, [company, demo, session, user]);
+  useEffect(loadInbox, [loadInbox]);
+  function openNotification(n: AppNotification) {
+    setSelected(n.task_id);
+    if (n.read_at) return;
+    const at = new Date().toISOString();
+    setInbox((list) =>
+      list.map((x) => (x.id === n.id ? { ...x, read_at: at } : x)),
+    );
+    if (demo) demoStore.current.readNotifications(user, [n.id]);
+    else void api.readNotifications(company, [n.id]).catch(() => {});
+  }
+  function readAllNotifications() {
+    const at = new Date().toISOString();
+    setInbox((list) => list.map((x) => ({ ...x, read_at: x.read_at ?? at })));
+    if (demo) demoStore.current.readNotifications(user);
+    else void api.readNotifications(company).catch(() => {});
+  }
+
+  // Latest values for the long-lived realtime subscription below.
+  const live = useRef({ user, openTask: setSelected, loadInbox });
+  live.current = { user, openTask: setSelected, loadInbox };
   // Realtime subscription: automatically detects changes from other users/tabs and updates cache & state
   useEffect(() => {
     if (!company || demo || !session) return;
     const unsubscribe = api.subscribeToCompanyChanges(company, {
+      user,
+      onNotification: (row) => {
+        live.current.loadInbox();
+        api
+          .myNotifications(company)
+          .then((list) => {
+            const n = list.find((x) => x.id === row.id);
+            if (!n) return;
+            const text = `${n.actor_name ?? "Alguém"} mencionou você em ${n.task_title}`;
+            notify(text);
+            showNotification("Você foi mencionado", {
+              body: n.excerpt ? `${text}: ${n.excerpt}` : text,
+              tag: n.id,
+              onClick: () => live.current.openTask(n.task_id),
+            });
+          })
+          .catch(() => {});
+      },
       onTaskChange: (task, eventType) => {
         const me = live.current.user;
         if (
@@ -1126,6 +1183,7 @@ export default function App() {
     const counts: Record<TaskScope, number> = {
       mine: 0,
       created: 0,
+      participating: 0,
       teams: 0,
       others: 0,
     };
@@ -1539,6 +1597,12 @@ export default function App() {
               </Button>
             )}
             <InstallApp notify={notify} />
+            <NotificationInbox
+              items={inbox}
+              members={data.members}
+              onOpen={openNotification}
+              onReadAll={readAllNotifications}
+            />
             {notifications !== "unsupported" && (
               <Button
                 className={`notify-toggle ${notifications}`}
@@ -1547,7 +1611,7 @@ export default function App() {
                 title={
                   {
                     default:
-                      "Receber um aviso quando uma tarefa for criada para você",
+                      "Receber um aviso quando uma tarefa for criada para você ou quando mencionarem você",
                     on: "Notificações ativadas — clique para pausar",
                     off: "Notificações pausadas — clique para ativar",
                     denied:
@@ -2010,15 +2074,35 @@ export default function App() {
                       ))}
                     </div>
                     {!isLeader && (
-                      <Button
-                        className={`filter-chip ${mine ? "selected" : ""}`}
-                        onClick={() => {
-                          setMine(!mine);
-                          setOffset(0);
-                        }}
-                      >
-                        <Users size={15} /> Minhas tarefas
-                      </Button>
+                      <>
+                        <Button
+                          className={`filter-chip ${mine ? "selected" : ""}`}
+                          aria-pressed={mine}
+                          onClick={() => {
+                            setMine(!mine);
+                            setScope("");
+                            setOffset(0);
+                          }}
+                        >
+                          <Users size={15} /> Minhas tarefas
+                        </Button>
+                        <Button
+                          className={`filter-chip ${listScope === "participating" ? "selected" : ""}`}
+                          aria-pressed={listScope === "participating"}
+                          title="Tarefas de que você participa: já foi responsável ou foi mencionado"
+                          onClick={() => {
+                            setScope(
+                              listScope === "participating"
+                                ? ""
+                                : "participating",
+                            );
+                            setMine(false);
+                            setOffset(0);
+                          }}
+                        >
+                          <AtSign size={15} /> Participando
+                        </Button>
+                      </>
                     )}
                   </div>
                   {isLeader && (

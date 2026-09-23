@@ -16,6 +16,7 @@ import {
   type Project,
   type Team,
   type TimeEntry,
+  type AppNotification,
 } from "./types";
 
 export interface Filters {
@@ -278,6 +279,8 @@ export function applyScope<
     eq: (c: string, v: string) => Q;
     neq: (c: string, v: string) => Q;
     or: (f: string) => Q;
+    contains: (c: string, v: string[]) => Q;
+    not: (c: string, op: string, v: string) => Q;
   },
 >(query: Q, scope: TaskScope, user: string, lookups: TaskLookups): Q {
   if (scope === "mine") return query.eq("assignee_id", user);
@@ -299,6 +302,10 @@ export function applyScope<
     .filter((k) => clients.has(k.client_id))
     .map((k) => k.id);
   const rest = query.neq("assignee_id", user).neq("creator_id", user);
+  if (scope === "participating")
+    return rest.contains("participant_ids", [user]);
+  // Tasks the person takes part in have their own tab.
+  const others = rest.not("participant_ids", "cs", `{${user}}`);
   if (scope === "teams") {
     const parts = [
       ...(teams.length ? [`team_id.in.(${teams.join(",")})`] : []),
@@ -308,8 +315,8 @@ export function applyScope<
     ];
     // No team at all: nothing can match.
     return parts.length
-      ? rest.or(parts.join(","))
-      : rest.eq("id", "00000000-0000-0000-0000-000000000000");
+      ? others.or(parts.join(","))
+      : others.eq("id", "00000000-0000-0000-0000-000000000000");
   }
   const withTeam = teams.length
     ? `and(team_id.not.is.null,team_id.not.in.(${teams.join(",")}))`
@@ -317,7 +324,7 @@ export function applyScope<
   const withoutTeam = contracts.length
     ? `and(team_id.is.null,contract_id.not.in.(${contracts.join(",")}))`
     : "team_id.is.null";
-  return rest.or(`${withTeam},${withoutTeam}`);
+  return others.or(`${withTeam},${withoutTeam}`);
 }
 
 export async function tasksQuery(
@@ -374,7 +381,13 @@ export async function taskScopeCounts(
       const companyTz =
         (await companies()).find((c) => c.id === company)?.timezone ??
         "America/Sao_Paulo";
-      const scopes: TaskScope[] = ["mine", "created", "teams", "others"];
+      const scopes: TaskScope[] = [
+        "mine",
+        "created",
+        "participating",
+        "teams",
+        "others",
+      ];
       const counts = await Promise.all(
         scopes.map(async (scope) => {
           const { count, error } = await applyScope(
@@ -991,6 +1004,10 @@ export function clearAllCaches(): void {
 }
 
 export interface RealtimeCallbacks {
+  /** Whose notifications to listen to (the signed-in person). */
+  user?: string;
+  /** A new notification for `user` (e.g. they were mentioned). */
+  onNotification?: (row: { id: string; task_id: string }) => void;
   onTaskChange?: (
     task: Task,
     eventType: "INSERT" | "UPDATE" | "DELETE",
@@ -1086,6 +1103,25 @@ export function subscribeToCompanyChanges(
     );
   }
 
+  if (callbacks.user)
+    channel.on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "notifications",
+        filter: `user_id=eq.${callbacks.user}`,
+      },
+      (payload) => {
+        const row = payload.new as {
+          id: string;
+          task_id: string;
+          company_id: string;
+        };
+        if (row.company_id === company) callbacks.onNotification?.(row);
+      },
+    );
+
   const lookupTables = [
     "clients",
     "products",
@@ -1120,4 +1156,19 @@ export function subscribeToCompanyChanges(
   return () => {
     void supabase?.removeChannel(channel);
   };
+}
+
+/** The person's latest notifications, newest first. */
+export async function myNotifications(
+  company: string,
+): Promise<AppNotification[]> {
+  return ((await rpc("my_notifications", {
+    p_company: company,
+    p_limit: 30,
+  })) ?? []) as AppNotification[];
+}
+
+/** Marks notifications as read (all of them when no ids are given). */
+export async function readNotifications(company: string, ids?: string[]) {
+  await rpc("read_notifications", { p_company: company, p_ids: ids ?? null });
 }

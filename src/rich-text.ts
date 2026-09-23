@@ -5,8 +5,10 @@ export type RichNode = {
   text?: string;
   content?: RichNode[];
   marks?: { type: string }[];
-  attrs?: { imageId: string; alt: string };
+  /** inlineImage: imageId and alt; mention: id (the person) and label. */
+  attrs?: { imageId?: string; alt?: string; id?: string; label?: string };
 };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const blocks = new Set([
   "doc",
   "paragraph",
@@ -22,12 +24,24 @@ export function sanitizeDescription(value: unknown): RichNode {
     if (!value || typeof value !== "object" || depth > 30 || --remaining < 0)
       return null;
     const node = value as RichNode;
+    // A person mentioned with "@" (demo people have non-UUID ids).
+    if (node.type === "mention" && typeof node.attrs?.id === "string")
+      return /^[\w-]{1,64}$/.test(node.attrs.id)
+        ? {
+            type: "mention",
+            attrs: {
+              id: node.attrs.id,
+              label:
+                typeof node.attrs.label === "string"
+                  ? node.attrs.label.slice(0, 120)
+                  : "",
+            },
+          }
+        : null;
     if (
       node.type === "inlineImage" &&
       typeof node.attrs?.imageId === "string" &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        node.attrs.imageId,
-      )
+      UUID.test(node.attrs.imageId)
     )
       return {
         type: "inlineImage",
@@ -92,6 +106,7 @@ export function serializeDescription(value: unknown): string {
   const doc = sanitizeDescription(value);
   const hasText = (node: RichNode): boolean =>
     node.type === "inlineImage" ||
+    node.type === "mention" ||
     !!node.text?.trim() ||
     !!node.content?.some(hasText);
   return hasText(doc) ? DESCRIPTION_PREFIX + JSON.stringify(doc) : "";
@@ -101,7 +116,9 @@ export function richTextPlain(value: string): string {
   const text = (node: RichNode): string =>
     node.type === "text"
       ? (node.text ?? "")
-      : (node.content ?? []).map(text).join(node.type === "doc" ? "\n" : "");
+      : node.type === "mention"
+        ? `@${node.attrs?.label ?? ""}`
+        : (node.content ?? []).map(text).join(node.type === "doc" ? "\n" : "");
   return text(parseDescription(value)).trim();
 }
 /**
@@ -123,4 +140,14 @@ export function transitionComment(label: string, note: string): string {
       ...(doc.content ?? []),
     ],
   });
+}
+/** The people mentioned with "@" in a comment or note (ids, no repeats). */
+export function mentionedIds(value: string): string[] {
+  const ids = new Set<string>();
+  const walk = (node: RichNode) => {
+    if (node.type === "mention" && node.attrs?.id) ids.add(node.attrs.id);
+    node.content?.forEach(walk);
+  };
+  walk(parseDescription(value));
+  return [...ids];
 }

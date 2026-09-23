@@ -1,18 +1,81 @@
 import { demoSnapshot, demoUser } from "./demo";
 import { projectReview, taskActions } from "./domain";
-import { transitionComment } from "./rich-text";
+import { mentionedIds, richTextPlain, transitionComment } from "./rich-text";
 import {
   type Snapshot,
+  type Status,
   type Task,
   type Comment,
   type Attachment,
   type TaskEvent,
+  type AppNotification,
+  statuses,
+  workingStatuses,
 } from "./types";
 export class DemoStore {
   data: Snapshot = demoSnapshot();
   comments: Comment[] = [];
   attachments: Attachment[] = [];
   events: TaskEvent[] = [];
+  /** Everyone's notifications (the demo person sees only theirs). */
+  notifications: (AppNotification & { user_id: string })[] = [];
+  constructor() {
+    // One example, so the demo inbox isn't empty.
+    const task = this.data.tasks.find((t) => t.assignee_id === demoUser);
+    const actor = this.data.members.find((m) => m.user_id !== demoUser);
+    if (task && actor)
+      this.notifications.push({
+        id: crypto.randomUUID(),
+        user_id: demoUser,
+        kind: "mention",
+        task_id: task.id,
+        task_title: task.title,
+        actor_id: actor.user_id,
+        actor_name: actor.name,
+        excerpt: `@${this.data.members.find((m) => m.user_id === demoUser)?.name} pode revisar antes de enviar?`,
+        read_at: null,
+        created_at: new Date(Date.now() - 3600_000).toISOString(),
+      });
+  }
+  inbox(user: string): AppNotification[] {
+    return this.notifications
+      .filter((n) => n.user_id === user)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+  readNotifications(user: string, ids?: string[]) {
+    const at = new Date().toISOString();
+    for (const n of this.notifications)
+      if (n.user_id === user && !n.read_at && (!ids || ids.includes(n.id)))
+        n.read_at = at;
+  }
+  /** Mirrors mavi_private.comment_mentions: participants and notifications. */
+  private mentionsIn(comment: Comment) {
+    const task = this.data.tasks.find((t) => t.id === comment.task_id);
+    if (!task) return;
+    const author = this.data.members.find(
+      (m) => m.user_id === comment.author_id,
+    );
+    for (const id of mentionedIds(comment.body)) {
+      if (id === comment.author_id) continue;
+      if (!this.data.members.some((m) => m.user_id === id && m.active))
+        continue;
+      task.participant_ids = [
+        ...new Set([...(task.participant_ids ?? [task.assignee_id]), id]),
+      ];
+      this.notifications.push({
+        id: crypto.randomUUID(),
+        user_id: id,
+        kind: "mention",
+        task_id: task.id,
+        task_title: task.title,
+        actor_id: comment.author_id,
+        actor_name: author?.name ?? null,
+        excerpt: richTextPlain(comment.body).replace(/\s+/g, " ").slice(0, 160),
+        read_at: null,
+        created_at: comment.created_at,
+      });
+    }
+  }
   private setClientTeams(clientId: string, teams: string[]) {
     const company_id = this.data.companies[0].id;
     this.data.clientTeams = [
@@ -238,6 +301,7 @@ export class DemoStore {
           title: a.p_title,
           description: a.p_description ?? "",
           status: "open",
+          status_changed_at: now,
           priority: a.p_priority ?? "normal",
           creator_id: demoUser,
           assignee_id: a.p_assignee,
@@ -288,74 +352,105 @@ export class DemoStore {
         if (!task) throw Error("Tarefa não encontrada");
         if (task.version !== a.p_version)
           throw Error("A tarefa mudou. Atualize.");
-        // Same rules as the buttons (and public.transition_task).
+        // Same rules as the status menu (and public.transition_task).
         const acts = taskActions(this.data, task, demoUser);
-        const allowed = {
-          start: acts.start || acts.resend,
-          submit: acts.submit === true,
-          approve_internal: acts.approveInternal,
-          approve_client: acts.approveClient,
-          reject: acts.reject,
-          return: acts.return === true,
-          reopen: acts.reopen === true,
-        }[a.p_action as string];
-        if (!allowed) throw Error("Sem permissão para esta ação");
-        const from = task.status;
-        const needsNote =
-          [
-            "return",
-            "reject",
-            "reopen",
-            "approve_internal",
-            "approve_client",
-          ].includes(a.p_action) ||
-          (a.p_action === "start" && from === "returned") ||
-          (a.p_action === "submit" && acts.submitNeedsNote);
-        if (needsNote && !a.p_note?.trim()) throw Error("Informe o motivo");
-        if (a.p_action === "start" || a.p_action === "reopen")
-          task.status = "progress";
-        if (a.p_action === "reject") task.status = "rejected";
-        if (a.p_action === "return") task.status = "returned";
-        if (a.p_action === "submit") {
-          task.status = "review";
-          const project = this.data.projects.find(
-            (p) => p.id === task.project_id,
-          );
-          if (!projectReview(project).required)
+        const from = task.status,
+          statusSince = task.status_changed_at ?? task.created_at,
+          fromAssignee = task.assignee_id,
+          note = String(a.p_note ?? "").trim();
+        const review = projectReview(
+          this.data.projects.find((p) => p.id === task.project_id),
+        ).required;
+        const assignee: string = a.p_assignee ?? task.assignee_id;
+        if (!this.data.members.some((m) => m.user_id === assignee && m.active))
+          throw Error("Escolha um responsável ativo da empresa");
+        let next: Status = from;
+        if (a.p_action === "move") {
+          if (!acts.move)
+            throw Error(
+              "Somente o responsável, o criador ou um gestor muda o status da tarefa",
+            );
+          const target: Status = a.p_status ?? from;
+          if (target === "done") {
+            if (review)
+              throw Error(
+                "Este projeto exige validação: a entrega é aprovada por quem valida",
+              );
             task.internal_approved_by = demoUser;
-        }
-        if (a.p_action === "approve_internal")
+            next = "review";
+          } else if (workingStatuses.includes(target)) next = target;
+          else throw Error("Status inválido");
+          if (target === from && assignee === task.assignee_id)
+            throw Error("Escolha outro status ou outro responsável");
+          if (next !== from && ["returned", "rejected"].includes(next) && !note)
+            throw Error(
+              next === "returned"
+                ? "Informe quais informações faltam"
+                : "Descreva a alteração solicitada",
+            );
+        } else if (a.p_action === "approve_internal") {
+          if (!acts.approveInternal) throw Error("Sem permissão para aprovar");
+          if (!note) throw Error("Informe as observações da validação");
           task.internal_approved_by = demoUser;
-        if (a.p_action === "approve_client") {
+        } else if (a.p_action === "approve_client") {
+          if (!acts.approveClient)
+            throw Error("Sem permissão para registrar aprovação");
+          if (!note) throw Error("Informe quem aprovou e a evidência");
           task.client_approved_by = demoUser;
           task.client_approval_note = a.p_note;
-        }
-        if (["return", "reject", "reopen"].includes(a.p_action)) {
+        } else if (a.p_action === "reopen") {
+          if (acts.reopen !== true) throw Error("Sem permissão para reabrir");
+          if (!note) throw Error("Informe o motivo");
+          next = a.p_status ?? "progress";
+          if (!workingStatuses.includes(next)) throw Error("Status inválido");
+        } else throw Error("Ação inválida");
+        if (["move", "reopen"].includes(a.p_action) && next !== "review") {
           task.internal_approved_by = null;
           task.client_approved_by = null;
-          task.revision++;
+          task.client_approval_note = null;
         }
         if (
-          task.status === "review" &&
+          a.p_action === "reopen" ||
+          (next !== from && ["returned", "rejected"].includes(next))
+        )
+          task.revision++;
+        if (
+          next === "review" &&
           task.internal_approved_by &&
           (!task.requires_client_approval || task.client_approved_by)
         )
-          task.status = "done";
-        task.delivered_at = task.status === "done" ? now : null;
+          next = "done";
+        if (next !== from) task.status_changed_at = now;
+        task.status = next;
+        task.assignee_id = assignee;
+        task.participant_ids = [
+          ...new Set([...(task.participant_ids ?? [fromAssignee]), assignee]),
+        ];
+        task.delivered_at = next === "done" ? now : null;
         task.version++;
-        event(a.p_action, { from, to: task.status, note: a.p_note });
-        const label = (
-          {
-            start: "Reenviada ao responsável",
-            submit: "Enviada para validação",
-            approve_internal: "Aprovada na validação",
-            return: "Devolvida ao criador",
-            reject: "Reprovada na validação",
-            approve_client: "Aprovação do cliente registrada",
-            reopen: "Tarefa reaberta",
-          } as Record<string, string>
-        )[a.p_action];
-        if (label && a.p_note?.trim())
+        event(a.p_action, {
+          from,
+          to: next,
+          note: a.p_note,
+          assignee_from: fromAssignee,
+          assignee_to: assignee,
+          status_since: statusSince,
+        });
+        if (note) {
+          let label =
+            a.p_action === "approve_internal"
+              ? "Aprovada na validação"
+              : a.p_action === "approve_client"
+                ? "Aprovação do cliente registrada"
+                : a.p_action === "reopen"
+                  ? `Tarefa reaberta · ${statuses[next].label}`
+                  : next !== from
+                    ? statuses[next].label
+                    : "Responsável alterado";
+          if (assignee !== fromAssignee)
+            label += ` · Responsável: ${
+              this.data.members.find((m) => m.user_id === assignee)?.name ?? "—"
+            }`;
           this.comments.unshift({
             id: crypto.randomUUID(),
             company_id: task.company_id,
@@ -364,6 +459,8 @@ export class DemoStore {
             body: transitionComment(label, a.p_note),
             created_at: now,
           });
+          this.mentionsIn(this.comments[0]);
+        }
         break;
       }
       case "add_comment":
@@ -375,6 +472,7 @@ export class DemoStore {
           body: a.p_body,
           created_at: now,
         });
+        this.mentionsIn(this.comments[0]);
         break;
       case "start_timer":
         {

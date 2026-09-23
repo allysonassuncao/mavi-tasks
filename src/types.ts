@@ -78,9 +78,25 @@ export interface Task {
   client_approved_by: string | null;
   client_approval_note: string | null;
   delivered_at: string | null;
+  /** When the task entered its current status. */
+  status_changed_at?: string;
+  /** Everyone who was ever responsible or was mentioned in it. */
+  participant_ids?: string[];
   revision: number;
   version: number;
   archived: boolean;
+  created_at: string;
+}
+/** A notice for one person, e.g. they were mentioned in a comment. */
+export interface AppNotification {
+  id: string;
+  kind: "mention";
+  task_id: string;
+  task_title: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  excerpt: string | null;
+  read_at: string | null;
   created_at: string;
 }
 export interface TimeEntry {
@@ -137,14 +153,26 @@ export interface Snapshot {
   }[];
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
 }
+/**
+ * Status keys predate the free flow and were kept: "open" is Em delegação and
+ * "rejected" is Alteração. Listed in menu order; Entregue is the closed one.
+ */
 export const statuses: Record<Status, { label: string; color: string }> = {
-  open: { label: "Aberto", color: "#7c8796" },
+  open: { label: "Em delegação", color: "#7c8796" },
   progress: { label: "Em andamento", color: "#598bda" },
   returned: { label: "Devolvida", color: "#db8757" },
-  rejected: { label: "Reprovada", color: "#cf6679" },
   review: { label: "Em validação", color: "#9a7cd3" },
+  rejected: { label: "Alteração", color: "#cf4f5f" },
   done: { label: "Entregue", color: "#4f9879" },
 };
+/** Statuses a task moves between freely until it is delivered. */
+export const workingStatuses: Status[] = [
+  "open",
+  "progress",
+  "returned",
+  "review",
+  "rejected",
+];
 export const priorities = {
   low: "Baixa",
   normal: "Normal",

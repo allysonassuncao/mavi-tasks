@@ -17,10 +17,16 @@ function renderNode(node: RichNode, key: number): ReactNode {
       return (
         <InlineImage
           key={key}
-          id={node.attrs!.imageId}
-          alt={node.attrs!.alt}
+          id={node.attrs!.imageId!}
+          alt={node.attrs!.alt!}
           zoomable
         />
+      );
+    case "mention":
+      return (
+        <span key={key} className="mention" data-user={node.attrs?.id}>
+          @{node.attrs?.label}
+        </span>
       );
     case "paragraph":
       return <p key={key}>{children?.length ? children : <br />}</p>;

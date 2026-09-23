@@ -26,50 +26,41 @@ const task = (status: Status, extra: Partial<Task> = {}): Task => ({
 const as = (user: string, t: Task, now?: number) =>
   taskActions(data, t, user, now);
 
-describe("Enviar para validação", () => {
-  it("é do responsável (ou do administrador), não do criador", () => {
-    expect(as("user-lucas", task("progress")).submit).toBe(true);
-    expect(as("user-allyson", task("progress")).submit).toBe(true);
-    expect(as("user-julia", task("progress")).submit).toBe(false);
-    expect(as("user-marina", task("progress")).submit).toBe(false);
+describe("Mudar status e responsável", () => {
+  it("é do responsável atual, do criador e dos gestores", () => {
+    for (const u of ["user-lucas", "user-julia", "user-marina", "user-allyson"])
+      expect(as(u, task("progress")).move).toBe(true);
   });
-  it("fica desabilitado em validação e oculto quando devolvida, reprovada ou entregue", () => {
-    expect(as("user-lucas", task("review")).submit).toEqual({
-      blocked: "Em validação…",
+  it("vale para qualquer status ativo, sem ordem fixa", () => {
+    for (const s of [
+      "open",
+      "progress",
+      "returned",
+      "review",
+      "rejected",
+    ] as Status[])
+      expect(as("user-lucas", task(s)).move).toBe(true);
+  });
+  it("quem só já foi responsável não muda o status", () => {
+    const other = task("progress", {
+      assignee_id: "user-julia",
+      creator_id: "user-allyson",
     });
-    for (const s of ["returned", "rejected", "done"] as Status[])
-      expect(as("user-lucas", task(s)).submit).toBe(false);
+    expect(as("user-lucas", other).move).toBe(false);
+  });
+  it("tarefa entregue só sai pela reabertura", () => {
+    expect(as("user-lucas", task("done")).move).toBe(false);
   });
 });
 
-describe("Devolver ao criador", () => {
-  it("o responsável devolve tarefas abertas, em andamento ou reprovadas", () => {
-    for (const s of ["open", "progress", "rejected"] as Status[])
-      expect(as("user-lucas", task(s)).return).toBe(true);
-    expect(as("user-lucas", task("review")).return).toBe(false);
+describe("Entrega", () => {
+  it("com validação no projeto, não é feita pelo menu de status", () => {
+    expect(as("user-lucas", task("progress")).deliver).toBe(false);
   });
-  it("o criador nunca devolve, nem sendo também o responsável", () => {
-    expect(as("user-julia", task("progress")).return).toBe(false);
-    expect(
-      as("user-lucas", task("progress", { creator_id: "user-lucas" })).return,
-    ).toBe(false);
-  });
-  it("o administrador também devolve tarefas em validação", () => {
-    expect(as("user-allyson", task("review")).return).toBe(true);
-  });
-  it("aparece desabilitado quando a tarefa já foi devolvida", () => {
-    expect(as("user-lucas", task("returned")).return).toEqual({
-      blocked: "Devolvida…",
-    });
-  });
-});
-
-describe("Tarefa devolvida", () => {
-  it("volta à execução pelo criador ou administrador", () => {
-    expect(as("user-julia", task("returned")).resend).toBe(true);
-    expect(as("user-allyson", task("returned")).resend).toBe(true);
-    expect(as("user-lucas", task("returned")).resend).toBe(false);
-    expect(as("user-julia", task("returned")).start).toBe(false);
+  it("sem validação, quem move a tarefa também entrega", () => {
+    project.requires_review = false;
+    expect(as("user-lucas", task("progress")).deliver).toBe(true);
+    project.requires_review = true;
   });
 });
 
@@ -82,9 +73,9 @@ describe("Validação", () => {
     expect(as("user-julia", approved).approveClient).toBe(true);
     expect(as("user-julia", approved).approveInternal).toBe(false);
   });
-  it("só o validador aprova ou reprova", () => {
-    expect(as("user-lucas", task("review")).reject).toBe(false);
-    expect(as("user-julia", task("review")).reject).toBe(true);
+  it("só o validador aprova", () => {
+    expect(as("user-lucas", task("review")).approveInternal).toBe(false);
+    expect(as("user-julia", task("review")).approveInternal).toBe(true);
   });
 });
 
