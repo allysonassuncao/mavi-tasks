@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { handleDrive, type DriveEnv, type GcsCredentials } from "./_drive";
+import { handleDrive, type DriveEnv, type GcsCredentials } from "./_drive.js";
 
 function credentials(): GcsCredentials | null {
   if (process.env.GCS_CREDENTIALS)

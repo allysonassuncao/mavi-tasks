@@ -1,5 +1,5 @@
-import { callRpc, signGcsUrl, type DriveEnv } from "./_drive";
-import { attachmentType, inlineImageTypes } from "../src/upload-types";
+import { callRpc, signGcsUrl, type DriveEnv } from "./_drive.js";
+import { attachmentType, inlineImageTypes } from "../src/upload-types.js";
 
 /**
  * Signs uploads for task attachments and inline images. The client names a

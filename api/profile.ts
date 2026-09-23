@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { driveEnv } from "./drive";
-import { handleProfile } from "./_profile";
+import { driveEnv } from "./drive.js";
+import { handleProfile } from "./_profile.js";
 
 export default async function handler(
   req: IncomingMessage & { body?: any },

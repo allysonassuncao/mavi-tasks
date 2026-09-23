@@ -1,4 +1,4 @@
-import { callRpc, signGcsUrl, type DriveEnv } from "./_drive";
+import { callRpc, signGcsUrl, type DriveEnv } from "./_drive.js";
 
 /** Largest avatar GCS accepts; the browser sends ~10-30 KB images. */
 export const AVATAR_MAX_BYTES = 512 * 1024;

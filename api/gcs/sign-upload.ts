@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { driveEnv } from "../drive";
-import { handleUpload } from "../_uploads";
+import { driveEnv } from "../drive.js";
+import { handleUpload } from "../_uploads.js";
 
 /** Signs attachment and inline image uploads for their own records only. */
 export default async function handler(
