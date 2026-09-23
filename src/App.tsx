@@ -114,6 +114,11 @@ import {
   namesFrom,
   buildNameLookup,
   canSeeTask,
+  TASK_SCOPES,
+  myTeams,
+  taskScope,
+  taskTeamName,
+  type TaskScope,
   taskMatchesSearch,
   durationWithSeconds,
   upsertById,
@@ -266,6 +271,7 @@ export default function App() {
     [status, setStatus] = useUrlState<string>("status", ""),
     [product, setProduct] = useUrlState<string>("produto", ""),
     [mine, setMine] = useUrlState<boolean>("minhas", false),
+    [scopeParam, setScope] = useUrlState<string>("escopo", ""),
     [late, setLate] = useUrlState<boolean>("atrasadas", false),
     [clientFilter, setClientFilter] = useUrlState<string>("cliente", ""),
     [projectFilter, setProjectFilter] = useUrlState<string>("projeto", ""),
@@ -323,6 +329,11 @@ export default function App() {
     isAdmin = member?.role === "admin",
     isManager = member?.role === "manager",
     isLeader = isAdmin || isManager;
+  // Leaders' task list tabs (see TASK_SCOPES): "" is every task.
+  const listScope: TaskScope | "" =
+    isLeader && TASK_SCOPES.some((t) => t.id === scopeParam)
+      ? (scopeParam as TaskScope)
+      : "";
   const today = dateKey(new Date(), currentCompany?.timezone);
   const [periodValue, setPeriod] = useUrlState<string>("periodo", "");
   const [currentRunning, setCurrentRunning] = useState<
@@ -603,7 +614,8 @@ export default function App() {
           status: page === "tasks" ? status : "",
           hideDone: page === "tasks" && !status,
           product: page === "tasks" ? product : "",
-          mine: page === "tasks" ? mine : false,
+          mine: page === "tasks" && !isLeader ? mine : false,
+          scope: page === "tasks" && listScope ? listScope : undefined,
           user,
           page: page === "tasks" ? offset : 0,
           late: page === "tasks" ? late : false,
@@ -661,9 +673,60 @@ export default function App() {
     projectFilter,
     refresh,
     isLeader,
+    listScope,
     page === "tasks",
     page === "tasks" ? view : "list",
     page === "tasks" ? scheduleMonth : "",
+  ]);
+  // How many tasks each tab holds, with the list's other filters applied.
+  const [scopeCounts, setScopeCounts] = useState<Record<
+    TaskScope,
+    number
+  > | null>(null);
+  useEffect(() => {
+    if (demo || !isLeader || page !== "tasks" || !company || !session) return;
+    let alive = true;
+    api
+      .taskScopeCounts(
+        company,
+        {
+          search: query,
+          status,
+          hideDone: !status,
+          product,
+          mine: false,
+          user,
+          page: 0,
+          late,
+          client: clientFilter,
+          project: projectFilter,
+          onlyMineOrCreated: false,
+        },
+        refresh > 0,
+      )
+      .then((c) => {
+        if (alive) setScopeCounts(c);
+      })
+      .catch(() => {
+        if (alive) setScopeCounts(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [
+    demo,
+    isLeader,
+    page,
+    company,
+    session,
+    query,
+    status,
+    product,
+    user,
+    late,
+    clientFilter,
+    projectFilter,
+    refresh,
   ]);
   useEffect(() => {
     if (demo || !company || !session) return;
@@ -1015,7 +1078,8 @@ export default function App() {
     () => new Map(data.tasks.map((t) => [t.id, t])),
     [data.tasks],
   );
-  const filtered = useMemo(
+  // Every filter but the leaders' scope tab (the tabs count from this).
+  const unscoped = useMemo(
     () =>
       data.tasks.filter(
         (t) =>
@@ -1026,7 +1090,7 @@ export default function App() {
           taskMatchesSearch(nameLookup, t, query) &&
           // Delivered tasks only appear when filtering by "Entregue".
           (status ? t.status === status : t.status !== "done") &&
-          (!mine || t.assignee_id === user) &&
+          (isLeader || !mine || t.assignee_id === user) &&
           (!late || isLate(t, today)) &&
           (!product ||
             nameLookup.contracts.get(t.contract_id)?.product_id === product),
@@ -1039,12 +1103,67 @@ export default function App() {
       query,
       status,
       mine,
+      isLeader,
       user,
       late,
       today,
       product,
     ],
   );
+  const teamsOfMine = useMemo(() => myTeams(data, user), [data, user]);
+  const filtered = useMemo(
+    () =>
+      listScope
+        ? unscoped.filter(
+            (t) => taskScope(data, t, user, teamsOfMine) === listScope,
+          )
+        : unscoped,
+    [unscoped, listScope, data, user, teamsOfMine],
+  );
+  // Tab counts: from the server, or from the demo's (complete) task list.
+  const tabCounts = useMemo(() => {
+    if (!demo) return scopeCounts;
+    const counts: Record<TaskScope, number> = {
+      mine: 0,
+      created: 0,
+      teams: 0,
+      others: 0,
+    };
+    for (const t of unscoped) counts[taskScope(data, t, user, teamsOfMine)]++;
+    return counts;
+  }, [demo, scopeCounts, unscoped, data, user, teamsOfMine]);
+  // "Todas": the page split by scope; team tabs: split by team.
+  const listGroups = useMemo(() => {
+    if (!isLeader) return undefined;
+    if (!listScope)
+      return TASK_SCOPES.map((sc) => ({
+        key: sc.id,
+        label: sc.label,
+        hint: sc.hint,
+        tasks: filtered.filter(
+          (t) => taskScope(data, t, user, teamsOfMine) === sc.id,
+        ),
+      })).filter((g) => g.tasks.length);
+    if (listScope === "teams" || listScope === "others") {
+      const byTeam = new Map<string, Task[]>();
+      for (const t of filtered) {
+        const name = taskTeamName(data, t);
+        byTeam.set(name, [...(byTeam.get(name) ?? []), t]);
+      }
+      return [...byTeam.entries()]
+        .sort(([a], [b]) =>
+          a === "Sem equipe" ? 1 : b === "Sem equipe" ? -1 : a.localeCompare(b),
+        )
+        .map(([name, tasks]) => ({
+          key: name,
+          label: name,
+          hint:
+            name === "Sem equipe" ? "Tarefas sem equipe definida" : "Equipe",
+          tasks,
+        }));
+    }
+    return undefined;
+  }, [isLeader, listScope, filtered, data, user, teamsOfMine]);
   // Collaborators only see their own entries and tasks (RLS already scopes
   // them; this keeps demo mode and cached data consistent with that).
   const visibleHours = useMemo(
@@ -1713,6 +1832,7 @@ export default function App() {
                     </div>
                     <TaskTable
                       tasks={focus}
+                      me={user}
                       lookup={nameLookup}
                       today={today}
                       playing={playingTimer}
@@ -1751,7 +1871,8 @@ export default function App() {
                       <Button
                         onClick={() => {
                           go("tasks");
-                          setMine(true);
+                          if (isLeader) setScope("mine");
+                          else setMine(true);
                         }}
                       >
                         Abrir minhas tarefas <ArrowUpRight size={18} />
@@ -1888,16 +2009,60 @@ export default function App() {
                         </Button>
                       ))}
                     </div>
-                    <Button
-                      className={`filter-chip ${mine ? "selected" : ""}`}
-                      onClick={() => {
-                        setMine(!mine);
-                        setOffset(0);
-                      }}
-                    >
-                      <Users size={15} /> Minhas tarefas
-                    </Button>
+                    {!isLeader && (
+                      <Button
+                        className={`filter-chip ${mine ? "selected" : ""}`}
+                        onClick={() => {
+                          setMine(!mine);
+                          setOffset(0);
+                        }}
+                      >
+                        <Users size={15} /> Minhas tarefas
+                      </Button>
+                    )}
                   </div>
+                  {isLeader && (
+                    <div
+                      className="scope-tabs"
+                      role="tablist"
+                      aria-label="De quem são as tarefas"
+                    >
+                      {[
+                        {
+                          id: "" as const,
+                          label: "Todas",
+                          hint: "Todas as tarefas, separadas por seção",
+                        },
+                        ...TASK_SCOPES,
+                      ].map((tab) => {
+                        const n = tabCounts
+                          ? tab.id
+                            ? tabCounts[tab.id]
+                            : Object.values(tabCounts).reduce(
+                                (a, b) => a + b,
+                                0,
+                              )
+                          : null;
+                        return (
+                          <button
+                            key={tab.id || "all"}
+                            type="button"
+                            role="tab"
+                            aria-selected={listScope === tab.id}
+                            className={listScope === tab.id ? "selected" : ""}
+                            title={tab.hint}
+                            onClick={() => {
+                              setScope(tab.id);
+                              setOffset(0);
+                            }}
+                          >
+                            {tab.label}
+                            {n !== null && <span>{n}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   {(clientFilter || projectFilter) && (
                     <div className="active-context">
                       <span>
@@ -2015,6 +2180,8 @@ export default function App() {
                   ) : view === "list" ? (
                     <TaskTable
                       tasks={filtered}
+                      groups={listGroups}
+                      me={user}
                       lookup={nameLookup}
                       today={today}
                       playing={playingTimer}
@@ -2827,20 +2994,105 @@ function PlayingBadge({ playing }: { playing: Playing }) {
     </span>
   );
 }
+type TaskGroup = { key: string; label: string; hint: string; tasks: Task[] };
 function TaskTable({
   tasks,
+  groups,
+  me,
   lookup,
   today,
   playing,
   onSelect,
 }: {
   tasks: Task[];
+  /** Sections (e.g. "Para você", "Suas equipes"); none renders one list. */
+  groups?: TaskGroup[];
+  /** The viewer: their own tasks and creations are marked "Você". */
+  me?: string;
   lookup: NameLookup;
   today: string;
   /** The user's running timer, marked on its task. */
   playing?: Playing | null;
   onSelect: (id: string) => void;
 }) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const toggle = (key: string) =>
+    setCollapsed((set) => {
+      const next = new Set(set);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const row = (t: Task) => {
+    const n = namesFrom(lookup, t),
+      creator = lookup.members.get(t.creator_id),
+      isPlaying = playing?.entry.task_id === t.id,
+      mineToDo = !!me && t.assignee_id === me,
+      mineCreated = !!me && t.creator_id === me;
+    return (
+      <tr key={t.id} className={isPlaying ? "is-playing" : undefined}>
+        <td>
+          <Button className="task-title" onClick={() => onSelect(t.id)}>
+            <span
+              className={`task-check ${t.status === "done" ? "complete" : ""}`}
+            >
+              {t.status === "done" && <Check size={13} />}
+            </span>
+            <span>
+              <strong>{t.title}</strong>
+              <small>
+                {n.client?.name} <span> / </span> {n.product?.name}
+              </small>
+              {isPlaying && playing && <PlayingBadge playing={playing} />}
+              <span className="mobile-status">
+                <Badge status={t.status} />
+              </span>
+            </span>
+          </Button>
+        </td>
+        <td>
+          <Badge status={t.status} />
+        </td>
+        <td>
+          <span className={`due ${isLate(t, today) ? "late" : ""}`}>
+            <CalendarDays size={14} />
+            {t.due_date === today ? "Hoje" : dateLabel(t.due_date)}
+            {isLate(t, today) && <span className="late-dot" />}
+          </span>
+        </td>
+        <td>
+          <span className="task-person" title={n.member?.name}>
+            <Avatar
+              name={n.member?.name ?? "?"}
+              src={n.member?.avatar_url}
+              size="small"
+            />
+            {mineToDo ? (
+              <span className="you-tag">Você</span>
+            ) : (
+              <span className="task-person-name">
+                {n.member?.name?.split(" ")[0]}
+              </span>
+            )}
+          </span>
+        </td>
+        <td className="col-creator">
+          <span className="task-person">
+            <Avatar
+              name={creator?.name ?? "?"}
+              src={creator?.avatar_url}
+              size="small"
+            />
+            {mineCreated ? (
+              <span className="you-tag">Você</span>
+            ) : (
+              (creator?.name ?? "Usuário removido")
+            )}
+          </span>
+        </td>
+      </tr>
+    );
+  };
   return (
     <>
       <div className="table-scroll">
@@ -2854,68 +3106,38 @@ function TaskTable({
               <th className="col-creator">Criado por</th>
             </tr>
           </thead>
-          <tbody>
-            {tasks.map((t) => {
-              const n = namesFrom(lookup, t),
-                creator = lookup.members.get(t.creator_id),
-                isPlaying = playing?.entry.task_id === t.id;
+          {groups ? (
+            groups.map((g) => {
+              const closed = collapsed.has(g.key);
               return (
-                <tr key={t.id} className={isPlaying ? "is-playing" : undefined}>
-                  <td>
-                    <Button
-                      className="task-title"
-                      onClick={() => onSelect(t.id)}
-                    >
-                      <span
-                        className={`task-check ${t.status === "done" ? "complete" : ""}`}
+                <tbody key={g.key} className="task-group">
+                  <tr className="task-group-head">
+                    <th colSpan={5} scope="rowgroup">
+                      <button
+                        type="button"
+                        aria-expanded={!closed}
+                        onClick={() => toggle(g.key)}
                       >
-                        {t.status === "done" && <Check size={13} />}
-                      </span>
-                      <span>
-                        <strong>{t.title}</strong>
-                        <small>
-                          {n.client?.name} <span> / </span> {n.product?.name}
-                        </small>
-                        {isPlaying && playing && (
-                          <PlayingBadge playing={playing} />
-                        )}
-                        <span className="mobile-status">
-                          <Badge status={t.status} />
+                        <ChevronRight
+                          size={15}
+                          className={closed ? "" : "open"}
+                          aria-hidden="true"
+                        />
+                        <strong>{g.label}</strong>
+                        <span className="task-group-count">
+                          {g.tasks.length}
                         </span>
-                      </span>
-                    </Button>
-                  </td>
-                  <td>
-                    <Badge status={t.status} />
-                  </td>
-                  <td>
-                    <span className={`due ${isLate(t, today) ? "late" : ""}`}>
-                      <CalendarDays size={14} />
-                      {t.due_date === today ? "Hoje" : dateLabel(t.due_date)}
-                      {isLate(t, today) && <span className="late-dot" />}
-                    </span>
-                  </td>
-                  <td>
-                    <Avatar
-                      name={n.member?.name ?? "?"}
-                      src={n.member?.avatar_url}
-                      size="small"
-                    />
-                  </td>
-                  <td className="col-creator">
-                    <span className="task-person">
-                      <Avatar
-                        name={creator?.name ?? "?"}
-                        src={creator?.avatar_url}
-                        size="small"
-                      />
-                      {creator?.name ?? "Usuário removido"}
-                    </span>
-                  </td>
-                </tr>
+                        <small>{g.hint}</small>
+                      </button>
+                    </th>
+                  </tr>
+                  {!closed && g.tasks.map(row)}
+                </tbody>
               );
-            })}
-          </tbody>
+            })
+          ) : (
+            <tbody>{tasks.map(row)}</tbody>
+          )}
         </table>
       </div>
       {!tasks.length && (

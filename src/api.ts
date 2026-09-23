@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import * as cache from "./cache";
-import { fold } from "./domain";
+import { fold, type TaskScope } from "./domain";
 import {
   emptySnapshot,
   type Snapshot,
@@ -32,6 +32,8 @@ export interface Filters {
   project: string;
   schedule?: { view: "calendar" | "gantt"; start: string; end: string };
   onlyMineOrCreated?: boolean;
+  /** Leaders' list tabs: for them, created by them, their teams, others. */
+  scope?: TaskScope;
 }
 
 export interface Summary {
@@ -168,6 +170,7 @@ function hashFilters(filters: Filters): string {
     pr: filters.project,
     sch: filters.schedule,
     mc: filters.onlyMineOrCreated,
+    sc: filters.scope,
   });
 }
 
@@ -199,14 +202,128 @@ export function taskSearchFilter(
   return parts.join(",");
 }
 
+type TaskLookups = Pick<
+  CompanyLookups,
+  "contracts" | "clients" | "projects" | "teamMembers" | "clientTeams"
+>;
+const emptyTaskLookups: TaskLookups = {
+  contracts: [],
+  clients: [],
+  projects: [],
+  teamMembers: [],
+  clientTeams: [],
+};
+
+/** The list's filters (everything but scope, order and paging). */
+function filteredTasks(
+  company: string,
+  filters: Filters,
+  lookups: TaskLookups,
+  companyTz: string,
+  head = false,
+) {
+  let query = supabase!
+    .from("tasks")
+    .select(head ? "id" : "*", { count: "exact", head })
+    .eq("company_id", company)
+    .eq("archived", false);
+
+  // Collaborators: RLS (tasks_read) already limits the rows to their own
+  // tasks plus the ones their teams' supervision covers.
+
+  if (filters.search.trim())
+    query = query.or(taskSearchFilter(filters.search, lookups));
+  if (filters.status) query = query.eq("status", filters.status);
+  else if (filters.hideDone) query = query.neq("status", "done");
+  if (filters.client)
+    query = query.in(
+      "contract_id",
+      lookups.contracts
+        .filter((c) => c.client_id === filters.client)
+        .map((c) => c.id),
+    );
+  if (filters.project) query = query.eq("project_id", filters.project);
+  if (filters.mine) query = query.eq("assignee_id", filters.user);
+  if (filters.product) {
+    const ids = lookups.contracts
+      .filter((c) => c.product_id === filters.product)
+      .map((c) => c.id);
+    query = query.in("contract_id", ids);
+  }
+  if (filters.late) {
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: companyTz,
+    }).format(new Date());
+    query = query.lt("due_date", today).neq("status", "done");
+  }
+  if (filters.schedule) {
+    const { view, start, end } = filters.schedule;
+    query = query.gte("due_date", start);
+    if (view === "calendar") query = query.lte("due_date", end);
+    else
+      query = query.or(
+        `start_date.lte.${end},and(start_date.is.null,created_at.lte.${end}T23:59:59.999Z),and(start_date.is.null,due_date.lte.${end})`,
+      );
+  }
+  return query;
+}
+
+/**
+ * Mirrors domain.taskScope on the server: assigned to the person, created by
+ * them for someone else, in their teams (the task's team, or the client's
+ * teams when it has none), or everything else.
+ */
+export function applyScope<
+  Q extends {
+    eq: (c: string, v: string) => Q;
+    neq: (c: string, v: string) => Q;
+    or: (f: string) => Q;
+  },
+>(query: Q, scope: TaskScope, user: string, lookups: TaskLookups): Q {
+  if (scope === "mine") return query.eq("assignee_id", user);
+  if (scope === "created")
+    return query.eq("creator_id", user).neq("assignee_id", user);
+  const teams = [
+    ...new Set(
+      lookups.teamMembers
+        .filter((tm) => tm.user_id === user)
+        .map((tm) => tm.team_id),
+    ),
+  ];
+  const clients = new Set(
+    lookups.clientTeams
+      .filter((ct) => teams.includes(ct.team_id))
+      .map((ct) => ct.client_id),
+  );
+  const contracts = lookups.contracts
+    .filter((k) => clients.has(k.client_id))
+    .map((k) => k.id);
+  const rest = query.neq("assignee_id", user).neq("creator_id", user);
+  if (scope === "teams") {
+    const parts = [
+      ...(teams.length ? [`team_id.in.(${teams.join(",")})`] : []),
+      ...(contracts.length
+        ? [`and(team_id.is.null,contract_id.in.(${contracts.join(",")}))`]
+        : []),
+    ];
+    // No team at all: nothing can match.
+    return parts.length
+      ? rest.or(parts.join(","))
+      : rest.eq("id", "00000000-0000-0000-0000-000000000000");
+  }
+  const withTeam = teams.length
+    ? `and(team_id.not.is.null,team_id.not.in.(${teams.join(",")}))`
+    : "team_id.not.is.null";
+  const withoutTeam = contracts.length
+    ? `and(team_id.is.null,contract_id.not.in.(${contracts.join(",")}))`
+    : "team_id.is.null";
+  return rest.or(`${withTeam},${withoutTeam}`);
+}
+
 export async function tasksQuery(
   company: string,
   filters: Filters,
-  lookups: Pick<CompanyLookups, "contracts" | "clients" | "projects"> = {
-    contracts: [],
-    clients: [],
-    projects: [],
-  },
+  lookups: TaskLookups = emptyTaskLookups,
   companyTz = "America/Sao_Paulo",
   forceRefresh = false,
 ): Promise<{ tasks: Task[]; count: number }> {
@@ -216,51 +333,11 @@ export async function tasksQuery(
   return cache.fetchWithCache(
     cacheKey,
     async () => {
-      let query = supabase!
-        .from("tasks")
-        .select("*", { count: "exact" })
-        .eq("company_id", company)
-        .eq("archived", false)
+      let query = filteredTasks(company, filters, lookups, companyTz)
         .order("due_date")
         .order("id");
-
-      // Collaborators: RLS (tasks_read) already limits the rows to their own
-      // tasks plus the ones their teams' supervision covers.
-
-      if (filters.search.trim())
-        query = query.or(taskSearchFilter(filters.search, lookups));
-      if (filters.status) query = query.eq("status", filters.status);
-      else if (filters.hideDone) query = query.neq("status", "done");
-      if (filters.client)
-        query = query.in(
-          "contract_id",
-          lookups.contracts
-            .filter((c) => c.client_id === filters.client)
-            .map((c) => c.id),
-        );
-      if (filters.project) query = query.eq("project_id", filters.project);
-      if (filters.mine) query = query.eq("assignee_id", filters.user);
-      if (filters.product) {
-        const ids = lookups.contracts
-          .filter((c) => c.product_id === filters.product)
-          .map((c) => c.id);
-        query = query.in("contract_id", ids);
-      }
-      if (filters.late) {
-        const today = new Intl.DateTimeFormat("en-CA", {
-          timeZone: companyTz,
-        }).format(new Date());
-        query = query.lt("due_date", today).neq("status", "done");
-      }
-      if (filters.schedule) {
-        const { view, start, end } = filters.schedule;
-        query = query.gte("due_date", start);
-        if (view === "calendar") query = query.lte("due_date", end);
-        else
-          query = query.or(
-            `start_date.lte.${end},and(start_date.is.null,created_at.lte.${end}T23:59:59.999Z),and(start_date.is.null,due_date.lte.${end})`,
-          );
-      }
+      if (filters.scope)
+        query = applyScope(query, filters.scope, filters.user, lookups);
 
       const result = await query.range(
         filters.schedule ? 0 : filters.page * 50,
@@ -268,7 +345,7 @@ export async function tasksQuery(
       );
 
       if (result.error) throw result.error;
-      const tasks = (result.data ?? []) as Task[];
+      const tasks = (result.data ?? []) as unknown as Task[];
 
       if (filters.schedule && tasks.length >= SCHEDULE_CAP)
         throw Error(
@@ -276,6 +353,43 @@ export async function tasksQuery(
         );
 
       return { tasks, count: result.count ?? 0 };
+    },
+    { ttlMs: CACHE_TTL.TASKS, forceRefresh },
+  );
+}
+
+/** How many tasks each scope tab holds under the current filters. */
+export async function taskScopeCounts(
+  company: string,
+  filters: Filters,
+  forceRefresh = false,
+): Promise<Record<TaskScope, number>> {
+  if (!supabase) throw Error("Supabase não configurado");
+  const lookups = await companyLookups(company, forceRefresh);
+  const base = { ...filters, scope: undefined, page: 0 };
+  const cacheKey = `task_scopes:${company}:${hashFilters(base)}`;
+  return cache.fetchWithCache(
+    cacheKey,
+    async () => {
+      const companyTz =
+        (await companies()).find((c) => c.id === company)?.timezone ??
+        "America/Sao_Paulo";
+      const scopes: TaskScope[] = ["mine", "created", "teams", "others"];
+      const counts = await Promise.all(
+        scopes.map(async (scope) => {
+          const { count, error } = await applyScope(
+            filteredTasks(company, base, lookups, companyTz, true),
+            scope,
+            filters.user,
+            lookups,
+          );
+          if (error) throw error;
+          return count ?? 0;
+        }),
+      );
+      return Object.fromEntries(
+        scopes.map((scope, i) => [scope, counts[i]]),
+      ) as Record<TaskScope, number>;
     },
     { ttlMs: CACHE_TTL.TASKS, forceRefresh },
   );
@@ -768,8 +882,9 @@ export function patchCachedTask(company: string, updatedTask: Task): void {
     },
   );
 
-  // 3. Invalidate summary cache so stats recalculate
+  // 3. Invalidate summary cache so stats recalculate (and the tab counts)
   invalidateSummaryCache(company);
+  cache.invalidate(`task_scopes:${company}:`);
 }
 
 export function addCachedTask(company: string, newTask: Task): void {
@@ -788,12 +903,14 @@ export function addCachedTask(company: string, newTask: Task): void {
     },
   );
 
-  // 3. Invalidate summary cache
+  // 3. Invalidate summary cache (and the tab counts)
   invalidateSummaryCache(company);
+  cache.invalidate(`task_scopes:${company}:`);
 }
 
 export function removeCachedTask(company: string, taskId: string): void {
   cache.remove(`task:${company}:${taskId}`);
+  cache.invalidate(`task_scopes:${company}:`);
   cache.updateMatching<{ tasks: Task[]; count: number }>(
     `tasks:${company}:`,
     (_key, cached) => {
@@ -838,6 +955,7 @@ export function patchCachedHours(company: string, entry: TimeEntry): void {
 export function invalidateCompanyCache(company: string): void {
   cache.invalidate(`lookups:v3:${company}`);
   cache.invalidate(`tasks:${company}:`);
+  cache.invalidate(`task_scopes:${company}:`);
   cache.invalidate(`hours:${company}`);
   cache.invalidate(`summary:${company}:`);
   cache.invalidate(`task:${company}:`);
@@ -849,6 +967,7 @@ export function invalidateLookupsCache(company: string): void {
 
 export function invalidateTasksCache(company: string): void {
   cache.invalidate(`tasks:${company}:`);
+  cache.invalidate(`task_scopes:${company}:`);
   cache.invalidate(`hours:${company}`);
   cache.invalidate(`summary:${company}:`);
   cache.invalidate(`task:${company}:`);

@@ -345,3 +345,59 @@ export function taskActions(
   };
 }
 export type TaskActions = ReturnType<typeof taskActions>;
+/**
+ * Where a task stands for the person looking at the list: assigned to them,
+ * created by them for someone else, in one of their teams, or elsewhere.
+ * Mirrored on the server by the task list's `scope` filter (api.ts).
+ */
+export type TaskScope = "mine" | "created" | "teams" | "others";
+export const TASK_SCOPES: { id: TaskScope; label: string; hint: string }[] = [
+  { id: "mine", label: "Para você", hint: "Você é o responsável" },
+  {
+    id: "created",
+    label: "Criadas por você",
+    hint: "Você criou para outra pessoa",
+  },
+  {
+    id: "teams",
+    label: "Suas equipes",
+    hint: "Das equipes de que você participa",
+  },
+  { id: "others", label: "Outras equipes", hint: "Demais tarefas da empresa" },
+];
+/** The person's teams and the clients those teams serve. */
+export function myTeams(data: Snapshot, userId: string) {
+  const teams = new Set(
+    data.teamMembers
+      .filter((tm) => tm.user_id === userId)
+      .map((tm) => tm.team_id),
+  );
+  const clients = new Set(
+    data.clientTeams
+      .filter((ct) => teams.has(ct.team_id))
+      .map((ct) => ct.client_id),
+  );
+  return { teams, clients };
+}
+export function taskScope(
+  data: Snapshot,
+  task: Task,
+  userId: string,
+  mine = myTeams(data, userId),
+): TaskScope {
+  if (task.assignee_id === userId) return "mine";
+  if (task.creator_id === userId) return "created";
+  const inMyTeams = task.team_id
+    ? mine.teams.has(task.team_id)
+    : mine.clients.has(
+        data.contracts.find((k) => k.id === task.contract_id)?.client_id ?? "",
+      );
+  return inMyTeams ? "teams" : "others";
+}
+/** The task's team name ("Sem equipe" when none). */
+export function taskTeamName(data: Snapshot, task: Task) {
+  return (
+    (task.team_id && data.teams.find((t) => t.id === task.team_id)?.name) ||
+    "Sem equipe"
+  );
+}

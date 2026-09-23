@@ -6066,3 +6066,118 @@ label .input-control .ui-input {
   width: auto;
   padding: 0 12px;
 }
+
+/* Leaders' task list: whose tasks (tabs) and sections */
+.scope-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.scope-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 12px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #87937e;
+  white-space: nowrap;
+}
+.scope-tabs button:hover {
+  color: var(--ink);
+}
+.scope-tabs button.selected {
+  color: #2d3e27;
+  font-weight: 600;
+  border-bottom-color: #8fbf5a;
+}
+.scope-tabs button span {
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #eef2ea;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #6e8060;
+  text-align: center;
+}
+.scope-tabs button.selected span {
+  background: #e3f1cf;
+  color: #3d5a24;
+}
+.task-table .task-group-head th {
+  padding: 0;
+  background: #f7f9f4;
+  border-block: 1px solid #eef1ea;
+}
+.task-group-head button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 23px;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: #44524a;
+}
+.task-group-head button:hover {
+  background: #f1f5ec;
+}
+.task-group-head svg {
+  color: #8b9a82;
+  transition: transform 0.15s ease;
+}
+.task-group-head svg.open {
+  transform: rotate(90deg);
+}
+.task-group-head strong {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.task-group-count {
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #e3e9dc;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: #6e8060;
+  text-align: center;
+}
+.task-group-head small {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: #a0aba7;
+}
+.you-tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #e3f1cf;
+  color: #3d5a24;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.task-person-name {
+  font-size: 0.75rem;
+  color: #596861;
+}
+@media (max-width: 760px) {
+  .scope-tabs {
+    padding: 0 12px;
+  }
+  .task-group-head button {
+    padding: 10px 16px;
+  }
+  .task-group-head small {
+    display: none;
+  }
+}
