@@ -43,10 +43,12 @@ import type {
 } from "./types";
 import { canCreateTaskIn, contractProductLabel } from "./domain";
 import { DriveAudit } from "./DriveAudit";
+import { FileViewer } from "./FileViewer";
 import {
   createDriveFolder,
   deleteDriveFile,
   deleteDriveFolder,
+  driveViewUrl,
   formatBytes,
   listDriveFiles,
   listDriveFolders,
@@ -188,6 +190,10 @@ function DriveTree({
   const [busyId, setBusyId] = useState("");
   const [editing, setEditing] = useState<Editing>(null);
   const [draft, setDraft] = useState("");
+  const [viewer, setViewer] = useState<{
+    list: DriveFile[];
+    index: number;
+  } | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   const folderById = useMemo(
@@ -475,9 +481,9 @@ function DriveTree({
                       <button
                         type="button"
                         className="drive-file-name"
-                        title="Abrir"
+                        title="Visualizar"
                         onClick={() =>
-                          void run(f.id, () => openDriveFile(f.id, true))
+                          setViewer({ list, index: list.indexOf(f) })
                         }
                       >
                         {f.name}
@@ -529,7 +535,7 @@ function DriveTree({
                       title="Visualizar"
                       disabled={busyId === f.id}
                       onClick={() =>
-                        void run(f.id, () => openDriveFile(f.id, true))
+                        setViewer({ list, index: list.indexOf(f) })
                       }
                     >
                       <Eye size={15} />
@@ -913,6 +919,21 @@ function DriveTree({
             </div>
           ) : null}
         </>
+      )}
+      {viewer && (
+        <FileViewer
+          files={viewer.list.map((f) => ({
+            key: f.id,
+            name: f.name,
+            contentType: f.content_type,
+            size: f.size_bytes,
+            load: () => driveViewUrl(f.id),
+            download: () => openDriveFile(f.id),
+            openOriginal: () => openDriveFile(f.id, true),
+          }))}
+          start={viewer.index}
+          onClose={() => setViewer(null)}
+        />
       )}
       {dragging && (
         <div className="drive-drop" aria-hidden="true">

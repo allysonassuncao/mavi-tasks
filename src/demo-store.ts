@@ -30,14 +30,11 @@ export class DemoStore {
     supervisors: string[],
   ) {
     const company_id = this.data.companies[0].id;
-    const invalid = supervisors.some((id) => {
-      const role = this.data.members.find((m) => m.user_id === id)?.role;
-      return role !== "admin" && role !== "manager";
-    });
+    const invalid = supervisors.some(
+      (id) => !this.data.members.some((m) => m.user_id === id && m.active),
+    );
     if (invalid)
-      throw Error(
-        "Supervisores precisam ser gestores ou administradores ativos",
-      );
+      throw Error("Supervisores precisam ser pessoas ativas da empresa");
     this.data.teamMembers = [
       ...this.data.teamMembers.filter((tm) => tm.team_id !== teamId),
       ...[...new Set([...users, ...supervisors])].map((user_id) => ({
@@ -61,6 +58,16 @@ export class DemoStore {
         action,
         detail,
         created_at: now,
+      });
+    // Mirrors start_timer / stop_timer: play and pause become comments.
+    const timerComment = (taskId: string, body: string) =>
+      this.comments.unshift({
+        id: crypto.randomUUID(),
+        company_id: this.data.companies[0].id,
+        task_id: taskId,
+        author_id: demoUser,
+        body,
+        created_at: new Date().toISOString(),
       });
     switch (name) {
       case "update_client":
@@ -375,8 +382,12 @@ export class DemoStore {
             (h) => h.user_id === demoUser && !h.ended_at,
           );
           if (active && active.task_id === a.p_task) return active.id;
-          if (active) active.ended_at = now;
+          if (active) {
+            active.ended_at = now;
+            timerComment(active.task_id, pauseComment(active, true));
+          }
         }
+        timerComment(a.p_task, transitionComment("Iniciou o trabalho", ""));
         this.data.hours.unshift({
           id,
           company_id,
@@ -390,7 +401,10 @@ export class DemoStore {
         break;
       case "stop_timer": {
         const h = this.data.hours.find((h) => h.id === a.p_entry);
-        if (h) h.ended_at = now;
+        if (h && !h.ended_at) {
+          h.ended_at = now;
+          timerComment(h.task_id, pauseComment(h, false));
+        }
         break;
       }
       case "log_time":
@@ -473,4 +487,23 @@ export class DemoStore {
     };
     return id;
   }
+}
+
+/** Mirrors mavi_private.session_label: "1h 05min", "25min", "40s". */
+export function sessionLabel(from: string, to: string) {
+  const s = Math.max(0, Math.floor((Date.parse(to) - Date.parse(from)) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}min`;
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}min`;
+}
+function pauseComment(
+  entry: { started_at: string; ended_at: string | null },
+  automatic: boolean,
+) {
+  return transitionComment(
+    automatic
+      ? "Pausou o trabalho (ao iniciar outra tarefa)"
+      : "Pausou o trabalho",
+    `Sessão de ${sessionLabel(entry.started_at, entry.ended_at!)}`,
+  );
 }

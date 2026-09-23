@@ -224,11 +224,8 @@ export async function tasksQuery(
         .order("due_date")
         .order("id");
 
-      if (filters.onlyMineOrCreated && filters.user) {
-        query = query.or(
-          `assignee_id.eq.${filters.user},creator_id.eq.${filters.user}`,
-        );
-      }
+      // Collaborators: RLS (tasks_read) already limits the rows to their own
+      // tasks plus the ones their teams' supervision covers.
 
       if (filters.search.trim())
         query = query.or(taskSearchFilter(filters.search, lookups));
@@ -305,6 +302,33 @@ export async function companyHours(
     },
     { ttlMs: CACHE_TTL.HOURS, forceRefresh },
   );
+}
+
+/**
+ * Seconds already tracked on a task (finished entries only), from every entry
+ * the person may see — not just the company's latest entries kept in the
+ * snapshot, which would undercount tasks with older work.
+ */
+export async function taskPastSeconds(
+  company: string,
+  taskId: string,
+): Promise<number> {
+  if (!supabase) throw Error("Supabase não configurado");
+  const { data, error } = await supabase
+    .from("time_entries")
+    .select("started_at,ended_at")
+    .eq("company_id", company)
+    .eq("task_id", taskId)
+    .not("ended_at", "is", null)
+    .limit(10000);
+  if (error) throw error;
+  return (data ?? []).reduce((sum, h) => {
+    const start = Date.parse(h.started_at),
+      end = Date.parse(h.ended_at!);
+    return Number.isFinite(start) && Number.isFinite(end) && end > start
+      ? sum + Math.floor((end - start) / 1000)
+      : sum;
+  }, 0);
 }
 
 export async function reportSummary(

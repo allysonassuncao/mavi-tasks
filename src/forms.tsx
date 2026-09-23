@@ -35,6 +35,10 @@ import {
   KeyRound,
   Mail,
   HardDrive,
+  ChevronsLeft,
+  ChevronsRight,
+  UserRoundPen,
+  Eye,
 } from "lucide-react";
 import { Modal, Avatar, Badge, Empty, Loading } from "./components";
 import {
@@ -52,13 +56,12 @@ import {
   duration,
   durationWithSeconds,
   names,
-  taskTimerSeconds,
   formatClock,
   projectReview,
   taskActions,
   type BlockedAction,
 } from "./domain";
-import { useNow } from "./useClock";
+import { useTaskSeconds } from "./useTaskTime";
 import { supabase } from "./supabase";
 import { rpc, taskExtras, invalidateTaskExtras } from "./api";
 import { getGcsPublicUrl } from "./gcs";
@@ -74,6 +77,8 @@ import { TaskDrive } from "./DrivePage";
 import { TeamPicker } from "./TeamPicker";
 import { ReviewSettings } from "./ReviewSettings";
 import { attachmentAccept, uploadAttachment } from "./attachments";
+import { attachmentType } from "./upload-types";
+import { FileViewer } from "./FileViewer";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
 export type FormPreset = {
@@ -468,6 +473,7 @@ export function CreateForm({
     </Modal>
   );
 }
+const PANEL_KEY = "mavi:task-panel";
 const blocked = (value: unknown): value is BlockedAction =>
   typeof value === "object" && value !== null && "blocked" in value;
 /** Field label, submit label and confirmation for each action that takes a note. */
@@ -559,13 +565,15 @@ export function TaskDetail({
     [uploading, setUploading] = useState(false);
   const [editorUploading, setEditorUploading] = useState(false);
   const [commentRevision, setCommentRevision] = useState(0);
+  const [viewing, setViewing] = useState<number | null>(null);
   const n = names(data, task),
     member = data.members.find((m) => m.user_id === user),
     isAdmin = member?.role === "admin",
     isManager = member?.role === "manager",
     isLeader = isAdmin || isManager,
     canEdit = isLeader || task.creator_id === user,
-    acts = taskActions(data, task, user);
+    acts = taskActions(data, task, user),
+    creator = data.members.find((m) => m.user_id === task.creator_id);
   const review = projectReview(
     data.projects.find((p) => p.id === task.project_id),
   );
@@ -575,10 +583,57 @@ export function TaskDetail({
     : review.approver === "supervisor"
       ? "o supervisor da equipe"
       : "o criador da tarefa";
+  // Side panel (comments, history, files, Drive): the open/closed choice is
+  // a per-viewer convenience kept in the browser.
+  const [panelOpen, setPanelOpen] = useState(() => {
+    try {
+      return localStorage.getItem(PANEL_KEY) !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  function togglePanel(open: boolean) {
+    setPanelOpen(open);
+    try {
+      localStorage.setItem(PANEL_KEY, open ? "open" : "closed");
+    } catch {
+      // Blocked storage: the choice just won't persist.
+    }
+  }
+  const panels = [
+    {
+      id: "comments",
+      label: "Comentários",
+      icon: MessageSquare,
+      count: extras.comments.length,
+    },
+    { id: "activity", label: "Histórico", icon: History, count: 0 },
+    {
+      id: "files",
+      label: "Arquivos",
+      icon: Paperclip,
+      count: extras.attachments.length,
+    },
+    ...(n.client
+      ? [{ id: "drive", label: "Drive do cliente", icon: HardDrive, count: 0 }]
+      : []),
+  ];
+  const current = panels.find((p) => p.id === tab) ?? panels[0];
+  // Comments read like a chat: newest at the bottom, next to the composer.
+  const sideBody = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sideBody.current;
+    if (el && tab === "comments") el.scrollTop = el.scrollHeight;
+  }, [tab, panelOpen, loading, extras.comments.length]);
   const running = currentRunning;
   const isRunning = running?.task_id === task.id;
-  const now = useNow(isRunning);
-  const totalSeconds = taskTimerSeconds(data.hours, task.id, running, now);
+  const totalSeconds = useTaskSeconds({
+    company: task.company_id,
+    taskId: task.id,
+    hours: data.hours,
+    running,
+    demo,
+  });
   const clock = formatClock(totalSeconds);
   useEffect(() => {
     if (!isRunning) setEditing(false);
@@ -710,636 +765,715 @@ export function TaskDetail({
       busy={busy || uploading || editorUploading}
       wide
     >
-      <div className="task-detail">
-        <div className="detail-breadcrumb">
-          {n.client?.name}
-          <span>/</span>
-          {n.product?.name}
-          <span>/</span>
-          {n.project?.name ?? "Sem projeto"}
-        </div>
-        <div className="detail-title">
-          <h2>{task.title}</h2>
-          <Badge status={task.status} />
-        </div>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="task-properties">
-          <div>
-            <span>
-              <UserRound size={16} /> Responsável
-            </span>
-            <strong>
-              <Avatar
-                name={n.member?.name ?? "?"}
-                src={n.member?.avatar_url}
-                size="small"
-              />
-              {n.member?.name}
-            </strong>
+      <div
+        className={`task-detail task-workspace${panelOpen ? "" : " panel-collapsed"}`}
+        data-panel={tab}
+      >
+        <div className="task-main">
+          <div className="detail-breadcrumb">
+            {n.client?.name}
+            <span>/</span>
+            {n.product?.name}
+            <span>/</span>
+            {n.project?.name ?? "Sem projeto"}
           </div>
-          <div>
-            <span>
-              <CalendarDays size={16} /> Prazo combinado
-            </span>
-            <strong>{dateLabel(task.due_date)}</strong>
+          <div className="detail-title">
+            <h2>{task.title}</h2>
+            <Badge status={task.status} />
           </div>
-          <div>
-            <span>
-              <Flag size={16} /> Prioridade
-            </span>
-            <strong>{priorities[task.priority]}</strong>
-          </div>
-          <div>
-            <span>
-              <Clock3 size={16} /> Tempo
-            </span>
-            <strong>
-              {durationWithSeconds(totalSeconds)}{" "}
-              <small>/ {duration(task.estimated_minutes)} estimadas</small>
-            </strong>
-          </div>
-        </div>
-        <section
-          className={`focus-timer ${isRunning ? "is-running" : ""}`}
-          aria-label="Controle de execução"
-        >
-          <Button
-            className={`timer-play ${isRunning ? "timer-stop" : ""}`}
-            loading={busy}
-            disabled={busy || editorUploading}
-            onClick={() =>
-              void mutate(
-                isRunning ? "stop_timer" : "start_timer",
-                isRunning ? { p_entry: running.id } : { p_task: task.id },
-              ).catch((e) => setError(e.message))
-            }
-          >
-            {isRunning ? (
-              <Pause size={27} fill="currentColor" />
-            ) : (
-              <Play size={27} fill="currentColor" />
-            )}
-            <span>{isRunning ? "Parar" : "Iniciar"}</span>
-          </Button>
-          <div>
-            <strong>{clock}</strong>
-            <p>
-              {isRunning
-                ? "Tempo sendo registrado nesta tarefa."
-                : running
-                  ? "Ao iniciar, sua outra tarefa será pausada automaticamente."
-                  : totalSeconds > 0
-                    ? "Cronômetro pausado. Clique em Iniciar para continuar."
-                    : "Inicie para ler a descrição e registrar seu tempo."}
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
             </p>
+          )}
+          <div className="task-properties">
+            <div>
+              <span>
+                <UserRound size={16} /> Responsável
+              </span>
+              <strong>
+                <Avatar
+                  name={n.member?.name ?? "?"}
+                  src={n.member?.avatar_url}
+                  size="small"
+                />
+                {n.member?.name}
+              </strong>
+            </div>
+            <div>
+              <span>
+                <UserRoundPen size={16} /> Criado por
+              </span>
+              <strong>
+                <Avatar
+                  name={creator?.name ?? "?"}
+                  src={creator?.avatar_url}
+                  size="small"
+                />
+                {creator?.name ?? "Usuário removido"}
+              </strong>
+            </div>
+            <div>
+              <span>
+                <CalendarDays size={16} /> Prazo combinado
+              </span>
+              <strong>{dateLabel(task.due_date)}</strong>
+            </div>
+            <div>
+              <span>
+                <Flag size={16} /> Prioridade
+              </span>
+              <strong>{priorities[task.priority]}</strong>
+            </div>
+            <div>
+              <span>
+                <Clock3 size={16} /> Tempo
+              </span>
+              <strong>
+                {durationWithSeconds(totalSeconds)}{" "}
+                <small>/ {duration(task.estimated_minutes)} estimadas</small>
+              </strong>
+            </div>
           </div>
-          <Button
-            className="btn secondary share-task"
-            onClick={() =>
-              void navigator.clipboard
-                .writeText(window.location.href)
-                .then(() => notify("Link da tarefa copiado."))
-                .catch(() =>
-                  setError(
-                    "Copie o endereço da barra do navegador para compartilhar.",
-                  ),
-                )
-            }
-          >
-            <Copy size={16} /> Copiar link
-          </Button>
-        </section>
-        {!isRunning ? (
           <section
-            className="description-locked"
-            aria-label="Descrição bloqueada até iniciar"
+            className={`focus-timer ${isRunning ? "is-running" : ""}`}
+            aria-label="Controle de execução"
           >
-            <div className="blurred-placeholder" aria-hidden="true">
-              <p>
-                Contexto, referências e orientações para realizar esta tarefa.
-              </p>
-              <p>
-                Instruções e detalhes do trabalho aparecem nesta área de
-                leitura.
-              </p>
-              <p>Entregáveis e critérios para validação.</p>
-            </div>
-            <div className="description-unlock">
-              <LockKeyhole size={24} />
-              <strong>Inicie a tarefa para visualizar a descrição</strong>
-              <span>Use o botão Iniciar acima.</span>
-            </div>
-          </section>
-        ) : editing ? (
-          <form className="entity-form inline-edit" onSubmit={edit}>
-            <label>
-              Título
-              <Input
-                name="title"
-                defaultValue={task.title}
-                minLength={2}
-                maxLength={240}
-                required
-              />
-            </label>
-            <Suspense
-              fallback={
-                <>
-                  <input
-                    type="hidden"
-                    name="description"
-                    value={task.description}
-                  />
-                  <Loading compact />
-                </>
+            <Button
+              className={`timer-play ${isRunning ? "timer-stop" : ""}`}
+              loading={busy}
+              disabled={busy || editorUploading}
+              onClick={() =>
+                void mutate(
+                  isRunning ? "stop_timer" : "start_timer",
+                  isRunning ? { p_entry: running.id } : { p_task: task.id },
+                )
+                  .then(() => {
+                    // Play and pause are posted as comments.
+                    invalidateTaskExtras(task.id);
+                    setLocalRefresh((v) => v + 1);
+                  })
+                  .catch((e) => setError(e.message))
               }
             >
-              <RichTextEditor
-                company={task.company_id}
-                demo={demo}
-                defaultValue={task.description}
-                disabled={busy}
-                onUploading={setEditorUploading}
-              />
-            </Suspense>
-            <label>
-              Início planejado (opcional)
-              <Input
-                type="date"
-                name="start_date"
-                defaultValue={task.start_date ?? ""}
-              />
-            </label>
-            <div className="form-columns">
+              {isRunning ? (
+                <Pause size={27} fill="currentColor" />
+              ) : (
+                <Play size={27} fill="currentColor" />
+              )}
+              <span>{isRunning ? "Parar" : "Iniciar"}</span>
+            </Button>
+            <div>
+              <strong>{clock}</strong>
+              <p>
+                {isRunning
+                  ? "Tempo sendo registrado nesta tarefa."
+                  : running
+                    ? "Ao iniciar, sua outra tarefa será pausada automaticamente."
+                    : totalSeconds > 0
+                      ? "Cronômetro pausado. Clique em Iniciar para continuar."
+                      : "Inicie para ler a descrição e registrar seu tempo."}
+              </p>
+            </div>
+            <Button
+              className="btn secondary share-task"
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(window.location.href)
+                  .then(() => notify("Link da tarefa copiado."))
+                  .catch(() =>
+                    setError(
+                      "Copie o endereço da barra do navegador para compartilhar.",
+                    ),
+                  )
+              }
+            >
+              <Copy size={16} /> Copiar link
+            </Button>
+          </section>
+          {!isRunning ? (
+            <section
+              className="description-locked"
+              aria-label="Descrição bloqueada até iniciar"
+            >
+              <div className="blurred-placeholder" aria-hidden="true">
+                <p>
+                  Contexto, referências e orientações para realizar esta tarefa.
+                </p>
+                <p>
+                  Instruções e detalhes do trabalho aparecem nesta área de
+                  leitura.
+                </p>
+                <p>Entregáveis e critérios para validação.</p>
+              </div>
+              <div className="description-unlock">
+                <LockKeyhole size={24} />
+                <strong>Inicie a tarefa para visualizar a descrição</strong>
+                <span>Use o botão Iniciar acima.</span>
+              </div>
+            </section>
+          ) : editing ? (
+            <form className="entity-form inline-edit" onSubmit={edit}>
               <label>
-                Prazo
+                Título
                 <Input
-                  type="date"
-                  name="due"
-                  defaultValue={task.due_date}
+                  name="title"
+                  defaultValue={task.title}
+                  minLength={2}
+                  maxLength={240}
                   required
                 />
               </label>
-              <label>
-                Estimativa em horas
-                <Input
-                  type="number"
-                  name="estimated"
-                  defaultValue={task.estimated_minutes / 60}
-                  min="0"
-                  step="0.25"
-                />
-              </label>
-            </div>
-            <label>
-              Prioridade
-              <Select name="priority" defaultValue={task.priority}>
-                {Object.entries(priorities).map(([k, v]) => (
-                  <SelectOption value={k} key={k}>
-                    {v}
-                  </SelectOption>
-                ))}
-              </Select>
-            </label>
-            <div className="form-footer">
-              <Button
-                type="button"
-                className="btn secondary"
-                onClick={() => setEditing(false)}
-              >
-                Cancelar
-              </Button>
-              <Button
-                className="btn primary"
-                disabled={busy || editorUploading}
-                loading={busy || editorUploading}
-              >
-                <Save size={16} /> Salvar alterações
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <section className="detail-description">
-            <div>
-              <h3>Descrição</h3>
-              {canEdit && (
-                <Button className="text-btn" onClick={() => setEditing(true)}>
-                  Editar tarefa
-                </Button>
-              )}
-            </div>
-            <RichTextContent value={task.description} />
-          </section>
-        )}
-        <div className="approval-state">
-          <Check size={17} />
-          <span>
-            {review.required ? (
-              <>
-                Validação por {reviewer}:{" "}
-                <strong>
-                  {task.internal_approved_by ? "aprovada" : "pendente"}
-                </strong>
-              </>
-            ) : (
-              <>Este projeto não tem etapa de validação</>
-            )}
-            {task.requires_client_approval && (
-              <>
-                {" "}
-                · Cliente:{" "}
-                <strong>
-                  {task.client_approved_by ? "aprovada" : "pendente"}
-                </strong>
-              </>
-            )}
-          </span>
-        </div>
-        {!action && (
-          <div className="detail-actions">
-            {acts.start && (
-              <Button
-                className="btn primary"
-                disabled={busy}
-                loading={busy}
-                onClick={() => void transition("start")}
-              >
-                <Check size={15} /> Marcar em andamento
-              </Button>
-            )}
-            {acts.resend && (
-              <Button
-                className="btn primary"
-                disabled={busy}
-                loading={busy}
-                onClick={() => setAction("start")}
-              >
-                <Send size={15} /> Enviar novamente
-              </Button>
-            )}
-            {acts.submit && (
-              <Button
-                className="btn primary"
-                disabled={busy || blocked(acts.submit)}
-                loading={busy}
-                onClick={() =>
-                  acts.submitNeedsNote
-                    ? setAction("submit")
-                    : void transition("submit")
+              <Suspense
+                fallback={
+                  <>
+                    <input
+                      type="hidden"
+                      name="description"
+                      value={task.description}
+                    />
+                    <Loading compact />
+                  </>
                 }
               >
-                <Check size={16} />{" "}
-                {blocked(acts.submit)
-                  ? acts.submit.blocked
-                  : review.required
-                    ? "Enviar para validação"
-                    : "Concluir tarefa"}
-              </Button>
-            )}
-            {acts.approveInternal && (
-              <Button
-                className="btn primary"
-                disabled={busy}
-                loading={busy}
-                onClick={() => setAction("approve_internal")}
-              >
-                <Check size={16} /> Aprovar internamente
-              </Button>
-            )}
-            {acts.approveClient && (
-              <Button
-                className="btn secondary"
-                disabled={busy}
-                loading={busy}
-                onClick={() => setAction("approve_client")}
-              >
-                Registrar aprovação do cliente
-              </Button>
-            )}
-            {acts.reject && (
-              <Button
-                className="btn secondary"
-                disabled={busy}
-                loading={busy}
-                onClick={() => setAction("reject")}
-              >
-                Solicitar ajustes
-              </Button>
-            )}
-            {acts.return && (
-              <Button
-                className="btn secondary"
-                disabled={busy || blocked(acts.return)}
-                loading={busy}
-                onClick={() => setAction("return")}
-              >
-                {blocked(acts.return)
-                  ? acts.return.blocked
-                  : "Devolver ao criador"}
-              </Button>
-            )}
-            {acts.reopen && (
-              <Button
-                className="btn secondary"
-                disabled={busy || blocked(acts.reopen)}
-                loading={busy}
-                title={blocked(acts.reopen) ? acts.reopen.blocked : undefined}
-                onClick={() => setAction("reopen")}
-              >
-                Reabrir tarefa
-              </Button>
-            )}
-          </div>
-        )}
-        {blocked(acts.reopen) && (
-          <p className="muted action-hint">{acts.reopen.blocked}</p>
-        )}
-        {action && (
-          <form
-            className="action-note"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (editorUploading) return;
-              const fd = new FormData(e.currentTarget);
-              let note = String(fd.get("note") ?? "");
-              const min = action === "approve_client" ? 5 : 3;
-              if (richTextPlain(note).length < min) {
-                setError(
-                  `Escreva ao menos ${min} caracteres no campo "${noteForm[action].label}".`,
-                );
-                return;
-              }
-              if (action === "reopen") {
-                const kind = fd.get("reopen_kind"),
-                  origin = fd.get("reopen_origin");
-                if (!kind || !origin) {
-                  setError("Responda às duas perguntas da reabertura.");
-                  return;
-                }
-                note = prependParagraphs(note, [
-                  `Foi realizado o que foi solicitado? ${
-                    kind === "change" ? "Sim (alteração)" : "Não (correção)"
-                  }`,
-                  `Pedido de quem? ${origin === "client" ? "Cliente" : "Interno"}`,
-                ]);
-              }
-              if (
-                ["return", "reject", "reopen"].includes(action) &&
-                !window.confirm(noteForm[action].confirm)
-              )
-                return;
-              void transition(action, note);
-            }}
-          >
-            {action === "reopen" && (
-              <div className="reopen-questions">
-                <fieldset>
-                  <legend>Foi realizado o que foi solicitado?</legend>
-                  <label className="radio-option">
-                    <input type="radio" name="reopen_kind" value="change" />
-                    Sim — é uma alteração
-                  </label>
-                  <label className="radio-option">
-                    <input type="radio" name="reopen_kind" value="fix" />
-                    Não — é uma correção
-                  </label>
-                </fieldset>
-                <fieldset>
-                  <legend>É um pedido do cliente ou um pedido seu?</legend>
-                  <label className="radio-option">
-                    <input type="radio" name="reopen_origin" value="client" />
-                    Cliente
-                  </label>
-                  <label className="radio-option">
-                    <input type="radio" name="reopen_origin" value="internal" />
-                    Meu
-                  </label>
-                </fieldset>
-              </div>
-            )}
-            <Suspense fallback={<Loading compact />}>
-              <RichTextEditor
-                key={action}
-                company={task.company_id}
-                demo={demo}
-                name="note"
-                label={noteForm[action].label}
-                disabled={busy}
-                onUploading={setEditorUploading}
-              />
-            </Suspense>
-            <small>
-              Este texto também será publicado nos comentários da tarefa.
-            </small>
-            <div className="form-footer">
-              <Button
-                type="button"
-                className="btn secondary"
-                onClick={() => {
-                  setAction("");
-                  setError("");
-                }}
-              >
-                Cancelar
-              </Button>
-              <Button
-                className="btn primary"
-                disabled={busy || editorUploading}
-                loading={busy || editorUploading}
-              >
-                {noteForm[action].submit}
-              </Button>
-            </div>
-          </form>
-        )}
-        <div className="detail-tabs">
-          {[
-            { id: "comments", label: "Comentários", icon: MessageSquare },
-            { id: "files", label: "Arquivos", icon: Paperclip },
-            ...(n.client
-              ? [{ id: "drive", label: "Drive", icon: HardDrive }]
-              : []),
-            { id: "activity", label: "Histórico", icon: History },
-          ].map((t) => (
-            <Button
-              className={tab === t.id ? "selected" : ""}
-              key={t.id}
-              onClick={() => setTab(t.id)}
-            >
-              <t.icon size={16} />
-              {t.label}
-            </Button>
-          ))}
-        </div>
-        {loading ? (
-          <Loading compact />
-        ) : tab === "comments" ? (
-          <>
-            <form className="comment-form" onSubmit={comment}>
-              <Avatar
-                name={
-                  data.members.find((m) => m.user_id === user)?.name ??
-                  "Usuário"
-                }
-                src={data.members.find((m) => m.user_id === user)?.avatar_url}
-              />
-              <Suspense fallback={<Loading compact />}>
                 <RichTextEditor
-                  key={commentRevision}
                   company={task.company_id}
                   demo={demo}
-                  name="body"
-                  label="Comentário"
+                  defaultValue={task.description}
                   disabled={busy}
                   onUploading={setEditorUploading}
                 />
               </Suspense>
-              <Button
-                className="icon-btn"
-                disabled={busy || editorUploading}
-                loading={busy || editorUploading}
-                aria-label="Enviar comentário"
-              >
-                <Send size={19} />
-              </Button>
-            </form>
-            <div className="comment-list">
-              {extras.comments.map((c) => (
-                <article key={c.id}>
-                  <Avatar
-                    name={
-                      data.members.find((m) => m.user_id === c.author_id)
-                        ?.name ?? "Usuário"
-                    }
-                    src={
-                      data.members.find((m) => m.user_id === c.author_id)
-                        ?.avatar_url
-                    }
+              <label>
+                Início planejado (opcional)
+                <Input
+                  type="date"
+                  name="start_date"
+                  defaultValue={task.start_date ?? ""}
+                />
+              </label>
+              <div className="form-columns">
+                <label>
+                  Prazo
+                  <Input
+                    type="date"
+                    name="due"
+                    defaultValue={task.due_date}
+                    required
                   />
-                  <div>
-                    <strong>
-                      {
-                        data.members.find((m) => m.user_id === c.author_id)
-                          ?.name
-                      }
-                      <small>
-                        {new Date(c.created_at).toLocaleString("pt-BR")}
-                      </small>
-                    </strong>
-                    <RichTextContent value={c.body} />
-                  </div>
-                </article>
-              ))}
-              {!extras.comments.length && (
-                <p className="muted centered">
-                  A conversa sobre esta entrega começa aqui.
-                </p>
-              )}
-            </div>
-          </>
-        ) : tab === "drive" && n.client ? (
-          <TaskDrive
-            root={{ client: n.client.id }}
-            demo={demo}
-            data={data}
-            company={task.company_id}
-            user={user}
-            isLeader={isLeader}
-            notify={notify}
-          />
-        ) : tab === "files" ? (
-          <>
-            <label className={`upload-zone ${demo ? "disabled" : ""}`}>
-              <Paperclip size={24} />
-              <strong>
-                {demo ? (
-                  "Arquivos disponíveis após conectar ao Supabase"
-                ) : uploading ? (
-                  <span role="status" aria-busy="true">
-                    <Skeleton className="skeleton-upload" />
-                    <span className="sr-only">Enviando arquivo…</span>
-                  </span>
-                ) : (
-                  "Clique para anexar um arquivo"
-                )}
-              </strong>
-              <small>
-                PDF, imagens, documentos, planilhas ou ZIP · até 20 MB
-              </small>
-              <Input
-                type="file"
-                disabled={demo || uploading}
-                accept={attachmentAccept}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void upload(file);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            {extras.attachments.map((a) => (
-              <div className="file-row" key={a.id}>
-                <Paperclip size={17} />
-                <span>
-                  {a.name}
-                  <small>{(a.size_bytes / 1024).toFixed(0)} KB</small>
-                </span>
+                </label>
+                <label>
+                  Estimativa em horas
+                  <Input
+                    type="number"
+                    name="estimated"
+                    defaultValue={task.estimated_minutes / 60}
+                    min="0"
+                    step="0.25"
+                  />
+                </label>
+              </div>
+              <label>
+                Prioridade
+                <Select name="priority" defaultValue={task.priority}>
+                  {Object.entries(priorities).map(([k, v]) => (
+                    <SelectOption value={k} key={k}>
+                      {v}
+                    </SelectOption>
+                  ))}
+                </Select>
+              </label>
+              <div className="form-footer">
                 <Button
-                  className="icon-btn"
-                  aria-label={`Baixar ${a.name}`}
-                  onClick={() => void download(a)}
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => setEditing(false)}
                 >
-                  <Download size={18} />
+                  Cancelar
+                </Button>
+                <Button
+                  className="btn primary"
+                  disabled={busy || editorUploading}
+                  loading={busy || editorUploading}
+                >
+                  <Save size={16} /> Salvar alterações
                 </Button>
               </div>
-            ))}
-          </>
-        ) : (
-          <div className="event-list">
-            {extras.events.map((e) => (
-              <div key={e.id}>
-                <span className="event-dot" />
-                <div>
+            </form>
+          ) : (
+            <section className="detail-description">
+              <div>
+                <h3>Descrição</h3>
+                {canEdit && (
+                  <Button className="text-btn" onClick={() => setEditing(true)}>
+                    Editar tarefa
+                  </Button>
+                )}
+              </div>
+              <RichTextContent value={task.description} />
+            </section>
+          )}
+          <div className="approval-state">
+            <Check size={17} />
+            <span>
+              {review.required ? (
+                <>
+                  Validação por {reviewer}:{" "}
                   <strong>
-                    {e.action === "submit" && e.detail.to === "done"
-                      ? "Tarefa concluída"
-                      : e.action === "start" && e.detail.from === "returned"
-                        ? "Reenviada ao responsável"
-                        : ((
-                            {
-                              created: "Tarefa criada",
-                              start: "Trabalho iniciado",
-                              submit: "Enviada para validação",
-                              return: "Devolvida ao criador",
-                              reject: "Reprovada na validação",
-                              approve_internal: "Aprovada na validação",
-                              approve_client: "Aprovação do cliente registrada",
-                              reopen: "Tarefa reaberta",
-                              edited: "Tarefa editada",
-                            } as Record<string, string>
-                          )[e.action] ?? e.action)}
+                    {task.internal_approved_by ? "aprovada" : "pendente"}
                   </strong>
-                  <small>
-                    {new Date(e.created_at).toLocaleString("pt-BR")}
-                  </small>
-                  {!!e.detail.note && (
-                    <RichTextContent value={String(e.detail.note)} />
+                </>
+              ) : (
+                <>Este projeto não tem etapa de validação</>
+              )}
+              {task.requires_client_approval && (
+                <>
+                  {" "}
+                  · Cliente:{" "}
+                  <strong>
+                    {task.client_approved_by ? "aprovada" : "pendente"}
+                  </strong>
+                </>
+              )}
+            </span>
+          </div>
+          {!action && (
+            <div className="detail-actions">
+              {acts.start && (
+                <Button
+                  className="btn primary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() => void transition("start")}
+                >
+                  <Check size={15} /> Marcar em andamento
+                </Button>
+              )}
+              {acts.resend && (
+                <Button
+                  className="btn primary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() => setAction("start")}
+                >
+                  <Send size={15} /> Enviar novamente
+                </Button>
+              )}
+              {acts.submit && (
+                <Button
+                  className="btn primary"
+                  disabled={busy || blocked(acts.submit)}
+                  loading={busy}
+                  onClick={() =>
+                    acts.submitNeedsNote
+                      ? setAction("submit")
+                      : void transition("submit")
+                  }
+                >
+                  <Check size={16} />{" "}
+                  {blocked(acts.submit)
+                    ? acts.submit.blocked
+                    : review.required
+                      ? "Enviar para validação"
+                      : "Concluir tarefa"}
+                </Button>
+              )}
+              {acts.approveInternal && (
+                <Button
+                  className="btn primary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() => setAction("approve_internal")}
+                >
+                  <Check size={16} /> Aprovar internamente
+                </Button>
+              )}
+              {acts.approveClient && (
+                <Button
+                  className="btn secondary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() => setAction("approve_client")}
+                >
+                  Registrar aprovação do cliente
+                </Button>
+              )}
+              {acts.reject && (
+                <Button
+                  className="btn secondary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() => setAction("reject")}
+                >
+                  Solicitar ajustes
+                </Button>
+              )}
+              {acts.return && (
+                <Button
+                  className="btn secondary"
+                  disabled={busy || blocked(acts.return)}
+                  loading={busy}
+                  onClick={() => setAction("return")}
+                >
+                  {blocked(acts.return)
+                    ? acts.return.blocked
+                    : "Devolver ao criador"}
+                </Button>
+              )}
+              {acts.reopen && (
+                <Button
+                  className="btn secondary"
+                  disabled={busy || blocked(acts.reopen)}
+                  loading={busy}
+                  title={blocked(acts.reopen) ? acts.reopen.blocked : undefined}
+                  onClick={() => setAction("reopen")}
+                >
+                  Reabrir tarefa
+                </Button>
+              )}
+            </div>
+          )}
+          {blocked(acts.reopen) && (
+            <p className="muted action-hint">{acts.reopen.blocked}</p>
+          )}
+          {action && (
+            <form
+              className="action-note"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (editorUploading) return;
+                const fd = new FormData(e.currentTarget);
+                let note = String(fd.get("note") ?? "");
+                const min = action === "approve_client" ? 5 : 3;
+                if (richTextPlain(note).length < min) {
+                  setError(
+                    `Escreva ao menos ${min} caracteres no campo "${noteForm[action].label}".`,
+                  );
+                  return;
+                }
+                if (action === "reopen") {
+                  const kind = fd.get("reopen_kind"),
+                    origin = fd.get("reopen_origin");
+                  if (!kind || !origin) {
+                    setError("Responda às duas perguntas da reabertura.");
+                    return;
+                  }
+                  note = prependParagraphs(note, [
+                    `Foi realizado o que foi solicitado? ${
+                      kind === "change" ? "Sim (alteração)" : "Não (correção)"
+                    }`,
+                    `Pedido de quem? ${origin === "client" ? "Cliente" : "Interno"}`,
+                  ]);
+                }
+                if (
+                  ["return", "reject", "reopen"].includes(action) &&
+                  !window.confirm(noteForm[action].confirm)
+                )
+                  return;
+                void transition(action, note);
+              }}
+            >
+              {action === "reopen" && (
+                <div className="reopen-questions">
+                  <fieldset>
+                    <legend>Foi realizado o que foi solicitado?</legend>
+                    <label className="radio-option">
+                      <input type="radio" name="reopen_kind" value="change" />
+                      Sim — é uma alteração
+                    </label>
+                    <label className="radio-option">
+                      <input type="radio" name="reopen_kind" value="fix" />
+                      Não — é uma correção
+                    </label>
+                  </fieldset>
+                  <fieldset>
+                    <legend>É um pedido do cliente ou um pedido seu?</legend>
+                    <label className="radio-option">
+                      <input type="radio" name="reopen_origin" value="client" />
+                      Cliente
+                    </label>
+                    <label className="radio-option">
+                      <input
+                        type="radio"
+                        name="reopen_origin"
+                        value="internal"
+                      />
+                      Meu
+                    </label>
+                  </fieldset>
+                </div>
+              )}
+              <Suspense fallback={<Loading compact />}>
+                <RichTextEditor
+                  key={action}
+                  company={task.company_id}
+                  demo={demo}
+                  name="note"
+                  label={noteForm[action].label}
+                  disabled={busy}
+                  onUploading={setEditorUploading}
+                />
+              </Suspense>
+              <small>
+                Este texto também será publicado nos comentários da tarefa.
+              </small>
+              <div className="form-footer">
+                <Button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => {
+                    setAction("");
+                    setError("");
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  className="btn primary"
+                  disabled={busy || editorUploading}
+                  loading={busy || editorUploading}
+                >
+                  {noteForm[action].submit}
+                </Button>
+              </div>
+            </form>
+          )}
+        </div>
+        <nav className="task-rail" aria-label="Painel lateral da tarefa">
+          <Button
+            className="icon-btn task-rail-toggle"
+            aria-label={panelOpen ? "Recolher painel" : "Expandir painel"}
+            title={panelOpen ? "Recolher painel" : "Expandir painel"}
+            aria-expanded={panelOpen}
+            onClick={() => togglePanel(!panelOpen)}
+          >
+            {panelOpen ? (
+              <ChevronsRight size={18} />
+            ) : (
+              <ChevronsLeft size={18} />
+            )}
+          </Button>
+          {panels.map((t) => (
+            <Button
+              key={t.id}
+              className={`icon-btn${tab === t.id && panelOpen ? " selected" : ""}`}
+              aria-label={t.label}
+              title={t.label}
+              aria-pressed={tab === t.id && panelOpen}
+              onClick={() => {
+                setTab(t.id);
+                togglePanel(true);
+              }}
+            >
+              <t.icon size={18} />
+              {!!t.count && <span className="task-rail-count">{t.count}</span>}
+            </Button>
+          ))}
+        </nav>
+        {panelOpen && (
+          <aside className="task-side" aria-label={current.label}>
+            <header className="task-side-head">
+              <h3>{current.label}</h3>
+            </header>
+            <div className="task-side-body" ref={sideBody}>
+              {loading ? (
+                <Loading compact />
+              ) : tab === "comments" ? (
+                <div className="comment-list">
+                  {[...extras.comments].reverse().map((c) => (
+                    <article key={c.id}>
+                      <Avatar
+                        name={
+                          data.members.find((m) => m.user_id === c.author_id)
+                            ?.name ?? "Usuário"
+                        }
+                        src={
+                          data.members.find((m) => m.user_id === c.author_id)
+                            ?.avatar_url
+                        }
+                        size="small"
+                      />
+                      <div>
+                        <strong>
+                          {
+                            data.members.find((m) => m.user_id === c.author_id)
+                              ?.name
+                          }
+                          <small>
+                            {new Date(c.created_at).toLocaleString("pt-BR")}
+                          </small>
+                        </strong>
+                        <RichTextContent value={c.body} />
+                      </div>
+                    </article>
+                  ))}
+                  {!extras.comments.length && (
+                    <p className="muted centered">
+                      A conversa sobre esta entrega começa aqui.
+                    </p>
                   )}
                 </div>
-              </div>
-            ))}
-            {!extras.events.length && (
-              <p className="muted centered">
-                As próximas alterações aparecerão aqui.
-              </p>
+              ) : tab === "drive" && n.client ? (
+                <TaskDrive
+                  root={{ client: n.client.id }}
+                  demo={demo}
+                  data={data}
+                  company={task.company_id}
+                  user={user}
+                  isLeader={isLeader}
+                  notify={notify}
+                />
+              ) : tab === "files" ? (
+                <>
+                  <label className={`upload-zone ${demo ? "disabled" : ""}`}>
+                    <Paperclip size={24} />
+                    <strong>
+                      {demo ? (
+                        "Arquivos disponíveis após conectar ao Supabase"
+                      ) : uploading ? (
+                        <span role="status" aria-busy="true">
+                          <Skeleton className="skeleton-upload" />
+                          <span className="sr-only">Enviando arquivo…</span>
+                        </span>
+                      ) : (
+                        "Clique para anexar um arquivo"
+                      )}
+                    </strong>
+                    <small>
+                      PDF, imagens, documentos, planilhas ou ZIP · até 20 MB
+                    </small>
+                    <Input
+                      type="file"
+                      disabled={demo || uploading}
+                      accept={attachmentAccept}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void upload(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  {extras.attachments.map((a, i) => (
+                    <div className="file-row" key={a.id}>
+                      <Paperclip size={17} />
+                      <span>
+                        <button
+                          type="button"
+                          className="file-row-name"
+                          title="Visualizar"
+                          onClick={() => setViewing(i)}
+                        >
+                          {a.name}
+                        </button>
+                        <small>{(a.size_bytes / 1024).toFixed(0)} KB</small>
+                      </span>
+                      <Button
+                        className="icon-btn"
+                        aria-label={`Visualizar ${a.name}`}
+                        title="Visualizar"
+                        onClick={() => setViewing(i)}
+                      >
+                        <Eye size={18} />
+                      </Button>
+                      <Button
+                        className="icon-btn"
+                        aria-label={`Baixar ${a.name}`}
+                        onClick={() => void download(a)}
+                      >
+                        <Download size={18} />
+                      </Button>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="event-list">
+                  {extras.events.map((e) => (
+                    <div key={e.id}>
+                      <span className="event-dot" />
+                      <div>
+                        <strong>
+                          {e.action === "submit" && e.detail.to === "done"
+                            ? "Tarefa concluída"
+                            : e.action === "start" &&
+                                e.detail.from === "returned"
+                              ? "Reenviada ao responsável"
+                              : ((
+                                  {
+                                    created: "Tarefa criada",
+                                    start: "Trabalho iniciado",
+                                    submit: "Enviada para validação",
+                                    return: "Devolvida ao criador",
+                                    reject: "Reprovada na validação",
+                                    approve_internal: "Aprovada na validação",
+                                    approve_client:
+                                      "Aprovação do cliente registrada",
+                                    reopen: "Tarefa reaberta",
+                                    edited: "Tarefa editada",
+                                  } as Record<string, string>
+                                )[e.action] ?? e.action)}
+                        </strong>
+                        <small>
+                          {new Date(e.created_at).toLocaleString("pt-BR")}
+                        </small>
+                        {!!e.detail.note && (
+                          <RichTextContent value={String(e.detail.note)} />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {!extras.events.length && (
+                    <p className="muted centered">
+                      As próximas alterações aparecerão aqui.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+            {tab === "comments" && (
+              <form
+                className="comment-form task-side-composer"
+                onSubmit={comment}
+              >
+                <Suspense fallback={<Loading compact />}>
+                  <RichTextEditor
+                    key={commentRevision}
+                    company={task.company_id}
+                    demo={demo}
+                    name="body"
+                    label="Comentário"
+                    disabled={busy}
+                    onUploading={setEditorUploading}
+                  />
+                </Suspense>
+                <Button
+                  className="btn primary"
+                  disabled={busy || editorUploading}
+                  loading={busy || editorUploading}
+                  aria-label="Enviar comentário"
+                >
+                  <Send size={16} /> Enviar
+                </Button>
+              </form>
             )}
-          </div>
+          </aside>
         )}
       </div>
+      {viewing !== null && extras.attachments[viewing] && (
+        <FileViewer
+          files={extras.attachments.map((a) => ({
+            key: a.id,
+            name: a.name,
+            contentType: attachmentType(a.name) ?? "",
+            size: a.size_bytes,
+            load: async () => getGcsPublicUrl(a.path),
+            download: () => download(a),
+            openOriginal: () =>
+              window.open(getGcsPublicUrl(a.path), "_blank", "noopener"),
+          }))}
+          start={viewing}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </Modal>
   );
 }

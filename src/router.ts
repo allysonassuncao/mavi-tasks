@@ -3,6 +3,7 @@ import { useCallback, useSyncExternalStore, type SetStateAction } from "react";
 export const pagePaths = {
   overview: "/visao-geral",
   tasks: "/tarefas",
+  search: "/tarefas/busca",
   clients: "/clientes",
   products: "/produtos",
   contracts: "/produtos-contratados",
@@ -78,6 +79,15 @@ export function safeReturnPath(value: string | null) {
     "periodo",
     "visualizacao",
     "mes",
+    "termo",
+    "em",
+    "cli",
+    "proj",
+    "resp",
+    "criador",
+    "situacao",
+    "de",
+    "ate",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);

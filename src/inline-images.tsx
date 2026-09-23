@@ -5,6 +5,7 @@ import { supabase } from "./supabase";
 import { uploadToGcs, getGcsPublicUrl } from "./gcs";
 import { inlineImageTypes } from "./upload-types";
 import { Skeleton } from "./ui";
+import { FileViewer, downloadUrl } from "./FileViewer";
 
 const demoImages = new Map<string, string>();
 
@@ -36,11 +37,15 @@ export async function uploadInlineImage(
 export function InlineImage({
   id,
   alt = "Imagem anexada",
+  zoomable = false,
 }: {
   id: string;
   alt?: string;
+  /** Opens the image in the file viewer on click (not inside the editor). */
+  zoomable?: boolean;
 }) {
   const [url, setUrl] = useState("");
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState(false);
 
   useEffect(() => {
@@ -80,6 +85,39 @@ export function InlineImage({
       <ImageOff size={18} />
       Imagem indisponível ou sem permissão.
     </span>
+  ) : url && zoomable ? (
+    <>
+      <button
+        type="button"
+        className="inline-image-zoom"
+        title="Ampliar imagem"
+        aria-label={`Ampliar ${alt}`}
+        onClick={() => setOpen(true)}
+      >
+        <img
+          className="inline-image"
+          src={url}
+          alt={alt}
+          loading="lazy"
+          onError={() => setError(true)}
+        />
+      </button>
+      {open && (
+        <FileViewer
+          files={[
+            {
+              key: id,
+              name: alt,
+              contentType: "image/*",
+              load: async () => url,
+              download: () => downloadUrl(url, alt),
+              openOriginal: () => window.open(url, "_blank", "noopener"),
+            },
+          ]}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   ) : url ? (
     <img
       className="inline-image"

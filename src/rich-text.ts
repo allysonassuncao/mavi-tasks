@@ -109,7 +109,10 @@ export function richTextPlain(value: string): string {
  * transition note is a bold label followed by the note's own content.
  */
 export function transitionComment(label: string, note: string): string {
-  const doc = parseDescription(note);
+  // An empty note adds nothing (the SQL version splits "" into no lines).
+  const doc: RichNode = note.trim()
+    ? parseDescription(note)
+    : { type: "doc", content: [] };
   return serializeDescription({
     type: "doc",
     content: [

@@ -26,7 +26,6 @@ export function ReviewSettings({
   const supervisors = data.members.filter(
     (m) =>
       m.active &&
-      (m.role === "manager" || m.role === "admin") &&
       data.teamMembers.some(
         (tm) =>
           tm.user_id === m.user_id &&

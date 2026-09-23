@@ -15,7 +15,12 @@ function renderNode(node: RichNode, key: number): ReactNode {
   switch (node.type) {
     case "inlineImage":
       return (
-        <InlineImage key={key} id={node.attrs!.imageId} alt={node.attrs!.alt} />
+        <InlineImage
+          key={key}
+          id={node.attrs!.imageId}
+          alt={node.attrs!.alt}
+          zoomable
+        />
       );
     case "paragraph":
       return <p key={key}>{children?.length ? children : <br />}</p>;

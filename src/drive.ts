@@ -186,6 +186,16 @@ export async function openDriveFile(id: string, inline = false) {
   }
 }
 
+/** A short-lived URL that shows the file inline (logged as a view). */
+export async function driveViewUrl(id: string) {
+  const { url } = await driveServer<{ url: string }>({
+    action: "download",
+    file: id,
+    inline: true,
+  });
+  return url;
+}
+
 export function setDriveVisibility(id: string, visibility: DriveVisibility) {
   return rpc("set_drive_file_visibility", {
     p_file: id,

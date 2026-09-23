@@ -73,6 +73,9 @@ import {
   UserPlus,
   KeyRound,
   Mail,
+  TextSearch,
+  MonitorDown,
+  Share,
 } from "lucide-react";
 import { supabase } from "./supabase";
 import * as api from "./api";
@@ -110,7 +113,9 @@ import {
   isLate,
   namesFrom,
   buildNameLookup,
+  canSeeTask,
   taskMatchesSearch,
+  durationWithSeconds,
   upsertById,
   initials,
   type NameLookup,
@@ -130,6 +135,9 @@ import { TeamForm } from "./TeamForm";
 import { Drive } from "./DrivePage";
 import { ProfilePage } from "./ProfilePage";
 import { MemberForm } from "./MemberForm";
+import { TaskSearch } from "./TaskSearch";
+import { useInstall } from "./pwa";
+import { useTaskSeconds } from "./useTaskTime";
 import {
   notificationState,
   showNotification,
@@ -172,6 +180,7 @@ const SELF_HANDLED_MUTATIONS = new Set(["add_comment"]);
 // (read-only, plus creating tasks) and only their own hours and reports.
 const MEMBER_PAGES: readonly Page[] = [
   "tasks",
+  "search",
   "clients",
   "projects",
   "hours",
@@ -320,6 +329,9 @@ export default function App() {
     import("./types").TimeEntry | null
   >(null);
   const activeTimer = currentRunning;
+  const playingTimer: Playing | null = activeTimer
+    ? { entry: activeTimer, hours: data.hours, company, demo }
+    : null;
   useEffect(() => {
     let alive = true;
     async function syncTimer() {
@@ -370,7 +382,9 @@ export default function App() {
         if (alive) {
           if (
             !t ||
-            (!isLeader && t.assignee_id !== user && t.creator_id !== user)
+            // The database only returns visible tasks (leaders, creator,
+            // assignee, the team's supervisors); the demo mirrors that.
+            (demo && !canSeeTask(demoStore.current.data, t, user))
           ) {
             setDetailTask(null);
             setDetailError(
@@ -568,9 +582,7 @@ export default function App() {
         demoMember?.role === "admin" || demoMember?.role === "manager";
       const tasks = isDemoLeader
         ? demoData.tasks
-        : demoData.tasks.filter(
-            (t) => t.assignee_id === user || t.creator_id === user,
-          );
+        : demoData.tasks.filter((t) => canSeeTask(demoData, t, user));
       setData({ ...demoData, tasks });
       setLoading(false);
       return;
@@ -1260,8 +1272,16 @@ export default function App() {
               <a
                 key={item.id}
                 href={pageUrl(item.id, companyPath)}
-                aria-current={page === item.id ? "page" : undefined}
-                className={page === item.id ? "active" : ""}
+                aria-current={
+                  page === item.id || (page === "search" && item.id === "tasks")
+                    ? "page"
+                    : undefined
+                }
+                className={
+                  page === item.id || (page === "search" && item.id === "tasks")
+                    ? "active"
+                    : ""
+                }
                 title={item.label}
                 onClick={(event) => followLink(event, item.id)}
               >
@@ -1380,22 +1400,26 @@ export default function App() {
             <strong>
               {page === "profile"
                 ? "Meu perfil"
-                : (navigation.find((n) => n.id === page)?.label ??
-                  "Configurações")}
+                : page === "search"
+                  ? "Busca avançada"
+                  : (navigation.find((n) => n.id === page)?.label ??
+                    "Configurações")}
             </strong>
           </div>
           <div className="topbar-right">
-            {activeTimer && (
+            {playingTimer && (
               <Button
                 className="timer-live"
+                title="Tempo total da tarefa em execução"
                 onClick={() => {
                   go("hours");
                 }}
               >
                 <span className="pulse" />
-                <LiveDuration entry={activeTimer} />
+                <TaskTotal playing={playingTimer} />
               </Button>
             )}
+            <InstallApp notify={notify} />
             {notifications !== "unsupported" && (
               <Button
                 className={`notify-toggle ${notifications}`}
@@ -1475,8 +1499,10 @@ export default function App() {
                   ? "Visão geral"
                   : page === "profile"
                     ? "Meu perfil"
-                    : (navigation.find((n) => n.id === page)?.label ??
-                      "Equipe e configurações")}
+                    : page === "search"
+                      ? "Tarefas"
+                      : (navigation.find((n) => n.id === page)?.label ??
+                        "Equipe e configurações")}
               </h1>
               <p>
                 {
@@ -1484,6 +1510,8 @@ export default function App() {
                     overview:
                       "Uma visão clara do trabalho. Mais espaço para criar.",
                     tasks: "Organize prioridades e acompanhe cada entrega.",
+                    search:
+                      "Encontre qualquer tarefa pelo que foi escrito nela.",
                     clients:
                       "Cada cliente com os produtos que contratou e os projetos de cada um.",
                     products:
@@ -1687,6 +1715,7 @@ export default function App() {
                       tasks={focus}
                       lookup={nameLookup}
                       today={today}
+                      playing={playingTimer}
                       onSelect={setSelected}
                     />
                     <div className="panel-footer">
@@ -1817,6 +1846,17 @@ export default function App() {
                   </section>
                 </div>
               )}
+              {page === "search" && (
+                <TaskSearch
+                  data={data}
+                  company={company}
+                  user={user}
+                  demo={demo}
+                  demoComments={() => demoStore.current.comments}
+                  onOpen={setSelected}
+                  onBack={() => go("tasks")}
+                />
+              )}
               {page === "tasks" && (
                 <section className="panel work-panel">
                   <div className="work-toolbar">
@@ -1904,6 +1944,22 @@ export default function App() {
                         </Button>
                       )}
                     </div>
+                    <Button
+                      className="filter-chip advanced-search-link"
+                      title="Buscar também na descrição e nos comentários, incluindo entregues"
+                      onClick={() => {
+                        // Carries what was typed in the quick search.
+                        const term = search.trim();
+                        go("search");
+                        if (term)
+                          navigate(
+                            `${pageUrl("search", companyPath)}?termo=${encodeURIComponent(term)}`,
+                            true,
+                          );
+                      }}
+                    >
+                      <TextSearch size={15} /> Busca avançada
+                    </Button>
                     <Select
                       aria-label="Filtrar status"
                       value={status}
@@ -1961,6 +2017,7 @@ export default function App() {
                       tasks={filtered}
                       lookup={nameLookup}
                       today={today}
+                      playing={playingTimer}
                       onSelect={setSelected}
                     />
                   ) : view === "board" ? (
@@ -1982,10 +2039,11 @@ export default function App() {
                             {filtered
                               .filter((t) => t.status === key)
                               .map((t) => {
-                                const n = namesFrom(nameLookup, t);
+                                const n = namesFrom(nameLookup, t),
+                                  playing = activeTimer?.task_id === t.id;
                                 return (
                                   <Button
-                                    className="task-card"
+                                    className={`task-card${playing ? " is-playing" : ""}`}
                                     key={t.id}
                                     onClick={() => setSelected(t.id)}
                                   >
@@ -1993,6 +2051,9 @@ export default function App() {
                                       {n.client?.name} · {n.product?.name}
                                     </small>
                                     <h4>{t.title}</h4>
+                                    {playing && playingTimer && (
+                                      <PlayingBadge playing={playingTimer} />
+                                    )}
                                     <footer>
                                       <span
                                         className={
@@ -2692,15 +2753,92 @@ function Stat({
     </Button>
   );
 }
+/**
+ * "Instalar app": the browser's install dialog where supported (Chrome,
+ * Edge, Android), or the Share → Add to Home Screen steps on iPhone/iPad.
+ * Hidden once installed or where installing isn't possible.
+ */
+function InstallApp({ notify }: { notify: (s: string) => void }) {
+  const { mode, install } = useInstall();
+  const [steps, setSteps] = useState(false);
+  if (!mode) return null;
+  return (
+    <>
+      <Button
+        className="install-app"
+        title="Instalar o Workspace como aplicativo"
+        onClick={() =>
+          mode === "ios"
+            ? setSteps(true)
+            : void install().then((ok) => ok && notify("Aplicativo instalado."))
+        }
+      >
+        <MonitorDown size={16} />
+        <span>Instalar app</span>
+      </Button>
+      {steps && (
+        <Modal
+          title="Instalar no iPhone ou iPad"
+          onClose={() => setSteps(false)}
+        >
+          <ol className="install-steps">
+            <li>
+              Toque em <strong>Compartilhar</strong>{" "}
+              <Share size={15} aria-label="(ícone de compartilhar)" /> na barra
+              do Safari.
+            </li>
+            <li>
+              Escolha <strong>Adicionar à Tela de Início</strong>.
+            </li>
+            <li>
+              Confirme em <strong>Adicionar</strong>. O Workspace abre como um
+              app, em tela cheia.
+            </li>
+          </ol>
+        </Modal>
+      )}
+    </>
+  );
+}
+/** The user's running timer, as the task list needs it to mark its task. */
+type Playing = {
+  entry: TimeEntry;
+  hours: TimeEntry[];
+  company: string;
+  demo: boolean;
+};
+/** Live total time of the task being played (every session, not just this one). */
+function TaskTotal({ playing }: { playing: Playing }) {
+  const seconds = useTaskSeconds({
+    company: playing.company,
+    taskId: playing.entry.task_id,
+    hours: playing.hours,
+    running: playing.entry,
+    demo: playing.demo,
+  });
+  return <>{durationWithSeconds(seconds)}</>;
+}
+/** Marks the task whose timer the user is running, with the task's total time. */
+function PlayingBadge({ playing }: { playing: Playing }) {
+  return (
+    <span className="playing-badge" title="Seu cronômetro está nesta tarefa">
+      <span className="playing-pulse" aria-hidden="true" />
+      Em execução · <TaskTotal playing={playing} />
+    </span>
+  );
+}
 function TaskTable({
   tasks,
   lookup,
   today,
+  playing,
   onSelect,
 }: {
   tasks: Task[];
   lookup: NameLookup;
   today: string;
+  /** The user's running timer, marked on its task. */
+  playing?: Playing | null;
   onSelect: (id: string) => void;
 }) {
   return (
@@ -2713,13 +2851,16 @@ function TaskTable({
               <th>Status</th>
               <th>Prazo</th>
               <th>Responsável</th>
+              <th className="col-creator">Criado por</th>
             </tr>
           </thead>
           <tbody>
             {tasks.map((t) => {
-              const n = namesFrom(lookup, t);
+              const n = namesFrom(lookup, t),
+                creator = lookup.members.get(t.creator_id),
+                isPlaying = playing?.entry.task_id === t.id;
               return (
-                <tr key={t.id}>
+                <tr key={t.id} className={isPlaying ? "is-playing" : undefined}>
                   <td>
                     <Button
                       className="task-title"
@@ -2735,6 +2876,9 @@ function TaskTable({
                         <small>
                           {n.client?.name} <span> / </span> {n.product?.name}
                         </small>
+                        {isPlaying && playing && (
+                          <PlayingBadge playing={playing} />
+                        )}
                         <span className="mobile-status">
                           <Badge status={t.status} />
                         </span>
@@ -2757,6 +2901,16 @@ function TaskTable({
                       src={n.member?.avatar_url}
                       size="small"
                     />
+                  </td>
+                  <td className="col-creator">
+                    <span className="task-person">
+                      <Avatar
+                        name={creator?.name ?? "?"}
+                        src={creator?.avatar_url}
+                        size="small"
+                      />
+                      {creator?.name ?? "Usuário removido"}
+                    </span>
                   </td>
                 </tr>
               );
@@ -2877,6 +3031,9 @@ function Login({
         <small>
           Acesso por convite. Entre em contato com seu administrador.
         </small>
+        <div className="login-install">
+          <InstallApp notify={notify} />
+        </div>
       </div>
     </div>
   );

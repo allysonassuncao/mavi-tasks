@@ -110,15 +110,14 @@ export function TeamForm({
           <fieldset className="team-people">
             <legend>Pessoas da equipe</legend>
             <small>
-              Marque quem faz parte da equipe e, entre gestores e
-              administradores, quem é supervisor. Supervisores validam as
+              Marque quem faz parte da equipe e quem é supervisor — pode haver
+              mais de um, de qualquer perfil. Supervisores veem e validam as
               tarefas da equipe nos projetos configurados com “Supervisor da
               equipe”.
             </small>
             {people.map((m) => {
               const isMember = members.includes(m.user_id);
               const isSupervisor = supervisors.includes(m.user_id);
-              const canSupervise = m.role === "admin" || m.role === "manager";
               return (
                 <div
                   className={`team-person-row ${isMember ? "member" : ""}`}
@@ -136,25 +135,16 @@ export function TeamForm({
                       <small>{roleLabel[m.role]}</small>
                     </span>
                   </label>
-                  {canSupervise ? (
-                    <button
-                      type="button"
-                      className={`supervisor-toggle ${isSupervisor ? "on" : ""}`}
-                      aria-pressed={isSupervisor}
-                      aria-label={`${m.name} é supervisor da equipe`}
-                      onClick={() => toggleSupervisor(m.user_id)}
-                    >
-                      <ShieldCheck size={14} />
-                      Supervisor
-                    </button>
-                  ) : (
-                    <span
-                      className="supervisor-na"
-                      title="Colaboradores não podem ser supervisores"
-                    >
-                      —
-                    </span>
-                  )}
+                  <button
+                    type="button"
+                    className={`supervisor-toggle ${isSupervisor ? "on" : ""}`}
+                    aria-pressed={isSupervisor}
+                    aria-label={`${m.name} é supervisor da equipe`}
+                    onClick={() => toggleSupervisor(m.user_id)}
+                  >
+                    <ShieldCheck size={14} />
+                    Supervisor
+                  </button>
                 </div>
               );
             })}

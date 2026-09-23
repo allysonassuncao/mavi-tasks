@@ -190,10 +190,42 @@ export function projectReview(
   };
 }
 /**
+ * Mirrors mavi_private.task_supervisor: an active supervisor of the task's
+ * team (or of the client's teams when the task has none), whatever the
+ * person's profile.
+ */
+export function isTaskSupervisor(data: Snapshot, task: Task, userId: string) {
+  if (!data.members.some((m) => m.user_id === userId && m.active)) return false;
+  const myTeams = new Set(
+    data.teamMembers
+      .filter((tm) => tm.user_id === userId && tm.supervisor)
+      .map((tm) => tm.team_id),
+  );
+  if (!myTeams.size) return false;
+  if (task.team_id) return myTeams.has(task.team_id);
+  const clientId = data.contracts.find(
+    (c) => c.id === task.contract_id,
+  )?.client_id;
+  return data.clientTeams.some(
+    (ct) => ct.client_id === clientId && myTeams.has(ct.team_id),
+  );
+}
+/** Mirrors the tasks policy: leaders, the creator, the assignee, supervisors. */
+export function canSeeTask(data: Snapshot, task: Task, userId: string) {
+  const me = data.members.find((m) => m.user_id === userId && m.active);
+  return (
+    me?.role === "admin" ||
+    me?.role === "manager" ||
+    task.creator_id === userId ||
+    task.assignee_id === userId ||
+    isTaskSupervisor(data, task, userId)
+  );
+}
+/**
  * Mirrors mavi_private.can_approve: admins always; tasks outside a project
  * (or in one without validation) by their creator or any leader; otherwise
- * by the project's chosen approver — the creator, or a manager who belongs
- * to the task's team (the client's teams when the task has none).
+ * by the project's chosen approver — the creator, or a supervisor of the
+ * task's team (the client's teams when the task has none).
  */
 export function canApproveTask(data: Snapshot, task: Task, userId: string) {
   const me = data.members.find((m) => m.user_id === userId && m.active);
@@ -204,19 +236,7 @@ export function canApproveTask(data: Snapshot, task: Task, userId: string) {
   if (!project || !review.required)
     return me.role === "manager" || task.creator_id === userId;
   if (review.approver === "creator") return task.creator_id === userId;
-  if (me.role !== "manager") return false;
-  const myTeams = new Set(
-    data.teamMembers
-      .filter((tm) => tm.user_id === userId && tm.supervisor)
-      .map((tm) => tm.team_id),
-  );
-  if (task.team_id) return myTeams.has(task.team_id);
-  const clientId = data.contracts.find(
-    (c) => c.id === task.contract_id,
-  )?.client_id;
-  return data.clientTeams.some(
-    (ct) => ct.client_id === clientId && myTeams.has(ct.team_id),
-  );
+  return isTaskSupervisor(data, task, userId);
 }
 /**
  * Mirrors mavi_private.contract_access, which create_task checks: admins

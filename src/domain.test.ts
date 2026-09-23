@@ -250,3 +250,30 @@ describe("Clientes das equipes da pessoa", () => {
     expect(teamClientIds(data, "user-julia").size).toBe(0);
   });
 });
+
+describe("Colaborador supervisor", () => {
+  it("valida e enxerga as tarefas da equipe que supervisiona", async () => {
+    const { demoSnapshot } = await import("./demo");
+    const { canApproveTask, canSeeTask } = await import("./domain");
+    const data = demoSnapshot();
+    const member = data.members.find((m) => m.role === "member")!;
+    const task = {
+      ...data.tasks[0],
+      creator_id: "outra-pessoa",
+      assignee_id: "outra-pessoa",
+      team_id: "equipe-x",
+    };
+    const project = data.projects.find((p) => p.id === task.project_id)!;
+    project.requires_review = true;
+    project.approver = "supervisor";
+    expect(canSeeTask(data, task, member.user_id)).toBe(false);
+    data.teamMembers.push({
+      company_id: task.company_id,
+      team_id: "equipe-x",
+      user_id: member.user_id,
+      supervisor: true,
+    });
+    expect(canSeeTask(data, task, member.user_id)).toBe(true);
+    expect(canApproveTask(data, task, member.user_id)).toBe(true);
+  });
+});
