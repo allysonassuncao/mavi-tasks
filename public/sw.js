@@ -1,12 +1,12 @@
 // Service worker for the installable app (PWA). It keeps the app shell and
 // the hashed build assets available offline; data always comes from the
 // network (Supabase, GCS and /api are never cached).
-const CACHE = "workspace-shell-v1";
+const CACHE = "workspace-shell-v2";
 const SHELL = [
   "/",
   "/favicon.svg",
   "/manifest.webmanifest",
-  "/icons/icon-192.png",
+  "/icons/icon-192-v2.png",
 ];
 
 self.addEventListener("install", (event) => {
