@@ -67,9 +67,13 @@ export function createInviteHandler(
         .eq("company_id", company_id)
         .eq("user_id", user.id)
         .single();
-      if (membershipError || !membership?.active || membership.role !== "admin")
+      if (
+        membershipError ||
+        !membership?.active ||
+        (membership.role !== "admin" && membership.role !== "manager")
+      )
         return reply(403, {
-          error: "Somente administradores desta empresa podem convidar.",
+          error: "Somente administradores ou gestores desta empresa podem convidar.",
         });
       const { data: quota, error: quotaError } = await admin.rpc(
         "consume_invite_limit",
@@ -106,6 +110,7 @@ export function createInviteHandler(
         company_id,
         user_id: invited.user.id,
         name: name.trim(),
+        email: email.trim().toLowerCase(),
         role,
         active: true,
       });

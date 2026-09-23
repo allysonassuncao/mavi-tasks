@@ -1356,10 +1356,34 @@ tbody tr:last-child td {
   color: #8da077;
 }
 .member-row strong {
-  flex: 1;
   color: #63794e;
   font-size: 0.75rem;
   font-weight: 550;
+}
+.member-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+.member-info strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.member-email {
+  font-size: 0.68rem;
+  color: #95a785;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.member-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
 }
 .role-tag {
   background: #f0f4e9;

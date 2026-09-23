@@ -30,10 +30,10 @@ export class DemoStore {
       case "update_product":
       case "update_project":
       case "update_contract": {
-        if (
-          this.data.members.find((m) => m.user_id === demoUser)?.role !==
-          "admin"
-        )
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        if (role !== "admin" && role !== "manager")
           throw Error("Sem permissão");
         const kind = name.replace("update_", "");
         const rows =
@@ -144,13 +144,13 @@ export class DemoStore {
           created_at: now,
         });
         break;
-      case "update_task":
+      case "update_task": {
         if (!task) throw Error("Tarefa não encontrada");
-        if (
-          task.creator_id !== demoUser &&
-          this.data.members.find((m) => m.user_id === demoUser)?.role !==
-            "admin"
-        )
+        const callerRole = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        const isLeader = callerRole === "admin" || callerRole === "manager";
+        if (task.creator_id !== demoUser && !isLeader)
           throw Error("Sem permissão para editar");
         Object.assign(task, {
           title: a.p_title,
@@ -171,17 +171,22 @@ export class DemoStore {
         });
         event("edited");
         break;
+      }
       case "transition_task": {
         if (!task) throw Error("Tarefa não encontrada");
         if (task.version !== a.p_version)
           throw Error("A tarefa mudou. Atualize.");
+        const callerRole = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        const isLeader = callerRole === "admin" || callerRole === "manager";
         const approval = [
           "approve_internal",
           "approve_client",
           "reject",
           "reopen",
         ].includes(a.p_action);
-        if (approval && task.creator_id !== demoUser)
+        if (approval && !isLeader && task.creator_id !== demoUser)
           throw Error("Apenas o criador ou gestor pode aprovar");
         const from = task.status;
         if (
@@ -269,6 +274,60 @@ export class DemoStore {
           source: "manual",
         });
         break;
+      case "invite_user": {
+        const uid = crypto.randomUUID();
+        const role = String(a.p_role ?? "member") as
+          "admin" | "manager" | "member";
+        const name = String(a.p_name ?? "").trim();
+        const email = String(a.p_email ?? "")
+          .trim()
+          .toLowerCase();
+        this.data.members.push({
+          user_id: uid,
+          company_id,
+          name,
+          email,
+          role,
+          active: true,
+        });
+        const teams = Array.isArray(a.p_teams) ? (a.p_teams as string[]) : [];
+        for (const tid of teams) {
+          this.data.teamMembers.push({
+            company_id,
+            team_id: tid,
+            user_id: uid,
+          });
+        }
+        break;
+      }
+      case "reset_password": {
+        const targetId = String(a.p_user ?? "");
+        const member = this.data.members.find((m) => m.user_id === targetId);
+        if (!member) throw Error("Usuário não encontrado.");
+        if (a.p_mode === "set_password") {
+          const pwd = String(a.p_new_password ?? "").trim();
+          if (pwd.length < 8)
+            throw Error("A nova senha deve ter no mínimo 8 caracteres.");
+          return { success: true, message: "Senha redefinida com sucesso." };
+        }
+        return {
+          success: true,
+          link: "https://mavi.maso.app.br/?reset=demo-token",
+          message: `Link de recuperação enviado para ${member.email || member.name}.`,
+        };
+      }
+      case "update_user_email": {
+        const targetId = String(a.p_user ?? "");
+        const newEmail = String(a.p_new_email ?? "")
+          .trim()
+          .toLowerCase();
+        if (!newEmail || !/^\S+@\S+\.\S+$/.test(newEmail))
+          throw Error("Informe um e-mail válido.");
+        const member = this.data.members.find((m) => m.user_id === targetId);
+        if (!member) throw Error("Usuário não encontrado.");
+        member.email = newEmail;
+        break;
+      }
       default:
         throw Error("Operação indisponível na demonstração");
     }
@@ -276,6 +335,8 @@ export class DemoStore {
       ...this.data,
       tasks: [...this.data.tasks],
       hours: [...this.data.hours],
+      members: [...this.data.members],
+      teamMembers: [...this.data.teamMembers],
     };
     return id;
   }

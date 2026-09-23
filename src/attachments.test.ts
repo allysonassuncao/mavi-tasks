@@ -1,8 +1,18 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), upload: vi.fn() }));
-vi.mock("./api", () => ({ rpc: mocks.rpc, invalidateTaskExtras: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  rpc: vi.fn(),
+  uploadToGcs: vi.fn(),
+  invalidateTaskExtras: vi.fn(),
+}));
+vi.mock("./api", () => ({
+  rpc: mocks.rpc,
+  invalidateTaskExtras: mocks.invalidateTaskExtras,
+}));
+vi.mock("./gcs", () => ({
+  uploadToGcs: mocks.uploadToGcs,
+}));
 vi.mock("./supabase", () => ({
-  supabase: { storage: { from: () => ({ upload: mocks.upload }) } },
+  supabase: {},
 }));
 import {
   validateAttachment,
@@ -27,18 +37,29 @@ describe("task creation attachments", () => {
     mocks.rpc
       .mockResolvedValueOnce({ id: "a", path: "company/task/file.pdf" })
       .mockResolvedValueOnce(null);
-    mocks.upload.mockResolvedValue({ error: new Error("Upload negado") });
+    mocks.uploadToGcs.mockRejectedValue(new Error("Upload negado"));
     await expect(uploadAttachment("t", file("file.pdf"))).rejects.toThrow(
       "Upload negado",
     );
-    expect(mocks.upload).toHaveBeenCalledWith(
+    expect(mocks.uploadToGcs).toHaveBeenCalledWith(
       "company/task/file.pdf",
       expect.anything(),
-      { upsert: false, contentType: "application/pdf" },
+      "application/pdf",
     );
     expect(mocks.rpc).toHaveBeenLastCalledWith("discard_pending_attachment", {
       p_attachment: "a",
     });
+  });
+  it("invalidates task extras cache on successful upload", async () => {
+    mocks.rpc.mockResolvedValueOnce({ id: "a", path: "company/task/file.pdf" });
+    mocks.uploadToGcs.mockResolvedValueOnce(undefined);
+    await uploadAttachment("t", file("file.pdf"));
+    expect(mocks.uploadToGcs).toHaveBeenCalledWith(
+      "company/task/file.pdf",
+      expect.anything(),
+      "application/pdf",
+    );
+    expect(mocks.invalidateTaskExtras).toHaveBeenCalledWith("t");
   });
   it("retries only pending files without recreating the task or completed files", async () => {
     const first = file("a.pdf"),

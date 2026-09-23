@@ -28,6 +28,7 @@ export interface Filters {
   client: string;
   project: string;
   schedule?: { view: "calendar" | "gantt"; start: string; end: string };
+  onlyMineOrCreated?: boolean;
 }
 
 export interface Summary {
@@ -155,6 +156,7 @@ function hashFilters(filters: Filters): string {
     c: filters.client,
     pr: filters.project,
     sch: filters.schedule,
+    mc: filters.onlyMineOrCreated,
   });
 }
 
@@ -178,6 +180,12 @@ export async function tasksQuery(
         .eq("archived", false)
         .order("due_date")
         .order("id");
+
+      if (filters.onlyMineOrCreated && filters.user) {
+        query = query.or(
+          `assignee_id.eq.${filters.user},creator_id.eq.${filters.user}`,
+        );
+      }
 
       if (filters.search)
         query = query.ilike(
@@ -400,6 +408,226 @@ export async function currentTimer(): Promise<TimeEntry | null> {
     .maybeSingle();
   if (error) throw error;
   return data as TimeEntry | null;
+}
+
+async function parseFunctionError(
+  error: unknown,
+  fallback: string,
+): Promise<string> {
+  if (!error) return fallback;
+  const err = error as { message?: string; context?: unknown };
+  try {
+    if (
+      err.context &&
+      typeof (err.context as { json?: () => Promise<{ error?: string }> })
+        .json === "function"
+    ) {
+      const body = await (
+        err.context as { json: () => Promise<{ error?: string }> }
+      ).json();
+      if (body?.error) return body.error;
+    } else if (
+      err.context &&
+      typeof (err.context as { error?: string }).error === "string"
+    ) {
+      return (err.context as { error: string }).error;
+    }
+  } catch {
+    /* fallback to err.message */
+  }
+  return err.message || fallback;
+}
+
+export async function inviteUser(
+  company: string,
+  email: string,
+  name: string,
+  role: "admin" | "manager" | "member",
+  teams?: string[],
+): Promise<{ user_id: string }> {
+  let result: { user_id: string } | null = null;
+  let apiError: Error | null = null;
+
+  // 1. Try local dev server / Vercel API endpoint
+  try {
+    const session = await supabase?.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    const res = await fetch("/api/invite-user", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ company_id: company, email, name, role }),
+    });
+    if (res.ok) {
+      result = await res.json();
+    } else if (res.status !== 404) {
+      const err = await res.json().catch(() => ({}));
+      apiError = new Error(
+        err.error || `Erro ao convidar usuário (${res.status})`,
+      );
+    }
+  } catch {
+    // Network or server unreachable; will fallback to direct invoke if no explicit API error
+  }
+
+  if (apiError) throw apiError;
+
+  // 2. Direct Supabase Edge Function invoke
+  if (!result) {
+    if (!supabase) throw new Error("Conecte o Supabase para enviar convites.");
+    const { data, error } = await supabase.functions.invoke("invite-user", {
+      body: { company_id: company, email, name, role },
+    });
+    if (error) {
+      const msg = await parseFunctionError(error, "Erro ao convidar usuário.");
+      throw new Error(msg);
+    }
+    result = data as { user_id: string };
+  }
+
+  // 3. Assign teams if specified
+  if (result?.user_id && teams && teams.length > 0) {
+    try {
+      await rpc("assign_user_teams", {
+        p_company: company,
+        p_user: result.user_id,
+        p_teams: teams,
+      });
+    } catch {
+      /* User membership was created; teams can be adjusted in settings */
+    }
+  }
+
+  // 4. Invalidate lookups cache so members list updates
+  invalidateLookupsCache(company);
+
+  return result;
+}
+
+export async function resetUserPassword(
+  company: string,
+  userId: string,
+  mode: "send_link" | "set_password" = "send_link",
+  newPassword?: string,
+): Promise<{ success: boolean; link?: string; message?: string }> {
+  let result: { success: boolean; link?: string; message?: string } | null =
+    null;
+  let apiError: Error | null = null;
+
+  try {
+    const session = await supabase?.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    const res = await fetch("/api/user-admin", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        company_id: company,
+        target_user_id: userId,
+        action: "reset_password",
+        mode,
+        new_password: newPassword,
+      }),
+    });
+    if (res.ok) {
+      result = await res.json();
+    } else if (res.status !== 404) {
+      const err = await res.json().catch(() => ({}));
+      apiError = new Error(
+        err.error || `Erro ao redefinir senha (${res.status})`,
+      );
+    }
+  } catch {
+    // Network or server unreachable; will fallback to direct invoke if no explicit API error
+  }
+
+  if (apiError) throw apiError;
+
+  if (!result) {
+    if (!supabase) throw new Error("Conecte o Supabase para gerenciar senhas.");
+    const { data, error } = await supabase.functions.invoke("user-admin", {
+      body: {
+        company_id: company,
+        target_user_id: userId,
+        action: "reset_password",
+        mode,
+        new_password: newPassword,
+      },
+    });
+    if (error) {
+      const msg = await parseFunctionError(error, "Erro ao redefinir senha.");
+      throw new Error(msg);
+    }
+    result = data as { success: boolean; link?: string; message?: string };
+  }
+
+  return result;
+}
+
+export async function updateUserEmail(
+  company: string,
+  userId: string,
+  newEmail: string,
+): Promise<{ success: boolean; email: string }> {
+  let result: { success: boolean; email: string } | null = null;
+  let apiError: Error | null = null;
+
+  try {
+    const session = await supabase?.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    const res = await fetch("/api/user-admin", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        company_id: company,
+        target_user_id: userId,
+        action: "update_email",
+        new_email: newEmail,
+      }),
+    });
+    if (res.ok) {
+      result = await res.json();
+    } else if (res.status !== 404) {
+      const err = await res.json().catch(() => ({}));
+      apiError = new Error(
+        err.error || `Erro ao atualizar e-mail (${res.status})`,
+      );
+    }
+  } catch {
+    // Network or server unreachable; will fallback to direct invoke if no explicit API error
+  }
+
+  if (apiError) throw apiError;
+
+  if (!result) {
+    if (!supabase)
+      throw new Error("Conecte o Supabase para atualizar e-mails.");
+    const { data, error } = await supabase.functions.invoke("user-admin", {
+      body: {
+        company_id: company,
+        target_user_id: userId,
+        action: "update_email",
+        new_email: newEmail,
+      },
+    });
+    if (error) {
+      const msg = await parseFunctionError(error, "Erro ao atualizar e-mail.");
+      throw new Error(msg);
+    }
+    result = data as { success: boolean; email: string };
+  }
+
+  // Invalidate lookups cache so members list updates with new email
+  invalidateLookupsCache(company);
+
+  return result;
 }
 
 // Invalidation and intelligent cache update helpers

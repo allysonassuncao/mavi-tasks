@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createInviteHandler } from "./invite-user/handler";
 import { createReconcileHandler } from "./storage-reconcile/handler";
+import { createUserAdminHandler } from "./user-admin/handler";
 
 const origin = "https://app.example.com";
 const payload = {
@@ -133,6 +134,16 @@ describe("invite-user", () => {
     expect((await handler(inviteRequest())).status).toBe(403);
     expect(admin.rpc).not.toHaveBeenCalled();
   });
+  it("allows managers to invite users", async () => {
+    const { handler, admin, single } = inviteFixture();
+    single.mockResolvedValue({
+      data: { role: "manager", active: true },
+      error: null,
+    });
+    const response = await handler(inviteRequest());
+    expect(response.status).toBe(200);
+    expect(admin.rpc).toHaveBeenCalled();
+  });
   it("blocks send on quota exhaustion and exposes Retry-After", async () => {
     const { handler, admin } = inviteFixture();
     admin.rpc.mockResolvedValue({
@@ -217,5 +228,230 @@ describe("storage-reconcile", () => {
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+describe("user-admin", () => {
+  const companyId = "00000000-0000-4000-8000-000000000001";
+  const targetUserId = "00000000-0000-4000-8000-000000000002";
+
+  function userAdminFixture(
+    options: {
+      callerRole?: string;
+      callerActive?: boolean;
+      targetFound?: boolean;
+    } = {},
+  ) {
+    const {
+      callerRole = "admin",
+      callerActive = true,
+      targetFound = true,
+    } = options;
+
+    const callerMembership = { role: callerRole, active: callerActive };
+    const targetMembership = targetFound
+      ? {
+          user_id: targetUserId,
+          name: "Colaborador Alvo",
+          email: "target@example.com",
+          role: "member",
+          active: true,
+        }
+      : null;
+
+    let eqCount = 0;
+    const chain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockImplementation(() => {
+        eqCount++;
+        return chain;
+      }),
+      single: vi.fn().mockImplementation(() => {
+        // First single call is for caller membership, second is for target
+        if (eqCount <= 2) {
+          return Promise.resolve({ data: callerMembership, error: null });
+        }
+        return Promise.resolve({
+          data: targetMembership,
+          error: targetMembership ? null : { message: "Not found" },
+        });
+      }),
+      update: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: null }),
+        }),
+      }),
+    };
+
+    const admin = {
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: "caller-admin" } },
+          error: null,
+        }),
+        resetPasswordForEmail: vi.fn().mockResolvedValue({ error: null }),
+        admin: {
+          updateUserById: vi.fn().mockResolvedValue({ data: {}, error: null }),
+          generateLink: vi.fn().mockResolvedValue({
+            data: {
+              properties: { action_link: "https://auth.example.com/link" },
+            },
+            error: null,
+          }),
+          getUserById: vi.fn().mockResolvedValue({
+            data: { user: { email: "target@example.com" } },
+            error: null,
+          }),
+        },
+      },
+      from: vi.fn().mockReturnValue(chain),
+    };
+
+    const handler = createUserAdminHandler(origin, () => admin as never);
+    return { admin, handler, chain };
+  }
+
+  function userAdminRequest(
+    body: Record<string, unknown>,
+    token = "Bearer admin-token",
+  ) {
+    return new Request(origin, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Authorization: token,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("bloqueia chamadas de não-administradores", async () => {
+    const { handler } = userAdminFixture({ callerRole: "member" });
+    const res = await handler(
+      userAdminRequest({
+        company_id: companyId,
+        target_user_id: targetUserId,
+        action: "reset_password",
+      }),
+    );
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toContain("Somente administradores");
+  });
+
+  it("permite gestores resetarem senha", async () => {
+    const { handler } = userAdminFixture({ callerRole: "manager" });
+    const res = await handler(
+      userAdminRequest({
+        company_id: companyId,
+        target_user_id: targetUserId,
+        action: "reset_password",
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("retorna 404 se o usuário alvo não pertencer à empresa", async () => {
+    const { handler } = userAdminFixture({ targetFound: false });
+    const res = await handler(
+      userAdminRequest({
+        company_id: companyId,
+        target_user_id: targetUserId,
+        action: "reset_password",
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("gera link de recuperação ao resetar senha via send_link", async () => {
+    const { handler, admin } = userAdminFixture();
+    const res = await handler(
+      userAdminRequest({
+        company_id: companyId,
+        target_user_id: targetUserId,
+        action: "reset_password",
+        mode: "send_link",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.link).toBe("https://auth.example.com/link");
+    expect(admin.auth.resetPasswordForEmail).toHaveBeenCalledWith(
+      "target@example.com",
+      expect.objectContaining({ redirectTo: `${origin}/?reset=1` }),
+    );
+  });
+
+  it("atualiza a senha diretamente no modo set_password", async () => {
+    const { handler, admin } = userAdminFixture();
+    const res = await handler(
+      userAdminRequest({
+        company_id: companyId,
+        target_user_id: targetUserId,
+        action: "reset_password",
+        mode: "set_password",
+        new_password: "novaSenhaSegura123",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(admin.auth.admin.updateUserById).toHaveBeenCalledWith(targetUserId, {
+      password: "novaSenhaSegura123",
+    });
+  });
+
+  it("rejeita senha com menos de 8 caracteres no modo set_password", async () => {
+    const { handler } = userAdminFixture();
+    const res = await handler(
+      userAdminRequest({
+        company_id: companyId,
+        target_user_id: targetUserId,
+        action: "reset_password",
+        mode: "set_password",
+        new_password: "123",
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("mínimo 8 caracteres");
+  });
+
+  it("atualiza o e-mail no auth e na tabela memberships", async () => {
+    const { handler, admin, chain } = userAdminFixture();
+    const res = await handler(
+      userAdminRequest({
+        company_id: companyId,
+        target_user_id: targetUserId,
+        action: "update_email",
+        new_email: "novo.email@example.com",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.email).toBe("novo.email@example.com");
+    expect(admin.auth.admin.updateUserById).toHaveBeenCalledWith(targetUserId, {
+      email: "novo.email@example.com",
+      email_confirm: true,
+    });
+    expect(chain.update).toHaveBeenCalledWith({
+      email: "novo.email@example.com",
+    });
+  });
+
+  it("rejeita e-mail em formato inválido", async () => {
+    const { handler } = userAdminFixture();
+    const res = await handler(
+      userAdminRequest({
+        company_id: companyId,
+        target_user_id: targetUserId,
+        action: "update_email",
+        new_email: "email-invalido",
+      }),
+    );
+    expect(res.status).toBe(400);
   });
 });

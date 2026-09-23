@@ -34,6 +34,8 @@ import {
   LockKeyhole,
   Copy,
   Pause,
+  KeyRound,
+  Mail,
 } from "lucide-react";
 import { Modal, Avatar, Badge, Empty, Loading } from "./components";
 import {
@@ -44,10 +46,19 @@ import {
   type TaskEvent,
   priorities,
 } from "./types";
-import { dateKey, dateLabel, duration, minutes, names } from "./domain";
+import {
+  dateKey,
+  dateLabel,
+  duration,
+  minutes,
+  names,
+  taskTimerSeconds,
+  formatClock,
+} from "./domain";
 import { useNow } from "./useClock";
 import { supabase } from "./supabase";
 import { rpc, taskExtras, invalidateTaskExtras } from "./api";
+import { getGcsPublicUrl } from "./gcs";
 import type { DemoStore } from "./demo-store";
 import { RichTextContent } from "./RichTextContent";
 import {
@@ -121,6 +132,7 @@ export function CreateForm({
     project: "Novo projeto",
     time: "Registrar horas",
     team: "Nova equipe",
+    user: "Convidar usuário",
   };
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -131,6 +143,15 @@ export function CreateForm({
     let fn = "",
       a: Record<string, unknown> = { p_company: company };
     switch (kind) {
+      case "user":
+        fn = "invite_user";
+        Object.assign(a, {
+          p_name: s("name"),
+          p_email: s("email"),
+          p_role: s("role"),
+          p_teams: f.getAll("teams"),
+        });
+        break;
       case "client":
         fn = "create_client";
         Object.assign(a, { p_name: s("name"), p_email: s("email") });
@@ -506,6 +527,54 @@ export function CreateForm({
               </small>
             </>
           )}
+          {kind === "user" && (
+            <>
+              <label>
+                Nome completo
+                <Input
+                  name="name"
+                  placeholder="Ex.: Mariana Souza"
+                  minLength={2}
+                  maxLength={120}
+                  required
+                />
+              </label>
+              <label>
+                E-mail profissional
+                <Input
+                  type="email"
+                  name="email"
+                  placeholder="mariana@empresa.com.br"
+                  required
+                />
+              </label>
+              <label>
+                Perfil de acesso
+                <Select name="role" defaultValue="member" required>
+                  <SelectOption value="member">
+                    Colaborador — Execução de tarefas e apontamentos
+                  </SelectOption>
+                  <SelectOption value="manager">
+                    Gestor — Gestão de equipes e aprovações
+                  </SelectOption>
+                  <SelectOption value="admin">
+                    Administrador — Acesso total e configurações
+                  </SelectOption>
+                </Select>
+              </label>
+              {data.teams.length > 0 && (
+                <fieldset>
+                  <legend>Vincular a equipes (opcional)</legend>
+                  {data.teams.map((t) => (
+                    <label className="checkbox-label" key={t.id}>
+                      <Checkbox name="teams" value={t.id} />
+                      {t.name}
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+            </>
+          )}
         </fieldset>
         {kind === "task" && (
           <section
@@ -593,9 +662,11 @@ export function CreateForm({
               ? uploads.current.pending.length
                 ? "Reenviar anexos"
                 : "Concluir"
-              : kind === "time"
-                ? "Registrar horas"
-                : "Salvar"}
+              : kind === "user"
+                ? "Enviar convite"
+                : kind === "time"
+                  ? "Registrar horas"
+                  : "Salvar"}
             <Check size={17} />
           </Button>
         </div>
@@ -645,30 +716,20 @@ export function TaskDetail({
   const [commentRevision, setCommentRevision] = useState(0);
   const n = names(data, task),
     member = data.members.find((m) => m.user_id === user),
-    manager =
-      member?.role === "manager" &&
-      data.teamMembers.some(
-        (t) => t.team_id === task.team_id && t.user_id === user,
-      ),
-    canApprove = task.creator_id === user || manager,
-    canEdit = task.creator_id === user || member?.role === "admin",
-    canWork = canEdit || manager || task.assignee_id === user;
-  const running = currentRunning,
-    taskHours = data.hours
-      .filter((h) => h.task_id === task.id)
-      .reduce((s, h) => s + minutes(h), 0);
+    isAdmin = member?.role === "admin",
+    isManager = member?.role === "manager",
+    isLeader = isAdmin || isManager,
+    canApprove = isLeader,
+    canEdit = isLeader || task.creator_id === user,
+    canWork = isLeader || task.creator_id === user || task.assignee_id === user;
+  const running = currentRunning;
   const isRunning = running?.task_id === task.id;
   const now = useNow(isRunning);
-  const elapsedSeconds = isRunning
-    ? Math.max(0, Math.floor((now - Date.parse(running.started_at)) / 1000))
-    : 0;
-  const clock = [
-    Math.floor(elapsedSeconds / 3600),
-    Math.floor(elapsedSeconds / 60) % 60,
-    elapsedSeconds % 60,
-  ]
-    .map((v) => String(v).padStart(2, "0"))
-    .join(":");
+  const totalSeconds = taskTimerSeconds(data.hours, task.id, running, now);
+  const clock = formatClock(totalSeconds);
+  const taskHours = data.hours
+    .filter((h) => h.task_id === task.id)
+    .reduce((s, h) => s + minutes(h, now), 0);
   useEffect(() => {
     if (!isRunning) setEditing(false);
   }, [isRunning]);
@@ -779,10 +840,10 @@ export function TaskDetail({
   }
   async function download(a: Attachment) {
     try {
-      const { data: blob, error } = await supabase!.storage
-        .from("mavi-attachments")
-        .download(a.path);
-      if (error) throw error;
+      const publicUrl = getGcsPublicUrl(a.path);
+      const res = await fetch(publicUrl);
+      if (!res.ok) throw new Error("Não foi possível baixar o arquivo do GCS.");
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob),
         link = document.createElement("a");
       link.href = url;
@@ -872,13 +933,15 @@ export function TaskDetail({
             <span>{isRunning ? "Parar" : "Iniciar"}</span>
           </Button>
           <div>
-            <strong>{isRunning ? clock : "Pronto para começar"}</strong>
+            <strong>{clock}</strong>
             <p>
               {isRunning
                 ? "Tempo sendo registrado nesta tarefa."
                 : running
                   ? "Ao iniciar, sua outra tarefa será pausada automaticamente."
-                  : "Inicie para ler a descrição e registrar seu tempo."}
+                  : totalSeconds > 0
+                    ? "Cronômetro pausado. Clique em Iniciar para continuar."
+                    : "Inicie para ler a descrição e registrar seu tempo."}
             </p>
           </div>
           <Button
@@ -1310,6 +1373,259 @@ export function TaskDetail({
           </div>
         )}
       </div>
+    </Modal>
+  );
+}
+
+export function ResetPasswordModal({
+  member,
+  busy,
+  onSubmit,
+  onClose,
+}: {
+  member: { user_id: string; name: string; email?: string };
+  busy: boolean;
+  onSubmit: (
+    mode: "send_link" | "set_password",
+    newPassword?: string,
+  ) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<"send_link" | "set_password">("send_link");
+  const [newPassword, setNewPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (submitting || busy) return;
+    setError("");
+
+    if (mode === "set_password") {
+      if (newPassword.trim().length < 8) {
+        setError("A nova senha deve ter no mínimo 8 caracteres.");
+        return;
+      }
+    }
+
+    setSubmitting(true);
+    try {
+      await onSubmit(
+        mode,
+        mode === "set_password" ? newPassword.trim() : undefined,
+      );
+      onClose();
+    } catch (err) {
+      setError((err as Error).message || "Erro ao redefinir senha.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={`Redefinir senha · ${member.name}`}
+      onClose={onClose}
+      busy={submitting || busy}
+    >
+      <form className="entity-form" onSubmit={handleSubmit}>
+        <fieldset className="create-fields" disabled={submitting || busy}>
+          <label>
+            Colaborador
+            <Input
+              value={
+                member.email ? `${member.name} (${member.email})` : member.name
+              }
+              disabled
+              readOnly
+            />
+          </label>
+
+          <label>
+            Método de redefinição
+            <Select
+              value={mode}
+              onValueChange={(val) =>
+                setMode(val as "send_link" | "set_password")
+              }
+            >
+              <SelectOption value="send_link">
+                Enviar link de recuperação por e-mail
+              </SelectOption>
+              <SelectOption value="set_password">
+                Definir nova senha diretamente
+              </SelectOption>
+            </Select>
+          </label>
+
+          {mode === "send_link" ? (
+            <small>
+              {member.email
+                ? `Um e-mail será enviado para ${member.email} com o link seguro para cadastrar uma nova senha.`
+                : "O colaborador receberá o link seguro de redefinição no e-mail cadastrado."}
+            </small>
+          ) : (
+            <>
+              <label>
+                Nova senha
+                <Input
+                  type="password"
+                  placeholder="Mínimo de 8 caracteres"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  minLength={8}
+                  required
+                  autoFocus
+                />
+              </label>
+              <small>
+                Cadastre uma nova senha provisória ou definitiva caso o
+                colaborador não tenha acesso ao e-mail.
+              </small>
+            </>
+          )}
+        </fieldset>
+
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+
+        <div className="form-footer">
+          <Button
+            type="button"
+            className="btn secondary"
+            disabled={submitting || busy}
+            loading={submitting || busy}
+            onClick={onClose}
+          >
+            Cancelar
+          </Button>
+          <Button
+            className="btn primary"
+            disabled={submitting || busy}
+            loading={submitting || busy}
+          >
+            {mode === "send_link" ? "Enviar link" : "Salvar nova senha"}
+            <Check size={17} />
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+export function UpdateEmailModal({
+  member,
+  busy,
+  onSubmit,
+  onClose,
+}: {
+  member: { user_id: string; name: string; email?: string };
+  busy: boolean;
+  onSubmit: (newEmail: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [newEmail, setNewEmail] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (submitting || busy) return;
+    setError("");
+
+    const emailTrimmed = newEmail.trim().toLowerCase();
+    if (!emailTrimmed || !/^\S+@\S+\.\S+$/.test(emailTrimmed)) {
+      setError("Informe um endereço de e-mail válido.");
+      return;
+    }
+
+    if (member.email && emailTrimmed === member.email.toLowerCase()) {
+      setError("O novo e-mail deve ser diferente do e-mail atual.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await onSubmit(emailTrimmed);
+      onClose();
+    } catch (err) {
+      setError((err as Error).message || "Erro ao atualizar e-mail.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={`Alterar e-mail · ${member.name}`}
+      onClose={onClose}
+      busy={submitting || busy}
+    >
+      <form className="entity-form" onSubmit={handleSubmit}>
+        <fieldset className="create-fields" disabled={submitting || busy}>
+          <label>
+            Colaborador
+            <Input value={member.name} disabled readOnly />
+          </label>
+
+          <div className="form-columns">
+            <label>
+              E-mail atual
+              <Input
+                value={member.email || "Não informado"}
+                disabled
+                readOnly
+              />
+            </label>
+
+            <label>
+              Novo e-mail profissional
+              <Input
+                type="email"
+                placeholder="colaborador@empresa.com.br"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                required
+                autoFocus
+              />
+            </label>
+          </div>
+
+          <small>
+            O colaborador passará a utilizar este novo e-mail para acesso à
+            plataforma.
+          </small>
+        </fieldset>
+
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+
+        <div className="form-footer">
+          <Button
+            type="button"
+            className="btn secondary"
+            disabled={submitting || busy}
+            loading={submitting || busy}
+            onClick={onClose}
+          >
+            Cancelar
+          </Button>
+          <Button
+            className="btn primary"
+            disabled={submitting || busy}
+            loading={submitting || busy}
+          >
+            Atualizar e-mail
+            <Check size={17} />
+          </Button>
+        </div>
+      </form>
     </Modal>
   );
 }

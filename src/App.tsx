@@ -66,6 +66,9 @@ import {
   Pencil,
   BriefcaseBusiness,
   ChartNoAxesGantt,
+  UserPlus,
+  KeyRound,
+  Mail,
 } from "lucide-react";
 import { supabase } from "./supabase";
 import * as api from "./api";
@@ -89,6 +92,7 @@ import {
   type TaskEvent,
   type Status,
   type Company,
+  type Member,
   emptySnapshot,
   statuses,
   priorities,
@@ -106,7 +110,12 @@ import {
   type NameLookup,
 } from "./domain";
 import { useNow } from "./useClock";
-import { CreateForm, TaskDetail } from "./forms";
+import {
+  CreateForm,
+  TaskDetail,
+  ResetPasswordModal,
+  UpdateEmailModal,
+} from "./forms";
 
 const TaskSchedule = lazy(() =>
   import("./TaskSchedule").then((m) => ({ default: m.TaskSchedule })),
@@ -190,6 +199,12 @@ export default function App() {
     [offset, setOffset] = useUrlState<number>("pagina", 0),
     [count, setCount] = useState(0);
   const [entityEdit, setEntityEdit] = useState<EntityEdit | null>(null);
+  const [resetPasswordMember, setResetPasswordMember] = useState<Member | null>(
+    null,
+  );
+  const [updateEmailMember, setUpdateEmailMember] = useState<Member | null>(
+    null,
+  );
   const [contractProduct, setContractProduct] = useState("");
   const selected = taskIdFromPath(location.split("?")[0]);
   const taskBackground = useRef<string | null>(null);
@@ -231,7 +246,9 @@ export default function App() {
     user = demo ? demoUser : (session?.user.id ?? "");
   const currentCompany = data.companies.find((c) => c.id === company),
     member = data.members.find((m) => m.user_id === user),
-    isAdmin = member?.role === "admin";
+    isAdmin = member?.role === "admin",
+    isManager = member?.role === "manager",
+    isLeader = isAdmin || isManager;
   const today = dateKey(new Date(), currentCompany?.timezone);
   const [periodValue, setPeriod] = useUrlState<string>("periodo", "");
   const [currentRunning, setCurrentRunning] = useState<
@@ -286,11 +303,17 @@ export default function App() {
     promise
       .then((t) => {
         if (alive) {
-          setDetailTask(t);
-          if (!t)
+          if (
+            !t ||
+            (!isLeader && t.assignee_id !== user && t.creator_id !== user)
+          ) {
+            setDetailTask(null);
             setDetailError(
               "Tarefa não encontrada ou você não tem acesso a ela.",
             );
+          } else {
+            setDetailTask(t);
+          }
         }
       })
       .catch((e) => {
@@ -302,7 +325,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [selected, company, demo, session, refresh]);
+  }, [selected, company, demo, session, refresh, isLeader, user]);
   const period = /^\d{4}-(0[1-9]|1[0-2])$/.test(periodValue)
     ? periodValue
     : dateKey().slice(0, 7);
@@ -319,6 +342,12 @@ export default function App() {
       );
     }
   }, [authReady, demo, session, isLogin, location, needsPassword]);
+  useEffect(() => {
+    if (!authReady || !member || isLogin) return;
+    if (!isLeader && page !== "tasks") {
+      navigate(pageUrl("tasks", companyPath), true);
+    }
+  }, [authReady, member, isLeader, page, companyPath, isLogin]);
   useEffect(() => {
     if (
       !authReady ||
@@ -414,7 +443,16 @@ export default function App() {
   }, [demo, session]);
   useEffect(() => {
     if (demo) {
-      setData({ ...demoStore.current.data });
+      const demoData = demoStore.current.data;
+      const demoMember = demoData.members.find((m) => m.user_id === user);
+      const isDemoLeader =
+        demoMember?.role === "admin" || demoMember?.role === "manager";
+      const tasks = isDemoLeader
+        ? demoData.tasks
+        : demoData.tasks.filter(
+            (t) => t.assignee_id === user || t.creator_id === user,
+          );
+      setData({ ...demoData, tasks });
       setLoading(false);
       return;
     }
@@ -439,6 +477,7 @@ export default function App() {
           late: page === "tasks" ? late : false,
           client: page === "tasks" ? clientFilter : "",
           project: page === "tasks" ? projectFilter : "",
+          onlyMineOrCreated: !isLeader,
           schedule:
             page === "tasks" && scheduleView
               ? {
@@ -489,6 +528,7 @@ export default function App() {
     clientFilter,
     projectFilter,
     refresh,
+    isLeader,
     page === "tasks",
     page === "tasks" ? view : "list",
     page === "tasks" ? scheduleMonth : "",
@@ -566,11 +606,65 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
+      if (name === "invite_user") {
+        const email = String(args.p_email ?? "").trim();
+        const userName = String(args.p_name ?? "").trim();
+        const role = String(args.p_role ?? "member") as
+          "admin" | "manager" | "member";
+        const teams = Array.isArray(args.p_teams)
+          ? (args.p_teams as string[])
+          : [];
+
+        let userId = "";
+        if (demo) {
+          userId = demoStore.current.mutate(name, args) as string;
+          setData({ ...demoStore.current.data });
+          setRefresh((v) => v + 1);
+        } else {
+          const res = await api.inviteUser(
+            company,
+            email,
+            userName,
+            role,
+            teams,
+          );
+          userId = res.user_id;
+          const newMember = {
+            company_id: company,
+            user_id: userId,
+            name: userName,
+            role,
+            active: true,
+          };
+          setData((d) => ({
+            ...d,
+            members: [
+              ...d.members.filter((m) => m.user_id !== userId),
+              newMember,
+            ],
+            teamMembers: [
+              ...d.teamMembers,
+              ...teams.map((tid) => ({
+                company_id: company,
+                team_id: tid,
+                user_id: userId,
+              })),
+            ],
+          }));
+        }
+        notify(`Convite enviado para ${email}`);
+        return userId;
+      }
       const result = demo
         ? demoStore.current.mutate(name, args)
         : await api.rpc(name, args);
       if (demo) {
         setData({ ...demoStore.current.data });
+        setCurrentRunning(
+          demoStore.current.data.hours.find(
+            (h) => h.user_id === user && !h.ended_at,
+          ) ?? null,
+        );
         setRefresh((v) => v + 1);
       } else if (TASK_ROW_MUTATIONS.has(name) && result) {
         const updated = result as Task;
@@ -637,6 +731,84 @@ export default function App() {
       setBusy(false);
     }
   }
+
+  async function handleResetPassword(
+    targetMember: Member,
+    mode: "send_link" | "set_password",
+    newPassword?: string,
+  ) {
+    setBusy(true);
+    setError("");
+    try {
+      if (demo) {
+        demoStore.current.mutate("reset_password", {
+          p_user: targetMember.user_id,
+          p_mode: mode,
+          p_new_password: newPassword,
+        });
+        notify(
+          mode === "set_password"
+            ? `Senha de ${targetMember.name} redefinida com sucesso.`
+            : `Link de recuperação enviado para ${targetMember.email || targetMember.name}.`,
+        );
+      } else {
+        const res = await api.resetUserPassword(
+          company,
+          targetMember.user_id,
+          mode,
+          newPassword,
+        );
+        notify(
+          res.message ||
+            (mode === "set_password"
+              ? `Senha de ${targetMember.name} atualizada com sucesso.`
+              : `Link de recuperação enviado com sucesso.`),
+        );
+      }
+    } catch (e) {
+      const msg = (e as Error).message || "Erro ao redefinir senha.";
+      setError(msg);
+      throw Error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUpdateEmail(targetMember: Member, newEmail: string) {
+    setBusy(true);
+    setError("");
+    try {
+      if (demo) {
+        demoStore.current.mutate("update_user_email", {
+          p_user: targetMember.user_id,
+          p_new_email: newEmail,
+        });
+        setData((d) => ({
+          ...d,
+          members: d.members.map((m) =>
+            m.user_id === targetMember.user_id ? { ...m, email: newEmail } : m,
+          ),
+        }));
+        notify(`E-mail de ${targetMember.name} atualizado para ${newEmail}`);
+      } else {
+        await api.updateUserEmail(company, targetMember.user_id, newEmail);
+        setData((d) => ({
+          ...d,
+          members: d.members.map((m) =>
+            m.user_id === targetMember.user_id ? { ...m, email: newEmail } : m,
+          ),
+        }));
+        notify(`E-mail de ${targetMember.name} atualizado para ${newEmail}`);
+      }
+    } catch (e) {
+      const msg = (e as Error).message || "Erro ao atualizar e-mail.";
+      setError(msg);
+      throw Error(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function go(next: Page) {
     navigate(pageUrl(next, companyPath));
     setSidebar(false);
@@ -889,40 +1061,53 @@ export default function App() {
         </div>
         <span className="nav-label">PRINCIPAL</span>
         <nav aria-label="Navegação principal">
-          {navigation.map((item) => (
-            <a
-              key={item.id}
-              href={pageUrl(item.id, companyPath)}
-              aria-current={page === item.id ? "page" : undefined}
-              className={page === item.id ? "active" : ""}
-              onClick={(event) => followLink(event, item.id)}
-            >
-              <item.icon size={19} />
-              <span>{item.label}</span>
-              {item.id === "tasks" && !!stats?.total && (
-                <span className="nav-count">{stats.total}</span>
-              )}
-            </a>
-          ))}
+          {navigation
+            .filter((item) => isLeader || item.id === "tasks")
+            .map((item) => (
+              <a
+                key={item.id}
+                href={pageUrl(item.id, companyPath)}
+                aria-current={page === item.id ? "page" : undefined}
+                className={page === item.id ? "active" : ""}
+                onClick={(event) => followLink(event, item.id)}
+              >
+                <item.icon size={19} />
+                <span>{item.label}</span>
+                {item.id === "tasks" && !!stats?.total && (
+                  <span className="nav-count">{stats.total}</span>
+                )}
+              </a>
+            ))}
         </nav>
         <div className="sidebar-products">
           <span className="nav-label">PRODUTOS</span>
-          {data.products.map((p) => (
-            <Button
-              key={p.id}
-              onClick={() => {
-                go("tasks");
-                setProduct(p.id);
-              }}
-            >
-              <span className="product-dot" style={{ background: p.color }} />
-              {p.name}
-              <ChevronRight size={13} />
-            </Button>
-          ))}
+          {data.products
+            .filter(
+              (p) =>
+                isLeader ||
+                data.tasks.some((t) => {
+                  const contract = data.contracts.find(
+                    (c) => c.id === t.contract_id,
+                  );
+                  return contract?.product_id === p.id;
+                }),
+            )
+            .map((p) => (
+              <Button
+                key={p.id}
+                onClick={() => {
+                  go("tasks");
+                  setProduct(p.id);
+                }}
+              >
+                <span className="product-dot" style={{ background: p.color }} />
+                {p.name}
+                <ChevronRight size={13} />
+              </Button>
+            ))}
         </div>
         <div className="sidebar-bottom">
-          {isAdmin && (
+          {isLeader && (
             <a
               className={
                 page === "settings" ? "settings-link active" : "settings-link"
@@ -1051,7 +1236,7 @@ export default function App() {
               "projects",
               "settings",
             ].includes(page) ||
-              isAdmin) && (
+              isLeader) && (
               <Button
                 className="btn primary"
                 onClick={() =>
@@ -1067,12 +1252,16 @@ export default function App() {
                             : page === "hours"
                               ? "time"
                               : page === "settings"
-                                ? "team"
+                                ? "user"
                                 : "task",
                   )
                 }
               >
-                <Plus size={18} />
+                {page === "settings" ? (
+                  <UserPlus size={18} />
+                ) : (
+                  <Plus size={18} />
+                )}
                 {page === "contracts"
                   ? "Adicionar produto contratado"
                   : page === "products"
@@ -1084,7 +1273,7 @@ export default function App() {
                         : page === "hours"
                           ? "Registrar horas"
                           : page === "settings"
-                            ? "Nova equipe"
+                            ? "Convidar usuário"
                             : "Nova tarefa"}
               </Button>
             )}
@@ -1112,7 +1301,13 @@ export default function App() {
             <Loading />
           ) : (
             <>
-              {(page === "overview" || page === "reports") && (
+              {!isLeader && page !== "tasks" && (
+                <Empty
+                  title="Acesso restrito"
+                  body="Você tem permissão de acesso apenas ao módulo de Tarefas. Redirecionando..."
+                />
+              )}
+              {isLeader && (page === "overview" || page === "reports") && (
                 <>
                   <div className="section-top">
                     <span className="section-caption">
@@ -1175,7 +1370,7 @@ export default function App() {
                   </div>
                 </>
               )}
-              {page === "overview" && (
+              {isLeader && page === "overview" && (
                 <div className="dashboard-grid">
                   <section className="panel focus-panel">
                     <div className="panel-heading">
@@ -1263,7 +1458,7 @@ export default function App() {
                                     : "Colaboração"}
                               </small>
                             </div>
-                            {isAdmin && (
+                            {isLeader && (
                               <Button
                                 className="icon-btn"
                                 title={`Ver equipe de ${m.name}`}
@@ -1564,7 +1759,7 @@ export default function App() {
                     <h2>Catálogo de produtos</h2>
                     <span>{data.products.length} produtos</span>
                   </div>
-                  {!isAdmin && (
+                  {!isLeader && (
                     <p className="catalog-note">
                       O cadastro de produtos é feito pelos administradores da
                       agência.
@@ -1583,7 +1778,7 @@ export default function App() {
                           />
                           <div>
                             <strong>{p.name}</strong>
-                            {isAdmin && (
+                            {isLeader && (
                               <Button
                                 className="text-btn"
                                 onClick={() =>
@@ -1599,7 +1794,7 @@ export default function App() {
                               cliente(s)
                             </small>
                           </div>
-                          {isAdmin && (
+                          {isLeader && (
                             <Button
                               className="btn secondary"
 
@@ -1619,7 +1814,7 @@ export default function App() {
                       title="Cadastre seu primeiro produto"
                       body="Adicione os serviços oferecidos pela agência, como Make Ads, Make CRM e Social Leads."
                       action={
-                        isAdmin ? (
+                        isLeader ? (
                           <Button
                             className="btn primary"
                             onClick={() => setForm("product")}
@@ -1664,7 +1859,7 @@ export default function App() {
                           projeto(s)
                         </small>
                       </div>
-                      {isAdmin && (
+                      {isLeader && (
                         <Button
                           className="btn secondary"
                           onClick={() =>
@@ -1688,7 +1883,7 @@ export default function App() {
                 <>
                   <div className="section-top">
                     <span>{data.clients.length} clientes no espaço</span>
-                    {isAdmin && (
+                    {isLeader && (
                       <Button
                         className="btn secondary"
 
@@ -1721,7 +1916,7 @@ export default function App() {
                             <span className="subtle-label">CLIENTE</span>
                           </div>
                           <h2>{c.name}</h2>
-                          {isAdmin && (
+                          {isLeader && (
                             <Button
                               className="text-btn"
                               onClick={() =>
@@ -1799,7 +1994,7 @@ export default function App() {
                           </span>
                         </div>
                         <h2>{p.name}</h2>
-                        {isAdmin && (
+                        {isLeader && (
                           <Button
                             className="text-btn"
                             onClick={() =>
@@ -1963,13 +2158,13 @@ export default function App() {
                   <Reports byClient={byClient} byPerson={byPerson} />
                 </Suspense>
               )}
-              {page === "settings" && !isAdmin && (
+              {page === "settings" && !isLeader && (
                 <Empty
                   title="Área administrativa"
-                  body="Esta área está disponível apenas para administradores."
+                  body="Esta área está disponível apenas para administradores e gestores."
                 />
               )}
-              {page === "settings" && isAdmin && (
+              {page === "settings" && isLeader && (
                 <>
                   <div className="settings-grid">
                     <section className="panel">
@@ -1978,11 +2173,25 @@ export default function App() {
                           <h2>Pessoas do espaço</h2>
                           <p>Perfis e vínculos ativos</p>
                         </div>
+                        {isLeader && (
+                          <Button
+                            className="btn secondary"
+                            aria-label="Convidar usuário"
+                            onClick={() => setForm("user")}
+                          >
+                            <UserPlus size={17} /> Convidar usuário
+                          </Button>
+                        )}
                       </div>
                       {data.members.map((m) => (
                         <div className="member-row" key={m.user_id}>
                           <Avatar name={m.name} />
-                          <strong>{m.name}</strong>
+                          <div className="member-info">
+                            <strong>{m.name}</strong>
+                            {m.email && (
+                              <span className="member-email">{m.email}</span>
+                            )}
+                          </div>
                           <span className="role-tag">
                             {m.role === "admin"
                               ? "Administrador"
@@ -1991,19 +2200,43 @@ export default function App() {
                                 : "Colaborador"}
                           </span>
                           <span>{m.active ? "Ativo" : "Inativo"}</span>
+                          {isLeader && (
+                            <div className="member-actions">
+                              <Button
+                                className="icon-btn"
+                                title="Redefinir senha"
+                                aria-label={`Redefinir senha de ${m.name}`}
+                                onClick={() => setResetPasswordMember(m)}
+                              >
+                                <KeyRound size={15} />
+                              </Button>
+                              <Button
+                                className="icon-btn"
+                                title="Alterar e-mail"
+                                aria-label={`Alterar e-mail de ${m.name}`}
+                                onClick={() => setUpdateEmailMember(m)}
+                              >
+                                <Mail size={15} />
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       ))}
                       <div className="panel-footer">
                         <small>
-                          Convites serão habilitados após a conexão e
-                          configuração do Supabase.
+                          {data.members.length}{" "}
+                          {data.members.length === 1
+                            ? "membro cadastrado"
+                            : "membros cadastrados"}{" "}
+                          · Convites enviados com link seguro de primeiro
+                          acesso.
                         </small>
                       </div>
                     </section>
                     <section className="panel">
                       <div className="panel-heading">
                         <h2>Catálogo de produtos</h2>
-                        {isAdmin && (
+                        {isLeader && (
                           <Button
                             className="btn secondary"
 
@@ -2027,6 +2260,15 @@ export default function App() {
                     <section className="panel">
                       <div className="panel-heading">
                         <h2>Equipes</h2>
+                        {isLeader && (
+                          <Button
+                            className="btn secondary"
+                            aria-label="Nova equipe"
+                            onClick={() => setForm("team")}
+                          >
+                            <Plus size={17} /> Nova equipe
+                          </Button>
+                        )}
                       </div>
                       {data.teams.map((t) => (
                         <div className="team-config" key={t.id}>
@@ -2081,7 +2323,7 @@ export default function App() {
           {toast}
         </div>
       )}
-      {entityEdit && isAdmin && (
+      {entityEdit && isLeader && (
         <EditEntityForm
           edit={entityEdit}
           data={data}
@@ -2101,6 +2343,26 @@ export default function App() {
           busy={busy}
           mutate={mutate}
           onClose={() => setForm(null)}
+        />
+      )}
+      {resetPasswordMember && (
+        <ResetPasswordModal
+          member={resetPasswordMember}
+          busy={busy}
+          onSubmit={async (mode, newPassword) => {
+            await handleResetPassword(resetPasswordMember, mode, newPassword);
+          }}
+          onClose={() => setResetPasswordMember(null)}
+        />
+      )}
+      {updateEmailMember && (
+        <UpdateEmailModal
+          member={updateEmailMember}
+          busy={busy}
+          onSubmit={async (newEmail) => {
+            await handleUpdateEmail(updateEmailMember, newEmail);
+          }}
+          onClose={() => setUpdateEmailMember(null)}
         />
       )}
       {selected && !selectedTask && (detailLoading || detailError) && (

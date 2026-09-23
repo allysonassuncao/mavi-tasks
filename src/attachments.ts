@@ -1,5 +1,6 @@
 import { rpc, invalidateTaskExtras } from "./api";
 import { supabase } from "./supabase";
+import { uploadToGcs } from "./gcs";
 import type { Attachment } from "./types";
 const mimeByExtension: Record<string, string> = {
   pdf: "application/pdf",
@@ -36,10 +37,7 @@ export async function uploadAttachment(taskId: string, file: File) {
     p_size: file.size,
   });
   try {
-    const { error } = await supabase.storage
-      .from("mavi-attachments")
-      .upload(attachment.path, file, { upsert: false, contentType });
-    if (error) throw error;
+    await uploadToGcs(attachment.path, file, contentType);
     invalidateTaskExtras(taskId);
   } catch (error) {
     try {

@@ -9,10 +9,30 @@ function day(offset: number) {
 }
 export function demoSnapshot(): Snapshot {
   const members = [
-    { user_id: demoUser, name: "Allyson Assunção", role: "admin" as const },
-    { user_id: "user-marina", name: "Marina Costa", role: "manager" as const },
-    { user_id: "user-lucas", name: "Lucas Oliveira", role: "member" as const },
-    { user_id: "user-julia", name: "Júlia Santos", role: "member" as const },
+    {
+      user_id: demoUser,
+      name: "Allyson Assunção",
+      role: "admin" as const,
+      email: "allyson@mavi.app.br",
+    },
+    {
+      user_id: "user-marina",
+      name: "Marina Costa",
+      role: "manager" as const,
+      email: "marina@mavi.app.br",
+    },
+    {
+      user_id: "user-lucas",
+      name: "Lucas Oliveira",
+      role: "member" as const,
+      email: "lucas@mavi.app.br",
+    },
+    {
+      user_id: "user-julia",
+      name: "Júlia Santos",
+      role: "member" as const,
+      email: "julia@mavi.app.br",
+    },
   ].map((m) => ({ ...m, company_id, active: true }));
   const clients = [
     {

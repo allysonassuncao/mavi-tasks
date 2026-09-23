@@ -22,6 +22,36 @@ export function duration(value: number) {
   const m = Math.round(value);
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }
+export function taskTimerSeconds(
+  hours: TimeEntry[],
+  taskId: string,
+  running?: TimeEntry | null,
+  now = Date.now(),
+): number {
+  const isRunning = running?.task_id === taskId && !running.ended_at;
+  const pastSeconds = hours
+    .filter((h) => h.task_id === taskId && h.ended_at && h.id !== running?.id)
+    .reduce((sum, h) => {
+      const start = Date.parse(h.started_at);
+      const end = Date.parse(h.ended_at!);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        return sum;
+      }
+      return sum + Math.floor((end - start) / 1000);
+    }, 0);
+  const currentSeconds =
+    isRunning && running
+      ? Math.max(0, Math.floor((now - Date.parse(running.started_at)) / 1000))
+      : 0;
+  return pastSeconds + currentSeconds;
+}
+export function formatClock(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor(safe / 60) % 60;
+  const s = safe % 60;
+  return [h, m, s].map((v) => String(v).padStart(2, "0")).join(":");
+}
 export function dateLabel(value: string | null) {
   if (!value) return "Sem data";
   return new Date(value + "T12:00:00").toLocaleDateString("pt-BR", {
