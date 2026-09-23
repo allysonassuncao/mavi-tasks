@@ -199,6 +199,10 @@ export default function App() {
   const [demo, setDemo] = useState(false),
     [session, setSession] = useState<Session | null>(null),
     [authReady, setAuthReady] = useState(!supabase);
+  // The user whose access was confirmed active; deactivated people are
+  // signed out (see the my_access check below) with this notice.
+  const [accessUser, setAccessUser] = useState(""),
+    [accessNotice, setAccessNotice] = useState("");
   const [data, setData] = useState<Snapshot>(() => {
       if (demo) return demoStore.current.data;
       const cachedCompanies = cache.get<Company[]>("companies");
@@ -497,6 +501,33 @@ export default function App() {
     });
     return () => subscription.unsubscribe();
   }, []);
+  const sessionUser = session?.user.id ?? "";
+  useEffect(() => {
+    if (demo || !sessionUser || !supabase) return;
+    let alive = true;
+    async function check() {
+      const access = await api.myAccess().catch(() => null);
+      if (!alive) return;
+      if (access !== "inactive") {
+        // A failed check never locks anyone out; RLS still guards the data.
+        setAccessUser(sessionUser);
+        return;
+      }
+      setAccessNotice(DEACTIVATED);
+      api.clearAllCaches();
+      setData(emptySnapshot);
+      await supabase!.auth.signOut({ scope: "local" }).catch(() => {});
+    }
+    void check();
+    const onFocus = () => void check();
+    window.addEventListener("focus", onFocus);
+    const id = setInterval(check, 5 * 60 * 1000);
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", onFocus);
+      clearInterval(id);
+    };
+  }, [demo, sessionUser]);
   useEffect(() => {
     if (!company || demo) return;
     const cached = api.getCachedSnapshot(company);
@@ -558,6 +589,7 @@ export default function App() {
         {
           search: page === "tasks" ? query : "",
           status: page === "tasks" ? status : "",
+          hideDone: page === "tasks" && !status,
           product: page === "tasks" ? product : "",
           mine: page === "tasks" ? mine : false,
           user,
@@ -980,7 +1012,8 @@ export default function App() {
               clientFilter) &&
           (!projectFilter || t.project_id === projectFilter) &&
           taskMatchesSearch(nameLookup, t, query) &&
-          (!status || t.status === status) &&
+          // Delivered tasks only appear when filtering by "Entregue".
+          (status ? t.status === status : t.status !== "done") &&
           (!mine || t.assignee_id === user) &&
           (!late || isLate(t, today)) &&
           (!product ||
@@ -1108,6 +1141,7 @@ export default function App() {
         }}
       />
     );
+  if (!demo && session && accessUser !== session.user.id) return <Loading />;
   if (!demo && !session && !isLogin) return <Loading />;
   if (!demo && !session && isLogin)
     return (
@@ -1128,6 +1162,7 @@ export default function App() {
           );
         }}
         notify={notify}
+        notice={accessNotice}
       />
     );
   if (isLogin) return <Loading />;
@@ -1877,7 +1912,9 @@ export default function App() {
                         setOffset(0);
                       }}
                     >
-                      <SelectOption value="">Todos os status</SelectOption>
+                      <SelectOption value="">
+                        Todos os status (exceto entregues)
+                      </SelectOption>
                       {Object.entries(statuses).map(([k, v]) => (
                         <SelectOption key={k} value={k}>
                           {v.label}
@@ -1928,47 +1965,54 @@ export default function App() {
                     />
                   ) : view === "board" ? (
                     <div className="board">
-                      {Object.entries(statuses).map(([key, value]) => (
-                        <section className="board-column" key={key}>
-                          <h3>
-                            <i style={{ background: value.color }} />
-                            {value.label}
-                            <span>
-                              {filtered.filter((t) => t.status === key).length}
-                            </span>
-                          </h3>
-                          {filtered
-                            .filter((t) => t.status === key)
-                            .map((t) => {
-                              const n = namesFrom(nameLookup, t);
-                              return (
-                                <Button
-                                  className="task-card"
-                                  key={t.id}
-                                  onClick={() => setSelected(t.id)}
-                                >
-                                  <small>
-                                    {n.client?.name} · {n.product?.name}
-                                  </small>
-                                  <h4>{t.title}</h4>
-                                  <footer>
-                                    <span
-                                      className={isLate(t, today) ? "late" : ""}
-                                    >
-                                      <CalendarDays size={14} />
-                                      {dateLabel(t.due_date)}
-                                    </span>
-                                    <Avatar
-                                      name={n.member?.name ?? "?"}
-                                      src={n.member?.avatar_url}
-                                      size="small"
-                                    />
-                                  </footer>
-                                </Button>
-                              );
-                            })}
-                        </section>
-                      ))}
+                      {Object.entries(statuses)
+                        .filter(([key]) => key !== "done" || status === "done")
+                        .map(([key, value]) => (
+                          <section className="board-column" key={key}>
+                            <h3>
+                              <i style={{ background: value.color }} />
+                              {value.label}
+                              <span>
+                                {
+                                  filtered.filter((t) => t.status === key)
+                                    .length
+                                }
+                              </span>
+                            </h3>
+                            {filtered
+                              .filter((t) => t.status === key)
+                              .map((t) => {
+                                const n = namesFrom(nameLookup, t);
+                                return (
+                                  <Button
+                                    className="task-card"
+                                    key={t.id}
+                                    onClick={() => setSelected(t.id)}
+                                  >
+                                    <small>
+                                      {n.client?.name} · {n.product?.name}
+                                    </small>
+                                    <h4>{t.title}</h4>
+                                    <footer>
+                                      <span
+                                        className={
+                                          isLate(t, today) ? "late" : ""
+                                        }
+                                      >
+                                        <CalendarDays size={14} />
+                                        {dateLabel(t.due_date)}
+                                      </span>
+                                      <Avatar
+                                        name={n.member?.name ?? "?"}
+                                        src={n.member?.avatar_url}
+                                        size="small"
+                                      />
+                                    </footer>
+                                  </Button>
+                                );
+                              })}
+                          </section>
+                        ))}
                     </div>
                   ) : (
                     <Suspense fallback={<Loading compact />}>
@@ -2560,6 +2604,9 @@ export default function App() {
           callerIsAdmin={isAdmin}
           busy={busy}
           mutate={mutate}
+          syncAccess={
+            demo ? undefined : (id) => api.syncUserAccess(company, id)
+          }
           onClose={() => setEditMember(null)}
         />
       )}
@@ -2726,14 +2773,19 @@ function TaskTable({
     </>
   );
 }
+const DEACTIVATED =
+  "Seu acesso foi desativado. Fale com o administrador da sua empresa.";
 function Login({
   onDemo,
   notify,
+  notice = "",
 }: {
   onDemo: () => void;
   notify: (s: string) => void;
+  /** Why the person was signed out (e.g. their access was deactivated). */
+  notice?: string;
 }) {
-  const [error, setError] = useState(""),
+  const [error, setError] = useState(notice),
     [busy, setBusy] = useState(false);
   // The demo is no longer offered on the login page; local development can
   // still open it with /login?demo=1 (stripped from production builds).
@@ -2756,7 +2808,10 @@ function Login({
         email: String(fd.get("email")),
         password: String(fd.get("password")),
       });
-      if (error) throw error;
+      if (error)
+        throw error.code === "user_banned" || /banned/i.test(error.message)
+          ? Error(DEACTIVATED)
+          : error;
     } catch (e) {
       setError((e as Error).message);
     } finally {

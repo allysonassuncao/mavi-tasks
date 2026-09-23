@@ -41,19 +41,22 @@ export async function listDriveFiles(
   return (data ?? []) as DriveFile[];
 }
 
-/** Files anywhere the person can see whose name contains `text`. */
+/** Files the person can see (optionally in one client) whose name contains `text`. */
 export async function searchDriveFiles(
   company: string,
   text: string,
+  client?: string,
 ): Promise<DriveFile[]> {
   if (!supabase) throw Error("Supabase não configurado");
   const pattern = `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-  const { data, error } = await supabase
+  let query = supabase
     .from("drive_files")
     .select(DRIVE_COLUMNS)
     .eq("company_id", company)
     .eq("status", "ready")
-    .ilike("name", pattern)
+    .ilike("name", pattern);
+  if (client) query = query.eq("client_id", client);
+  const { data, error } = await query
     .order("name", { ascending: true })
     .limit(100);
   if (error) throw error;

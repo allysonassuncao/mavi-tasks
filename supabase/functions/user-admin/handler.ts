@@ -102,6 +102,30 @@ export function createUserAdminHandler(
         });
       }
 
+      // Handle SYNC ACCESS: after update_member changes someone's status, the
+      // Auth account follows the memberships — banned while no company keeps
+      // the person active (so they can't sign in or refresh a session), and
+      // unbanned otherwise. It only mirrors the database, so it cannot be used
+      // to lock out anyone the caller could not deactivate.
+      if (action === "sync_access") {
+        const { data: rows, error: rowsError } = await admin
+          .from("memberships")
+          .select("active")
+          .eq("user_id", target_user_id);
+        if (rowsError)
+          return reply(500, { error: "Não foi possível ler os acessos." });
+        const active = (rows ?? []).some((r: { active: boolean }) => r.active);
+        const { error: banError } = await admin.auth.admin.updateUserById(
+          target_user_id,
+          { ban_duration: active ? "none" : "876000h" },
+        );
+        if (banError)
+          return reply(400, {
+            error: banError.message || "Não foi possível atualizar o acesso.",
+          });
+        return reply(200, { success: true, active });
+      }
+
       // Fetch user's auth email if not in membership
       let targetEmail = targetMembership.email?.trim() || "";
       if (!targetEmail) {

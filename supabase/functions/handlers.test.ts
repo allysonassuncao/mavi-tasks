@@ -455,6 +455,51 @@ describe("user-admin", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  describe("sync_access", () => {
+    async function sync(
+      memberships: { active: boolean }[],
+      callerRole = "admin",
+    ) {
+      const fixture = userAdminFixture({ callerRole });
+      // The memberships list query is awaited directly (no .single()).
+      Object.assign(fixture.chain, {
+        then: (resolve: (v: unknown) => void) =>
+          resolve({ data: memberships, error: null }),
+      });
+      const res = await fixture.handler(
+        userAdminRequest({
+          company_id: companyId,
+          target_user_id: targetUserId,
+          action: "sync_access",
+        }),
+      );
+      return { ...fixture, res };
+    }
+    it("bloqueia o login de quem ficou sem nenhum vínculo ativo", async () => {
+      const { admin, res } = await sync([{ active: false }]);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ active: false });
+      expect(admin.auth.admin.updateUserById).toHaveBeenCalledWith(
+        targetUserId,
+        { ban_duration: "876000h" },
+      );
+    });
+    it("libera o login quando ainda há um vínculo ativo", async () => {
+      const { admin, res } = await sync([{ active: false }, { active: true }]);
+      expect(await res.json()).toMatchObject({ active: true });
+      expect(admin.auth.admin.updateUserById).toHaveBeenCalledWith(
+        targetUserId,
+        { ban_duration: "none" },
+      );
+    });
+    it("gestores também sincronizam, colaboradores não", async () => {
+      expect((await sync([{ active: false }], "manager")).res.status).toBe(200);
+      const member = await sync([{ active: false }], "member");
+      expect(member.res.status).toBe(403);
+      expect(member.admin.auth.admin.updateUserById).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("gcs-storage (desativada)", () => {

@@ -34,6 +34,7 @@ import {
   Pause,
   KeyRound,
   Mail,
+  HardDrive,
 } from "lucide-react";
 import { Modal, Avatar, Badge, Empty, Loading } from "./components";
 import {
@@ -69,6 +70,7 @@ import {
   serializeDescription,
 } from "./rich-text";
 import { ContractPicker } from "./ContractPicker";
+import { TaskDrive } from "./DrivePage";
 import { TeamPicker } from "./TeamPicker";
 import { ReviewSettings } from "./ReviewSettings";
 import { attachmentAccept, uploadAttachment } from "./attachments";
@@ -1158,6 +1160,9 @@ export function TaskDetail({
           {[
             { id: "comments", label: "Comentários", icon: MessageSquare },
             { id: "files", label: "Arquivos", icon: Paperclip },
+            ...(n.client
+              ? [{ id: "drive", label: "Drive", icon: HardDrive }]
+              : []),
             { id: "activity", label: "Histórico", icon: History },
           ].map((t) => (
             <Button
@@ -1236,6 +1241,16 @@ export function TaskDetail({
               )}
             </div>
           </>
+        ) : tab === "drive" && n.client ? (
+          <TaskDrive
+            root={{ client: n.client.id }}
+            demo={demo}
+            data={data}
+            company={task.company_id}
+            user={user}
+            isLeader={isLeader}
+            notify={notify}
+          />
         ) : tab === "files" ? (
           <>
             <label className={`upload-zone ${demo ? "disabled" : ""}`}>

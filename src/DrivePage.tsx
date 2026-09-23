@@ -92,6 +92,8 @@ type DriveProps = {
   user: string;
   isLeader: boolean;
   notify: (message: string) => void;
+  /** Limits the tree to one client's folder (the Drive tab of a task). */
+  root?: { client: string };
 };
 
 /**
@@ -110,6 +112,22 @@ export function Drive(props: DriveProps) {
       </div>
     );
   return <DriveWithHistory {...props} />;
+}
+
+/** The Drive tab of a task: only the folder of the task's client. */
+export function TaskDrive(props: DriveProps & { root: { client: string } }) {
+  if (props.demo)
+    return (
+      <p className="muted centered">
+        O Drive fica disponível na conta conectada; a demonstração não armazena
+        arquivos.
+      </p>
+    );
+  return (
+    <div className="task-drive">
+      <DriveTree key={props.root.client} {...props} />
+    </div>
+  );
 }
 
 function DriveWithHistory(props: DriveProps) {
@@ -147,8 +165,17 @@ function DriveWithHistory(props: DriveProps) {
   );
 }
 
-function DriveTree({ data, company, user, isLeader, notify }: DriveProps) {
-  const [at, setAt] = useState<DriveLocation>({});
+function DriveTree({
+  data,
+  company,
+  user,
+  isLeader,
+  notify,
+  root,
+}: DriveProps) {
+  // Rooted trees start at (and never leave) the client's folder.
+  const base: DriveLocation = root ? { client: root.client } : {};
+  const [at, setAt] = useState<DriveLocation>(base);
   const [folders, setFolders] = useState<DriveFolder[]>([]);
   const [files, setFiles] = useState<DriveFile[] | null>(null);
   const [query, setQuery] = useState("");
@@ -203,15 +230,15 @@ function DriveTree({ data, company, user, isLeader, notify }: DriveProps) {
       return;
     }
     const id = setTimeout(() => {
-      searchDriveFiles(company, text)
+      searchDriveFiles(company, text, root?.client)
         .then(setResults)
         .catch((e) => setError((e as Error).message));
     }, 300);
     return () => clearTimeout(id);
-  }, [company, query]);
+  }, [company, query, root?.client]);
 
   function go(next: DriveLocation) {
-    setAt(next);
+    setAt(root && !next.client ? base : next);
     setEditing(null);
     setQuery("");
     setError("");
@@ -233,8 +260,8 @@ function DriveTree({ data, company, user, isLeader, notify }: DriveProps) {
     folder_id: string | null;
   }) {
     return [
-      "Drive",
-      ...(item.client_id ? [clientName(item.client_id)] : []),
+      ...(root ? [] : ["Drive"]),
+      ...(item.client_id && !root ? [clientName(item.client_id)] : []),
       ...(item.contract_id
         ? [contractProductLabel(data, item.contract_id)]
         : []),
@@ -642,8 +669,16 @@ function DriveTree({ data, company, user, isLeader, notify }: DriveProps) {
         <span className="drive-search">
           <Input
             type="search"
-            aria-label="Buscar arquivo em todas as pastas"
-            placeholder="Buscar arquivo em todas as pastas"
+            aria-label={
+              root
+                ? "Buscar arquivo nas pastas deste cliente"
+                : "Buscar arquivo em todas as pastas"
+            }
+            placeholder={
+              root
+                ? "Buscar arquivo nas pastas deste cliente"
+                : "Buscar arquivo em todas as pastas"
+            }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             icon={Search}
@@ -686,12 +721,14 @@ function DriveTree({ data, company, user, isLeader, notify }: DriveProps) {
       </div>
 
       <nav className="drive-breadcrumb" aria-label="Pasta atual">
-        <button type="button" onClick={() => go({})}>
-          Drive
-        </button>
-        {!results && at.client && (
+        {!root && (
+          <button type="button" onClick={() => go({})}>
+            Drive
+          </button>
+        )}
+        {(root || (!results && at.client)) && (
           <>
-            <ChevronRight size={15} aria-hidden="true" />
+            {!root && <ChevronRight size={15} aria-hidden="true" />}
             <button type="button" onClick={() => go({ client: at.client })}>
               {clientName(at.client)}
             </button>
@@ -785,7 +822,11 @@ function DriveTree({ data, company, user, isLeader, notify }: DriveProps) {
           <div className="panel drive-empty">
             <Empty
               title="Nenhum arquivo encontrado"
-              body="A busca considera todas as pastas que você acessa."
+              body={
+                root
+                  ? "A busca considera as pastas deste cliente que você acessa."
+                  : "A busca considera todas as pastas que você acessa."
+              }
             />
           </div>
         )

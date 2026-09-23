@@ -21,6 +21,8 @@ import {
 export interface Filters {
   search: string;
   status: string;
+  /** Leave delivered tasks out (the task list without a status filter). */
+  hideDone?: boolean;
   product: string;
   mine: boolean;
   user: string;
@@ -156,6 +158,7 @@ function hashFilters(filters: Filters): string {
   return JSON.stringify({
     s: filters.search,
     st: filters.status,
+    hd: filters.hideDone,
     p: filters.product,
     m: filters.mine,
     u: filters.user,
@@ -230,6 +233,7 @@ export async function tasksQuery(
       if (filters.search.trim())
         query = query.or(taskSearchFilter(filters.search, lookups));
       if (filters.status) query = query.eq("status", filters.status);
+      else if (filters.hideDone) query = query.neq("status", "done");
       if (filters.client)
         query = query.in(
           "contract_id",
@@ -665,6 +669,54 @@ export async function updateUserEmail(
   invalidateLookupsCache(company);
 
   return result;
+}
+
+/** Bans or unbans the person's Auth account to match their memberships. */
+export async function syncUserAccess(
+  company: string,
+  userId: string,
+): Promise<{ success: boolean; active: boolean }> {
+  const body = {
+    company_id: company,
+    target_user_id: userId,
+    action: "sync_access",
+  };
+  try {
+    const session = await supabase?.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    const res = await fetch("/api/user-admin", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return await res.json();
+    if (res.status !== 404) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(
+        err.error || `Erro ao atualizar o acesso (${res.status})`,
+      );
+    }
+  } catch (e) {
+    // Only an unreachable proxy falls back to invoking the function directly.
+    if (!(e instanceof TypeError)) throw e;
+  }
+  if (!supabase) throw new Error("Conecte o Supabase para gerenciar acessos.");
+  const { data, error } = await supabase.functions.invoke("user-admin", {
+    body,
+  });
+  if (error)
+    throw new Error(
+      await parseFunctionError(error, "Erro ao atualizar o acesso."),
+    );
+  return data as { success: boolean; active: boolean };
+}
+
+/** 'inactive' when every membership of the signed-in person was deactivated. */
+export function myAccess(): Promise<"active" | "inactive" | "none"> {
+  return rpc("my_access", {});
 }
 
 // Invalidation and intelligent cache update helpers

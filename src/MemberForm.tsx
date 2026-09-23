@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Check } from "lucide-react";
 import { Modal } from "./components";
 import { Button, Checkbox, Input, Select, SelectOption } from "./ui";
@@ -23,6 +23,7 @@ export function MemberForm({
   callerIsAdmin,
   busy,
   mutate,
+  syncAccess,
   onClose,
 }: {
   member: Member;
@@ -32,6 +33,8 @@ export function MemberForm({
   callerIsAdmin: boolean;
   busy: boolean;
   mutate: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+  /** Blocks or restores the person's sign-in to match their new status. */
+  syncAccess?: (userId: string) => Promise<unknown>;
   onClose: () => void;
 }) {
   const self = member.user_id === currentUser;
@@ -45,6 +48,8 @@ export function MemberForm({
   );
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Survives a failed sync, when `member` already reflects the saved status.
+  const needsSync = useRef(false);
   const supervises = data.teamMembers.some(
     (tm) => tm.user_id === member.user_id && tm.supervisor,
   );
@@ -55,6 +60,7 @@ export function MemberForm({
     if (saving) return;
     setError("");
     setSaving(true);
+    if (active !== member.active) needsSync.current = true;
     try {
       await mutate("update_member", {
         p_company: company,
@@ -64,6 +70,19 @@ export function MemberForm({
         p_active: active,
         p_teams: teams,
       });
+      if (needsSync.current && syncAccess) {
+        try {
+          await syncAccess(member.user_id);
+          needsSync.current = false;
+        } catch (err) {
+          setError(
+            `O status foi salvo, mas o login não pôde ser ${
+              active ? "liberado" : "bloqueado"
+            }: ${(err as Error).message} Salve novamente para tentar outra vez.`,
+          );
+          return;
+        }
+      }
       onClose();
     } catch (err) {
       setError((err as Error).message);

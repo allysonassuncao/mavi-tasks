@@ -4777,6 +4777,20 @@ label .input-control .ui-input {
   gap: 14px;
   min-height: 60vh;
 }
+/* The Drive tab inside a task: no page height, toolbar may wrap. */
+.task-drive .drive-page {
+  min-height: 0;
+  padding-top: 6px;
+}
+.task-drive .drive-toolbar {
+  flex-wrap: wrap;
+}
+.task-drive .drive-upload-controls {
+  flex-wrap: wrap;
+}
+.task-drive .drive-folders {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
 .drive-upload-controls {
   display: flex;
   align-items: center;
