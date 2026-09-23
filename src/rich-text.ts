@@ -96,3 +96,28 @@ export function serializeDescription(value: unknown): string {
     !!node.content?.some(hasText);
   return hasText(doc) ? DESCRIPTION_PREFIX + JSON.stringify(doc) : "";
 }
+/** Visible text of a description (rich or legacy), for length validation. */
+export function richTextPlain(value: string): string {
+  const text = (node: RichNode): string =>
+    node.type === "text"
+      ? (node.text ?? "")
+      : (node.content ?? []).map(text).join(node.type === "doc" ? "\n" : "");
+  return text(parseDescription(value)).trim();
+}
+/**
+ * Mirrors mavi_private.transition_comment: the comment posted with a
+ * transition note is a bold label followed by the note's own content.
+ */
+export function transitionComment(label: string, note: string): string {
+  const doc = parseDescription(note);
+  return serializeDescription({
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: label, marks: [{ type: "bold" }] }],
+      },
+      ...(doc.content ?? []),
+    ],
+  });
+}

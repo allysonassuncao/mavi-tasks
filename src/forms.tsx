@@ -55,6 +55,7 @@ import {
   formatClock,
   canApproveTask,
   projectReview,
+  canSubmitTask,
 } from "./domain";
 import { useNow } from "./useClock";
 import { supabase } from "./supabase";
@@ -62,6 +63,7 @@ import { rpc, taskExtras, invalidateTaskExtras } from "./api";
 import { getGcsPublicUrl } from "./gcs";
 import type { DemoStore } from "./demo-store";
 import { RichTextContent } from "./RichTextContent";
+import { richTextPlain } from "./rich-text";
 import { ContractPicker } from "./ContractPicker";
 import { TeamPicker } from "./TeamPicker";
 import { ReviewSettings } from "./ReviewSettings";
@@ -495,7 +497,6 @@ export function TaskDetail({
     [loading, setLoading] = useState(false),
     [editing, setEditing] = useState(false),
     [localRefresh, setLocalRefresh] = useState(0),
-    [note, setNote] = useState(""),
     [action, setAction] = useState(""),
     [uploading, setUploading] = useState(false);
   const [editorUploading, setEditorUploading] = useState(false);
@@ -558,7 +559,6 @@ export function TaskDetail({
         p_note: message,
       });
       setAction("");
-      setNote("");
       invalidateTaskExtras(task.id);
       // The task itself is patched optimistically by mutate(); only the
       // activity/history tab still needs a (small, scoped) refetch.
@@ -905,7 +905,7 @@ export function TaskDetail({
         <div className="detail-actions">
           {canWork && (
             <>
-              {["open", "returned"].includes(task.status) && (
+              {["open", "returned", "rejected"].includes(task.status) && (
                 <Button
                   className="btn primary"
                   disabled={busy}
@@ -915,7 +915,7 @@ export function TaskDetail({
                   <Check size={15} /> Marcar em andamento
                 </Button>
               )}
-              {["open", "progress", "returned"].includes(task.status) && (
+              {canSubmitTask(task) && (
                 <Button
                   className="btn primary"
                   disabled={busy}
@@ -961,7 +961,9 @@ export function TaskDetail({
                   </Button>
                 </>
               )}
-              {["open", "progress", "review"].includes(task.status) && (
+              {["open", "progress", "review", "rejected"].includes(
+                task.status,
+              ) && (
                 <Button
                   className="btn secondary"
                   disabled={busy}
@@ -989,21 +991,42 @@ export function TaskDetail({
             className="action-note"
             onSubmit={(e) => {
               e.preventDefault();
+              if (editorUploading) return;
+              const note = String(
+                new FormData(e.currentTarget).get("note") ?? "",
+              );
+              const min = action === "approve_client" ? 5 : 3;
+              if (richTextPlain(note).length < min) {
+                setError(
+                  `Escreva ao menos ${min} caracteres ${
+                    action === "approve_client"
+                      ? "sobre a aprovação do cliente"
+                      : "explicando o motivo"
+                  }.`,
+                );
+                return;
+              }
               void transition(action, note);
             }}
           >
-            <label>
-              {action === "approve_client"
-                ? "Quem aprovou, quando e por qual meio?"
-                : "Descreva o motivo"}
-              <Textarea
-                required
-                minLength={action === "approve_client" ? 5 : 3}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows={3}
+            <Suspense fallback={<Loading compact />}>
+              <RichTextEditor
+                key={action}
+                company={task.company_id}
+                demo={demo}
+                name="note"
+                label={
+                  action === "approve_client"
+                    ? "Quem aprovou, quando e por qual meio?"
+                    : "Descreva o motivo"
+                }
+                disabled={busy}
+                onUploading={setEditorUploading}
               />
-            </label>
+            </Suspense>
+            <small>
+              Este texto também será publicado nos comentários da tarefa.
+            </small>
             <div className="form-footer">
               <Button
                 type="button"
@@ -1012,7 +1035,11 @@ export function TaskDetail({
               >
                 Cancelar
               </Button>
-              <Button className="btn primary" disabled={busy} loading={busy}>
+              <Button
+                className="btn primary"
+                disabled={busy || editorUploading}
+                loading={busy || editorUploading}
+              >
                 Confirmar
               </Button>
             </div>
@@ -1162,7 +1189,7 @@ export function TaskDetail({
                             start: "Trabalho iniciado",
                             submit: "Enviada para validação",
                             return: "Devolvida ao criador",
-                            reject: "Ajustes solicitados",
+                            reject: "Reprovada na validação",
                             approve_internal: "Aprovação interna registrada",
                             approve_client: "Aprovação do cliente registrada",
                             reopen: "Tarefa reaberta",
@@ -1173,7 +1200,9 @@ export function TaskDetail({
                   <small>
                     {new Date(e.created_at).toLocaleString("pt-BR")}
                   </small>
-                  {!!e.detail.note && <p>{String(e.detail.note)}</p>}
+                  {!!e.detail.note && (
+                    <RichTextContent value={String(e.detail.note)} />
+                  )}
                 </div>
               </div>
             ))}

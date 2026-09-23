@@ -160,6 +160,26 @@ export function contractProductLabel(data: Snapshot, contractId: string) {
   const { product, detail } = contractParts(data, contractId);
   return `${product?.name ?? "Produto"}${detail ? ` (${detail})` : ""}`;
 }
+/**
+ * Mirrors transition_task's "submit": returned, rejected and in-validation
+ * tasks must be resumed ("Marcar em andamento") before going to validation.
+ */
+export function canSubmitTask(task: Pick<Task, "status">) {
+  return task.status === "open" || task.status === "progress";
+}
+/** Task search matches the title, the client's name or the project's name. */
+export function taskMatchesSearch(
+  lookup: NameLookup,
+  task: Task,
+  query: string,
+) {
+  const q = fold(query);
+  if (!q) return true;
+  const n = namesFrom(lookup, task);
+  return [task.title, n.client?.name, n.project?.name].some(
+    (v) => !!v && fold(v).includes(q),
+  );
+}
 /** A project's validation settings, with defaults for rows cached before they existed. */
 export function projectReview(
   project?: Pick<Project, "requires_review" | "approver"> | null,

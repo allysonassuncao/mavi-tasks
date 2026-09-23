@@ -1,5 +1,6 @@
 import { demoSnapshot, demoUser } from "./demo";
-import { canApproveTask, projectReview } from "./domain";
+import { canApproveTask, canSubmitTask, projectReview } from "./domain";
+import { transitionComment } from "./rich-text";
 import {
   type Snapshot,
   type Task,
@@ -296,12 +297,11 @@ export class DemoStore {
           throw Error("Informe o motivo");
         if (a.p_action === "approve_client" && !a.p_note?.trim())
           throw Error("Registre a evidência de aprovação");
-        if (
-          a.p_action === "start" ||
-          a.p_action === "reject" ||
-          a.p_action === "reopen"
-        )
+        if (a.p_action === "submit" && !canSubmitTask(task))
+          throw Error("Retome a tarefa antes de enviá-la para validação");
+        if (a.p_action === "start" || a.p_action === "reopen")
           task.status = "progress";
+        if (a.p_action === "reject") task.status = "rejected";
         if (a.p_action === "return") task.status = "returned";
         if (a.p_action === "submit") {
           task.status = "review";
@@ -331,6 +331,23 @@ export class DemoStore {
         task.delivered_at = task.status === "done" ? now : null;
         task.version++;
         event(a.p_action, { from, to: task.status, note: a.p_note });
+        const label = (
+          {
+            return: "Devolvida ao criador",
+            reject: "Reprovada na validação",
+            approve_client: "Aprovação do cliente registrada",
+            reopen: "Tarefa reaberta",
+          } as Record<string, string>
+        )[a.p_action];
+        if (label && a.p_note?.trim())
+          this.comments.unshift({
+            id: crypto.randomUUID(),
+            company_id: task.company_id,
+            task_id: task.id,
+            author_id: demoUser,
+            body: transitionComment(label, a.p_note),
+            created_at: now,
+          });
         break;
       }
       case "add_comment":

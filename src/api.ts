@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import * as cache from "./cache";
+import { fold } from "./domain";
 import {
   emptySnapshot,
   type Snapshot,
@@ -167,10 +168,42 @@ function hashFilters(filters: Filters): string {
   });
 }
 
+/**
+ * PostgREST `or` filter for the task search: the title, or any task whose
+ * client or project name matches (resolved from the already loaded lookups,
+ * ignoring case and accents).
+ */
+export function taskSearchFilter(
+  search: string,
+  lookups: Pick<CompanyLookups, "contracts" | "clients" | "projects">,
+) {
+  const q = fold(search);
+  // Escape LIKE wildcards, then quote for PostgREST so commas and
+  // parentheses typed by the user can't break the filter syntax.
+  const pattern = `%${search.trim().replace(/[%_\\]/g, "\\$&")}%`;
+  const parts = [`title.ilike."${pattern.replace(/["\\]/g, "\\$&")}"`];
+  const clients = new Set(
+    lookups.clients.filter((c) => fold(c.name).includes(q)).map((c) => c.id),
+  );
+  const contracts = lookups.contracts
+    .filter((c) => clients.has(c.client_id))
+    .map((c) => c.id);
+  const projects = lookups.projects
+    .filter((p) => fold(p.name).includes(q))
+    .map((p) => p.id);
+  if (contracts.length) parts.push(`contract_id.in.(${contracts.join(",")})`);
+  if (projects.length) parts.push(`project_id.in.(${projects.join(",")})`);
+  return parts.join(",");
+}
+
 export async function tasksQuery(
   company: string,
   filters: Filters,
-  contracts: Contract[] = [],
+  lookups: Pick<CompanyLookups, "contracts" | "clients" | "projects"> = {
+    contracts: [],
+    clients: [],
+    projects: [],
+  },
   companyTz = "America/Sao_Paulo",
   forceRefresh = false,
 ): Promise<{ tasks: Task[]; count: number }> {
@@ -194,23 +227,20 @@ export async function tasksQuery(
         );
       }
 
-      if (filters.search)
-        query = query.ilike(
-          "title",
-          `%${filters.search.replace(/[%_\\]/g, "\\$&")}%`,
-        );
+      if (filters.search.trim())
+        query = query.or(taskSearchFilter(filters.search, lookups));
       if (filters.status) query = query.eq("status", filters.status);
       if (filters.client)
         query = query.in(
           "contract_id",
-          contracts
+          lookups.contracts
             .filter((c) => c.client_id === filters.client)
             .map((c) => c.id),
         );
       if (filters.project) query = query.eq("project_id", filters.project);
       if (filters.mine) query = query.eq("assignee_id", filters.user);
       if (filters.product) {
-        const ids = contracts
+        const ids = lookups.contracts
           .filter((c) => c.product_id === filters.product)
           .map((c) => c.id);
         query = query.in("contract_id", ids);
@@ -315,7 +345,7 @@ export async function snapshot(
   const companyTz = activeCompany?.timezone ?? "America/Sao_Paulo";
 
   const [taskQueryResult, hours] = await Promise.all([
-    tasksQuery(company, filters, lookups.contracts, companyTz, forceRefresh),
+    tasksQuery(company, filters, lookups, companyTz, forceRefresh),
     companyHours(company, forceRefresh),
   ]);
 

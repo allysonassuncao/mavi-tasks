@@ -110,6 +110,7 @@ import {
   isLate,
   namesFrom,
   buildNameLookup,
+  taskMatchesSearch,
   upsertById,
   initials,
   type NameLookup,
@@ -978,7 +979,7 @@ export default function App() {
             nameLookup.contracts.get(t.contract_id)?.client_id ===
               clientFilter) &&
           (!projectFilter || t.project_id === projectFilter) &&
-          (!query || t.title.toLowerCase().includes(query.toLowerCase())) &&
+          taskMatchesSearch(nameLookup, t, query) &&
           (!status || t.status === status) &&
           (!mine || t.assignee_id === user) &&
           (!late || isLate(t, today)) &&
@@ -1847,8 +1848,8 @@ export default function App() {
                     <div className="searchbox">
                       <Input
                         type="search"
-                        aria-label="Buscar tarefa"
-                        placeholder="Buscar tarefa…"
+                        aria-label="Buscar por tarefa, cliente ou projeto"
+                        placeholder="Buscar tarefa, cliente ou projeto…"
                         value={search}
                         onChange={(e) => {
                           setSearch(e.target.value);

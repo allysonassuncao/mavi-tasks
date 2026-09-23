@@ -713,6 +713,10 @@ tbody tr:last-child td {
   background: #fbefe7;
   color: #c38b64;
 }
+.badge.rejected {
+  background: #fbecee;
+  color: #bf6273;
+}
 .badge.done {
   background: #edf6ed;
   color: #82a381;

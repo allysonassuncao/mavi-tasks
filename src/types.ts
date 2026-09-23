@@ -1,4 +1,5 @@
-export type Status = "open" | "progress" | "returned" | "review" | "done";
+export type Status =
+  "open" | "progress" | "returned" | "rejected" | "review" | "done";
 export type Role = "admin" | "manager" | "member";
 export interface Company {
   id: string;
@@ -140,6 +141,7 @@ export const statuses: Record<Status, { label: string; color: string }> = {
   open: { label: "Aberto", color: "#7c8796" },
   progress: { label: "Em andamento", color: "#598bda" },
   returned: { label: "Devolvida", color: "#db8757" },
+  rejected: { label: "Reprovada", color: "#cf6679" },
   review: { label: "Em validação", color: "#9a7cd3" },
   done: { label: "Entregue", color: "#4f9879" },
 };
