@@ -94,3 +94,38 @@ export async function changePassword(password: string) {
   const { error } = await supabase.auth.updateUser({ password });
   if (error) throw error;
 }
+
+/**
+ * Why a self-service recovery email was not sent, in words for the person on
+ * the login page (the admin-facing wording lives in _shared/auth-email.ts).
+ */
+export function passwordResetError(
+  error: { message?: string; status?: number; code?: string } | null,
+) {
+  const message = error?.message ?? "";
+  const wait = /after (\d+) seconds?/i.exec(message)?.[1];
+  if (wait)
+    return `Por segurança, aguarde ${wait} segundos antes de pedir outro link.`;
+  if (
+    error?.code === "over_email_send_rate_limit" ||
+    error?.status === 429 ||
+    /rate limit/i.test(message)
+  )
+    return "Muitos pedidos de e-mail agora. Tente de novo em alguns minutos.";
+  if (error?.code === "validation_failed" || /invalid.*email/i.test(message))
+    return "Confira o e-mail digitado.";
+  return "Não foi possível enviar o link agora. Tente de novo ou fale com o administrador.";
+}
+
+/**
+ * Emails a recovery link. Supabase answers the same way whether or not the
+ * address has an account, so the screen must not claim either.
+ */
+export async function requestPasswordReset(email: string) {
+  if (!supabase) throw Error("A conexão com Supabase ainda não foi configurada.");
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+    // Same landing as the admin-sent link: the app opens "Defina sua senha".
+    redirectTo: window.location.origin + "/?reset=1",
+  });
+  if (error) throw Error(passwordResetError(error));
+}

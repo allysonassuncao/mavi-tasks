@@ -28,9 +28,8 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import {
   LayoutDashboard,
-  CheckCheck,
   Users,
-  AtSign,
+  CheckCheck,
   FolderKanban,
   Clock3,
   ChartNoAxesCombined,
@@ -50,6 +49,7 @@ import {
   Menu,
   LogOut,
   Check,
+  ArrowLeft,
   ArrowRight,
   CalendarDays,
   List,
@@ -128,6 +128,7 @@ import {
   type NameLookup,
 } from "./domain";
 import { useNow } from "./useClock";
+import { requestPasswordReset } from "./profile";
 import {
   CreateForm,
   type FormPreset,
@@ -273,7 +274,8 @@ export default function App() {
     [query, setQuery] = useState(search),
     [status, setStatus] = useUrlState<string>("status", ""),
     [product, setProduct] = useUrlState<string>("produto", ""),
-    [mine, setMine] = useUrlState<boolean>("minhas", false),
+    // Old "Minhas tarefas" links (?minhas=1) open the "Para você" tab.
+    [legacyMine, setLegacyMine] = useUrlState<boolean>("minhas", false),
     [scopeParam, setScope] = useUrlState<string>("escopo", ""),
     [late, setLate] = useUrlState<boolean>("atrasadas", false),
     [clientFilter, setClientFilter] = useUrlState<string>("cliente", ""),
@@ -320,6 +322,11 @@ export default function App() {
     [toast, setToast] = useState(""),
     [refresh, setRefresh] = useState(0),
     [reportRefresh, setReportRefresh] = useState(0);
+  useEffect(() => {
+    if (!legacyMine) return;
+    setLegacyMine(false);
+    setScope("mine");
+  }, [legacyMine, setLegacyMine, setScope]);
   const [summary, setSummary] = useState<api.Summary | null>(null);
   // Only components that actually display a running clock subscribe to time
   // ticking (see useNow/LiveDuration) — demoNow is the one exception, since the
@@ -332,13 +339,19 @@ export default function App() {
     isAdmin = member?.role === "admin",
     isManager = member?.role === "manager",
     isLeader = isAdmin || isManager;
-  // Leaders' task list tabs (see TASK_SCOPES): "" is every task.
-  // Collaborators have no tabs, only the "Participando" view.
-  const listScope: TaskScope | "" = (
-    isLeader
-      ? TASK_SCOPES.some((t) => t.id === scopeParam)
-      : scopeParam === "participating"
-  )
+  // Task list tabs (see TASK_SCOPES): "" is every task. Collaborators only
+  // see their own tasks, the ones they take part in and, when they supervise
+  // a team, that team's (the tasks policy) — so "Outras equipes" never
+  // applies to them, and "Suas equipes" only to supervisors.
+  const supervises = data.teamMembers.some(
+    (tm) => tm.user_id === user && tm.supervisor,
+  );
+  const scopeTabs = isLeader
+    ? TASK_SCOPES
+    : TASK_SCOPES.filter(
+        (t) => t.id !== "others" && (t.id !== "teams" || supervises),
+      );
+  const listScope: TaskScope | "" = scopeTabs.some((t) => t.id === scopeParam)
     ? (scopeParam as TaskScope)
     : "";
   const today = dateKey(new Date(), currentCompany?.timezone);
@@ -621,7 +634,7 @@ export default function App() {
           status: page === "tasks" ? status : "",
           hideDone: page === "tasks" && !status,
           product: page === "tasks" ? product : "",
-          mine: page === "tasks" && !isLeader ? mine : false,
+          mine: false,
           scope: page === "tasks" && listScope ? listScope : undefined,
           user,
           page: page === "tasks" ? offset : 0,
@@ -672,7 +685,6 @@ export default function App() {
     query,
     status,
     product,
-    mine,
     user,
     offset,
     late,
@@ -691,7 +703,7 @@ export default function App() {
     number
   > | null>(null);
   useEffect(() => {
-    if (demo || !isLeader || page !== "tasks" || !company || !session) return;
+    if (demo || page !== "tasks" || !company || !session) return;
     let alive = true;
     api
       .taskScopeCounts(
@@ -1147,7 +1159,6 @@ export default function App() {
           taskMatchesSearch(nameLookup, t, query) &&
           // Delivered tasks only appear when filtering by "Entregue".
           (status ? t.status === status : t.status !== "done") &&
-          (isLeader || !mine || t.assignee_id === user) &&
           (!late || isLate(t, today)) &&
           (!product ||
             nameLookup.contracts.get(t.contract_id)?.product_id === product),
@@ -1159,8 +1170,6 @@ export default function App() {
       projectFilter,
       query,
       status,
-      mine,
-      isLeader,
       user,
       late,
       today,
@@ -1192,16 +1201,17 @@ export default function App() {
   }, [demo, scopeCounts, unscoped, data, user, teamsOfMine]);
   // "Todas": the page split by scope; team tabs: split by team.
   const listGroups = useMemo(() => {
-    if (!isLeader) return undefined;
     if (!listScope)
-      return TASK_SCOPES.map((sc) => ({
-        key: sc.id,
-        label: sc.label,
-        hint: sc.hint,
-        tasks: filtered.filter(
-          (t) => taskScope(data, t, user, teamsOfMine) === sc.id,
-        ),
-      })).filter((g) => g.tasks.length);
+      return scopeTabs
+        .map((sc) => ({
+          key: sc.id,
+          label: sc.label,
+          hint: sc.hint,
+          tasks: filtered.filter(
+            (t) => taskScope(data, t, user, teamsOfMine) === sc.id,
+          ),
+        }))
+        .filter((g) => g.tasks.length);
     if (listScope === "teams" || listScope === "others") {
       const byTeam = new Map<string, Task[]>();
       for (const t of filtered) {
@@ -1221,7 +1231,7 @@ export default function App() {
         }));
     }
     return undefined;
-  }, [isLeader, listScope, filtered, data, user, teamsOfMine]);
+  }, [scopeTabs, listScope, filtered, data, user, teamsOfMine]);
   // Collaborators only see their own entries and tasks (RLS already scopes
   // them; this keeps demo mode and cached data consistent with that).
   const visibleHours = useMemo(
@@ -1326,6 +1336,7 @@ export default function App() {
           setNeedsPassword(false);
           const url = new URL(window.location.href);
           url.searchParams.delete("setup");
+          url.searchParams.delete("reset");
           navigate(url.pathname + url.search, true);
         }}
       />
@@ -1935,8 +1946,7 @@ export default function App() {
                       <Button
                         onClick={() => {
                           go("tasks");
-                          if (isLeader) setScope("mine");
-                          else setMine(true);
+                          setScope("mine");
                         }}
                       >
                         Abrir minhas tarefas <ArrowUpRight size={18} />
@@ -2073,80 +2083,47 @@ export default function App() {
                         </Button>
                       ))}
                     </div>
-                    {!isLeader && (
-                      <>
-                        <Button
-                          className={`filter-chip ${mine ? "selected" : ""}`}
-                          aria-pressed={mine}
-                          onClick={() => {
-                            setMine(!mine);
-                            setScope("");
-                            setOffset(0);
-                          }}
-                        >
-                          <Users size={15} /> Minhas tarefas
-                        </Button>
-                        <Button
-                          className={`filter-chip ${listScope === "participating" ? "selected" : ""}`}
-                          aria-pressed={listScope === "participating"}
-                          title="Tarefas de que você participa: já foi responsável ou foi mencionado"
-                          onClick={() => {
-                            setScope(
-                              listScope === "participating"
-                                ? ""
-                                : "participating",
-                            );
-                            setMine(false);
-                            setOffset(0);
-                          }}
-                        >
-                          <AtSign size={15} /> Participando
-                        </Button>
-                      </>
-                    )}
                   </div>
-                  {isLeader && (
-                    <div
-                      className="scope-tabs"
-                      role="tablist"
-                      aria-label="De quem são as tarefas"
-                    >
-                      {[
-                        {
-                          id: "" as const,
-                          label: "Todas",
-                          hint: "Todas as tarefas, separadas por seção",
-                        },
-                        ...TASK_SCOPES,
-                      ].map((tab) => {
-                        const n = tabCounts
-                          ? tab.id
-                            ? tabCounts[tab.id]
-                            : Object.values(tabCounts).reduce(
-                                (a, b) => a + b,
-                                0,
-                              )
-                          : null;
-                        return (
-                          <button
-                            key={tab.id || "all"}
-                            type="button"
-                            role="tab"
-                            aria-selected={listScope === tab.id}
-                            className={listScope === tab.id ? "selected" : ""}
-                            title={tab.hint}
-                            onClick={() => {
-                              setScope(tab.id);
-                              setOffset(0);
-                            }}
-                          >
-                            {tab.label}
-                            {n !== null && <span>{n}</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div
+                    className="scope-tabs"
+                    role="tablist"
+                    aria-label="De quem são as tarefas"
+                  >
+                    {[
+                      {
+                        id: "" as const,
+                        label: "Todas",
+                        hint: "Todas as tarefas, separadas por seção",
+                      },
+                      ...scopeTabs,
+                    ].map((tab) => {
+                      const n = tabCounts
+                        ? tab.id
+                          ? tabCounts[tab.id]
+                          : scopeTabs.reduce(
+                              (sum, t) => sum + tabCounts[t.id],
+                              0,
+                            )
+                        : null;
+                      return (
+                        <button
+                          key={tab.id || "all"}
+                          type="button"
+                          role="tab"
+                          aria-selected={listScope === tab.id}
+                          className={listScope === tab.id ? "selected" : ""}
+                          title={tab.hint}
+                          onClick={() => {
+                            setScope(tab.id);
+                            setOffset(0);
+                          }}
+                        >
+                          {tab.label}
+                          {n !== null && <span>{n}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
                   {(clientFilter || projectFilter) && (
                     <div className="active-context">
                       <span>
@@ -3246,7 +3223,35 @@ function Login({
   notice?: string;
 }) {
   const [error, setError] = useState(notice),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [mode, setMode] = useState<"login" | "forgot" | "sent">("login"),
+    [email, setEmail] = useState(""),
+    [cooldown, setCooldown] = useState(0);
+  // Supabase refuses a second recovery email within 60 s; the resend button
+  // waits it out instead of failing.
+  useEffect(() => {
+    if (!cooldown) return;
+    const id = setTimeout(() => setCooldown((v) => v - 1), 1000);
+    return () => clearTimeout(id);
+  }, [cooldown]);
+  function switchMode(next: typeof mode) {
+    setError("");
+    setMode(next);
+  }
+  async function sendReset(e?: FormEvent<HTMLFormElement>) {
+    e?.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await requestPasswordReset(email);
+      setMode("sent");
+      setCooldown(60);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   // The demo is no longer offered on the login page; local development can
   // still open it with /login?demo=1 (stripped from production builds).
   useEffect(() => {
@@ -3301,42 +3306,127 @@ function Login({
       </div>
       <div className="login-form">
         <small>SEU ESPAÇO DE TRABALHO</small>
-        <h2>Bom ter você aqui.</h2>
-        <p>Entre com o acesso enviado pela sua equipe.</p>
-        <form onSubmit={submit}>
-          <label>
-            E-mail
-            <Input
-              name="email"
-              type="email"
-              autoComplete="email"
-              placeholder="voce@agencia.com.br"
-              required
-            />
-          </label>
-          <label>
-            Senha
-            <Input
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              placeholder="Sua senha"
-              required
-            />
-          </label>
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
+        {mode === "login" ? (
+          <>
+            <h2>Bom ter você aqui.</h2>
+            <p>Entre com o acesso enviado pela sua equipe.</p>
+            <form onSubmit={submit}>
+              <label>
+                E-mail
+                <Input
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="voce@agencia.com.br"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </label>
+              {/* The link sits beside the label, not inside it: a button in a
+                  <label> would take over its clicks. */}
+              <div className="login-password">
+                <label>
+                  Senha
+                  <Input
+                    name="password"
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="Sua senha"
+                    required
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="login-link login-forgot"
+                  onClick={() => switchMode("forgot")}
+                >
+                  Esqueci minha senha
+                </button>
+              </div>
+              {error && (
+                <p className="form-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <Button className="btn primary" disabled={busy} loading={busy}>
+                Entrar no workspace
+                <ArrowRight size={17} />
+              </Button>
+            </form>
+            <small>
+              Acesso por convite. Entre em contato com seu administrador.
+            </small>
+          </>
+        ) : mode === "forgot" ? (
+          <>
+            <h2>Esqueceu a senha?</h2>
+            <p>
+              Informe o e-mail do seu acesso. Enviaremos um link para você criar
+              uma nova senha.
             </p>
-          )}
-          <Button className="btn primary" disabled={busy} loading={busy}>
-            Entrar no workspace
-            <ArrowRight size={17} />
-          </Button>
-        </form>
-        <small>
-          Acesso por convite. Entre em contato com seu administrador.
-        </small>
+            <form onSubmit={sendReset}>
+              <label>
+                E-mail
+                <Input
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="voce@agencia.com.br"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </label>
+              {error && (
+                <p className="form-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <Button className="btn primary" disabled={busy} loading={busy}>
+                Enviar link de recuperação
+                <ArrowRight size={17} />
+              </Button>
+            </form>
+            <button
+              type="button"
+              className="login-link login-back"
+              onClick={() => switchMode("login")}
+            >
+              <ArrowLeft size={15} /> Voltar para o login
+            </button>
+          </>
+        ) : (
+          <>
+            <h2>Confira seu e-mail.</h2>
+            <p role="status">
+              Se houver um acesso com <strong>{email.trim()}</strong>, você
+              receberá um link para criar uma nova senha. Se não chegar em
+              alguns minutos, olhe também a caixa de spam.
+            </p>
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
+            <Button
+              className="btn secondary"
+              disabled={busy || cooldown > 0}
+              loading={busy}
+              onClick={() => void sendReset()}
+            >
+              {cooldown > 0 ? `Reenviar em ${cooldown}s` : "Reenviar link"}
+            </Button>
+            <button
+              type="button"
+              className="login-link login-back"
+              onClick={() => switchMode("login")}
+            >
+              <ArrowLeft size={15} /> Voltar para o login
+            </button>
+          </>
+        )}
         <div className="login-install">
           <InstallApp notify={notify} />
         </div>
@@ -3348,6 +3438,10 @@ function Login({
 function SetPassword({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  // "Esqueci minha senha" links land on /?reset=1; invites use ?setup=1.
+  const [recovery] = useState(() =>
+    new URLSearchParams(window.location.search).has("reset"),
+  );
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget),
@@ -3370,8 +3464,12 @@ function SetPassword({ onDone }: { onDone: () => void }) {
   return (
     <div className="password-page">
       <div className="login-form">
-        <h2>Defina sua senha</h2>
-        <p>Conclua seu acesso ao espaço de trabalho.</p>
+        <h2>{recovery ? "Crie uma nova senha" : "Defina sua senha"}</h2>
+        <p>
+          {recovery
+            ? "Escolha uma senha com pelo menos 12 caracteres."
+            : "Conclua seu acesso ao espaço de trabalho."}
+        </p>
         <form onSubmit={submit}>
           <label>
             Nova senha

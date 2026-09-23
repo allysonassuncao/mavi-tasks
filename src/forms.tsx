@@ -20,7 +20,6 @@ import {
   CalendarDays,
   Check,
   CircleDot,
-  Clock3,
   Download,
   Flag,
   MessageSquare,
@@ -59,8 +58,8 @@ import {
 import {
   dateLabel,
   defaultContractName,
+  isLate,
   duration,
-  durationWithSeconds,
   names,
   formatClock,
   projectReview,
@@ -687,6 +686,9 @@ export function TaskDetail({
     demo,
   });
   const clock = formatClock(totalSeconds);
+  const timeRatio =
+    task.estimated_minutes > 0 ? totalSeconds / 60 / task.estimated_minutes : 0;
+  const late = Boolean(task.due_date) && isLate(task);
   useEffect(() => {
     if (!isRunning) setEditing(false);
   }, [isRunning]);
@@ -913,6 +915,23 @@ export function TaskDetail({
           </div>
           <div className="detail-title">
             <h2>{task.title}</h2>
+            <button
+              type="button"
+              className="share-task"
+              title="Copiar link da tarefa"
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(window.location.href)
+                  .then(() => notify("Link da tarefa copiado."))
+                  .catch(() =>
+                    setError(
+                      "Copie o endereço da barra do navegador para compartilhar.",
+                    ),
+                  )
+              }
+            >
+              <Copy size={15} /> <span>Copiar link</span>
+            </button>
           </div>
           {error && (
             <p className="form-error" role="alert">
@@ -920,112 +939,115 @@ export function TaskDetail({
             </p>
           )}
           <div className="task-properties">
-            <div>
-              <span>
-                <CircleDot size={16} /> Status
-              </span>
-              <strong>
-                <StatusMenu
-                  current={task.status}
-                  choices={statusChoices}
-                  durations={durations}
-                  onPick={pickStatus}
-                />
-                {durations[task.status] ? (
-                  <small className="status-time">
-                    há {shortSpan(durations[task.status]!)}
-                  </small>
-                ) : null}
-              </strong>
+            <div className="property-group">
+              <div className="property-row">
+                <span className="property-label">
+                  <CircleDot size={15} /> Status
+                </span>
+                <div className="property-value">
+                  <StatusMenu
+                    current={task.status}
+                    choices={statusChoices}
+                    durations={durations}
+                    onPick={pickStatus}
+                  />
+                  {durations[task.status] ? (
+                    <small>há {shortSpan(durations[task.status]!)}</small>
+                  ) : null}
+                </div>
+              </div>
+              <div className="property-row">
+                <span className="property-label">
+                  <CalendarDays size={15} /> Prazo
+                </span>
+                <div className={`property-value${late ? " late" : ""}`}>
+                  {dateLabel(task.due_date)}
+                  {late && <small className="late">atrasada</small>}
+                </div>
+              </div>
+              <div className="property-row">
+                <span className="property-label">
+                  <Flag size={15} /> Prioridade
+                </span>
+                <div className="property-value">
+                  <span className={`priority-flag priority-${task.priority}`}>
+                    <Flag size={13} fill="currentColor" />
+                    {priorities[task.priority]}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div>
-              <span>
-                <UserRound size={16} /> Responsável
-              </span>
-              {acts.move ? (
-                <button
-                  type="button"
-                  className="property-button"
-                  title="Trocar responsável"
-                  onClick={() => pickStatus(task.status)}
-                >
+            <div className="property-group">
+              <div className="property-row">
+                <span className="property-label">
+                  <UserRound size={15} /> Responsável
+                </span>
+                <div className="property-value">
+                  {acts.move ? (
+                    <button
+                      type="button"
+                      className="property-button"
+                      title="Trocar responsável"
+                      onClick={() => pickStatus(task.status)}
+                    >
+                      <Avatar
+                        name={n.member?.name ?? "?"}
+                        src={n.member?.avatar_url}
+                        size="small"
+                      />
+                      {n.member?.name}
+                      <UserRoundPen size={14} />
+                    </button>
+                  ) : (
+                    <>
+                      <Avatar
+                        name={n.member?.name ?? "?"}
+                        src={n.member?.avatar_url}
+                        size="small"
+                      />
+                      {n.member?.name}
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="property-row">
+                <span className="property-label">
+                  <UserRoundPen size={15} /> Criado por
+                </span>
+                <div className="property-value">
                   <Avatar
-                    name={n.member?.name ?? "?"}
-                    src={n.member?.avatar_url}
+                    name={creator?.name ?? "?"}
+                    src={creator?.avatar_url}
                     size="small"
                   />
-                  {n.member?.name}
-                  <UserRoundPen size={14} />
-                </button>
-              ) : (
-                <strong>
-                  <Avatar
-                    name={n.member?.name ?? "?"}
-                    src={n.member?.avatar_url}
-                    size="small"
-                  />
-                  {n.member?.name}
-                </strong>
-              )}
-            </div>
-            <div>
-              <span>
-                <Users size={16} /> Participantes
-              </span>
-              {participants.length ? (
-                <strong className="participant-list">
-                  {participants.map((m) => (
-                    <span key={m.user_id} title={m.name}>
-                      <Avatar name={m.name} src={m.avatar_url} size="small" />
-                      {participants.length <= 3 && m.name}
-                    </span>
-                  ))}
-                </strong>
-              ) : (
-                <small>Mencione alguém com @ nos comentários</small>
-              )}
-            </div>
-            <div>
-              <span>
-                <UserRoundPen size={16} /> Criado por
-              </span>
-              <strong>
-                <Avatar
-                  name={creator?.name ?? "?"}
-                  src={creator?.avatar_url}
-                  size="small"
-                />
-                {creator?.name ?? "Usuário removido"}
-              </strong>
-            </div>
-            <div>
-              <span>
-                <CalendarDays size={16} /> Prazo combinado
-              </span>
-              <strong>{dateLabel(task.due_date)}</strong>
-            </div>
-            <div>
-              <span>
-                <Flag size={16} /> Prioridade
-              </span>
-              <strong>{priorities[task.priority]}</strong>
-            </div>
-            <div>
-              <span>
-                <Clock3 size={16} /> Tempo
-              </span>
-              <strong>
-                {durationWithSeconds(totalSeconds)}{" "}
-                <small>/ {duration(task.estimated_minutes)} estimadas</small>
-              </strong>
+                  {creator?.name ?? "Usuário removido"}
+                </div>
+              </div>
+              <div className="property-row">
+                <span className="property-label">
+                  <Users size={15} /> Participantes
+                </span>
+                <div className="property-value participant-list">
+                  {participants.length ? (
+                    participants.map((m) => (
+                      <span key={m.user_id} title={m.name}>
+                        <Avatar name={m.name} src={m.avatar_url} size="small" />
+                        {participants.length <= 3 && m.name}
+                      </span>
+                    ))
+                  ) : (
+                    <small>Mencione com @ nos comentários</small>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
           <section
-            className={`focus-timer ${isRunning ? "is-running" : ""}`}
+            className={`focus-timer${isRunning ? " is-running" : ""}`}
             aria-label="Controle de execução"
           >
             <Button
-              className={`timer-play ${isRunning ? "timer-stop" : ""}`}
+              className={`timer-play${isRunning ? " timer-stop" : ""}`}
               loading={busy}
               disabled={busy || editorUploading}
               onClick={() =>
@@ -1042,39 +1064,57 @@ export function TaskDetail({
               }
             >
               {isRunning ? (
-                <Pause size={27} fill="currentColor" />
+                <Pause size={20} fill="currentColor" />
               ) : (
-                <Play size={27} fill="currentColor" />
+                <Play size={20} fill="currentColor" />
               )}
               <span>{isRunning ? "Parar" : "Iniciar"}</span>
             </Button>
-            <div>
-              <strong>{clock}</strong>
+            <div className="timer-body">
+              <div className="timer-head">
+                <span className="timer-clock">
+                  <strong>{clock}</strong>
+                  <small>
+                    {task.estimated_minutes > 0
+                      ? `de ${duration(task.estimated_minutes)} estimadas`
+                      : "sem estimativa"}
+                  </small>
+                </span>
+                <span
+                  className={`timer-state${isRunning ? " running" : totalSeconds > 0 ? " paused" : ""}`}
+                >
+                  <i aria-hidden="true" />
+                  {isRunning
+                    ? "Em andamento"
+                    : totalSeconds > 0
+                      ? "Pausado"
+                      : "Não iniciado"}
+                </span>
+              </div>
+              {task.estimated_minutes > 0 && (
+                <span
+                  className={`time-meter${timeRatio > 1 ? " over" : ""}`}
+                  role="meter"
+                  aria-label="Tempo usado da estimativa"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(Math.min(timeRatio, 1) * 100)}
+                >
+                  <i style={{ width: `${Math.min(timeRatio, 1) * 100}%` }} />
+                </span>
+              )}
               <p>
                 {isRunning
-                  ? "Tempo sendo registrado nesta tarefa."
+                  ? timeRatio > 1
+                    ? "Seu tempo está sendo registrado — a estimativa já foi ultrapassada."
+                    : "Seu tempo está sendo registrado nesta tarefa."
                   : running
-                    ? "Ao iniciar, sua outra tarefa será pausada automaticamente."
+                    ? "Ao iniciar, sua outra tarefa em andamento é pausada automaticamente."
                     : totalSeconds > 0
-                      ? "Cronômetro pausado. Clique em Iniciar para continuar."
-                      : "Inicie para ler a descrição e registrar seu tempo."}
+                      ? "Clique em Iniciar para continuar registrando."
+                      : "Inicie para ver a descrição e registrar seu tempo."}
               </p>
             </div>
-            <Button
-              className="btn secondary share-task"
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(window.location.href)
-                  .then(() => notify("Link da tarefa copiado."))
-                  .catch(() =>
-                    setError(
-                      "Copie o endereço da barra do navegador para compartilhar.",
-                    ),
-                  )
-              }
-            >
-              <Copy size={16} /> Copiar link
-            </Button>
           </section>
           {!isRunning ? (
             <section

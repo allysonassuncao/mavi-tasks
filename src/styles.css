@@ -1688,40 +1688,125 @@ textarea::placeholder {
 .detail-title .badge {
   margin-top: 6px;
 }
+/* Task properties: two groups (progress, people); each row has the label
+   on the left and the value on the right, like ClickUp's field list. */
+.task-main {
+  container-type: inline-size;
+}
 .task-properties {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 32px;
   margin: 24px 0 28px;
-  padding: 20px;
+  padding: 10px 14px;
   background: #f8faf5;
   border: 1px solid #edf1e7;
   border-radius: 9px;
 }
-.task-properties > div {
+.property-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.property-row {
   display: grid;
-  grid-template-columns: 170px 1fr;
-  gap: 10px;
+  grid-template-columns: 124px minmax(0, 1fr);
   align-items: center;
-  font-size: 0.79rem;
+  gap: 12px;
+  min-height: 40px;
+  padding: 4px 0;
 }
-.task-properties > div > span {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  color: #97a889;
+.property-row + .property-row {
+  border-top: 1px solid #edf1e7;
 }
-.task-properties strong {
+.property-label {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
+  color: #6e7c63;
   font-size: 0.8rem;
+  white-space: nowrap;
+}
+.property-label svg {
+  flex: none;
+  color: #a1b28f;
+}
+.property-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.85rem;
   font-weight: 500;
 }
-.task-properties small {
-  color: #a1b28f;
-  font-size: 0.65rem;
+.property-value small {
+  color: #8f9e80;
+  font-size: 0.72rem;
   font-weight: 400;
+}
+.priority-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.priority-flag svg {
+  color: #b9c4ae;
+}
+.priority-high svg {
+  color: #d9a441;
+}
+.priority-urgent {
+  color: #b5553c;
+}
+.priority-urgent svg {
+  color: #d0654a;
+}
+.property-time {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.property-time > span:first-child {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.property-time b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.time-meter {
+  display: block;
+  height: 4px;
+  max-width: 180px;
+  background: #e4ebdb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.time-meter i {
+  display: block;
+  height: 100%;
+  background: #7fa653;
+  border-radius: inherit;
+}
+.time-meter.over i {
+  background: #d49373;
+}
+@container (max-width: 620px) {
+  .task-properties {
+    grid-template-columns: 1fr;
+  }
+  .property-group + .property-group {
+    border-top: 1px solid #edf1e7;
+  }
+}
+@container (max-width: 380px) {
+  .property-row {
+    grid-template-columns: 104px minmax(0, 1fr);
+  }
 }
 .detail-description > div {
   display: flex;
@@ -2014,11 +2099,6 @@ button.status-trigger:focus-visible {
   outline: 2px solid #263334;
   outline-offset: 2px;
 }
-.status-time {
-  color: #a1b28f;
-  font-size: 0.66rem;
-  font-weight: 400;
-}
 .status-menu {
   background: #fff;
   color: var(--ink);
@@ -2210,8 +2290,6 @@ button.status-trigger:focus-visible {
 .client-card > p,
 .project-card > p,
 .role-tag,
-.task-properties strong,
-.task-properties > div,
 .detail-tabs button,
 .detail-actions .btn,
 .member-row strong,
@@ -2731,29 +2809,11 @@ th,
     border-radius: 0;
     width: 100%;
   }
-  .detail-title {
-    display: block;
-  }
   .detail-title .badge {
     margin-top: 12px;
   }
   .detail-title h2 {
     font-size: 1.2rem;
-  }
-  .task-properties {
-    padding: 15px;
-  }
-  .task-properties > div {
-    grid-template-columns: 125px 1fr;
-    gap: 10px;
-  }
-  .task-properties strong {
-    flex-wrap: wrap;
-    font-size: 0.77rem;
-  }
-  .task-properties > div > span {
-    font-size: 0.74rem;
-    gap: 6px;
   }
   .detail-tabs {
     gap: 16px;
@@ -2833,7 +2893,6 @@ th,
   color: #56664c;
 }
 .detail-breadcrumb,
-.task-properties > div > span,
 .detail-tabs button,
 .muted,
 .event-list strong {
@@ -2872,9 +2931,6 @@ th,
   .filter-chip,
   .detail-tabs button {
     min-height: 44px;
-  }
-  .task-properties > div {
-    grid-template-columns: 110px 1fr;
   }
   .sidebar:not(.visible) {
     visibility: hidden;
@@ -3517,23 +3573,11 @@ label .input-control .ui-input {
   max-height: 180px;
   overflow-y: auto;
 }
-/* Properties in two columns, as in the reference layout. */
-.task-workspace .task-properties {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px 28px;
-}
-.task-workspace .task-properties > div {
-  grid-template-columns: 130px minmax(0, 1fr);
-}
 @media (max-width: 1100px) {
   .modal.sheet .task-workspace,
   .modal.sheet .task-workspace[data-panel="drive"],
   .modal.sheet .task-workspace[data-panel="files"] {
     --side: 380px;
-  }
-  .task-workspace .task-properties {
-    grid-template-columns: 1fr;
   }
 }
 /* Narrow screens: one column; the rail becomes a row of tabs above the
@@ -3573,50 +3617,159 @@ label .input-control .ui-input {
     padding: 14px 20px 20px;
   }
 }
+/* Timer: the action on the left; clock, state, estimate and a hint on the
+   right. It is the task's one place for worked time. */
 .focus-timer {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 22px;
-  padding: 24px;
-  border: 1px solid #cbdabb;
-  border-radius: 16px;
+  gap: 20px;
+  padding: 18px 22px;
+  border: 1px solid #d8e4cb;
+  border-radius: 14px;
   background: #f4f8ef;
   margin: 24px 0;
 }
 .focus-timer.is-running {
-  background: #e8f2dc;
+  background: #eaf3df;
   border-color: #a1bf78;
 }
 .timer-play {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
   justify-content: center;
-  min-width: 152px;
-  min-height: 64px;
+  min-width: 128px;
+  min-height: 52px;
+  padding: 0 22px;
   background: #a7cf75;
-  border-radius: 14px;
-  font-size: 1.08rem;
+  border-radius: 12px;
+  font-size: 1rem;
   font-weight: 700;
   color: #223b18;
-  box-shadow: 0 5px 16px #496c1720;
+  box-shadow: 0 4px 14px #496c1720;
+}
+.timer-play:hover:not(:disabled) {
+  filter: brightness(0.96);
 }
 .timer-stop {
   background: #233d25;
   color: #fff;
 }
-.focus-timer > div {
-  flex: 1;
+.timer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
 }
-.focus-timer strong {
-  font-size: 1.25rem;
+.timer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.timer-clock {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.timer-clock strong {
+  font-size: 1.45rem;
+  font-weight: 650;
+  letter-spacing: -0.3px;
   font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
-.focus-timer p {
-  margin: 7px 0 0;
-  font-size: 0.8rem;
+.timer-clock small {
+  color: #7f8f72;
+  font-size: 0.78rem;
+}
+.timer-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 99px;
+  background: #e7ece2;
+  color: #66735c;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.timer-state i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.timer-state.paused {
+  background: #f6ecd9;
+  color: #9a6b1f;
+}
+.timer-state.running {
+  background: #d7eac0;
+  color: #34561a;
+}
+.timer-state.running i {
+  animation: timer-pulse 1.6s ease-in-out infinite;
+}
+@keyframes timer-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .timer-state.running i {
+    animation: none;
+  }
+}
+.timer-body .time-meter {
+  max-width: none;
+  height: 5px;
+}
+.timer-body p {
+  margin: 0;
+  font-size: 0.78rem;
   line-height: 1.5;
   color: #667963;
+}
+.share-task {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding: 6px 10px;
+  border: 1px solid #dfe5e3;
+  border-radius: 8px;
+  background: #fff;
+  color: #57645f;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.share-task:hover {
+  background: #f5f8f2;
+  border-color: #cfd9c6;
+}
+.share-task:focus-visible {
+  outline: 2px solid #263334;
+  outline-offset: 2px;
+}
+@container (max-width: 480px) {
+  .focus-timer {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 16px;
+  }
+  .timer-play {
+    width: 100%;
+  }
+  .share-task span {
+    display: none;
+  }
 }
 .description-locked {
   position: relative;
@@ -3971,20 +4124,6 @@ label .input-control .ui-input {
   .modal.sheet .task-detail {
     padding: 20px;
   }
-  .focus-timer {
-    flex-wrap: wrap;
-    padding: 18px;
-    gap: 14px;
-  }
-  .focus-timer .share-task {
-    width: 100%;
-  }
-  .timer-play {
-    min-width: 124px;
-  }
-  .focus-timer > div {
-    min-width: 120px;
-  }
   .schedule-navigation {
     padding: 12px;
     flex-wrap: wrap;
@@ -4006,22 +4145,6 @@ label .input-control .ui-input {
 }
 .workspace .select-leading-icon {
   display: none;
-}
-@media (min-width: 1000px) {
-  .task-properties {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 24px;
-  }
-  .task-properties > div {
-    display: flex;
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .task-properties strong {
-    flex-wrap: wrap;
-  }
 }
 
 /* Quick task creation */
@@ -5361,7 +5484,6 @@ label .input-control .ui-input {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-right: 6px;
 }
 
 /* Drive */
@@ -6504,4 +6626,50 @@ label .input-control .ui-input {
   .task-group-head small {
     display: none;
   }
+}
+
+/* Self-service password recovery on the login page */
+.login-password {
+  position: relative;
+}
+.login-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #5d7a3f;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.login-link:hover {
+  color: #3f5a27;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.login-link:focus-visible {
+  outline: 2px solid #263334;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.login-forgot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  line-height: 1.5;
+}
+.login-back {
+  display: flex;
+  margin: 24px auto 0;
+}
+.login-form > p strong {
+  color: #4b613b;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.login-form > .btn {
+  width: 100%;
 }
