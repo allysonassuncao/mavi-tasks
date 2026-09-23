@@ -1,4 +1,9 @@
-import { type Snapshot, type Task, type Status } from "./types";
+import {
+  type Snapshot,
+  type Task,
+  type Status,
+  type ProjectApprover,
+} from "./types";
 import { dateKey } from "./domain";
 export const demoUser = "user-allyson";
 const company_id = "demo-agency";
@@ -115,14 +120,22 @@ export function demoSnapshot(): Snapshot {
       contract_id: "ct-3",
       name: "Implantação comercial",
       due_date: day(20),
+      requires_review: false,
     },
     {
       id: "pr-4",
       contract_id: "ct-4",
       name: "Coleção novos espaços",
       due_date: day(14),
+      approver: "supervisor" as const,
     },
-  ].map((p) => ({ ...p, company_id, archived: false }));
+  ].map((p) => ({
+    requires_review: true,
+    approver: "creator" as ProjectApprover,
+    ...p,
+    company_id,
+    archived: false,
+  }));
   const rows: [
     string,
     string,
@@ -297,10 +310,15 @@ export function demoSnapshot(): Snapshot {
     teams,
     tasks,
     teamMembers: teams.flatMap((t) =>
-      members.map((m) => ({ company_id, team_id: t.id, user_id: m.user_id })),
+      members.map((m) => ({
+        company_id,
+        team_id: t.id,
+        user_id: m.user_id,
+        supervisor: m.role === "manager",
+      })),
     ),
-    contractTeams: contracts.flatMap((c) =>
-      teams.map((t) => ({ company_id, contract_id: c.id, team_id: t.id })),
+    clientTeams: clients.flatMap((c) =>
+      teams.map((t) => ({ company_id, client_id: c.id, team_id: t.id })),
     ),
     hours: tasks.slice(0, 6).map((t, i) => ({
       id: `time-${i}`,

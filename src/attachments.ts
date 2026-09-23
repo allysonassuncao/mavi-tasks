@@ -2,26 +2,14 @@ import { rpc, invalidateTaskExtras } from "./api";
 import { supabase } from "./supabase";
 import { uploadToGcs } from "./gcs";
 import type { Attachment } from "./types";
-const mimeByExtension: Record<string, string> = {
-  pdf: "application/pdf",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-  txt: "text/plain",
-  csv: "text/csv",
-  zip: "application/zip",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-};
-export const attachmentAccept = Object.keys(mimeByExtension)
+import { attachmentType, attachmentTypes } from "./upload-types";
+export const attachmentAccept = Object.keys(attachmentTypes)
   .map((ext) => `.${ext}`)
   .join(",");
 export function validateAttachment(file: Pick<File, "name" | "size">) {
   if (file.size === 0 || file.size > 20971520)
     throw Error(`${file.name}: escolha um arquivo não vazio de até 20 MB.`);
-  const type = mimeByExtension[file.name.split(".").pop()?.toLowerCase() ?? ""];
+  const type = attachmentType(file.name);
   if (!type)
     throw Error(
       `${file.name}: formato não permitido. Use PDF, imagem, TXT, CSV, ZIP ou documentos do Office.`,
@@ -37,7 +25,11 @@ export async function uploadAttachment(taskId: string, file: File) {
     p_size: file.size,
   });
   try {
-    await uploadToGcs(attachment.path, file, contentType);
+    await uploadToGcs(
+      { kind: "attachment", id: attachment.id },
+      file,
+      contentType,
+    );
     invalidateTaskExtras(taskId);
   } catch (error) {
     try {

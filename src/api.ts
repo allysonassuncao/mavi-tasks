@@ -49,8 +49,14 @@ export interface CompanyLookups {
   contracts: Contract[];
   projects: Project[];
   teams: Team[];
-  teamMembers: { company_id: string; team_id: string; user_id: string }[];
-  contractTeams: { company_id: string; contract_id: string; team_id: string }[];
+  teamMembers: {
+    company_id: string;
+    team_id: string;
+    user_id: string;
+    /** Validates the team's tasks in projects set to "Supervisor da equipe". */
+    supervisor?: boolean;
+  }[];
+  clientTeams: { company_id: string; client_id: string; team_id: string }[];
 }
 
 const LOOKUP_CAP = 1000;
@@ -95,7 +101,8 @@ export async function companyLookups(
   forceRefresh = false,
 ): Promise<CompanyLookups> {
   if (!supabase) throw Error("Supabase não configurado");
-  const cacheKey = `lookups:${company}`;
+  // v3: team supervisors; bumped whenever the cached shape changes.
+  const cacheKey = `lookups:v3:${company}`;
 
   return cache.fetchWithCache(
     cacheKey,
@@ -108,7 +115,7 @@ export async function companyLookups(
         projects: [],
         teams: [],
         teamMembers: [],
-        contractTeams: [],
+        clientTeams: [],
       };
 
       const tables = [
@@ -119,7 +126,7 @@ export async function companyLookups(
         ["projects", "projects"],
         ["teams", "teams"],
         ["teamMembers", "team_members"],
-        ["contractTeams", "contract_teams"],
+        ["clientTeams", "client_teams"],
       ] as const;
 
       await Promise.all(
@@ -321,7 +328,7 @@ export async function snapshot(
     projects: lookups.projects,
     teams: lookups.teams,
     teamMembers: lookups.teamMembers,
-    contractTeams: lookups.contractTeams,
+    clientTeams: lookups.clientTeams,
     tasks: taskQueryResult.tasks,
     hours,
   };
@@ -335,7 +342,7 @@ export async function snapshot(
  */
 export function getCachedSnapshot(company: string): Snapshot | null {
   const companyList = cache.get<Company[]>("companies");
-  const lookups = cache.get<CompanyLookups>(`lookups:${company}`);
+  const lookups = cache.get<CompanyLookups>(`lookups:v3:${company}`);
   if (!lookups) return null;
 
   const hours = cache.get<TimeEntry[]>(`hours:${company}`) ?? [];
@@ -349,7 +356,7 @@ export function getCachedSnapshot(company: string): Snapshot | null {
     projects: lookups.projects,
     teams: lookups.teams,
     teamMembers: lookups.teamMembers,
-    contractTeams: lookups.contractTeams,
+    clientTeams: lookups.clientTeams,
     tasks: [],
     hours,
   };
@@ -700,7 +707,7 @@ export function patchCachedLookups(
   updater: (current: CompanyLookups) => CompanyLookups,
 ): void {
   cache.update<CompanyLookups>(
-    `lookups:${company}`,
+    `lookups:v3:${company}`,
     (current) => (current ? updater(current) : null),
     CACHE_TTL.LOOKUPS,
   );
@@ -723,7 +730,7 @@ export function patchCachedHours(company: string, entry: TimeEntry): void {
 }
 
 export function invalidateCompanyCache(company: string): void {
-  cache.invalidate(`lookups:${company}`);
+  cache.invalidate(`lookups:v3:${company}`);
   cache.invalidate(`tasks:${company}:`);
   cache.invalidate(`hours:${company}`);
   cache.invalidate(`summary:${company}:`);
@@ -731,7 +738,7 @@ export function invalidateCompanyCache(company: string): void {
 }
 
 export function invalidateLookupsCache(company: string): void {
-  cache.invalidate(`lookups:${company}`);
+  cache.invalidate(`lookups:v3:${company}`);
 }
 
 export function invalidateTasksCache(company: string): void {
@@ -861,7 +868,7 @@ export function subscribeToCompanyChanges(
     "projects",
     "teams",
     "team_members",
-    "contract_teams",
+    "client_teams",
     "memberships",
   ];
 

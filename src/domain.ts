@@ -1,4 +1,10 @@
-import { type Task, type TimeEntry, type Snapshot } from "./types";
+import {
+  type Task,
+  type TimeEntry,
+  type Snapshot,
+  type Project,
+  type ProjectApprover,
+} from "./types";
 export function dateKey(date = new Date(), timezone = "America/Sao_Paulo") {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
@@ -21,6 +27,15 @@ export function minutes(entry: TimeEntry, now = Date.now()) {
 export function duration(value: number) {
   const m = Math.round(value);
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+/** Worked time down to the second, e.g. "1h 05m 09s" — for task timers. */
+export function durationWithSeconds(totalSeconds: number) {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const pad = (v: number) => String(v).padStart(2, "0");
+  return `${Math.floor(safe / 3600)}h ${pad(Math.floor(safe / 60) % 60)}m ${pad(safe % 60)}s`;
+}
+export function entrySeconds(entry: TimeEntry, now = Date.now()) {
+  return Math.floor(minutes(entry, now) * 60);
 }
 export function taskTimerSeconds(
   hours: TimeEntry[],
@@ -102,4 +117,119 @@ export function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   const next = list.slice();
   next[index] = item;
   return next;
+}
+/** Accent- and case-insensitive key for matching names typed by people. */
+export const fold = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+/** Default name for a client ↔ product link when the user gives none. */
+export function defaultContractName(product: string, client: string) {
+  return `${product} · ${client}`;
+}
+/**
+ * A contracted product is identified by its client and product; its own name
+ * only adds information when it is not just a restatement of those two
+ * (e.g. "Social Leads · Aurora"), so callers show it only when this returns it.
+ */
+export function contractDetail(name: string, product = "", client = "") {
+  const n = fold(name);
+  if (!n) return "";
+  const p = fold(product),
+    c = fold(client);
+  if ((p && n.includes(p)) || n === c || n === `${c} · ${p}`) return "";
+  return name.trim();
+}
+export function contractParts(data: Snapshot, contractId: string | null) {
+  const contract = data.contracts.find((c) => c.id === contractId);
+  const client = data.clients.find((c) => c.id === contract?.client_id);
+  const product = data.products.find((p) => p.id === contract?.product_id);
+  return {
+    contract,
+    client,
+    product,
+    detail: contract
+      ? contractDetail(contract.name, product?.name, client?.name)
+      : "",
+  };
+}
+/** "Produto (identificação)" — how a contracted product reads under its client. */
+export function contractProductLabel(data: Snapshot, contractId: string) {
+  const { product, detail } = contractParts(data, contractId);
+  return `${product?.name ?? "Produto"}${detail ? ` (${detail})` : ""}`;
+}
+/** A project's validation settings, with defaults for rows cached before they existed. */
+export function projectReview(
+  project?: Pick<Project, "requires_review" | "approver"> | null,
+) {
+  return {
+    required: project?.requires_review ?? true,
+    approver: project?.approver ?? ("creator" as ProjectApprover),
+  };
+}
+/**
+ * Mirrors mavi_private.can_approve: admins always; tasks outside a project
+ * (or in one without validation) by their creator or any leader; otherwise
+ * by the project's chosen approver — the creator, or a manager who belongs
+ * to the task's team (the client's teams when the task has none).
+ */
+export function canApproveTask(data: Snapshot, task: Task, userId: string) {
+  const me = data.members.find((m) => m.user_id === userId && m.active);
+  if (!me) return false;
+  if (me.role === "admin") return true;
+  const project = data.projects.find((p) => p.id === task.project_id);
+  const review = projectReview(project);
+  if (!project || !review.required)
+    return me.role === "manager" || task.creator_id === userId;
+  if (review.approver === "creator") return task.creator_id === userId;
+  if (me.role !== "manager") return false;
+  const myTeams = new Set(
+    data.teamMembers
+      .filter((tm) => tm.user_id === userId && tm.supervisor)
+      .map((tm) => tm.team_id),
+  );
+  if (task.team_id) return myTeams.has(task.team_id);
+  const clientId = data.contracts.find(
+    (c) => c.id === task.contract_id,
+  )?.client_id;
+  return data.clientTeams.some(
+    (ct) => ct.client_id === clientId && myTeams.has(ct.team_id),
+  );
+}
+/**
+ * Mirrors mavi_private.contract_access, which create_task checks: admins
+ * everywhere, everyone else only in clients served by one of their teams.
+ */
+export function canCreateTaskIn(
+  data: Snapshot,
+  contractId: string,
+  userId: string,
+) {
+  const me = data.members.find((m) => m.user_id === userId && m.active);
+  if (!me) return false;
+  if (me.role === "admin") return true;
+  const clientId = data.contracts.find((c) => c.id === contractId)?.client_id;
+  const myTeams = new Set(
+    data.teamMembers
+      .filter((tm) => tm.user_id === userId)
+      .map((tm) => tm.team_id),
+  );
+  return data.clientTeams.some(
+    (ct) => ct.client_id === clientId && myTeams.has(ct.team_id),
+  );
+}
+/** Clients served by any of the person's teams (how collaborators reach clients). */
+export function teamClientIds(data: Snapshot, userId: string) {
+  const myTeams = new Set(
+    data.teamMembers
+      .filter((tm) => tm.user_id === userId)
+      .map((tm) => tm.team_id),
+  );
+  return new Set(
+    data.clientTeams
+      .filter((ct) => myTeams.has(ct.team_id))
+      .map((ct) => ct.client_id),
+  );
 }

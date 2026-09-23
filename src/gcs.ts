@@ -10,74 +10,47 @@ export function getGcsPublicUrl(path: string): string {
   return `https://storage.googleapis.com/${GCS_BUCKET}/${encodeURI(cleanPath).replace(/#/g, "%23").replace(/\?/g, "%3F")}`;
 }
 
-/**
- * Requests a signed upload URL from the local Vite dev middleware,
- * Vercel serverless API, or Supabase Edge Function.
- */
-export async function getSignedUploadUrl(
-  path: string,
-  contentType: string,
-): Promise<string> {
-  const cleanPath = path.replace(/^\/+/, "");
-
-  // 1. Try local dev server / Vercel API endpoint
-  try {
-    const res = await fetch("/api/gcs/sign-upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: cleanPath, contentType }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.url) return data.url;
-    }
-  } catch {
-    /* Fallback to Supabase Edge Function */
-  }
-
-  // 2. Try Supabase Edge Function
-  if (supabase) {
-    try {
-      const { data, error } = await supabase.functions.invoke("gcs-storage", {
-        body: { path: cleanPath, contentType, action: "sign-upload" },
-      });
-      if (!error && data?.url) return data.url;
-      if (error) throw error;
-    } catch (err) {
-      throw new Error(
-        `Falha ao autorizar upload no GCS: ${(err as Error).message || err}`,
-      );
-    }
-  }
-
-  throw new Error(
-    "Não foi possível obter autorização para envio de arquivo ao GCS.",
-  );
-}
+/** A record prepared for upload (prepare_attachment / prepare_inline_image). */
+export type UploadTarget = { kind: "attachment" | "inline-image"; id: string };
 
 /**
- * Uploads a file directly to Google Cloud Storage using a signed V4 PUT URL.
+ * Uploads the file for a record the user just prepared. The server
+ * (api/gcs/sign-upload.ts) signs a PUT only for that record's own path.
  */
 export async function uploadToGcs(
-  path: string,
+  target: UploadTarget,
   file: File,
   contentType?: string,
 ): Promise<void> {
-  const type = contentType || file.type || "application/octet-stream";
-  const signedUrl = await getSignedUploadUrl(path, type);
-
-  const res = await fetch(signedUrl, {
-    method: "PUT",
+  const token = supabase
+    ? (await supabase.auth.getSession()).data.session?.access_token
+    : undefined;
+  if (!token) throw new Error("Entre novamente para enviar arquivos.");
+  const res = await fetch("/api/gcs/sign-upload", {
+    method: "POST",
     headers: {
-      "Content-Type": type,
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
     },
+    body: JSON.stringify({
+      ...target,
+      contentType: contentType || file.type || "application/octet-stream",
+    }),
+  });
+  const signed = await res.json().catch(() => ({}));
+  if (!res.ok)
+    throw new Error(
+      signed.error ?? "Não foi possível autorizar o envio do arquivo.",
+    );
+  const put = await fetch(signed.url, {
+    method: "PUT",
+    headers: signed.headers,
     body: file,
   });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
+  if (!put.ok) {
+    const errText = await put.text().catch(() => "");
     throw new Error(
-      `Falha no upload para o Google Cloud Storage (${res.status}): ${errText || res.statusText}`,
+      `Falha no upload para o Google Cloud Storage (${put.status}): ${errText || put.statusText}`,
     );
   }
 }

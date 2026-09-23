@@ -33,7 +33,7 @@ describe("task creation attachments", () => {
     await expect(uploadAttachment("t", file("a.exe"))).rejects.toThrow();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
-  it("uses the protected prepared path and cleans up rejected uploads", async () => {
+  it("uploads the prepared record (never a client path) and cleans up rejected uploads", async () => {
     mocks.rpc
       .mockResolvedValueOnce({ id: "a", path: "company/task/file.pdf" })
       .mockResolvedValueOnce(null);
@@ -42,7 +42,7 @@ describe("task creation attachments", () => {
       "Upload negado",
     );
     expect(mocks.uploadToGcs).toHaveBeenCalledWith(
-      "company/task/file.pdf",
+      { kind: "attachment", id: "a" },
       expect.anything(),
       "application/pdf",
     );
@@ -55,7 +55,7 @@ describe("task creation attachments", () => {
     mocks.uploadToGcs.mockResolvedValueOnce(undefined);
     await uploadAttachment("t", file("file.pdf"));
     expect(mocks.uploadToGcs).toHaveBeenCalledWith(
-      "company/task/file.pdf",
+      { kind: "attachment", id: "a" },
       expect.anything(),
       "application/pdf",
     );

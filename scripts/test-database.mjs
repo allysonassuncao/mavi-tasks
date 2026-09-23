@@ -46,7 +46,12 @@ async function denied(fn) {
   await assert.rejects(fn);
 }
 await as(admin);
-const team = await rpc("create_team", [A, "Equipe A", [manager, member]]);
+const team = await rpc("create_team", [
+  A,
+  "Equipe A",
+  [manager, member],
+  [manager],
+]);
 const client = await rpc("create_client", [A, "Cliente A", ""]);
 const product = await rpc("create_product", [A, "Make Ads"]);
 const contract = await rpc("create_contract", [
@@ -107,10 +112,51 @@ await as(admin);
 await check("chave composta impede associação entre empresas", () =>
   denied(() => rpc("create_contract", [A, clientB, product, "Inválido", null])),
 );
+const teamsOf = async (clientId) =>
+  (
+    await db.query(
+      "select team_id from client_teams where client_id=$1 order by team_id",
+      [clientId],
+    )
+  ).rows.map((r) => r.team_id);
+await check("equipes responsáveis ficam no cliente, sem duplicar", async () => {
+  const teamB = await rpc("create_team", [A, "Equipe B", [member]]);
+  const served = await rpc("create_client", [
+    A,
+    "Cliente com equipes",
+    "",
+    [team, teamB, team],
+  ]);
+  assert.deepEqual(await teamsOf(served), [team, teamB].sort());
+  await rpc("update_client", [served, "Cliente com equipes", "", null]);
+  assert.deepEqual(await teamsOf(served), [team, teamB].sort());
+  await rpc("update_client", [served, "Cliente com equipes", "", [teamB]]);
+  assert.deepEqual(await teamsOf(served), [teamB]);
+});
+await check("equipe passada ao produto passa a atender o cliente", async () =>
+  assert.deepEqual(await teamsOf(client), [team]),
+);
 await check("tarefa não pode apontar para contrato de outra empresa", () =>
   denied(() =>
     rpc("create_task", [A, contractB, "Inválida", member, "2026-10-01"]),
   ),
+);
+const servedClient = await rpc("create_client", [
+  A,
+  "Cliente da equipe",
+  "",
+  [team],
+]);
+await rpc("create_contract", [A, servedClient, product, "Serviço da equipe"]);
+const sees = async (id) =>
+  (await db.query("select id from clients where id=$1", [id])).rows.length;
+await as(isolated);
+await check("membro fora da equipe não vê cliente da equipe", async () =>
+  assert.equal(await sees(servedClient), 0),
+);
+await as(member);
+await check("membro da equipe vê cliente ainda sem tarefas", async () =>
+  assert.equal(await sees(servedClient), 1),
 );
 await as(isolated);
 await check("membro sem equipe não vê contrato ou tarefa", async () => {
@@ -171,6 +217,499 @@ await check("reabrir invalida aprovações", async () => {
   assert.equal(t.client_approved_by, null);
   assert.equal(t.revision, 2);
 });
+const statusOf = async (id) =>
+  (await db.query("select status from tasks where id=$1", [id])).rows[0].status;
+async function projectTask(requiresReview, approver, creator) {
+  await as(admin);
+  const reviewProject = await rpc("create_project", [
+    A,
+    contract,
+    `Validação ${approver} ${requiresReview}`,
+    null,
+    requiresReview,
+    approver,
+  ]);
+  await as(creator);
+  return rpc("create_task", [
+    A,
+    contract,
+    "Tarefa com regra do projeto",
+    member,
+    "2026-10-01",
+    reviewProject,
+    team,
+  ]);
+}
+await check("projeto sem validação conclui ao enviar", async () => {
+  const id = await projectTask(false, "creator", admin);
+  await as(member);
+  await rpc("transition_task", [id, 1, "start", ""]);
+  await rpc("transition_task", [id, 2, "submit", ""]);
+  assert.equal(await statusOf(id), "done");
+});
+await check(
+  "validação pelo supervisor: só gestor da equipe aprova",
+  async () => {
+    const id = await projectTask(true, "supervisor", member);
+    await as(member);
+    await rpc("transition_task", [id, 1, "start", ""]);
+    await rpc("transition_task", [id, 2, "submit", ""]);
+    await denied(() => rpc("transition_task", [id, 3, "approve_internal", ""]));
+    await as(manager);
+    await rpc("transition_task", [id, 3, "approve_internal", ""]);
+    assert.equal(await statusOf(id), "done");
+  },
+);
+await check("supervisores são escolhidos na equipe", async () => {
+  const id = await projectTask(true, "supervisor", member);
+  await as(member);
+  await rpc("transition_task", [id, 1, "start", ""]);
+  await rpc("transition_task", [id, 2, "submit", ""]);
+  await as(admin);
+  await rpc("update_team", [team, "Equipe A", [manager, member], []]);
+  await as(manager);
+  await denied(() => rpc("transition_task", [id, 3, "approve_internal", ""]));
+  await as(admin);
+  await rpc("update_team", [team, "Equipe A", [member], [manager]]);
+  const people = (
+    await db.query(
+      "select user_id, supervisor from team_members where team_id=$1",
+      [team],
+    )
+  ).rows;
+  assert.equal(people.length, 2);
+  assert.equal(people.find((p) => p.user_id === manager)?.supervisor, true);
+  assert.equal(people.find((p) => p.user_id === member)?.supervisor, false);
+  await as(manager);
+  await rpc("transition_task", [id, 3, "approve_internal", ""]);
+  assert.equal(await statusOf(id), "done");
+});
+await check("colaborador não pode ser supervisor", async () => {
+  await as(admin);
+  await denied(() =>
+    rpc("update_team", [team, "Equipe A", [manager, member], [member]]),
+  );
+});
+await check(
+  "validação pelo criador: gestor não criador não aprova",
+  async () => {
+    const id = await projectTask(true, "creator", member);
+    await as(member);
+    await rpc("transition_task", [id, 1, "start", ""]);
+    await rpc("transition_task", [id, 2, "submit", ""]);
+    await as(manager);
+    await denied(() => rpc("transition_task", [id, 3, "approve_internal", ""]));
+    await as(member);
+    await rpc("transition_task", [id, 3, "approve_internal", ""]);
+    assert.equal(await statusOf(id), "done");
+  },
+);
+await as(member);
+await check(
+  "colaborador não envia na raiz nem na pasta do cliente",
+  async () => {
+    await denied(() =>
+      rpc("prepare_drive_file", [
+        A,
+        "raiz.pdf",
+        10,
+        "application/pdf",
+        "private",
+      ]),
+    );
+    await denied(() =>
+      rpc("prepare_drive_file", [
+        A,
+        "cliente.pdf",
+        10,
+        "application/pdf",
+        "private",
+        client,
+      ]),
+    );
+    await denied(() => rpc("create_drive_folder", [A, "Pasta", client]));
+  },
+);
+const driveFile = await rpc("prepare_drive_file", [
+  A,
+  "briefing.pdf",
+  2048,
+  "application/pdf",
+  "private",
+  null,
+  contract,
+]);
+const driveRows = async (id) =>
+  (await db.query("select id from drive_files where id=$1", [id])).rows.length;
+await check(
+  "upload pendente do Drive é visível só para quem envia",
+  async () => {
+    assert.equal(await driveRows(driveFile), 1);
+    assert.equal(
+      (await db.query("select * from drive_upload_target($1)", [driveFile]))
+        .rows.length,
+      1,
+    );
+    await as(manager);
+    assert.equal(await driveRows(driveFile), 0);
+    assert.equal(
+      (await db.query("select * from drive_upload_target($1)", [driveFile]))
+        .rows.length,
+      0,
+    );
+  },
+);
+await check("caminho do arquivo no bucket não é legível", async () => {
+  await as(member);
+  await denied(() => db.query("select path from drive_files"));
+});
+await check("arquivo do cliente: só quem atende o cliente baixa", async () => {
+  await rpc("confirm_drive_file", [driveFile]);
+  const downloads = async () =>
+    (await db.query("select * from drive_download_target($1)", [driveFile]))
+      .rows.length;
+  await as(isolated);
+  assert.equal(await downloads(), 0);
+  assert.equal(await driveRows(driveFile), 0);
+  await as(manager);
+  assert.equal(await downloads(), 1);
+  await as(foreignUser);
+  assert.equal(
+    (await db.query("select * from drive_download_target($1)", [driveFile]))
+      .rows.length,
+    0,
+  );
+});
+await check("link público só funciona com o arquivo público", async () => {
+  await as(member);
+  const token = (
+    await db.query("select share_token from drive_files where id=$1", [
+      driveFile,
+    ])
+  ).rows[0].share_token;
+  await as();
+  const publicRows = async () =>
+    (await db.query("select * from drive_public_target($1)", [token])).rows
+      .length;
+  assert.equal(await publicRows(), 0);
+  await as(isolated);
+  await denied(() => rpc("set_drive_file_visibility", [driveFile, "public"]));
+  await as(member);
+  await rpc("set_drive_file_visibility", [driveFile, "public"]);
+  await as();
+  assert.equal(await publicRows(), 1);
+});
+await check("só quem enviou ou gestores excluem arquivos", async () => {
+  await as(isolated);
+  await denied(() => rpc("delete_drive_file", [driveFile]));
+  await as(admin);
+  assert.equal(
+    await rpc("delete_drive_file", [driveFile]),
+    `drive/${A}/${driveFile}`,
+  );
+  assert.equal(await driveRows(driveFile), 0);
+});
+await check(
+  "pastas: criadas no produto, herdam o local e só saem vazias",
+  async () => {
+    await as(member);
+    const folder = await rpc("create_drive_folder", [
+      A,
+      "Criativos",
+      null,
+      contract,
+    ]);
+    const sub = await rpc("create_drive_folder", [
+      A,
+      "Aprovados",
+      null,
+      null,
+      folder,
+    ]);
+    const row = (
+      await db.query(
+        "select client_id, contract_id, parent_id from drive_folders where id=$1",
+        [sub],
+      )
+    ).rows[0];
+    assert.deepEqual(row, {
+      client_id: client,
+      contract_id: contract,
+      parent_id: folder,
+    });
+    await rpc("rename_drive_folder", [sub, "Aprovados pelo cliente"]);
+    await denied(() => rpc("delete_drive_folder", [folder]));
+    await rpc("delete_drive_folder", [sub]);
+    await rpc("delete_drive_folder", [folder]);
+    await as(isolated);
+    await denied(() =>
+      rpc("create_drive_folder", [A, "Intruso", null, contract]),
+    );
+  },
+);
+await check("gestores organizam a raiz, visível a toda a empresa", async () => {
+  await as(manager);
+  const shared = await rpc("create_drive_folder", [A, "Modelos da agência"]);
+  await rpc("create_drive_folder", [A, "Contratos", client]);
+  await as(isolated);
+  assert.equal(
+    (await db.query("select id from drive_folders where id=$1", [shared])).rows
+      .length,
+    1,
+  );
+  assert.equal(
+    (
+      await db.query("select id from drive_folders where client_id=$1", [
+        client,
+      ])
+    ).rows.length,
+    0,
+  );
+});
+await check("cada pessoa altera só o próprio nome e foto", async () => {
+  await as(member);
+  await rpc("update_my_profile", ["Membro Renomeado"]);
+  const names = (
+    await db.query(
+      "select user_id, name from memberships where user_id in ($1,$2)",
+      [member, manager],
+    )
+  ).rows;
+  assert.equal(
+    names.find((r) => r.user_id === member).name,
+    "Membro Renomeado",
+  );
+  assert.equal(names.find((r) => r.user_id === manager).name, "Gestor A");
+  await denied(() => rpc("update_my_profile", [" "]));
+  const path = await rpc("avatar_upload_path", ["webp"]);
+  assert.match(
+    await rpc("avatar_upload_path", ["jpg"]),
+    new RegExp(`^avatars/${member}/[0-9a-f-]{36}\\.jpg$`),
+  );
+  await denied(() => rpc("avatar_upload_path", ["svg"]));
+  assert.match(path, new RegExp(`^avatars/${member}/[0-9a-f-]{36}\\.webp$`));
+  const url = `https://storage.googleapis.com/bucket/${path}`;
+  await rpc("set_my_avatar", [url]);
+  assert.equal(
+    (
+      await db.query("select avatar_url from memberships where user_id=$1", [
+        member,
+      ])
+    ).rows[0].avatar_url,
+    url,
+  );
+  await denied(() =>
+    rpc("set_my_avatar", [
+      `https://storage.googleapis.com/bucket/avatars/${manager}/${member}.webp`,
+    ]),
+  );
+  await denied(() => rpc("set_my_avatar", ["https://evil.example/pixel.webp"]));
+  await denied(() =>
+    db.query("update memberships set name='x' where user_id=$1", [manager]),
+  );
+  await rpc("set_my_avatar", [null]);
+  await rpc("update_my_profile", ["Membro A"]);
+});
+await check(
+  "assinatura de upload só para o próprio registro recente",
+  async () => {
+    await as(member);
+    const own = await rpc("prepare_attachment", [task, "entrega.pdf", 1234]);
+    const image = await rpc("prepare_inline_image", [A, "print.png", 2048]);
+    const target = async (fn, id) =>
+      (await db.query(`select * from ${fn}($1)`, [id])).rows;
+    assert.deepEqual(await target("attachment_upload_target", own.id), [
+      { path: own.path, name: "entrega.pdf", size_bytes: 1234 },
+    ]);
+    assert.equal(
+      (await target("inline_image_upload_target", image.id))[0].path,
+      image.path,
+    );
+    await as(manager);
+    assert.equal((await target("attachment_upload_target", own.id)).length, 0);
+    assert.equal(
+      (await target("inline_image_upload_target", image.id)).length,
+      0,
+    );
+    await as();
+    await denied(() => target("attachment_upload_target", own.id));
+    // Records older than 15 minutes (or images already in a task) are closed.
+    await db.exec("reset role");
+    await db.query(
+      "update attachments set created_at = now() - interval '20 minutes' where id=$1",
+      [own.id],
+    );
+    await db.query("update inline_images set task_id=$1 where id=$2", [
+      task,
+      image.id,
+    ]);
+    await as(member);
+    assert.equal((await target("attachment_upload_target", own.id)).length, 0);
+    assert.equal(
+      (await target("inline_image_upload_target", image.id)).length,
+      0,
+    );
+  },
+);
+const memberRow = async (id) =>
+  (
+    await db.query(
+      "select name, role, active from memberships where company_id=$1 and user_id=$2",
+      [A, id],
+    )
+  ).rows[0];
+const memberTeams = async (id) =>
+  (
+    await db.query(
+      "select team_id, supervisor from team_members where company_id=$1 and user_id=$2",
+      [A, id],
+    )
+  ).rows;
+await check(
+  "gestor edita colaborador: nome, perfil, equipes e status",
+  async () => {
+    await as(manager);
+    await rpc("update_member", [
+      A,
+      member,
+      "Membro Editado",
+      "member",
+      false,
+      [],
+    ]);
+    assert.deepEqual(await memberRow(member), {
+      name: "Membro Editado",
+      role: "member",
+      active: false,
+    });
+    assert.deepEqual(await memberTeams(member), []);
+    await rpc("update_member", [A, member, "Membro A", "member", true, [team]]);
+    assert.deepEqual(await memberRow(member), {
+      name: "Membro A",
+      role: "member",
+      active: true,
+    });
+  },
+);
+await check(
+  "gestor não edita administradores nem concede administrador",
+  async () => {
+    await as(manager);
+    await denied(() =>
+      rpc("update_member", [A, admin, "Admin A", "admin", true, []]),
+    );
+    await denied(() =>
+      rpc("update_member", [A, member, "Membro A", "admin", true, [team]]),
+    );
+  },
+);
+await check("ninguém altera o próprio perfil nem se desativa", async () => {
+  await as(manager);
+  await denied(() =>
+    rpc("update_member", [A, manager, "Gestor A", "member", true, [team]]),
+  );
+  await denied(() =>
+    rpc("update_member", [A, manager, "Gestor A", "manager", false, [team]]),
+  );
+  await rpc("update_member", [A, manager, "Gestor A", "manager", true, [team]]);
+});
+await check("colaborador não edita pessoas", async () => {
+  await as(member);
+  await denied(() =>
+    rpc("update_member", [A, isolated, "Isolado A", "member", true, []]),
+  );
+});
+await check("quem deixa de ser gestor perde a supervisão", async () => {
+  await as(admin);
+  await rpc("update_team", [team, "Equipe A", [member], [manager]]);
+  await rpc("update_member", [A, manager, "Gestor A", "member", true, [team]]);
+  assert.deepEqual(await memberTeams(manager), [
+    { team_id: team, supervisor: false },
+  ]);
+  await rpc("update_member", [A, manager, "Gestor A", "manager", true, [team]]);
+  await rpc("update_team", [team, "Equipe A", [member], [manager]]);
+});
+await check(
+  "toda ação no Drive fica no histórico, imutável e só para gestores",
+  async () => {
+    await as(member);
+    const file = await rpc("prepare_drive_file", [
+      A,
+      "contrato.pdf",
+      500,
+      "application/pdf",
+      "private",
+      null,
+      contract,
+    ]);
+    await rpc("confirm_drive_file", [file]);
+    await rpc("rename_drive_file", [file, "contrato-assinado.pdf"]);
+    await rpc("set_drive_file_visibility", [file, "public"]);
+    await rpc("log_drive_link_copied", [file]);
+    await db.query("select * from drive_download_target($1, $2, $3)", [
+      file,
+      false,
+      { ip: "203.0.113.9", user_agent: "Teste/1.0" },
+    ]);
+    const token = (
+      await db.query("select share_token from drive_files where id=$1", [file])
+    ).rows[0].share_token;
+    await as();
+    await db.query("select * from drive_public_target($1, $2)", [token, true]);
+    await as(member);
+    const folder = await rpc("create_drive_folder", [
+      A,
+      "Jurídico",
+      null,
+      contract,
+    ]);
+    await rpc("rename_drive_folder", [folder, "Jurídico 2026"]);
+    await rpc("delete_drive_folder", [folder]);
+    await rpc("delete_drive_file", [file]);
+    assert.equal(
+      (await db.query("select * from drive_audit")).rows.length,
+      0,
+      "colaborador não lê o histórico",
+    );
+    await as(manager);
+    const rows = (
+      await db.query(
+        "select action, actor_id, item_name, details from drive_audit where file_id=$1 or folder_id=$2 order by id",
+        [file, folder],
+      )
+    ).rows;
+    assert.deepEqual(
+      rows.map((r) => r.action),
+      [
+        "upload_started",
+        "upload_completed",
+        "file_renamed",
+        "visibility_changed",
+        "link_copied",
+        "file_downloaded",
+        "public_viewed",
+        "folder_created",
+        "folder_renamed",
+        "folder_deleted",
+        "file_deleted",
+      ],
+    );
+    const by = (action) => rows.find((r) => r.action === action);
+    assert.equal(by("file_renamed").details.from, "contrato.pdf");
+    assert.equal(by("visibility_changed").details.to, "public");
+    assert.deepEqual(by("file_downloaded").details.origin, {
+      ip: "203.0.113.9",
+      user_agent: "Teste/1.0",
+    });
+    assert.equal(by("public_viewed").actor_id, null);
+    assert.equal(by("file_deleted").item_name, "contrato-assinado.pdf");
+    assert.equal(by("upload_started").actor_id, member);
+    await denied(() => db.query("delete from drive_audit"));
+    await db.exec("reset role");
+    await denied(() => db.query("update drive_audit set action='x'"));
+    await denied(() => db.query("delete from drive_audit"));
+  },
+);
 await as(member);
 let timer;
 await check("iniciar cronômetro é idempotente", async () => {

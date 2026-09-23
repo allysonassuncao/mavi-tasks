@@ -6,6 +6,12 @@ import {
   duration,
   taskTimerSeconds,
   formatClock,
+  durationWithSeconds,
+  canApproveTask,
+  canCreateTaskIn,
+  teamClientIds,
+  contractDetail,
+  contractProductLabel,
 } from "./domain";
 import { demoSnapshot } from "./demo";
 import type { TimeEntry } from "./types";
@@ -117,5 +123,130 @@ describe("Datas e horas operacionais", () => {
     expect(formatClock(3599)).toBe("00:59:59");
     expect(formatClock(3600)).toBe("01:00:00");
     expect(formatClock(3665)).toBe("01:01:05");
+  });
+});
+
+describe("Produtos contratados", () => {
+  it("omite o nome quando só repete cliente e produto", () => {
+    expect(
+      contractDetail("Social Leads · Aurora", "Social Leads", "Aurora Studio"),
+    ).toBe("");
+    expect(contractDetail("Make Ads", "Make Ads", "Norte")).toBe("");
+    expect(contractDetail("  ", "Make Ads", "Norte")).toBe("");
+  });
+  it("mantém uma identificação própria", () =>
+    expect(contractDetail("Unidade Centro", "Make Ads", "Norte")).toBe(
+      "Unidade Centro",
+    ));
+  it("rotula o produto contratado sem repetir o cliente", () => {
+    const data = demoSnapshot();
+    const contract = data.contracts[0];
+    const product = data.products.find((p) => p.id === contract.product_id)!;
+    expect(contractProductLabel(data, contract.id)).toBe(product.name);
+  });
+});
+
+describe("Tempo trabalhado com segundos", () => {
+  it("mostra horas, minutos e segundos", () => {
+    expect(durationWithSeconds(0)).toBe("0h 00m 00s");
+    expect(durationWithSeconds(3909)).toBe("1h 05m 09s");
+    expect(durationWithSeconds(59.9)).toBe("0h 00m 59s");
+    expect(durationWithSeconds(-5)).toBe("0h 00m 00s");
+  });
+});
+
+describe("Quem valida tarefas de um projeto", () => {
+  const setup = (
+    requires_review: boolean,
+    approver: "creator" | "supervisor",
+  ) => {
+    const data = demoSnapshot();
+    const project = { ...data.projects[0], requires_review, approver };
+    data.projects = [project];
+    // Marina (gestora) is only in the task's team; Lucas created the task.
+    data.teamMembers = [
+      {
+        company_id: project.company_id,
+        team_id: data.teams[0].id,
+        user_id: "user-marina",
+        supervisor: true,
+      },
+    ];
+    const task = {
+      ...data.tasks[0],
+      project_id: project.id,
+      contract_id: project.contract_id,
+      team_id: data.teams[0].id,
+      creator_id: "user-lucas",
+    };
+    return { data, task };
+  };
+  it("administrador valida sempre", () => {
+    const { data, task } = setup(true, "creator");
+    expect(canApproveTask(data, task, "user-allyson")).toBe(true);
+  });
+  it("criador valida; gestor não criador não", () => {
+    const { data, task } = setup(true, "creator");
+    expect(canApproveTask(data, task, "user-lucas")).toBe(true);
+    expect(canApproveTask(data, task, "user-marina")).toBe(false);
+  });
+  it("supervisor da equipe valida; criador não", () => {
+    const { data, task } = setup(true, "supervisor");
+    expect(canApproveTask(data, task, "user-marina")).toBe(true);
+    expect(canApproveTask(data, task, "user-lucas")).toBe(false);
+  });
+  it("gestor da equipe que não é supervisor não valida", () => {
+    const { data, task } = setup(true, "supervisor");
+    data.teamMembers = data.teamMembers.map((tm) => ({
+      ...tm,
+      supervisor: false,
+    }));
+    expect(canApproveTask(data, task, "user-marina")).toBe(false);
+  });
+  it("gestor fora da equipe da tarefa não é supervisor", () => {
+    const { data, task } = setup(true, "supervisor");
+    const other = { ...task, team_id: data.teams[1].id };
+    expect(canApproveTask(data, other, "user-marina")).toBe(false);
+  });
+});
+
+describe("Onde a pessoa pode criar tarefas", () => {
+  it("administrador cria em qualquer cliente; colaborador só nos da sua equipe", () => {
+    const data = demoSnapshot();
+    const contract = data.contracts[0];
+    data.teamMembers = [
+      {
+        company_id: contract.company_id,
+        team_id: data.teams[0].id,
+        user_id: "user-lucas",
+      },
+    ];
+    data.clientTeams = [
+      {
+        company_id: contract.company_id,
+        client_id: contract.client_id,
+        team_id: data.teams[0].id,
+      },
+    ];
+    expect(canCreateTaskIn(data, contract.id, "user-allyson")).toBe(true);
+    expect(canCreateTaskIn(data, contract.id, "user-lucas")).toBe(true);
+    expect(canCreateTaskIn(data, contract.id, "user-julia")).toBe(false);
+  });
+});
+
+describe("Clientes das equipes da pessoa", () => {
+  it("inclui só os clientes atendidos pelas equipes dela", () => {
+    const data = demoSnapshot();
+    const [aurora, norte] = data.clients;
+    const company_id = aurora.company_id;
+    data.teamMembers = [
+      { company_id, team_id: data.teams[0].id, user_id: "user-lucas" },
+    ];
+    data.clientTeams = [
+      { company_id, client_id: aurora.id, team_id: data.teams[0].id },
+      { company_id, client_id: norte.id, team_id: data.teams[1].id },
+    ];
+    expect([...teamClientIds(data, "user-lucas")]).toEqual([aurora.id]);
+    expect(teamClientIds(data, "user-julia").size).toBe(0);
   });
 });

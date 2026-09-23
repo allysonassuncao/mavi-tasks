@@ -12,6 +12,8 @@ export interface Member {
   email?: string;
   role: Role;
   active: boolean;
+  /** Profile photo (public URL); initials are shown when absent. */
+  avatar_url?: string | null;
 }
 export interface Client {
   id: string;
@@ -42,7 +44,12 @@ export interface Project {
   name: string;
   due_date: string | null;
   archived: boolean;
+  /** Whether tasks go through validation before being done. */
+  requires_review: boolean;
+  /** Who validates when requires_review: the task creator or the team supervisor. */
+  approver: ProjectApprover;
 }
+export type ProjectApprover = "creator" | "supervisor";
 export interface Team {
   id: string;
   company_id: string;
@@ -120,8 +127,14 @@ export interface Snapshot {
   teams: Team[];
   tasks: Task[];
   hours: TimeEntry[];
-  teamMembers: { company_id: string; team_id: string; user_id: string }[];
-  contractTeams: { company_id: string; contract_id: string; team_id: string }[];
+  teamMembers: {
+    company_id: string;
+    team_id: string;
+    user_id: string;
+    /** Validates the team's tasks in projects set to "Supervisor da equipe". */
+    supervisor?: boolean;
+  }[];
+  clientTeams: { company_id: string; client_id: string; team_id: string }[];
 }
 export const statuses: Record<Status, { label: string; color: string }> = {
   open: { label: "Aberto", color: "#7c8796" },
@@ -147,5 +160,52 @@ export const emptySnapshot: Snapshot = {
   tasks: [],
   hours: [],
   teamMembers: [],
-  contractTeams: [],
+  clientTeams: [],
 };
+export type DriveVisibility = "private" | "public";
+export interface DriveFile {
+  id: string;
+  company_id: string;
+  name: string;
+  content_type: string;
+  size_bytes: number;
+  visibility: DriveVisibility;
+  share_token: string;
+  status: "pending" | "ready";
+  uploaded_by: string;
+  created_at: string;
+  client_id: string | null;
+  contract_id: string | null;
+  folder_id: string | null;
+}
+export interface DriveFolder {
+  id: string;
+  company_id: string;
+  client_id: string | null;
+  contract_id: string | null;
+  parent_id: string | null;
+  name: string;
+  created_by: string;
+  created_at: string;
+}
+/** Where an item lives in the Drive tree; all empty means the root. */
+export interface DriveLocation {
+  client?: string;
+  contract?: string;
+  folder?: string;
+}
+export interface DriveAuditEntry {
+  id: number;
+  company_id: string;
+  actor_id: string | null;
+  action: string;
+  file_id: string | null;
+  folder_id: string | null;
+  item_name: string | null;
+  client_id: string | null;
+  contract_id: string | null;
+  details: Record<string, unknown> & {
+    origin?: { ip?: string; user_agent?: string };
+  };
+  created_at: string;
+}

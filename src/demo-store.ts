@@ -1,4 +1,5 @@
 import { demoSnapshot, demoUser } from "./demo";
+import { canApproveTask, projectReview } from "./domain";
 import {
   type Snapshot,
   type Task,
@@ -11,6 +12,41 @@ export class DemoStore {
   comments: Comment[] = [];
   attachments: Attachment[] = [];
   events: TaskEvent[] = [];
+  private setClientTeams(clientId: string, teams: string[]) {
+    const company_id = this.data.companies[0].id;
+    this.data.clientTeams = [
+      ...this.data.clientTeams.filter((ct) => ct.client_id !== clientId),
+      ...[...new Set(teams)].map((team_id) => ({
+        company_id,
+        client_id: clientId,
+        team_id,
+      })),
+    ];
+  }
+  private setTeamPeople(
+    teamId: string,
+    users: string[],
+    supervisors: string[],
+  ) {
+    const company_id = this.data.companies[0].id;
+    const invalid = supervisors.some((id) => {
+      const role = this.data.members.find((m) => m.user_id === id)?.role;
+      return role !== "admin" && role !== "manager";
+    });
+    if (invalid)
+      throw Error(
+        "Supervisores precisam ser gestores ou administradores ativos",
+      );
+    this.data.teamMembers = [
+      ...this.data.teamMembers.filter((tm) => tm.team_id !== teamId),
+      ...[...new Set([...users, ...supervisors])].map((user_id) => ({
+        company_id,
+        team_id: teamId,
+        user_id,
+        supervisor: supervisors.includes(user_id),
+      })),
+    ];
+  }
   mutate(name: string, a: Record<string, any>) {
     const id = crypto.randomUUID(),
       company_id = this.data.companies[0].id,
@@ -47,7 +83,10 @@ export class DemoStore {
         const entity = rows.find((r) => r.id === a[`p_${kind}`]);
         if (!entity) throw Error("Cadastro não encontrado");
         const changes: Record<string, unknown> = { name: a.p_name };
-        if (kind === "client") changes.email = a.p_email;
+        if (kind === "client") {
+          changes.email = a.p_email;
+          if (a.p_teams) this.setClientTeams(entity.id, a.p_teams);
+        }
         if (kind === "project") {
           if (
             a.p_contract !== (entity as any).contract_id &&
@@ -58,6 +97,9 @@ export class DemoStore {
             );
           changes.due_date = a.p_due;
           changes.contract_id = a.p_contract;
+          if (a.p_requires_review != null)
+            changes.requires_review = a.p_requires_review;
+          if (a.p_approver) changes.approver = a.p_approver;
         }
         if (kind === "contract") {
           changes.client_id = a.p_client;
@@ -75,6 +117,7 @@ export class DemoStore {
           color: "#8e81bb",
           archived: false,
         });
+        this.setClientTeams(id, a.p_teams ?? []);
         break;
       case "create_product":
         this.data.products.push({
@@ -94,11 +137,12 @@ export class DemoStore {
           archived: false,
         });
         if (a.p_team)
-          this.data.contractTeams.push({
-            company_id,
-            contract_id: id,
-            team_id: a.p_team,
-          });
+          this.setClientTeams(a.p_client, [
+            ...this.data.clientTeams
+              .filter((ct) => ct.client_id === a.p_client)
+              .map((ct) => ct.team_id),
+            a.p_team,
+          ]);
         break;
       case "create_project":
         this.data.projects.push({
@@ -108,13 +152,73 @@ export class DemoStore {
           name: a.p_name,
           due_date: a.p_due,
           archived: false,
+          requires_review: a.p_requires_review ?? true,
+          approver: a.p_approver ?? "creator",
         });
+        break;
+      case "update_member": {
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        const target = this.data.members.find((m) => m.user_id === a.p_user);
+        if (!target || (role !== "admin" && role !== "manager"))
+          throw Error("Sem permissão");
+        if (
+          role !== "admin" &&
+          (target.role === "admin" || a.p_role === "admin")
+        )
+          throw Error("Somente administradores editam administradores.");
+        if (a.p_user === demoUser && (a.p_role !== target.role || !a.p_active))
+          throw Error(
+            "Você não pode alterar o próprio perfil de acesso nem se desativar.",
+          );
+        Object.assign(target, {
+          name: String(a.p_name).trim(),
+          role: a.p_role,
+          active: a.p_active,
+        });
+        const company_id = this.data.companies[0].id;
+        const kept = this.data.teamMembers.filter(
+          (tm) => tm.user_id === a.p_user && a.p_teams.includes(tm.team_id),
+        );
+        this.data.teamMembers = [
+          ...this.data.teamMembers.filter((tm) => tm.user_id !== a.p_user),
+          ...a.p_teams.map((team_id: string) => ({
+            company_id,
+            team_id,
+            user_id: a.p_user,
+            supervisor:
+              a.p_role !== "member" &&
+              !!kept.find((tm) => tm.team_id === team_id)?.supervisor,
+          })),
+        ];
+        break;
+      }
+      case "update_my_profile": {
+        const name = String(a.p_name ?? "").trim();
+        if (name.length < 2)
+          throw Error("Informe um nome de 2 a 120 caracteres.");
+        this.data.members = this.data.members.map((m) =>
+          m.user_id === demoUser ? { ...m, name } : m,
+        );
+        break;
+      }
+      case "set_my_avatar":
+        this.data.members = this.data.members.map((m) =>
+          m.user_id === demoUser ? { ...m, avatar_url: a.p_url ?? null } : m,
+        );
         break;
       case "create_team":
         this.data.teams.push({ id, company_id, name: a.p_name });
-        for (const user_id of a.p_users ?? [])
-          this.data.teamMembers.push({ company_id, team_id: id, user_id });
+        this.setTeamPeople(id, a.p_users ?? [], a.p_supervisors ?? []);
         break;
+      case "update_team": {
+        const team = this.data.teams.find((t) => t.id === a.p_team);
+        if (!team) throw Error("Equipe não encontrada");
+        team.name = a.p_name;
+        this.setTeamPeople(team.id, a.p_users ?? [], a.p_supervisors ?? []);
+        break;
+      }
       case "create_task":
         this.data.tasks.unshift({
           id,
@@ -176,18 +280,14 @@ export class DemoStore {
         if (!task) throw Error("Tarefa não encontrada");
         if (task.version !== a.p_version)
           throw Error("A tarefa mudou. Atualize.");
-        const callerRole = this.data.members.find(
-          (m) => m.user_id === demoUser,
-        )?.role;
-        const isLeader = callerRole === "admin" || callerRole === "manager";
         const approval = [
           "approve_internal",
           "approve_client",
           "reject",
           "reopen",
         ].includes(a.p_action);
-        if (approval && !isLeader && task.creator_id !== demoUser)
-          throw Error("Apenas o criador ou gestor pode aprovar");
+        if (approval && !canApproveTask(this.data, task, demoUser))
+          throw Error("Você não é o responsável pela validação desta tarefa");
         const from = task.status;
         if (
           ["return", "reject", "reopen"].includes(a.p_action) &&
@@ -203,7 +303,14 @@ export class DemoStore {
         )
           task.status = "progress";
         if (a.p_action === "return") task.status = "returned";
-        if (a.p_action === "submit") task.status = "review";
+        if (a.p_action === "submit") {
+          task.status = "review";
+          const project = this.data.projects.find(
+            (p) => p.id === task.project_id,
+          );
+          if (!projectReview(project).required)
+            task.internal_approved_by = demoUser;
+        }
         if (a.p_action === "approve_internal")
           task.internal_approved_by = demoUser;
         if (a.p_action === "approve_client") {

@@ -1,9 +1,34 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { getGcsPublicUrl, getSignedUploadUrl, uploadToGcs } from "./gcs";
+
+const session = vi.hoisted(() => ({ token: "user-token" as string | null }));
+vi.mock("./supabase", () => ({
+  supabase: {
+    auth: {
+      getSession: async () => ({
+        data: {
+          session: session.token ? { access_token: session.token } : null,
+        },
+      }),
+    },
+  },
+}));
+import { getGcsPublicUrl, uploadToGcs } from "./gcs";
+
+const signed = {
+  url: "https://storage.googleapis.com/maso_storage_main/signed-put-url",
+  headers: {
+    "Content-Type": "application/pdf",
+    "x-goog-content-length-range": "0,13",
+  },
+};
+const target = { kind: "attachment" as const, id: "attachment-id" };
+const file = () =>
+  new File(["dummy content"], "doc.pdf", { type: "application/pdf" });
 
 describe("Google Cloud Storage helpers", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    session.token = "user-token";
   });
 
   it("builds the correct public URL for objects in maso_storage_main", () => {
@@ -15,81 +40,70 @@ describe("Google Cloud Storage helpers", () => {
     );
   });
 
-  it("fetches signed upload URL from /api/gcs/sign-upload", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        url: "https://storage.googleapis.com/maso_storage_main/signed-put-url",
-      }),
-    });
+  it("asks for a signature for the prepared record, with the session token", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => signed })
+      .mockResolvedValueOnce({ ok: true, text: async () => "" });
     vi.stubGlobal("fetch", mockFetch);
-
-    const url = await getSignedUploadUrl("test/path.pdf", "application/pdf");
-    expect(url).toBe(
-      "https://storage.googleapis.com/maso_storage_main/signed-put-url",
-    );
-    expect(mockFetch).toHaveBeenCalledWith("/api/gcs/sign-upload", {
+    const upload = file();
+    await uploadToGcs(target, upload, "application/pdf");
+    expect(mockFetch).toHaveBeenNthCalledWith(1, "/api/gcs/sign-upload", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer user-token",
+      },
       body: JSON.stringify({
-        path: "test/path.pdf",
+        kind: "attachment",
+        id: "attachment-id",
         contentType: "application/pdf",
       }),
     });
+    expect(mockFetch).toHaveBeenLastCalledWith(signed.url, {
+      method: "PUT",
+      headers: signed.headers,
+      body: upload,
+    });
   });
 
-  it("uploads file to signed URL via PUT", async () => {
-    const mockFetch = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          url: "https://storage.googleapis.com/maso_storage_main/signed-put-url",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        text: async () => "",
-      });
+  it("does not upload without a session", async () => {
+    session.token = null;
+    const mockFetch = vi.fn();
     vi.stubGlobal("fetch", mockFetch);
+    await expect(uploadToGcs(target, file())).rejects.toThrow(
+      /Entre novamente/,
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 
-    const file = new File(["dummy content"], "doc.pdf", {
-      type: "application/pdf",
-    });
-    await uploadToGcs("tasks/1/doc.pdf", file);
-
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(mockFetch).toHaveBeenLastCalledWith(
-      "https://storage.googleapis.com/maso_storage_main/signed-put-url",
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/pdf" },
-        body: file,
-      },
+  it("surfaces a refused signature", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "Envio não autorizado ou expirado." }),
+      }),
+    );
+    await expect(uploadToGcs(target, file())).rejects.toThrow(
+      "Envio não autorizado ou expirado.",
     );
   });
 
   it("throws error if PUT upload fails", async () => {
-    const mockFetch = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          url: "https://storage.googleapis.com/maso_storage_main/signed-put-url",
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => signed })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          statusText: "Forbidden",
+          text: async () => "Access denied",
         }),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 403,
-        statusText: "Forbidden",
-        text: async () => "Access denied",
-      });
-    vi.stubGlobal("fetch", mockFetch);
-
-    const file = new File(["dummy content"], "doc.pdf", {
-      type: "application/pdf",
-    });
-    await expect(uploadToGcs("tasks/1/doc.pdf", file)).rejects.toThrow(
+    );
+    await expect(uploadToGcs(target, file())).rejects.toThrow(
       /Falha no upload para o Google Cloud Storage/,
     );
   });

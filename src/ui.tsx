@@ -10,6 +10,7 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
 import {
   Check,
+  Minus,
   ChevronDown,
   ChevronUp,
   Type,
@@ -66,7 +67,11 @@ export function Checkbox(props: ComponentProps<typeof CheckboxPrimitive.Root>) {
       className={`ui-checkbox ${props.className ?? ""}`}
     >
       <CheckboxPrimitive.Indicator>
-        <Check size={14} strokeWidth={3} />
+        {props.checked === "indeterminate" ? (
+          <Minus size={14} strokeWidth={3} />
+        ) : (
+          <Check size={14} strokeWidth={3} />
+        )}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );
@@ -120,6 +125,9 @@ export function Select({
       value={selected}
       onValueChange={(next) => {
         const actual = next === "__mavi_empty__" ? "" : next;
+        // Radix's hidden native select only knows options rendered while the
+        // menu was open, so a value set from outside can bounce back as "".
+        if (actual === "" && !options.some((o) => !o.value)) return;
         setInternal(actual);
         onValueChange?.(actual);
       }}

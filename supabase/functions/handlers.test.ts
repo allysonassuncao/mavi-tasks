@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createInviteHandler } from "./invite-user/handler";
 import { createReconcileHandler } from "./storage-reconcile/handler";
 import { createUserAdminHandler } from "./user-admin/handler";
+import { createGcsStorageHandler } from "./gcs-storage/handler";
 
 const origin = "https://app.example.com";
 const payload = {
@@ -453,5 +454,22 @@ describe("user-admin", () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("gcs-storage (desativada)", () => {
+  it("recusa assinar uploads, mesmo com sessão", async () => {
+    const res = await createGcsStorageHandler(origin)(
+      new Request(origin, {
+        method: "POST",
+        headers: { Authorization: "Bearer user-token", Origin: origin },
+        body: JSON.stringify({
+          path: "empresa/tarefa/arquivo",
+          contentType: "text/html",
+        }),
+      }),
+    );
+    expect(res.status).toBe(410);
+    expect(await res.json()).not.toHaveProperty("url");
   });
 });

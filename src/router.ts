@@ -9,6 +9,8 @@ export const pagePaths = {
   projects: "/projetos",
   hours: "/horas",
   reports: "/relatorios",
+  drive: "/drive",
+  profile: "/perfil",
   settings: "/configuracoes",
 } as const;
 export type Page = keyof typeof pagePaths;

@@ -1,4 +1,4 @@
-import { Clock3, Users, ShieldCheck } from "lucide-react";
+import { Clock3, Users } from "lucide-react";
 import { Avatar, Empty } from "./components";
 import { duration } from "./domain";
 import type { Summary } from "./api";
@@ -6,9 +6,14 @@ import type { Summary } from "./api";
 export default function Reports({
   byClient,
   byPerson,
+  personal = false,
+  avatarOf,
 }: {
+  avatarOf?: (userId: string) => string | null | undefined;
   byClient: Summary["by_client"];
   byPerson: Summary["by_person"];
+  /** Collaborator view: only the signed-in person's hours and workload. */
+  personal?: boolean;
 }) {
   const maximumMinutes = Math.max(
     1,
@@ -19,8 +24,12 @@ export default function Reports({
       <section className="panel">
         <div className="panel-heading">
           <div>
-            <h2>Horas por cliente</h2>
-            <p>Tempo registrado no período selecionado</p>
+            <h2>{personal ? "Suas horas por cliente" : "Horas por cliente"}</h2>
+            <p>
+              {personal
+                ? "Seu tempo registrado no período selecionado"
+                : "Tempo registrado no período selecionado"}
+            </p>
           </div>
           <Clock3 size={20} />
         </div>
@@ -51,15 +60,19 @@ export default function Reports({
       <section className="panel">
         <div className="panel-heading">
           <div>
-            <h2>Carga de trabalho</h2>
-            <p>Tarefas abertas e horas estimadas totais</p>
+            <h2>{personal ? "Sua carga de trabalho" : "Carga de trabalho"}</h2>
+            <p>
+              {personal
+                ? "Suas tarefas abertas e horas estimadas"
+                : "Tarefas abertas e horas estimadas totais"}
+            </p>
           </div>
           <Users size={20} />
         </div>
         <div className="workload">
           {byPerson.map((p) => (
             <div key={p.id}>
-              <Avatar name={p.name} />
+              <Avatar name={p.name} src={avatarOf?.(p.id)} />
               <span>
                 <strong>{p.name}</strong>
                 <small>{p.tasks} tarefas abertas</small>
@@ -70,7 +83,6 @@ export default function Reports({
         </div>
       </section>
       <div className="report-note">
-        <ShieldCheck size={18} /> Os relatórios respeitam suas permissões.
         Estimativas não representam capacidade disponível.
       </div>
     </div>

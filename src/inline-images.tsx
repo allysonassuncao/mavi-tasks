@@ -3,6 +3,7 @@ import { ImageOff } from "lucide-react";
 import { rpc } from "./api";
 import { supabase } from "./supabase";
 import { uploadToGcs, getGcsPublicUrl } from "./gcs";
+import { inlineImageTypes } from "./upload-types";
 import { Skeleton } from "./ui";
 
 const demoImages = new Map<string, string>();
@@ -13,7 +14,7 @@ export async function uploadInlineImage(
   demo: boolean,
 ) {
   if (
-    !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+    !inlineImageTypes.includes(file.type) ||
     file.size === 0 ||
     file.size > 5242880
   )
@@ -28,7 +29,7 @@ export async function uploadInlineImage(
     p_name: file.name,
     p_size: file.size,
   });
-  await uploadToGcs(record.path, file, file.type);
+  await uploadToGcs({ kind: "inline-image", id: record.id }, file, file.type);
   return record.id as string;
 }
 

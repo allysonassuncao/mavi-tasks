@@ -27,8 +27,6 @@ import {
   Send,
   Square,
   UserRound,
-  X,
-  Plus,
   History,
   Save,
   LockKeyhole,
@@ -44,16 +42,19 @@ import {
   type Comment,
   type Attachment,
   type TaskEvent,
+  type ProjectApprover,
   priorities,
 } from "./types";
 import {
-  dateKey,
   dateLabel,
+  defaultContractName,
   duration,
-  minutes,
+  durationWithSeconds,
   names,
   taskTimerSeconds,
   formatClock,
+  canApproveTask,
+  projectReview,
 } from "./domain";
 import { useNow } from "./useClock";
 import { supabase } from "./supabase";
@@ -61,82 +62,87 @@ import { rpc, taskExtras, invalidateTaskExtras } from "./api";
 import { getGcsPublicUrl } from "./gcs";
 import type { DemoStore } from "./demo-store";
 import { RichTextContent } from "./RichTextContent";
-import {
-  attachmentAccept,
-  validateAttachment,
-  uploadAttachment,
-  saveTaskWithAttachments,
-  type TaskUploadState,
-} from "./attachments";
+import { ContractPicker } from "./ContractPicker";
+import { TeamPicker } from "./TeamPicker";
+import { ReviewSettings } from "./ReviewSettings";
+import { attachmentAccept, uploadAttachment } from "./attachments";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
+export type FormPreset = {
+  client?: string;
+  product?: string;
+  contract?: string;
+  project?: string;
+  team?: string;
+};
 export function CreateForm({
   kind,
-  initialProduct,
-  demo,
+  preset = {},
   data,
   company,
-  user,
   busy,
   mutate,
   onClose,
 }: {
   kind: string;
-  initialProduct?: string;
-  demo: boolean;
+  preset?: FormPreset;
   data: Snapshot;
   company: string;
-  user: string;
   busy: boolean;
   mutate: Mutate;
   onClose: () => void;
 }) {
-  const [contract, setContract] = useState(data.contracts[0]?.id ?? ""),
+  const [contract, setContract] = useState(
+      data.contracts.some((c) => c.id === preset.contract)
+        ? preset.contract!
+        : (data.contracts.find((c) => !c.archived)?.id ?? ""),
+    ),
     [error, setError] = useState("");
-  const uploads = useRef<TaskUploadState>({ pending: [] });
+  const [linkClient, setLinkClient] = useState(
+    preset.client ?? data.clients[0]?.id ?? "",
+  );
+  const [linkProduct, setLinkProduct] = useState(
+    () =>
+      preset.product ??
+      (
+        data.products.find(
+          (p) =>
+            !data.contracts.some(
+              (c) =>
+                !c.archived &&
+                c.client_id === linkClient &&
+                c.product_id === p.id,
+            ),
+        ) ?? data.products[0]
+      )?.id ??
+      "",
+  );
+  const clientName = data.clients.find((c) => c.id === linkClient)?.name ?? "";
+  const productName =
+    data.products.find((p) => p.id === linkProduct)?.name ?? "";
+  const alreadyLinked = data.contracts.some(
+    (c) =>
+      !c.archived && c.client_id === linkClient && c.product_id === linkProduct,
+  );
+  const [clientTeams, setClientTeams] = useState<string[]>([]);
+  const [requiresReview, setRequiresReview] = useState(true);
+  const [approver, setApprover] = useState<ProjectApprover>("creator");
   const submitting = useRef(false);
   const [saving, setSaving] = useState(false);
-  const [editorUploading, setEditorUploading] = useState(false);
-  const [, updateUploads] = useState(0);
-  const redrawUploads = () => updateUploads((v) => v + 1);
   const close = () => {
-    if (!submitting.current && !editorUploading) onClose();
+    if (!submitting.current) onClose();
   };
-  function addFiles(files: FileList | null) {
-    setError("");
-    const errors: string[] = [];
-    for (const file of Array.from(files ?? [])) {
-      try {
-        validateAttachment(file);
-        if (
-          !uploads.current.pending.some(
-            (f) =>
-              f.name === file.name &&
-              f.size === file.size &&
-              f.lastModified === file.lastModified,
-          )
-        )
-          uploads.current.pending.push(file);
-      } catch (e) {
-        errors.push((e as Error).message);
-      }
-    }
-    setError(errors.join(" "));
-    redrawUploads();
-  }
   const titles: Record<string, string> = {
-    task: "Nova tarefa",
     client: "Novo cliente",
     product: "Novo produto",
-    contract: "Adicionar produto contratado",
+    contract: "Adicionar produto ao cliente",
     project: "Novo projeto",
     time: "Registrar horas",
-    team: "Nova equipe",
     user: "Convidar usuário",
   };
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (submitting.current || editorUploading) return;
+    if (submitting.current) return;
     setError("");
     const f = new FormData(e.currentTarget),
       s = (key: string) => String(f.get(key) ?? "");
@@ -154,23 +160,23 @@ export function CreateForm({
         break;
       case "client":
         fn = "create_client";
-        Object.assign(a, { p_name: s("name"), p_email: s("email") });
+        Object.assign(a, {
+          p_name: s("name"),
+          p_email: s("email"),
+          p_teams: clientTeams,
+        });
         break;
       case "product":
         fn = "create_product";
         a.p_name = s("name");
         break;
-      case "team":
-        fn = "create_team";
-        Object.assign(a, { p_name: s("name"), p_users: f.getAll("members") });
-        break;
       case "contract":
         fn = "create_contract";
         Object.assign(a, {
-          p_client: s("client"),
-          p_product: s("product"),
-          p_name: s("name"),
-          p_team: s("team") || null,
+          p_client: linkClient,
+          p_product: linkProduct,
+          p_name:
+            s("name").trim() || defaultContractName(productName, clientName),
         });
         break;
       case "project":
@@ -179,23 +185,8 @@ export function CreateForm({
           p_contract: contract,
           p_name: s("name"),
           p_due: s("due") || null,
-        });
-        break;
-      case "task":
-        fn = "create_task";
-        Object.assign(a, {
-          p_contract: contract,
-          p_title: s("title"),
-          p_assignee: s("assignee"),
-          p_due: s("due"),
-          p_start: s("start_date") || null,
-          p_project: s("project") || null,
-          p_team: s("team") || null,
-          p_description: s("description"),
-          p_priority: s("priority"),
-          p_estimated: Number(s("estimated")) * 60,
-          p_client_approval: f.has("client_approval"),
-          p_parent: s("parent") || null,
+          p_requires_review: requiresReview,
+          p_approver: approver,
         });
         break;
       case "time":
@@ -211,190 +202,22 @@ export function CreateForm({
     submitting.current = true;
     setSaving(true);
     try {
-      if (kind === "task") {
-        await saveTaskWithAttachments(
-          uploads.current,
-          () => mutate(fn, a),
-          uploadAttachment,
-          redrawUploads,
-        );
-      } else await mutate(fn, a);
+      await mutate(fn, a);
       onClose();
     } catch (e) {
-      const message =
-        (e as Error).message ?? "Não foi possível enviar o arquivo.";
-      setError(
-        uploads.current.taskId
-          ? `A tarefa foi salva. ${message} Tente reenviar os anexos pendentes ou feche para continuar depois.`
-          : message,
-      );
+      setError((e as Error).message);
     } finally {
       submitting.current = false;
       setSaving(false);
     }
   }
-  const contractSelect = (
-    <label>
-      Produto contratado
-      <Select required value={contract} onValueChange={setContract}>
-        {!data.contracts.length && (
-          <SelectOption value="">
-            Vincule um produto a um cliente primeiro
-          </SelectOption>
-        )}
-        {data.contracts.map((c) => (
-          <SelectOption value={c.id} key={c.id}>
-            {data.clients.find((client) => client.id === c.client_id)?.name} ·{" "}
-            {data.products.find((p) => p.id === c.product_id)?.name} — {c.name}
-          </SelectOption>
-        ))}
-      </Select>
-    </label>
-  );
   return (
-    <Modal
-      title={titles[kind]}
-      onClose={close}
-      busy={saving || editorUploading}
-    >
+    <Modal title={titles[kind]} onClose={close} busy={saving}>
       <form className="entity-form" onSubmit={submit}>
-        <fieldset
-          className="create-fields"
-          disabled={saving || !!uploads.current.taskId}
-        >
-          {kind === "task" ? (
-            <>
-              <label>
-                Nome da tarefa
-                <Input
-                  name="title"
-                  placeholder="O que precisa ser feito?"
-                  required
-                  minLength={2}
-                  maxLength={240}
-                  autoFocus
-                />
-              </label>
-              {contractSelect}
-              <div className="form-columns">
-                <label>
-                  Projeto
-                  <Select name="project" key={contract}>
-                    <SelectOption value="">
-                      Sem projeto · manutenção
-                    </SelectOption>
-                    {data.projects
-                      .filter((p) => p.contract_id === contract)
-                      .map((p) => (
-                        <SelectOption key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectOption>
-                      ))}
-                  </Select>
-                </label>
-                <label>
-                  Equipe
-                  <Select name="team" key={contract}>
-                    <SelectOption value="">Sem equipe principal</SelectOption>
-                    {data.teams
-                      .filter((t) =>
-                        data.contractTeams.some(
-                          (ct) =>
-                            ct.contract_id === contract && ct.team_id === t.id,
-                        ),
-                      )
-                      .map((t) => (
-                        <SelectOption key={t.id} value={t.id}>
-                          {t.name}
-                        </SelectOption>
-                      ))}
-                  </Select>
-                </label>
-              </div>
-              <div className="form-columns">
-                <label>
-                  Responsável
-                  <Select name="assignee" defaultValue={user} required>
-                    {data.members
-                      .filter((m) => m.active)
-                      .map((m) => (
-                        <SelectOption key={m.user_id} value={m.user_id}>
-                          {m.name}
-                        </SelectOption>
-                      ))}
-                  </Select>
-                </label>
-                <label>
-                  Prazo combinado
-                  <Input
-                    name="due"
-                    type="date"
-                    defaultValue={dateKey()}
-                    required
-                  />
-                </label>
-              </div>
-              <div className="form-columns">
-                <label>
-                  Prioridade
-                  <Select name="priority" defaultValue="normal">
-                    {Object.entries(priorities).map(([id, label]) => (
-                      <SelectOption key={id} value={id}>
-                        {label}
-                      </SelectOption>
-                    ))}
-                  </Select>
-                </label>
-                <label>
-                  Estimativa em horas
-                  <Input
-                    type="number"
-                    name="estimated"
-                    min="0"
-                    max="10000"
-                    step="0.25"
-                    defaultValue="0"
-                  />
-                </label>
-              </div>
-              <label>
-                Tarefa principal (opcional)
-                <Select name="parent" key={contract}>
-                  <SelectOption value="">
-                    Esta é uma tarefa principal
-                  </SelectOption>
-                  {data.tasks
-                    .filter((t) => t.contract_id === contract)
-                    .map((t) => (
-                      <SelectOption key={t.id} value={t.id}>
-                        {t.title}
-                      </SelectOption>
-                    ))}
-                </Select>
-              </label>
-              <label>
-                Início planejado (opcional)
-                <Input name="start_date" type="date" />
-              </label>
-              <Suspense fallback={<Loading compact />}>
-                <RichTextEditor
-                  company={company}
-                  demo={demo}
-                  onUploading={setEditorUploading}
-                  disabled={saving || !!uploads.current.taskId}
-                />
-              </Suspense>
-              <label className="checkbox-label">
-                <Checkbox name="client_approval" /> Exigir aprovação do cliente
-                além da aprovação interna
-              </label>
-            </>
-          ) : null}
-          {["client", "product", "project", "team", "contract"].includes(
-            kind,
-          ) && (
+        <fieldset className="create-fields" disabled={saving}>
+          {["client", "product", "project"].includes(kind) && (
             <label>
-              {kind === "contract" ? "Nome do serviço contratado" : "Nome"}
+              {kind === "project" ? "Nome do projeto" : "Nome"}
               <Input
                 name="name"
                 required
@@ -405,96 +228,125 @@ export function CreateForm({
                   kind === "client"
                     ? "Ex.: Aurora Studio"
                     : kind === "product"
-                      ? "Ex.: Make Ads"
-                      : kind === "contract"
-                        ? "Ex.: Make Ads · Aurora"
+                      ? "Ex.: Gestão de tráfego, Social media"
+                      : kind === "project"
+                        ? "Ex.: Campanha Black Friday, Lançamento do site"
                         : ""
                 }
               />
             </label>
           )}
           {kind === "client" && (
-            <label>
-              E-mail de contato
-              <Input
-                name="email"
-                type="email"
-                placeholder="contato@cliente.com.br"
+            <>
+              <label>
+                E-mail de contato
+                <Input
+                  name="email"
+                  type="email"
+                  placeholder="contato@cliente.com.br"
+                />
+              </label>
+              <TeamPicker
+                teams={data.teams}
+                value={clientTeams}
+                onChange={setClientTeams}
               />
-            </label>
+            </>
           )}
+          {kind === "project" &&
+            (contract ? (
+              <ContractPicker
+                data={data}
+                contract={contract}
+                onContractChange={setContract}
+              />
+            ) : (
+              <p className="form-error" role="alert">
+                Adicione um produto a um cliente (em Clientes) antes de criar
+                projetos.
+              </p>
+            ))}
           {kind === "project" && (
             <>
-              {contractSelect}
+              <small>
+                Projetos agrupam as entregas de um produto do cliente, como uma
+                campanha ou um lançamento. Tarefas do dia a dia podem ficar sem
+                projeto.
+              </small>
               <label>
                 Prazo do projeto
                 <Input name="due" type="date" />
               </label>
+              {contract && (
+                <ReviewSettings
+                  data={data}
+                  contractId={contract}
+                  required={requiresReview}
+                  approver={approver}
+                  onRequiredChange={setRequiresReview}
+                  onApproverChange={setApprover}
+                />
+              )}
             </>
           )}
           {kind === "contract" && (
             <>
+              <div className="form-columns">
+                <label>
+                  Cliente
+                  <Select
+                    required
+                    value={linkClient}
+                    onValueChange={setLinkClient}
+                  >
+                    {!data.clients.length && (
+                      <SelectOption value="">
+                        Cadastre um cliente primeiro
+                      </SelectOption>
+                    )}
+                    {data.clients.map((c) => (
+                      <SelectOption key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectOption>
+                    ))}
+                  </Select>
+                </label>
+                <label>
+                  Produto
+                  <Select
+                    required
+                    value={linkProduct}
+                    onValueChange={setLinkProduct}
+                  >
+                    {!data.products.length && (
+                      <SelectOption value="">
+                        Cadastre um produto primeiro
+                      </SelectOption>
+                    )}
+                    {data.products.map((p) => (
+                      <SelectOption key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectOption>
+                    ))}
+                  </Select>
+                </label>
+              </div>
+              {alreadyLinked && (
+                <small className="form-hint" role="status">
+                  {clientName} já contrata {productName}. Se for um segundo
+                  contrato (outra unidade ou período), dê uma identificação
+                  abaixo para diferenciar.
+                </small>
+              )}
               <label>
-                Cliente
-                <Select name="client" required>
-                  {!data.clients.length && (
-                    <SelectOption value="">
-                      Cadastre um cliente primeiro
-                    </SelectOption>
-                  )}
-                  {data.clients.map((c) => (
-                    <SelectOption key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectOption>
-                  ))}
-                </Select>
-              </label>
-              <label>
-                Produto
-                <Select
-                  name="product"
-                  required
-                  defaultValue={initialProduct || undefined}
-                >
-                  {!data.products.length && (
-                    <SelectOption value="">
-                      Cadastre um produto primeiro
-                    </SelectOption>
-                  )}
-                  {data.products.map((p) => (
-                    <SelectOption key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectOption>
-                  ))}
-                </Select>
-              </label>
-              <label>
-                Equipe com acesso
-                <Select name="team">
-                  <SelectOption value="">
-                    Somente administradores por enquanto
-                  </SelectOption>
-                  {data.teams.map((t) => (
-                    <SelectOption key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectOption>
-                  ))}
-                </Select>
+                Identificação (opcional)
+                <Input
+                  name="name"
+                  maxLength={120}
+                  placeholder="Ex.: Unidade Centro, Contrato 2026"
+                />
               </label>
             </>
-          )}
-          {kind === "team" && (
-            <fieldset>
-              <legend>Pessoas da equipe</legend>
-              {data.members
-                .filter((m) => m.active)
-                .map((m) => (
-                  <label className="checkbox-label" key={m.user_id}>
-                    <Checkbox name="members" value={m.user_id} />
-                    {m.name}
-                  </label>
-                ))}
-            </fieldset>
           )}
           {kind === "time" && (
             <>
@@ -576,68 +428,6 @@ export function CreateForm({
             </>
           )}
         </fieldset>
-        {kind === "task" && (
-          <section
-            className="creation-attachments"
-            aria-label="Anexos da nova tarefa"
-          >
-            <label
-              className={`upload-zone creation-upload ${saving || demo ? "disabled" : ""}`}
-            >
-              <Paperclip size={17} /> Adicionar anexos
-              <Input
-                type="file"
-                multiple
-                accept={attachmentAccept}
-                disabled={saving || demo}
-                onChange={(e) => {
-                  addFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            <small>
-              {demo
-                ? "Envio de arquivos disponível no ambiente conectado. O modo demonstração não armazena arquivos."
-                : "Até 20 MB por arquivo. PDF, imagens, TXT, CSV, ZIP, DOCX, XLSX e PPTX."}
-            </small>
-            {uploads.current.pending.map((file, index) => (
-              <div
-                className="pending-file"
-                key={`${file.name}-${file.size}-${file.lastModified}`}
-              >
-                <Paperclip size={15} />
-                <span>
-                  {file.name}
-                  <small>{(file.size / 1024).toFixed(1)} KB</small>
-                </span>
-                <Button
-                  type="button"
-                  className="icon-btn"
-                  aria-label={`Remover ${file.name}`}
-                  disabled={saving}
-                  onClick={() => {
-                    uploads.current.pending.splice(index, 1);
-                    redrawUploads();
-                  }}
-                >
-                  <X size={16} />
-                </Button>
-              </div>
-            ))}
-            {saving && uploads.current.taskId && (
-              <div role="status" aria-label="Enviando anexos">
-                <Skeleton className="skeleton-title" />
-              </div>
-            )}
-            {uploads.current.taskId && (
-              <small role="status">
-                Tarefa criada. {uploads.current.pending.length} anexo(s)
-                pendente(s).
-              </small>
-            )}
-          </section>
-        )}
         {error && (
           <p className="form-error" role="alert">
             {error}
@@ -647,26 +437,22 @@ export function CreateForm({
           <Button
             type="button"
             className="btn secondary"
-            disabled={busy || saving || editorUploading}
-            loading={busy || saving || editorUploading}
+            disabled={busy || saving}
+            loading={busy || saving}
             onClick={close}
           >
             Cancelar
           </Button>
           <Button
             className="btn primary"
-            disabled={busy || saving || editorUploading}
-            loading={busy || saving || editorUploading}
+            disabled={busy || saving}
+            loading={busy || saving}
           >
-            {uploads.current.taskId
-              ? uploads.current.pending.length
-                ? "Reenviar anexos"
-                : "Concluir"
-              : kind === "user"
-                ? "Enviar convite"
-                : kind === "time"
-                  ? "Registrar horas"
-                  : "Salvar"}
+            {kind === "user"
+              ? "Enviar convite"
+              : kind === "time"
+                ? "Registrar horas"
+                : "Salvar"}
             <Check size={17} />
           </Button>
         </div>
@@ -719,17 +505,23 @@ export function TaskDetail({
     isAdmin = member?.role === "admin",
     isManager = member?.role === "manager",
     isLeader = isAdmin || isManager,
-    canApprove = isLeader,
+    canApprove = canApproveTask(data, task, user),
     canEdit = isLeader || task.creator_id === user,
     canWork = isLeader || task.creator_id === user || task.assignee_id === user;
+  const review = projectReview(
+    data.projects.find((p) => p.id === task.project_id),
+  );
+  // Tasks outside a project keep the default: validation by creator or leader.
+  const reviewer = !task.project_id
+    ? "o criador ou um gestor"
+    : review.approver === "supervisor"
+      ? "o supervisor da equipe"
+      : "o criador da tarefa";
   const running = currentRunning;
   const isRunning = running?.task_id === task.id;
   const now = useNow(isRunning);
   const totalSeconds = taskTimerSeconds(data.hours, task.id, running, now);
   const clock = formatClock(totalSeconds);
-  const taskHours = data.hours
-    .filter((h) => h.task_id === task.id)
-    .reduce((s, h) => s + minutes(h, now), 0);
   useEffect(() => {
     if (!isRunning) setEditing(false);
   }, [isRunning]);
@@ -867,7 +659,7 @@ export function TaskDetail({
           <span>/</span>
           {n.product?.name}
           <span>/</span>
-          {n.project?.name ?? "Manutenção"}
+          {n.project?.name ?? "Sem projeto"}
         </div>
         <div className="detail-title">
           <h2>{task.title}</h2>
@@ -884,7 +676,11 @@ export function TaskDetail({
               <UserRound size={16} /> Responsável
             </span>
             <strong>
-              <Avatar name={n.member?.name ?? "?"} size="small" />
+              <Avatar
+                name={n.member?.name ?? "?"}
+                src={n.member?.avatar_url}
+                size="small"
+              />
               {n.member?.name}
             </strong>
           </div>
@@ -905,7 +701,7 @@ export function TaskDetail({
               <Clock3 size={16} /> Tempo
             </span>
             <strong>
-              {duration(taskHours)}{" "}
+              {durationWithSeconds(totalSeconds)}{" "}
               <small>/ {duration(task.estimated_minutes)} estimadas</small>
             </strong>
           </div>
@@ -1085,10 +881,16 @@ export function TaskDetail({
         <div className="approval-state">
           <Check size={17} />
           <span>
-            Aprovação interna:{" "}
-            <strong>
-              {task.internal_approved_by ? "aprovada" : "pendente"}
-            </strong>
+            {review.required ? (
+              <>
+                Validação por {reviewer}:{" "}
+                <strong>
+                  {task.internal_approved_by ? "aprovada" : "pendente"}
+                </strong>
+              </>
+            ) : (
+              <>Este projeto não tem etapa de validação</>
+            )}
             {task.requires_client_approval && (
               <>
                 {" "}
@@ -1120,7 +922,10 @@ export function TaskDetail({
                   loading={busy}
                   onClick={() => void transition("submit")}
                 >
-                  <Check size={16} /> Enviar para validação
+                  <Check size={16} />{" "}
+                  {review.required
+                    ? "Enviar para validação"
+                    : "Concluir tarefa"}
                 </Button>
               )}
               {task.status === "review" && canApprove && (
@@ -1239,6 +1044,7 @@ export function TaskDetail({
                   data.members.find((m) => m.user_id === user)?.name ??
                   "Usuário"
                 }
+                src={data.members.find((m) => m.user_id === user)?.avatar_url}
               />
               <Suspense fallback={<Loading compact />}>
                 <RichTextEditor
@@ -1267,6 +1073,10 @@ export function TaskDetail({
                     name={
                       data.members.find((m) => m.user_id === c.author_id)
                         ?.name ?? "Usuário"
+                    }
+                    src={
+                      data.members.find((m) => m.user_id === c.author_id)
+                        ?.avatar_url
                     }
                   />
                   <div>
@@ -1344,19 +1154,21 @@ export function TaskDetail({
                 <span className="event-dot" />
                 <div>
                   <strong>
-                    {(
-                      {
-                        created: "Tarefa criada",
-                        start: "Trabalho iniciado",
-                        submit: "Enviada para validação",
-                        return: "Devolvida ao criador",
-                        reject: "Ajustes solicitados",
-                        approve_internal: "Aprovação interna registrada",
-                        approve_client: "Aprovação do cliente registrada",
-                        reopen: "Tarefa reaberta",
-                        edited: "Tarefa editada",
-                      } as Record<string, string>
-                    )[e.action] ?? e.action}
+                    {e.action === "submit" && e.detail.to === "done"
+                      ? "Tarefa concluída"
+                      : ((
+                          {
+                            created: "Tarefa criada",
+                            start: "Trabalho iniciado",
+                            submit: "Enviada para validação",
+                            return: "Devolvida ao criador",
+                            reject: "Ajustes solicitados",
+                            approve_internal: "Aprovação interna registrada",
+                            approve_client: "Aprovação do cliente registrada",
+                            reopen: "Tarefa reaberta",
+                            edited: "Tarefa editada",
+                          } as Record<string, string>
+                        )[e.action] ?? e.action)}
                   </strong>
                   <small>
                     {new Date(e.created_at).toLocaleString("pt-BR")}

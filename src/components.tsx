@@ -1,18 +1,24 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { statuses, type Status, type TimeEntry } from "./types";
-import { initials, duration, minutes } from "./domain";
+import { initials, durationWithSeconds, entrySeconds } from "./domain";
 import { useNow } from "./useClock";
 export function Avatar({
   name,
   size = "normal",
+  src,
 }: {
   name: string;
-  size?: "small" | "normal" | "large";
+  size?: "small" | "normal" | "large" | "xlarge";
+  src?: string | null;
 }) {
   return (
     <span className={`avatar ${size}`} title={name}>
-      {initials(name)}
+      {src ? (
+        <img src={src} alt="" loading="lazy" decoding="async" />
+      ) : (
+        initials(name)
+      )}
     </span>
   );
 }
@@ -41,6 +47,12 @@ export function Modal({
   useEffect(() => {
     const d = ref.current;
     d?.showModal();
+    // showModal() moves focus to the close button, undoing the form's
+    // autoFocus (which ran while the dialog was still closed).
+    if (!wide)
+      d?.querySelector<HTMLElement>(
+        ".entity-form input:not([type=hidden]):not([tabindex='-1']):not(:disabled):not([readonly])",
+      )?.focus();
     return () => d?.close();
   }, []);
   return (
@@ -90,5 +102,5 @@ export function Empty({
 export { Loading } from "./ui";
 export function LiveDuration({ entry }: { entry: TimeEntry }) {
   const now = useNow(!entry.ended_at);
-  return <>{duration(minutes(entry, now))}</>;
+  return <>{durationWithSeconds(entrySeconds(entry, now))}</>;
 }

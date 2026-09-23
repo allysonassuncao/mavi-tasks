@@ -33,6 +33,10 @@ import {
   FolderKanban,
   Clock3,
   ChartNoAxesCombined,
+  HardDrive,
+  Bell,
+  BellOff,
+  BellRing,
   Settings2,
   Search,
   Plus,
@@ -40,6 +44,8 @@ import {
   ChevronRight,
   ChevronLeft,
   ChevronsUpDown,
+  ChevronsLeft,
+  ChevronsRight,
   Menu,
   LogOut,
   Check,
@@ -57,14 +63,12 @@ import {
   Send,
   Download,
   RefreshCw,
-  ExternalLink,
   Flag,
   X,
   ShieldCheck,
   Building2,
   Package,
   Pencil,
-  BriefcaseBusiness,
   ChartNoAxesGantt,
   UserPlus,
   KeyRound,
@@ -85,6 +89,7 @@ import {
 } from "./components";
 import {
   type Task,
+  type Project,
   type Snapshot,
   type TimeEntry,
   type Comment,
@@ -112,10 +117,30 @@ import {
 import { useNow } from "./useClock";
 import {
   CreateForm,
+  type FormPreset,
   TaskDetail,
   ResetPasswordModal,
   UpdateEmailModal,
 } from "./forms";
+import { TaskCreateForm } from "./TaskCreateForm";
+import { ClientPortfolio } from "./ClientPortfolio";
+import { ProjectsBrowser } from "./ProjectsBrowser";
+import { TeamForm } from "./TeamForm";
+import { Drive } from "./DrivePage";
+import { ProfilePage } from "./ProfilePage";
+import { MemberForm } from "./MemberForm";
+import {
+  notificationState,
+  showNotification,
+  toggleNotifications,
+  type NotificationState,
+} from "./notifications";
+import {
+  canCreateTaskIn,
+  contractParts,
+  contractProductLabel,
+  teamClientIds,
+} from "./domain";
 
 const TaskSchedule = lazy(() =>
   import("./TaskSchedule").then((m) => ({ default: m.TaskSchedule })),
@@ -130,10 +155,10 @@ const navigation = [
   { id: "tasks", label: "Tarefas", icon: CheckCheck },
   { id: "clients", label: "Clientes", icon: Users },
   { id: "products", label: "Produtos", icon: Package },
-  { id: "contracts", label: "Produtos contratados", icon: BriefcaseBusiness },
   { id: "projects", label: "Projetos", icon: FolderKanban },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
+  { id: "drive", label: "Drive", icon: HardDrive },
 ] as const;
 // Mutations that return the affected row (see the RPCs in
 // supabase/migrations/20260921120000_performance_optimizations.sql) patch
@@ -142,6 +167,27 @@ const navigation = [
 const TASK_ROW_MUTATIONS = new Set(["transition_task", "update_task"]);
 const TIMER_ROW_MUTATIONS = new Set(["start_timer", "stop_timer"]);
 const SELF_HANDLED_MUTATIONS = new Set(["add_comment"]);
+// Collaborators see these modules scoped to them: clients/projects they serve
+// (read-only, plus creating tasks) and only their own hours and reports.
+const MEMBER_PAGES: readonly Page[] = [
+  "tasks",
+  "clients",
+  "projects",
+  "hours",
+  "reports",
+  "drive",
+  "profile",
+];
+// A UI preference, not cached data: it lives outside the "mavi:cache:" prefix
+// that logout clears, so it survives signing out.
+const SIDEBAR_KEY = "mavi:sidebar-collapsed";
+function readSidebarCollapsed() {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 export default function App() {
   const demoStore = useRef(new DemoStore());
   const [needsPassword, setNeedsPassword] = useState(
@@ -175,6 +221,19 @@ export default function App() {
     setCompanyRef(next ? companySlug(next, data.companies) : "");
   }
   const page = usePage();
+  const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
+  const [notifications, setNotifications] =
+    useState<NotificationState>(notificationState);
+  function toggleCollapsed() {
+    setCollapsed((was) => {
+      try {
+        localStorage.setItem(SIDEBAR_KEY, was ? "0" : "1");
+      } catch {
+        // Blocked storage: the choice just won't persist.
+      }
+      return !was;
+    });
+  }
   const [sidebar, setSidebar] = useState(false),
     [viewValue, setView] = useUrlState<string>("visualizacao", "list");
   const view = ["list", "board", "calendar", "gantt"].includes(viewValue)
@@ -199,13 +258,14 @@ export default function App() {
     [offset, setOffset] = useUrlState<number>("pagina", 0),
     [count, setCount] = useState(0);
   const [entityEdit, setEntityEdit] = useState<EntityEdit | null>(null);
+  const [editMember, setEditMember] = useState<Member | null>(null);
   const [resetPasswordMember, setResetPasswordMember] = useState<Member | null>(
     null,
   );
   const [updateEmailMember, setUpdateEmailMember] = useState<Member | null>(
     null,
   );
-  const [contractProduct, setContractProduct] = useState("");
+  const [formPreset, setFormPreset] = useState<FormPreset>({});
   const selected = taskIdFromPath(location.split("?")[0]);
   const taskBackground = useRef<string | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
@@ -344,7 +404,7 @@ export default function App() {
   }, [authReady, demo, session, isLogin, location, needsPassword]);
   useEffect(() => {
     if (!authReady || !member || isLogin) return;
-    if (!isLeader && page !== "tasks") {
+    if (!isLeader && page && !MEMBER_PAGES.includes(page)) {
       navigate(pageUrl("tasks", companyPath), true);
     }
   }, [authReady, member, isLeader, page, companyPath, isLogin]);
@@ -384,6 +444,33 @@ export default function App() {
     setEntityEdit(null);
     setSidebar(false);
   }, [page]);
+  // Products are now linked to clients inside the Clients page.
+  useEffect(() => {
+    if (page === "contracts") navigate(pageUrl("clients", companyPath), true);
+  }, [page, companyPath]);
+  function openForm(kind: string, preset: FormPreset = {}) {
+    setFormPreset(preset);
+    setForm(kind);
+  }
+  // "N" opens a new task from anywhere, unless the user is typing or a
+  // dialog is already open.
+  useEffect(() => {
+    if (!company) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key.toLowerCase() !== "n" || e.metaKey || e.ctrlKey || e.altKey)
+        return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest("input, textarea, select, [contenteditable='true']") ||
+        document.querySelector("dialog[open]")
+      )
+        return;
+      e.preventDefault();
+      openForm("task");
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [company]);
   useEffect(() => {
     if (!toast) return;
     const id = setTimeout(() => setToast(""), 4500);
@@ -547,11 +634,27 @@ export default function App() {
     };
   }, [demo, company, session, period, refresh, reportRefresh]);
 
+  // Latest values for the long-lived realtime subscription below.
+  const live = useRef({ user, openTask: setSelected });
+  live.current = { user, openTask: setSelected };
   // Realtime subscription: automatically detects changes from other users/tabs and updates cache & state
   useEffect(() => {
     if (!company || demo || !session) return;
     const unsubscribe = api.subscribeToCompanyChanges(company, {
       onTaskChange: (task, eventType) => {
+        const me = live.current.user;
+        if (
+          eventType === "INSERT" &&
+          task.assignee_id === me &&
+          task.creator_id !== me
+        ) {
+          notify(`Nova tarefa para você: ${task.title}`);
+          showNotification("Nova tarefa para você", {
+            body: `${task.title} · prazo ${dateLabel(task.due_date)}`,
+            tag: task.id,
+            onClick: () => live.current.openTask(task.id),
+          });
+        }
         if (eventType === "INSERT") {
           setData((d) =>
             d.tasks.some((t) => t.id === task.id)
@@ -703,7 +806,11 @@ export default function App() {
           name.startsWith("update_contract") ||
           name.startsWith("create_project") ||
           name.startsWith("update_project") ||
-          name.startsWith("create_team")
+          name.startsWith("create_team") ||
+          name.startsWith("update_team") ||
+          name === "update_my_profile" ||
+          name === "update_member" ||
+          name === "set_my_avatar"
         ) {
           api.invalidateLookupsCache(company);
           const lookups = await api.companyLookups(company, true);
@@ -809,6 +916,17 @@ export default function App() {
     }
   }
 
+  function projectProgress(p: Project) {
+    if (demo) {
+      const tasks = data.tasks.filter((t) => t.project_id === p.id);
+      return {
+        total: tasks.length,
+        done: tasks.filter((t) => t.status === "done").length,
+      };
+    }
+    const stats = summary?.by_project?.find((s) => s.id === p.id);
+    return { total: stats?.total ?? 0, done: stats?.done ?? 0 };
+  }
   function go(next: Page) {
     navigate(pageUrl(next, companyPath));
     setSidebar(false);
@@ -881,18 +999,49 @@ export default function App() {
       product,
     ],
   );
+  // Collaborators only see their own entries and tasks (RLS already scopes
+  // them; this keeps demo mode and cached data consistent with that).
+  const visibleHours = useMemo(
+    () =>
+      isLeader ? data.hours : data.hours.filter((h) => h.user_id === user),
+    [isLeader, data.hours, user],
+  );
+  // Collaborators browse only the clients their teams serve (and those
+  // clients' products and projects). RLS still returns clients of tasks
+  // assigned to them elsewhere, which the task list needs for names.
+  const catalogData = useMemo(() => {
+    if (isLeader) return data;
+    const clients = teamClientIds(data, user);
+    const contracts = data.contracts.filter((k) => clients.has(k.client_id));
+    const contractIds = new Set(contracts.map((k) => k.id));
+    return {
+      ...data,
+      clients: data.clients.filter((c) => clients.has(c.id)),
+      contracts,
+      projects: data.projects.filter((p) => contractIds.has(p.contract_id)),
+    };
+  }, [isLeader, data, user]);
+  const reportTasks = useMemo(
+    () =>
+      isLeader
+        ? data.tasks
+        : data.tasks.filter(
+            (t) => t.assignee_id === user || t.creator_id === user,
+          ),
+    [isLeader, data.tasks, user],
+  );
   const periodHours = useMemo(
-    () => data.hours.filter((h) => h.started_at.slice(0, 7) === period),
-    [data.hours, period],
+    () => visibleHours.filter((h) => h.started_at.slice(0, 7) === period),
+    [visibleHours, period],
   );
   const stats = useMemo(
     () =>
       demo
         ? {
-            total: data.tasks.length,
-            late: data.tasks.filter((t) => isLate(t, today)).length,
-            review: data.tasks.filter((t) => t.status === "review").length,
-            done: data.tasks.filter(
+            total: reportTasks.length,
+            late: reportTasks.filter((t) => isLate(t, today)).length,
+            review: reportTasks.filter((t) => t.status === "review").length,
+            done: reportTasks.filter(
               (t) => t.delivered_at?.slice(0, 7) === period,
             ).length,
             minutes: periodHours.reduce(
@@ -901,7 +1050,7 @@ export default function App() {
             ),
           }
         : summary,
-    [demo, data.tasks, today, period, periodHours, demoNow, summary],
+    [demo, reportTasks, today, period, periodHours, demoNow, summary],
   );
   const focus = useMemo(
     () =>
@@ -943,6 +1092,9 @@ export default function App() {
         : (summary?.by_person ?? []),
     [demo, data.members, data.tasks, summary],
   );
+  const reportPeople = isLeader
+    ? byPerson
+    : byPerson.filter((p) => p.id === user);
   if (!authReady) return <Loading />;
   if (!demo && session && needsPassword)
     return (
@@ -1012,7 +1164,7 @@ export default function App() {
       />
     );
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
       {sidebar && (
         <Button
           className="sidebar-backdrop"
@@ -1021,22 +1173,27 @@ export default function App() {
         />
       )}
       <aside className={`sidebar ${sidebar ? "visible" : ""}`}>
-        <a
-          href="#"
-          className="brand"
-          onClick={(e) => {
-            e.preventDefault();
-            go("overview");
-          }}
-        >
-          <span className="brand-mark">M</span>
-          <span>
-            mavi<span className="brand-period">.</span>
-          </span>
-          <span className="brand-label">WORKSPACE</span>
-        </a>
+        <div className="sidebar-head">
+          <a
+            href="#"
+            className="brand"
+            title="Visão geral"
+            onClick={(e) => {
+              e.preventDefault();
+              go("overview");
+            }}
+          >
+            <span className="brand-mark">W</span>
+            <span className="brand-name">
+              workspace<span className="brand-period">.</span>
+            </span>
+          </a>
+        </div>
         <div className="workspace">
-          <span className="workspace-icon">
+          <span
+            className="workspace-icon"
+            title={currentCompany?.name ?? "Espaço de trabalho"}
+          >
             <Building2 size={19} />
           </span>
           <div>
@@ -1062,13 +1219,14 @@ export default function App() {
         <span className="nav-label">PRINCIPAL</span>
         <nav aria-label="Navegação principal">
           {navigation
-            .filter((item) => isLeader || item.id === "tasks")
+            .filter((item) => isLeader || MEMBER_PAGES.includes(item.id))
             .map((item) => (
               <a
                 key={item.id}
                 href={pageUrl(item.id, companyPath)}
                 aria-current={page === item.id ? "page" : undefined}
                 className={page === item.id ? "active" : ""}
+                title={item.label}
                 onClick={(event) => followLink(event, item.id)}
               >
                 <item.icon size={19} />
@@ -1095,18 +1253,33 @@ export default function App() {
             .map((p) => (
               <Button
                 key={p.id}
+                title={p.name}
                 onClick={() => {
                   go("tasks");
                   setProduct(p.id);
                 }}
               >
                 <span className="product-dot" style={{ background: p.color }} />
-                {p.name}
+                <span className="sidebar-text">{p.name}</span>
                 <ChevronRight size={13} />
               </Button>
             ))}
         </div>
         <div className="sidebar-bottom">
+          <button
+            type="button"
+            className="sidebar-collapse"
+            aria-expanded={!collapsed}
+            title={collapsed ? "Expandir menu" : "Recolher menu"}
+            onClick={toggleCollapsed}
+          >
+            {collapsed ? (
+              <ChevronsRight size={18} />
+            ) : (
+              <ChevronsLeft size={18} />
+            )}
+            <span className="sidebar-text">Recolher menu</span>
+          </button>
           {isLeader && (
             <a
               className={
@@ -1114,23 +1287,36 @@ export default function App() {
               }
               href={pageUrl("settings", companyPath)}
               aria-current={page === "settings" ? "page" : undefined}
+              title="Equipe e configurações"
               onClick={(event) => followLink(event, "settings")}
             >
-              <Settings2 size={18} /> Equipe e configurações
+              <Settings2 size={18} />{" "}
+              <span className="sidebar-text">Equipe e configurações</span>
             </a>
           )}
           <div className="profile">
-            <Avatar name={member?.name ?? "Usuário"} />
-            <div>
-              <strong>{member?.name ?? session?.user.email}</strong>
-              <small>
-                {member?.role === "admin"
-                  ? "Administrador"
-                  : member?.role === "manager"
-                    ? "Gestor"
-                    : "Colaborador"}
-              </small>
-            </div>
+            <a
+              className={`profile-link ${page === "profile" ? "active" : ""}`}
+              href={pageUrl("profile", companyPath)}
+              title="Meu perfil"
+              aria-current={page === "profile" ? "page" : undefined}
+              onClick={(event) => followLink(event, "profile")}
+            >
+              <Avatar
+                name={member?.name ?? "Usuário"}
+                src={member?.avatar_url}
+              />
+              <div>
+                <strong>{member?.name ?? session?.user.email}</strong>
+                <small>
+                  {member?.role === "admin"
+                    ? "Administrador"
+                    : member?.role === "manager"
+                      ? "Gestor"
+                      : "Colaborador"}
+                </small>
+              </div>
+            </a>
             {supabase && (
               <Button
                 className="icon-btn"
@@ -1156,7 +1342,10 @@ export default function App() {
             <span>Workspace</span>
             <ChevronRight size={14} />
             <strong>
-              {navigation.find((n) => n.id === page)?.label ?? "Configurações"}
+              {page === "profile"
+                ? "Meu perfil"
+                : (navigation.find((n) => n.id === page)?.label ??
+                  "Configurações")}
             </strong>
           </div>
           <div className="topbar-right">
@@ -1171,10 +1360,53 @@ export default function App() {
                 <LiveDuration entry={activeTimer} />
               </Button>
             )}
+            {notifications !== "unsupported" && (
+              <Button
+                className={`notify-toggle ${notifications}`}
+                disabled={notifications === "denied"}
+                aria-pressed={notifications === "on"}
+                title={
+                  {
+                    default:
+                      "Receber um aviso quando uma tarefa for criada para você",
+                    on: "Notificações ativadas — clique para pausar",
+                    off: "Notificações pausadas — clique para ativar",
+                    denied:
+                      "Notificações bloqueadas. Libere-as nas configurações do navegador para este site.",
+                  }[notifications]
+                }
+                onClick={() =>
+                  void toggleNotifications().then(setNotifications)
+                }
+              >
+                {notifications === "on" ? (
+                  <BellRing size={17} />
+                ) : notifications === "default" ? (
+                  <Bell size={17} />
+                ) : (
+                  <BellOff size={17} />
+                )}
+                {notifications === "default" && (
+                  <span>Ativar notificações</span>
+                )}
+              </Button>
+            )}
             <span className="online-label">
               <span /> {demo ? "Demonstração" : "Conectado"}
             </span>
-            <Avatar name={member?.name ?? "Usuário"} size="small" />
+            <button
+              type="button"
+              className="topbar-avatar"
+              title="Meu perfil"
+              aria-label="Meu perfil"
+              onClick={() => go("profile")}
+            >
+              <Avatar
+                name={member?.name ?? "Usuário"}
+                src={member?.avatar_url}
+                size="small"
+              />
+            </button>
           </div>
         </header>
         {demo && (
@@ -1205,8 +1437,10 @@ export default function App() {
               <h1>
                 {page === "overview"
                   ? "Visão geral"
-                  : (navigation.find((n) => n.id === page)?.label ??
-                    "Equipe e configurações")}
+                  : page === "profile"
+                    ? "Meu perfil"
+                    : (navigation.find((n) => n.id === page)?.label ??
+                      "Equipe e configurações")}
               </h1>
               <p>
                 {
@@ -1215,68 +1449,87 @@ export default function App() {
                       "Uma visão clara do trabalho. Mais espaço para criar.",
                     tasks: "Organize prioridades e acompanhe cada entrega.",
                     clients:
-                      "Relacionamentos, produtos e trabalho em um só lugar.",
+                      "Cada cliente com os produtos que contratou e os projetos de cada um.",
                     products:
-                      "Cadastre os serviços da agência e vincule-os aos clientes.",
+                      "O catálogo do que a agência vende. Adicione cada produto aos clientes que o contrataram.",
                     contracts:
                       "Serviços ativos de cada cliente. Cada serviço pode ter projetos e tarefas avulsas.",
                     projects:
-                      "Projetos agrupam entregas de um produto contratado. Tarefas avulsas podem existir sem projeto.",
+                      "Campanhas e entregas com começo e fim, organizadas por cliente.",
                     hours: "Seu tempo, registrado com clareza.",
-                    reports: "Entenda o ritmo e os resultados da operação.",
+                    drive:
+                      "Arquivos da equipe, privados ou compartilhados por link.",
+                    profile: "Seu nome, sua foto e sua senha.",
+                    reports: isLeader
+                      ? "Entenda o ritmo e os resultados da operação."
+                      : "Seu ritmo e seus resultados no período.",
                     settings: "Pessoas e produtos do seu espaço de trabalho.",
                   }[page]
                 }
               </p>
             </div>
-            {(![
-              "products",
-              "contracts",
-              "clients",
-              "projects",
-              "settings",
-            ].includes(page) ||
-              isLeader) && (
-              <Button
-                className="btn primary"
-                onClick={() =>
-                  setForm(
-                    page === "contracts"
-                      ? "contract"
-                      : page === "products"
-                        ? "product"
-                        : page === "clients"
-                          ? "client"
-                          : page === "projects"
-                            ? "project"
-                            : page === "hours"
-                              ? "time"
-                              : page === "settings"
-                                ? "user"
-                                : "task",
-                  )
-                }
-              >
-                {page === "settings" ? (
-                  <UserPlus size={18} />
-                ) : (
-                  <Plus size={18} />
-                )}
-                {page === "contracts"
-                  ? "Adicionar produto contratado"
-                  : page === "products"
-                    ? "Novo produto"
-                    : page === "clients"
-                      ? "Novo cliente"
-                      : page === "projects"
-                        ? "Novo projeto"
-                        : page === "hours"
-                          ? "Registrar horas"
-                          : page === "settings"
-                            ? "Convidar usuário"
-                            : "Nova tarefa"}
-              </Button>
-            )}
+            {page !== "drive" &&
+              page !== "profile" &&
+              (![
+                "products",
+                "contracts",
+                "clients",
+                "projects",
+                "settings",
+              ].includes(page) ||
+                isLeader) && (
+                <Button
+                  className="btn primary"
+                  onClick={() =>
+                    openForm(
+                      page === "contracts"
+                        ? "contract"
+                        : page === "products"
+                          ? "product"
+                          : page === "clients"
+                            ? "client"
+                            : page === "projects"
+                              ? "project"
+                              : page === "hours"
+                                ? "time"
+                                : page === "settings"
+                                  ? "user"
+                                  : "task",
+                    )
+                  }
+                >
+                  {page === "settings" ? (
+                    <UserPlus size={18} />
+                  ) : (
+                    <Plus size={18} />
+                  )}
+                  {page === "contracts"
+                    ? "Adicionar produto contratado"
+                    : page === "products"
+                      ? "Novo produto"
+                      : page === "clients"
+                        ? "Novo cliente"
+                        : page === "projects"
+                          ? "Novo projeto"
+                          : page === "hours"
+                            ? "Registrar horas"
+                            : page === "settings"
+                              ? "Convidar usuário"
+                              : "Nova tarefa"}
+                  {![
+                    "contracts",
+                    "products",
+                    "clients",
+                    "projects",
+                    "hours",
+                    "settings",
+                  ].includes(page) && (
+                    <kbd className="kbd-hint" title="Atalho: tecla N">
+                      N
+                    </kbd>
+                  )}
+                </Button>
+              )}
           </div>
           {error && (
             <div className="error-banner" role="alert">
@@ -1301,29 +1554,30 @@ export default function App() {
             <Loading />
           ) : (
             <>
-              {!isLeader && page !== "tasks" && (
+              {!isLeader && page && !MEMBER_PAGES.includes(page) && (
                 <Empty
                   title="Acesso restrito"
-                  body="Você tem permissão de acesso apenas ao módulo de Tarefas. Redirecionando..."
+                  body="Esta área é exclusiva de administradores e gestores. Redirecionando..."
                 />
               )}
-              {isLeader && (page === "overview" || page === "reports") && (
+              {((isLeader && page === "overview") || page === "reports") && (
                 <>
                   <div className="section-top">
                     <span className="section-caption">
                       {page === "overview"
                         ? "O PULSO DA SUA OPERAÇÃO"
-                        : "INDICADORES DO PERÍODO"}
+                        : isLeader
+                          ? "INDICADORES DO PERÍODO"
+                          : "SEUS INDICADORES DO PERÍODO"}
                     </span>
-                    <label className="period">
-                      <CalendarDays size={16} />
+                    <div className="period">
                       <Input
                         aria-label="Período dos relatórios"
                         type="month"
                         value={period}
                         onChange={(e) => setPeriod(e.target.value)}
                       />
-                    </label>
+                    </div>
                   </div>
                   <div className="stats-grid">
                     <Stat
@@ -1342,7 +1596,11 @@ export default function App() {
                       value={stats?.review}
                       icon={CheckCheck}
                       tone="purple"
-                      caption="O próximo passo é aprovar"
+                      caption={
+                        isLeader
+                          ? "O próximo passo é aprovar"
+                          : "Suas tarefas em validação"
+                      }
                       onClick={() => {
                         go("tasks");
                         setStatus("review");
@@ -1364,7 +1622,11 @@ export default function App() {
                       value={stats ? duration(stats.minutes) : undefined}
                       icon={Clock3}
                       tone="blue"
-                      caption="Tempo dedicado à operação"
+                      caption={
+                        isLeader
+                          ? "Tempo dedicado à operação"
+                          : "Seu tempo registrado"
+                      }
                       onClick={() => go("hours")}
                     />
                   </div>
@@ -1398,7 +1660,7 @@ export default function App() {
                       </span>
                       <Button
                         className="text-btn"
-                        onClick={() => setForm("task")}
+                        onClick={() => openForm("task")}
                       >
                         <Plus size={15} /> Adicionar tarefa
                       </Button>
@@ -1447,7 +1709,7 @@ export default function App() {
                         .slice(0, 4)
                         .map((m) => (
                           <div className="team-person" key={m.user_id}>
-                            <Avatar name={m.name} />
+                            <Avatar name={m.name} src={m.avatar_url} />
                             <div>
                               <strong>{m.name}</strong>
                               <small>
@@ -1697,6 +1959,7 @@ export default function App() {
                                     </span>
                                     <Avatar
                                       name={n.member?.name ?? "?"}
+                                      src={n.member?.avatar_url}
                                       size="small"
                                     />
                                   </footer>
@@ -1778,33 +2041,44 @@ export default function App() {
                           />
                           <div>
                             <strong>{p.name}</strong>
-                            {isLeader && (
+                            <small>
+                              {contracts.length
+                                ? `Contratado por ${new Set(contracts.map((c) => c.client_id)).size} cliente(s)`
+                                : "Nenhum cliente contratou ainda"}
+                            </small>
+                            {contracts.length > 0 && (
+                              <div className="catalog-clients">
+                                {contracts.map((k) => (
+                                  <span key={k.id}>
+                                    {
+                                      data.clients.find(
+                                        (c) => c.id === k.client_id,
+                                      )?.name
+                                    }
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {isLeader && (
+                            <div className="catalog-actions">
                               <Button
-                                className="text-btn"
+                                className="btn secondary"
                                 onClick={() =>
                                   setEntityEdit({ kind: "product", entity: p })
                                 }
                               >
-                                <Pencil size={15} /> Editar produto
+                                <Pencil size={15} /> Editar
                               </Button>
-                            )}
-                            <small>
-                              {contracts.length} contratação(ões) ·{" "}
-                              {new Set(contracts.map((c) => c.client_id)).size}{" "}
-                              cliente(s)
-                            </small>
-                          </div>
-                          {isLeader && (
-                            <Button
-                              className="btn secondary"
-
-                              onClick={() => {
-                                setContractProduct(p.id);
-                                setForm("contract");
-                              }}
-                            >
-                              <Plus size={16} /> Vincular a cliente
-                            </Button>
+                              <Button
+                                className="btn secondary"
+                                onClick={() =>
+                                  openForm("contract", { product: p.id })
+                                }
+                              >
+                                <Plus size={16} /> Adicionar a cliente
+                              </Button>
+                            </div>
                           )}
                         </div>
                       );
@@ -1817,7 +2091,7 @@ export default function App() {
                         isLeader ? (
                           <Button
                             className="btn primary"
-                            onClick={() => setForm("product")}
+                            onClick={() => openForm("product")}
                           >
                             <Plus size={17} /> Cadastrar produto
                           </Button>
@@ -1827,214 +2101,61 @@ export default function App() {
                   )}
                 </section>
               )}
-              {page === "contracts" && (
-                <section className="panel">
-                  <div className="panel-heading">
-                    <h2>Produtos contratados pelos clientes</h2>
-                    <span>{data.contracts.length} serviços</span>
-                  </div>
-                  <p className="catalog-note">
-                    Cliente é quem contrata. Produto é o serviço da agência.
-                    Aqui você vincula os dois; depois, pode organizar as
-                    entregas em projetos ou tarefas avulsas.
-                  </p>
-                  {data.contracts.map((c) => (
-                    <div className="catalog-row" key={c.id}>
-                      <BriefcaseBusiness size={23} />
-                      <div>
-                        <strong>{c.name}</strong>
-                        <small>
-                          {data.clients.find((x) => x.id === c.client_id)?.name}{" "}
-                          ·{" "}
-                          {
-                            data.products.find((p) => p.id === c.product_id)
-                              ?.name
-                          }
-                        </small>
-                        <small>
-                          {
-                            data.projects.filter((p) => p.contract_id === c.id)
-                              .length
-                          }{" "}
-                          projeto(s)
-                        </small>
-                      </div>
-                      {isLeader && (
-                        <Button
-                          className="btn secondary"
-                          onClick={() =>
-                            setEntityEdit({ kind: "contract", entity: c })
-                          }
-                        >
-                          <Pencil size={15} /> Editar serviço contratado
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                  {!data.contracts.length && (
-                    <Empty
-                      title="Nenhum produto contratado"
-                      body="Cadastre um cliente e um produto no catálogo. Depois, use Adicionar produto contratado para vincular o serviço ao cliente."
-                    />
-                  )}
-                </section>
-              )}
               {page === "clients" && (
-                <>
-                  <div className="section-top">
-                    <span>{data.clients.length} clientes no espaço</span>
-                    {isLeader && (
-                      <Button
-                        className="btn secondary"
-
-                        onClick={() => {
-                          setContractProduct("");
-                          setForm("contract");
-                        }}
-                      >
-                        <Plus size={16} /> Vincular produto
-                      </Button>
-                    )}
-                  </div>
-                  <div className="client-grid">
-                    {data.clients.map((c) => {
-                      const contracts = data.contracts.filter(
-                        (k) => k.client_id === c.id,
-                      );
-                      return (
-                        <article className="panel client-card" key={c.id}>
-                          <div className="client-card-top">
-                            <span
-                              className="client-logo"
-                              style={{
-                                background: c.color + "20",
-                                color: c.color,
-                              }}
-                            >
-                              {initials(c.name)}
-                            </span>
-                            <span className="subtle-label">CLIENTE</span>
-                          </div>
-                          <h2>{c.name}</h2>
-                          {isLeader && (
-                            <Button
-                              className="text-btn"
-                              onClick={() =>
-                                setEntityEdit({ kind: "client", entity: c })
-                              }
-                            >
-                              <Pencil size={15} /> Editar cliente
-                            </Button>
-                          )}
-                          <p>{c.email || "E-mail não informado"}</p>
-                          <div className="client-products">
-                            {contracts.map((k) => (
-                              <span key={k.id}>
-                                {
-                                  data.products.find(
-                                    (p) => p.id === k.product_id,
-                                  )?.name
-                                }
-                              </span>
-                            ))}
-                            {!contracts.length && (
-                              <small>Nenhum produto vinculado</small>
-                            )}
-                          </div>
-                          <footer>
-                            <span>{contracts.length} produtos contratados</span>
-                            <Button
-                              className="text-btn"
-                              onClick={() => {
-                                go("tasks");
-                                setClientFilter(c.id);
-                              }}
-                            >
-                              Ver trabalho <ArrowUpRight size={17} />
-                            </Button>
-                          </footer>
-                        </article>
-                      );
-                    })}
-                  </div>
-                  {!data.clients.length && (
-                    <Empty
-                      title="Seu primeiro cliente começa aqui"
-                      body="Cadastre um cliente e vincule os produtos contratados."
-                    />
-                  )}
-                </>
+                <ClientPortfolio
+                  data={catalogData}
+                  canManage={isLeader}
+                  projectProgress={projectProgress}
+                  onEditClient={(c) =>
+                    setEntityEdit({ kind: "client", entity: c })
+                  }
+                  onEditContract={(k) =>
+                    setEntityEdit({ kind: "contract", entity: k })
+                  }
+                  onEditProject={(p) =>
+                    setEntityEdit({ kind: "project", entity: p })
+                  }
+                  onAddContract={(client) => openForm("contract", { client })}
+                  onAddProject={(contract) => openForm("project", { contract })}
+                  onNewTask={(contract, project) =>
+                    openForm("task", { contract, project })
+                  }
+                  canCreateTask={(contract) =>
+                    canCreateTaskIn(data, contract, user)
+                  }
+                  onViewClient={(id) => {
+                    go("tasks");
+                    setClientFilter(id);
+                  }}
+                  onViewProject={(id) => {
+                    go("tasks");
+                    setProjectFilter(id);
+                  }}
+                />
               )}
               {page === "projects" && (
-                <div className="client-grid">
-                  {data.projects.map((p) => {
-                    const k = data.contracts.find(
-                        (c) => c.id === p.contract_id,
-                      ),
-                      client = data.clients.find((c) => c.id === k?.client_id),
-                      tasks = data.tasks.filter((t) => t.project_id === p.id),
-                      projectStats = summary?.by_project?.find(
-                        (s) => s.id === p.id,
-                      ),
-                      total = demo ? tasks.length : (projectStats?.total ?? 0),
-                      done = demo
-                        ? tasks.filter((t) => t.status === "done").length
-                        : (projectStats?.done ?? 0);
-                    return (
-                      <article className="panel project-card" key={p.id}>
-                        <div className="client-card-top">
-                          <span className="project-icon">
-                            <FolderKanban size={23} />
-                          </span>
-                          <span className="subtle-label">
-                            {
-                              data.products.find((d) => d.id === k?.product_id)
-                                ?.name
-                            }
-                          </span>
-                        </div>
-                        <h2>{p.name}</h2>
-                        {isLeader && (
-                          <Button
-                            className="text-btn"
-                            onClick={() =>
-                              setEntityEdit({ kind: "project", entity: p })
-                            }
-                          >
-                            <Pencil size={15} /> Editar projeto
-                          </Button>
-                        )}
-                        <p>{client?.name}</p>
-                        <div className="project-progress">
-                          <span>
-                            {done} de {total} tarefas entregues
-                          </span>
-                          <progress value={done} max={total || 1} />
-                        </div>
-                        <footer>
-                          <span>
-                            <CalendarDays size={15} /> {dateLabel(p.due_date)}
-                          </span>
-                          <Button
-                            className="text-btn"
-                            onClick={() => {
-                              go("tasks");
-                              setProjectFilter(p.id);
-                            }}
-                          >
-                            Ver tarefas <ArrowUpRight size={16} />
-                          </Button>
-                        </footer>
-                      </article>
-                    );
-                  })}
-                  {!data.projects.length && (
-                    <Empty
-                      title="Nenhum projeto ainda"
-                      body="Crie um projeto dentro de um produto contratado."
-                    />
-                  )}
-                </div>
+                <ProjectsBrowser
+                  data={catalogData}
+                  today={today}
+                  canManage={isLeader}
+                  projectProgress={projectProgress}
+                  onEditProject={(p) =>
+                    setEntityEdit({ kind: "project", entity: p })
+                  }
+                  onViewProject={(id) => {
+                    go("tasks");
+                    setProjectFilter(id);
+                  }}
+                  onNewTask={(contract, project) =>
+                    openForm("task", { contract, project })
+                  }
+                  canCreateTask={(contract) =>
+                    canCreateTaskIn(data, contract, user)
+                  }
+                  onNewProject={(contract) =>
+                    openForm("project", contract ? { contract } : {})
+                  }
+                />
               )}
               {page === "hours" && (
                 <>
@@ -2090,7 +2211,9 @@ export default function App() {
                       <div>
                         <h2>Apontamentos recentes</h2>
                         <p>
-                          Até 100 registros mais recentes autorizados para você
+                          {isLeader
+                            ? "Os 100 registros mais recentes"
+                            : "Seus 100 registros mais recentes"}
                         </p>
                       </div>
                     </div>
@@ -2099,27 +2222,29 @@ export default function App() {
                         <thead>
                           <tr>
                             <th>Tarefa</th>
-                            <th>Pessoa</th>
+                            {isLeader && <th>Pessoa</th>}
                             <th>Data</th>
                             <th>Origem</th>
                             <th>Tempo</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {data.hours.map((h) => (
+                          {visibleHours.map((h) => (
                             <tr key={h.id}>
                               <td>
                                 {data.tasks.find((t) => t.id === h.task_id)
                                   ?.title ?? "Tarefa fora da seleção atual"}
                                 <small className="cell-note">{h.note}</small>
                               </td>
-                              <td>
-                                {
-                                  data.members.find(
-                                    (m) => m.user_id === h.user_id,
-                                  )?.name
-                                }
-                              </td>
+                              {isLeader && (
+                                <td>
+                                  {
+                                    data.members.find(
+                                      (m) => m.user_id === h.user_id,
+                                    )?.name
+                                  }
+                                </td>
+                              )}
                               <td>
                                 {new Date(h.started_at).toLocaleDateString(
                                   "pt-BR",
@@ -2144,7 +2269,7 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
-                    {!data.hours.length && (
+                    {!visibleHours.length && (
                       <Empty
                         title="Nenhum apontamento"
                         body="Registre o tempo dedicado às suas tarefas."
@@ -2153,9 +2278,37 @@ export default function App() {
                   </section>
                 </>
               )}
+              {page === "profile" && (
+                <ProfilePage
+                  data={data}
+                  user={user}
+                  email={session?.user.email ?? member?.email ?? ""}
+                  demo={demo}
+                  mutate={mutate}
+                  notify={notify}
+                />
+              )}
+              {page === "drive" && (
+                <Drive
+                  key={company}
+                  demo={demo}
+                  data={catalogData}
+                  company={company}
+                  user={user}
+                  isLeader={isLeader}
+                  notify={notify}
+                />
+              )}
               {page === "reports" && (
                 <Suspense fallback={<Loading compact />}>
-                  <Reports byClient={byClient} byPerson={byPerson} />
+                  <Reports
+                    avatarOf={(id) =>
+                      data.members.find((m) => m.user_id === id)?.avatar_url
+                    }
+                    byClient={byClient}
+                    byPerson={reportPeople}
+                    personal={!isLeader}
+                  />
                 </Suspense>
               )}
               {page === "settings" && !isLeader && (
@@ -2177,7 +2330,7 @@ export default function App() {
                           <Button
                             className="btn secondary"
                             aria-label="Convidar usuário"
-                            onClick={() => setForm("user")}
+                            onClick={() => openForm("user")}
                           >
                             <UserPlus size={17} /> Convidar usuário
                           </Button>
@@ -2185,7 +2338,7 @@ export default function App() {
                       </div>
                       {data.members.map((m) => (
                         <div className="member-row" key={m.user_id}>
-                          <Avatar name={m.name} />
+                          <Avatar name={m.name} src={m.avatar_url} />
                           <div className="member-info">
                             <strong>{m.name}</strong>
                             {m.email && (
@@ -2202,6 +2355,16 @@ export default function App() {
                           <span>{m.active ? "Ativo" : "Inativo"}</span>
                           {isLeader && (
                             <div className="member-actions">
+                              {(isAdmin || m.role !== "admin") && (
+                                <Button
+                                  className="icon-btn"
+                                  title="Editar usuário"
+                                  aria-label={`Editar ${m.name}`}
+                                  onClick={() => setEditMember(m)}
+                                >
+                                  <Pencil size={15} />
+                                </Button>
+                              )}
                               <Button
                                 className="icon-btn"
                                 title="Redefinir senha"
@@ -2241,7 +2404,7 @@ export default function App() {
                             className="btn secondary"
 
                             aria-label="Novo produto"
-                            onClick={() => setForm("product")}
+                            onClick={() => openForm("product")}
                           >
                             <Plus size={17} /> Novo produto
                           </Button>
@@ -2264,7 +2427,7 @@ export default function App() {
                           <Button
                             className="btn secondary"
                             aria-label="Nova equipe"
-                            onClick={() => setForm("team")}
+                            onClick={() => openForm("team")}
                           >
                             <Plus size={17} /> Nova equipe
                           </Button>
@@ -2272,7 +2435,24 @@ export default function App() {
                       </div>
                       {data.teams.map((t) => (
                         <div className="team-config" key={t.id}>
-                          <strong>{t.name}</strong>
+                          <div className="team-config-info">
+                            <strong>{t.name}</strong>
+                            <small>
+                              <ShieldCheck size={12} />{" "}
+                              {data.teamMembers
+                                .filter(
+                                  (tm) => tm.team_id === t.id && tm.supervisor,
+                                )
+                                .map(
+                                  (tm) =>
+                                    data.members.find(
+                                      (m) => m.user_id === tm.user_id,
+                                    )?.name,
+                                )
+                                .filter(Boolean)
+                                .join(", ") || "Sem supervisor"}
+                            </small>
+                          </div>
                           <div className="avatar-stack">
                             {data.teamMembers
                               .filter((m) => m.team_id === t.id)
@@ -2284,24 +2464,28 @@ export default function App() {
                                       (m) => m.user_id === tm.user_id,
                                     )?.name ?? "?"
                                   }
+                                  src={
+                                    data.members.find(
+                                      (m) => m.user_id === tm.user_id,
+                                    )?.avatar_url
+                                  }
                                   size="small"
                                 />
                               ))}
                           </div>
+                          {isLeader && (
+                            <Button
+                              className="icon-btn"
+                              aria-label={`Editar equipe ${t.name}`}
+                              title="Editar equipe"
+                              onClick={() => openForm("team", { team: t.id })}
+                            >
+                              <Pencil size={15} />
+                            </Button>
+                          )}
                         </div>
                       ))}
                     </section>
-                  </div>
-                  <div className="security-note">
-                    <ShieldCheck size={22} />
-                    <div>
-                      <strong>Permissões verificadas no backend</strong>
-                      <p>
-                        {demo
-                          ? "Você está em um ambiente demonstrativo."
-                          : "Acesso limitado aos dados e equipes autorizados da sua empresa."}
-                      </p>
-                    </div>
                   </div>
                 </>
               )}
@@ -2309,7 +2493,7 @@ export default function App() {
           )}
           <footer className="app-footer">
             <span>
-              MAVI <span>·</span> Gestão de trabalho
+              Workspace <span>·</span> Gestão de trabalho
             </span>
             <span>
               {demo ? "Ambiente demonstrativo" : "Seu trabalho, em um só lugar"}
@@ -2332,10 +2516,19 @@ export default function App() {
           onClose={() => setEntityEdit(null)}
         />
       )}
-      {form && (
-        <CreateForm
-          kind={form}
-          initialProduct={contractProduct}
+      {form === "team" ? (
+        <TeamForm
+          team={data.teams.find((t) => t.id === formPreset.team)}
+          data={data}
+          company={company}
+          busy={busy}
+          mutate={mutate}
+          onClose={() => setForm(null)}
+        />
+      ) : form === "task" ? (
+        <TaskCreateForm
+          initialContract={formPreset.contract}
+          initialProject={formPreset.project}
           demo={demo}
           data={data}
           company={company}
@@ -2343,6 +2536,30 @@ export default function App() {
           busy={busy}
           mutate={mutate}
           onClose={() => setForm(null)}
+        />
+      ) : (
+        form && (
+          <CreateForm
+            kind={form}
+            preset={formPreset}
+            data={data}
+            company={company}
+            busy={busy}
+            mutate={mutate}
+            onClose={() => setForm(null)}
+          />
+        )
+      )}
+      {editMember && isLeader && (
+        <MemberForm
+          member={editMember}
+          data={data}
+          company={company}
+          currentUser={user}
+          callerIsAdmin={isAdmin}
+          busy={busy}
+          mutate={mutate}
+          onClose={() => setEditMember(null)}
         />
       )}
       {resetPasswordMember && (
@@ -2487,7 +2704,11 @@ function TaskTable({
                     </span>
                   </td>
                   <td>
-                    <Avatar name={n.member?.name ?? "?"} size="small" />
+                    <Avatar
+                      name={n.member?.name ?? "?"}
+                      src={n.member?.avatar_url}
+                      size="small"
+                    />
                   </td>
                 </tr>
               );
@@ -2513,6 +2734,15 @@ function Login({
 }) {
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  // The demo is no longer offered on the login page; local development can
+  // still open it with /login?demo=1 (stripped from production builds).
+  useEffect(() => {
+    if (
+      import.meta.env.DEV &&
+      new URLSearchParams(window.location.search).has("demo")
+    )
+      onDemo();
+  }, [onDemo]);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
@@ -2536,7 +2766,10 @@ function Login({
     <div className="login-page">
       <div className="login-art">
         <a className="brand" href="#">
-          <span className="brand-mark">M</span>mavi.
+          <span className="brand-mark">W</span>
+          <span>
+            workspace<span className="brand-period">.</span>
+          </span>
         </a>
         <h1>
           O trabalho flui.
@@ -2585,9 +2818,6 @@ function Login({
             <ArrowRight size={17} />
           </Button>
         </form>
-        <Button className="text-btn demo-login" onClick={onDemo}>
-          Explorar demonstração <ExternalLink size={15} />
-        </Button>
         <small>
           Acesso por convite. Entre em contato com seu administrador.
         </small>

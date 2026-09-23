@@ -21,12 +21,13 @@ await db.query(
   `insert into memberships(company_id,user_id,name,role) values($1,$3,'Admin','admin'),($1,$4,'Member','member'),($1,$5,'Isolated','member'),($2,$3,'Admin','admin')`,
   [company, other, admin, member, outsider],
 );
-await db.exec(`insert into clients(company_id,name) select id,'Client' from companies;
+// 50 clients × 2 contracts; the team serves one client, i.e. 2 of 100 contracts.
+await db.exec(`insert into clients(company_id,name) select id,'Client '||n from companies cross join generate_series(1,50) n;
 insert into products(company_id,name) select id,'Product' from companies;
 insert into teams(company_id,name) select id,'Team' from companies;
-insert into contracts(company_id,client_id,product_id,name) select c.id,l.id,p.id,'Contract '||n
-from companies c join clients l on l.company_id=c.id join products p on p.company_id=c.id cross join generate_series(1,100) n;
-insert into contract_teams(company_id,contract_id,team_id) select k.company_id,k.id,t.id from contracts k join teams t on t.company_id=k.company_id where k.name in ('Contract 1','Contract 2');`);
+insert into contracts(company_id,client_id,product_id,name) select c.id,l.id,p.id,l.name||' · Contract '||n
+from companies c join clients l on l.company_id=c.id join products p on p.company_id=c.id cross join generate_series(1,2) n;
+insert into client_teams(company_id,client_id,team_id) select l.company_id,l.id,t.id from clients l join teams t on t.company_id=l.company_id where l.name='Client 1';`);
 await db.query(
   `insert into team_members select company_id,id,$1 from teams where company_id=$2`,
   [member, company],
