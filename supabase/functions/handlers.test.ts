@@ -135,6 +135,21 @@ describe("invite-user", () => {
     expect((await handler(inviteRequest())).status).toBe(403);
     expect(admin.rpc).not.toHaveBeenCalled();
   });
+  it("explains why the invite email was not sent", async () => {
+    const { handler, admin, chain } = inviteFixture();
+    admin.auth.admin.inviteUserByEmail.mockResolvedValue({
+      data: { user: null },
+      error: {
+        status: 400,
+        code: "email_address_not_authorized",
+        message: "Email address not authorized",
+      },
+    });
+    const response = await handler(inviteRequest());
+    expect(response.status).toBe(422);
+    expect((await response.json()).error).toContain("SMTP próprio");
+    expect(chain.insert).not.toHaveBeenCalled();
+  });
   it("allows managers to invite users", async () => {
     const { handler, admin, single } = inviteFixture();
     single.mockResolvedValue({
@@ -365,7 +380,7 @@ describe("user-admin", () => {
     expect(res.status).toBe(404);
   });
 
-  it("gera link de recuperação ao resetar senha via send_link", async () => {
+  it("envia o e-mail de recuperação no modo send_link, sem gerar link antes", async () => {
     const { handler, admin } = userAdminFixture();
     const res = await handler(
       userAdminRequest({
@@ -378,12 +393,58 @@ describe("user-admin", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
-    expect(body.link).toBe("https://auth.example.com/link");
+    expect(body.message).toContain("target@example.com");
     expect(admin.auth.resetPasswordForEmail).toHaveBeenCalledWith(
       "target@example.com",
       expect.objectContaining({ redirectTo: `${origin}/?reset=1` }),
     );
+    // Generating a link first made Supabase refuse the email for 60s.
+    expect(admin.auth.admin.generateLink).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      {
+        status: 429,
+        code: "over_email_send_rate_limit",
+        message: "email rate limit exceeded",
+      },
+      429,
+      "limite de envio",
+    ],
+    [
+      {
+        status: 400,
+        code: "email_address_not_authorized",
+        message: "Email address not authorized",
+      },
+      422,
+      "SMTP próprio",
+    ],
+    [
+      { status: 500, message: "Error sending recovery email" },
+      502,
+      "SMTP configurado",
+    ],
+  ])(
+    "não diz que enviou quando o e-mail falha: %o",
+    async (error, status, text) => {
+      const { handler, admin } = userAdminFixture();
+      admin.auth.resetPasswordForEmail.mockResolvedValue({ error });
+      const res = await handler(
+        userAdminRequest({
+          company_id: companyId,
+          target_user_id: targetUserId,
+          action: "reset_password",
+          mode: "send_link",
+        }),
+      );
+      expect(res.status).toBe(status);
+      const body = await res.json();
+      expect(body.success).toBeUndefined();
+      expect(body.error).toContain(text);
+    },
+  );
 
   it("atualiza a senha diretamente no modo set_password", async () => {
     const { handler, admin } = userAdminFixture();

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.116.0";
+import { describeEmailError } from "../_shared/auth-email.ts";
 
 // CORS is an additional browser restriction; JWT + live admin membership remain
 // mandatory because non-browser callers can forge the Origin header.
@@ -101,11 +102,13 @@ export function createInviteHandler(
           redirectTo: requestOrigin + "/?setup=1",
           data: { name: name.trim() },
         });
-      if (inviteError || !invited.user)
-        return reply(400, {
-          error:
-            "Não foi possível enviar o convite. Confirme o endereço e verifique se a conta já existe.",
-        });
+      if (inviteError || !invited.user) {
+        const failure = describeEmailError(
+          inviteError,
+          "Não foi possível enviar o convite. Confirme o endereço e verifique se a conta já existe.",
+        );
+        return reply(failure.status, { error: failure.message });
+      }
       const { error: writeError } = await admin.from("memberships").insert({
         company_id,
         user_id: invited.user.id,

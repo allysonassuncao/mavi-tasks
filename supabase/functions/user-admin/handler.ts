@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.116.0";
+import { describeEmailError } from "../_shared/auth-email.ts";
 
 export function createUserAdminHandler(
   origin: string,
@@ -162,48 +163,33 @@ export function createUserAdminHandler(
             message: "Senha atualizada com sucesso.",
           });
         } else {
-          // Send link mode (and return generated recovery link if available)
+          // Send link mode: Supabase emails the recovery link.
           if (!targetEmail) {
             return reply(400, {
               error: "Usuário não possui e-mail cadastrado para recuperação.",
             });
           }
 
-          let recoveryLink = "";
-          try {
-            const { data: linkData, error: linkError } =
-              await admin.auth.admin.generateLink({
-                type: "recovery",
-                email: targetEmail,
-                options: {
-                  redirectTo: requestOrigin + "/?reset=1",
-                },
-              });
-            if (!linkError && linkData?.properties?.action_link) {
-              recoveryLink = linkData.properties.action_link;
-            }
-          } catch {
-            // If generateLink is not configured, fall back to resetPasswordForEmail
-          }
-
+          // Only the email itself: generating a recovery link first counts as
+          // a recovery request, and Supabase then refuses this send for 60s
+          // (the email silently never went out while the screen said it did).
           const { error: resetError } = await admin.auth.resetPasswordForEmail(
             targetEmail,
-            {
-              redirectTo: requestOrigin + "/?reset=1",
-            },
+            { redirectTo: requestOrigin + "/?reset=1" },
           );
-
-          if (resetError && !recoveryLink) {
-            return reply(400, {
-              error:
-                resetError.message || "Erro ao enviar e-mail de recuperação.",
+          if (resetError) {
+            const failure = describeEmailError(
+              resetError,
+              "Não foi possível enviar o e-mail de recuperação.",
+            );
+            return reply(failure.status, {
+              error: `${failure.message} Enquanto isso, use “Definir nova senha diretamente”.`,
             });
           }
 
           return reply(200, {
             success: true,
-            link: recoveryLink || undefined,
-            message: `Link de recuperação gerado para ${targetEmail}.`,
+            message: `E-mail de recuperação enviado para ${targetEmail}. Se não chegar em alguns minutos, peça para conferir o spam.`,
           });
         }
       }
