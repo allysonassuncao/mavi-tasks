@@ -53,9 +53,9 @@ import {
   names,
   taskTimerSeconds,
   formatClock,
-  canApproveTask,
   projectReview,
-  canSubmitTask,
+  taskActions,
+  type BlockedAction,
 } from "./domain";
 import { useNow } from "./useClock";
 import { supabase } from "./supabase";
@@ -63,7 +63,11 @@ import { rpc, taskExtras, invalidateTaskExtras } from "./api";
 import { getGcsPublicUrl } from "./gcs";
 import type { DemoStore } from "./demo-store";
 import { RichTextContent } from "./RichTextContent";
-import { richTextPlain } from "./rich-text";
+import {
+  parseDescription,
+  richTextPlain,
+  serializeDescription,
+} from "./rich-text";
 import { ContractPicker } from "./ContractPicker";
 import { TeamPicker } from "./TeamPicker";
 import { ReviewSettings } from "./ReviewSettings";
@@ -462,6 +466,58 @@ export function CreateForm({
     </Modal>
   );
 }
+const blocked = (value: unknown): value is BlockedAction =>
+  typeof value === "object" && value !== null && "blocked" in value;
+/** Field label, submit label and confirmation for each action that takes a note. */
+const noteForm: Record<
+  string,
+  { label: string; submit: string; confirm?: string }
+> = {
+  start: {
+    label: "Parecer para reenviar ao responsável",
+    submit: "Enviar novamente",
+  },
+  submit: {
+    label: "Descreva o que foi entregue para a validação",
+    submit: "Confirmar solicitação",
+  },
+  approve_internal: {
+    label: "Observações da validação",
+    submit: "Aprovar tarefa",
+  },
+  approve_client: {
+    label: "Quem aprovou, quando e por qual meio?",
+    submit: "Registrar aprovação",
+  },
+  reject: {
+    label: "Descreva o motivo da reprovação",
+    submit: "Reprovar tarefa",
+    confirm: "Reprovar esta tarefa e devolvê-la para ajustes?",
+  },
+  return: {
+    label: "Descreva o motivo da devolução",
+    submit: "Confirmar devolução",
+    confirm: "Devolver esta tarefa ao criador?",
+  },
+  reopen: {
+    label: "Descreva o motivo da reabertura",
+    submit: "Confirmar reabertura",
+    confirm: "Reabrir esta tarefa?",
+  },
+};
+/** Adds plain paragraphs (e.g. questionnaire answers) before a rich-text note. */
+function prependParagraphs(note: string, lines: string[]) {
+  return serializeDescription({
+    type: "doc",
+    content: [
+      ...lines.map((text) => ({
+        type: "paragraph",
+        content: [{ type: "text", text }],
+      })),
+      ...(parseDescription(note).content ?? []),
+    ],
+  });
+}
 export function TaskDetail({
   task,
   currentRunning,
@@ -506,9 +562,8 @@ export function TaskDetail({
     isAdmin = member?.role === "admin",
     isManager = member?.role === "manager",
     isLeader = isAdmin || isManager,
-    canApprove = canApproveTask(data, task, user),
     canEdit = isLeader || task.creator_id === user,
-    canWork = isLeader || task.creator_id === user || task.assignee_id === user;
+    acts = taskActions(data, task, user);
   const review = projectReview(
     data.projects.find((p) => p.id === task.project_id),
   );
@@ -902,124 +957,175 @@ export function TaskDetail({
             )}
           </span>
         </div>
-        <div className="detail-actions">
-          {canWork && (
-            <>
-              {["open", "returned", "rejected"].includes(task.status) && (
-                <Button
-                  className="btn primary"
-                  disabled={busy}
-                  loading={busy}
-                  onClick={() => void transition("start")}
-                >
-                  <Check size={15} /> Marcar em andamento
-                </Button>
-              )}
-              {canSubmitTask(task) && (
-                <Button
-                  className="btn primary"
-                  disabled={busy}
-                  loading={busy}
-                  onClick={() => void transition("submit")}
-                >
-                  <Check size={16} />{" "}
-                  {review.required
+        {!action && (
+          <div className="detail-actions">
+            {acts.start && (
+              <Button
+                className="btn primary"
+                disabled={busy}
+                loading={busy}
+                onClick={() => void transition("start")}
+              >
+                <Check size={15} /> Marcar em andamento
+              </Button>
+            )}
+            {acts.resend && (
+              <Button
+                className="btn primary"
+                disabled={busy}
+                loading={busy}
+                onClick={() => setAction("start")}
+              >
+                <Send size={15} /> Enviar novamente
+              </Button>
+            )}
+            {acts.submit && (
+              <Button
+                className="btn primary"
+                disabled={busy || blocked(acts.submit)}
+                loading={busy}
+                onClick={() =>
+                  acts.submitNeedsNote
+                    ? setAction("submit")
+                    : void transition("submit")
+                }
+              >
+                <Check size={16} />{" "}
+                {blocked(acts.submit)
+                  ? acts.submit.blocked
+                  : review.required
                     ? "Enviar para validação"
                     : "Concluir tarefa"}
-                </Button>
-              )}
-              {task.status === "review" && canApprove && (
-                <>
-                  {!task.internal_approved_by && (
-                    <Button
-                      className="btn primary"
-                      disabled={busy}
-                      loading={busy}
-                      onClick={() => void transition("approve_internal")}
-                    >
-                      <Check size={16} /> Aprovar internamente
-                    </Button>
-                  )}
-                  {task.requires_client_approval &&
-                    !task.client_approved_by && (
-                      <Button
-                        className="btn secondary"
-                        disabled={busy}
-                        loading={busy}
-                        onClick={() => setAction("approve_client")}
-                      >
-                        Registrar aprovação do cliente
-                      </Button>
-                    )}
-                  <Button
-                    className="btn secondary"
-                    disabled={busy}
-                    loading={busy}
-                    onClick={() => setAction("reject")}
-                  >
-                    Solicitar ajustes
-                  </Button>
-                </>
-              )}
-              {["open", "progress", "review", "rejected"].includes(
-                task.status,
-              ) && (
-                <Button
-                  className="btn secondary"
-                  disabled={busy}
-                  loading={busy}
-                  onClick={() => setAction("return")}
-                >
-                  Devolver ao criador
-                </Button>
-              )}
-              {task.status === "done" && canApprove && (
-                <Button
-                  className="btn secondary"
-                  disabled={busy}
-                  loading={busy}
-                  onClick={() => setAction("reopen")}
-                >
-                  Reabrir tarefa
-                </Button>
-              )}
-            </>
-          )}
-        </div>
+              </Button>
+            )}
+            {acts.approveInternal && (
+              <Button
+                className="btn primary"
+                disabled={busy}
+                loading={busy}
+                onClick={() => setAction("approve_internal")}
+              >
+                <Check size={16} /> Aprovar internamente
+              </Button>
+            )}
+            {acts.approveClient && (
+              <Button
+                className="btn secondary"
+                disabled={busy}
+                loading={busy}
+                onClick={() => setAction("approve_client")}
+              >
+                Registrar aprovação do cliente
+              </Button>
+            )}
+            {acts.reject && (
+              <Button
+                className="btn secondary"
+                disabled={busy}
+                loading={busy}
+                onClick={() => setAction("reject")}
+              >
+                Solicitar ajustes
+              </Button>
+            )}
+            {acts.return && (
+              <Button
+                className="btn secondary"
+                disabled={busy || blocked(acts.return)}
+                loading={busy}
+                onClick={() => setAction("return")}
+              >
+                {blocked(acts.return)
+                  ? acts.return.blocked
+                  : "Devolver ao criador"}
+              </Button>
+            )}
+            {acts.reopen && (
+              <Button
+                className="btn secondary"
+                disabled={busy || blocked(acts.reopen)}
+                loading={busy}
+                title={blocked(acts.reopen) ? acts.reopen.blocked : undefined}
+                onClick={() => setAction("reopen")}
+              >
+                Reabrir tarefa
+              </Button>
+            )}
+          </div>
+        )}
+        {blocked(acts.reopen) && (
+          <p className="muted action-hint">{acts.reopen.blocked}</p>
+        )}
         {action && (
           <form
             className="action-note"
             onSubmit={(e) => {
               e.preventDefault();
               if (editorUploading) return;
-              const note = String(
-                new FormData(e.currentTarget).get("note") ?? "",
-              );
+              const fd = new FormData(e.currentTarget);
+              let note = String(fd.get("note") ?? "");
               const min = action === "approve_client" ? 5 : 3;
               if (richTextPlain(note).length < min) {
                 setError(
-                  `Escreva ao menos ${min} caracteres ${
-                    action === "approve_client"
-                      ? "sobre a aprovação do cliente"
-                      : "explicando o motivo"
-                  }.`,
+                  `Escreva ao menos ${min} caracteres no campo "${noteForm[action].label}".`,
                 );
                 return;
               }
+              if (action === "reopen") {
+                const kind = fd.get("reopen_kind"),
+                  origin = fd.get("reopen_origin");
+                if (!kind || !origin) {
+                  setError("Responda às duas perguntas da reabertura.");
+                  return;
+                }
+                note = prependParagraphs(note, [
+                  `Foi realizado o que foi solicitado? ${
+                    kind === "change" ? "Sim (alteração)" : "Não (correção)"
+                  }`,
+                  `Pedido de quem? ${origin === "client" ? "Cliente" : "Interno"}`,
+                ]);
+              }
+              if (
+                ["return", "reject", "reopen"].includes(action) &&
+                !window.confirm(noteForm[action].confirm)
+              )
+                return;
               void transition(action, note);
             }}
           >
+            {action === "reopen" && (
+              <div className="reopen-questions">
+                <fieldset>
+                  <legend>Foi realizado o que foi solicitado?</legend>
+                  <label className="radio-option">
+                    <input type="radio" name="reopen_kind" value="change" />
+                    Sim — é uma alteração
+                  </label>
+                  <label className="radio-option">
+                    <input type="radio" name="reopen_kind" value="fix" />
+                    Não — é uma correção
+                  </label>
+                </fieldset>
+                <fieldset>
+                  <legend>É um pedido do cliente ou um pedido seu?</legend>
+                  <label className="radio-option">
+                    <input type="radio" name="reopen_origin" value="client" />
+                    Cliente
+                  </label>
+                  <label className="radio-option">
+                    <input type="radio" name="reopen_origin" value="internal" />
+                    Meu
+                  </label>
+                </fieldset>
+              </div>
+            )}
             <Suspense fallback={<Loading compact />}>
               <RichTextEditor
                 key={action}
                 company={task.company_id}
                 demo={demo}
                 name="note"
-                label={
-                  action === "approve_client"
-                    ? "Quem aprovou, quando e por qual meio?"
-                    : "Descreva o motivo"
-                }
+                label={noteForm[action].label}
                 disabled={busy}
                 onUploading={setEditorUploading}
               />
@@ -1031,7 +1137,10 @@ export function TaskDetail({
               <Button
                 type="button"
                 className="btn secondary"
-                onClick={() => setAction("")}
+                onClick={() => {
+                  setAction("");
+                  setError("");
+                }}
               >
                 Cancelar
               </Button>
@@ -1040,7 +1149,7 @@ export function TaskDetail({
                 disabled={busy || editorUploading}
                 loading={busy || editorUploading}
               >
-                Confirmar
+                {noteForm[action].submit}
               </Button>
             </div>
           </form>
@@ -1183,19 +1292,21 @@ export function TaskDetail({
                   <strong>
                     {e.action === "submit" && e.detail.to === "done"
                       ? "Tarefa concluída"
-                      : ((
-                          {
-                            created: "Tarefa criada",
-                            start: "Trabalho iniciado",
-                            submit: "Enviada para validação",
-                            return: "Devolvida ao criador",
-                            reject: "Reprovada na validação",
-                            approve_internal: "Aprovação interna registrada",
-                            approve_client: "Aprovação do cliente registrada",
-                            reopen: "Tarefa reaberta",
-                            edited: "Tarefa editada",
-                          } as Record<string, string>
-                        )[e.action] ?? e.action)}
+                      : e.action === "start" && e.detail.from === "returned"
+                        ? "Reenviada ao responsável"
+                        : ((
+                            {
+                              created: "Tarefa criada",
+                              start: "Trabalho iniciado",
+                              submit: "Enviada para validação",
+                              return: "Devolvida ao criador",
+                              reject: "Reprovada na validação",
+                              approve_internal: "Aprovada na validação",
+                              approve_client: "Aprovação do cliente registrada",
+                              reopen: "Tarefa reaberta",
+                              edited: "Tarefa editada",
+                            } as Record<string, string>
+                          )[e.action] ?? e.action)}
                   </strong>
                   <small>
                     {new Date(e.created_at).toLocaleString("pt-BR")}

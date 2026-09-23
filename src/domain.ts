@@ -253,3 +253,75 @@ export function teamClientIds(data: Snapshot, userId: string) {
       .map((ct) => ct.client_id),
   );
 }
+/** Delivered tasks can be reopened (except by admins) up to this long after delivery. */
+export const REOPEN_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+/** A button that is shown but disabled, with the reason as its label. */
+export type BlockedAction = { blocked: string };
+/**
+ * Which task actions the user sees (mirrors public.transition_task):
+ * `true` shows the action, a BlockedAction shows it disabled, `false` hides it.
+ */
+export function taskActions(
+  data: Snapshot,
+  task: Task,
+  userId: string,
+  now = Date.now(),
+) {
+  const me = data.members.find((m) => m.user_id === userId && m.active);
+  const admin = me?.role === "admin",
+    leader = admin || me?.role === "manager",
+    creator = task.creator_id === userId,
+    assignee = task.assignee_id === userId,
+    approver = canApproveTask(data, task, userId),
+    s = task.status;
+  const review = projectReview(
+    data.projects.find((p) => p.id === task.project_id),
+  ).required;
+  const submitter = assignee || admin;
+  const canReturn =
+    !creator &&
+    ((assignee && ["open", "progress", "rejected"].includes(s)) ||
+      (admin && ["open", "progress", "review", "rejected"].includes(s)));
+  const reopenExpired =
+    !admin &&
+    !!task.delivered_at &&
+    now - Date.parse(task.delivered_at) >= REOPEN_WINDOW_MS;
+  return {
+    /** Resume open or rejected work. */
+    start:
+      (leader || creator || assignee) && (s === "open" || s === "rejected"),
+    /** A returned task goes back to execution through its creator. */
+    resend: s === "returned" && (creator || admin),
+    submit: submitter
+      ? canSubmitTask(task) ||
+        (s === "review" && review
+          ? ({ blocked: "Em validação…" } as BlockedAction)
+          : false)
+      : false,
+    /** Validation requests need a description; direct conclusions don't. */
+    submitNeedsNote: review,
+    approveInternal: approver && s === "review" && !task.internal_approved_by,
+    approveClient:
+      approver &&
+      s === "review" &&
+      task.requires_client_approval &&
+      !!task.internal_approved_by &&
+      !task.client_approved_by,
+    reject: approver && s === "review",
+    return: canReturn
+      ? true
+      : !creator && submitter && s === "returned"
+        ? ({ blocked: "Devolvida…" } as BlockedAction)
+        : false,
+    reopen:
+      s === "done" && (admin || creator || assignee || approver)
+        ? reopenExpired
+          ? ({
+              blocked:
+                "Não é possível reabrir esta tarefa. A data limite para reabertura da tarefa foi ultrapassada.",
+            } as BlockedAction)
+          : true
+        : false,
+  };
+}
+export type TaskActions = ReturnType<typeof taskActions>;

@@ -1,5 +1,5 @@
 import { demoSnapshot, demoUser } from "./demo";
-import { canApproveTask, canSubmitTask, projectReview } from "./domain";
+import { projectReview, taskActions } from "./domain";
 import { transitionComment } from "./rich-text";
 import {
   type Snapshot,
@@ -281,24 +281,30 @@ export class DemoStore {
         if (!task) throw Error("Tarefa não encontrada");
         if (task.version !== a.p_version)
           throw Error("A tarefa mudou. Atualize.");
-        const approval = [
-          "approve_internal",
-          "approve_client",
-          "reject",
-          "reopen",
-        ].includes(a.p_action);
-        if (approval && !canApproveTask(this.data, task, demoUser))
-          throw Error("Você não é o responsável pela validação desta tarefa");
+        // Same rules as the buttons (and public.transition_task).
+        const acts = taskActions(this.data, task, demoUser);
+        const allowed = {
+          start: acts.start || acts.resend,
+          submit: acts.submit === true,
+          approve_internal: acts.approveInternal,
+          approve_client: acts.approveClient,
+          reject: acts.reject,
+          return: acts.return === true,
+          reopen: acts.reopen === true,
+        }[a.p_action as string];
+        if (!allowed) throw Error("Sem permissão para esta ação");
         const from = task.status;
-        if (
-          ["return", "reject", "reopen"].includes(a.p_action) &&
-          !a.p_note?.trim()
-        )
-          throw Error("Informe o motivo");
-        if (a.p_action === "approve_client" && !a.p_note?.trim())
-          throw Error("Registre a evidência de aprovação");
-        if (a.p_action === "submit" && !canSubmitTask(task))
-          throw Error("Retome a tarefa antes de enviá-la para validação");
+        const needsNote =
+          [
+            "return",
+            "reject",
+            "reopen",
+            "approve_internal",
+            "approve_client",
+          ].includes(a.p_action) ||
+          (a.p_action === "start" && from === "returned") ||
+          (a.p_action === "submit" && acts.submitNeedsNote);
+        if (needsNote && !a.p_note?.trim()) throw Error("Informe o motivo");
         if (a.p_action === "start" || a.p_action === "reopen")
           task.status = "progress";
         if (a.p_action === "reject") task.status = "rejected";
@@ -333,6 +339,9 @@ export class DemoStore {
         event(a.p_action, { from, to: task.status, note: a.p_note });
         const label = (
           {
+            start: "Reenviada ao responsável",
+            submit: "Enviada para validação",
+            approve_internal: "Aprovada na validação",
             return: "Devolvida ao criador",
             reject: "Reprovada na validação",
             approve_client: "Aprovação do cliente registrada",

@@ -1855,6 +1855,47 @@ textarea::placeholder {
 .inline-edit {
   padding: 0;
 }
+.action-hint {
+  margin: -12px 0 18px;
+  font-size: 0.8rem;
+}
+.reopen-questions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.reopen-questions fieldset {
+  display: grid;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.reopen-questions legend {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.reopen-questions .radio-option {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  text-align: left;
+  gap: 8px;
+  width: auto;
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+.reopen-questions .radio-option input {
+  accent-color: #9ebf73;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  flex: none;
+}
 .action-note {
   padding: 17px;
   background: #f7faf1;
