@@ -42,7 +42,6 @@ import {
   Plus,
   ArrowUpRight,
   ChevronRight,
-  ChevronLeft,
   ChevronsUpDown,
   ChevronsLeft,
   ChevronsRight,
@@ -125,9 +124,11 @@ import {
   durationWithSeconds,
   upsertById,
   initials,
+  byId,
   type NameLookup,
 } from "./domain";
 import { useNow } from "./useClock";
+import { Expandable, Paged, Pagination } from "./Pagination";
 import { requestPasswordReset } from "./profile";
 import {
   CreateForm,
@@ -208,7 +209,10 @@ function readSidebarCollapsed() {
   }
 }
 export default function App() {
-  const demoStore = useRef(new DemoStore());
+  // Created once: `useRef(new DemoStore())` would build (and discard) a whole
+  // demo snapshot on every render.
+  const [demoStoreInstance] = useState(() => new DemoStore());
+  const demoStore = useRef(demoStoreInstance);
   const [needsPassword, setNeedsPassword] = useState(
     new URLSearchParams(window.location.search).get("setup") === "1" ||
       new URLSearchParams(window.location.hash.slice(1)).get("type") ===
@@ -2321,32 +2325,20 @@ export default function App() {
                     />
                   )}
                   {!scheduleView && (
-                    <div className="pagination">
-                      <span>
-                        {demo ? filtered.length : count} tarefas ·{" "}
-                        {demo ? "demonstração" : `página ${offset + 1}`}
-                      </span>
-                      <div>
-                        <Button
-                          className="icon-btn"
-                          disabled={loading || offset === 0 || demo}
-                          aria-label="Página anterior"
-                          onClick={() => setOffset((v) => v - 1)}
-                        >
-                          <ChevronLeft size={18} />
-                        </Button>
-                        <Button
-                          className="icon-btn"
-                          disabled={
-                            loading || demo || (offset + 1) * 50 >= count
-                          }
-                          aria-label="Próxima página"
-                          onClick={() => setOffset((v) => v + 1)}
-                        >
-                          <ChevronRight size={18} />
-                        </Button>
-                      </div>
-                    </div>
+                    <Pagination
+                      always
+                      page={demo ? 0 : offset}
+                      pageCount={demo ? 1 : Math.max(1, Math.ceil(count / 50))}
+                      pageSize={50}
+                      total={demo ? filtered.length : count}
+                      noun={
+                        (demo ? filtered.length : count) === 1
+                          ? "tarefa"
+                          : "tarefas"
+                      }
+                      disabled={loading}
+                      onPage={setOffset}
+                    />
                   )}
                 </section>
               )}
@@ -2364,9 +2356,16 @@ export default function App() {
                   )}
                   {data.products.length ? (
                     data.products.map((p) => {
-                      const contracts = data.contracts.filter(
-                        (c) => c.product_id === p.id && !c.archived,
-                      );
+                      const contracts = data.contracts
+                        .filter((c) => c.product_id === p.id && !c.archived)
+                        .sort((a, b) =>
+                          (
+                            byId(data.clients).get(a.client_id)?.name ?? ""
+                          ).localeCompare(
+                            byId(data.clients).get(b.client_id)?.name ?? "",
+                            "pt-BR",
+                          ),
+                        );
                       return (
                         <div className="catalog-row" key={p.id}>
                           <span
@@ -2382,15 +2381,18 @@ export default function App() {
                             </small>
                             {contracts.length > 0 && (
                               <div className="catalog-clients">
-                                {contracts.map((k) => (
-                                  <span key={k.id}>
-                                    {
-                                      data.clients.find(
-                                        (c) => c.id === k.client_id,
-                                      )?.name
-                                    }
-                                  </span>
-                                ))}
+                                <Expandable items={contracts} noun="clientes">
+                                  {(shown) =>
+                                    shown.map((k) => (
+                                      <span key={k.id}>
+                                        {
+                                          byId(data.clients).get(k.client_id)
+                                            ?.name
+                                        }
+                                      </span>
+                                    ))
+                                  }
+                                </Expandable>
                               </div>
                             )}
                           </div>
@@ -2670,55 +2672,66 @@ export default function App() {
                           </Button>
                         )}
                       </div>
-                      {data.members.map((m) => (
-                        <div className="member-row" key={m.user_id}>
-                          <Avatar name={m.name} src={m.avatar_url} />
-                          <div className="member-info">
-                            <strong>{m.name}</strong>
-                            {m.email && (
-                              <span className="member-email">{m.email}</span>
-                            )}
-                          </div>
-                          <span className="role-tag">
-                            {m.role === "admin"
-                              ? "Administrador"
-                              : m.role === "manager"
-                                ? "Gestor"
-                                : "Colaborador"}
-                          </span>
-                          <span>{m.active ? "Ativo" : "Inativo"}</span>
-                          {isLeader && (
-                            <div className="member-actions">
-                              {(isAdmin || m.role !== "admin") && (
-                                <Button
-                                  className="icon-btn"
-                                  title="Editar usuário"
-                                  aria-label={`Editar ${m.name}`}
-                                  onClick={() => setEditMember(m)}
-                                >
-                                  <Pencil size={15} />
-                                </Button>
+                      <Paged
+                        items={data.members}
+                        pageSize={25}
+                        noun="pessoas"
+                        className=""
+                      >
+                        {(page) =>
+                          page.map((m) => (
+                            <div className="member-row" key={m.user_id}>
+                              <Avatar name={m.name} src={m.avatar_url} />
+                              <div className="member-info">
+                                <strong>{m.name}</strong>
+                                {m.email && (
+                                  <span className="member-email">
+                                    {m.email}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="role-tag">
+                                {m.role === "admin"
+                                  ? "Administrador"
+                                  : m.role === "manager"
+                                    ? "Gestor"
+                                    : "Colaborador"}
+                              </span>
+                              <span>{m.active ? "Ativo" : "Inativo"}</span>
+                              {isLeader && (
+                                <div className="member-actions">
+                                  {(isAdmin || m.role !== "admin") && (
+                                    <Button
+                                      className="icon-btn"
+                                      title="Editar usuário"
+                                      aria-label={`Editar ${m.name}`}
+                                      onClick={() => setEditMember(m)}
+                                    >
+                                      <Pencil size={15} />
+                                    </Button>
+                                  )}
+                                  <Button
+                                    className="icon-btn"
+                                    title="Redefinir senha"
+                                    aria-label={`Redefinir senha de ${m.name}`}
+                                    onClick={() => setResetPasswordMember(m)}
+                                  >
+                                    <KeyRound size={15} />
+                                  </Button>
+                                  <Button
+                                    className="icon-btn"
+                                    title="Alterar e-mail"
+                                    aria-label={`Alterar e-mail de ${m.name}`}
+                                    onClick={() => setUpdateEmailMember(m)}
+                                  >
+                                    <Mail size={15} />
+                                  </Button>
+                                </div>
                               )}
-                              <Button
-                                className="icon-btn"
-                                title="Redefinir senha"
-                                aria-label={`Redefinir senha de ${m.name}`}
-                                onClick={() => setResetPasswordMember(m)}
-                              >
-                                <KeyRound size={15} />
-                              </Button>
-                              <Button
-                                className="icon-btn"
-                                title="Alterar e-mail"
-                                aria-label={`Alterar e-mail de ${m.name}`}
-                                onClick={() => setUpdateEmailMember(m)}
-                              >
-                                <Mail size={15} />
-                              </Button>
                             </div>
-                          )}
-                        </div>
-                      ))}
+                          ))
+                        }
+                      </Paged>
                       <div className="panel-footer">
                         <small>
                           {data.members.length}{" "}

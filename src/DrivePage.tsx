@@ -6,6 +6,7 @@ import {
   useState,
   type DragEvent,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import {
   Building2,
@@ -34,6 +35,7 @@ import {
 } from "lucide-react";
 import { Button, Input, Select, SelectOption, Loading } from "./ui";
 import { Empty } from "./components";
+import { Paged } from "./Pagination";
 import type {
   DriveFile,
   DriveFolder,
@@ -276,8 +278,13 @@ function DriveTree({
   }
 
   // What is shown inside the current location.
+  const locationKey = [at.client, at.contract, at.folder].join("|");
   const clients =
-    !at.client && !at.folder ? data.clients.filter((c) => !c.archived) : [];
+    !at.client && !at.folder
+      ? data.clients
+          .filter((c) => !c.archived)
+          .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+      : [];
   const products =
     at.client && !at.contract && !at.folder
       ? data.contracts.filter((k) => k.client_id === at.client && !k.archived)
@@ -823,7 +830,9 @@ function DriveTree({
 
       {results ? (
         results.length ? (
-          fileRows(results, true)
+          <Paged items={results} pageSize={50} noun="arquivos" resetKey={query}>
+            {(page) => fileRows(page, true)}
+          </Paged>
         ) : (
           <div className="panel drive-empty">
             <Empty
@@ -842,66 +851,92 @@ function DriveTree({
             products.length > 0 ||
             subfolders.length > 0 ||
             editing?.kind === "new-folder") && (
-            <div className="drive-folders">
-              {editing?.kind === "new-folder" && (
-                <div className="drive-folder-card editing">
-                  {nameForm("Nome da nova pasta")}
+            <Paged
+              items={
+                [
+                  ...clients.map(
+                    (c) => () =>
+                      folderCard(
+                        c.id,
+                        c.name,
+                        "client",
+                        () => go({ client: c.id }),
+                        c.color,
+                      ),
+                  ),
+                  ...products.map(
+                    (k) => () =>
+                      folderCard(
+                        k.id,
+                        contractProductLabel(data, k.id),
+                        "product",
+                        () => go({ client: k.client_id, contract: k.id }),
+                        data.products.find((p) => p.id === k.product_id)?.color,
+                      ),
+                  ),
+                  ...subfolders.map(
+                    (f) => () =>
+                      editing?.kind === "folder" && editing.id === f.id ? (
+                        <div className="drive-folder-card editing" key={f.id}>
+                          {nameForm(`Novo nome de ${f.name}`)}
+                        </div>
+                      ) : (
+                        folderCard(
+                          f.id,
+                          f.name,
+                          "folder",
+                          () =>
+                            go({
+                              client: f.client_id ?? undefined,
+                              contract: f.contract_id ?? undefined,
+                              folder: f.id,
+                            }),
+                          undefined,
+                          canWrite
+                            ? {
+                                rename: () =>
+                                  startEdit(
+                                    { kind: "folder", id: f.id },
+                                    f.name,
+                                  ),
+                                remove:
+                                  isLeader || f.created_by === user
+                                    ? () => void removeFolder(f)
+                                    : undefined,
+                              }
+                            : undefined,
+                        )
+                      ),
+                  ),
+                ] as (() => ReactNode)[]
+              }
+              pageSize={48}
+              noun={clients.length ? "clientes" : "pastas"}
+              resetKey={locationKey}
+            >
+              {(page) => (
+                <div className="drive-folders">
+                  {editing?.kind === "new-folder" && (
+                    <div className="drive-folder-card editing">
+                      {nameForm("Nome da nova pasta")}
+                    </div>
+                  )}
+                  {page.map((card) => card())}
                 </div>
               )}
-              {clients.map((c) =>
-                folderCard(
-                  c.id,
-                  c.name,
-                  "client",
-                  () => go({ client: c.id }),
-                  c.color,
-                ),
-              )}
-              {products.map((k) =>
-                folderCard(
-                  k.id,
-                  contractProductLabel(data, k.id),
-                  "product",
-                  () => go({ client: k.client_id, contract: k.id }),
-                  data.products.find((p) => p.id === k.product_id)?.color,
-                ),
-              )}
-              {subfolders.map((f) =>
-                editing?.kind === "folder" && editing.id === f.id ? (
-                  <div className="drive-folder-card editing" key={f.id}>
-                    {nameForm(`Novo nome de ${f.name}`)}
-                  </div>
-                ) : (
-                  folderCard(
-                    f.id,
-                    f.name,
-                    "folder",
-                    () =>
-                      go({
-                        client: f.client_id ?? undefined,
-                        contract: f.contract_id ?? undefined,
-                        folder: f.id,
-                      }),
-                    undefined,
-                    canWrite
-                      ? {
-                          rename: () =>
-                            startEdit({ kind: "folder", id: f.id }, f.name),
-                          remove:
-                            isLeader || f.created_by === user
-                              ? () => void removeFolder(f)
-                              : undefined,
-                        }
-                      : undefined,
-                  )
-                ),
-              )}
-            </div>
+            </Paged>
           )}
           {files === null ? (
             <Loading compact />
           ) : files.length ? (
-            fileRows(files, false)
+            <Paged
+              items={files}
+              pageSize={50}
+              noun="arquivos"
+              resetKey={locationKey}
+            >
+              {(page) => fileRows(page, false)}
+            </Paged>
           ) : empty ? (
             <div className="panel drive-empty">
               <Empty

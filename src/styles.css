@@ -6673,3 +6673,139 @@ label .input-control .ui-input {
 .login-form > .btn {
   width: 100%;
 }
+
+/* Numbered pager (Pagination.tsx), shared by every long list. */
+.pagination > div {
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.pagination .page-number {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: #66735c;
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.pagination .page-number:hover:not(:disabled) {
+  background: #edf1e9;
+}
+.pagination .page-number.selected {
+  background: #e4efd6;
+  color: #34561a;
+  font-weight: 650;
+}
+.pagination .page-gap {
+  min-width: 18px;
+  text-align: center;
+  color: #a3ae98;
+}
+@media (max-width: 600px) {
+  .pagination {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .pagination > div {
+    justify-content: center;
+  }
+}
+/* Pagers outside a panel: no divider, aligned with the cards. */
+.portfolio-pagination,
+.grid-pagination {
+  border-top: 0;
+  padding: 18px 2px 4px;
+}
+.paged-anchor {
+  display: block;
+  height: 0;
+  scroll-margin-top: 80px;
+}
+.expand-more {
+  padding: 3px 9px;
+  border: 1px dashed #cfd9c6;
+  border-radius: 99px;
+  background: none;
+  color: #5d7a3f;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.expand-more:hover {
+  background: #f3f7ee;
+}
+
+/* Select with many options: searches as you type (SearchSelect in ui.tsx). */
+.ui-search-select {
+  cursor: pointer;
+}
+.ui-search-select > svg:last-child {
+  flex-shrink: 0;
+  color: #8a9790;
+}
+.ui-search-select-native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.ui-search-menu {
+  display: flex;
+  flex-direction: column;
+  width: var(--radix-popover-trigger-width);
+  min-width: 260px;
+  max-height: min(380px, var(--radix-popover-content-available-height));
+}
+.ui-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 5px;
+  padding: 0 10px;
+  border: 1px solid #e0e6e2;
+  border-radius: 8px;
+  color: #809087;
+}
+.ui-search-field:focus-within {
+  border-color: #a1bf78;
+}
+.ui-search-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+}
+.ui-search-options {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ui-search-options .ui-select-option > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-search-empty,
+.ui-search-more {
+  margin: 0;
+  padding: 10px;
+  color: #8a9790;
+  font-size: 0.78rem;
+}
+.ui-search-more {
+  border-top: 1px solid #eef1ed;
+}

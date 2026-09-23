@@ -144,10 +144,33 @@ export function contractDetail(name: string, product = "", client = "") {
   if ((p && n.includes(p)) || n === c || n === `${c} · ${p}`) return "";
   return name.trim();
 }
+const idIndexes = new WeakMap<
+  object,
+  { size: number; map: Map<string, unknown> }
+>();
+/**
+ * The list indexed by id, built once per array: lookups inside loops over
+ * thousands of clients or projects stay O(1). It maps ids to the objects
+ * themselves, so edits made in place are seen; the index is rebuilt when the
+ * array is replaced or grows or shrinks.
+ */
+export function byId<T extends { id: string }>(list: readonly T[]) {
+  const hit = idIndexes.get(list);
+  if (hit && hit.size === list.length) return hit.map as Map<string, T>;
+  const map = new Map(list.map((item) => [item.id, item]));
+  idIndexes.set(list, { size: list.length, map });
+  return map;
+}
 export function contractParts(data: Snapshot, contractId: string | null) {
-  const contract = data.contracts.find((c) => c.id === contractId);
-  const client = data.clients.find((c) => c.id === contract?.client_id);
-  const product = data.products.find((p) => p.id === contract?.product_id);
+  const contract = contractId
+    ? byId(data.contracts).get(contractId)
+    : undefined;
+  const client = contract
+    ? byId(data.clients).get(contract.client_id)
+    : undefined;
+  const product = contract
+    ? byId(data.products).get(contract.product_id)
+    : undefined;
   return {
     contract,
     client,

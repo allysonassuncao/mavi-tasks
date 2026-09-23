@@ -1,6 +1,7 @@
 import { Clock3, Users } from "lucide-react";
 import { Avatar, Empty } from "./components";
 import { duration } from "./domain";
+import { Paged } from "./Pagination";
 import type { Summary } from "./api";
 
 export default function Reports({
@@ -15,10 +16,9 @@ export default function Reports({
   /** Collaborator view: only the signed-in person's hours and workload. */
   personal?: boolean;
 }) {
-  const maximumMinutes = Math.max(
-    1,
-    ...byClient.map((client) => client.minutes),
-  );
+  // Most hours first; the bar scale comes from the top client overall.
+  const clients = [...byClient].sort((a, b) => b.minutes - a.minutes);
+  const maximumMinutes = Math.max(1, clients[0]?.minutes ?? 0);
   return (
     <div className="report-grid">
       <section className="panel">
@@ -34,21 +34,25 @@ export default function Reports({
           <Clock3 size={20} />
         </div>
         <div className="bar-list">
-          {byClient.map((c) => (
-            <div className="bar-row" key={c.id}>
-              <div>
-                <span>{c.name}</span>
-                <strong>{duration(c.minutes)}</strong>
-              </div>
-              <div className="bar-track">
-                <span
-                  style={{
-                    width: `${(c.minutes / maximumMinutes) * 100}%`,
-                  }}
-                />
-              </div>
-            </div>
-          ))}
+          <Paged items={clients} pageSize={15} noun="clientes" className="">
+            {(page) =>
+              page.map((c) => (
+                <div className="bar-row" key={c.id}>
+                  <div>
+                    <span>{c.name}</span>
+                    <strong>{duration(c.minutes)}</strong>
+                  </div>
+                  <div className="bar-track">
+                    <span
+                      style={{
+                        width: `${(c.minutes / maximumMinutes) * 100}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))
+            }
+          </Paged>
           {!byClient.length && (
             <Empty
               title="Sem horas no período"
@@ -70,16 +74,20 @@ export default function Reports({
           <Users size={20} />
         </div>
         <div className="workload">
-          {byPerson.map((p) => (
-            <div key={p.id}>
-              <Avatar name={p.name} src={avatarOf?.(p.id)} />
-              <span>
-                <strong>{p.name}</strong>
-                <small>{p.tasks} tarefas abertas</small>
-              </span>
-              <b>{duration(p.estimated)}</b>
-            </div>
-          ))}
+          <Paged items={byPerson} pageSize={20} noun="pessoas" className="">
+            {(page) =>
+              page.map((p) => (
+                <div key={p.id}>
+                  <Avatar name={p.name} src={avatarOf?.(p.id)} />
+                  <span>
+                    <strong>{p.name}</strong>
+                    <small>{p.tasks} tarefas abertas</small>
+                  </span>
+                  <b>{duration(p.estimated)}</b>
+                </div>
+              ))
+            }
+          </Paged>
         </div>
       </section>
       <div className="report-note">

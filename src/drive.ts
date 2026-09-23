@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { rpc } from "./api";
+import { fetchAllRows, rpc } from "./api";
 import type {
   DriveAuditEntry,
   DriveFile,
@@ -19,26 +19,25 @@ export async function listDriveFiles(
   at: DriveLocation,
 ): Promise<DriveFile[]> {
   if (!supabase) throw Error("Supabase não configurado");
-  let query = supabase
-    .from("drive_files")
-    .select(DRIVE_COLUMNS)
-    .eq("company_id", company)
-    .eq("status", "ready");
-  if (at.folder) query = query.eq("folder_id", at.folder);
-  else {
-    query = query.is("folder_id", null);
-    query = at.contract
-      ? query.eq("contract_id", at.contract)
-      : query.is("contract_id", null);
-    query = at.client
-      ? query.eq("client_id", at.client)
-      : query.is("client_id", null);
-  }
-  const { data, error } = await query
-    .order("name", { ascending: true })
-    .limit(1000);
-  if (error) throw error;
-  return (data ?? []) as DriveFile[];
+  return fetchAllRows<DriveFile>((count) => {
+    let query = supabase!
+      .from("drive_files")
+      .select(DRIVE_COLUMNS, count ? { count } : undefined)
+      .eq("company_id", company)
+      .eq("status", "ready");
+    if (at.folder) query = query.eq("folder_id", at.folder);
+    else {
+      query = query.is("folder_id", null);
+      query = at.contract
+        ? query.eq("contract_id", at.contract)
+        : query.is("contract_id", null);
+      query = at.client
+        ? query.eq("client_id", at.client)
+        : query.is("client_id", null);
+    }
+    // The id breaks ties between equal names, so pages never overlap.
+    return query.order("name").order("id");
+  });
 }
 
 /** Files the person can see (optionally in one client) whose name contains `text`. */
@@ -63,19 +62,19 @@ export async function searchDriveFiles(
   return (data ?? []) as DriveFile[];
 }
 
-/** Every folder the person can see; the tree is small enough to load at once. */
+/** Every folder the person can see, read page by page (see fetchAllRows). */
 export async function listDriveFolders(
   company: string,
 ): Promise<DriveFolder[]> {
   if (!supabase) throw Error("Supabase não configurado");
-  const { data, error } = await supabase
-    .from("drive_folders")
-    .select("*")
-    .eq("company_id", company)
-    .order("name", { ascending: true })
-    .limit(5000);
-  if (error) throw error;
-  return (data ?? []) as DriveFolder[];
+  return fetchAllRows<DriveFolder>((count) =>
+    supabase!
+      .from("drive_folders")
+      .select("*", count ? { count } : undefined)
+      .eq("company_id", company)
+      .order("name")
+      .order("id"),
+  );
 }
 
 export function createDriveFolder(

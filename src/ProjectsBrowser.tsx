@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ArrowUpDown,
   CalendarDays,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Button, Input, Select, SelectOption } from "./ui";
 import { Empty } from "./components";
+import { Paged } from "./Pagination";
 import type { Project, Snapshot } from "./types";
 import {
   contractParts,
@@ -89,6 +90,12 @@ export function ProjectsBrowser({
   const searching = query.trim().length > 0;
 
   const isLate = (p: Project) => !!p.due_date && p.due_date < today;
+  // "client:team" pairs, so the team filter is a lookup per project.
+  const clientTeamKeys = useMemo(
+    () =>
+      new Set(data.clientTeams.map((ct) => `${ct.client_id}:${ct.team_id}`)),
+    [data.clientTeams],
+  );
   const matches = (p: Project) => {
     const {
       contract,
@@ -98,13 +105,7 @@ export function ProjectsBrowser({
     if (!contract || contract.archived) return false;
     if (client && c?.id !== client) return false;
     if (product && pr?.id !== product) return false;
-    if (
-      team &&
-      !data.clientTeams.some(
-        (ct) => ct.client_id === c?.id && ct.team_id === team,
-      )
-    )
-      return false;
+    if (team && !clientTeamKeys.has(`${c?.id}:${team}`)) return false;
     if (due === "late" && !isLate(p)) return false;
     if (
       due === "week" &&
@@ -120,10 +121,39 @@ export function ProjectsBrowser({
     return true;
   };
   const projects = data.projects.filter((p) => !p.archived && matches(p));
+  // Grouped once per render: each folder then reads its own list, instead of
+  // scanning every project for each of (possibly) thousands of clients.
+  const byContract = new Map<string, Project[]>(),
+    byClient = new Map<string, Project[]>();
+  for (const p of projects) {
+    byContract.set(p.contract_id, [
+      ...(byContract.get(p.contract_id) ?? []),
+      p,
+    ]);
+    const clientId = contractParts(data, p.contract_id).client?.id ?? "";
+    byClient.set(clientId, [...(byClient.get(clientId) ?? []), p]);
+  }
+  const contractsByClient = useMemo(() => {
+    const map = new Map<string, Snapshot["contracts"]>();
+    for (const k of data.contracts)
+      if (!k.archived)
+        map.set(k.client_id, [...(map.get(k.client_id) ?? []), k]);
+    return map;
+  }, [data.contracts]);
   const contractsOf = (clientId: string) =>
-    data.contracts.filter((k) => k.client_id === clientId && !k.archived);
-  const projectsIn = (contractId: string) =>
-    projects.filter((p) => p.contract_id === contractId);
+    contractsByClient.get(clientId) ?? [];
+  const projectsIn = (contractId: string) => byContract.get(contractId) ?? [];
+  // A new search, filter or folder starts the lists on their first page.
+  const pageKey = [
+    query,
+    client,
+    product,
+    team,
+    due,
+    sort,
+    folder.client,
+    folder.contract,
+  ].join("|");
 
   function sorted(list: Project[]) {
     const clientName = (p: Project) =>
@@ -271,9 +301,13 @@ export function ProjectsBrowser({
     if (folderContract?.contract) {
       const list = sorted(projectsIn(folderContract.contract.id));
       return list.length ? (
-        <div className="drive-grid">
-          {list.map((p) => projectCard(p, false))}
-        </div>
+        <Paged items={list} pageSize={24} noun="projetos" resetKey={pageKey}>
+          {(page) => (
+            <div className="drive-grid">
+              {page.map((p) => projectCard(p, false))}
+            </div>
+          )}
+        </Paged>
       ) : (
         <Empty
           title={filtering ? "Nenhum projeto com esses filtros" : "Pasta vazia"}
@@ -300,20 +334,29 @@ export function ProjectsBrowser({
         (k) => !filtering || projectsIn(k.id).length,
       );
       return contracts.length ? (
-        <div className="drive-folders">
-          {contracts.map((k) => {
-            const list = projectsIn(k.id);
-            const pr = contractParts(data, k.id).product;
-            return folderCard(
-              k.id,
-              contractProductLabel(data, k.id),
-              pr?.color,
-              `${list.length} ${list.length === 1 ? "projeto" : "projetos"}`,
-              list.filter(isLate).length,
-              () => setFolder({ client: folderClient.id, contract: k.id }),
-            );
-          })}
-        </div>
+        <Paged
+          items={contracts}
+          pageSize={48}
+          noun="produtos"
+          resetKey={pageKey}
+        >
+          {(page) => (
+            <div className="drive-folders">
+              {page.map((k) => {
+                const list = projectsIn(k.id);
+                const pr = contractParts(data, k.id).product;
+                return folderCard(
+                  k.id,
+                  contractProductLabel(data, k.id),
+                  pr?.color,
+                  `${list.length} ${list.length === 1 ? "projeto" : "projetos"}`,
+                  list.filter(isLate).length,
+                  () => setFolder({ client: folderClient.id, contract: k.id }),
+                );
+              })}
+            </div>
+          )}
+        </Paged>
       ) : (
         <Empty
           title="Nenhum produto com esses filtros"
@@ -321,32 +364,33 @@ export function ProjectsBrowser({
         />
       );
     }
-    const clients = data.clients.filter((c) => {
-      if (c.archived || !contractsOf(c.id).length) return false;
-      return (
-        !filtering ||
-        projects.some(
-          (p) => contractParts(data, p.contract_id).client?.id === c.id,
-        )
-      );
-    });
+    const clients = data.clients
+      .filter(
+        (c) =>
+          !c.archived &&
+          contractsOf(c.id).length > 0 &&
+          (!filtering || byClient.has(c.id)),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
     return clients.length ? (
-      <div className="drive-folders">
-        {clients.map((c) => {
-          const list = projects.filter(
-            (p) => contractParts(data, p.contract_id).client?.id === c.id,
-          );
-          const products = contractsOf(c.id).length;
-          return folderCard(
-            c.id,
-            c.name,
-            c.color,
-            `${products} ${products === 1 ? "produto" : "produtos"} · ${list.length} ${list.length === 1 ? "projeto" : "projetos"}`,
-            list.filter(isLate).length,
-            () => setFolder({ client: c.id }),
-          );
-        })}
-      </div>
+      <Paged items={clients} pageSize={48} noun="clientes" resetKey={pageKey}>
+        {(page) => (
+          <div className="drive-folders">
+            {page.map((c) => {
+              const list = byClient.get(c.id) ?? [];
+              const products = contractsOf(c.id).length;
+              return folderCard(
+                c.id,
+                c.name,
+                c.color,
+                `${products} ${products === 1 ? "produto" : "produtos"} · ${list.length} ${list.length === 1 ? "projeto" : "projetos"}`,
+                list.filter(isLate).length,
+                () => setFolder({ client: c.id }),
+              );
+            })}
+          </div>
+        )}
+      </Paged>
     ) : (
       <Empty
         title={
@@ -396,79 +440,91 @@ export function ProjectsBrowser({
       );
     return (
       <div className="panel drive-table-wrap">
-        <table className="drive-table">
-          <thead>
-            <tr>
-              <th>{sortHeader("name", "Projeto")}</th>
-              <th className="hide-mobile">{sortHeader("client", "Cliente")}</th>
-              <th className="hide-mobile">Produto</th>
-              <th>{sortHeader("due", "Prazo")}</th>
-              <th className="hide-mobile hide-narrow">Progresso</th>
-              <th className="hide-mobile">Validação</th>
-              <th aria-label="Ações" />
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((p) => {
-              const { client: c, product: pr } = contractParts(
-                data,
-                p.contract_id,
-              );
-              const { done, total } = projectProgress(p);
-              return (
-                <tr key={p.id}>
-                  <td>
-                    <span className="drive-row-name">
-                      <FolderKanban size={16} aria-hidden="true" />
-                      <button
-                        type="button"
-                        className="drive-file-name"
-                        onClick={() => onViewProject(p.id)}
-                      >
-                        {p.name}
-                      </button>
-                    </span>
-                    <small className="show-mobile">
-                      {c?.name} · {pr?.name}
-                    </small>
-                  </td>
-                  <td className="hide-mobile">
-                    <button
-                      type="button"
-                      className="drive-link"
-                      onClick={() => {
-                        changeView("folders");
-                        setFolder({ client: c?.id });
-                      }}
-                    >
-                      {c?.name}
-                    </button>
-                  </td>
-                  <td className="hide-mobile">
-                    <span className="drive-product">
-                      <span
-                        className="product-dot"
-                        style={{ background: pr?.color }}
-                      />
-                      {contractProductLabel(data, p.contract_id)}
-                    </span>
-                  </td>
-                  <td>{dueBadge(p)}</td>
-                  <td className="hide-mobile hide-narrow">
-                    <span className="drive-progress">
-                      <progress value={done} max={total || 1} />
-                      <span>
-                        {done}/{total}
-                      </span>
-                    </span>
-                  </td>
-                  <td className="hide-mobile">{reviewBadge(p)}</td>
-                  <td>{projectActions(p)}</td>
+        <Paged
+          items={list}
+          pageSize={50}
+          noun="projetos"
+          resetKey={pageKey}
+          className=""
+        >
+          {(page) => (
+            <table className="drive-table">
+              <thead>
+                <tr>
+                  <th>{sortHeader("name", "Projeto")}</th>
+                  <th className="hide-mobile">
+                    {sortHeader("client", "Cliente")}
+                  </th>
+                  <th className="hide-mobile">Produto</th>
+                  <th>{sortHeader("due", "Prazo")}</th>
+                  <th className="hide-mobile hide-narrow">Progresso</th>
+                  <th className="hide-mobile">Validação</th>
+                  <th aria-label="Ações" />
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {page.map((p) => {
+                  const { client: c, product: pr } = contractParts(
+                    data,
+                    p.contract_id,
+                  );
+                  const { done, total } = projectProgress(p);
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <span className="drive-row-name">
+                          <FolderKanban size={16} aria-hidden="true" />
+                          <button
+                            type="button"
+                            className="drive-file-name"
+                            onClick={() => onViewProject(p.id)}
+                          >
+                            {p.name}
+                          </button>
+                        </span>
+                        <small className="show-mobile">
+                          {c?.name} · {pr?.name}
+                        </small>
+                      </td>
+                      <td className="hide-mobile">
+                        <button
+                          type="button"
+                          className="drive-link"
+                          onClick={() => {
+                            changeView("folders");
+                            setFolder({ client: c?.id });
+                          }}
+                        >
+                          {c?.name}
+                        </button>
+                      </td>
+                      <td className="hide-mobile">
+                        <span className="drive-product">
+                          <span
+                            className="product-dot"
+                            style={{ background: pr?.color }}
+                          />
+                          {contractProductLabel(data, p.contract_id)}
+                        </span>
+                      </td>
+                      <td>{dueBadge(p)}</td>
+                      <td className="hide-mobile hide-narrow">
+                        <span className="drive-progress">
+                          <progress value={done} max={total || 1} />
+                          <span>
+                            {done}/{total}
+                          </span>
+                        </span>
+                      </td>
+                      <td className="hide-mobile">{reviewBadge(p)}</td>
+                      <td>{projectActions(p)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </Paged>
       </div>
     );
   }
@@ -613,9 +669,18 @@ export function ProjectsBrowser({
           </nav>
           {searching ? (
             projects.length ? (
-              <div className="drive-grid">
-                {sorted(projects).map((p) => projectCard(p, true))}
-              </div>
+              <Paged
+                items={sorted(projects)}
+                pageSize={24}
+                noun="projetos"
+                resetKey={pageKey}
+              >
+                {(page) => (
+                  <div className="drive-grid">
+                    {page.map((p) => projectCard(p, true))}
+                  </div>
+                )}
+              </Paged>
             ) : (
               <Empty
                 title="Nenhum projeto encontrado"

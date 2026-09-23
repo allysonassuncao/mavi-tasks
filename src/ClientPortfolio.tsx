@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
   CalendarDays,
@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Button, Input } from "./ui";
 import { Empty } from "./components";
+import { Pagination, usePagination } from "./Pagination";
 import type { Client, Contract, Project, Snapshot } from "./types";
 import { contractParts, dateLabel, fold, initials } from "./domain";
 
@@ -66,9 +67,15 @@ export function ClientPortfolio({
   onViewProject: (projectId: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const clients = data.clients.filter(
-    (c) => !c.archived && fold(c.name).includes(fold(query.trim())),
-  );
+  const top = useRef<HTMLDivElement>(null);
+  const clients = useMemo(() => {
+    const q = fold(query.trim());
+    return data.clients
+      .filter((c) => !c.archived && fold(c.name).includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [data.clients, query]);
+  // Cards are large (products and projects inside): a dozen per page.
+  const pages = usePagination(clients, 12, query);
   const teamsOf = (clientId: string) =>
     data.clientTeams
       .filter((ct) => ct.client_id === clientId)
@@ -78,7 +85,7 @@ export function ClientPortfolio({
   return (
     <>
       <HierarchyGuide />
-      <div className="section-top">
+      <div className="section-top" ref={top}>
         <span>
           {(() => {
             const n = data.clients.filter((c) => !c.archived).length;
@@ -100,7 +107,7 @@ export function ClientPortfolio({
         </span>
       </div>
       <div className="portfolio">
-        {clients.map((client) => {
+        {pages.pageItems.map((client) => {
           const contracts = data.contracts.filter(
             (k) => k.client_id === client.id && !k.archived,
           );
@@ -296,6 +303,16 @@ export function ClientPortfolio({
           );
         })}
       </div>
+      <Pagination
+        className="portfolio-pagination"
+        page={pages.page}
+        pageCount={pages.pageCount}
+        pageSize={pages.pageSize}
+        total={clients.length}
+        noun={clients.length === 1 ? "cliente" : "clientes"}
+        onPage={pages.setPage}
+        anchor={top}
+      />
       {!clients.length && (
         <Empty
           title={

@@ -65,7 +65,47 @@ export interface CompanyLookups {
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
 }
 
-const LOOKUP_CAP = 1000;
+/** The most rows Supabase (PostgREST max-rows) returns per request. */
+export const PAGE_ROWS = 1000;
+
+type PagedQuery<T> = PromiseLike<{
+  data: T[] | null;
+  error: unknown;
+  count?: number | null;
+}> & { range: (from: number, to: number) => PagedQuery<T> };
+
+/**
+ * Every row of a query, read in pages of PAGE_ROWS: a request is silently
+ * cut at max-rows, so a single call never sees past the first thousand. The
+ * first page brings the exact count; the others then go out a few at a time.
+ * `build` must return a fresh query ordered by a unique key, so pages neither
+ * overlap nor skip rows. `count` is only requested on the first call.
+ */
+export async function fetchAllRows<T>(
+  build: (count?: "exact") => PagedQuery<T>,
+  concurrency = 4,
+): Promise<T[]> {
+  const first = await build("exact").range(0, PAGE_ROWS - 1);
+  if (first.error) throw first.error;
+  const rows = [...(first.data ?? [])];
+  const total = first.count ?? rows.length;
+  if (rows.length < PAGE_ROWS || total <= PAGE_ROWS) return rows;
+  const starts: number[] = [];
+  for (let from = PAGE_ROWS; from < total; from += PAGE_ROWS) starts.push(from);
+  const pages: T[][] = new Array(starts.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, starts.length) }, async () => {
+      while (next < starts.length) {
+        const i = next++;
+        const page = await build().range(starts[i], starts[i] + PAGE_ROWS - 1);
+        if (page.error) throw page.error;
+        pages[i] = page.data ?? [];
+      }
+    }),
+  );
+  return rows.concat(...pages);
+}
 const SCHEDULE_CAP = 2000;
 
 // TTL configurations in milliseconds
@@ -124,30 +164,29 @@ export async function companyLookups(
         clientTeams: [],
       };
 
+      // Order for stable paging: by name where there is one (the order the
+      // screens show), always ending in the primary key so no two rows tie.
       const tables = [
-        ["members", "memberships"],
-        ["clients", "clients"],
-        ["products", "products"],
-        ["contracts", "contracts"],
-        ["projects", "projects"],
-        ["teams", "teams"],
-        ["teamMembers", "team_members"],
-        ["clientTeams", "client_teams"],
+        ["members", "memberships", ["name", "user_id"]],
+        ["clients", "clients", ["name", "id"]],
+        ["products", "products", ["name", "id"]],
+        ["contracts", "contracts", ["name", "id"]],
+        ["projects", "projects", ["name", "id"]],
+        ["teams", "teams", ["name", "id"]],
+        ["teamMembers", "team_members", ["team_id", "user_id"]],
+        ["clientTeams", "client_teams", ["client_id", "team_id"]],
       ] as const;
 
       await Promise.all(
-        tables.map(async ([key, table]) => {
-          const { data: rows, error } = await supabase!
-            .from(table)
-            .select("*")
-            .eq("company_id", company)
-            .limit(LOOKUP_CAP);
-          if (error) throw error;
-          if ((rows ?? []).length >= LOOKUP_CAP)
-            throw Error(
-              `A lista de "${table}" tem mais de ${LOOKUP_CAP} registros e não pôde ser carregada por completo. Fale com o suporte.`,
-            );
-          (result[key] as unknown) = rows ?? [];
+        tables.map(async ([key, table, keyColumns]) => {
+          (result[key] as unknown) = await fetchAllRows((count) => {
+            let query = supabase!
+              .from(table)
+              .select("*", count ? { count } : undefined)
+              .eq("company_id", company);
+            for (const column of keyColumns) query = query.order(column);
+            return query;
+          });
         }),
       );
 
@@ -441,15 +480,17 @@ export async function taskPastSeconds(
   taskId: string,
 ): Promise<number> {
   if (!supabase) throw Error("Supabase não configurado");
-  const { data, error } = await supabase
-    .from("time_entries")
-    .select("started_at,ended_at")
-    .eq("company_id", company)
-    .eq("task_id", taskId)
-    .not("ended_at", "is", null)
-    .limit(10000);
-  if (error) throw error;
-  return (data ?? []).reduce((sum, h) => {
+  const data = await fetchAllRows<{ started_at: string; ended_at: string }>(
+    (count) =>
+      supabase!
+        .from("time_entries")
+        .select("started_at,ended_at", count ? { count } : undefined)
+        .eq("company_id", company)
+        .eq("task_id", taskId)
+        .not("ended_at", "is", null)
+        .order("id"),
+  );
+  return data.reduce((sum, h) => {
     const start = Date.parse(h.started_at),
       end = Date.parse(h.ended_at!);
     return Number.isFinite(start) && Number.isFinite(end) && end > start
