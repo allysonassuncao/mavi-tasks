@@ -517,6 +517,9 @@ export async function handleGoogle(
             color: (c.backgroundColor as string) || "#2a78d6",
             primary: !!c.primary,
             writable: c.accessRole === "owner" || c.accessRole === "writer",
+            // "Minhas agendas" in Google: the ones the person owns.
+            owner: c.accessRole === "owner",
+            textColor: (c.foregroundColor as string) || "#ffffff",
             selected: !!c.selected || !!c.primary,
             timeZone: c.timeZone,
           })),

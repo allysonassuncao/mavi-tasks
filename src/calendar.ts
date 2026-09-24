@@ -13,6 +13,10 @@ export type AgendaCalendar = {
   color: string;
   primary: boolean;
   writable: boolean;
+  /** Owned by the person ("Minhas agendas"); the rest are "Outras agendas". */
+  owner: boolean;
+  /** Text color Google uses on this calendar's color. */
+  textColor: string;
   /** Shown by default (as in Google). */
   selected: boolean;
   timeZone?: string;
@@ -235,24 +239,46 @@ export function stepCursor(view: View, cursor: Date, dir: 1 | -1) {
   );
 }
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-/** "Setembro de 2026", "21 – 27 de set. de 2026", "Quinta, 24 de setembro". */
+/**
+ * The toolbar title, as Google shows it: the month ("Setembro de 2026"),
+ * both months when a week spans two ("Set – out de 2026"), or the day.
+ */
 export function viewTitle(view: View, cursor: Date) {
-  if (view === "month")
-    return capital(
-      cursor.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }),
-    );
   if (view === "day")
     return capital(
       cursor.toLocaleDateString("pt-BR", {
-        weekday: "long",
         day: "numeric",
         month: "long",
+        year: "numeric",
       }),
     );
-  const { from, to } = viewRange(view, cursor);
+  const { from, to } =
+    view === "month"
+      ? {
+          from: new Date(cursor.getFullYear(), cursor.getMonth(), 1),
+          to: new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1),
+        }
+      : viewRange(view, cursor);
   const last = addDays(to, -1);
-  const sameMonth = from.getMonth() === last.getMonth();
-  return `${from.getDate()}${sameMonth ? "" : ` de ${from.toLocaleDateString("pt-BR", { month: "short" })}`} – ${last.toLocaleDateString("pt-BR", { day: "numeric", month: "short", year: "numeric" })}`;
+  const month = (d: Date) =>
+    d.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
+  if (
+    from.getMonth() === last.getMonth() &&
+    from.getFullYear() === last.getFullYear()
+  )
+    return capital(
+      from.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }),
+    );
+  if (from.getFullYear() === last.getFullYear())
+    return `${capital(month(from))} – ${month(last)} de ${last.getFullYear()}`;
+  return `${capital(month(from))} de ${from.getFullYear()} – ${month(last)} de ${last.getFullYear()}`;
+}
+/** "GMT-03", for the time grid's corner. */
+export function gmtLabel(d = new Date()) {
+  const off = -d.getTimezoneOffset();
+  const h = Math.floor(Math.abs(off) / 60);
+  const m = Math.abs(off) % 60;
+  return `GMT${off >= 0 ? "+" : "-"}${pad(h)}${m ? `:${pad(m)}` : ""}`;
 }
 export const timeLabel = (d: Date) =>
   d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -509,26 +535,62 @@ export function demoAgenda(email: string): AgendaApi {
     {
       id: "primary",
       name: email || "Minha agenda",
-      color: "#2a78d6",
+      color: "#f4511e",
+      textColor: "#fff",
       primary: true,
       writable: true,
+      owner: true,
       selected: true,
     },
     {
       id: "comercial",
       name: "Comercial",
-      color: "#1baf7a",
+      color: "#039be5",
+      textColor: "#fff",
       primary: false,
       writable: true,
+      owner: true,
       selected: true,
     },
     {
+      id: "alinhamentos",
+      name: "Alinhamentos/Feedbacks",
+      color: "#7986cb",
+      textColor: "#fff",
+      primary: false,
+      writable: true,
+      owner: true,
+      selected: false,
+    },
+    ...Array.from({ length: 14 }, (_, i): AgendaCalendar => ({
+      id: `transferido-${i}`,
+      name: `Transferido de pessoa${i + 1}@makevendas.com.br`,
+      color: "#616161",
+      textColor: "#fff",
+      primary: false,
+      writable: true,
+      owner: true,
+      selected: false,
+    })),
+    {
       id: "feriados",
       name: "Feriados no Brasil",
-      color: "#e87ba4",
+      color: "#0b8043",
+      textColor: "#fff",
       primary: false,
       writable: false,
+      owner: false,
       selected: true,
+    },
+    {
+      id: "aniversarios",
+      name: "Aniversários",
+      color: "#33b679",
+      textColor: "#fff",
+      primary: false,
+      writable: false,
+      owner: false,
+      selected: false,
     },
   ];
   const base = (
@@ -588,7 +650,19 @@ export function demoAgenda(email: string): AgendaApi {
       "Apresentação de proposta",
       at(2, 10),
       at(2, 11),
-      { meetUrl: "https://meet.google.com/demo-prop" },
+      {
+        meetUrl: "https://meet.google.com/demo-prop",
+        organizerSelf: false,
+        canEdit: false,
+        attendees: [
+          {
+            email: "cliente@aurora.example",
+            organizer: true,
+            response: "accepted",
+          },
+          { email: email, self: true, response: "needsAction" },
+        ],
+      },
     ),
     base(
       "overlap",

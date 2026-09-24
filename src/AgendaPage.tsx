@@ -10,6 +10,7 @@ import {
 import {
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -17,10 +18,12 @@ import {
   HelpCircle,
   LogOut,
   MapPin,
+  Menu,
   Pencil,
   Plus,
   RefreshCw,
   Repeat2,
+  Search,
   Trash2,
   Users,
   Video,
@@ -37,6 +40,7 @@ import {
 } from "./ui";
 import { Empty, Modal } from "./components";
 import type { Snapshot } from "./types";
+import { fold } from "./domain";
 import {
   AgendaError,
   addDays,
@@ -46,6 +50,7 @@ import {
   eventRange,
   fromDayKey,
   fromRecurrence,
+  gmtLabel,
   googleAgenda,
   googleEventColors,
   inputDateTime,
@@ -55,6 +60,7 @@ import {
   repeatLabel,
   sameDay,
   startOfDay,
+  startOfWeek,
   stepCursor,
   timeLabel,
   toRecurrence,
@@ -70,6 +76,7 @@ import {
 } from "./calendar";
 
 type Notify = (message: string) => void;
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const HOUR = 48;
 const HIDDEN_KEY = "mavi:agenda-hidden";
 const VIEW_KEY = "mavi:agenda-view";
@@ -223,6 +230,27 @@ export function AgendaPage({
 type Dialog =
   | { mode: "view"; event: AgendaEvent }
   | { mode: "edit"; event?: AgendaEvent; start?: Date; allDay?: boolean };
+const ASIDE_KEY = "mavi:agenda-aside";
+const SECTIONS_KEY = "mavi:agenda-sections";
+const viewLabels: Record<View, string> = {
+  day: "Dia",
+  week: "Semana",
+  month: "Mês",
+  list: "Lista",
+};
+
+/**
+ * How an event looks, as in Google: solid when ahead, lighter once past,
+ * only outlined while the invitation has no answer, struck through when
+ * declined.
+ */
+type Look = "solid" | "past" | "pending" | "declined";
+function lookOf(e: AgendaEvent, now: Date): Look {
+  const self = e.attendees.find((a) => a.self)?.response;
+  if (self === "declined") return "declined";
+  if (self === "needsAction") return "pending";
+  return eventRange(e).end.getTime() <= now.getTime() ? "past" : "solid";
+}
 
 function AgendaView({
   api,
@@ -253,6 +281,11 @@ function AgendaView({
   const [loading, setLoading] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [tick, setTick] = useState(0);
+  // The side panel: open by default on wide screens, a drawer on phones.
+  const [aside, setAside] = useState(
+    () =>
+      window.innerWidth >= 900 && read(ASIDE_KEY, window.innerWidth >= 1200),
+  );
   const cache = useRef(new Map<string, AgendaEvent[]>());
   const request = useRef(0);
 
@@ -283,8 +316,7 @@ function AgendaView({
     if (!calendars) return;
     const n = ++request.current;
     const cached = cache.current.get(key);
-    if (cached) setEvents(cached);
-    else setEvents(null);
+    setEvents(cached ?? null);
     if (!visible.length) {
       setEvents([]);
       return;
@@ -304,12 +336,20 @@ function AgendaView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, tick, calendars]);
 
-  const colorOf = useCallback(
-    (e: AgendaEvent) =>
-      (e.colorId && googleEventColors[e.colorId]) ||
-      calendars?.find((c) => c.id === e.calendarId)?.color ||
-      "#2a78d6",
+  const byId = useMemo(
+    () => new Map((calendars ?? []).map((c) => [c.id, c])),
     [calendars],
+  );
+  const paint = useCallback(
+    (e: AgendaEvent) => {
+      const own = e.colorId && googleEventColors[e.colorId];
+      const cal = byId.get(e.calendarId);
+      return {
+        color: own || cal?.color || "#039be5",
+        text: own ? "#fff" : cal?.textColor || "#fff",
+      };
+    },
+    [byId],
   );
   const reload = () => {
     cache.current.clear();
@@ -319,17 +359,21 @@ function AgendaView({
     setView(v);
     write(VIEW_KEY, v);
   }
-  function toggleCalendar(c: AgendaCalendar) {
-    const current = visible.map((x) => x.id);
-    const next = current.includes(c.id)
-      ? current.filter((id) => id !== c.id)
-      : [...current, c.id];
+  function toggleAside() {
+    setAside((open) => {
+      // Only the desktop panel is remembered; the phone drawer starts closed.
+      if (window.innerWidth >= 900) write(ASIDE_KEY, !open);
+      return !open;
+    });
+  }
+  function setShown(ids: string[]) {
     const hide = (calendars ?? [])
       .map((x) => x.id)
-      .filter((id) => !next.includes(id));
+      .filter((id) => !ids.includes(id));
     // Keep at least one entry so the "hidden" list is used over defaults.
-    setHidden(hide.length ? hide : ["__none__"]);
-    write(HIDDEN_KEY, hide.length ? hide : ["__none__"]);
+    const value = hide.length ? hide : ["__none__"];
+    setHidden(value);
+    write(HIDDEN_KEY, value);
   }
   async function disconnect() {
     if (
@@ -350,15 +394,70 @@ function AgendaView({
   const create = (start: Date, allDay = false) =>
     setDialog({ mode: "edit", start, allDay });
   const writable = (calendars ?? []).filter((c) => c.writable);
+  const phone = () => window.innerWidth < 900;
 
   if (!calendars)
     return error ? <p className="form-error">{error}</p> : <Loading compact />;
   return (
-    <div className="agenda">
-      <div className="agenda-toolbar">
-        <div className="agenda-nav">
+    <div className={`agenda ${aside ? "with-aside" : ""}`}>
+      {aside && phone() && (
+        <button
+          type="button"
+          className="agenda-backdrop"
+          aria-label="Fechar painel"
+          onClick={toggleAside}
+        />
+      )}
+      <aside className="agenda-side" aria-label="Agendas" hidden={!aside}>
+        <Button
+          className="agenda-create"
+          onClick={() => {
+            if (phone()) toggleAside();
+            create(defaultStart(cursor));
+          }}
+          disabled={!writable.length}
+        >
+          <Plus size={20} /> Criar
+        </Button>
+        <MiniMonth
+          cursor={cursor}
+          view={view}
+          onPick={(d) => {
+            setCursor(d);
+            if (phone()) toggleAside();
+          }}
+        />
+        <CalendarList
+          calendars={calendars}
+          shown={visible.map((c) => c.id)}
+          onChange={setShown}
+        />
+        <div className="agenda-account">
+          <small>Conectado como</small>
+          <strong title={account}>{account || "Google"}</strong>
+          <Button className="text-btn" onClick={() => void disconnect()}>
+            <LogOut size={14} /> Desconectar
+          </Button>
+          {demo && (
+            <small className="muted">
+              Demonstração: nada é enviado ao Google.
+            </small>
+          )}
+        </div>
+      </aside>
+      <section className="agenda-main">
+        <div className="agenda-toolbar">
           <Button
-            className="btn secondary"
+            className="icon-btn"
+            aria-label={aside ? "Esconder agendas" : "Mostrar agendas"}
+            title={aside ? "Esconder agendas" : "Mostrar agendas"}
+            aria-expanded={aside}
+            onClick={toggleAside}
+          >
+            <Menu size={20} />
+          </Button>
+          <Button
+            className="agenda-today"
             onClick={() => setCursor(new Date())}
           >
             Hoje
@@ -366,123 +465,87 @@ function AgendaView({
           <Button
             className="icon-btn"
             aria-label="Anterior"
+            title="Anterior"
             onClick={() => setCursor((c) => stepCursor(view, c, -1))}
           >
-            <ChevronLeft size={18} />
+            <ChevronLeft size={20} />
           </Button>
           <Button
             className="icon-btn"
             aria-label="Próximo"
+            title="Próximo"
             onClick={() => setCursor((c) => stepCursor(view, c, 1))}
           >
-            <ChevronRight size={18} />
+            <ChevronRight size={20} />
           </Button>
           <h2>{viewTitle(view, cursor)}</h2>
           {loading && events && (
             <span className="dash-refreshing" aria-label="Atualizando" />
           )}
-        </div>
-        <div className="agenda-actions">
-          <div className="drive-view" role="tablist" aria-label="Visualização">
-            {(
-              [
-                ["day", "Dia"],
-                ["week", "Semana"],
-                ["month", "Mês"],
-                ["list", "Lista"],
-              ] as const
-            ).map(([v, label]) => (
-              <button
-                key={v}
-                type="button"
-                role="tab"
-                aria-selected={view === v}
-                className={view === v ? "selected" : ""}
-                onClick={() => changeView(v)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <Button
-            className="icon-btn"
-            aria-label="Atualizar"
-            title="Atualizar"
-            onClick={reload}
-          >
-            <RefreshCw size={15} />
-          </Button>
-          <Button
-            className="btn primary"
-            onClick={() => create(defaultStart(cursor))}
-            disabled={!writable.length}
-          >
-            <Plus size={16} /> Novo evento
-          </Button>
-        </div>
-      </div>
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
-      {failed.length > 0 && (
-        <p className="muted agenda-warning">
-          Não foi possível ler{" "}
-          {failed.length === 1 ? "uma agenda" : `${failed.length} agendas`}:{" "}
-          {failed
-            .map((id) => calendars.find((c) => c.id === id)?.name ?? id)
-            .join(", ")}
-          .
-        </p>
-      )}
-      <div className="agenda-body">
-        <aside className="agenda-side">
-          <span className="agenda-side-title">Minhas agendas</span>
-          <ul className="agenda-calendars">
-            {calendars.map((c) => (
-              <li key={c.id}>
-                <label className="checkbox-label">
-                  <Checkbox
-                    checked={visible.some((v) => v.id === c.id)}
-                    onCheckedChange={() => toggleCalendar(c)}
-                    style={{ ["--check-color" as string]: c.color }}
-                  />
-                  <span title={c.name}>{c.name}</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          <div className="agenda-account">
-            <small>Conectado como</small>
-            <strong title={account}>{account || "Google"}</strong>
-            <Button className="text-btn" onClick={() => void disconnect()}>
-              <LogOut size={14} /> Desconectar
+          <span className="agenda-toolbar-end">
+            <Button
+              className="icon-btn"
+              aria-label="Atualizar"
+              title="Atualizar"
+              onClick={reload}
+            >
+              <RefreshCw size={16} />
             </Button>
-            {demo && (
-              <small className="muted">
-                Demonstração: nada é enviado ao Google.
-              </small>
-            )}
-          </div>
-        </aside>
-        <section className="panel agenda-main">
+            <Select
+              aria-label="Visualização"
+              className="agenda-view-select"
+              value={view}
+              onValueChange={(v) => changeView(v as View)}
+            >
+              {(Object.keys(viewLabels) as View[]).map((v) => (
+                <SelectOption key={v} value={v}>
+                  {viewLabels[v]}
+                </SelectOption>
+              ))}
+            </Select>
+            <Button
+              className="icon-btn agenda-create-small"
+              aria-label="Criar evento"
+              title="Criar evento"
+              onClick={() => create(defaultStart(cursor))}
+              disabled={!writable.length}
+            >
+              <Plus size={20} />
+            </Button>
+          </span>
+        </div>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        {failed.length > 0 && (
+          <p className="muted agenda-warning">
+            Não foi possível ler{" "}
+            {failed.length === 1 ? "uma agenda" : `${failed.length} agendas`}:{" "}
+            {failed.map((id) => byId.get(id)?.name ?? id).join(", ")}.
+          </p>
+        )}
+        <div className="panel agenda-surface">
           {events === null ? (
             <Loading compact />
           ) : view === "month" ? (
             <MonthView
               cursor={cursor}
               events={events}
-              colorOf={colorOf}
+              paint={paint}
               onOpen={open}
               onCreate={(d) => create(atNine(d))}
-              onDay={(d) => (setCursor(d), changeView("day"))}
+              onDay={(d) => {
+                setCursor(d);
+                changeView("day");
+              }}
             />
           ) : view === "list" ? (
             <ListView
               from={range.from}
               events={events}
-              colorOf={colorOf}
+              colorOf={(e) => paint(e).color}
               onOpen={open}
             />
           ) : (
@@ -490,18 +553,22 @@ function AgendaView({
               days={view === "week" ? 7 : 1}
               from={range.from}
               events={events}
-              colorOf={colorOf}
+              paint={paint}
               onOpen={open}
               onCreate={create}
+              onDay={(d) => {
+                setCursor(d);
+                changeView("day");
+              }}
             />
           )}
-        </section>
-      </div>
+        </div>
+      </section>
       {dialog?.mode === "view" && (
         <EventDetails
           event={dialog.event}
-          calendar={calendars.find((c) => c.id === dialog.event.calendarId)}
-          color={colorOf(dialog.event)}
+          calendar={byId.get(dialog.event.calendarId)}
+          color={paint(dialog.event).color}
           onClose={() => setDialog(null)}
           onEdit={() => setDialog({ mode: "edit", event: dialog.event })}
           onDelete={async (scope) => {
@@ -556,42 +623,245 @@ function AgendaView({
 /** The next round hour on the cursor's day. */
 function defaultStart(cursor: Date) {
   const now = new Date();
-  const d = sameDay(cursor, now) ? now : atNine(cursor);
+  const today = sameDay(cursor, now);
   return new Date(
-    d.getFullYear(),
-    d.getMonth(),
-    d.getDate(),
-    sameDay(cursor, now) ? now.getHours() + 1 : 9,
+    cursor.getFullYear(),
+    cursor.getMonth(),
+    cursor.getDate(),
+    today ? now.getHours() + 1 : 9,
     0,
   );
 }
 const atNine = (d: Date) =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate(), 9, 0);
 
+// ------------------------------------------------------------ side panel
+/** A month to jump around (like Google's), marking today and what is shown. */
+function MiniMonth({
+  cursor,
+  view,
+  onPick,
+}: {
+  cursor: Date;
+  view: View;
+  onPick: (d: Date) => void;
+}) {
+  const [month, setMonth] = useState(
+    () => new Date(cursor.getFullYear(), cursor.getMonth(), 1),
+  );
+  useEffect(() => {
+    setMonth(new Date(cursor.getFullYear(), cursor.getMonth(), 1));
+  }, [cursor]);
+  const from = startOfWeek(month);
+  const days = Array.from({ length: 42 }, (_, i) => addDays(from, i));
+  const shown = viewRange(view === "list" ? "day" : view, cursor);
+  const today = new Date();
+  return (
+    <div className="agenda-mini">
+      <div className="agenda-mini-head">
+        <strong>
+          {capital(
+            month.toLocaleDateString("pt-BR", {
+              month: "long",
+              year: "numeric",
+            }),
+          )}
+        </strong>
+        <Button
+          className="icon-btn"
+          aria-label="Mês anterior"
+          onClick={() =>
+            setMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))
+          }
+        >
+          <ChevronLeft size={16} />
+        </Button>
+        <Button
+          className="icon-btn"
+          aria-label="Próximo mês"
+          onClick={() =>
+            setMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))
+          }
+        >
+          <ChevronRight size={16} />
+        </Button>
+      </div>
+      <div className="agenda-mini-grid" role="grid">
+        {["D", "S", "T", "Q", "Q", "S", "S"].map((d, i) => (
+          <span key={i} className="agenda-mini-weekday">
+            {d}
+          </span>
+        ))}
+        {days.map((d) => {
+          const inShown = view !== "month" && d >= shown.from && d < shown.to;
+          return (
+            <button
+              key={dayKey(d)}
+              type="button"
+              className={[
+                d.getMonth() !== month.getMonth() ? "outside" : "",
+                sameDay(d, today) ? "today" : "",
+                sameDay(d, cursor) ? "selected" : "",
+                inShown ? "shown" : "",
+              ].join(" ")}
+              onClick={() => onPick(d)}
+              aria-label={d.toLocaleDateString("pt-BR", { dateStyle: "full" })}
+              aria-current={sameDay(d, today) ? "date" : undefined}
+            >
+              {d.getDate()}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The calendars, grouped as in Google ("Minhas agendas", "Outras agendas"),
+ * each group collapsible and scrolling on its own; with many calendars a
+ * search narrows the list.
+ */
+function CalendarList({
+  calendars,
+  shown,
+  onChange,
+}: {
+  calendars: AgendaCalendar[];
+  shown: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [closed, setClosed] = useState<Record<string, boolean>>(() =>
+    read(SECTIONS_KEY, {}),
+  );
+  const q = fold(query.trim());
+  const sorted = [...calendars].sort(
+    (a, b) =>
+      Number(b.primary) - Number(a.primary) ||
+      a.name.localeCompare(b.name, "pt-BR"),
+  );
+  const groups = [
+    {
+      key: "mine",
+      label: "Minhas agendas",
+      items: sorted.filter((c) => c.owner),
+    },
+    {
+      key: "other",
+      label: "Outras agendas",
+      items: sorted.filter((c) => !c.owner),
+    },
+  ].filter((g) => g.items.length);
+  const toggle = (id: string) =>
+    onChange(
+      shown.includes(id) ? shown.filter((x) => x !== id) : [...shown, id],
+    );
+  return (
+    <div className="agenda-lists">
+      {calendars.length > 8 && (
+        <label className="agenda-list-search">
+          <Search size={14} aria-hidden="true" />
+          <input
+            aria-label="Buscar agenda"
+            placeholder="Buscar agenda"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              aria-label="Limpar busca"
+              onClick={() => setQuery("")}
+            >
+              <X size={13} />
+            </button>
+          )}
+        </label>
+      )}
+      {groups.map((g) => {
+        const items = g.items.filter((c) => fold(c.name).includes(q));
+        const isClosed = closed[g.key] && !q;
+        const count = g.items.filter((c) => shown.includes(c.id)).length;
+        return (
+          <section key={g.key} className="agenda-list-group">
+            <button
+              type="button"
+              className="agenda-list-toggle"
+              aria-expanded={!isClosed}
+              onClick={() => {
+                const next = { ...closed, [g.key]: !closed[g.key] };
+                setClosed(next);
+                write(SECTIONS_KEY, next);
+              }}
+            >
+              <span>{g.label}</span>
+              <small>
+                {count}/{g.items.length}
+              </small>
+              <ChevronDown size={16} aria-hidden="true" />
+            </button>
+            {!isClosed && (
+              <ul>
+                {items.map((c) => (
+                  <li key={c.id}>
+                    <label className="agenda-calendar" title={c.name}>
+                      <input
+                        type="checkbox"
+                        checked={shown.includes(c.id)}
+                        onChange={() => toggle(c.id)}
+                        style={{ ["--cal-color" as string]: c.color }}
+                      />
+                      <span>{c.name}</span>
+                    </label>
+                  </li>
+                ))}
+                {!items.length && (
+                  <li className="agenda-list-empty">
+                    Nenhuma agenda encontrada.
+                  </li>
+                )}
+              </ul>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ events
+type Paint = (e: AgendaEvent) => { color: string; text: string };
+
 function EventChip({
   event,
-  color,
+  paint,
   onOpen,
-  showTime = true,
+  now,
 }: {
   event: AgendaEvent;
-  color: string;
+  paint: Paint;
   onOpen: (e: AgendaEvent) => void;
-  showTime?: boolean;
+  now: Date;
 }) {
   const { start } = eventRange(event);
+  const { color, text } = paint(event);
+  const look = lookOf(event, now);
   return (
     <button
       type="button"
-      className={`agenda-chip ${event.allDay ? "all-day" : ""}`}
-      style={{ ["--event-color" as string]: color }}
+      className={`agenda-chip ${event.allDay ? "all-day" : "timed"} ${look}`}
+      style={{
+        ["--event-color" as string]: color,
+        ["--event-text" as string]: text,
+      }}
       onClick={(e) => {
         e.stopPropagation();
         onOpen(event);
       }}
       title={event.title}
     >
-      {!event.allDay && showTime && <time>{timeLabel(start)}</time>}
+      {!event.allDay && <time>{timeLabel(start)}</time>}
       <span>{event.title}</span>
     </button>
   );
@@ -601,21 +871,21 @@ function EventChip({
 function MonthView({
   cursor,
   events,
-  colorOf,
+  paint,
   onOpen,
   onCreate,
   onDay: openDay,
 }: {
   cursor: Date;
   events: AgendaEvent[];
-  colorOf: (e: AgendaEvent) => string;
+  paint: Paint;
   onOpen: (e: AgendaEvent) => void;
   onCreate: (d: Date) => void;
   onDay: (d: Date) => void;
 }) {
   const { from } = viewRange("month", cursor);
   const days = Array.from({ length: 42 }, (_, i) => addDays(from, i));
-  const today = new Date();
+  const now = new Date();
   const byDay = useMemo(() => {
     const map = new Map<string, AgendaEvent[]>();
     for (const d of days)
@@ -634,20 +904,23 @@ function MonthView({
   }, [events, from.getTime()]);
   return (
     <div className="agenda-month">
-      {days.slice(0, 7).map((d) => (
-        <span key={d.getDay()} className="agenda-weekday">
-          {d.toLocaleDateString("pt-BR", { weekday: "short" }).replace(".", "")}
-        </span>
-      ))}
-      {days.map((d) => {
+      {days.map((d, i) => {
         const list = byDay.get(dayKey(d)) ?? [];
         return (
           <div
             key={dayKey(d)}
-            className={`agenda-cell ${d.getMonth() !== cursor.getMonth() ? "outside" : ""} ${sameDay(d, today) ? "today" : ""}`}
+            className={`agenda-cell ${d.getMonth() !== cursor.getMonth() ? "outside" : ""} ${sameDay(d, now) ? "today" : ""}`}
             onClick={() => onCreate(d)}
-            role="gridcell"
           >
+            {i < 7 && (
+              <span className="agenda-weekday">
+                {d
+                  .toLocaleDateString("pt-BR", { weekday: "short" })
+                  .replace(".", "")
+                  .toUpperCase()}
+                .
+              </span>
+            )}
             <button
               type="button"
               className="agenda-cell-day"
@@ -657,14 +930,17 @@ function MonthView({
               }}
               aria-label={d.toLocaleDateString("pt-BR", { dateStyle: "full" })}
             >
-              {d.getDate()}
+              {d.getDate() === 1
+                ? `${d.getDate()} de ${d.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "")}`
+                : d.getDate()}
             </button>
             {list.slice(0, 3).map((e) => (
               <EventChip
                 key={`${e.calendarId}:${e.id}`}
                 event={e}
-                color={colorOf(e)}
+                paint={paint}
                 onOpen={onOpen}
+                now={now}
               />
             ))}
             {list.length > 3 && (
@@ -676,7 +952,7 @@ function MonthView({
                   openDay(d);
                 }}
               >
-                +{list.length - 3} mais
+                Mais {list.length - 3}
               </button>
             )}
           </div>
@@ -691,16 +967,18 @@ function TimeGrid({
   days: count,
   from,
   events,
-  colorOf,
+  paint,
   onOpen,
   onCreate,
+  onDay: openDay,
 }: {
   days: number;
   from: Date;
   events: AgendaEvent[];
-  colorOf: (e: AgendaEvent) => string;
+  paint: Paint;
   onOpen: (e: AgendaEvent) => void;
   onCreate: (start: Date, allDay?: boolean) => void;
+  onDay: (d: Date) => void;
 }) {
   const days = Array.from({ length: count }, (_, i) => addDays(from, i));
   const scroller = useRef<HTMLDivElement>(null);
@@ -709,57 +987,72 @@ function TimeGrid({
     const t = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(t);
   }, []);
-  // Open at 7:00 (or an hour before now, if earlier in the view).
+  // Like Google: open around the current time when today is shown, else 7:00.
   useLayoutEffect(() => {
-    if (scroller.current) scroller.current.scrollTop = 7 * HOUR;
-  }, []);
+    if (!scroller.current) return;
+    const today = days.some((d) => sameDay(d, new Date()));
+    const hour = today ? Math.max(0, new Date().getHours() - 2) : 7;
+    scroller.current.scrollTop = hour * HOUR;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from.getTime(), count]);
   const allDay = days.map((d) => events.filter((e) => e.allDay && onDay(e, d)));
-  const hasAllDay = allDay.some((l) => l.length);
   return (
     <div
       className="agenda-grid"
       style={{ ["--days" as string]: count, ["--hour" as string]: `${HOUR}px` }}
     >
-      <div className="agenda-grid-head">
-        <span />
-        {days.map((d) => (
-          <button
-            key={dayKey(d)}
-            type="button"
-            className={`agenda-grid-day ${sameDay(d, now) ? "today" : ""}`}
-            onClick={() => onCreate(atNine(d))}
-          >
-            <small>
-              {d
-                .toLocaleDateString("pt-BR", { weekday: "short" })
-                .replace(".", "")}
-            </small>
-            <strong>{d.getDate()}</strong>
-          </button>
-        ))}
-      </div>
-      {hasAllDay && (
-        <div className="agenda-allday">
-          <small>Dia todo</small>
-          {allDay.map((list, i) => (
-            <div key={i} onClick={() => onCreate(days[i], true)}>
-              {list.map((e) => (
-                <EventChip
-                  key={`${e.calendarId}:${e.id}`}
-                  event={e}
-                  color={colorOf(e)}
-                  onOpen={onOpen}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
       <div className="agenda-grid-scroll" ref={scroller}>
+        <div className="agenda-grid-sticky">
+          <div className="agenda-grid-head">
+            <span className="agenda-tz">{gmtLabel()}</span>
+            {days.map((d) => (
+              <div
+                key={dayKey(d)}
+                className={`agenda-grid-day ${sameDay(d, now) ? "today" : ""}`}
+              >
+                <small>
+                  {d
+                    .toLocaleDateString("pt-BR", { weekday: "short" })
+                    .replace(".", "")
+                    .toUpperCase()}
+                  .
+                </small>
+                <button
+                  type="button"
+                  onClick={() => openDay(d)}
+                  aria-label={d.toLocaleDateString("pt-BR", {
+                    dateStyle: "full",
+                  })}
+                  disabled={count === 1}
+                >
+                  {d.getDate()}
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="agenda-allday">
+            <span />
+            {allDay.map((list, i) => (
+              <div key={i} onClick={() => onCreate(days[i], true)}>
+                {list.map((e) => (
+                  <EventChip
+                    key={`${e.calendarId}:${e.id}`}
+                    event={e}
+                    paint={paint}
+                    onOpen={onOpen}
+                    now={now}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
         <div className="agenda-grid-body">
-          <div className="agenda-hours">
+          <div className="agenda-hours" aria-hidden="true">
             {Array.from({ length: 24 }, (_, h) => (
-              <span key={h}>{h ? `${String(h).padStart(2, "0")}:00` : ""}</span>
+              <span key={h} style={{ top: h * HOUR }}>
+                {h ? `${String(h).padStart(2, "0")}:00` : ""}
+              </span>
             ))}
           </div>
           {days.map((d) => (
@@ -783,30 +1076,41 @@ function TimeGrid({
             >
               {layoutDay(events, d).map(({ event, top, height, col, cols }) => {
                 const { start, end } = eventRange(event);
+                const { color, text } = paint(event);
+                const short = height < 45;
                 return (
                   <button
                     key={`${event.calendarId}:${event.id}`}
                     type="button"
-                    className="agenda-block"
+                    className={`agenda-block ${lookOf(event, now)} ${short ? "short" : ""}`}
                     style={{
                       top: (top / 60) * HOUR,
                       height: Math.max(18, (height / 60) * HOUR - 2),
                       left: `calc(${(col / cols) * 100}% + 1px)`,
-                      width: `calc(${100 / cols}% - 3px)`,
-                      ["--event-color" as string]: colorOf(event),
+                      width: `calc(${100 / cols}% - ${cols > 1 ? 3 : 10}px)`,
+                      ["--event-color" as string]: color,
+                      ["--event-text" as string]: text,
                     }}
                     onClick={(ev) => {
                       ev.stopPropagation();
                       onOpen(event);
                     }}
-                    title={`${event.title} · ${timeLabel(start)}–${timeLabel(end)}`}
+                    title={`${event.title} · ${timeLabel(start)} – ${timeLabel(end)}`}
                   >
-                    <strong>{event.title}</strong>
-                    {height >= 40 && (
-                      <small>
-                        {timeLabel(start)} – {timeLabel(end)}
-                        {event.location ? ` · ${event.location}` : ""}
-                      </small>
+                    {short ? (
+                      <span className="agenda-block-line">
+                        <strong>{event.title}</strong>, {timeLabel(start)}
+                      </span>
+                    ) : (
+                      <>
+                        <strong>{event.title}</strong>
+                        <small>
+                          {timeLabel(start)} – {timeLabel(end)}
+                        </small>
+                        {event.location && height >= 75 && (
+                          <small>{event.location}</small>
+                        )}
+                      </>
                     )}
                   </button>
                 );
@@ -907,7 +1211,6 @@ function ListView({
 }
 
 // ------------------------------------------------------------ details
-const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 function whenText(e: AgendaEvent) {
   return capital(whenTextLower(e));
 }
