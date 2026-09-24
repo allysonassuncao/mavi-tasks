@@ -38,6 +38,14 @@ export function HierarchyGuide() {
   );
 }
 
+type ClientStatus = "active" | "archived" | "all";
+const statusOptions: [ClientStatus, string][] = [
+  ["active", "Ativos"],
+  ["archived", "Arquivados"],
+  ["all", "Todos"],
+];
+const count = new Intl.NumberFormat("pt-BR");
+
 export function ClientPortfolio({
   data,
   canManage,
@@ -67,15 +75,29 @@ export function ClientPortfolio({
   onViewProject: (projectId: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  // Archived clients (former clients) stay out of the way unless asked for.
+  const [status, setStatus] = useState<ClientStatus>("active");
   const top = useRef<HTMLDivElement>(null);
+  const counts = useMemo(() => {
+    const archived = data.clients.filter((c) => c.archived).length;
+    return {
+      active: data.clients.length - archived,
+      archived,
+      all: data.clients.length,
+    };
+  }, [data.clients]);
   const clients = useMemo(() => {
     const q = fold(query.trim());
     return data.clients
-      .filter((c) => !c.archived && fold(c.name).includes(q))
+      .filter(
+        (c) =>
+          (status === "all" || c.archived === (status === "archived")) &&
+          fold(c.name).includes(q),
+      )
       .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-  }, [data.clients, query]);
+  }, [data.clients, query, status]);
   // Cards are large (products and projects inside): a dozen per page.
-  const pages = usePagination(clients, 12, query);
+  const pages = usePagination(clients, 12, `${status}:${query}`);
   const teamsOf = (clientId: string) =>
     data.clientTeams
       .filter((ct) => ct.client_id === clientId)
@@ -88,13 +110,30 @@ export function ClientPortfolio({
       <div className="section-top" ref={top}>
         <span>
           {(() => {
-            const n = data.clients.filter((c) => !c.archived).length;
-            const noun = n === 1 ? "cliente" : "clientes";
+            const n = counts.active;
+            const noun = n === 1 ? "cliente ativo" : "clientes ativos";
             return canManage
-              ? `${n} ${noun} no espaço`
-              : `${n} ${noun} das suas equipes`;
+              ? `${count.format(n)} ${noun} no espaço`
+              : `${count.format(n)} ${noun} das suas equipes`;
           })()}
         </span>
+        <div
+          className="drive-view portfolio-status"
+          role="group"
+          aria-label="Mostrar clientes"
+        >
+          {statusOptions.map(([key, label]) => (
+            <button
+              type="button"
+              key={key}
+              className={status === key ? "selected" : ""}
+              aria-pressed={status === key}
+              onClick={() => setStatus(key)}
+            >
+              {label} <small>{count.format(counts[key])}</small>
+            </button>
+          ))}
+        </div>
         <span className="portfolio-search">
           <Input
             type="search"
@@ -108,15 +147,23 @@ export function ClientPortfolio({
       </div>
       <div className="portfolio">
         {pages.pageItems.map((client) => {
+          // An archived client's products are usually archived with it:
+          // they're listed too, as its history.
           const contracts = data.contracts.filter(
-            (k) => k.client_id === client.id && !k.archived,
+            (k) =>
+              k.client_id === client.id && (client.archived || !k.archived),
           );
+          // Nothing new is started for a former client.
+          const open = !client.archived;
           const projectCount = data.projects.filter(
             (p) => !p.archived && contracts.some((k) => k.id === p.contract_id),
           ).length;
           const teams = teamsOf(client.id);
           return (
-            <article className="panel portfolio-client" key={client.id}>
+            <article
+              className={`panel portfolio-client ${client.archived ? "archived" : ""}`}
+              key={client.id}
+            >
               <header className="portfolio-client-head">
                 <span
                   className="client-logo"
@@ -128,7 +175,12 @@ export function ClientPortfolio({
                   {initials(client.name)}
                 </span>
                 <div>
-                  <h2>{client.name}</h2>
+                  <h2>
+                    {client.name}
+                    {client.archived && (
+                      <span className="archived-tag">Arquivado</span>
+                    )}
+                  </h2>
                   <p>
                     {contracts.length}{" "}
                     {contracts.length === 1 ? "produto" : "produtos"} ·{" "}
@@ -156,12 +208,14 @@ export function ClientPortfolio({
                       >
                         <Pencil size={15} />
                       </Button>
-                      <Button
-                        className="btn secondary"
-                        onClick={() => onAddContract(client.id)}
-                      >
-                        <Plus size={15} /> Produto
-                      </Button>
+                      {open && (
+                        <Button
+                          className="btn secondary"
+                          onClick={() => onAddContract(client.id)}
+                        >
+                          <Plus size={15} /> Produto
+                        </Button>
+                      )}
                     </>
                   )}
                 </div>
@@ -187,10 +241,13 @@ export function ClientPortfolio({
                             <strong>
                               {product?.name}
                               {detail && <small> · {detail}</small>}
+                              {contract.archived && (
+                                <span className="archived-tag">Arquivado</span>
+                              )}
                             </strong>
                           </div>
                           <div className="portfolio-actions">
-                            {canCreateTask(contract.id) && (
+                            {open && canCreateTask(contract.id) && (
                               <Button
                                 className="text-btn"
                                 onClick={() => onNewTask(contract.id)}
@@ -200,12 +257,14 @@ export function ClientPortfolio({
                             )}
                             {canManage && (
                               <>
-                                <Button
-                                  className="text-btn"
-                                  onClick={() => onAddProject(contract.id)}
-                                >
-                                  <Plus size={14} /> Projeto
-                                </Button>
+                                {open && !contract.archived && (
+                                  <Button
+                                    className="text-btn"
+                                    onClick={() => onAddProject(contract.id)}
+                                  >
+                                    <Plus size={14} /> Projeto
+                                  </Button>
+                                )}
                                 <Button
                                   className="icon-btn"
                                   aria-label={`Editar ${product?.name} de ${client.name}`}
@@ -246,7 +305,7 @@ export function ClientPortfolio({
                                     {done}/{total}
                                   </span>
                                   <span className="portfolio-row-actions">
-                                    {canCreateTask(contract.id) && (
+                                    {open && canCreateTask(contract.id) && (
                                       <Button
                                         className="icon-btn"
                                         aria-label={`Nova tarefa em ${project.name}`}
@@ -275,14 +334,19 @@ export function ClientPortfolio({
                           </ul>
                         ) : (
                           <p className="portfolio-empty">
-                            Sem projetos: as tarefas deste produto ficam
-                            avulsas.
+                            {open
+                              ? "Sem projetos: as tarefas deste produto ficam avulsas."
+                              : "Sem projetos."}
                           </p>
                         )}
                       </li>
                     );
                   })}
                 </ul>
+              ) : !open ? (
+                <div className="portfolio-empty-client">
+                  <p>Nenhum produto registrado para este cliente.</p>
+                </div>
               ) : (
                 <div className="portfolio-empty-client">
                   <p>
@@ -318,16 +382,22 @@ export function ClientPortfolio({
           title={
             query
               ? "Nenhum cliente encontrado"
-              : canManage
-                ? "Seu primeiro cliente começa aqui"
-                : "Nenhum cliente para você ainda"
+              : status === "archived"
+                ? "Nenhum cliente arquivado"
+                : canManage
+                  ? "Seu primeiro cliente começa aqui"
+                  : "Nenhum cliente para você ainda"
           }
           body={
             query
-              ? "Confira a grafia ou limpe a busca."
-              : canManage
-                ? "Cadastre um cliente e adicione os produtos que ele contratou."
-                : "Aqui aparecem os clientes atendidos pelas equipes em que você está. Peça a um gestor para incluí-lo em uma equipe."
+              ? status === "all"
+                ? "Confira a grafia ou limpe a busca."
+                : "Confira a grafia, limpe a busca ou procure em Todos."
+              : status === "archived"
+                ? "Os clientes arquivados aparecem aqui."
+                : canManage
+                  ? "Cadastre um cliente e adicione os produtos que ele contratou."
+                  : "Aqui aparecem os clientes atendidos pelas equipes em que você está. Peça a um gestor para incluí-lo em uma equipe."
           }
         />
       )}

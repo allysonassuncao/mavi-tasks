@@ -95,11 +95,14 @@ type PagedQuery<T> = PromiseLike<{
 }> & { range: (from: number, to: number) => PagedQuery<T> };
 
 /**
- * Every row of a query, read in pages of PAGE_ROWS: a request is silently
- * cut at max-rows, so a single call never sees past the first thousand. The
- * first page brings the exact count; the others then go out a few at a time.
- * `build` must return a fresh query ordered by a unique key, so pages neither
- * overlap nor skip rows. `count` is only requested on the first call.
+ * Every row of a query, read in pages: a request is silently cut at the
+ * project's max-rows (1000 by default, but it can be set lower), so a single
+ * call never sees past it. The first page brings the exact count and shows
+ * the real page size — never assumed to be PAGE_ROWS, or a lower max-rows
+ * would stop the reading at its first page. The other pages then go out a
+ * few at a time. `build` must return a fresh query ordered by a unique key,
+ * so pages neither overlap nor skip rows. `count` is only requested on the
+ * first call.
  */
 export async function fetchAllRows<T>(
   build: (count?: "exact") => PagedQuery<T>,
@@ -108,17 +111,27 @@ export async function fetchAllRows<T>(
   const first = await build("exact").range(0, PAGE_ROWS - 1);
   if (first.error) throw first.error;
   const rows = [...(first.data ?? [])];
-  const total = first.count ?? rows.length;
-  if (rows.length < PAGE_ROWS || total <= PAGE_ROWS) return rows;
+  const size = rows.length;
+  if (!size) return rows;
+  if (first.count == null) {
+    // No count: keep reading until a page comes back short.
+    for (let page = first.data ?? []; page.length === size;) {
+      const next = await build().range(rows.length, rows.length + size - 1);
+      if (next.error) throw next.error;
+      page = next.data ?? [];
+      rows.push(...page);
+    }
+    return rows;
+  }
   const starts: number[] = [];
-  for (let from = PAGE_ROWS; from < total; from += PAGE_ROWS) starts.push(from);
+  for (let from = size; from < first.count; from += size) starts.push(from);
   const pages: T[][] = new Array(starts.length);
   let next = 0;
   await Promise.all(
     Array.from({ length: Math.min(concurrency, starts.length) }, async () => {
       while (next < starts.length) {
         const i = next++;
-        const page = await build().range(starts[i], starts[i] + PAGE_ROWS - 1);
+        const page = await build().range(starts[i], starts[i] + size - 1);
         if (page.error) throw page.error;
         pages[i] = page.data ?? [];
       }
@@ -167,8 +180,9 @@ export async function companyLookups(
   forceRefresh = false,
 ): Promise<CompanyLookups> {
   if (!supabase) throw Error("Supabase não configurado");
-  // v4: task templates; bumped whenever the cached shape changes.
-  const cacheKey = `lookups:v4:${company}`;
+  // v5: suggestion settings, and lists no longer cut at a lower max-rows;
+  // bumped whenever the cached shape (or what it may hold) changes.
+  const cacheKey = `lookups:v5:${company}`;
 
   return cache.fetchWithCache(
     cacheKey,
@@ -600,7 +614,7 @@ export async function snapshot(
  */
 export function getCachedSnapshot(company: string): Snapshot | null {
   const companyList = cache.get<Company[]>("companies");
-  const lookups = cache.get<CompanyLookups>(`lookups:v4:${company}`);
+  const lookups = cache.get<CompanyLookups>(`lookups:v5:${company}`);
   if (!lookups) return null;
 
   const hours = cache.get<TimeEntry[]>(`hours:${company}`) ?? [];
@@ -980,7 +994,7 @@ export function patchCachedLookups(
   updater: (current: CompanyLookups) => CompanyLookups,
 ): void {
   cache.update<CompanyLookups>(
-    `lookups:v4:${company}`,
+    `lookups:v5:${company}`,
     (current) => (current ? updater(current) : null),
     CACHE_TTL.LOOKUPS,
   );
@@ -1003,7 +1017,7 @@ export function patchCachedHours(company: string, entry: TimeEntry): void {
 }
 
 export function invalidateCompanyCache(company: string): void {
-  cache.invalidate(`lookups:v4:${company}`);
+  cache.invalidate(`lookups:v5:${company}`);
   cache.invalidate(`tasks:${company}:`);
   cache.invalidate(`task_scopes:${company}:`);
   cache.invalidate(`hours:${company}`);
@@ -1012,7 +1026,7 @@ export function invalidateCompanyCache(company: string): void {
 }
 
 export function invalidateLookupsCache(company: string): void {
-  cache.invalidate(`lookups:v4:${company}`);
+  cache.invalidate(`lookups:v5:${company}`);
 }
 
 export function invalidateTasksCache(company: string): void {

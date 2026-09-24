@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import { fetchAllRows, PAGE_ROWS } from "./api";
 
 /** A table of `total` rows behind a PostgREST-like builder capped at max-rows. */
-function fakeTable(total: number, failAt?: number) {
+function fakeTable(
+  total: number,
+  failAt?: number,
+  maxRows = PAGE_ROWS,
+  withCount = true,
+) {
   const calls: { from: number; to: number; count?: string }[] = [];
   const build = (count?: "exact") => ({
     range(from: number, to: number) {
       calls.push({ from, to, count });
-      const end = Math.min(to, from + PAGE_ROWS - 1, total - 1);
+      const end = Math.min(to, from + maxRows - 1, total - 1);
       const data = Array.from(
         { length: Math.max(0, end - from + 1) },
         (_, i) => from + i,
@@ -15,7 +20,11 @@ function fakeTable(total: number, failAt?: number) {
       const result =
         failAt === from
           ? { data: null, error: new Error("falhou"), count: null }
-          : { data, error: null, count: count ? total : null };
+          : {
+              data,
+              error: null,
+              count: count && withCount ? total : null,
+            };
       return Object.assign(Promise.resolve(result), {
         range: () => {
           throw Error("range chamado duas vezes");
@@ -48,6 +57,31 @@ describe("fetchAllRows", () => {
   it("funciona com exatamente 1000 linhas", async () => {
     const t = fakeTable(PAGE_ROWS);
     expect(await fetchAllRows<number>(t.build)).toHaveLength(PAGE_ROWS);
+    expect(t.calls).toHaveLength(1);
+  });
+
+  it("traz tudo quando o projeto limita as páginas abaixo de 1000", async () => {
+    // e.g. "Max rows" set to 100 in the API settings: 250 clients.
+    const t = fakeTable(250, undefined, 100);
+    const rows = await fetchAllRows<number>(t.build);
+    expect(rows).toEqual(Array.from({ length: 250 }, (_, i) => i));
+    expect(t.calls.map((c) => [c.from, c.to])).toEqual([
+      [0, PAGE_ROWS - 1],
+      [100, 199],
+      [200, 299],
+    ]);
+  });
+
+  it("sem a contagem, lê até uma página vir incompleta", async () => {
+    const t = fakeTable(2300, undefined, PAGE_ROWS, false);
+    const rows = await fetchAllRows<number>(t.build);
+    expect(rows).toEqual(Array.from({ length: 2300 }, (_, i) => i));
+    expect(t.calls.map((c) => c.from)).toEqual([0, 1000, 2000]);
+  });
+
+  it("tabela vazia faz uma chamada só", async () => {
+    const t = fakeTable(0);
+    expect(await fetchAllRows<number>(t.build)).toEqual([]);
     expect(t.calls).toHaveLength(1);
   });
 

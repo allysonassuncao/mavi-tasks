@@ -64,7 +64,17 @@ export function demoSnapshot(): Snapshot {
       email: "ola@forma.example",
       color: "#cb9c65",
     },
-  ].map((c) => ({ ...c, company_id, archived: false }));
+  ]
+    .map((c) => ({ ...c, company_id, archived: false }))
+    // A former client, to show the "Arquivados" filter.
+    .concat({
+      id: "cl-5",
+      name: "Brisa Turismo",
+      email: "",
+      color: "#7fa3c4",
+      company_id,
+      archived: true,
+    });
   const products = [
     { id: "pd-1", name: "Make Ads", color: "#719edc" },
     { id: "pd-2", name: "Make CRM", color: "#d09b61" },
@@ -101,7 +111,16 @@ export function demoSnapshot(): Snapshot {
       product_id: "pd-1",
       name: "Make Ads · Aurora",
     },
-  ].map((c) => ({ ...c, company_id, archived: false }));
+  ]
+    .map((c) => ({ ...c, company_id, archived: false }))
+    .concat({
+      id: "ct-6",
+      client_id: "cl-5",
+      product_id: "pd-1",
+      name: "Make Ads · Brisa",
+      company_id,
+      archived: true,
+    });
   const projects = [
     {
       id: "pr-1",
