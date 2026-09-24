@@ -6,6 +6,7 @@ import {
   accountId,
   configured,
   graphAll,
+  notConfiguredMessage,
   type AdsEnv,
   type Fetch,
 } from "./_ads.js";
@@ -439,12 +440,7 @@ export async function syncCycle(
   if (!window) return { cycle: t.cycle_id, status: "ok" as const, days: 0 };
   try {
     if (!configured(env, t.platform))
-      throw new AdsError(
-        500,
-        t.platform === "meta"
-          ? "A conexão com o Facebook não está configurada no servidor."
-          : "A conexão com o Google Ads não está configurada no servidor.",
-      );
+      throw new AdsError(500, notConfiguredMessage(env, t.platform));
     const read = t.platform === "meta" ? readMeta : readGoogle;
     const { days, snapshot } = await read(
       env,
@@ -494,7 +490,10 @@ export async function handleAdsSync(
     body: { error },
   });
   if (!env.tokenKey)
-    return fail(500, "A sincronização não está configurada no servidor.");
+    return fail(
+      500,
+      "A sincronização não está configurada no servidor: falta GOOGLE_TOKEN_KEY_ADS (32 bytes em base64) na Vercel.",
+    );
   const scheduled =
     !!env.secret &&
     !!authorization &&

@@ -583,7 +583,9 @@ export function AdConnections({
   };
   const describe = (provider: AdsProvider, c: AdsConnection) => {
     if (!c.configured)
-      return "Ainda não configurado no servidor (credenciais do app na Vercel).";
+      return c.missing?.length
+        ? `Não configurado no servidor. Falta na Vercel (Production): ${c.missing.join(", ")}. Depois de salvar, faça um Redeploy.`
+        : "Ainda não configurado no servidor (credenciais do app na Vercel).";
     if (provider === "meta")
       return c.accounts
         ? `${c.accounts} ${c.accounts === 1 ? "conta de anúncio" : "contas de anúncio"}, por ${(c.people ?? []).join(", ") || "—"}${c.expires_at ? `. O primeiro acesso vence em ${shortDate(c.expires_at)}` : ""}.`

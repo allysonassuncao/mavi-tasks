@@ -881,4 +881,167 @@ await check("números e sincronizações: só administradores leem", async () =>
   );
 });
 
+// ------------------------------------------------------------ paged list
+const page = (who, args = {}) =>
+  as(who).then(() =>
+    rpc("ad_campaign_page", [
+      A,
+      args.scope ?? "active",
+      args.search ?? "",
+      args.platform ?? "",
+      args.attention ?? false,
+      args.limit ?? 25,
+      args.offset ?? 0,
+    ]),
+  );
+// Three active campaigns with known alerts, on a client with an accent.
+const acme = await (async () => {
+  await as(admin);
+  const client = await rpc("create_client", [A, "Açaí Ltda", ""]);
+  return rpc("create_contract", [A, client, makeAds, "Make Ads", team]);
+})();
+const activeWith = async (name, platform, c) => {
+  const id = await campaign(admin, { contract: acme, name, platform });
+  if (c) {
+    const y = await cycle(admin, id, { ...c, links: [], current: true });
+    if (c.next)
+      await cycle(admin, id, {
+        start: shift(c.nextStart),
+        end: shift(c.nextEnd),
+        links: [],
+      });
+    void y;
+  } else {
+    // An active campaign whose cycle was deleted is rare; one without a
+    // current cycle: create a cycle, activate, then clear the pointer.
+    await cycle(admin, id, {
+      start: shift(-5),
+      end: shift(5),
+      links: [],
+      current: true,
+    });
+  }
+  await as(admin);
+  await rpc("set_ad_campaign_status", [id, "active", "Teste da lista"]);
+  return id;
+};
+const ok = await activeWith("Zeta ok", "meta", {
+  start: shift(-5),
+  end: shift(25),
+});
+const ending = await activeWith("Beta terminando", "google", {
+  start: shift(-20),
+  end: shift(4),
+});
+const ended = await activeWith("Alfa encerrado", "meta", {
+  start: shift(-40),
+  end: shift(-3),
+  next: true,
+  nextStart: -2,
+  nextEnd: 27,
+});
+const noCurrent = await activeWith("Delta sem atual", "meta", null);
+await sql("update ad_campaigns set current_cycle_id = null where id = $1", [
+  noCurrent,
+]);
+// A new campaign, never activated: out of the list, in "pending".
+const fresh = await campaign(admin, {
+  contract: acme,
+  name: "Nova aguardando",
+});
+
+await check("lista paginada: só ativas, com ciclo atual e alerta", async () => {
+  const all = await page(admin, { search: "açai" });
+  const byName = Object.fromEntries(all.rows.map((r) => [r.campaign.name, r]));
+  assert.deepEqual(Object.keys(byName).sort(), [
+    "Alfa encerrado",
+    "Beta terminando",
+    "Delta sem atual",
+    "Zeta ok",
+  ]);
+  assert.equal(byName["Zeta ok"].alert.kind, "none");
+  assert.equal(byName["Zeta ok"].client_name, "Açaí Ltda");
+  assert.equal(byName["Zeta ok"].current.end_date, shift(25));
+  assert.deepEqual(
+    [
+      byName["Beta terminando"].alert.kind,
+      byName["Beta terminando"].alert.days,
+    ],
+    ["ending", 5],
+  );
+  assert.equal(byName["Alfa encerrado"].alert.kind, "ended");
+  assert.equal(byName["Alfa encerrado"].alert.days, 3);
+  // The cycle covering today is the one to switch to.
+  assert.equal(byName["Alfa encerrado"].alert.next.start_date, shift(-2));
+  assert.equal(byName["Delta sem atual"].alert.kind, "no_current");
+  assert.ok(byName["Delta sem atual"].alert.next);
+  assert.ok(all.rows.every((r) => r.campaign.status === "active"));
+  // Company-wide (other checks above also left never-activated ones).
+  assert.ok(all.pending >= 1);
+  // Everything active in the company, and those needing attention.
+  assert.ok(all.all >= 4);
+  assert.ok(all.attention >= 3);
+});
+
+await check("busca sem acento, plataforma, atenção e paginação", async () => {
+  assert.equal((await page(admin, { search: "ACAI zeta" })).total, 0);
+  assert.equal((await page(admin, { search: "zeta" })).rows[0].campaign.id, ok);
+  assert.deepEqual(
+    (await page(admin, { search: "açaí", platform: "google" })).rows.map(
+      (r) => r.campaign.id,
+    ),
+    [ending],
+  );
+  const attention = await page(admin, { search: "acai", attention: true });
+  assert.deepEqual(
+    attention.rows.map((r) => r.campaign.name),
+    ["Alfa encerrado", "Beta terminando", "Delta sem atual"],
+  );
+  // Sorted by client, then name; two per page.
+  const first = await page(admin, { search: "acai", limit: 2 });
+  const second = await page(admin, { search: "acai", limit: 2, offset: 2 });
+  assert.equal(first.total, 4);
+  assert.deepEqual(
+    [...first.rows, ...second.rows].map((r) => r.campaign.name),
+    ["Alfa encerrado", "Beta terminando", "Delta sem atual", "Zeta ok"],
+  );
+  assert.equal((await page(admin, { limit: 1000 })).rows.length <= 100, true);
+});
+
+await check("aguardando ativação: novas nunca ativadas, à parte", async () => {
+  const pending = await page(admin, { scope: "pending", search: "acai" });
+  assert.deepEqual(
+    pending.rows.map((r) => r.campaign.id),
+    [fresh],
+  );
+  assert.equal(pending.rows[0].alert.kind, "no_cycle");
+  // Once activated and inactivated again, it is simply inactive: out of both.
+  const y = await cycle(admin, fresh, {
+    start: shift(-1),
+    end: shift(29),
+    links: [],
+    current: true,
+  });
+  void y;
+  await as(admin);
+  await rpc("set_ad_campaign_status", [fresh, "active", "Começou"]);
+  await rpc("set_ad_campaign_status", [fresh, "inactive", "Pausou"]);
+  assert.equal(
+    (await page(admin, { scope: "pending", search: "acai" })).total,
+    0,
+  );
+  assert.ok(
+    (await page(admin, { search: "acai" })).rows.every(
+      (r) => r.campaign.id !== fresh,
+    ),
+  );
+  // Imported campaigns (legacy_id) never count as pending.
+  await sql("update ad_campaigns set legacy_id = 'x1' where id = $1", [fresh]);
+});
+
+await check("lista paginada: só administradores", async () => {
+  for (const user of [manager, trafego, outsider])
+    await assert.rejects(page(user), /exclusivo de administradores/);
+});
+
 console.log(`\n${passed} verificações de campanhas passaram.`);

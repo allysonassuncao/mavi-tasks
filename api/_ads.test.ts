@@ -6,6 +6,7 @@ import {
   adsEnv,
   handleAds,
   handleAdsCallback,
+  missingConfig,
   type AdsEnv,
 } from "./_ads";
 import { seal, unseal } from "./_google";
@@ -87,6 +88,59 @@ describe("configuração e validação", () => {
     );
     expect(result.status).toBe(500);
     expect(result.body.code).toBe("not_configured");
+    // It says what is missing (names, never values).
+    expect(result.body.error).toBe(
+      "A conexão com o Google Ads não está configurada no servidor. Falta na Vercel (Production): GOOGLE_CLIENT_ID_ADS, GOOGLE_CLIENT_SECRET_ADS, GOOGLE_ADS_DEVELOPER_TOKEN. Depois de salvar, faça um Redeploy.",
+    );
+  });
+  it("aponta a chave ausente ou inválida, que vale para as duas plataformas", () => {
+    expect(
+      missingConfig(adsEnv({ META_APP_ID: "a", META_APP_SECRET: "b" }), "meta"),
+    ).toEqual(["GOOGLE_TOKEN_KEY_ADS"]);
+    // 64 hex characters (or any text) is not 32 bytes in base64.
+    const hex = adsEnv({
+      GOOGLE_TOKEN_KEY_ADS: "ab".repeat(32),
+      META_APP_ID: "a",
+      META_APP_SECRET: "b",
+    });
+    expect(hex.tokenKey).toBeNull();
+    expect(missingConfig(hex, "meta")[0]).toMatch(
+      /^GOOGLE_TOKEN_KEY_ADS \(inválida/,
+    );
+    expect(missingConfig(hex, "google")).toHaveLength(4);
+    const ok = adsEnv({
+      GOOGLE_TOKEN_KEY_ADS: key.toString("base64"),
+      META_APP_ID: "a",
+      META_APP_SECRET: "b",
+    });
+    expect(missingConfig(ok, "meta")).toEqual([]);
+  });
+  it("a janela Conexões recebe o que falta de cada plataforma", async () => {
+    const e = adsEnv({
+      GOOGLE_TOKEN_KEY_ADS: key.toString("base64"),
+      META_APP_ID: "a",
+      META_APP_SECRET: "b",
+    });
+    const { fetch } = network([
+      [/rpc\/ad_connections/, () => json({ meta: null, google: null })],
+    ]);
+    const result = await handleAds(
+      { action: "status", company },
+      auth,
+      e,
+      fetch,
+    );
+    expect(result.body).toMatchObject({
+      meta: { configured: true, missing: [] },
+      google: {
+        configured: false,
+        missing: [
+          "GOOGLE_CLIENT_ID_ADS",
+          "GOOGLE_CLIENT_SECRET_ADS",
+          "GOOGLE_ADS_DEVELOPER_TOKEN",
+        ],
+      },
+    });
   });
   it("exige sessão, empresa e plataforma válidas", async () => {
     const f = vi.fn() as unknown as typeof fetch;

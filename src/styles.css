@@ -11265,3 +11265,17 @@ label .input-control .ui-input {
     animation: none;
   }
 }
+/* Campanhas: lista paginada no servidor */
+.campaign-loading {
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.campaign-attention.pending {
+  border-color: #d5e0ee;
+  background: #f1f6fc;
+  color: #3f5f8c;
+}
+.campaign-attention.pending.on {
+  background: #dfeaf8;
+  border-color: #b4c9e6;
+}

@@ -24,6 +24,8 @@ export type AdsEnv = {
   supabaseKey: string;
   /** 32 bytes (GOOGLE_TOKEN_KEY_ADS, base64); null when missing or invalid. */
   tokenKey: Buffer | null;
+  /** Why tokenKey is null: the variable is absent, or not 32 bytes. */
+  tokenKeyIssue?: "missing" | "invalid" | null;
   /** Registered in the Meta app and in Google Cloud: <origin>/api/ads-callback. */
   redirectUri: string;
   meta: { appId: string; appSecret: string; version: string };
@@ -49,6 +51,11 @@ export function adsEnv(
     supabaseKey:
       env.VITE_SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY || "",
     tokenKey: key && key.length === 32 ? key : null,
+    tokenKeyIssue: !env.GOOGLE_TOKEN_KEY_ADS
+      ? "missing"
+      : key?.length === 32
+        ? null
+        : "invalid",
     redirectUri: env.ADS_REDIRECT_URI || `${appOrigin(env)}/api/ads-callback`,
     meta: {
       appId: env.META_APP_ID ?? "",
@@ -70,15 +77,33 @@ export const META_SCOPE = "ads_read,business_management";
 export const GOOGLE_ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
+/** The server variables a platform still needs (names only, never values). */
+export function missingConfig(env: AdsEnv, provider: AdsProvider) {
+  const missing: string[] = [];
+  if (!env.tokenKey)
+    missing.push(
+      env.tokenKeyIssue === "invalid"
+        ? "GOOGLE_TOKEN_KEY_ADS (inválida: precisa ter 32 bytes em base64, gere com openssl rand -base64 32)"
+        : "GOOGLE_TOKEN_KEY_ADS",
+    );
+  if (provider === "meta") {
+    if (!env.meta.appId) missing.push("META_APP_ID");
+    if (!env.meta.appSecret) missing.push("META_APP_SECRET");
+  } else {
+    if (!env.google.clientId) missing.push("GOOGLE_CLIENT_ID_ADS");
+    if (!env.google.clientSecret) missing.push("GOOGLE_CLIENT_SECRET_ADS");
+    if (!env.google.developerToken) missing.push("GOOGLE_ADS_DEVELOPER_TOKEN");
+  }
+  return missing;
+}
 export function configured(env: AdsEnv, provider: AdsProvider) {
-  if (!env.tokenKey) return false;
-  return provider === "meta"
-    ? !!(env.meta.appId && env.meta.appSecret)
-    : !!(
-        env.google.clientId &&
-        env.google.clientSecret &&
-        env.google.developerToken
-      );
+  return missingConfig(env, provider).length === 0;
+}
+/** "Falta na Vercel: X, Y." — for the error and the Conexões window. */
+export function notConfiguredMessage(env: AdsEnv, provider: AdsProvider) {
+  const name = provider === "meta" ? "o Facebook" : "o Google Ads";
+  const missing = missingConfig(env, provider);
+  return `A conexão com ${name} não está configurada no servidor. Falta na Vercel (Production): ${missing.join(", ")}. Depois de salvar, faça um Redeploy.`;
 }
 
 export class AdsError extends Error {
@@ -537,13 +562,7 @@ export async function handleAds(
   if (needsProvider && provider !== "meta" && provider !== "google")
     return fail(400, "Plataforma inválida.");
   if (needsProvider && !configured(env, provider))
-    return fail(
-      500,
-      provider === "meta"
-        ? "A conexão com o Facebook não está configurada no servidor."
-        : "A conexão com o Google Ads não está configurada no servidor.",
-      "not_configured",
-    );
+    return fail(500, notConfiguredMessage(env, provider), "not_configured");
   try {
     if (req.action === "status") {
       const connections = await rpc<{
@@ -555,9 +574,14 @@ export async function handleAds(
       return {
         status: 200,
         body: {
-          meta: { configured: configured(env, "meta"), ...connections.meta },
+          meta: {
+            configured: configured(env, "meta"),
+            missing: missingConfig(env, "meta"),
+            ...connections.meta,
+          },
           google: {
             configured: configured(env, "google"),
+            missing: missingConfig(env, "google"),
             ...connections.google,
           },
         },

@@ -229,8 +229,8 @@ describe("demonstração segue as regras do banco", () => {
       media_plan_url: "",
       notes: "",
     });
-    let state = await backend.load(company);
-    let a = state.campaigns.find((c) => c.id === id)!;
+    let state = await backend.campaign(company, id);
+    let a = state.campaigns[0];
     expect(a.status).toBe("inactive");
     await expect(backend.setStatus(a, "active", "Começar")).rejects.toThrow(
       /ciclo atual/,
@@ -266,8 +266,8 @@ describe("demonstração segue as regras do banco", () => {
       },
       false,
     );
-    state = await backend.load(company);
-    a = state.campaigns.find((c) => c.id === id)!;
+    state = await backend.campaign(company, id);
+    a = state.campaigns[0];
     expect(a.current_cycle_id).toBe(first);
     expect(
       state.cycles.filter((y) => y.campaign_id === id).map((y) => y.multiplier),
@@ -321,7 +321,8 @@ describe("contas e campanhas das plataformas", () => {
       });
     const a = await create("A", contracts[0].id);
     const b = await create("B", contracts[1 % contracts.length].id);
-    const state = await backend.load(company);
+    const campA = (await backend.campaign(company, a)).campaigns[0];
+    const campB = (await backend.campaign(company, b)).campaigns[0];
     const input = (start: string, end: string) => ({
       competence: `${start.slice(0, 7)}-01`,
       start_date: start,
@@ -341,14 +342,14 @@ describe("contas e campanhas das plataformas", () => {
         },
       ],
     });
-    const campA = state.campaigns.find((c) => c.id === a)!;
-    const campB = state.campaigns.find((c) => c.id === b)!;
     const y = await backend.createCycle(
       campA,
       input("2031-01-01", "2031-01-31"),
       false,
     );
-    const saved = (await backend.load(company)).cycles.find((c) => c.id === y)!;
+    const saved = (await backend.campaign(company, a)).cycles.find(
+      (c) => c.id === y,
+    )!;
     expect(saved.links[0]).toMatchObject({ account_id: "555", manager_id: "" });
     await expect(
       backend.createCycle(campB, input("2031-01-01", "2031-01-31"), false),
@@ -363,5 +364,58 @@ describe("contas e campanhas das plataformas", () => {
     expect(connectionResult("google-sem-permissao")).toMatch(/Google Ads/);
     expect(connectionResult("meta-sem-contas")).toMatch(/nenhuma conta/);
     expect(connectionResult("xyz")).toMatch(/Não foi possível/);
+  });
+});
+
+describe("lista paginada (demonstração com as regras do servidor)", () => {
+  const data = demoSnapshot();
+  const company = data.companies[0].id;
+  it("só ativas; as novas ficam em aguardando ativação", async () => {
+    const backend = demoCampaigns(() => data, demoUser);
+    const q = {
+      scope: "active" as const,
+      search: "",
+      platform: "",
+      attention: false,
+      limit: 1,
+      offset: 0,
+    };
+    const first = await backend.page(company, q);
+    expect(first.rows).toHaveLength(1);
+    expect(first.total).toBe(first.all);
+    const everything = [
+      ...first.rows,
+      ...(await backend.page(company, { ...q, limit: 50, offset: 1 })).rows,
+    ];
+    expect(everything.every((r) => r.campaign.status === "active")).toBe(true);
+    expect(everything).toHaveLength(first.all);
+    const pending = await backend.page(company, {
+      ...q,
+      scope: "pending",
+      limit: 50,
+    });
+    expect(pending.rows.every((r) => r.campaign.status === "inactive")).toBe(
+      true,
+    );
+    expect(pending.total).toBe(first.pending);
+    // Search ignores accents and case.
+    const google = await backend.page(company, {
+      ...q,
+      platform: "google",
+      limit: 50,
+    });
+    expect(google.rows.every((r) => r.campaign.platform === "google")).toBe(
+      true,
+    );
+    const name = everything[0].campaign.name;
+    const found = await backend.page(company, {
+      ...q,
+      search: name
+        .toUpperCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, ""),
+      limit: 50,
+    });
+    expect(found.rows.map((r) => r.campaign.name)).toContain(name);
   });
 });

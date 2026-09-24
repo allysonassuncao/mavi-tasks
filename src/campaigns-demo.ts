@@ -2,6 +2,8 @@ import type { Snapshot } from "./types";
 import {
   AdsApiError,
   addDays,
+  currentCycle,
+  cycleAlert,
   monthlyEnd,
   type AdCampaign,
   type AdCampaignEvent,
@@ -123,16 +125,70 @@ export function demoCampaigns(
   return {
     ads: demoAds(),
     metrics: demoMetrics(store, () => user),
-    async load() {
-      const visible = new Set(data().contracts.map((k) => k.id));
+    // The same rules as ad_campaign_page: only active campaigns, or the new
+    // ones never activated ("pending"), searched, filtered and paged.
+    async page(_company, q) {
       const snapshot = clone();
-      const campaigns = snapshot.campaigns.filter((c) =>
-        visible.has(c.contract_id),
+      const today = dateKey();
+      const fold = (t: string) =>
+        t
+          .normalize("NFD")
+          .replace(/\p{Diacritic}/gu, "")
+          .toLowerCase();
+      const pending = (c: AdCampaign) =>
+        c.status === "inactive" &&
+        !store.events.some(
+          (e) => e.campaign_id === c.id && e.action === "status",
+        ) &&
+        Date.now() - Date.parse(c.created_at) < 60 * 86_400_000;
+      const rows = snapshot.campaigns
+        .filter((c) => !c.archived)
+        .map((c) => {
+          const contract = data().contracts.find((k) => k.id === c.contract_id);
+          return {
+            campaign: c,
+            client_name:
+              data().clients.find((x) => x.id === contract?.client_id)?.name ??
+              "",
+            product_name:
+              data().products.find((x) => x.id === contract?.product_id)
+                ?.name ?? "",
+            current: currentCycle(snapshot, c),
+            alert: cycleAlert(snapshot, c, today),
+          };
+        })
+        .sort(
+          (a, b) =>
+            fold(a.client_name).localeCompare(fold(b.client_name)) ||
+            fold(a.campaign.name).localeCompare(fold(b.campaign.name)),
+        );
+      const scoped = rows.filter((r) =>
+        q.scope === "pending"
+          ? pending(r.campaign)
+          : r.campaign.status === "active",
       );
-      const ids = new Set(campaigns.map((c) => c.id));
+      const term = fold(q.search.trim());
+      const filtered = scoped.filter(
+        (r) =>
+          (!term ||
+            fold(`${r.campaign.name} ${r.client_name}`).includes(term)) &&
+          (!q.platform || r.campaign.platform === q.platform) &&
+          (!q.attention || r.alert.kind !== "none"),
+      );
+      return {
+        rows: filtered.slice(q.offset, q.offset + q.limit),
+        total: filtered.length,
+        all: scoped.length,
+        attention: scoped.filter((r) => r.alert.kind !== "none").length,
+        pending: rows.filter((r) => pending(r.campaign)).length,
+      };
+    },
+    async campaign(_company, id) {
+      const snapshot = clone();
+      const campaigns = snapshot.campaigns.filter((c) => c.id === id);
       return {
         campaigns,
-        cycles: snapshot.cycles.filter((y) => ids.has(y.campaign_id)),
+        cycles: snapshot.cycles.filter((y) => y.campaign_id === id),
       };
     },
     async events(_company, campaign) {

@@ -389,8 +389,75 @@ export type CampaignInput = {
   media_plan_url: string;
   notes: string;
 };
+/**
+ * The list is paged on the server (migration 20261003090000): only active
+ * campaigns — never the inactive ones — or, in "pending", campaigns created
+ * in MAVI in the last 60 days that were never activated.
+ */
+export type PageQuery = {
+  scope: "active" | "pending";
+  search: string;
+  platform: string;
+  attention: boolean;
+  limit: number;
+  offset: number;
+};
+export type CampaignRow = {
+  campaign: AdCampaign;
+  client_name: string;
+  product_name: string;
+  current: AdCycle | null;
+  alert: CycleAlert;
+};
+export type CampaignPage = {
+  rows: CampaignRow[];
+  /** Rows matching the search and filters. */
+  total: number;
+  /** Every campaign of the scope, and those needing attention. */
+  all: number;
+  attention: number;
+  /** New campaigns waiting for their first activation. */
+  pending: number;
+};
+type RawCycle = Omit<AdCycle, "links"> & { links?: AdCycleLink[] };
+const cycleFrom = (y: RawCycle | null): AdCycle | null =>
+  y
+    ? {
+        ...y,
+        // numeric columns may arrive as strings
+        budget: Number(y.budget),
+        multiplier: Number(y.multiplier),
+        links: y.links ?? [],
+      }
+    : null;
+/** The alert as the database computes it, in cycleAlert's shape. */
+export function alertFrom(raw: {
+  kind: CycleAlert["kind"];
+  days?: number | null;
+  next?: RawCycle | null;
+}): CycleAlert {
+  const next = cycleFrom(raw.next ?? null);
+  switch (raw.kind) {
+    case "no_current":
+      return { kind: "no_current", suggestion: next };
+    case "ending":
+      return { kind: "ending", days: raw.days ?? 0, next };
+    case "ended":
+      return { kind: "ended", days: raw.days ?? 0, next };
+    case "ends_today":
+      return { kind: "ends_today", next };
+    case "no_cycle":
+      return { kind: "no_cycle" };
+    default:
+      return { kind: "none" };
+  }
+}
+
 export interface CampaignsBackend {
-  load(company: string): Promise<CampaignData>;
+  /** A page of the list: only active campaigns (or the ones "pending"). */
+  page(company: string, query: PageQuery): Promise<CampaignPage>;
+  /** One campaign with its cycles (and links), or none. */
+  campaign(company: string, id: string): Promise<CampaignData>;
   events(company: string, campaign: string): Promise<AdCampaignEvent[]>;
   createCampaign(company: string, input: CampaignInput): Promise<string>;
   updateCampaign(
@@ -425,6 +492,8 @@ export const searchablePlatform = (p: AdPlatform): p is AdsProvider =>
 export type AdsConnection = {
   /** The server has the app's credentials for this platform. */
   configured: boolean;
+  /** Server variables still missing (names only). */
+  missing?: string[];
   /** Meta: accounts reached, who connected them, earliest expiry. */
   accounts?: number;
   people?: string[];
@@ -564,42 +633,85 @@ function cycleArgs(input: CycleInput) {
 }
 
 export const supabaseCampaigns: CampaignsBackend = {
-  async load(company) {
+  async page(company, q) {
+    const raw = (await rpc("ad_campaign_page", {
+      p_company: company,
+      p_scope: q.scope,
+      p_search: q.search,
+      p_platform: q.platform,
+      p_attention: q.attention,
+      p_limit: q.limit,
+      p_offset: q.offset,
+    })) as {
+      total: number;
+      all: number;
+      attention: number;
+      pending?: number;
+      rows: {
+        campaign: AdCampaign;
+        client_name: string;
+        product_name: string;
+        current: RawCycle | null;
+        alert: Parameters<typeof alertFrom>[0];
+      }[];
+    };
+    return {
+      total: raw.total,
+      all: raw.all,
+      attention: raw.attention,
+      pending: raw.pending ?? 0,
+      rows: raw.rows.map((r) => ({
+        campaign: r.campaign,
+        client_name: r.client_name,
+        product_name: r.product_name,
+        current: cycleFrom(r.current),
+        alert: alertFrom(r.alert),
+      })),
+    };
+  },
+  async campaign(company, id) {
     if (!supabase) throw Error("Supabase não configurado");
-    const [campaigns, cycles, links] = await Promise.all([
-      fetchAllRows<AdCampaign>((count) =>
-        supabase!
-          .from("ad_campaigns")
-          .select(CAMPAIGN_COLUMNS, count ? { count } : undefined)
-          .eq("company_id", company)
-          .order("id"),
-      ),
+    const [campaigns, cycles] = await Promise.all([
+      supabase
+        .from("ad_campaigns")
+        .select(CAMPAIGN_COLUMNS)
+        .eq("company_id", company)
+        .eq("id", id)
+        .then(({ data, error }) => {
+          if (error) throw error;
+          return (data ?? []) as AdCampaign[];
+        }),
       fetchAllRows<Omit<AdCycle, "links">>((count) =>
         supabase!
           .from("ad_cycles")
           .select(CYCLE_COLUMNS, count ? { count } : undefined)
           .eq("company_id", company)
-          .order("id"),
-      ),
-      fetchAllRows<{
-        id: string;
-        cycle_id: string;
-        account_id: string;
-        external_campaign_id: string;
-        manager_id: string;
-        account_name: string;
-        campaign_name: string;
-      }>((count) =>
-        supabase!
-          .from("ad_cycle_links")
-          .select(
-            "id,cycle_id,account_id,external_campaign_id,manager_id,account_name,campaign_name",
-            count ? { count } : undefined,
-          )
-          .eq("company_id", company)
+          .eq("campaign_id", id)
           .order("id"),
       ),
     ]);
+    const ids = cycles.map((y) => y.id);
+    const links: {
+      cycle_id: string;
+      account_id: string;
+      external_campaign_id: string;
+      manager_id: string;
+      account_name: string;
+      campaign_name: string;
+    }[] = [];
+    // A campaign has tens of cycles: their links in a few requests.
+    for (let i = 0; i < ids.length; i += 150) {
+      const { data, error } = await supabase
+        .from("ad_cycle_links")
+        .select(
+          "cycle_id,account_id,external_campaign_id,manager_id,account_name,campaign_name",
+        )
+        .eq("company_id", company)
+        .in("cycle_id", ids.slice(i, i + 150))
+        .order("id");
+      if (error) throw error;
+      links.push(...((data ?? []) as typeof links));
+    }
     const byCycle = new Map<string, AdCycleLink[]>();
     for (const l of links)
       byCycle.set(l.cycle_id, [
@@ -614,13 +726,9 @@ export const supabaseCampaigns: CampaignsBackend = {
       ]);
     return {
       campaigns,
-      cycles: cycles.map((y) => ({
-        ...y,
-        // numeric columns may arrive as strings
-        budget: Number(y.budget),
-        multiplier: Number(y.multiplier),
-        links: byCycle.get(y.id) ?? [],
-      })),
+      cycles: cycles.map((y) =>
+        cycleFrom({ ...y, links: byCycle.get(y.id) ?? [] })!,
+      ),
     };
   },
   async events(company, campaign) {

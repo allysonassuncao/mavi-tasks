@@ -32,9 +32,9 @@ import {
   Loading,
 } from "./ui";
 import { Empty, Modal } from "./components";
-import { Pagination, usePagination } from "./Pagination";
+import { Pagination } from "./Pagination";
 import { ContractPicker } from "./ContractPicker";
-import { contractParts, dateKey, fold } from "./domain";
+import { contractParts, dateKey } from "./domain";
 import { useUrlState } from "./router";
 import type { Snapshot } from "./types";
 import {
@@ -68,6 +68,7 @@ import {
   type AdObjective,
   type AdPlatform,
   type CampaignData,
+  type CampaignPage,
   type CampaignsBackend,
   type CycleAlert,
   type CycleDraft,
@@ -113,9 +114,12 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
   );
   const timezone = data.companies.find((c) => c.id === company)?.timezone;
   const today = dateKey(new Date(), timezone);
+  // Only the open campaign (with its cycles) is loaded; the list comes a
+  // page at a time from the server.
   const [state, setState] = useState<CampaignData>(emptyData);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [listTick, setListTick] = useState(0);
   const [selected, setSelected] = useUrlState<string>("campanha", "");
   // The detail's own state (CampaignDayToDay), dropped on leaving it.
   const [, setTab] = useUrlState<string>("aba", "");
@@ -136,21 +140,24 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
   }, [connection, setConnection, notify]);
 
   const reload = useCallback(async () => {
+    if (!selected) return;
     try {
-      setState(await backend.load(company));
+      setState(await backend.campaign(company, selected));
       setLoadError("");
     } catch (e) {
       setLoadError((e as Error).message);
     } finally {
       setLoaded(true);
     }
-  }, [backend, company]);
+  }, [backend, company, selected]);
   useEffect(() => {
     setLoaded(false);
+    setState(emptyData);
     void reload();
   }, [reload]);
   const afterChange = async (message: string) => {
     await reload();
+    setListTick((t) => t + 1);
     setEventsTick((t) => t + 1);
     notify(message);
   };
@@ -160,9 +167,9 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
 
   return (
     <>
-      {!loaded ? (
+      {selected && !loaded ? (
         <Loading compact />
-      ) : loadError ? (
+      ) : selected && loadError ? (
         <div className="error-banner" role="alert">
           <TriangleAlert size={18} />
           <span>Não foi possível carregar as campanhas: {loadError}</span>
@@ -204,11 +211,12 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
         />
       ) : (
         <CampaignList
-          state={state}
-          data={data}
+          backend={backend}
+          company={company}
           today={today}
           canCreate={canCreate}
           missing={!!selected}
+          tick={listTick}
           onOpen={(id) => setSelected(id)}
           onNew={() => setCampaignForm({})}
           onConnections={() => setConnections(true)}
@@ -239,9 +247,7 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
               "Campanha cadastrada. Agora cadastre o primeiro ciclo.",
             );
             setSelected(id);
-            const created = (await backend.load(company)).campaigns.find(
-              (c) => c.id === id,
-            );
+            const [created] = (await backend.campaign(company, id)).campaigns;
             if (created) setCycleForm({ campaign: created, first: true });
           }}
         />
@@ -370,72 +376,85 @@ function StatusChip({ status }: { status: AdCampaignStatus }) {
   );
 }
 
+const PAGE_SIZE = 25;
+
+/**
+ * The list, a page at a time from the server (ad_campaign_page): only active
+ * campaigns, or the new ones waiting for their first activation. Search,
+ * platform and "precisam de atenção" are applied there too.
+ */
 function CampaignList({
-  state,
-  data,
+  backend,
+  company,
   today,
   canCreate,
   missing,
+  tick,
   onOpen,
   onNew,
   onConnections,
   demo,
 }: {
-  state: CampaignData;
-  data: Snapshot;
+  backend: CampaignsBackend;
+  company: string;
   today: string;
   canCreate: boolean;
   missing: boolean;
+  /** Changes after an edit elsewhere: read the page again. */
+  tick: number;
   onOpen: (id: string) => void;
   onNew: () => void;
   onConnections: () => void;
   demo: boolean;
 }) {
   const [query, setQuery] = useUrlState<string>("busca", "");
-  const [status, setStatus] = useUrlState<string>("status", "");
   const [platform, setPlatform] = useUrlState<string>("plataforma", "");
   const [attention, setAttention] = useUrlState<boolean>("atencao", false);
-  const top = useRef<HTMLDivElement>(null);
-  const rows = useMemo(() => {
-    const q = fold(query.trim());
-    return state.campaigns
-      .filter((c) => !c.archived)
-      .map((c) => {
-        const parts = contractParts(data, c.contract_id);
-        const cycle = currentCycle(state, c);
-        return {
-          campaign: c,
-          parts,
-          cycle,
-          alert: cycleAlert(state, c, today),
-        };
-      })
-      .filter(
-        (r) =>
-          (!status || r.campaign.status === status) &&
-          (!platform || r.campaign.platform === platform) &&
-          (!attention || r.alert.kind !== "none") &&
-          (!q ||
-            fold(r.campaign.name).includes(q) ||
-            fold(r.parts.client?.name ?? "").includes(q)),
-      )
-      .sort(
-        (a, b) =>
-          (a.parts.client?.name ?? "").localeCompare(
-            b.parts.client?.name ?? "",
-            "pt-BR",
-          ) || a.campaign.name.localeCompare(b.campaign.name, "pt-BR"),
-      );
-  }, [state, data, today, query, status, platform, attention]);
-  const pages = usePagination(
-    rows,
-    25,
-    `${query}|${status}|${platform}|${attention}`,
+  const [pendingOnly, setPendingOnly] = useUrlState<boolean>(
+    "aguardando",
+    false,
   );
-  const total = state.campaigns.filter((c) => !c.archived).length;
-  const needing = state.campaigns.filter(
-    (c) => !c.archived && cycleAlert(state, c, today).kind !== "none",
-  ).length;
+  const [typed, setTyped] = useState(query);
+  const [page, setPage] = useState(0);
+  const [result, setResult] = useState<CampaignPage | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const top = useRef<HTMLDivElement>(null);
+  // Search after a pause in typing, not at every key.
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(typed.trim()), 300);
+    return () => clearTimeout(t);
+  }, [typed, setQuery]);
+  const filters = `${query}|${platform}|${attention}|${pendingOnly}`;
+  useEffect(() => setPage(0), [filters]);
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    backend
+      .page(company, {
+        scope: pendingOnly ? "pending" : "active",
+        search: query,
+        platform,
+        attention: attention && !pendingOnly,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+      })
+      .then((r) => {
+        if (!live) return;
+        setResult(r);
+        setError("");
+      })
+      .catch((e) => live && setError((e as Error).message))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [backend, company, query, platform, attention, pendingOnly, page, tick]);
+
+  const rows = result?.rows ?? [];
+  const total = result?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const filtered = !!(query || platform || attention);
 
   return (
     <>
@@ -453,20 +472,54 @@ function CampaignList({
       )}
       <div className="section-top campaign-toolbar" ref={top}>
         <span>
-          {total} {total === 1 ? "campanha" : "campanhas"}
-          {needing > 0 && (
+          {result ? (
             <>
-              {" · "}
-              <button
-                type="button"
-                className={`campaign-attention ${attention ? "on" : ""}`}
-                aria-pressed={attention}
-                onClick={() => setAttention(!attention)}
-              >
-                <TriangleAlert size={13} /> {needing}{" "}
-                {needing === 1 ? "precisa" : "precisam"} de atenção
-              </button>
+              {pendingOnly ? (
+                <>
+                  {result.all}{" "}
+                  {result.all === 1
+                    ? "campanha aguardando ativação"
+                    : "campanhas aguardando ativação"}
+                </>
+              ) : (
+                <>
+                  {result.all}{" "}
+                  {result.all === 1 ? "campanha ativa" : "campanhas ativas"}
+                </>
+              )}
+              {!pendingOnly && result.attention > 0 && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    className={`campaign-attention ${attention ? "on" : ""}`}
+                    aria-pressed={attention}
+                    onClick={() => setAttention(!attention)}
+                  >
+                    <TriangleAlert size={13} /> {result.attention}{" "}
+                    {result.attention === 1 ? "precisa" : "precisam"} de atenção
+                  </button>
+                </>
+              )}
+              {(pendingOnly || result.pending > 0) && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    className={`campaign-attention pending ${pendingOnly ? "on" : ""}`}
+                    aria-pressed={pendingOnly}
+                    title="Campanhas criadas nos últimos 60 dias que ainda não foram ativadas"
+                    onClick={() => setPendingOnly(!pendingOnly)}
+                  >
+                    {pendingOnly
+                      ? "Voltar às ativas"
+                      : `${result.pending} ${result.pending === 1 ? "aguardando" : "aguardando"} ativação`}
+                  </button>
+                </>
+              )}
             </>
+          ) : (
+            "Campanhas ativas"
           )}
         </span>
         <div className="campaign-filters">
@@ -475,16 +528,11 @@ function CampaignList({
               type="search"
               aria-label="Buscar campanha ou cliente"
               placeholder="Buscar campanha ou cliente"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
               icon={Search}
             />
           </span>
-          <Select value={status} onValueChange={setStatus} aria-label="Status">
-            <SelectOption value="">Todos os status</SelectOption>
-            <SelectOption value="active">Ativas</SelectOption>
-            <SelectOption value="inactive">Inativas</SelectOption>
-          </Select>
           <Select
             value={platform}
             onValueChange={setPlatform}
@@ -511,8 +559,19 @@ function CampaignList({
           )}
         </div>
       </div>
-      {rows.length ? (
-        <section className="panel">
+      {error && (
+        <div className="error-banner" role="alert">
+          <TriangleAlert size={18} />
+          <span>Não foi possível carregar as campanhas: {error}</span>
+        </div>
+      )}
+      {!result && !error ? (
+        <Loading compact />
+      ) : rows.length ? (
+        <section
+          className={`panel ${loading ? "campaign-loading" : ""}`}
+          aria-busy={loading}
+        >
           <div className="table-scroll">
             <table className="campaign-table">
               <thead>
@@ -527,91 +586,110 @@ function CampaignList({
                 </tr>
               </thead>
               <tbody>
-                {pages.pageItems.map(({ campaign, parts, cycle, alert }) => (
-                  <tr
-                    key={campaign.id}
-                    className="campaign-row"
-                    tabIndex={0}
-                    onClick={() => onOpen(campaign.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") onOpen(campaign.id);
-                    }}
-                  >
-                    <td>
-                      <strong className="campaign-name">{campaign.name}</strong>
-                      <small className="cell-note">
-                        {parts.client?.name ?? "Cliente"} ·{" "}
-                        {parts.product?.name ?? "Produto"}
-                      </small>
-                    </td>
-                    <td>
-                      <PlatformLabel platform={campaign.platform} />
-                    </td>
-                    <td>
-                      <StatusChip status={campaign.status} />
-                    </td>
-                    <td>
-                      {cycle && (
-                        <span className="campaign-period">
-                          {shortDate(cycle.start_date)} a{" "}
-                          {shortDate(cycle.end_date)}
-                        </span>
-                      )}
-                      <AlertChip alert={alert} today={today} cycle={cycle} />
-                    </td>
-                    <td>{cycle ? money(cycle.budget) : "—"}</td>
-                    <td>
-                      {cycle ? (
-                        <>
-                          {cycle.goal_results}{" "}
-                          {objectives[cycle.objective].result}
-                          {goalCost(cycle) !== null && (
-                            <small className="cell-note">
-                              {money(goalCost(cycle)!)} por resultado
-                            </small>
-                          )}
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td>
-                      {cycle ? cycle.multiplier.toLocaleString("pt-BR") : "—"}
-                    </td>
-                  </tr>
-                ))}
+                {rows.map(
+                  ({
+                    campaign,
+                    client_name,
+                    product_name,
+                    current: cycle,
+                    alert,
+                  }) => (
+                    <tr
+                      key={campaign.id}
+                      className="campaign-row"
+                      tabIndex={0}
+                      onClick={() => onOpen(campaign.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") onOpen(campaign.id);
+                      }}
+                    >
+                      <td>
+                        <strong className="campaign-name">
+                          {campaign.name}
+                        </strong>
+                        <small className="cell-note">
+                          {client_name || "Cliente"} ·{" "}
+                          {product_name || "Produto"}
+                        </small>
+                      </td>
+                      <td>
+                        <PlatformLabel platform={campaign.platform} />
+                      </td>
+                      <td>
+                        <StatusChip status={campaign.status} />
+                      </td>
+                      <td>
+                        {cycle && (
+                          <span className="campaign-period">
+                            {shortDate(cycle.start_date)} a{" "}
+                            {shortDate(cycle.end_date)}
+                          </span>
+                        )}
+                        <AlertChip alert={alert} today={today} cycle={cycle} />
+                      </td>
+                      <td>{cycle ? money(cycle.budget) : "—"}</td>
+                      <td>
+                        {cycle ? (
+                          <>
+                            {cycle.goal_results}{" "}
+                            {objectives[cycle.objective].result}
+                            {goalCost(cycle) !== null && (
+                              <small className="cell-note">
+                                {money(goalCost(cycle)!)} por resultado
+                              </small>
+                            )}
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td>
+                        {cycle ? cycle.multiplier.toLocaleString("pt-BR") : "—"}
+                      </td>
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
           </div>
         </section>
       ) : (
-        <Empty
-          title={
-            total ? "Nenhuma campanha encontrada" : "Nenhuma campanha ainda"
-          }
-          body={
-            total
-              ? "Confira a busca e os filtros."
-              : canCreate
-                ? "Cadastre a primeira campanha de tráfego pago de um cliente e, em seguida, o ciclo de verba dela."
-                : "Aqui aparecem as campanhas dos clientes atendidos pelas suas equipes."
-          }
-          action={
-            !total && canCreate ? (
-              <Button className="btn primary" onClick={onNew}>
-                <Plus size={17} /> Nova campanha
-              </Button>
-            ) : undefined
-          }
-        />
+        !error && (
+          <Empty
+            title={
+              filtered
+                ? "Nenhuma campanha encontrada"
+                : pendingOnly
+                  ? "Nenhuma campanha aguardando ativação"
+                  : "Nenhuma campanha ativa"
+            }
+            body={
+              filtered
+                ? "Confira a busca e os filtros."
+                : pendingOnly
+                  ? "Campanhas novas aparecem aqui até a primeira ativação."
+                  : canCreate
+                    ? "Cadastre uma campanha de tráfego pago e o ciclo de verba dela; ao ativá-la, ela aparece aqui."
+                    : "Aqui aparecem as campanhas ativas."
+            }
+            action={
+              !filtered && !pendingOnly && canCreate ? (
+                <Button className="btn primary" onClick={onNew}>
+                  <Plus size={17} /> Nova campanha
+                </Button>
+              ) : undefined
+            }
+          />
+        )
       )}
       <Pagination
-        page={pages.page}
-        pageCount={pages.pageCount}
-        pageSize={pages.pageSize}
-        total={rows.length}
-        noun={rows.length === 1 ? "campanha" : "campanhas"}
-        onPage={pages.setPage}
+        page={Math.min(page, pageCount - 1)}
+        pageCount={pageCount}
+        pageSize={PAGE_SIZE}
+        total={total}
+        noun={total === 1 ? "campanha" : "campanhas"}
+        onPage={setPage}
+        disabled={loading}
         anchor={top}
       />
     </>
