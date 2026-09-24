@@ -16,10 +16,10 @@ import {
   Link2,
   Megaphone,
   Pencil,
+  Plug,
   Plus,
   Search,
   Star,
-  Trash2,
   TriangleAlert,
 } from "lucide-react";
 import {
@@ -39,6 +39,7 @@ import { useUrlState } from "./router";
 import type { Snapshot } from "./types";
 import {
   campaignStatuses,
+  connectionResult,
   currentCycle,
   cycleAlert,
   cycleDays,
@@ -62,6 +63,7 @@ import {
   type AdCampaignEvent,
   type AdCampaignStatus,
   type AdCycle,
+  type AdCycleLink,
   type AdDestination,
   type AdObjective,
   type AdPlatform,
@@ -72,6 +74,8 @@ import {
   type CycleInput,
 } from "./campaigns";
 import { demoCampaigns } from "./campaigns-demo";
+import { AdConnections, CycleLinks, accountLabel } from "./CampaignLinks";
+import { CampaignDayToDay } from "./CampaignDayToDay";
 
 type Props = {
   demo: boolean;
@@ -113,10 +117,23 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [selected, setSelected] = useUrlState<string>("campanha", "");
+  // The detail's own state (CampaignDayToDay), dropped on leaving it.
+  const [, setTab] = useUrlState<string>("aba", "");
+  const [, setViewedCycle] = useUrlState<string>("ciclo", "");
+  const [, setTimelineTab] = useUrlState<string>("linha", "");
   const [campaignForm, setCampaignForm] = useState<CampaignFormState>(null);
   const [cycleForm, setCycleForm] = useState<CycleFormState>(null);
   const [statusForm, setStatusForm] = useState<StatusFormState>(null);
+  const [connections, setConnections] = useState(false);
   const [eventsTick, setEventsTick] = useState(0);
+  // Back from Facebook or Google (api/ads-callback): say how it went.
+  const [connection, setConnection] = useUrlState<string>("conexao", "");
+  useEffect(() => {
+    if (!connection) return;
+    notify(connectionResult(connection));
+    setConnection("");
+    setConnections(true);
+  }, [connection, setConnection, notify]);
 
   const reload = useCallback(async () => {
     try {
@@ -163,7 +180,13 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           backend={backend}
           today={today}
           eventsTick={eventsTick}
-          onBack={() => setSelected("")}
+          notify={notify}
+          onBack={() => {
+            setTab("");
+            setViewedCycle("");
+            setTimelineTab("");
+            setSelected("");
+          }}
           onEdit={() => setCampaignForm({ campaign })}
           onStatus={(to) => setStatusForm({ campaign, to })}
           onNewCycle={() => setCycleForm({ campaign })}
@@ -188,6 +211,7 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           missing={!!selected}
           onOpen={(id) => setSelected(id)}
           onNew={() => setCampaignForm({})}
+          onConnections={() => setConnections(true)}
           demo={demo}
         />
       )}
@@ -229,6 +253,8 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           first={cycleForm.first}
           state={state}
           today={today}
+          company={company}
+          ads={backend.ads}
           onClose={() => setCycleForm(null)}
           onSave={async (input, makeCurrent) => {
             if (cycleForm.cycle) {
@@ -245,6 +271,14 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
               );
             }
           }}
+        />
+      )}
+      {connections && (
+        <AdConnections
+          company={company}
+          ads={backend.ads}
+          onClose={() => setConnections(false)}
+          notify={notify}
         />
       )}
       {statusForm && (
@@ -344,6 +378,7 @@ function CampaignList({
   missing,
   onOpen,
   onNew,
+  onConnections,
   demo,
 }: {
   state: CampaignData;
@@ -353,6 +388,7 @@ function CampaignList({
   missing: boolean;
   onOpen: (id: string) => void;
   onNew: () => void;
+  onConnections: () => void;
   demo: boolean;
 }) {
   const [query, setQuery] = useUrlState<string>("busca", "");
@@ -461,6 +497,13 @@ function CampaignList({
               </SelectOption>
             ))}
           </Select>
+          <Button
+            className="btn secondary"
+            onClick={onConnections}
+            title="Conexões com o Facebook e o Google Ads"
+          >
+            <Plug size={16} /> Conexões
+          </Button>
           {canCreate && (
             <Button className="btn primary" onClick={onNew}>
               <Plus size={17} /> Nova campanha
@@ -585,6 +628,7 @@ function CampaignDetail({
   backend,
   today,
   eventsTick,
+  notify,
   onBack,
   onEdit,
   onStatus,
@@ -599,6 +643,7 @@ function CampaignDetail({
   backend: CampaignsBackend;
   today: string;
   eventsTick: number;
+  notify: (message: string) => void;
   onBack: () => void;
   onEdit: () => void;
   onStatus: (to: AdCampaignStatus) => void;
@@ -754,153 +799,181 @@ function CampaignDetail({
         </div>
       )}
 
-      <section className="panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Ciclos</h2>
-            <p>
-              Períodos de verba da campanha. O ciclo atual só muda quando alguém
-              troca.
-            </p>
-          </div>
-          <Button className="btn secondary" onClick={onNewCycle}>
-            <Plus size={15} /> Novo ciclo
-          </Button>
-        </div>
-        {cycles.length ? (
-          <div className="table-scroll">
-            <table className="campaign-table">
-              <thead>
-                <tr>
-                  <th>Período</th>
-                  <th>Competência</th>
-                  <th>Objetivo</th>
-                  <th>Meta</th>
-                  <th>Verba</th>
-                  <th title="Índice de performance">M</th>
-                  <th>Destino e vínculos</th>
-                  <th>Situação</th>
-                  <th aria-label="Ações" />
-                </tr>
-              </thead>
-              <tbody>
-                {[...cycles].reverse().map((y) => {
-                  const isCurrent = y.id === campaign.current_cycle_id;
-                  const s = cycleState(y, today);
-                  return (
-                    <tr
-                      key={y.id}
-                      className={isCurrent ? "campaign-current" : ""}
-                    >
-                      <td>
-                        <strong>
-                          {shortDate(y.start_date)} a {shortDate(y.end_date)}
-                        </strong>
-                        <small className="cell-note">{cycleDays(y)} dias</small>
-                      </td>
-                      <td>{monthLabel(y.competence_month)}</td>
-                      <td>{objectives[y.objective].label}</td>
-                      <td>
-                        {y.goal_results} {objectives[y.objective].result}
-                        {goalCost(y) !== null && (
-                          <small className="cell-note">
-                            {money(goalCost(y)!)} por resultado
-                          </small>
-                        )}
-                      </td>
-                      <td>{money(y.budget)}</td>
-                      <td>{y.multiplier.toLocaleString("pt-BR")}</td>
-                      <td>
-                        {destinations[y.destination]}
-                        <small className="cell-note">
-                          <Link2 size={12} /> {y.links.length}{" "}
-                          {y.links.length === 1 ? "vínculo" : "vínculos"} na
-                          plataforma
-                          {y.landing_pages.length > 0 &&
-                            ` · LPs: ${y.landing_pages.join(", ")}`}
-                        </small>
-                      </td>
-                      <td>
-                        {isCurrent && (
-                          <span className="campaign-chip current">Atual</span>
-                        )}
-                        <span
-                          className={`campaign-chip ${s === "ended" ? "muted" : ""}`}
-                        >
-                          {cycleStates[s]}
-                        </span>
-                      </td>
-                      <td className="campaign-row-actions">
-                        {!isCurrent && (
-                          <Button
-                            className="text-btn"
-                            onClick={() => onMakeCurrent(y)}
-                            title="Definir como o ciclo que está valendo"
+      <CampaignDayToDay
+        campaign={campaign}
+        cycles={cycles}
+        current={current}
+        company={company}
+        metricsBackend={backend.metrics}
+        today={today}
+        events={events}
+        describeEvent={(e) => describeEvent(e, state)}
+        notify={notify}
+        cyclesTab={
+          <>
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>Ciclos</h2>
+                  <p>
+                    Períodos de verba da campanha. O ciclo atual só muda quando
+                    alguém troca.
+                  </p>
+                </div>
+                <Button className="btn secondary" onClick={onNewCycle}>
+                  <Plus size={15} /> Novo ciclo
+                </Button>
+              </div>
+              {cycles.length ? (
+                <div className="table-scroll">
+                  <table className="campaign-table">
+                    <thead>
+                      <tr>
+                        <th>Período</th>
+                        <th>Competência</th>
+                        <th>Objetivo</th>
+                        <th>Meta</th>
+                        <th>Verba</th>
+                        <th title="Índice de performance">M</th>
+                        <th>Destino e vínculos</th>
+                        <th>Situação</th>
+                        <th aria-label="Ações" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...cycles].reverse().map((y) => {
+                        const isCurrent = y.id === campaign.current_cycle_id;
+                        const s = cycleState(y, today);
+                        return (
+                          <tr
+                            key={y.id}
+                            className={isCurrent ? "campaign-current" : ""}
                           >
-                            <Star size={14} /> Tornar atual
-                          </Button>
-                        )}
-                        <Button
-                          className="icon-btn"
-                          aria-label={`Editar ciclo de ${shortDate(y.start_date)} a ${shortDate(y.end_date)}`}
-                          title="Editar ciclo"
-                          onClick={() => onEditCycle(y)}
-                        >
-                          <Pencil size={14} />
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <Empty
-            title="Nenhum ciclo"
-            body="O ciclo registra o período, a verba, o objetivo e a quantidade de resultados esperada."
-          />
-        )}
-      </section>
+                            <td>
+                              <strong>
+                                {shortDate(y.start_date)} a{" "}
+                                {shortDate(y.end_date)}
+                              </strong>
+                              <small className="cell-note">
+                                {cycleDays(y)} dias
+                              </small>
+                            </td>
+                            <td>{monthLabel(y.competence_month)}</td>
+                            <td>{objectives[y.objective].label}</td>
+                            <td>
+                              {y.goal_results} {objectives[y.objective].result}
+                              {goalCost(y) !== null && (
+                                <small className="cell-note">
+                                  {money(goalCost(y)!)} por resultado
+                                </small>
+                              )}
+                            </td>
+                            <td>{money(y.budget)}</td>
+                            <td>{y.multiplier.toLocaleString("pt-BR")}</td>
+                            <td>
+                              {destinations[y.destination]}
+                              <small
+                                className="cell-note"
+                                title={y.links
+                                  .map((l) => linkName(campaign.platform, l))
+                                  .join("\n")}
+                              >
+                                <Link2 size={12} />{" "}
+                                {y.links.length
+                                  ? `${linkName(campaign.platform, y.links[0])}${y.links.length > 1 ? ` +${y.links.length - 1}` : ""}`
+                                  : "Sem vínculo na plataforma"}
+                                {y.landing_pages.length > 0 &&
+                                  ` · LPs: ${y.landing_pages.join(", ")}`}
+                              </small>
+                            </td>
+                            <td>
+                              {isCurrent && (
+                                <span className="campaign-chip current">
+                                  Atual
+                                </span>
+                              )}
+                              <span
+                                className={`campaign-chip ${s === "ended" ? "muted" : ""}`}
+                              >
+                                {cycleStates[s]}
+                              </span>
+                            </td>
+                            <td className="campaign-row-actions">
+                              {!isCurrent && (
+                                <Button
+                                  className="text-btn"
+                                  onClick={() => onMakeCurrent(y)}
+                                  title="Definir como o ciclo que está valendo"
+                                >
+                                  <Star size={14} /> Tornar atual
+                                </Button>
+                              )}
+                              <Button
+                                className="icon-btn"
+                                aria-label={`Editar ciclo de ${shortDate(y.start_date)} a ${shortDate(y.end_date)}`}
+                                title="Editar ciclo"
+                                onClick={() => onEditCycle(y)}
+                              >
+                                <Pencil size={14} />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <Empty
+                  title="Nenhum ciclo"
+                  body="O ciclo registra o período, a verba, o objetivo e a quantidade de resultados esperada."
+                />
+              )}
+            </section>
 
-      <section className="panel">
-        <div className="panel-heading">
-          <div>
-            <h2>
-              <History size={17} /> Histórico
-            </h2>
-            <p>Quem cadastrou e alterou o quê, com antes e depois.</p>
-          </div>
-        </div>
-        {events === null ? (
-          <Loading compact />
-        ) : events.length ? (
-          <ol className="campaign-history">
-            {events.map((e) => (
-              <li key={e.id}>
-                <span className="campaign-history-when">
-                  {new Date(e.created_at).toLocaleString("pt-BR", {
-                    day: "2-digit",
-                    month: "2-digit",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-                <span>
-                  <strong>
-                    {data.members.find((m) => m.user_id === e.actor_id)?.name ??
-                      "Alguém"}
-                  </strong>{" "}
-                  {describeEvent(e, state)}
-                </span>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="muted campaign-history-empty">Sem registros ainda.</p>
-        )}
-      </section>
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>
+                    <History size={17} /> Histórico
+                  </h2>
+                  <p>Quem cadastrou e alterou o quê, com antes e depois.</p>
+                </div>
+              </div>
+              {events === null ? (
+                <Loading compact />
+              ) : events.length ? (
+                <ol className="campaign-history">
+                  {events.map((e) => (
+                    <li key={e.id}>
+                      <span className="campaign-history-when">
+                        {new Date(e.created_at).toLocaleString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <span>
+                        <strong>
+                          {data.members.find((m) => m.user_id === e.actor_id)
+                            ?.name ?? "Alguém"}
+                        </strong>{" "}
+                        {describeEvent(e, state)}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="muted campaign-history-empty">
+                  Sem registros ainda.
+                </p>
+              )}
+            </section>
+          </>
+        }
+      />
     </div>
   );
 }
@@ -972,6 +1045,12 @@ function describeEvent(e: AdCampaignEvent, state: CampaignData) {
     default:
       return e.action;
   }
+}
+
+/** A link as people read it: the campaign's name, or the account's. */
+function linkName(platform: AdPlatform, l: AdCycleLink) {
+  if (l.campaign_id) return l.campaign_name || `Campanha ${l.campaign_id}`;
+  return `Conta ${l.account_name || accountLabel(platform, l.account_id)} (inteira)`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1143,6 +1222,8 @@ function CycleForm({
   first,
   state,
   today,
+  company,
+  ads,
   onClose,
   onSave,
 }: {
@@ -1151,6 +1232,8 @@ function CycleForm({
   first?: boolean;
   state: CampaignData;
   today: string;
+  company: string;
+  ads: CampaignsBackend["ads"];
   onClose: () => void;
   onSave: (input: CycleInput, makeCurrent: boolean) => Promise<void>;
 }) {
@@ -1342,69 +1425,13 @@ function CycleForm({
               />
             </label>
           )}
-          <fieldset className="campaign-links">
-            <legend>Vínculos na plataforma</legend>
-            <small>
-              Contas de anúncio e campanhas de {platforms[campaign.platform]} de
-              onde vêm os resultados deste ciclo. Opcional por enquanto; será
-              usado pela sincronização automática.
-            </small>
-            {draft.links.map((l, i) => (
-              <div className="campaign-link-row" key={i}>
-                <Input
-                  aria-label={`Conta de anúncio ${i + 1}`}
-                  placeholder="Conta de anúncio"
-                  value={l.account_id}
-                  onChange={(e) =>
-                    set(
-                      "links",
-                      draft.links.map((x, j) =>
-                        j === i ? { ...x, account_id: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-                <Input
-                  aria-label={`Campanha na plataforma ${i + 1}`}
-                  placeholder="ID da campanha (opcional)"
-                  value={l.campaign_id}
-                  onChange={(e) =>
-                    set(
-                      "links",
-                      draft.links.map((x, j) =>
-                        j === i ? { ...x, campaign_id: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-                <Button
-                  type="button"
-                  className="icon-btn"
-                  aria-label={`Remover vínculo ${i + 1}`}
-                  onClick={() =>
-                    set(
-                      "links",
-                      draft.links.filter((_, j) => j !== i),
-                    )
-                  }
-                >
-                  <Trash2 size={15} />
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              className="text-btn"
-              onClick={() =>
-                set("links", [
-                  ...draft.links,
-                  { account_id: "", campaign_id: "" },
-                ])
-              }
-            >
-              <Plus size={14} /> Adicionar vínculo
-            </Button>
-          </fieldset>
+          <CycleLinks
+            platform={campaign.platform}
+            company={company}
+            ads={ads}
+            links={draft.links}
+            onChange={(links) => set("links", links)}
+          />
           {!cycle && (
             <label className="checkbox-label">
               <Checkbox

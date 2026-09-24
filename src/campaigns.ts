@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { fetchAllRows, rpc } from "./api";
+import type { MetricsBackend } from "./campaign-metrics";
 
 /**
  * Campanhas (tráfego pago): each belongs to a contracted product and goes
@@ -35,6 +36,11 @@ export interface AdCampaign {
 export interface AdCycleLink {
   account_id: string;
   campaign_id: string;
+  /** Google: the MCC the account is reached through (login-customer-id). */
+  manager_id?: string;
+  /** Names as they were when picked from the platform. */
+  account_name?: string;
+  campaign_name?: string;
 }
 export interface AdCycle {
   id: string;
@@ -348,6 +354,7 @@ export function cycleInput(
     return { error: "Informe ao menos uma página de captura da Make." };
   const links = draft.links
     .map((l) => ({
+      ...l,
       account_id: l.account_id.trim(),
       campaign_id: l.campaign_id.trim(),
     }))
@@ -402,6 +409,137 @@ export interface CampaignsBackend {
     makeCurrent: boolean,
   ): Promise<string>;
   updateCycle(cycle: AdCycle, input: CycleInput): Promise<void>;
+  /** The platforms' accounts and campaigns, read live (api/_ads.ts). */
+  ads: AdsBackend;
+  /** Each cycle's numbers (the daily sync, api/_ads-sync.ts). */
+  metrics: MetricsBackend;
+}
+
+/* ------------------------------------------------------------------ */
+/* Platforms (Meta and Google Ads)                                     */
+
+export type AdsProvider = "meta" | "google";
+/** The platforms whose accounts and campaigns can be searched. */
+export const searchablePlatform = (p: AdPlatform): p is AdsProvider =>
+  p === "meta" || p === "google";
+export type AdsConnection = {
+  /** The server has the app's credentials for this platform. */
+  configured: boolean;
+  /** Meta: accounts reached, who connected them, earliest expiry. */
+  accounts?: number;
+  people?: string[];
+  expires_at?: string | null;
+  /** Google: the agency account connected. */
+  email?: string;
+  connected_at?: string;
+};
+export type AdsStatus = { meta: AdsConnection; google: AdsConnection };
+export type PlatformAccount = {
+  id: string;
+  name: string;
+  status: string;
+  active: boolean;
+  currency: string;
+  manager_id: string;
+  manager_name: string;
+  expires_at?: string | null;
+  connected_by?: string;
+};
+export type PlatformCampaign = {
+  id: string;
+  name: string;
+  status: string;
+  active: boolean;
+  kind: string;
+};
+export interface AdsBackend {
+  status(company: string): Promise<AdsStatus>;
+  /** Where to send the administrator to allow access (null: done here). */
+  connect(company: string, provider: AdsProvider): Promise<string | null>;
+  disconnect(company: string, provider: AdsProvider): Promise<void>;
+  accounts(company: string, provider: AdsProvider): Promise<PlatformAccount[]>;
+  campaigns(
+    company: string,
+    provider: AdsProvider,
+    account: string,
+    manager: string,
+  ): Promise<PlatformCampaign[]>;
+}
+export class AdsApiError extends Error {
+  constructor(
+    message: string,
+    /** not_configured, not_connected or expired. */
+    public code?: string,
+  ) {
+    super(message);
+  }
+}
+async function adsServer<T>(body: Record<string, unknown>): Promise<T> {
+  const token = supabase
+    ? (await supabase.auth.getSession()).data.session?.access_token
+    : undefined;
+  if (!token) throw new AdsApiError("Entre novamente para buscar campanhas.");
+  const res = await fetch("/api/ads", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok)
+    throw new AdsApiError(
+      data.error ?? "Não foi possível falar com a plataforma de anúncios.",
+      data.code,
+    );
+  return data as T;
+}
+export const serverAds: AdsBackend = {
+  status: (company) => adsServer({ action: "status", company }),
+  async connect(company, provider) {
+    return (
+      await adsServer<{ url: string }>({ action: "connect", company, provider })
+    ).url;
+  },
+  async disconnect(company, provider) {
+    await adsServer({ action: "disconnect", company, provider });
+  },
+  async accounts(company, provider) {
+    return (
+      await adsServer<{ accounts: PlatformAccount[] }>({
+        action: "accounts",
+        company,
+        provider,
+      })
+    ).accounts;
+  },
+  async campaigns(company, provider, account, manager) {
+    return (
+      await adsServer<{ campaigns: PlatformCampaign[] }>({
+        action: "campaigns",
+        company,
+        provider,
+        account,
+        manager,
+      })
+    ).campaigns;
+  },
+};
+/** What the connection's return (?conexao=meta-conectado) means. */
+export function connectionResult(value: string) {
+  const [provider, ...rest] = value.split("-");
+  const name = provider === "google" ? "Google Ads" : "Facebook";
+  const result = rest.join("-");
+  return (
+    {
+      conectado: `${name} conectado.`,
+      "sem-contas": `${name} conectado, mas este usuário não tem acesso a nenhuma conta de anúncio.`,
+      cancelado: `Conexão com o ${name} cancelada.`,
+      "sem-permissao": `O ${name} não concedeu a permissão necessária. Conecte de novo e aceite o acesso ao Google Ads.`,
+      expirado: `A conexão demorou demais ou você não é mais administrador. Tente de novo.`,
+    }[result] ?? `Não foi possível conectar o ${name}. Tente de novo.`
+  );
 }
 
 const CAMPAIGN_COLUMNS =
@@ -448,11 +586,14 @@ export const supabaseCampaigns: CampaignsBackend = {
         cycle_id: string;
         account_id: string;
         external_campaign_id: string;
+        manager_id: string;
+        account_name: string;
+        campaign_name: string;
       }>((count) =>
         supabase!
           .from("ad_cycle_links")
           .select(
-            "id,cycle_id,account_id,external_campaign_id",
+            "id,cycle_id,account_id,external_campaign_id,manager_id,account_name,campaign_name",
             count ? { count } : undefined,
           )
           .eq("company_id", company)
@@ -463,7 +604,13 @@ export const supabaseCampaigns: CampaignsBackend = {
     for (const l of links)
       byCycle.set(l.cycle_id, [
         ...(byCycle.get(l.cycle_id) ?? []),
-        { account_id: l.account_id, campaign_id: l.external_campaign_id },
+        {
+          account_id: l.account_id,
+          campaign_id: l.external_campaign_id,
+          manager_id: l.manager_id,
+          account_name: l.account_name,
+          campaign_name: l.campaign_name,
+        },
       ]);
     return {
       campaigns,
@@ -536,5 +683,15 @@ export const supabaseCampaigns: CampaignsBackend = {
       p_version: cycle.version,
       ...cycleArgs(input),
     });
+  },
+  ads: serverAds,
+  // Loaded on demand (and keeps campaign-metrics.ts out of this module).
+  metrics: {
+    load: (company, campaign) =>
+      import("./campaign-metrics").then((m) =>
+        m.loadMetrics(company, campaign),
+      ),
+    sync: (_company, campaign) =>
+      import("./campaign-metrics").then((m) => m.syncNow(campaign)),
   },
 };

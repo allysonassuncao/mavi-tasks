@@ -24,7 +24,8 @@ export type GroupBy =
   | "status"
   | "priority";
 export type Interval = "auto" | "day" | "week" | "month";
-export type Unit = "number" | "hours" | "days" | "percent";
+/** "money" (R$) is only drawn by Campanhas' charts, not a dashboard metric. */
+export type Unit = "number" | "hours" | "days" | "percent" | "money";
 export type FilterField =
   | "client"
   | "product"
@@ -611,6 +612,7 @@ export function formatValue(
   decimals?: number,
 ) {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  if (unit === "money") return `R$ ${numberFormat(decimals ?? 2).format(v)}`;
   const d =
     decimals ??
     (Math.abs(v) >= 100 ? 0 : unit === "number" && Number.isInteger(v) ? 0 : 1);
@@ -629,7 +631,13 @@ export function formatTick(v: number, unit: Unit) {
       : abs >= 1e4
         ? `${numberFormat(1).format(v / 1e3)} mil`
         : numberFormat(abs < 10 && !Number.isInteger(v) ? 1 : 0).format(v);
-  return unit === "percent" ? `${n}%` : unit === "hours" ? `${n} h` : n;
+  return unit === "percent"
+    ? `${n}%`
+    : unit === "hours"
+      ? `${n} h`
+      : unit === "money"
+        ? `R$ ${n}`
+        : n;
 }
 
 // ------------------------------------------------------------ layout

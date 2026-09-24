@@ -197,7 +197,8 @@ await check("ciclo novo: vínculos gravados; atual só se pedido", async () => {
     [first],
   );
   assert.deepEqual(links, [
-    { account_id: "act_1", external_campaign_id: "c1" },
+    // Meta accounts are kept without the "act_" prefix.
+    { account_id: "1", external_campaign_id: "c1" },
   ]);
   const [y] = await sql(
     "select competence_month::text,multiplier::float,budget::float from ad_cycles where id=$1",
@@ -296,7 +297,9 @@ await check("o ciclo atual não troca sozinho", async () => {
 
 await check("ciclo atual precisa ser da própria campanha", async () => {
   const other = await campaign(admin, { contract: otherContract });
-  const foreign = await cycle(admin, other);
+  const foreign = await cycle(admin, other, {
+    links: [{ account_id: "act_2", campaign_id: "c9" }],
+  });
   await as(admin);
   await assert.rejects(
     rpc("set_ad_campaign_current_cycle", [main, foreign]),
@@ -418,6 +421,464 @@ await check("administrador desativado perde o acesso", async () => {
   await sql("update memberships set active=false where user_id=$1", [admin2]);
   assert.equal((await visible(admin2, "ad_campaigns")).length, 0);
   await assert.rejects(campaign(admin2), /exclusivo de administradores/);
+});
+
+// ------------------------------------------------------------ connections
+const rows = async (name, args) =>
+  (
+    await db.query(
+      `select * from public.${name}(${args.map((_, i) => `$${i + 1}`).join(",")})`,
+      args,
+    )
+  ).rows;
+const cipher = (n) => `v1:${"x".repeat(n)}`;
+
+await check(
+  "uma campanha da plataforma pertence a uma só campanha",
+  async () => {
+    const other = await campaign(admin, {
+      contract: otherContract,
+      name: "Outra",
+    });
+    await assert.rejects(
+      cycle(admin, other, {
+        links: [
+          { account_id: "1", campaign_id: "c1", campaign_name: "Leads BF" },
+        ],
+      }),
+      /campanha Leads BF da plataforma já está vinculada à campanha "Nome novo"/,
+    );
+    // The same campaign's next cycles keep linking it.
+    await cycle(admin, main, {
+      start: "2026-11-30",
+      end: "2026-12-29",
+      links: [{ account_id: "act_1", campaign_id: "c1" }],
+    });
+  },
+);
+
+await check("Google: conta sem traços, MCC e nomes gravados", async () => {
+  const g = await campaign(admin, {
+    contract: otherContract,
+    name: "Google - Pesquisa",
+    platform: "google",
+  });
+  const y = await cycle(admin, g, {
+    links: [
+      {
+        account_id: "123-456-7890",
+        campaign_id: "555",
+        manager_id: "987-654-3210",
+        account_name: "Vittalium Ads",
+        campaign_name: "Pesquisa - Marca",
+      },
+    ],
+  });
+  const [link] = await sql(
+    "select account_id,external_campaign_id,manager_id,account_name,campaign_name from ad_cycle_links where cycle_id=$1",
+    [y],
+  );
+  assert.deepEqual(link, {
+    account_id: "1234567890",
+    external_campaign_id: "555",
+    manager_id: "9876543210",
+    account_name: "Vittalium Ads",
+    campaign_name: "Pesquisa - Marca",
+  });
+});
+
+let metaState;
+await check("só administradores iniciam uma conexão", async () => {
+  await as(manager);
+  await assert.rejects(
+    rpc("ad_begin_connect", [A, "meta"]),
+    /exclusivo de administradores/,
+  );
+  await as(outsider);
+  await assert.rejects(
+    rpc("ad_begin_connect", [A, "meta"]),
+    /exclusivo de administradores/,
+  );
+  await as(admin);
+  await assert.rejects(rpc("ad_begin_connect", [A, "tiktok"]), /inválida/);
+  metaState = await rpc("ad_begin_connect", [A, "meta"]);
+  assert.match(metaState, /^[0-9a-f]{64}$/);
+});
+
+await check("Meta: o retorno grava o token por conta de anúncio", async () => {
+  await as(null);
+  const accounts = JSON.stringify([
+    {
+      account_id: "111",
+      name: "Vittalium",
+      currency: "BRL",
+      account_status: 1,
+    },
+    { account_id: "222", name: "Outro", currency: "BRL", account_status: 2 },
+    { account_id: "act_x", name: "Inválida" },
+  ]);
+  const args = (state) => [
+    state,
+    "fb1",
+    "Ana no Facebook",
+    cipher(10),
+    "2026-11-20T00:00:00Z",
+    accounts,
+  ];
+  await assert.rejects(
+    rpc("ad_complete_google_connect", [
+      metaState,
+      "a@x",
+      "",
+      cipher(5),
+      null,
+      null,
+    ]),
+    /Conexão expirada/,
+  );
+  assert.equal(await rpc("ad_complete_meta_connect", args(metaState)), 2);
+  await assert.rejects(
+    rpc("ad_complete_meta_connect", args(metaState)),
+    /Conexão expirada/,
+  );
+  await as(admin);
+  const list = await rows("ad_meta_account_list", [A]);
+  assert.deepEqual(
+    list.map((a) => [a.account_id, a.name, a.fb_user_name]),
+    [
+      ["222", "Outro", "Ana no Facebook"],
+      ["111", "Vittalium", "Ana no Facebook"],
+    ],
+  );
+  assert.ok(list.every((a) => !("token_cipher" in a)));
+  const [token] = await rows("ad_meta_token", [A, "111"]);
+  assert.equal(token.token_cipher, cipher(10));
+  const status = await rpc("ad_connections", [A]);
+  assert.equal(status.meta.accounts, 2);
+  assert.equal(status.google, null);
+});
+
+await check("Meta: quem conecta por último assume a conta", async () => {
+  await sql("update memberships set active=true where user_id=$1", [admin2]);
+  await as(admin2);
+  const state = await rpc("ad_begin_connect", [A, "meta"]);
+  await as(null);
+  await rpc("ad_complete_meta_connect", [
+    state,
+    "fb2",
+    "Beto no Facebook",
+    cipher(20),
+    null,
+    JSON.stringify([{ account_id: "111", name: "Vittalium" }]),
+  ]);
+  const [row] = await sql(
+    "select fb_user_name,connected_by,token_cipher from mavi_private.ad_meta_accounts where company_id=$1 and account_id='111'",
+    [A],
+  );
+  assert.deepEqual(row, {
+    fb_user_name: "Beto no Facebook",
+    connected_by: admin2,
+    token_cipher: cipher(20),
+  });
+});
+
+await check(
+  "estado expirado, de outra plataforma ou de ex-admin não vale",
+  async () => {
+    await as(admin);
+    const old = await rpc("ad_begin_connect", [A, "google"]);
+    await sql(
+      "update mavi_private.ad_oauth_states set created_at=now()-interval '16 minutes' where state=$1",
+      [old],
+    );
+    const complete = (state) =>
+      as(null).then(() =>
+        rpc("ad_complete_google_connect", [
+          state,
+          "agencia@x",
+          "adwords",
+          cipher(8),
+          cipher(4),
+          null,
+        ]),
+      );
+    await assert.rejects(complete(old), /Conexão expirada/);
+    await as(admin);
+    const demoted = await rpc("ad_begin_connect", [A, "google"]);
+    await sql("update memberships set role='manager' where user_id=$1", [
+      admin,
+    ]);
+    await assert.rejects(complete(demoted), /Conexão expirada/);
+    await sql("update memberships set role='admin' where user_id=$1", [admin]);
+  },
+);
+
+await check(
+  "Google: um token da agência, renovável e desconectável",
+  async () => {
+    await as(admin);
+    const state = await rpc("ad_begin_connect", [A, "google"]);
+    await as(null);
+    await rpc("ad_complete_google_connect", [
+      state,
+      "agencia@make.com",
+      "https://www.googleapis.com/auth/adwords",
+      cipher(8),
+      cipher(4),
+      "2026-10-01T10:00:00Z",
+    ]);
+    await as(admin);
+    const [tokens] = await rows("ad_google_tokens", [A]);
+    assert.equal(tokens.refresh_token_cipher, cipher(8));
+    await rpc("ad_google_save_access", [A, cipher(6), "2026-10-01T11:00:00Z"]);
+    const status = await rpc("ad_connections", [A]);
+    assert.equal(status.google.email, "agencia@make.com");
+    await as(manager);
+    await assert.rejects(rows("ad_google_tokens", [A]), /exclusivo/);
+    await assert.rejects(rpc("ad_connections", [A]), /exclusivo/);
+    await as(admin);
+    await rpc("ad_disconnect", [A, "google"]);
+    assert.equal((await rpc("ad_connections", [A])).google, null);
+    assert.equal((await rpc("ad_connections", [A])).meta.accounts, 2);
+  },
+);
+
+await check("ninguém lê as conexões direto nas tabelas", async () => {
+  for (const user of [admin, manager, null]) {
+    await as(user);
+    for (const table of [
+      "ad_meta_accounts",
+      "ad_google_connections",
+      "ad_oauth_states",
+    ])
+      await assert.rejects(
+        db.query(`select * from mavi_private.${table}`),
+        /permission denied/,
+      );
+  }
+});
+
+// ------------------------------------------------------------ metrics sync
+const secret = "s".repeat(40);
+await sql(
+  "insert into mavi_private.ad_sync_config(url, secret) values ('https://app.example/api/ads-sync', $1)",
+  [secret],
+);
+// A Meta campaign with a running cycle linked to account 111.
+const synced = await campaign(admin, {
+  contract: otherContract,
+  name: "Sync - Meta",
+});
+const today = (
+  await sql("select mavi_private.company_today($1)::text as d", [A])
+)[0].d;
+const shift = (n) => {
+  const d = new Date(`${today}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const syncCycle = await cycle(admin, synced, {
+  start: shift(-10),
+  end: shift(20),
+  goal: 100,
+  budget: 3000,
+  m: 2.5,
+  links: [{ account_id: "111", campaign_id: "c-sync" }],
+});
+const targets = async (who, p = [null, null, 15]) => {
+  await as(who);
+  return rpc("ad_sync_targets", p);
+};
+
+await check(
+  "sincronização: segredo do agendamento ou administrador",
+  async () => {
+    await assert.rejects(
+      targets(null, ["errado".repeat(8), null, 15]),
+      /Sem permissão/,
+    );
+    await assert.rejects(targets(admin), /Sem permissão/);
+    await assert.rejects(targets(manager, [null, synced, 15]), /Sem permissão/);
+    const mine = await targets(admin, [null, synced, 15]);
+    assert.deepEqual(
+      mine.map((t) => t.cycle_id),
+      [syncCycle],
+    );
+    const all = await targets(null, [secret, null, 50]);
+    const t = all.find((x) => x.cycle_id === syncCycle);
+    assert.equal(t.platform, "meta");
+    assert.deepEqual(t.links, [
+      { account_id: "111", campaign_id: "c-sync", manager_id: "" },
+    ]);
+    // The connected account's encrypted token comes along.
+    assert.equal(t.meta_tokens["111"].token_cipher, cipher(20));
+    assert.equal(t.last_day, null);
+    // Future cycles and cycles without links are left out.
+    assert.ok(all.every((x) => x.start_date < today));
+  },
+);
+
+await check(
+  "sincronização grava dias, acumulado e status Bom/Ruim",
+  async () => {
+    await as(null);
+    const day = (d, spend, conversions) => ({
+      day: shift(d),
+      spend,
+      impressions: 1000,
+      reach: 800,
+      clicks: 40,
+      conversions,
+    });
+    const n = await rpc("ad_sync_store", [
+      secret,
+      syncCycle,
+      "schedule",
+      "ok",
+      "",
+      JSON.stringify([day(-2, 50, 10), day(-1, 60, 12), day(-30, 999, 1)]),
+      JSON.stringify({
+        period_end: shift(-1),
+        spend: 110,
+        impressions: 2000,
+        reach: 1500,
+        clicks: 80,
+        conversions: 22,
+      }),
+    ]);
+    assert.equal(n, 2, "the day outside the cycle is ignored");
+    const days = await sql(
+      "select day::text, spend::float, multiplier::float, source from ad_daily_metrics where cycle_id=$1 order by day",
+      [syncCycle],
+    );
+    assert.deepEqual(days, [
+      { day: shift(-2), spend: 50, multiplier: 2.5, source: "meta" },
+      { day: shift(-1), spend: 60, multiplier: 2.5, source: "meta" },
+    ]);
+    // CPA 110/22 = 5 ≤ (3000/2.5)/100 = 12 → Bom.
+    const [snap] = await sql(
+      "select goal_status, period_start::text, period_end::text, author_label from ad_cycle_snapshots where cycle_id=$1",
+      [syncCycle],
+    );
+    assert.deepEqual(snap, {
+      goal_status: "good",
+      period_start: shift(-10),
+      period_end: shift(-1),
+      author_label: "Sincronização diária",
+    });
+    // Synced today: the schedule skips it; the button still finds it.
+    const again = await targets(null, [secret, null, 50]);
+    assert.ok(again.every((x) => x.cycle_id !== syncCycle));
+    assert.equal(
+      (await targets(admin, [null, synced, 15]))[0].last_day,
+      shift(-1),
+    );
+  },
+);
+
+await check(
+  "reprocessar substitui o dia da plataforma, não o digitado",
+  async () => {
+    await sql(
+      "update ad_daily_metrics set source='manual', spend=70 where cycle_id=$1 and day=$2",
+      [syncCycle, shift(-2)],
+    );
+    await as(admin);
+    await rpc("ad_sync_store", [
+      null,
+      syncCycle,
+      "manual",
+      "ok",
+      "",
+      JSON.stringify([
+        { day: shift(-2), spend: 55, conversions: 1 },
+        { day: shift(-1), spend: 65, conversions: 1 },
+      ]),
+      JSON.stringify({ period_end: shift(-1), spend: 900, conversions: 5 }),
+    ]);
+    const days = await sql(
+      "select day::text, spend::float from ad_daily_metrics where cycle_id=$1 order by day",
+      [syncCycle],
+    );
+    assert.deepEqual(days, [
+      { day: shift(-2), spend: 70 },
+      { day: shift(-1), spend: 65 },
+    ]);
+    // CPA 180 > 12 → Ruim; still one snapshot for today.
+    const snaps = await sql(
+      "select goal_status, author_label from ad_cycle_snapshots where cycle_id=$1",
+      [syncCycle],
+    );
+    assert.deepEqual(snaps, [
+      { goal_status: "bad", author_label: "Sincronização manual" },
+    ]);
+    const runs = await sql(
+      "select trigger, status, days from ad_sync_runs where cycle_id=$1 order by id",
+      [syncCycle],
+    );
+    assert.deepEqual(runs, [
+      { trigger: "schedule", status: "ok", days: 2 },
+      { trigger: "manual", status: "ok", days: 2 },
+    ]);
+  },
+);
+
+await check(
+  "erro da plataforma fica registrado, sem apagar números",
+  async () => {
+    await as(null);
+    await rpc("ad_sync_store", [
+      secret,
+      syncCycle,
+      "schedule",
+      "error",
+      "Facebook: token expirado",
+      "[]",
+      null,
+    ]);
+    const [last] = await sql(
+      "select status, message from ad_sync_runs where cycle_id=$1 order by id desc limit 1",
+      [syncCycle],
+    );
+    assert.deepEqual(last, {
+      status: "error",
+      message: "Facebook: token expirado",
+    });
+    assert.equal(
+      (
+        await sql(
+          "select count(*)::int as n from ad_daily_metrics where cycle_id=$1",
+          [syncCycle],
+        )
+      )[0].n,
+      2,
+    );
+    await as(manager);
+    await assert.rejects(
+      rpc("ad_sync_store", [null, syncCycle, "manual", "ok", "", "[]", null]),
+      /Sem permissão/,
+    );
+  },
+);
+
+await check("números e sincronizações: só administradores leem", async () => {
+  assert.ok((await visible(admin, "ad_daily_metrics")).length >= 2);
+  assert.ok((await visible(admin, "ad_cycle_snapshots")).length >= 1);
+  for (const user of [manager, trafego, outsider])
+    for (const table of [
+      "ad_daily_metrics",
+      "ad_cycle_snapshots",
+      "ad_sync_runs",
+    ])
+      assert.equal((await visible(user, table)).length, 0, `${user} ${table}`);
+  await as(admin);
+  await assert.rejects(
+    db.query(
+      "insert into ad_daily_metrics(company_id,campaign_id,cycle_id,day,multiplier,source) values ($1,$2,$3,now(),1,'manual')",
+      [A, synced, syncCycle],
+    ),
+    /permission denied/,
+  );
 });
 
 console.log(`\n${passed} verificações de campanhas passaram.`);

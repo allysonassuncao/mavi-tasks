@@ -91,15 +91,22 @@ Antes do primeiro deploy, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLIS
 
 ### Variáveis de servidor
 
-| Variável                                   | Uso                                                                                                                                        |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GCS_CREDENTIALS`                          | JSON da conta de serviço do Google Cloud Storage (anexos, Drive, fotos)                                                                    |
-| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`    | Par de chaves das notificações push (`npx web-push generate-vapid-keys`)                                                                   |
-| `VAPID_SUBJECT`                            | Contato do remetente das notificações, ex.: `mailto:suporte@empresa.com.br`                                                                |
-| `PUSH_SECRET`                              | Segredo aleatório (32+ caracteres) que o banco usa para chamar `/api/push`                                                                 |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Cliente OAuth do app no Google Cloud (Agenda)                                                                                              |
-| `GOOGLE_TOKEN_KEY`                         | Chave de 32 bytes em base64 que criptografa os tokens do Google no banco (`openssl rand -base64 32`). Trocar a chave desconecta todo mundo |
-| `GOOGLE_REDIRECT_URI`                      | Opcional. Padrão: `<APP_ORIGIN>/api/google-callback`; em desenvolvimento, `http://localhost:5173/api/google-callback`                      |
+| Variável                                           | Uso                                                                                                                                                                   |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GCS_CREDENTIALS`                                  | JSON da conta de serviço do Google Cloud Storage (anexos, Drive, fotos)                                                                                               |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`            | Par de chaves das notificações push (`npx web-push generate-vapid-keys`)                                                                                              |
+| `VAPID_SUBJECT`                                    | Contato do remetente das notificações, ex.: `mailto:suporte@empresa.com.br`                                                                                           |
+| `PUSH_SECRET`                                      | Segredo aleatório (32+ caracteres) que o banco usa para chamar `/api/push`                                                                                            |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`         | Cliente OAuth do app no Google Cloud (Agenda)                                                                                                                         |
+| `GOOGLE_TOKEN_KEY`                                 | Chave de 32 bytes em base64 que criptografa os tokens do Google no banco (`openssl rand -base64 32`). Trocar a chave desconecta todo mundo                            |
+| `GOOGLE_REDIRECT_URI`                              | Opcional. Padrão: `<APP_ORIGIN>/api/google-callback`; em desenvolvimento, `http://localhost:5173/api/google-callback`                                                 |
+| `META_APP_ID`, `META_APP_SECRET`                   | App da Meta (Facebook) usado em Campanhas para listar contas e campanhas de anúncio                                                                                   |
+| `GOOGLE_CLIENT_ID_ADS`, `GOOGLE_CLIENT_SECRET_ADS` | Cliente OAuth do Google Cloud usado em Campanhas (Google Ads), separado do da Agenda                                                                                  |
+| `GOOGLE_TOKEN_KEY_ADS`                             | Chave de 32 bytes em base64 (`openssl rand -base64 32`) que criptografa os tokens de Campanhas (Meta e Google Ads) no banco. Trocar a chave desconecta as plataformas |
+| `GOOGLE_ADS_DEVELOPER_TOKEN`                       | Developer token da MCC da agência (Campanhas → Google Ads)                                                                                                            |
+| `META_GRAPH_VERSION`, `GOOGLE_ADS_API_VERSION`     | Opcionais. Padrões: `v23.0` e `v25` (a v21 do Google Ads, usada pelo MASO, foi desligada em 05/08/2026)                                                               |
+| `ADS_REDIRECT_URI`                                 | Opcional. Padrão: `<APP_ORIGIN>/api/ads-callback`; em desenvolvimento, `http://localhost:5173/api/ads-callback`                                                       |
+| `ADS_SYNC_SECRET`                                  | Segredo aleatório (32+ caracteres) com que o banco chama `/api/ads-sync` (sincronização diária de Campanhas)                                                          |
 
 ### Agenda (Google Agenda)
 
@@ -110,6 +117,54 @@ No Google Cloud, no cliente OAuth do app (tipo "Aplicativo da Web"):
 1. Em **URIs de redirecionamento autorizados**, cadastrar `https://workspace.maso.app.br/api/google-callback` (e `http://localhost:5173/api/google-callback` para desenvolvimento).
 2. Na tela de consentimento, o escopo `https://www.googleapis.com/auth/calendar`. Enquanto o app estiver em modo de teste, só os usuários de teste cadastrados conseguem conectar.
 3. Configurar `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` e `GOOGLE_TOKEN_KEY` na Vercel e fazer redeploy.
+
+### Campanhas: contas e campanhas do Meta e do Google Ads
+
+No cadastro e na edição de um ciclo, a seção **Vínculos na plataforma** lista, ao vivo, as contas de anúncio e as campanhas de cada conta, para marcar as do ciclo (como o MASO fazia). A conexão segue o MASO: no **Facebook**, cada administrador que conecta dá acesso às contas de anúncio que ele enxerga (token de longa duração, ~60 dias, guardado por conta; quem conecta por último assume a conta); no **Google Ads**, uma única conexão da agência, com uma conta que tenha acesso à MCC (renovada sozinha). Os tokens são criptografados pelo servidor com `GOOGLE_TOKEN_KEY_ADS` (migração `20261001090000_ad_platform_connections`) e nunca chegam ao navegador; só administradores alcançam as conexões. Em **Campanhas → Conexões** o administrador conecta, reconecta e desconecta.
+
+Meta (developers.facebook.com, no app da agência — pode ser o mesmo do MASO):
+
+1. Produto **Login do Facebook** → **URIs de redirecionamento do OAuth válidos**: `https://workspace.maso.app.br/api/ads-callback` (e `http://localhost:5173/api/ads-callback` para desenvolvimento).
+2. Permissões `ads_read` e `business_management` (quem conecta precisa ter acesso às contas no Business Manager).
+3. Configurar `META_APP_ID`, `META_APP_SECRET` e `GOOGLE_TOKEN_KEY_ADS` (a mesma chave do Google Ads) na Vercel e fazer redeploy.
+
+Google Ads (cliente OAuth próprio de Campanhas, separado do da Agenda):
+
+1. No Google Cloud, criar um cliente OAuth "Aplicativo da Web" e cadastrar `https://workspace.maso.app.br/api/ads-callback` (e `http://localhost:5173/api/ads-callback` para desenvolvimento) nos **URIs de redirecionamento autorizados**.
+2. Ativar a **Google Ads API** no projeto e incluir o escopo `https://www.googleapis.com/auth/adwords` na tela de consentimento.
+3. Configurar `GOOGLE_CLIENT_ID_ADS`, `GOOGLE_CLIENT_SECRET_ADS`, `GOOGLE_TOKEN_KEY_ADS` e `GOOGLE_ADS_DEVELOPER_TOKEN` (Central de API da MCC) na Vercel e fazer redeploy.
+
+Sem essas variáveis, a tela avisa que a conexão não está configurada e os IDs continuam podendo ser digitados.
+
+### Campanhas: dia a dia da campanha (números dos ciclos)
+
+O detalhe da campanha mostra, para o ciclo escolhido, o cabeçalho do MASO (mídia total e restante, meta, conversões diárias ideais, atual, orçamento diário, taxa de melhoramento, dia da campanha, score e o alerta de ritmo), a aba **Dia a Dia** (período e gráficos de consumo, conversões, etapas de venda, CTR, CPC, alcance, cliques e frequência) e a **Linha do tempo** (acumulados do ciclo, registros diários com a conferência "LIVE" e a visão da Minha Máquina do cliente). O botão **Valores com M** alterna entre os valores reais (sem M) e os do cliente (com M).
+
+Os números vêm de uma sincronização diária (migração `20261002090000_ad_metrics`): o banco chama `/api/ads-sync` com `ADS_SYNC_SECRET` (pg_cron + pg_net, como as notificações push), e a função lê o Meta e o Google Ads com as conexões acima, grava os dias (reprocessando os últimos 7) e o acumulado do ciclo até ontem. Um administrador também pode sincronizar uma campanha na hora (**Sincronizar**). Para ligar:
+
+1. Gerar um segredo (`openssl rand -base64 32`), configurar `ADS_SYNC_SECRET` na Vercel e fazer redeploy.
+2. No SQL Editor do Supabase: `insert into mavi_private.ad_sync_config(url, secret) values ('https://workspace.maso.app.br/api/ads-sync', '<o mesmo segredo>');`
+3. Rodar `supabase/operations/schedule-ads-sync.sql` (a cada 20 minutos entre 06:00 e 09:40, horário de Brasília; cada chamada sincroniza os ciclos que ainda não foram sincronizados no dia).
+
+### Campanhas: importação do histórico do MASO
+
+`scripts/import-maso-campaigns.mjs` gera o SQL (idempotente) com campanhas, ciclos, vínculos, registros diários e acumulados (`tipo = 0`) do MASO, a partir das exportações do phpMyAdmin em **SQL** (padrão) ou JSON:
+
+1. Exportar as tabelas `maso_acompanhamento`, `maso_acompanhamento_ciclo`, `maso_acompanhamento_registro` e `maso_acompanhamento_registro_diario`, e só `id, nome` de `nichomercado` e `usuarios_maso` (sem senhas).
+2. Gerar os arquivos:
+
+   ```
+   node --max-old-space-size=8192 scripts/import-maso-campaigns.mjs --input <cada .sql> \
+     --company <uuid da empresa> --author <uuid de um administrador> --mapping mapa.csv \
+     --products 1,2 --clients "Make Ads" --out import.sql --parts 4
+   ```
+
+   - `--mapping`: CSV `id_cliente;contract_id` para clientes que já estão no MAVI (`--template mapa.csv` gera o modelo).
+   - `--products 1,2`: só tráfego pago (Setup e Setup Premium); Social Media, SEO e Site ficam de fora.
+   - `--clients "Make Ads"`: cria os clientes que faltam (nome = id do MASO) com um produto contratado Make Ads; sem campanha ativa, entram arquivados.
+   - `--parts 4`: divide em arquivos de até 4 MB para o SQL Editor (`import-01.sql` primeiro; os demais em qualquer ordem).
+
+3. Rodar os arquivos no SQL Editor do Supabase, na ordem. Cada um é uma transação; rodar de novo não duplica nada.
 
 ### Notificações push (com o app fechado)
 

@@ -1,15 +1,29 @@
 import type { Snapshot } from "./types";
 import {
+  AdsApiError,
   addDays,
   monthlyEnd,
   type AdCampaign,
   type AdCampaignEvent,
   type AdCycle,
+  type AdCycleLink,
+  type AdPlatform,
+  type AdsBackend,
+  type PlatformAccount,
+  type PlatformCampaign,
   type CampaignData,
   type CampaignsBackend,
   type CycleInput,
 } from "./campaigns";
 import { dateKey } from "./domain";
+import {
+  dateRange,
+  type CampaignMetrics,
+  type CycleSnapshot,
+  type DailyMetric,
+  type MetricsBackend,
+  type SyncRun,
+} from "./campaign-metrics";
 
 /**
  * The campaigns of the demonstration, in memory only: reloading discards
@@ -61,7 +75,32 @@ export function demoCampaigns(
       throw Error(
         `O período conflita com o ciclo de ${fmt(other.start_date)} a ${fmt(other.end_date)} desta campanha`,
       );
+    // As in the database: a platform campaign belongs to one campaign.
+    for (const l of input.links) {
+      if (!l.campaign_id) continue;
+      const taken = store.cycles.find(
+        (y) =>
+          y.campaign_id !== a.id &&
+          y.links.some(
+            (k) =>
+              k.campaign_id === l.campaign_id &&
+              normalized(a.platform, k.account_id) ===
+                normalized(a.platform, l.account_id),
+          ),
+      );
+      if (taken)
+        throw Error(
+          `A campanha ${l.campaign_name || l.campaign_id} da plataforma já está vinculada à campanha "${store.campaigns.find((c) => c.id === taken.campaign_id)?.name}"`,
+        );
+    }
   }
+  const linksOf = (a: AdCampaign, links: AdCycleLink[]) =>
+    links.map((l) => ({
+      ...l,
+      account_id: normalized(a.platform, l.account_id),
+      manager_id:
+        a.platform === "google" ? (l.manager_id ?? "").replace(/-/g, "") : "",
+    }));
   const changes = (
     before: Record<string, unknown>,
     after: Record<string, unknown>,
@@ -82,6 +121,8 @@ export function demoCampaigns(
   });
 
   return {
+    ads: demoAds(),
+    metrics: demoMetrics(store, () => user),
     async load() {
       const visible = new Set(data().contracts.map((k) => k.id));
       const snapshot = clone();
@@ -213,7 +254,7 @@ export function demoCampaigns(
         created_at: now(),
         updated_at: now(),
         version: 1,
-        links: input.links,
+        links: linksOf(a, input.links),
       };
       store.cycles.push(y);
       log(a, y.id, "cycle_created", {
@@ -254,7 +295,7 @@ export function demoCampaigns(
         destination: input.destination,
         landing_pages: input.landing_pages,
         niche: input.niche,
-        links: input.links,
+        links: linksOf(a, input.links),
         updated_at: now(),
         version: y.version + 1,
       });
@@ -277,6 +318,259 @@ export function demoCampaigns(
 }
 
 const fmt = (date: string) => date.split("-").reverse().join("/");
+/** Meta accounts without "act_", Google ones without dashes (as stored). */
+const normalized = (platform: AdPlatform, account: string) =>
+  platform === "meta"
+    ? account.replace(/^act_/i, "")
+    : platform === "google"
+      ? account.replace(/-/g, "")
+      : account;
+
+/* ------------------------------------------------------------------ */
+/* Platforms in the demonstration: made-up accounts and campaigns.      */
+
+const DEMO_ACCOUNTS: Record<"meta" | "google", PlatformAccount[]> = {
+  meta: [
+    ["1234567890", "Norte Coffee · Make", "Ativa", true],
+    ["2345678901", "Aurora Estética · Make", "Ativa", true],
+    ["3456789012", "Conta antiga (livre)", "Desativada", false],
+  ].map(([id, name, status, active]) => ({
+    id: id as string,
+    name: name as string,
+    status: status as string,
+    active: active as boolean,
+    currency: "BRL",
+    manager_id: "",
+    manager_name: "",
+    expires_at: new Date(Date.now() + 45 * 86_400_000).toISOString(),
+    connected_by: "Allyson Assunção",
+  })),
+  google: [
+    ["1234567890", "Norte Coffee Ads"],
+    ["9876543210", "Aurora Estética Ads"],
+  ].map(([id, name]) => ({
+    id,
+    name,
+    status: "Ativa",
+    active: true,
+    currency: "BRL",
+    manager_id: "5550001111",
+    manager_name: "MCC Make Vendas",
+  })),
+};
+const DEMO_CAMPAIGNS: Record<string, [string, string, boolean, string][]> = {
+  "meta:1234567890": [
+    [
+      "23850001",
+      "[MSG] Motion · Conversas WhatsApp",
+      true,
+      "OUTCOME_ENGAGEMENT",
+    ],
+    ["23850002", "[LEAD] Cadastro · Formulário", true, "OUTCOME_LEADS"],
+    ["23850003", "[VENDA] Black Friday", false, "OUTCOME_SALES"],
+    ["23850004", "[RMKT] Visitantes 30 dias", false, "OUTCOME_TRAFFIC"],
+  ],
+  "meta:2345678901": [
+    ["23860001", "[LEAD] Avaliação gratuita", true, "OUTCOME_LEADS"],
+    ["23860002", "[MSG] Agendamento", false, "OUTCOME_ENGAGEMENT"],
+  ],
+  "google:1234567890": [
+    ["21000001", "Pesquisa · Marca", true, "SEARCH"],
+    ["21000002", "Pesquisa · Cafés especiais", true, "SEARCH"],
+    ["21000003", "PMax · Loja", false, "PERFORMANCE_MAX"],
+  ],
+  "google:9876543210": [["22000001", "Pesquisa · Estética", true, "SEARCH"]],
+};
+
+/** One set of connections for the whole demonstration session. */
+const demoConnected = { meta: true, google: true };
+function demoAds(): AdsBackend {
+  const wait = () => new Promise((r) => setTimeout(r, 250));
+  const need = (provider: "meta" | "google") => {
+    if (!demoConnected[provider])
+      throw new AdsApiError(
+        provider === "meta"
+          ? "Conecte o Facebook para buscar as contas."
+          : "Conecte o Google Ads da agência.",
+        "not_connected",
+      );
+  };
+  return {
+    async status() {
+      return {
+        meta: demoConnected.meta
+          ? {
+              configured: true,
+              accounts: DEMO_ACCOUNTS.meta.length,
+              people: ["Allyson Assunção"],
+              expires_at: DEMO_ACCOUNTS.meta[0].expires_at,
+            }
+          : { configured: true },
+        google: demoConnected.google
+          ? {
+              configured: true,
+              email: "trafego@makevendas.demo",
+              connected_at: new Date().toISOString(),
+            }
+          : { configured: true },
+      };
+    },
+    async connect(_company, provider) {
+      await wait();
+      demoConnected[provider] = true;
+      return null;
+    },
+    async disconnect(_company, provider) {
+      demoConnected[provider] = false;
+    },
+    async accounts(_company, provider) {
+      await wait();
+      need(provider);
+      return DEMO_ACCOUNTS[provider].map((a) => ({ ...a }));
+    },
+    async campaigns(_company, provider, account) {
+      await wait();
+      need(provider);
+      const id = normalized(provider, account);
+      if (!DEMO_ACCOUNTS[provider].some((a) => a.id === id))
+        throw new AdsApiError(
+          "Esta conta de anúncio não está conectada. Conecte com um usuário que tenha acesso a ela.",
+          "not_connected",
+        );
+      return (DEMO_CAMPAIGNS[`${provider}:${id}`] ?? []).map(
+        ([cid, name, active, kind]): PlatformCampaign => ({
+          id: cid,
+          name,
+          status: active ? "Ativa" : "Pausada",
+          active,
+          kind,
+        }),
+      );
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Numbers in the demonstration: made up, but consistent with the cycle  */
+/* (budget, M, goal), one snapshot a day and one "LIVE" divergence.      */
+
+/** A repeatable 0..1 from a text (the same demo numbers every time). */
+function noise(text: string) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 10000) / 10000;
+}
+function demoCycleMetrics(y: AdCycle, today: string) {
+  const until = [y.end_date, addDays(today, -1)].sort()[0];
+  const daily: DailyMetric[] = [];
+  const snapshots: CycleSnapshot[] = [];
+  if (y.start_date > until || !y.links.length) return { daily, snapshots };
+  const days = dateRange(y.start_date, y.end_date).length;
+  const perDay = y.budget / y.multiplier / days;
+  const goalCost =
+    y.goal_results > 0 ? y.budget / y.multiplier / y.goal_results : 20;
+  const funnel = y.objective === "sale" || y.objective === "custom";
+  const cumulative = {
+    spend: 0,
+    impressions: 0,
+    reach: 0,
+    clicks: 0,
+    conversions: 0,
+    view_content: 0,
+    add_to_cart: 0,
+    initiate_checkout: 0,
+  };
+  for (const day of dateRange(y.start_date, until)) {
+    const r = noise(`${y.id}:${day}`);
+    const spend = Math.round(perDay * (0.8 + r * 0.5) * 100) / 100;
+    const impressions = Math.round(spend * (32 + r * 20));
+    const reach = Math.round(impressions * (0.55 + r * 0.15));
+    const clicks = Math.round(impressions * (0.01 + r * 0.012));
+    const conversions = Math.max(
+      0,
+      Math.round(spend / (goalCost * (0.35 + noise(`${day}:${y.id}`) * 0.9))),
+    );
+    const row: DailyMetric = {
+      cycle_id: y.id,
+      day,
+      multiplier: y.multiplier,
+      spend,
+      impressions,
+      reach,
+      clicks,
+      conversions,
+      view_content: funnel ? Math.round(clicks * 0.6) : 0,
+      add_to_cart: funnel ? Math.round(clicks * 0.12) : 0,
+      initiate_checkout: funnel ? Math.round(clicks * 0.06) : 0,
+      source: "meta",
+    };
+    daily.push(row);
+    for (const k of Object.keys(cumulative) as (keyof typeof cumulative)[])
+      cumulative[k] += row[k];
+    snapshots.push({
+      id: snapshots.length + 1,
+      cycle_id: y.id,
+      taken_on: addDays(day, 1),
+      period_start: y.start_date,
+      period_end: day,
+      ...cumulative,
+      spend: Math.round(cumulative.spend * 100) / 100,
+      reach: Math.round(cumulative.reach * 0.72),
+      goal_status:
+        y.goal_results > 0 &&
+        cumulative.conversions > 0 &&
+        cumulative.spend / cumulative.conversions <= goalCost
+          ? "good"
+          : "bad",
+      source: "meta",
+      author_label: "Sincronização diária",
+    });
+  }
+  // One day stored differently from what the snapshots say (the MASO's
+  // red "LIVE" badge), to show it.
+  if (daily.length > 3) daily[2] = { ...daily[2], spend: daily[2].spend + 5 };
+  return { daily, snapshots };
+}
+function demoMetrics(store: Store, user: () => string): MetricsBackend {
+  const runs: SyncRun[] = [];
+  const build = (campaign: string): CampaignMetrics => {
+    const today = dateKey();
+    const cycles = store.cycles.filter((y) => y.campaign_id === campaign);
+    const parts = cycles.map((y) => demoCycleMetrics(y, today));
+    return {
+      daily: parts
+        .flatMap((p) => p.daily)
+        .sort((a, b) => a.day.localeCompare(b.day)),
+      snapshots: parts.flatMap((p) => p.snapshots),
+      runs: runs.filter((r) => cycles.some((y) => y.id === r.cycle_id)),
+    };
+  };
+  return {
+    async load(_company, campaign) {
+      return build(campaign);
+    },
+    async sync(_company, campaign) {
+      await new Promise((r) => setTimeout(r, 400));
+      void user;
+      const cycles = store.cycles.filter(
+        (y) => y.campaign_id === campaign && y.links.length,
+      );
+      for (const y of cycles)
+        runs.unshift({
+          cycle_id: y.id,
+          trigger: "manual",
+          status: "ok",
+          message: "",
+          days: Math.min(7, demoCycleMetrics(y, dateKey()).daily.length),
+          created_at: new Date().toISOString(),
+        });
+      return { synced: cycles.length, errors: [] };
+    },
+  };
+}
 
 type Store = {
   campaigns: AdCampaign[];
@@ -350,9 +644,17 @@ function seed(data: Snapshot): Store {
       version: 1,
       links: [
         {
-          account_id:
-            plan.platform === "meta" ? "act_1234567890" : "123-456-7890",
-          campaign_id: "",
+          account_id: "1234567890",
+          campaign_id: plan.platform === "meta" ? "23850001" : "21000001",
+          manager_id: plan.platform === "google" ? "5550001111" : "",
+          account_name:
+            plan.platform === "meta"
+              ? "Norte Coffee · Make"
+              : "Norte Coffee Ads",
+          campaign_name:
+            plan.platform === "meta"
+              ? "[MSG] Motion · Conversas WhatsApp"
+              : "Pesquisa · Marca",
         },
       ],
     };

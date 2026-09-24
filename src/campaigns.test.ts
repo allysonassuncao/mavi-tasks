@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   addDays,
   amountText,
+  connectionResult,
   cycleAlert,
   cycleDays,
   cycleInput,
@@ -278,5 +279,89 @@ describe("demonstração segue as regras do banco", () => {
       "cycle_created",
       "created",
     ]);
+  });
+});
+
+describe("contas e campanhas das plataformas", () => {
+  const data = demoSnapshot();
+  const company = data.companies[0].id;
+  const contracts = data.contracts.filter((k) => k.name.startsWith("Make Ads"));
+  it("lista contas e campanhas da conta; conta desconhecida pede conexão", async () => {
+    const { ads } = demoCampaigns(() => data, demoUser);
+    const accounts = await ads.accounts(company, "google");
+    expect(accounts[0]).toMatchObject({ manager_id: "5550001111" });
+    const campaigns = await ads.campaigns(
+      company,
+      "meta",
+      "act_1234567890",
+      "",
+    );
+    expect(campaigns.map((c) => c.active)).toContain(false);
+    await expect(
+      ads.campaigns(company, "meta", "999", ""),
+    ).rejects.toMatchObject({ code: "not_connected" });
+    await ads.disconnect(company, "google");
+    await expect(ads.accounts(company, "google")).rejects.toMatchObject({
+      code: "not_connected",
+    });
+    expect((await ads.status(company)).google.email).toBeUndefined();
+    expect(await ads.connect(company, "google")).toBeNull();
+    expect((await ads.status(company)).google.email).toBeTruthy();
+  });
+  it("uma campanha da plataforma fica em uma só campanha; ids normalizados", async () => {
+    const backend = demoCampaigns(() => data, demoUser);
+    const create = (name: string, contract: string) =>
+      backend.createCampaign(company, {
+        contract_id: contract,
+        name,
+        platform: "meta",
+        briefing_url: "",
+        media_plan_url: "",
+        notes: "",
+      });
+    const a = await create("A", contracts[0].id);
+    const b = await create("B", contracts[1 % contracts.length].id);
+    const state = await backend.load(company);
+    const input = (start: string, end: string) => ({
+      competence: `${start.slice(0, 7)}-01`,
+      start_date: start,
+      end_date: end,
+      objective: "lead" as const,
+      goal_results: 10,
+      budget: 100,
+      multiplier: 1,
+      destination: "external_page" as const,
+      landing_pages: [],
+      niche: "",
+      links: [
+        {
+          account_id: "act_555",
+          campaign_id: "777",
+          campaign_name: "[LEAD] BF",
+        },
+      ],
+    });
+    const campA = state.campaigns.find((c) => c.id === a)!;
+    const campB = state.campaigns.find((c) => c.id === b)!;
+    const y = await backend.createCycle(
+      campA,
+      input("2031-01-01", "2031-01-31"),
+      false,
+    );
+    const saved = (await backend.load(company)).cycles.find((c) => c.id === y)!;
+    expect(saved.links[0]).toMatchObject({ account_id: "555", manager_id: "" });
+    await expect(
+      backend.createCycle(campB, input("2031-01-01", "2031-01-31"), false),
+    ).rejects.toThrow(
+      /\[LEAD\] BF da plataforma já está vinculada à campanha "A"/,
+    );
+    // The same campaign's next cycle keeps it.
+    await backend.createCycle(campA, input("2031-02-01", "2031-02-28"), false);
+  });
+  it("explica o retorno da conexão", () => {
+    expect(connectionResult("meta-conectado")).toBe("Facebook conectado.");
+    expect(connectionResult("google-sem-permissao")).toMatch(/Google Ads/);
+    expect(connectionResult("meta-sem-contas")).toMatch(/nenhuma conta/);
+    expect(connectionResult("xyz")).toMatch(/Não foi possível/);
   });
 });
