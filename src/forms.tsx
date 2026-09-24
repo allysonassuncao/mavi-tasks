@@ -43,6 +43,7 @@ import {
   Eye,
   Reply,
   Repeat,
+  CircleX,
   X,
 } from "lucide-react";
 import { Modal, Avatar, Empty, Loading } from "./components";
@@ -522,14 +523,15 @@ function eventLabel(e: TaskEvent) {
         approve_internal: "Aprovada na validação",
         approve_client: "Aprovação do cliente registrada",
         edited: "Tarefa editada",
-        recurrence_stopped: "Repetição parada",
+        recurrence_stopped: "Repetição cancelada",
       } as Record<string, string>
     )[e.action] ?? e.action
   );
 }
 /**
  * A task's repetition in its details: how often, when the next copy opens
- * and, for whoever set it up or a leader, a way to stop it (confirmed).
+ * and, for whoever set it up or a leader, a button to cancel it (confirmed;
+ * the copies already opened stay).
  */
 function RecurrenceRow({
   recurrence,
@@ -549,45 +551,52 @@ function RecurrenceRow({
         <Repeat size={15} /> Repetição
       </span>
       <div className="property-value recurrence-value">
-        {recurrenceFrequencies[recurrence.frequency]}
-        {recurrence.active ? (
-          <small>próxima em {dateLabel(recurrence.next_run)}</small>
-        ) : (
-          <small>parada</small>
-        )}
+        <span>
+          {recurrenceFrequencies[recurrence.frequency]}
+          {recurrence.active ? (
+            <small> · próxima em {dateLabel(recurrence.next_run)}</small>
+          ) : (
+            <small> · cancelada</small>
+          )}
+        </span>
         {recurrence.active && recurrence.last_error && (
           <small className="late" title={recurrence.last_error}>
-            não abriu: {recurrence.last_error}
+            A última cópia não abriu: {recurrence.last_error}
           </small>
         )}
         {recurrence.active &&
           canStop &&
           (confirming ? (
-            <span className="recurrence-confirm">
-              <Button
-                type="button"
-                className="btn secondary small"
-                disabled={busy}
-                onClick={() => setConfirming(false)}
-              >
-                Manter
-              </Button>
-              <Button
-                type="button"
-                className="btn danger small"
-                loading={busy}
-                onClick={() => onStop().finally(() => setConfirming(false))}
-              >
-                Parar repetição
-              </Button>
-            </span>
+            <div className="recurrence-confirm" role="alertdialog">
+              <small>
+                Nenhuma nova cópia será aberta. As tarefas já abertas continuam.
+              </small>
+              <span>
+                <Button
+                  type="button"
+                  className="btn secondary"
+                  disabled={busy}
+                  onClick={() => setConfirming(false)}
+                >
+                  Voltar
+                </Button>
+                <Button
+                  type="button"
+                  className="btn danger"
+                  loading={busy}
+                  onClick={() => onStop().finally(() => setConfirming(false))}
+                >
+                  Cancelar repetição
+                </Button>
+              </span>
+            </div>
           ) : (
             <button
               type="button"
-              className="property-button"
+              className="recurrence-cancel"
               onClick={() => setConfirming(true)}
             >
-              Parar
+              <CircleX size={14} /> Cancelar repetição
             </button>
           ))}
       </div>

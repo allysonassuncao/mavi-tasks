@@ -4476,13 +4476,48 @@ label .input-control .ui-input {
 .repeat-hint {
   line-height: 1.45;
 }
-.recurrence-confirm {
+/* Repetição in the task details (forms.tsx RecurrenceRow). */
+.recurrence-value {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.recurrence-cancel {
   display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid #efcfd3;
+  border-radius: 999px;
+  background: #fff;
+  color: #b8404f;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.recurrence-cancel:hover,
+.recurrence-cancel:focus-visible {
+  background: #fdf1f2;
+  border-color: #e3a9b0;
+  outline: none;
+}
+.recurrence-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #efcfd3;
+  border-radius: 10px;
+  background: #fdf6f7;
+}
+.recurrence-confirm > span {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .recurrence-confirm .btn {
   min-height: 0;
-  padding: 4px 10px;
+  padding: 5px 12px;
   font-size: 0.75rem;
 }
 .quick-task-details[hidden],
