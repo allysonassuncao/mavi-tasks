@@ -3508,10 +3508,78 @@ label .input-control .ui-input {
 }
 .task-side .comment-list article {
   gap: 10px;
-  margin-bottom: 20px;
-}
-.task-side .comment-list article:last-child {
   margin-bottom: 0;
+}
+/* A comment and its replies (one level, indented under the avatar). */
+.comment-thread + .comment-thread {
+  margin-top: 20px;
+}
+.comment-replies {
+  display: grid;
+  gap: 14px;
+  margin: 12px 0 0 14px;
+  padding-left: 24px;
+  border-left: 2px solid var(--border);
+}
+.comment-list article.replying > div {
+  border-radius: 8px;
+  box-shadow: 0 0 0 6px #f3f8ec;
+  background: #f3f8ec;
+}
+.comment-reply {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.comment-reply:hover:not(:disabled),
+.comment-reply:focus-visible {
+  color: var(--ink);
+}
+.comment-context {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.comment-replying {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* The one-line excerpt must not widen the composer. */
+  width: 100%;
+  min-width: 0;
+  padding: 5px 6px 5px 10px;
+  border-radius: 8px;
+  background: #f3f8ec;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.comment-replying > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.comment-replying strong {
+  color: var(--ink);
+  font-weight: 550;
+}
+.comment-replying small {
+  margin-left: 6px;
+}
+.comment-replying .icon-btn {
+  flex: none;
+  margin: 0;
 }
 .task-side .comment-list .rich-text-content {
   font-size: 0.85rem;
@@ -7935,4 +8003,120 @@ label .input-control .ui-input {
 .color-custom,
 .color-clear {
   white-space: nowrap;
+}
+
+/* Sugestões (nova funcionalidade ou bug, para a equipe de P&D) */
+.suggestion-form {
+  width: min(560px, 100%);
+}
+.suggestion-kinds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.suggestion-kind {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #dfe6d8;
+  border-radius: 10px;
+  background: #fff;
+  color: #5e6f52;
+  text-align: left;
+  cursor: pointer;
+}
+.suggestion-kind:hover {
+  background: #f7faf3;
+}
+.suggestion-kind > svg {
+  flex: none;
+  margin-top: 1px;
+}
+.suggestion-kind span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.suggestion-kind strong {
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.suggestion-kind small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.suggestion-kind.selected {
+  border-color: #bddf85;
+  background: #f1f9e4;
+  box-shadow: 0 0 0 1px #bddf85;
+}
+.suggestion-kind.bug.selected {
+  border-color: #eab3ba;
+  background: #fdf2f3;
+  box-shadow: 0 0 0 1px #eab3ba;
+}
+.suggestion-kind.bug.selected > svg {
+  color: #c2414f;
+}
+.suggestion-kind.feature.selected > svg {
+  color: #5f8a2c;
+}
+.suggestion-hint {
+  margin-top: -6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.suggestion-attach {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.suggestion-attach .upload-zone {
+  flex: 1;
+  min-width: 0;
+}
+.suggestion-attach .suggestion-shot {
+  flex: none;
+  margin: 0;
+}
+.pending-file.with-preview img {
+  flex: none;
+  width: 64px;
+  height: 40px;
+  object-fit: cover;
+  object-position: top left;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.suggestion-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px 12px 12px;
+  text-align: center;
+  color: var(--muted);
+}
+.suggestion-empty > svg {
+  color: #83a657;
+}
+.suggestion-empty strong {
+  color: var(--ink);
+}
+.suggestion-empty p {
+  max-width: 360px;
+  font-size: 0.85rem;
+}
+.suggestion-settings {
+  padding: 4px 24px 22px;
+}
+@media (max-width: 560px) {
+  .suggestion-kinds {
+    grid-template-columns: 1fr;
+  }
+  .suggestion-attach {
+    flex-direction: column;
+  }
 }

@@ -18,6 +18,7 @@ import {
   type TimeEntry,
   type AppNotification,
   type TaskTemplate,
+  type SuggestionSettings,
 } from "./types";
 
 export interface Filters {
@@ -65,6 +66,7 @@ export interface CompanyLookups {
   }[];
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
   taskTemplates: TaskTemplate[];
+  suggestionSettings: SuggestionSettings[];
 }
 
 /**
@@ -181,6 +183,7 @@ export async function companyLookups(
         teamMembers: [],
         clientTeams: [],
         taskTemplates: [],
+        suggestionSettings: [],
       };
 
       // Order for stable paging: by name where there is one (the order the
@@ -195,6 +198,7 @@ export async function companyLookups(
         ["teamMembers", "team_members", ["team_id", "user_id"]],
         ["clientTeams", "client_teams", ["client_id", "team_id"]],
         ["taskTemplates", "task_templates", ["name", "id"]],
+        ["suggestionSettings", "suggestion_settings", ["company_id"]],
       ] as const;
 
       await Promise.all(
@@ -207,10 +211,12 @@ export async function companyLookups(
             for (const column of keyColumns) query = query.order(column);
             return query;
           });
-          // Templates are optional: until their migration runs (or if they
-          // can't be read) the app works without them.
+          // Templates and suggestions are optional: until their migrations
+          // run (or if they can't be read) the app works without them.
           (result[key] as unknown) =
-            key === "taskTemplates" ? await rows.catch(() => []) : await rows;
+            key === "taskTemplates" || key === "suggestionSettings"
+              ? await rows.catch(() => [])
+              : await rows;
         }),
       );
 
@@ -580,6 +586,7 @@ export async function snapshot(
     teamMembers: lookups.teamMembers,
     clientTeams: lookups.clientTeams,
     taskTemplates: lookups.taskTemplates ?? [],
+    suggestionSettings: lookups.suggestionSettings ?? [],
     tasks: taskQueryResult.tasks,
     hours,
   };
@@ -609,6 +616,7 @@ export function getCachedSnapshot(company: string): Snapshot | null {
     teamMembers: lookups.teamMembers,
     clientTeams: lookups.clientTeams,
     taskTemplates: lookups.taskTemplates ?? [],
+    suggestionSettings: lookups.suggestionSettings ?? [],
     tasks: [],
     hours,
   };
@@ -1107,7 +1115,9 @@ export interface RealtimeCallbacks {
  * change on "mavi:company:<id>" (a private topic: Realtime checks that the
  * person is an active member once, when joining), so every open app hears
  * about changes without polling and without per-row policy checks per
- * subscriber. Notifications keep their own per-person subscription.
+ * subscriber. Notifications arrive the same way on the person's own topic,
+ * "mavi:inbox:<company>:<user>". Nothing uses postgres_changes: while one
+ * subscription is open, Realtime polls the database non-stop for it.
  */
 export function subscribeToCompanyChanges(
   company: string,
@@ -1123,12 +1133,27 @@ export function subscribeToCompanyChanges(
     .on("broadcast", { event: "change" }, ({ payload }) =>
       callbacks.onChange?.(payload as LiveChange),
     );
+  const inbox = callbacks.user
+    ? client
+        .channel(`mavi:inbox:${company}:${callbacks.user}`, {
+          config: { private: true },
+        })
+        .on("broadcast", { event: "notification" }, ({ payload }) => {
+          const row = payload as {
+            id: string;
+            task_id: string;
+            company_id: string;
+          };
+          if (row.company_id === company) callbacks.onNotification?.(row);
+        })
+    : null;
   // Private topics are authorised with the person's session token.
   void client.realtime
     .setAuth()
     .catch(() => {})
     .finally(() => {
       if (closed) return;
+      inbox?.subscribe();
       live.subscribe((status) => {
         if (status === "SUBSCRIBED") {
           if (joined && dropped) callbacks.onResync?.();
@@ -1145,29 +1170,6 @@ export function subscribeToCompanyChanges(
         }
       });
     });
-
-  const inbox = callbacks.user
-    ? client
-        .channel(`mavi:inbox:${company}:${callbacks.user}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "notifications",
-            filter: `user_id=eq.${callbacks.user}`,
-          },
-          (payload) => {
-            const row = payload.new as {
-              id: string;
-              task_id: string;
-              company_id: string;
-            };
-            if (row.company_id === company) callbacks.onNotification?.(row);
-          },
-        )
-        .subscribe()
-    : null;
 
   return () => {
     closed = true;

@@ -13,7 +13,8 @@ function when(value: string) {
 }
 
 /**
- * The person's inbox, as in ClickUp: who mentioned them and where. Opening
+ * The person's inbox, as in ClickUp: who mentioned or replied to them, and
+ * where. Opening
  * one marks it read and opens the task.
  */
 export function NotificationInbox({
@@ -84,7 +85,9 @@ export function NotificationInbox({
                         <strong>{n.actor_name ?? "Alguém"}</strong>{" "}
                         {n.kind === "assigned"
                           ? "criou uma tarefa para você:"
-                          : "mencionou você em"}{" "}
+                          : n.kind === "reply"
+                            ? "respondeu um comentário em"
+                            : "mencionou você em"}{" "}
                         <strong>{n.task_title}</strong>
                       </span>
                       {n.excerpt && <small>{n.excerpt}</small>}
@@ -98,8 +101,8 @@ export function NotificationInbox({
         ) : (
           <p className="inbox-empty">
             <AtSign size={18} />
-            Quando criarem uma tarefa para você ou mencionarem você com @, o
-            aviso aparece aqui.
+            Quando criarem uma tarefa para você, mencionarem você com @ ou
+            responderem um comentário seu, o aviso aparece aqui.
           </p>
         )}
       </Popover.Content>

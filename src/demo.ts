@@ -297,6 +297,7 @@ export function demoSnapshot(): Snapshot {
   const teams = [
     { id: "team-1", name: "Estratégia & Performance", company_id },
     { id: "team-2", name: "Criação & Conteúdo", company_id },
+    { id: "team-3", name: "P&D", company_id },
   ];
   return {
     companies: [
@@ -320,6 +321,10 @@ export function demoSnapshot(): Snapshot {
     clientTeams: clients.flatMap((c) =>
       teams.map((t) => ({ company_id, client_id: c.id, team_id: t.id })),
     ),
+    // Suggestions go to P&D, in Aurora's contract.
+    suggestionSettings: [
+      { company_id, team_id: "team-3", contract_id: "ct-1", project_id: null },
+    ],
     // Shows the template builder and the extra fields in the demo.
     taskTemplates: [
       {

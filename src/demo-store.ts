@@ -1,5 +1,5 @@
 import { demoSnapshot, demoUser } from "./demo";
-import { projectReview, taskActions } from "./domain";
+import { dateKey, projectReview, taskActions } from "./domain";
 import {
   customFieldsError,
   customKey,
@@ -25,7 +25,10 @@ export class DemoStore {
   attachments: Attachment[] = [];
   events: TaskEvent[] = [];
   /** Everyone's notifications (the demo person sees only theirs). */
-  notifications: (AppNotification & { user_id: string })[] = [];
+  notifications: (AppNotification & {
+    user_id: string;
+    comment_id?: string;
+  })[] = [];
   constructor() {
     // One example, so the demo inbox isn't empty.
     const task = this.data.tasks.find((t) => t.assignee_id === demoUser);
@@ -80,6 +83,38 @@ export class DemoStore {
         excerpt: richTextPlain(comment.body).replace(/\s+/g, " ").slice(0, 160),
         read_at: null,
         created_at: comment.created_at,
+        comment_id: comment.id,
+      });
+    }
+  }
+  /** Mirrors mavi_private.comment_replies: tells the conversation. */
+  private repliesTo(reply: Comment) {
+    const task = this.data.tasks.find((t) => t.id === reply.task_id);
+    if (!task || !reply.parent_id) return;
+    const author = this.data.members.find((m) => m.user_id === reply.author_id);
+    const told = new Set(
+      this.notifications
+        .filter((n) => n.comment_id === reply.id)
+        .map((n) => n.user_id),
+    );
+    for (const c of this.comments) {
+      if (c.id !== reply.parent_id && c.parent_id !== reply.parent_id) continue;
+      if (c.author_id === reply.author_id || told.has(c.author_id)) continue;
+      if (!this.data.members.some((m) => m.user_id === c.author_id && m.active))
+        continue;
+      told.add(c.author_id);
+      this.notifications.push({
+        id: crypto.randomUUID(),
+        user_id: c.author_id,
+        kind: "reply",
+        task_id: task.id,
+        task_title: task.title,
+        actor_id: reply.author_id,
+        actor_name: author?.name ?? null,
+        excerpt: richTextPlain(reply.body).replace(/\s+/g, " ").slice(0, 160),
+        read_at: null,
+        created_at: reply.created_at,
+        comment_id: reply.id,
       });
     }
   }
@@ -299,11 +334,57 @@ export class DemoStore {
         this.setTeamPeople(team.id, a.p_users ?? [], a.p_supervisors ?? []);
         break;
       }
+      case "save_suggestion_settings": {
+        const contract = this.data.contracts.find((c) => c.id === a.p_contract);
+        if (
+          !this.data.clientTeams.some(
+            (ct) =>
+              ct.client_id === contract?.client_id && ct.team_id === a.p_team,
+          )
+        )
+          throw Error("A equipe de P&D precisa atender o cliente escolhido");
+        this.data.suggestionSettings = [
+          {
+            company_id,
+            team_id: a.p_team,
+            contract_id: a.p_contract,
+            project_id: a.p_project ?? null,
+          },
+        ];
+        break;
+      }
+      case "submit_suggestion":
       case "create_task": {
+        if (name === "submit_suggestion") {
+          // Mirrors public.submit_suggestion: a task for P&D, where the
+          // settings say, with no template field asked up front.
+          const s = this.data.suggestionSettings?.[0];
+          if (!s)
+            throw Error(
+              "Sugestões ainda não configuradas: um gestor precisa escolher a equipe de P&D",
+            );
+          if (
+            !this.data.teamMembers.some(
+              (tm) => tm.team_id === s.team_id && tm.user_id === a.p_assignee,
+            )
+          )
+            throw Error("Escolha um responsável da equipe de P&D");
+          const due = new Date();
+          due.setDate(due.getDate() + (a.p_kind === "bug" ? 2 : 7));
+          Object.assign(a, {
+            p_contract: s.contract_id,
+            p_project: s.project_id,
+            p_team: s.team_id,
+            p_priority: a.p_kind === "bug" ? "high" : "normal",
+            p_due: dateKey(due),
+            p_custom: {},
+          });
+        }
         // Mirrors public.create_task: the templates that apply add their
         // fields, and the required ones must be filled in.
         const fields = templateFieldsFor(this.data, a.p_contract, a.p_assignee);
-        const problem = customFieldsError(fields, a.p_custom ?? {});
+        const problem =
+          name === "create_task" && customFieldsError(fields, a.p_custom ?? {});
         if (problem) throw Error(problem);
         this.data.tasks.unshift({
           custom_fields: fillDemoFields(fields, a.p_custom ?? {}),
@@ -536,7 +617,14 @@ export class DemoStore {
         }
         break;
       }
-      case "add_comment":
+      case "add_comment": {
+        const parent = a.p_parent
+          ? this.comments.find(
+              (c) => c.id === a.p_parent && c.task_id === a.p_task,
+            )
+          : undefined;
+        if (a.p_parent && !parent)
+          throw new Error("O comentário respondido não existe nesta tarefa");
         this.comments.unshift({
           id,
           company_id,
@@ -544,9 +632,12 @@ export class DemoStore {
           author_id: demoUser,
           body: a.p_body,
           created_at: now,
+          parent_id: parent ? (parent.parent_id ?? parent.id) : null,
         });
         this.mentionsIn(this.comments[0]);
+        this.repliesTo(this.comments[0]);
         break;
+      }
       case "start_timer":
         {
           const active = this.data.hours.find(

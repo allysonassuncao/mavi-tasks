@@ -41,6 +41,8 @@ import {
   UserRoundPen,
   Users,
   Eye,
+  Reply,
+  X,
 } from "lucide-react";
 import { Modal, Avatar, Empty, Loading } from "./components";
 import {
@@ -81,6 +83,7 @@ import {
   richTextPlain,
   serializeDescription,
 } from "./rich-text";
+import { commentThreads, replyRoot } from "./comment-threads";
 import { ContractPicker } from "./ContractPicker";
 import { TaskDrive } from "./DrivePage";
 import { TeamPicker } from "./TeamPicker";
@@ -625,6 +628,9 @@ export function TaskDetail({
     [uploadProgress, setUploadProgress] = useState("");
   const [editorUploading, setEditorUploading] = useState(false);
   const [commentRevision, setCommentRevision] = useState(0);
+  // The comment being answered from the composer.
+  const [replyTo, setReplyTo] = useState<Comment | null>(null);
+  const composer = useRef<HTMLFormElement>(null);
   const [viewing, setViewing] = useState<number | null>(null);
   const n = names(data, task),
     member = data.members.find((m) => m.user_id === user),
@@ -834,6 +840,8 @@ export function TaskDetail({
       const result = await mutate("add_comment", {
         p_task: task.id,
         p_body: body,
+        // Sent only for replies: plain comments keep the original call.
+        ...(replyTo ? { p_parent: replyRoot(replyTo) } : {}),
       });
       invalidateTaskExtras(task.id);
       // Demo mode already re-syncs extras from the demo store whenever
@@ -844,11 +852,53 @@ export function TaskDetail({
           comments: [result as Comment, ...x.comments],
         }));
       form.reset();
+      setReplyTo(null);
       setCommentRevision((v) => v + 1);
       setLocalRefresh((v) => v + 1);
     } catch (e) {
       setError((e as Error).message);
     }
+  }
+  function startReply(c: Comment) {
+    setReplyTo(c);
+    composer.current
+      ?.querySelector<HTMLElement>("[contenteditable=true]")
+      ?.focus();
+  }
+  function commentItem(c: Comment, orphan = false) {
+    const author = data.members.find((m) => m.user_id === c.author_id);
+    return (
+      <article
+        key={c.id}
+        className={replyTo?.id === c.id ? "replying" : undefined}
+      >
+        <Avatar
+          name={author?.name ?? "Usuário"}
+          src={author?.avatar_url}
+          size="small"
+        />
+        <div>
+          <strong>
+            {author?.name}
+            <small>{new Date(c.created_at).toLocaleString("pt-BR")}</small>
+          </strong>
+          {orphan && (
+            <span className="comment-context">
+              <Reply size={12} /> Em resposta a um comentário anterior
+            </span>
+          )}
+          <RichTextContent value={c.body} />
+          <button
+            type="button"
+            className="comment-reply"
+            onClick={() => startReply(c)}
+            disabled={busy}
+          >
+            <Reply size={13} /> Responder
+          </button>
+        </div>
+      </article>
+    );
   }
   async function edit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1547,32 +1597,18 @@ export function TaskDetail({
                 <Loading compact />
               ) : tab === "comments" ? (
                 <div className="comment-list">
-                  {[...extras.comments].reverse().map((c) => (
-                    <article key={c.id}>
-                      <Avatar
-                        name={
-                          data.members.find((m) => m.user_id === c.author_id)
-                            ?.name ?? "Usuário"
-                        }
-                        src={
-                          data.members.find((m) => m.user_id === c.author_id)
-                            ?.avatar_url
-                        }
-                        size="small"
-                      />
-                      <div>
-                        <strong>
-                          {
-                            data.members.find((m) => m.user_id === c.author_id)
-                              ?.name
-                          }
-                          <small>
-                            {new Date(c.created_at).toLocaleString("pt-BR")}
-                          </small>
-                        </strong>
-                        <RichTextContent value={c.body} />
-                      </div>
-                    </article>
+                  {commentThreads(extras.comments).map((t) => (
+                    <div className="comment-thread" key={t.comment.id}>
+                      {commentItem(t.comment, t.orphan)}
+                      {t.replies.length > 0 && (
+                        <div
+                          className="comment-replies"
+                          aria-label={`${t.replies.length} ${t.replies.length === 1 ? "resposta" : "respostas"}`}
+                        >
+                          {t.replies.map((r) => commentItem(r))}
+                        </div>
+                      )}
+                    </div>
                   ))}
                   {!extras.comments.length && (
                     <p className="muted centered">
@@ -1688,9 +1724,32 @@ export function TaskDetail({
             </div>
             {tab === "comments" && (
               <form
+                ref={composer}
                 className="comment-form task-side-composer"
                 onSubmit={comment}
               >
+                {replyTo && (
+                  <div className="comment-replying">
+                    <Reply size={14} />
+                    <span>
+                      Respondendo a{" "}
+                      <strong>
+                        {data.members.find(
+                          (m) => m.user_id === replyTo.author_id,
+                        )?.name ?? "Usuário"}
+                      </strong>
+                      <small>{richTextPlain(replyTo.body)}</small>
+                    </span>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      aria-label="Cancelar resposta"
+                      onClick={() => setReplyTo(null)}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
                 <Suspense fallback={<Loading compact />}>
                   <RichTextEditor
                     key={commentRevision}
@@ -1698,7 +1757,7 @@ export function TaskDetail({
                     demo={demo}
                     mentions={mentionPeople}
                     name="body"
-                    label="Comentário"
+                    label={replyTo ? "Resposta" : "Comentário"}
                     disabled={busy}
                     onUploading={setEditorUploading}
                   />
@@ -1707,9 +1766,9 @@ export function TaskDetail({
                   className="btn primary"
                   disabled={busy || editorUploading}
                   loading={busy || editorUploading}
-                  aria-label="Enviar comentário"
+                  aria-label={replyTo ? "Enviar resposta" : "Enviar comentário"}
                 >
-                  <Send size={16} /> Enviar
+                  <Send size={16} /> {replyTo ? "Responder" : "Enviar"}
                 </Button>
               </form>
             )}

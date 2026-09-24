@@ -98,7 +98,7 @@ export interface Task {
 /** A notice for one person, e.g. they were mentioned in a comment. */
 export interface AppNotification {
   id: string;
-  kind: "mention" | "assigned";
+  kind: "mention" | "assigned" | "reply";
   task_id: string;
   task_title: string;
   actor_id: string | null;
@@ -124,6 +124,8 @@ export interface Comment {
   author_id: string;
   body: string;
   created_at: string;
+  /** The conversation's first comment, when this is a reply. */
+  parent_id?: string | null;
 }
 export interface Attachment {
   id: string;
@@ -162,6 +164,15 @@ export interface Snapshot {
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
   /** Custom fields for new tasks, by product and/or team (see TaskTemplate). */
   taskTemplates: TaskTemplate[];
+  /** Where suggestions become tasks (one row at most; see Suggestions). */
+  suggestionSettings?: SuggestionSettings[];
+}
+/** The P&D team that receives suggestions, and where its tasks live. */
+export interface SuggestionSettings {
+  company_id: string;
+  team_id: string;
+  contract_id: string;
+  project_id: string | null;
 }
 export type CustomFieldType =
   | "text"

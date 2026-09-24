@@ -234,6 +234,11 @@ export function SidebarNav({
               label: "Templates de tarefa",
               to: { page: "settings", hash: "config-templates" },
             },
+            {
+              key: "settings-suggestions",
+              label: "Sugestões",
+              to: { page: "settings", hash: "config-sugestoes" },
+            },
           ],
         },
       ],

@@ -37,6 +37,7 @@ import {
   Bell,
   BellOff,
   BellRing,
+  Lightbulb,
   Settings2,
   Search,
   Plus,
@@ -131,6 +132,7 @@ import {
 import { useNow } from "./useClock";
 import { Expandable, Paged, Pagination } from "./Pagination";
 import { TaskTemplatesPanel } from "./TaskTemplates";
+import { SuggestionDialog, SuggestionSettingsPanel } from "./SuggestionDialog";
 import { SidebarNav, type NavTarget } from "./SidebarNav";
 import { requestPasswordReset } from "./profile";
 import { pushActive, syncPush } from "./push";
@@ -909,6 +911,8 @@ export default function App() {
     // Everything may be stale (missed notices, or none arriving at all).
     const resync = () => {
       api.forgetTaskData(company);
+      // Notifications announced while offline aren't replayed either.
+      live.current.loadInbox();
       pending.hours = pending.timer = pending.lookups = true;
       const open = live.current.selected;
       if (open) pending.tasks.add(open);
@@ -917,8 +921,8 @@ export default function App() {
     };
     const unsubscribe = api.subscribeToCompanyChanges(company, {
       user,
-      // A new task for the person, or a mention: the inbox row arrives
-      // here while the app is open. With push on, the browser already shows
+      // A new task for the person, a mention or a reply: the inbox row
+      // arrives here while the app is open. With push on, the browser already shows
       // the system notification (same tag), so only the toast is added.
       onNotification: (row) => {
         live.current.loadInbox();
@@ -929,14 +933,16 @@ export default function App() {
             if (!n) return;
             const who = n.actor_name ?? "Alguém";
             const assigned = n.kind === "assigned";
+            const said =
+              n.kind === "reply" ? "respondeu um comentário" : "mencionou você";
             notify(
               assigned
                 ? `Nova tarefa para você: ${n.task_title}`
-                : `${who} mencionou você em ${n.task_title}`,
+                : `${who} ${said} em ${n.task_title}`,
             );
             if (pushActive()) return;
             showNotification(
-              assigned ? "Nova tarefa para você" : `${who} mencionou você`,
+              assigned ? "Nova tarefa para você" : `${who} ${said}`,
               {
                 body: assigned
                   ? `${who} criou: ${n.task_title}`
@@ -1101,7 +1107,10 @@ export default function App() {
       } else if (name === "add_comment" && args.p_task) {
         api.invalidateTaskExtras(args.p_task as string);
       } else if (!SELF_HANDLED_MUTATIONS.has(name)) {
-        if (name === "create_task" && result) {
+        if (
+          (name === "create_task" || name === "submit_suggestion") &&
+          result
+        ) {
           const newTask = await api.taskById(company, result as string, true);
           if (newTask) {
             api.forgetTask(company, newTask.id);
@@ -1124,6 +1133,7 @@ export default function App() {
           name.startsWith("create_team") ||
           name.startsWith("update_team") ||
           name === "save_task_template" ||
+          name === "save_suggestion_settings" ||
           name === "delete_task_template" ||
           name === "update_my_profile" ||
           name === "update_member" ||
@@ -1723,6 +1733,15 @@ export default function App() {
               </Button>
             )}
             <InstallApp notify={notify} />
+            <button
+              type="button"
+              className="inbox-toggle"
+              title="Sugestões: nova funcionalidade ou bug"
+              aria-label="Sugestões"
+              onClick={() => setForm("suggestion")}
+            >
+              <Lightbulb size={17} />
+            </button>
             <NotificationInbox
               items={inbox}
               members={data.members}
@@ -2959,6 +2978,13 @@ export default function App() {
                       mutate={mutate}
                       notify={notify}
                     />
+                    <SuggestionSettingsPanel
+                      key={data.suggestionSettings?.[0]?.team_id ?? "none"}
+                      data={data}
+                      company={company}
+                      mutate={mutate}
+                      notify={notify}
+                    />
                   </div>
                 </>
               )}
@@ -2996,6 +3022,20 @@ export default function App() {
           company={company}
           busy={busy}
           mutate={mutate}
+          onClose={() => setForm(null)}
+        />
+      ) : form === "suggestion" ? (
+        <SuggestionDialog
+          demo={demo}
+          data={data}
+          company={company}
+          isLeader={isLeader}
+          busy={busy}
+          mutate={mutate}
+          notify={notify}
+          onConfigure={() =>
+            openNav({ page: "settings", hash: "config-sugestoes" })
+          }
           onClose={() => setForm(null)}
         />
       ) : form === "task" ? (
