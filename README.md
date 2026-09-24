@@ -87,7 +87,7 @@ O proprietário fará a integração manual com [allysonassuncao/mavi-tasks](htt
 
 Antes do primeiro deploy, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` com os valores de `.env.local`, disponível somente na máquina local. Sem essas variáveis o frontend abre em modo demonstração. Configurá-las separadamente em Preview e Production; cada ambiente deve apontar ao Supabase correspondente. Nunca usar uma chave `service_role` ou secreta nessas variáveis.
 
-`vercel.json` inclui fallback de rotas e cabeçalhos de segurança. Se usar domínio personalizado para a API do Supabase, revisar `connect-src` da CSP antes da publicação. Depois de publicar, configurar no Supabase Auth a Site URL e o redirect exato `https://SEU-DOMINIO/?setup=1`.
+`vercel.json` inclui fallback de rotas e cabeçalhos de segurança. Se usar domínio personalizado para a API do Supabase, revisar `connect-src` da CSP antes da publicação. Depois de publicar, configurar no Supabase Auth a Site URL e os redirects exatos `https://workspace.maso.app.br/?setup=1` e `https://workspace.maso.app.br/?reset=1`.
 
 ### Variáveis de servidor
 
@@ -109,7 +109,9 @@ values ('https://SEU-DOMINIO/api/push', '<o mesmo PUSH_SECRET da Vercel>');
 
 Cada pessoa ativa as notificações no sino do topo; no iPhone, só com o app instalado na tela de início (iOS 16.4+). Sem essa configuração o app continua avisando enquanto está aberto.
 
-Conta identificada: `allysoncombr`. Nenhum deploy foi executado pelo agente. Não é necessário autenticar o CLI da Vercel para seguir pelo fluxo GitHub escolhido. Domínio final ainda não definido.
+Conta identificada: `allysoncombr`. Nenhum deploy foi executado pelo agente. Não é necessário autenticar o CLI da Vercel para seguir pelo fluxo GitHub escolhido.
+
+Domínio oficial: `https://workspace.maso.app.br` (definido em `api/_origin.ts`; a variável `APP_ORIGIN` na Vercel o substitui). É o endereço dos links enviados por e-mail (convite e redefinição de senha) e precisa constar em `APP_ORIGIN` / `APP_ADDITIONAL_ORIGINS` das funções do Supabase.
 
 ## Verificação realizada e critérios de homologação
 

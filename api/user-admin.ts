@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { appOrigin } from "./_origin.js";
 
 export default async function handler(
   req: IncomingMessage & { body?: any },
@@ -22,7 +23,8 @@ export default async function handler(
 
   try {
     const supabaseUrl =
-      process.env.VITE_SUPABASE_URL || "https://zajlipvbotjafkowohmn.supabase.co";
+      process.env.VITE_SUPABASE_URL ||
+      "https://zajlipvbotjafkowohmn.supabase.co";
     const targetUrl = `${supabaseUrl}/functions/v1/user-admin`;
     const authHeader = req.headers["authorization"] || "";
 
@@ -31,7 +33,8 @@ export default async function handler(
       headers: {
         "Content-Type": "application/json",
         Authorization: authHeader as string,
-        Origin: "https://mavi.maso.app.br",
+        // The official domain: email links are built from it.
+        Origin: appOrigin(),
       },
       body,
     });

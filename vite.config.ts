@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { appOrigin } from "./api/_origin";
 
 function gcsDevPlugin() {
   return {
@@ -48,7 +49,7 @@ function gcsDevPlugin() {
                 headers: {
                   "Content-Type": "application/json",
                   Authorization: authHeader as string,
-                  Origin: "https://mavi.maso.app.br",
+                  Origin: appOrigin(),
                 },
                 body,
               });
@@ -84,7 +85,7 @@ function gcsDevPlugin() {
                 headers: {
                   "Content-Type": "application/json",
                   Authorization: authHeader as string,
-                  Origin: "https://mavi.maso.app.br",
+                  Origin: appOrigin(),
                 },
                 body,
               });

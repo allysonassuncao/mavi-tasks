@@ -565,7 +565,7 @@ export class DemoStore {
         }
         return {
           success: true,
-          link: "https://mavi.maso.app.br/?reset=demo-token",
+          link: "https://workspace.maso.app.br/?reset=demo-token",
           message: `Link de recuperação enviado para ${member.email || member.name}.`,
         };
       }
