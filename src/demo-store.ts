@@ -1,10 +1,17 @@
 import { demoSnapshot, demoUser } from "./demo";
-import { dateKey, projectReview, taskActions } from "./domain";
+import {
+  dateKey,
+  nextRecurrence,
+  projectReview,
+  taskActions,
+  teamAssignee,
+} from "./domain";
 import {
   customFieldsError,
   customKey,
   isEmpty,
   templateFieldsFor,
+  teamTemplateFields,
 } from "./templateFields";
 import { mentionedIds, richTextPlain, transitionComment } from "./rich-text";
 import {
@@ -15,6 +22,7 @@ import {
   type Comment,
   type Attachment,
   type TaskEvent,
+  type TaskRecurrence,
   type AppNotification,
   statuses,
   workingStatuses,
@@ -24,6 +32,8 @@ export class DemoStore {
   comments: Comment[] = [];
   attachments: Attachment[] = [];
   events: TaskEvent[] = [];
+  /** Repetitions set up in the demo (it never opens their copies). */
+  recurrences: TaskRecurrence[] = [];
   /** Everyone's notifications (the demo person sees only theirs). */
   notifications: (AppNotification & {
     user_id: string;
@@ -404,9 +414,25 @@ export class DemoStore {
             p_custom: {},
           });
         }
-        // Mirrors public.create_task: the templates that apply add their
-        // fields, and the required ones must be filled in.
-        const fields = templateFieldsFor(this.data, a.p_contract, a.p_assignee);
+        // Mirrors public.create_task: a task sent to a team goes to its
+        // active member with the fewest open tasks (supervisors only when
+        // there is nobody else), and gets the fields of that team's templates.
+        const byTeam = name === "create_task" && !a.p_assignee;
+        let assignee: string = a.p_assignee;
+        if (byTeam) {
+          if (!a.p_team) throw Error("Escolha um responsável ou uma equipe");
+          const picked = teamAssignee(this.data, a.p_team);
+          if (!picked)
+            throw Error(
+              "Esta equipe não tem ninguém ativo para receber a tarefa.",
+            );
+          assignee = picked.user_id;
+        }
+        // The templates that apply add their fields, and the required ones
+        // must be filled in.
+        const fields = byTeam
+          ? teamTemplateFields(this.data, a.p_contract, a.p_team)
+          : templateFieldsFor(this.data, a.p_contract, assignee);
         const problem =
           name === "create_task" && customFieldsError(fields, a.p_custom ?? {});
         if (problem) throw Error(problem);
@@ -424,7 +450,7 @@ export class DemoStore {
           status_changed_at: now,
           priority: a.p_priority ?? "normal",
           creator_id: demoUser,
-          assignee_id: a.p_assignee,
+          assignee_id: assignee,
           due_date: a.p_due,
           original_due_date: a.p_due,
           start_date: a.p_start ?? null,
@@ -439,6 +465,46 @@ export class DemoStore {
           archived: false,
           created_at: now,
         });
+        // Mirrors mavi_private.start_recurrence.
+        if (name === "create_task" && a.p_repeat) {
+          const today = dateKey();
+          const recurrence: TaskRecurrence = {
+            id: crypto.randomUUID(),
+            frequency: a.p_repeat,
+            next_run: nextRecurrence(a.p_repeat, today, today),
+            active: true,
+            creator_id: demoUser,
+            copies: 0,
+            last_error: null,
+          };
+          this.recurrences.push(recurrence);
+          this.data.tasks[0].recurrence_id = recurrence.id;
+          this.events.unshift({
+            id: crypto.randomUUID(),
+            task_id: id,
+            actor_id: demoUser,
+            action: "recurrence_started",
+            detail: { frequency: a.p_repeat },
+            created_at: now,
+          });
+        }
+        break;
+      }
+      case "stop_task_recurrence": {
+        // Mirrors public.stop_task_recurrence.
+        const r = this.recurrences.find((x) => x.id === task?.recurrence_id);
+        if (!r) throw Error("Esta tarefa não se repete");
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        if (r.creator_id !== demoUser && role !== "admin" && role !== "manager")
+          throw Error(
+            "Só quem programou a repetição ou um gestor pode pará-la",
+          );
+        if (r.active) {
+          r.active = false;
+          event("recurrence_stopped");
+        }
         break;
       }
       case "set_task_custom_fields": {

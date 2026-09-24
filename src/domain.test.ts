@@ -11,6 +11,8 @@ import {
   canCreateTaskIn,
   contractOpen,
   teamClientIds,
+  teamAssignee,
+  nextRecurrence,
   contractDetail,
   contractProductLabel,
 } from "./domain";
@@ -286,4 +288,84 @@ describe("Colaborador supervisor", () => {
     expect(canSeeTask(data, task, member.user_id)).toBe(true);
     expect(canApproveTask(data, task, member.user_id)).toBe(true);
   });
+});
+
+describe("Tarefa enviada para uma equipe", () => {
+  // Three designers and their supervisor; only the tasks built here count.
+  const team = "t-design";
+  const people = ["u-bia", "u-caio", "u-duda", "u-chefe"];
+  function snapshot(assigned: [string, string, boolean?][]) {
+    const base = demoSnapshot();
+    return {
+      ...base,
+      members: people.map((user_id) => ({
+        ...base.members[0],
+        user_id,
+        name: user_id,
+        active: true,
+      })),
+      teamMembers: people.map((user_id) => ({
+        company_id: base.members[0].company_id,
+        team_id: team,
+        user_id,
+        supervisor: user_id === "u-chefe",
+      })),
+      tasks: assigned.map(([assignee_id, created_at, done], i) => ({
+        ...base.tasks[0],
+        id: `t${i}`,
+        assignee_id,
+        created_at,
+        status: done ? ("done" as const) : ("progress" as const),
+        archived: false,
+      })),
+    };
+  }
+  it("vai para quem tem menos tarefas em aberto, não o supervisor", () => {
+    const data = snapshot([
+      ["u-bia", "2026-09-01"],
+      ["u-bia", "2026-09-02"],
+      ["u-caio", "2026-09-03"],
+      ["u-duda", "2026-09-04"],
+      ["u-duda", "2026-09-05", true],
+    ]);
+    // Caio and Duda have one open task; Caio received his longest ago.
+    expect(teamAssignee(data, team)?.user_id).toBe("u-caio");
+  });
+  it("pessoa desativada não recebe", () => {
+    const data = snapshot([["u-bia", "2026-09-01"]]);
+    data.members = data.members.map((m) =>
+      m.user_id === "u-caio" || m.user_id === "u-duda"
+        ? { ...m, active: false }
+        : m,
+    );
+    expect(teamAssignee(data, team)?.user_id).toBe("u-bia");
+  });
+  it("equipe só com supervisores: o supervisor recebe", () => {
+    const data = snapshot([["u-chefe", "2026-09-01"]]);
+    data.teamMembers = data.teamMembers.filter((tm) => tm.supervisor);
+    expect(teamAssignee(data, team)?.user_id).toBe("u-chefe");
+  });
+  it("equipe sem ninguém ativo não tem quem receba", () => {
+    const data = snapshot([]);
+    data.members = data.members.map((m) => ({ ...m, active: false }));
+    expect(teamAssignee(data, team)).toBeUndefined();
+  });
+});
+
+describe("Datas da repetição (espelho de mavi_private.next_recurrence)", () => {
+  it.each([
+    ["daily", "2026-09-25", "2026-09-25", "2026-09-26"],
+    ["weekdays", "2026-09-25", "2026-09-25", "2026-09-28"],
+    ["weekdays", "2026-09-25", "2026-09-26", "2026-09-28"],
+    ["weekdays", "2026-09-25", "2026-09-28", "2026-09-29"],
+    ["weekly", "2026-09-24", "2026-09-24", "2026-10-01"],
+    ["weekly", "2026-09-24", "2026-10-03", "2026-10-08"],
+    ["biweekly", "2026-09-24", "2026-09-24", "2026-10-08"],
+    ["biweekly", "2026-09-24", "2026-10-08", "2026-10-22"],
+    ["monthly", "2026-01-31", "2026-01-31", "2026-02-28"],
+    ["monthly", "2026-01-31", "2026-02-28", "2026-03-31"],
+    ["monthly", "2026-09-24", "2026-12-30", "2027-01-24"],
+  ] as const)("%s a partir de %s, depois de %s: %s", (f, anchor, after, want) =>
+    expect(nextRecurrence(f, anchor, after)).toBe(want),
+  );
 });

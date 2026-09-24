@@ -7,6 +7,7 @@ import {
   type Project,
   type ProjectApprover,
   type Contract,
+  type RecurrenceFrequency,
 } from "./types";
 export function dateKey(date = new Date(), timezone = "America/Sao_Paulo") {
   return new Intl.DateTimeFormat("en-CA", {
@@ -293,6 +294,78 @@ export function canCreateTaskIn(
   return data.clientTeams.some(
     (ct) => ct.client_id === clientId && myTeams.has(ct.team_id),
   );
+}
+/**
+ * Who receives a task sent to a team — mirrors mavi_private.team_assignee:
+ * the active member with the fewest open tasks, supervisors only when the
+ * team has nobody else; ties go to whoever received a task longest ago, then
+ * by name.
+ * Only the database sees everyone's tasks, so outside the demo it decides.
+ */
+export function teamAssignee(data: Snapshot, teamId: string) {
+  const load = (userId: string) => {
+    const mine = data.tasks.filter((t) => t.assignee_id === userId);
+    return {
+      open: mine.filter((t) => t.status !== "done" && !t.archived).length,
+      last: mine.reduce(
+        (max, t) => (t.created_at > max ? t.created_at : max),
+        "",
+      ),
+    };
+  };
+  return data.teamMembers
+    .filter((tm) => tm.team_id === teamId)
+    .flatMap((tm) => {
+      const m = data.members.find((x) => x.user_id === tm.user_id && x.active);
+      return m
+        ? [{ member: m, supervisor: !!tm.supervisor, ...load(m.user_id) }]
+        : [];
+    })
+    .sort(
+      (a, b) =>
+        Number(a.supervisor) - Number(b.supervisor) ||
+        a.open - b.open ||
+        a.last.localeCompare(b.last) ||
+        a.member.name.localeCompare(b.member.name, "pt-BR") ||
+        a.member.user_id.localeCompare(b.member.user_id),
+    )[0]?.member;
+}
+/**
+ * The first date of a repetition after `after` (YYYY-MM-DD) — mirrors
+ * mavi_private.next_recurrence. Weekly, biweekly and monthly count from the
+ * day the series started; a month shorter than that day uses its last day.
+ */
+export function nextRecurrence(
+  frequency: RecurrenceFrequency,
+  anchor: string,
+  after: string,
+) {
+  const day = (key: string) => new Date(`${key}T12:00:00Z`);
+  const key = (d: Date) => d.toISOString().slice(0, 10);
+  const plus = (d: Date, days: number) =>
+    new Date(d.getTime() + days * 86_400_000);
+  const start = day(anchor),
+    from = day(after);
+  if (frequency === "daily") return key(plus(from, 1));
+  if (frequency === "weekdays") {
+    let d = plus(from, 1);
+    while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d = plus(d, 1);
+    return key(d);
+  }
+  if (frequency === "weekly" || frequency === "biweekly") {
+    const step = frequency === "weekly" ? 7 : 14;
+    const elapsed = Math.round((from.getTime() - start.getTime()) / 86_400_000);
+    return key(
+      plus(start, step * (Math.max(Math.floor(elapsed / step), -1) + 1)),
+    );
+  }
+  for (let n = 1; ; n++) {
+    const y = start.getUTCFullYear(),
+      m = start.getUTCMonth() + n;
+    const last = new Date(Date.UTC(y, m + 1, 0, 12)).getUTCDate();
+    const d = new Date(Date.UTC(y, m, Math.min(start.getUTCDate(), last), 12));
+    if (d > from) return key(d);
+  }
 }
 /** Clients served by any of the person's teams (how collaborators reach clients). */
 export function teamClientIds(data: Snapshot, userId: string) {

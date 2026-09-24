@@ -34,12 +34,35 @@ export function templateFieldsFor(
   contractId: string,
   assigneeId: string,
 ): TaskCustomField[] {
-  const product = data.contracts.find((k) => k.id === contractId)?.product_id;
-  const teams = new Set(
-    data.teamMembers
-      .filter((tm) => tm.user_id === assigneeId)
-      .map((tm) => tm.team_id),
+  return fieldsOfTemplates(
+    data,
+    contractId,
+    new Set(
+      data.teamMembers
+        .filter((tm) => tm.user_id === assigneeId)
+        .map((tm) => tm.team_id),
+    ),
   );
+}
+
+/**
+ * The fields of a task sent to a team (whoever receives it): those of the
+ * product and of that team — mirrors mavi_private.team_template_fields.
+ */
+export function teamTemplateFields(
+  data: Pick<Snapshot, "taskTemplates" | "contracts">,
+  contractId: string,
+  teamId: string,
+): TaskCustomField[] {
+  return fieldsOfTemplates(data, contractId, new Set([teamId]));
+}
+
+function fieldsOfTemplates(
+  data: Pick<Snapshot, "taskTemplates" | "contracts">,
+  contractId: string,
+  teams: Set<string>,
+): TaskCustomField[] {
+  const product = data.contracts.find((k) => k.id === contractId)?.product_id;
   return (data.taskTemplates ?? [])
     .filter(
       (t) =>

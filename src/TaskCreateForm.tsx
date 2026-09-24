@@ -14,9 +14,18 @@ import { Modal, Loading } from "./components";
 import { ContractPicker } from "./ContractPicker";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
 import { CustomFieldsForm } from "./CustomFieldsForm";
-import { customFieldsError, templateFieldsFor } from "./templateFields";
-import { type Snapshot, priorities } from "./types";
-import { canCreateTaskIn, dateKey } from "./domain";
+import {
+  customFieldsError,
+  teamTemplateFields,
+  templateFieldsFor,
+} from "./templateFields";
+import {
+  type RecurrenceFrequency,
+  type Snapshot,
+  priorities,
+  recurrenceFrequencies,
+} from "./types";
+import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
 import {
   attachmentAccept,
   validateAttachment,
@@ -56,7 +65,9 @@ const dueShortcuts = [
 /**
  * Task creation keeps only what the backend requires up front (title,
  * contracted product, assignee and due date — all but the title prefilled);
- * everything else lives behind "Adicionar detalhes".
+ * everything else lives behind "Adicionar detalhes". The assignee can be a
+ * team instead of a person: the database hands the task to the team member
+ * with the fewest open tasks (supervisors only when there is nobody else).
  */
 export function TaskCreateForm({
   initialContract,
@@ -100,7 +111,10 @@ export function TaskCreateForm({
   );
   const [title, setTitle] = useState("");
   const [assignee, setAssignee] = useState(user);
+  const [assignMode, setAssignMode] = useState<"person" | "team">("person");
+  const [assignTeam, setAssignTeam] = useState("");
   const [due, setDue] = useState(dateKey());
+  const [repeat, setRepeat] = useState<RecurrenceFrequency | "">("");
   const [showDetails, setShowDetails] = useState(false);
   const [detailsMounted, setDetailsMounted] = useState(false);
   const [createAnother, setCreateAnother] = useState(false);
@@ -117,11 +131,56 @@ export function TaskCreateForm({
   const locked = saving || !!uploads.current.taskId;
   const working = busy || saving || editorUploading;
   const activeMembers = data.members.filter((m) => m.active);
-  // Template fields for this product and assignee: they change as either
-  // does (values typed for fields still shown are kept).
+  // Teams that serve this client (create_task accepts only those). One with
+  // nobody active can't receive a task, so it shows why and can't be picked.
+  const clientTeams = useMemo(
+    () =>
+      data.teams
+        .filter((t) =>
+          data.clientTeams.some(
+            (ct) => ct.client_id === contractClient && ct.team_id === t.id,
+          ),
+        )
+        .map((t) => {
+          const people = data.teamMembers.filter((tm) => tm.team_id === t.id);
+          const active = people.some((tm) =>
+            data.members.some((m) => m.user_id === tm.user_id && m.active),
+          );
+          return {
+            team: t,
+            unavailable: active
+              ? ""
+              : people.length
+                ? "ninguém ativo"
+                : "sem pessoas",
+          };
+        }),
+    [data, contractClient],
+  );
+  // The product's projects (optional, under "Adicionar detalhes").
+  const projects = data.projects.filter(
+    (p) => p.contract_id === contract && (!p.archived || p.id === project),
+  );
+  const projectName = projects.find((p) => p.id === project)?.name;
+  const byTeam = assignMode === "team";
+  // A team chosen for another client no longer applies.
+  const team = clientTeams.some(
+    (ct) => ct.team.id === assignTeam && !ct.unavailable,
+  )
+    ? assignTeam
+    : "";
+  // Template fields for this product and assignee (or team): they change as
+  // either does (values typed for fields still shown are kept).
   const customFields = useMemo(
-    () => (contract ? templateFieldsFor(data, contract, assignee) : []),
-    [data, contract, assignee],
+    () =>
+      !contract
+        ? []
+        : byTeam
+          ? team
+            ? teamTemplateFields(data, contract, team)
+            : []
+          : templateFieldsFor(data, contract, assignee),
+    [data, contract, assignee, byTeam, team],
   );
   const [customValues, setCustomValues] = useState<Record<string, unknown>>({});
   const me = activeMembers.find((m) => m.user_id === user);
@@ -165,6 +224,7 @@ export function TaskCreateForm({
   function resetForNext() {
     uploads.current = { pending: [] };
     setTitle("");
+    setRepeat("");
     setCustomValues({});
     setFormKey((v) => v + 1);
     setCreated((v) => v + 1);
@@ -177,6 +237,10 @@ export function TaskCreateForm({
     setError("");
     const f = new FormData(e.currentTarget),
       s = (key: string) => String(f.get(key) ?? "");
+    if (byTeam && !team) {
+      setError("Escolha a equipe que vai receber a tarefa.");
+      return;
+    }
     const fieldsProblem = customFieldsError(customFields, customValues);
     if (fieldsProblem) {
       setError(fieldsProblem);
@@ -186,16 +250,19 @@ export function TaskCreateForm({
       p_company: company,
       p_contract: contract,
       p_title: title.trim(),
-      p_assignee: assignee,
+      // Without an assignee, the database picks one from the team.
+      p_assignee: byTeam ? null : assignee,
       p_due: due,
       p_start: s("start_date") || null,
       p_project: project || null,
-      p_team: s("team") || null,
+      p_team: byTeam ? team : s("team") || null,
       p_description: s("description"),
       p_priority: s("priority") || "normal",
       p_estimated: Number(s("estimated")) * 60,
       p_client_approval: f.has("client_approval"),
       p_parent: s("parent") || null,
+      // The database opens a copy of the task on each date of the series.
+      ...(repeat ? { p_repeat: repeat } : {}),
       // Only the fields shown now; the database checks them against the
       // templates that apply and keeps its own copy in the task. Sent only
       // when there are fields, so tasks without templates never depend on it.
@@ -279,9 +346,10 @@ export function TaskCreateForm({
             <ContractPicker
               data={data}
               contract={contract}
-              onContractChange={setContract}
-              project={project}
-              onProjectChange={setProject}
+              onContractChange={(id) => {
+                setContract(id);
+                setProject("");
+              }}
               allowed={(id) => canCreateTaskIn(data, id, user)}
             />
           ) : (
@@ -292,21 +360,76 @@ export function TaskCreateForm({
             </p>
           )}
           <div className="form-columns">
-            <label>
-              Responsável
-              <Select required value={assignee} onValueChange={setAssignee}>
-                {me && (
-                  <SelectOption value={me.user_id}>Eu ({me.name})</SelectOption>
-                )}
-                {activeMembers
-                  .filter((m) => m.user_id !== user)
-                  .map((m) => (
-                    <SelectOption key={m.user_id} value={m.user_id}>
-                      {m.name}
+            <div className="quick-task-due">
+              {byTeam ? (
+                <label>
+                  Equipe responsável
+                  <Select required value={team} onValueChange={setAssignTeam}>
+                    <SelectOption value="">
+                      {clientTeams.length
+                        ? "Escolha a equipe"
+                        : "Nenhuma equipe atende este cliente"}
                     </SelectOption>
-                  ))}
-              </Select>
-            </label>
+                    {clientTeams.map(({ team: t, unavailable }) => (
+                      <SelectOption
+                        key={t.id}
+                        value={t.id}
+                        disabled={!!unavailable}
+                      >
+                        {unavailable ? `${t.name} · ${unavailable}` : t.name}
+                      </SelectOption>
+                    ))}
+                  </Select>
+                </label>
+              ) : (
+                <label>
+                  Responsável
+                  <Select required value={assignee} onValueChange={setAssignee}>
+                    {me && (
+                      <SelectOption value={me.user_id}>
+                        Eu ({me.name})
+                      </SelectOption>
+                    )}
+                    {activeMembers
+                      .filter((m) => m.user_id !== user)
+                      .map((m) => (
+                        <SelectOption key={m.user_id} value={m.user_id}>
+                          {m.name}
+                        </SelectOption>
+                      ))}
+                  </Select>
+                </label>
+              )}
+              <div
+                className="due-shortcuts"
+                role="radiogroup"
+                aria-label="Enviar para"
+              >
+                {(
+                  [
+                    ["person", "Pessoa"],
+                    ["team", "Equipe"],
+                  ] as const
+                ).map(([mode, label]) => (
+                  <button
+                    type="button"
+                    key={mode}
+                    role="radio"
+                    aria-checked={assignMode === mode}
+                    className={assignMode === mode ? "selected" : ""}
+                    onClick={() => setAssignMode(mode)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {byTeam && (
+                <small className="assign-team-hint">
+                  Vai para quem da equipe tem menos tarefas em aberto.
+                  Supervisores só recebem quando a equipe não tem mais ninguém.
+                </small>
+              )}
+            </div>
             <div className="quick-task-due">
               <label>
                 Prazo
@@ -426,7 +549,15 @@ export function TaskCreateForm({
           >
             <ChevronDown size={16} className={showDetails ? "open" : ""} />
             {showDetails ? "Ocultar detalhes" : "Adicionar detalhes"}
-            {!showDetails && <small>prioridade, estimativa, equipe…</small>}
+            {!showDetails && (
+              <small>
+                {projectName
+                  ? `projeto ${projectName} · prioridade, estimativa…`
+                  : projects.length
+                    ? "projeto, prioridade, estimativa, equipe…"
+                    : "prioridade, estimativa, equipe…"}
+              </small>
+            )}
           </button>
           {detailsMounted && (
             <div
@@ -435,75 +566,110 @@ export function TaskCreateForm({
               hidden={!showDetails}
               key={formKey}
             >
-              <div className="form-columns">
-                <label>
-                  Prioridade
-                  <Select name="priority" defaultValue="normal">
-                    {Object.entries(priorities).map(([id, label]) => (
-                      <SelectOption key={id} value={id}>
-                        {label}
-                      </SelectOption>
-                    ))}
-                  </Select>
-                </label>
-                <label>
-                  Estimativa em horas
-                  <Input
-                    type="number"
-                    name="estimated"
-                    min="0"
-                    max="10000"
-                    step="0.25"
-                    placeholder="0"
-                  />
-                </label>
-              </div>
-              <div className="form-columns">
-                <label>
-                  Equipe
-                  <Select name="team" key={contract}>
-                    <SelectOption value="">Sem equipe principal</SelectOption>
-                    {data.teams
-                      .filter((t) =>
-                        data.clientTeams.some(
-                          (ct) =>
-                            ct.client_id === contractClient &&
-                            ct.team_id === t.id,
+              {/* Fields fill a two-column grid; a lone last one spans it. */}
+              <section className="details-section" aria-label="Organização">
+                <h4>Organização</h4>
+                <div className="details-grid">
+                  {projects.length > 0 && (
+                    <label>
+                      Projeto
+                      <Select value={project} onValueChange={setProject}>
+                        <SelectOption value="">Sem projeto</SelectOption>
+                        {projects.map((p) => (
+                          <SelectOption key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectOption>
+                        ))}
+                      </Select>
+                    </label>
+                  )}
+                  {/* A task sent to a team belongs to that team. */}
+                  {!byTeam && (
+                    <label>
+                      Equipe
+                      <Select name="team" key={contract}>
+                        <SelectOption value="">
+                          Sem equipe principal
+                        </SelectOption>
+                        {clientTeams.map(({ team: t }) => (
+                          <SelectOption key={t.id} value={t.id}>
+                            {t.name}
+                          </SelectOption>
+                        ))}
+                      </Select>
+                    </label>
+                  )}
+                  <label>
+                    Tarefa principal
+                    <Select name="parent" key={contract}>
+                      <SelectOption value="">Nenhuma</SelectOption>
+                      {data.tasks
+                        .filter((t) => t.contract_id === contract)
+                        .map((t) => (
+                          <SelectOption key={t.id} value={t.id}>
+                            {t.title}
+                          </SelectOption>
+                        ))}
+                    </Select>
+                  </label>
+                </div>
+              </section>
+              <section className="details-section" aria-label="Planejamento">
+                <h4>Planejamento</h4>
+                <div className="details-grid">
+                  <label>
+                    Prioridade
+                    <Select name="priority" defaultValue="normal">
+                      {Object.entries(priorities).map(([id, label]) => (
+                        <SelectOption key={id} value={id}>
+                          {label}
+                        </SelectOption>
+                      ))}
+                    </Select>
+                  </label>
+                  <label>
+                    Estimativa em horas
+                    <Input
+                      type="number"
+                      name="estimated"
+                      min="0"
+                      max="10000"
+                      step="0.25"
+                      placeholder="0"
+                    />
+                  </label>
+                  <label>
+                    Início planejado
+                    <Input name="start_date" type="date" />
+                  </label>
+                  <label>
+                    Programar repetição
+                    <Select
+                      value={repeat}
+                      onValueChange={(v) =>
+                        setRepeat(v as RecurrenceFrequency | "")
+                      }
+                    >
+                      <SelectOption value="">Não repetir</SelectOption>
+                      {Object.entries(recurrenceFrequencies).map(
+                        ([id, label]) => (
+                          <SelectOption key={id} value={id}>
+                            {label}
+                          </SelectOption>
                         ),
-                      )
-                      .map((t) => (
-                        <SelectOption key={t.id} value={t.id}>
-                          {t.name}
-                        </SelectOption>
-                      ))}
-                  </Select>
+                      )}
+                    </Select>
+                  </label>
+                </div>
+                {repeat && <RepeatHint frequency={repeat} due={due} />}
+              </section>
+              <section className="details-section" aria-label="Aprovação">
+                <h4>Aprovação</h4>
+                <label className="checkbox-label">
+                  <Checkbox name="client_approval" /> Exigir aprovação do
+                  cliente além da aprovação interna
                 </label>
-                <label>
-                  Tarefa principal
-                  <Select name="parent" key={contract}>
-                    <SelectOption value="">
-                      Esta é uma tarefa principal
-                    </SelectOption>
-                    {data.tasks
-                      .filter((t) => t.contract_id === contract)
-                      .map((t) => (
-                        <SelectOption key={t.id} value={t.id}>
-                          {t.title}
-                        </SelectOption>
-                      ))}
-                  </Select>
-                </label>
-              </div>
-              <div className="form-columns">
-                <label>
-                  Início planejado
-                  <Input name="start_date" type="date" />
-                </label>
-              </div>
-              <label className="checkbox-label">
-                <Checkbox name="client_approval" /> Exigir aprovação do cliente
-                além da aprovação interna
-              </label>
+              </section>
             </div>
           )}
         </fieldset>
@@ -547,5 +713,41 @@ export function TaskCreateForm({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/**
+ * What a repetition will do, from today: when the first copy opens and its
+ * due date (the same distance as this task's).
+ */
+function RepeatHint({
+  frequency,
+  due,
+}: {
+  frequency: RecurrenceFrequency;
+  due: string;
+}) {
+  const today = dateKey();
+  const first = nextRecurrence(frequency, today, today);
+  const offset = Math.max(
+    0,
+    Math.round(
+      (new Date(`${due}T12:00:00Z`).getTime() -
+        new Date(`${today}T12:00:00Z`).getTime()) /
+        86_400_000,
+    ),
+  );
+  const firstDue = dateKey(
+    new Date(new Date(`${first}T12:00:00Z`).getTime() + offset * 86_400_000),
+  );
+  return (
+    <small className="repeat-hint" role="status">
+      Uma cópia desta tarefa abre em {dateLabel(first)}
+      {offset
+        ? `, com prazo em ${dateLabel(firstDue)}`
+        : ", com prazo no mesmo dia"}
+      , e assim por diante até alguém parar a repetição. Anexos e imagens da
+      descrição não são copiados.
+    </small>
   );
 }

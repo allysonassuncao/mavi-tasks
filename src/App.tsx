@@ -1111,6 +1111,7 @@ export default function App() {
       const result = demo
         ? demoStore.current.mutate(name, args)
         : await api.rpc(name, args);
+      let createdTask: Task | null | undefined = null;
       if (demo) {
         setData({ ...demoStore.current.data });
         setCurrentRunning(
@@ -1143,6 +1144,10 @@ export default function App() {
         setCurrentRunning(entry.ended_at ? null : entry);
         setData((d) => ({ ...d, hours: upsertById(d.hours, entry) }));
         api.patchCachedHours(company, entry);
+      } else if (name === "stop_task_recurrence" && args.p_task) {
+        // Only the repetition in the task's details changed.
+        api.invalidateTaskExtras(args.p_task as string);
+        setExtrasTick((v) => v + 1);
       } else if (name === "add_comment" && args.p_task) {
         api.invalidateTaskExtras(args.p_task as string);
       } else if (!SELF_HANDLED_MUTATIONS.has(name)) {
@@ -1151,6 +1156,7 @@ export default function App() {
           result
         ) {
           const newTask = await api.taskById(company, result as string, true);
+          createdTask = newTask;
           if (newTask) {
             api.forgetTask(company, newTask.id);
             if (!liveOk.current) setLiveTick((v) => v + 1);
@@ -1195,7 +1201,20 @@ export default function App() {
           setRefresh((v) => v + 1);
         }
       }
-      notify(demo ? "Alteração feita na demonstração." : "Alteração salva.");
+      if (demo && name === "create_task")
+        createdTask = demoStore.current.data.tasks.find((t) => t.id === result);
+      // A task sent to a team: say who received it.
+      const receiver =
+        name === "create_task" && !args.p_assignee && createdTask
+          ? data.members.find((m) => m.user_id === createdTask!.assignee_id)
+          : undefined;
+      notify(
+        receiver
+          ? `Tarefa enviada para ${receiver.name}, quem tinha menos tarefas na equipe.`
+          : demo
+            ? "Alteração feita na demonstração."
+            : "Alteração salva.",
+      );
       return result;
     } catch (e) {
       const message =

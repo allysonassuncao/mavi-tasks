@@ -4440,6 +4440,51 @@ label .input-control .ui-input {
   flex-direction: column;
   gap: 18px;
 }
+/* "Adicionar detalhes": groups of fields in a two-column grid. */
+.details-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.details-section + .details-section {
+  padding-top: 16px;
+  border-top: 1px solid #edf1e8;
+}
+.details-section h4 {
+  margin: 0;
+  color: #839970;
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 15px;
+}
+/* A field left alone on its row takes the whole row. */
+.details-grid > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+@media (max-width: 600px) {
+  .details-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.repeat-hint {
+  line-height: 1.45;
+}
+.recurrence-confirm {
+  display: inline-flex;
+  gap: 6px;
+}
+.recurrence-confirm .btn {
+  min-height: 0;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
 .quick-task-details[hidden],
 .creation-attachments[hidden] {
   display: none;

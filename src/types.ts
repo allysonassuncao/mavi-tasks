@@ -92,6 +92,8 @@ export interface Task {
   participant_ids?: string[];
   /** Template fields filled in when the task was created (its own copy). */
   custom_fields?: TaskCustomField[];
+  /** The repetition this task started or was opened by (see TaskRecurrence). */
+  recurrence_id?: string | null;
   revision: number;
   version: number;
   archived: boolean;
@@ -137,6 +139,28 @@ export interface Attachment {
   path: string;
   size_bytes: number;
   uploaded_by: string;
+}
+/** How a task repeats: the database opens a copy on each date. */
+export type RecurrenceFrequency =
+  "daily" | "weekdays" | "weekly" | "biweekly" | "monthly";
+export const recurrenceFrequencies: Record<RecurrenceFrequency, string> = {
+  daily: "Todos os dias",
+  weekdays: "Todos os dias úteis",
+  weekly: "Semanal",
+  biweekly: "Quinzenal",
+  monthly: "Mensal",
+};
+/** A task's repetition, as its details show it (from task_extras). */
+export interface TaskRecurrence {
+  id: string;
+  frequency: RecurrenceFrequency;
+  /** The date the next copy opens. */
+  next_run: string;
+  active: boolean;
+  creator_id: string;
+  copies: number;
+  /** Why the last copy couldn't open (tried again on the next run). */
+  last_error: string | null;
 }
 export interface TaskEvent {
   id: string;

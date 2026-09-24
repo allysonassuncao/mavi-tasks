@@ -42,6 +42,7 @@ import {
   Users,
   Eye,
   Reply,
+  Repeat,
   X,
 } from "lucide-react";
 import { Modal, Avatar, Empty, Loading } from "./components";
@@ -51,9 +52,11 @@ import {
   type Comment,
   type Attachment,
   type TaskEvent,
+  type TaskRecurrence,
   type ProjectApprover,
   type Status,
   priorities,
+  recurrenceFrequencies,
   statuses,
   workingStatuses,
 } from "./types";
@@ -504,6 +507,10 @@ function eventLabel(e: TaskEvent) {
     return `Anexo excluído · ${String(e.detail.name ?? "")}`;
   if (e.action === "start" && from === "returned")
     return "Reenviada ao responsável";
+  if (e.action === "recurrence_started")
+    return `Repetição programada · ${recurrenceFrequencies[e.detail.frequency as keyof typeof recurrenceFrequencies] ?? ""}`;
+  if (e.action === "created" && e.detail.recurrence)
+    return "Tarefa aberta pela repetição";
   return (
     (
       {
@@ -515,8 +522,76 @@ function eventLabel(e: TaskEvent) {
         approve_internal: "Aprovada na validação",
         approve_client: "Aprovação do cliente registrada",
         edited: "Tarefa editada",
+        recurrence_stopped: "Repetição parada",
       } as Record<string, string>
     )[e.action] ?? e.action
+  );
+}
+/**
+ * A task's repetition in its details: how often, when the next copy opens
+ * and, for whoever set it up or a leader, a way to stop it (confirmed).
+ */
+function RecurrenceRow({
+  recurrence,
+  canStop,
+  busy,
+  onStop,
+}: {
+  recurrence: TaskRecurrence;
+  canStop: boolean;
+  busy: boolean;
+  onStop: () => Promise<unknown>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div className="property-row">
+      <span className="property-label">
+        <Repeat size={15} /> Repetição
+      </span>
+      <div className="property-value recurrence-value">
+        {recurrenceFrequencies[recurrence.frequency]}
+        {recurrence.active ? (
+          <small>próxima em {dateLabel(recurrence.next_run)}</small>
+        ) : (
+          <small>parada</small>
+        )}
+        {recurrence.active && recurrence.last_error && (
+          <small className="late" title={recurrence.last_error}>
+            não abriu: {recurrence.last_error}
+          </small>
+        )}
+        {recurrence.active &&
+          canStop &&
+          (confirming ? (
+            <span className="recurrence-confirm">
+              <Button
+                type="button"
+                className="btn secondary small"
+                disabled={busy}
+                onClick={() => setConfirming(false)}
+              >
+                Manter
+              </Button>
+              <Button
+                type="button"
+                className="btn danger small"
+                loading={busy}
+                onClick={() => onStop().finally(() => setConfirming(false))}
+              >
+                Parar repetição
+              </Button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="property-button"
+              onClick={() => setConfirming(true)}
+            >
+              Parar
+            </button>
+          ))}
+      </div>
+    </div>
   );
 }
 const blocked = (value: unknown): value is BlockedAction =>
@@ -621,6 +696,7 @@ export function TaskDetail({
       comments: Comment[];
       attachments: Attachment[];
       events: TaskEvent[];
+      recurrence?: TaskRecurrence | null;
     }>({ comments: [], attachments: [], events: [] }),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false),
@@ -719,6 +795,9 @@ export function TaskDetail({
         comments: demoStore.comments.filter((c) => c.task_id === task.id),
         attachments: [],
         events: demoStore.events.filter((e) => e.task_id === task.id),
+        recurrence: demoStore.recurrences.find(
+          (r) => r.id === task.recurrence_id,
+        ),
       });
       return;
     }
@@ -1063,6 +1142,18 @@ export function TaskDetail({
                   </span>
                 </div>
               </div>
+              {extras.recurrence && (
+                <RecurrenceRow
+                  recurrence={extras.recurrence}
+                  canStop={isLeader || extras.recurrence.creator_id === user}
+                  busy={busy}
+                  onStop={() =>
+                    mutate("stop_task_recurrence", { p_task: task.id }).then(
+                      () => setLocalRefresh((v) => v + 1),
+                    )
+                  }
+                />
+              )}
             </div>
             <div className="property-group">
               <div className="property-row">
