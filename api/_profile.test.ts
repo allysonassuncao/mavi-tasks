@@ -77,4 +77,35 @@ describe("handleProfile", () => {
       "image/jpeg",
     );
   });
+  it("logo da empresa: pede ao banco o caminho da pasta da empresa", async () => {
+    const company = "00000000-0000-4000-8000-000000000009";
+    const logoPath = `company-logos/${company}/00000000-0000-4000-8000-000000000003.webp`;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(logoPath)));
+    const res = await handleProfile(
+      { action: "company-logo-upload", company },
+      "Bearer user-token",
+      env,
+      fetchMock as unknown as typeof fetch,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://db.example.com/rest/v1/rpc/company_logo_upload_path",
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      p_company: company,
+      p_format: "webp",
+    });
+    expect(res.body.public_url).toBe(
+      `https://storage.googleapis.com/public-bucket/${logoPath}`,
+    );
+    const bad = await handleProfile(
+      { action: "company-logo-upload", company: "../outra" },
+      "Bearer user-token",
+      env,
+      fetchMock as unknown as typeof fetch,
+    );
+    expect(bad.status).toBe(400);
+  });
 });

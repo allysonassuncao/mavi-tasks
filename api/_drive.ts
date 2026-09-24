@@ -102,7 +102,7 @@ export function signGcsUrl(
 
 /** Calls a database function through PostgREST, as the user or anonymously. */
 export async function callRpc<T>(
-  env: DriveEnv,
+  env: Pick<DriveEnv, "supabaseUrl" | "supabaseKey">,
   fetchImpl: Fetch,
   authorization: string | null,
   name: string,

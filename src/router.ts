@@ -3,6 +3,7 @@ import { useCallback, useSyncExternalStore, type SetStateAction } from "react";
 export const pagePaths = {
   overview: "/visao-geral",
   tasks: "/tarefas",
+  agenda: "/agenda",
   search: "/tarefas/busca",
   clients: "/clientes",
   products: "/produtos",

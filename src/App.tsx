@@ -46,7 +46,6 @@ import {
   Plus,
   ArrowUpRight,
   ChevronRight,
-  ChevronsUpDown,
   ChevronsLeft,
   ChevronsRight,
   Menu,
@@ -70,7 +69,6 @@ import {
   Flag,
   X,
   ShieldCheck,
-  Building2,
   Package,
   Pencil,
   ChartNoAxesGantt,
@@ -153,6 +151,7 @@ import { TeamForm } from "./TeamForm";
 import { Drive } from "./DrivePage";
 import { CampaignsPage } from "./CampaignsPage";
 import { StoragePage } from "./StoragePage";
+import { CompanyLogoDialog, WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { ProfilePage } from "./ProfilePage";
 import { MemberForm } from "./MemberForm";
 import { TaskSearch } from "./TaskSearch";
@@ -181,6 +180,9 @@ const ScheduleNavigation = lazy(() =>
   import("./TaskSchedule").then((m) => ({ default: m.ScheduleNavigation })),
 );
 const Reports = lazy(() => import("./Reports"));
+const AgendaPage = lazy(() =>
+  import("./AgendaPage").then((m) => ({ default: m.AgendaPage })),
+);
 // Leaders only, and heavy (editor, charts): loaded when first opened.
 const DashboardsPage = lazy(() =>
   import("./DashboardsPage").then((m) => ({ default: m.DashboardsPage })),
@@ -189,6 +191,7 @@ const DashboardsPage = lazy(() =>
 const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "tasks", label: "Tarefas", icon: CheckCheck },
+  { id: "agenda", label: "Agenda", icon: CalendarDays },
   { id: "clients", label: "Clientes", icon: Users },
   { id: "products", label: "Produtos", icon: Package },
   { id: "projects", label: "Projetos", icon: FolderKanban },
@@ -214,6 +217,7 @@ const SELF_HANDLED_MUTATIONS = new Set(["add_comment"]);
 // (read-only, plus creating tasks) and only their own hours and reports.
 const MEMBER_PAGES: readonly Page[] = [
   "tasks",
+  "agenda",
   "search",
   "clients",
   "projects",
@@ -312,6 +316,7 @@ export default function App() {
       return !was;
     });
   }
+  const [editingLogo, setEditingLogo] = useState(false);
   const [sidebar, setSidebar] = useState(false),
     [viewValue, setView] = useUrlState<string>("visualizacao", "list");
   const view = ["list", "board", "calendar", "gantt"].includes(viewValue)
@@ -1177,6 +1182,9 @@ export default function App() {
           api.invalidateLookupsCache(company);
           const lookups = await api.companyLookups(company, true);
           setData((d) => ({ ...d, ...lookups }));
+        } else if (name === "set_company_logo") {
+          const companies = await api.companies(true);
+          setData((d) => ({ ...d, companies }));
         } else if (name === "log_time") {
           api.invalidateHoursCache(company);
           const hours = await api.companyHours(company, true);
@@ -1636,33 +1644,26 @@ export default function App() {
             </span>
           </a>
         </div>
-        <div className="workspace">
-          <span
-            className="workspace-icon"
-            title={currentCompany?.name ?? "Espaço de trabalho"}
-          >
-            <Building2 size={19} />
-          </span>
-          <div>
-            <small>Seu espaço de trabalho</small>
-            <Select
-              aria-label="Empresa ativa"
-              value={company}
-              onValueChange={(value) => {
-                setData({ ...emptySnapshot, companies: data.companies });
-                setCompany(value);
-                setOffset(0);
-              }}
-            >
-              {data.companies.map((c) => (
-                <SelectOption key={c.id} value={c.id}>
-                  {c.name}
-                </SelectOption>
-              ))}
-            </Select>
-          </div>
-          <ChevronsUpDown size={14} />
-        </div>
+        <WorkspaceSwitcher
+          companies={data.companies}
+          current={currentCompany}
+          isAdmin={isAdmin}
+          collapsed={collapsed}
+          onSelect={(value) => {
+            setData({ ...emptySnapshot, companies: data.companies });
+            setCompany(value);
+            setOffset(0);
+          }}
+          onChangeLogo={() => setEditingLogo(true)}
+        />
+        {editingLogo && currentCompany && (
+          <CompanyLogoDialog
+            company={currentCompany}
+            demo={demo}
+            mutate={mutate}
+            onClose={() => setEditingLogo(false)}
+          />
+        )}
         <div className="sidebar-scroll">
           <SidebarNav
             page={page ?? "overview"}
@@ -1876,6 +1877,8 @@ export default function App() {
                     overview:
                       "Uma visão clara do trabalho. Mais espaço para criar.",
                     tasks: "Organize prioridades e acompanhe cada entrega.",
+                    agenda:
+                      "Seu Google Agenda: veja, crie e edite eventos sem sair do workspace.",
                     search:
                       "Encontre qualquer tarefa pelo que foi escrito nela.",
                     clients:
@@ -1908,6 +1911,7 @@ export default function App() {
               page !== "profile" &&
               page !== "campaigns" &&
               page !== "storage" &&
+              page !== "agenda" &&
               page !== "dashboards" &&
               (![
                 "products",
@@ -2836,6 +2840,17 @@ export default function App() {
                   isLeader={isLeader}
                   notify={notify}
                 />
+              )}
+              {page === "agenda" && (
+                <Suspense fallback={<Loading compact />}>
+                  <AgendaPage
+                    key={company}
+                    data={catalogData}
+                    demo={demo}
+                    email={session?.user.email ?? member?.email ?? ""}
+                    notify={notify}
+                  />
+                </Suspense>
               )}
               {page === "dashboards" && (isLeader || openDashboard) && (
                 <Suspense fallback={<Loading compact />}>

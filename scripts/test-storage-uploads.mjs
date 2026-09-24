@@ -3,6 +3,7 @@
 // Arquivar cliente (migration 20260930110000_archive_client).
 // Uso por cliente (migration 20260930120000_storage_by_client).
 // Excluir e compartilhar (migration 20260930130000_storage_file_actions).
+// Logo da empresa (migration 20260930150000_company_logo).
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
@@ -383,6 +384,54 @@ await check(
       [f.id],
     );
     assert.ok(row.deleted_at);
+  },
+);
+
+await check(
+  "logo da empresa: só administradores, na pasta da empresa, registrado",
+  async () => {
+    const url = (company, id) =>
+      `https://storage.googleapis.com/b/company-logos/${company}/${id}.webp`;
+    await as(manager);
+    await assert.rejects(
+      rpc("company_logo_upload_path", [A, "webp"]),
+      /Sem permissão/,
+    );
+    await as(admin);
+    const path = await rpc("company_logo_upload_path", [A, "webp"]);
+    assert.match(path, new RegExp(`^company-logos/${A}/[0-9a-f-]{36}\\.webp$`));
+    await as(admin);
+    await assert.rejects(
+      rpc("set_company_logo", [A, url(B, uid(950)), 1000]),
+      /Imagem inválida/,
+    );
+    await as(outsider);
+    await assert.rejects(
+      rpc("set_company_logo", [A, url(A, uid(950)), 1000]),
+      /Sem permissão/,
+    );
+    await as(admin);
+    await rpc("set_company_logo", [A, url(A, uid(950)), 40000]);
+    await as(admin);
+    await rpc("set_company_logo", [A, url(A, uid(951)), 30000]);
+    const [company] = await sql("select logo_url from companies where id=$1", [
+      A,
+    ]);
+    assert.equal(company.logo_url, url(A, uid(951)));
+    const logos = await ledger("logo");
+    assert.equal(logos.length, 2);
+    assert.ok(logos[0].deleted_at, "o logo anterior deixa de contar");
+    assert.equal(Number(logos[1].size_bytes), 30000);
+    await as(admin);
+    await rpc("set_company_logo", [A, null, null]);
+    assert.ok((await ledger("logo")).every((l) => l.deleted_at));
+    // Members read the logo with the company.
+    await as(member);
+    assert.equal(
+      (await db.query("select logo_url from companies where id=$1", [A]))
+        .rows[0].logo_url,
+      null,
+    );
   },
 );
 

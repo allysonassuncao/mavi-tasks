@@ -64,8 +64,10 @@ const percent = (part: number, whole: number) =>
     : "—";
 /** Rows per page in the people and clients tables. */
 const PAGE_SIZE = 25;
-/** A client's uploads are never profile photos: that column is left out. */
-const clientKinds = storageKinds.filter((k) => k.kind !== "avatar");
+/** A client's uploads are never profile photos or logos: no such columns. */
+const clientKinds = storageKinds.filter(
+  (k) => k.kind !== "avatar" && k.kind !== "logo",
+);
 
 /** "33,62" and "GB": the headline figure, with two decimals. */
 function sizeParts(bytes: number): [string, string] {
@@ -413,7 +415,7 @@ export function StoragePage({
             <ClientLogo />
             <span>
               <strong>Sem cliente</strong>
-              <small>Drive geral, imagens soltas e fotos de perfil</small>
+              <small>Drive geral, imagens soltas, fotos e logo</small>
             </span>
           </>
         ),
@@ -671,6 +673,7 @@ const accessNote: Record<StorageKind, [string, string]> = {
   attachment: ["Pela tarefa", "Quem tem acesso à tarefa abre o anexo"],
   inline_image: ["Pelo texto", "Aparece na descrição ou no comentário"],
   avatar: ["Perfil", "Foto exibida para toda a equipe"],
+  logo: ["Empresa", "Imagem do espaço de trabalho, vista por toda a equipe"],
 };
 
 /** Public or private (Drive files), or how the file is reached. */
@@ -990,7 +993,9 @@ function ClientStorage({
           ? "Drive geral"
           : f.kind === "avatar"
             ? "Foto de perfil"
-            : "Imagem fora de tarefas";
+            : f.kind === "logo"
+              ? "Logo da empresa"
+              : "Imagem fora de tarefas";
   const shownError = error || actions.error;
   return (
     <Modal
@@ -1006,7 +1011,8 @@ function ClientStorage({
         {clientId === NO_CLIENT && (
           <p className="muted storage-note">
             Arquivos do Drive fora das pastas de clientes, imagens coladas em
-            textos que ainda não estão em uma tarefa e fotos de perfil.
+            textos que ainda não estão em uma tarefa, fotos de perfil e o logo
+            da empresa.
           </p>
         )}
         <UsageSummary

@@ -11,6 +11,8 @@ export interface Company {
   id: string;
   name: string;
   timezone: string;
+  /** Workspace image (public URL); initials are shown when absent. */
+  logo_url?: string | null;
 }
 export interface Member {
   company_id: string;

@@ -5,7 +5,8 @@ import { supabase } from "./supabase";
  * upload is a row of storage_uploads; storage_usage sums what still exists
  * per person and kind.
  */
-export type StorageKind = "drive" | "attachment" | "inline_image" | "avatar";
+export type StorageKind =
+  "drive" | "attachment" | "inline_image" | "avatar" | "logo";
 
 /** Fixed order and colors (validated for color-vision deficiency). */
 export const storageKinds: {
@@ -17,6 +18,7 @@ export const storageKinds: {
   { kind: "attachment", label: "Anexos de tarefas", color: "#eb6834" },
   { kind: "inline_image", label: "Imagens em textos", color: "#1baf7a" },
   { kind: "avatar", label: "Fotos de perfil", color: "#eda100" },
+  { kind: "logo", label: "Logo da empresa", color: "#e87ba4" },
 ];
 export const storageKindLabel = (kind: StorageKind) =>
   storageKinds.find((k) => k.kind === kind)?.label ?? kind;
@@ -55,6 +57,7 @@ export const emptyUsage = (): UsageTotals => ({
   attachment: 0,
   inline_image: 0,
   avatar: 0,
+  logo: 0,
   last_upload_at: null,
 });
 export type PersonUsage = UsageTotals & { user_id: string };

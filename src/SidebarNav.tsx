@@ -1,5 +1,6 @@
 import { useState, type MouseEvent, type ReactNode } from "react";
 import {
+  CalendarDays,
   ChartNoAxesCombined,
   CheckCheck,
   ChevronDown,
@@ -49,11 +50,13 @@ function readOpen(): Record<string, boolean> {
 const PRODUCTS_SHOWN = 8;
 
 /**
- * The main menu, grouped by what people do: work (tasks, projects, hours),
- * the client portfolio, files and analyses, and administration. Tasks and
- * settings open submenus with shortcuts (views of the task list, sections
- * of the settings page); a submenu opens by itself when one of its places
- * is current, and remembers being opened or closed by hand.
+ * The main menu, grouped by what people do: work (tasks, campaigns), files
+ * and analyses, and administration (clients, products, projects, hours,
+ * team and settings, storage). Collaborators, who have no administration,
+ * find their clients, projects and hours under work. Tasks and settings
+ * open submenus with shortcuts (views of the task list, sections of the
+ * settings page); a submenu opens by itself when one of its places is
+ * current, and remembers being opened or closed by hand.
  */
 export function SidebarNav({
   page,
@@ -91,6 +94,29 @@ export function SidebarNav({
     page: "tasks",
     query,
   });
+  // Where leaders manage the portfolio and hours; collaborators use them as
+  // part of their work.
+  const portfolio: Item[] = [
+    { key: "clients", label: "Clientes", icon: Users, to: { page: "clients" } },
+    {
+      key: "products",
+      label: "Produtos",
+      icon: Package,
+      to: { page: "products" },
+    },
+    {
+      key: "projects",
+      label: "Projetos",
+      icon: FolderKanban,
+      to: { page: "projects" },
+    },
+    {
+      key: "hours",
+      label: "Controle de horas",
+      icon: Clock3,
+      to: { page: "hours" },
+    },
+  ];
   const groups: Group[] = [
     {
       items: [
@@ -161,10 +187,10 @@ export function SidebarNav({
           ],
         },
         {
-          key: "projects",
-          label: "Projetos",
-          icon: FolderKanban,
-          to: { page: "projects" },
+          key: "agenda",
+          label: "Agenda",
+          icon: CalendarDays,
+          to: { page: "agenda" },
         },
         {
           key: "campaigns",
@@ -172,29 +198,7 @@ export function SidebarNav({
           icon: Megaphone,
           to: { page: "campaigns" },
         },
-        {
-          key: "hours",
-          label: "Controle de horas",
-          icon: Clock3,
-          to: { page: "hours" },
-        },
-      ],
-    },
-    {
-      label: "Carteira",
-      items: [
-        {
-          key: "clients",
-          label: "Clientes",
-          icon: Users,
-          to: { page: "clients" },
-        },
-        {
-          key: "products",
-          label: "Produtos",
-          icon: Package,
-          to: { page: "products" },
-        },
+        ...(isLeader ? [] : portfolio),
       ],
     },
     {
@@ -223,6 +227,7 @@ export function SidebarNav({
     {
       label: "Administração",
       items: [
+        ...(isLeader ? portfolio : []),
         {
           key: "settings",
           label: "Equipe e configurações",

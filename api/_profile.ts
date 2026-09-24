@@ -4,8 +4,9 @@ import { callRpc, signGcsUrl, type DriveEnv } from "./_drive.js";
 export const AVATAR_MAX_BYTES = 512 * 1024;
 
 /**
- * Profile photo uploads. The database picks the object path inside the
- * caller's own avatar folder; the signed URL only accepts WebP/JPEG up to
+ * Profile photo and company logo uploads. The database picks the object
+ * path inside the caller's own avatar folder (or, for administrators, the
+ * company's logo folder); the signed URL only accepts WebP/JPEG up to
  * AVATAR_MAX_BYTES (enforced by GCS through x-goog-content-length-range).
  * Avatars live in the public bucket so every teammate can load them directly.
  */
@@ -18,18 +19,30 @@ export async function handleProfile(
   const fail = (status: number, error: string) => ({ status, body: { error } });
   if (!env.credentials?.client_email || !env.credentials.private_key)
     return fail(500, "Credenciais do Google Cloud Storage não configuradas.");
-  const req = (body ?? {}) as { action?: string; format?: string };
-  if (req.action !== "avatar-upload") return fail(400, "Ação inválida.");
+  const req = (body ?? {}) as {
+    action?: string;
+    format?: string;
+    company?: unknown;
+  };
+  if (req.action !== "avatar-upload" && req.action !== "company-logo-upload")
+    return fail(400, "Ação inválida.");
+  const logo = req.action === "company-logo-upload";
+  if (
+    logo &&
+    (typeof req.company !== "string" || !/^[0-9a-f-]{36}$/i.test(req.company))
+  )
+    return fail(400, "Empresa inválida.");
   const format = req.format === "jpg" ? "jpg" : "webp";
   const contentType = format === "jpg" ? "image/jpeg" : "image/webp";
   if (!authorization?.startsWith("Bearer "))
     return fail(401, "Autenticação necessária.");
+  // Company logos (administrators) go to the company's own folder.
   const target = await callRpc<string>(
     env,
     fetchImpl,
     authorization,
-    "avatar_upload_path",
-    { p_format: format },
+    logo ? "company_logo_upload_path" : "avatar_upload_path",
+    logo ? { p_company: req.company, p_format: format } : { p_format: format },
   );
   if (!target.ok) return fail(target.status, target.error);
   const range = `0,${AVATAR_MAX_BYTES}`;

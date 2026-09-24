@@ -32,13 +32,18 @@ const render = (isLeader: boolean, page: Page = "tasks", query = "") =>
 describe("SidebarNav", () => {
   it("agrupa o menu e abre o submenu da página atual", () => {
     const html = render(true);
-    for (const label of [
-      "TRABALHO",
-      "CARTEIRA",
-      "ARQUIVOS E ANÁLISES",
-      "ADMINISTRAÇÃO",
-    ])
+    for (const label of ["TRABALHO", "ARQUIVOS E ANÁLISES", "ADMINISTRAÇÃO"])
       expect(html).toContain(label);
+    expect(html).not.toContain("CARTEIRA");
+    // Leaders manage clients, products, projects and hours in Administração.
+    const admin = html.slice(html.indexOf("ADMINISTRAÇÃO"));
+    for (const item of [
+      "Clientes",
+      "Produtos",
+      "Projetos",
+      "Controle de horas",
+    ])
+      expect(admin).toContain(`>${item}<`);
     expect(html).toContain("Para você");
     expect(html).toContain(
       "POR PRODUTO".toLowerCase() === "" ? "" : "Por produto",
@@ -55,6 +60,7 @@ describe("SidebarNav", () => {
     expect(html).not.toContain("ADMINISTRAÇÃO");
     expect(html).not.toContain(">Produtos<");
     expect(html).toContain("Clientes");
+    expect(html).toContain("Controle de horas");
   });
   it("atalhos da configuração abrem na página de configurações", () => {
     const html = render(true, "settings");

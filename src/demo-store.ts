@@ -223,6 +223,16 @@ export class DemoStore {
         Object.assign(entity, changes);
         break;
       }
+      case "set_company_logo": {
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        if (role !== "admin") throw Error("Sem permissão");
+        this.data.companies = this.data.companies.map((c) =>
+          c.id === a.p_company ? { ...c, logo_url: a.p_url ?? null } : c,
+        );
+        break;
+      }
       case "set_client_archived": {
         const role = this.data.members.find(
           (m) => m.user_id === demoUser,

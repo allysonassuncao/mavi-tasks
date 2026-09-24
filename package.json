@@ -19,6 +19,7 @@
     "test:db:inbox": "node scripts/test-inbox-broadcast.mjs",
     "test:db:storage": "node scripts/test-storage-uploads.mjs",
     "test:db:dashboards": "node scripts/test-dashboards.mjs",
+    "test:db:agenda": "node scripts/test-google-calendar.mjs",
     "benchmark:rls": "node scripts/benchmark-rls.mjs",
     "benchmark:dashboards": "node scripts/benchmark-dashboards.mjs",
     "format": "prettier --write src scripts supabase/functions *.json *.ts *.html *.md",

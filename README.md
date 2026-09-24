@@ -91,12 +91,25 @@ Antes do primeiro deploy, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLIS
 
 ### Variáveis de servidor
 
-| Variável | Uso |
-| --- | --- |
-| `GCS_CREDENTIALS` | JSON da conta de serviço do Google Cloud Storage (anexos, Drive, fotos) |
-| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Par de chaves das notificações push (`npx web-push generate-vapid-keys`) |
-| `VAPID_SUBJECT` | Contato do remetente das notificações, ex.: `mailto:suporte@empresa.com.br` |
-| `PUSH_SECRET` | Segredo aleatório (32+ caracteres) que o banco usa para chamar `/api/push` |
+| Variável                                   | Uso                                                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GCS_CREDENTIALS`                          | JSON da conta de serviço do Google Cloud Storage (anexos, Drive, fotos)                                                                    |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`    | Par de chaves das notificações push (`npx web-push generate-vapid-keys`)                                                                   |
+| `VAPID_SUBJECT`                            | Contato do remetente das notificações, ex.: `mailto:suporte@empresa.com.br`                                                                |
+| `PUSH_SECRET`                              | Segredo aleatório (32+ caracteres) que o banco usa para chamar `/api/push`                                                                 |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Cliente OAuth do app no Google Cloud (Agenda)                                                                                              |
+| `GOOGLE_TOKEN_KEY`                         | Chave de 32 bytes em base64 que criptografa os tokens do Google no banco (`openssl rand -base64 32`). Trocar a chave desconecta todo mundo |
+| `GOOGLE_REDIRECT_URI`                      | Opcional. Padrão: `<APP_ORIGIN>/api/google-callback`; em desenvolvimento, `http://localhost:5173/api/google-callback`                      |
+
+### Agenda (Google Agenda)
+
+Cada pessoa conecta o próprio Google Agenda em **Agenda**; os eventos são lidos e gravados ao vivo no Google por `/api/google` (nada da agenda é copiado para o banco). A migração `20260930160000_google_calendar` guarda só a conexão, com os tokens criptografados pelo servidor (AES-256-GCM com `GOOGLE_TOKEN_KEY`).
+
+No Google Cloud, no cliente OAuth do app (tipo "Aplicativo da Web"):
+
+1. Em **URIs de redirecionamento autorizados**, cadastrar `https://workspace.maso.app.br/api/google-callback` (e `http://localhost:5173/api/google-callback` para desenvolvimento).
+2. Na tela de consentimento, o escopo `https://www.googleapis.com/auth/calendar`. Enquanto o app estiver em modo de teste, só os usuários de teste cadastrados conseguem conectar.
+3. Configurar `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` e `GOOGLE_TOKEN_KEY` na Vercel e fazer redeploy.
 
 ### Notificações push (com o app fechado)
 

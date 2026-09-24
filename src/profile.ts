@@ -22,7 +22,22 @@ function encode(canvas: HTMLCanvasElement, type: string, quality: number) {
  * as WebP (JPEG where the browser cannot encode WebP, e.g. Safari). A phone
  * photo of several MB becomes ~10-30 KB, so lists with many avatars stay fast.
  */
-export async function optimizeAvatar(file: File): Promise<OptimizedAvatar> {
+export function optimizeAvatar(file: File) {
+  return optimizeImage(file, "cover");
+}
+
+/**
+ * A company logo: the whole image fits the square (logos are rarely
+ * square), on a transparent background (white when only JPEG is possible).
+ */
+export function optimizeLogo(file: File) {
+  return optimizeImage(file, "contain");
+}
+
+async function optimizeImage(
+  file: File,
+  fit: "cover" | "contain",
+): Promise<OptimizedAvatar> {
   if (!file.type.startsWith("image/"))
     throw Error("Escolha um arquivo de imagem (JPG, PNG ou WebP).");
   if (file.size > MAX_INPUT_BYTES)
@@ -35,29 +50,46 @@ export async function optimizeAvatar(file: File): Promise<OptimizedAvatar> {
       "Não foi possível ler esta imagem. Use JPG, PNG ou WebP (fotos HEIC do iPhone precisam ser convertidas).",
     );
   }
-  const side = Math.min(bitmap.width, bitmap.height);
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = AVATAR_SIZE;
   const ctx = canvas.getContext("2d")!;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(
-    bitmap,
-    (bitmap.width - side) / 2,
-    (bitmap.height - side) / 2,
-    side,
-    side,
-    0,
-    0,
-    AVATAR_SIZE,
-    AVATAR_SIZE,
-  );
-  bitmap.close();
+  const draw = () => {
+    if (fit === "cover") {
+      const side = Math.min(bitmap.width, bitmap.height);
+      ctx.drawImage(
+        bitmap,
+        (bitmap.width - side) / 2,
+        (bitmap.height - side) / 2,
+        side,
+        side,
+        0,
+        0,
+        AVATAR_SIZE,
+        AVATAR_SIZE,
+      );
+    } else {
+      const scale = AVATAR_SIZE / Math.max(bitmap.width, bitmap.height);
+      const w = bitmap.width * scale,
+        h = bitmap.height * scale;
+      ctx.drawImage(bitmap, (AVATAR_SIZE - w) / 2, (AVATAR_SIZE - h) / 2, w, h);
+    }
+  };
+  draw();
   let blob = await encode(canvas, "image/webp", 0.82);
   let format: OptimizedAvatar["format"] = "webp";
   if (!blob || blob.type !== "image/webp") {
+    // JPEG has no transparency: a logo gets a white background.
+    if (fit === "contain") {
+      ctx.globalCompositeOperation = "destination-over";
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, AVATAR_SIZE, AVATAR_SIZE);
+      ctx.globalCompositeOperation = "source-over";
+    }
     blob = await encode(canvas, "image/jpeg", 0.85);
     format = "jpg";
   }
+  bitmap.close();
   if (!blob) throw Error("Não foi possível otimizar esta imagem.");
   return {
     blob,
@@ -68,7 +100,19 @@ export async function optimizeAvatar(file: File): Promise<OptimizedAvatar> {
 }
 
 /** Uploads an optimized avatar; returns its public URL for set_my_avatar. */
-export async function uploadAvatar(avatar: OptimizedAvatar) {
+export function uploadAvatar(avatar: OptimizedAvatar) {
+  return uploadImage(avatar, { action: "avatar-upload" });
+}
+
+/** Uploads a company logo (administrators); returns its URL for set_company_logo. */
+export function uploadCompanyLogo(company: string, logo: OptimizedAvatar) {
+  return uploadImage(logo, { action: "company-logo-upload", company });
+}
+
+async function uploadImage(
+  avatar: OptimizedAvatar,
+  request: Record<string, string>,
+) {
   const token = (await supabase?.auth.getSession())?.data.session?.access_token;
   const res = await fetch("/api/profile", {
     method: "POST",
@@ -76,7 +120,7 @@ export async function uploadAvatar(avatar: OptimizedAvatar) {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ action: "avatar-upload", format: avatar.format }),
+    body: JSON.stringify({ ...request, format: avatar.format }),
   });
   const signed = await res.json().catch(() => ({}));
   if (!res.ok) throw Error(signed.error ?? "Não foi possível enviar a foto.");
@@ -122,7 +166,8 @@ export function passwordResetError(
  * address has an account, so the screen must not claim either.
  */
 export async function requestPasswordReset(email: string) {
-  if (!supabase) throw Error("A conexão com Supabase ainda não foi configurada.");
+  if (!supabase)
+    throw Error("A conexão com Supabase ainda não foi configurada.");
   const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
     // Same landing as the admin-sent link: the app opens "Defina sua senha".
     redirectTo: window.location.origin + "/?reset=1",
