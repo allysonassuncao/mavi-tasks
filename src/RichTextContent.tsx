@@ -9,6 +9,22 @@ function renderNode(node: RichNode, key: number): ReactNode {
       if (mark.type === "bold") text = <strong>{text}</strong>;
       if (mark.type === "italic") text = <em>{text}</em>;
       if (mark.type === "strike") text = <s>{text}</s>;
+      // Colors were reduced to "#rrggbb" by sanitizeDescription.
+      if (mark.type === "textStyle" && mark.attrs?.color)
+        text = <span style={{ color: mark.attrs.color }}>{text}</span>;
+      if (mark.type === "highlight")
+        text = (
+          <mark
+            className="rt-highlight"
+            style={
+              mark.attrs?.color
+                ? { backgroundColor: mark.attrs.color }
+                : undefined
+            }
+          >
+            {text}
+          </mark>
+        );
     }
     return <Fragment key={key}>{text}</Fragment>;
   }

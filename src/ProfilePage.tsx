@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Camera, Check, KeyRound, Trash2, UserRound } from "lucide-react";
+import {
+  Camera,
+  Check,
+  KeyRound,
+  Mail,
+  ShieldCheck,
+  Trash2,
+  UserRound,
+  UsersRound,
+} from "lucide-react";
 import { Avatar } from "./components";
 import { Button, Input } from "./ui";
 import type { Snapshot } from "./types";
@@ -138,15 +147,8 @@ export function ProfilePage({
           {error}
         </p>
       )}
-      <section className="panel profile-card">
-        <div className="panel-heading">
-          <div>
-            <h2>
-              <Camera size={18} /> Foto de perfil
-            </h2>
-            <p>Aparece para a sua equipe em tarefas, comentários e listas.</p>
-          </div>
-        </div>
+      {/* Who you are, across the page: photo, name, access and teams. */}
+      <section className="panel profile-hero">
         <div className="profile-photo">
           {photo ? (
             <span className="avatar xlarge">
@@ -159,6 +161,35 @@ export function ProfilePage({
               size="xlarge"
             />
           )}
+          <div className="profile-identity">
+            <h2>{me?.name ?? "Usuário"}</h2>
+            <ul className="profile-facts">
+              <li>
+                <Mail size={14} aria-hidden="true" /> {email || "—"}
+              </li>
+              {me && (
+                <li>
+                  <ShieldCheck size={14} aria-hidden="true" />{" "}
+                  {roleLabel[me.role]}
+                </li>
+              )}
+              <li>
+                <UsersRound size={14} aria-hidden="true" />
+                {teams.length ? (
+                  <span className="profile-teams">
+                    {teams.map((t) => (
+                      <span key={t.name} className="profile-team">
+                        {t.name}
+                        {t.supervisor && <em> · supervisor</em>}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  "Sem equipe"
+                )}
+              </li>
+            </ul>
+          </div>
           <div className="profile-photo-actions">
             {photo ? (
               <>
@@ -223,117 +254,106 @@ export function ProfilePage({
         </div>
       </section>
 
-      <section className="panel profile-card">
-        <div className="panel-heading">
-          <div>
-            <h2>
-              <UserRound size={18} /> Informações básicas
-            </h2>
-            <p>Seu nome aparece para todas as pessoas do espaço.</p>
-          </div>
-        </div>
-        <form className="entity-form profile-form" onSubmit={saveName}>
-          <label>
-            Nome
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              minLength={2}
-              maxLength={120}
-              autoComplete="name"
-            />
-          </label>
-          <div className="form-columns">
-            <label>
-              E-mail
-              <Input type="email" value={email} readOnly disabled />
-            </label>
-            <label>
-              Perfil de acesso
-              <Input value={me ? roleLabel[me.role] : ""} readOnly disabled />
-            </label>
-          </div>
-          <small>
-            Para trocar o e-mail ou o perfil de acesso, fale com um
-            administrador.
-          </small>
-          {teams.length > 0 && (
-            <div className="profile-teams">
-              <span>Equipes</span>
-              <div>
-                {teams.map((t) => (
-                  <span key={t.name} className="profile-team">
-                    {t.name}
-                    {t.supervisor && <em> · supervisor</em>}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="form-footer">
-            <Button
-              className="btn primary"
-              loading={savingName}
-              disabled={name.trim() === me?.name || name.trim().length < 2}
-            >
-              <Check size={16} /> Salvar nome
-            </Button>
-          </div>
-        </form>
-      </section>
-
-      {!demo && (
+      <div className="profile-grid">
         <section className="panel profile-card">
           <div className="panel-heading">
             <div>
               <h2>
-                <KeyRound size={18} /> Senha
+                <UserRound size={18} /> Informações básicas
               </h2>
-              <p>Use pelo menos 8 caracteres.</p>
+              <p>Seu nome aparece para todas as pessoas do espaço.</p>
             </div>
           </div>
-          <form className="entity-form profile-form" onSubmit={savePassword}>
-            <input
-              type="text"
-              name="username"
-              autoComplete="username"
-              value={email}
-              readOnly
-              hidden
-            />
+          <form className="entity-form profile-form" onSubmit={saveName}>
+            <label>
+              Nome
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                minLength={2}
+                maxLength={120}
+                autoComplete="name"
+              />
+            </label>
             <div className="form-columns">
               <label>
-                Nova senha
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                />
+                E-mail
+                <Input type="email" value={email} readOnly disabled />
               </label>
               <label>
-                Confirmar nova senha
-                <Input
-                  type="password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                />
+                Perfil de acesso
+                <Input value={me ? roleLabel[me.role] : ""} readOnly disabled />
               </label>
             </div>
+            <small>
+              Para trocar o e-mail ou o perfil de acesso, fale com um
+              administrador.
+            </small>
             <div className="form-footer">
-              <Button className="btn primary" loading={savingPassword}>
-                <Check size={16} /> Alterar senha
+              <Button
+                className="btn primary"
+                loading={savingName}
+                disabled={name.trim() === me?.name || name.trim().length < 2}
+              >
+                <Check size={16} /> Salvar nome
               </Button>
             </div>
           </form>
         </section>
-      )}
+
+        {!demo && (
+          <section className="panel profile-card">
+            <div className="panel-heading">
+              <div>
+                <h2>
+                  <KeyRound size={18} /> Senha
+                </h2>
+                <p>Use pelo menos 8 caracteres.</p>
+              </div>
+            </div>
+            <form className="entity-form profile-form" onSubmit={savePassword}>
+              <input
+                type="text"
+                name="username"
+                autoComplete="username"
+                value={email}
+                readOnly
+                hidden
+              />
+              <div className="form-columns">
+                <label>
+                  Nova senha
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </label>
+                <label>
+                  Confirmar nova senha
+                  <Input
+                    type="password"
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </label>
+              </div>
+              <div className="form-footer">
+                <Button className="btn primary" loading={savingPassword}>
+                  <Check size={16} /> Alterar senha
+                </Button>
+              </div>
+            </form>
+          </section>
+        )}
+      </div>
     </div>
   );
 }

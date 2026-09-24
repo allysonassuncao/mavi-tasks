@@ -94,3 +94,68 @@ it("preserva apenas IDs de imagens privadas, sem aceitar URLs externas ou códig
   expect(value).not.toContain("javascript:");
   expect(parseDescription(value).content).toHaveLength(1);
 });
+
+describe("cor do texto e destaque", () => {
+  const doc = (marks: unknown[]) => ({
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "Olá", marks }] },
+    ],
+  });
+  const marksOf = (value: unknown) =>
+    parseDescription(serializeDescription(value)).content![0].content![0].marks;
+  it("guarda cor do texto e destaque com cor", () => {
+    expect(
+      marksOf(
+        doc([
+          { type: "textStyle", attrs: { color: "#C0392B" } },
+          { type: "highlight", attrs: { color: "#fef08a" } },
+        ]),
+      ),
+    ).toEqual([
+      { type: "textStyle", attrs: { color: "#c0392b" } },
+      { type: "highlight", attrs: { color: "#fef08a" } },
+    ]);
+  });
+  it("converte rgb() e hex curto colados de outros lugares", () => {
+    expect(
+      marksOf(
+        doc([{ type: "textStyle", attrs: { color: "rgb(29, 78, 216)" } }]),
+      ),
+    ).toEqual([{ type: "textStyle", attrs: { color: "#1d4ed8" } }]);
+    expect(
+      marksOf(doc([{ type: "highlight", attrs: { color: "#fa0" } }])),
+    ).toEqual([{ type: "highlight", attrs: { color: "#ffaa00" } }]);
+  });
+  it("descarta cores que não são cores", () => {
+    for (const color of [
+      "red; background:url(https://x.example/a.png)",
+      "expression(alert(1))",
+      "#12345",
+      "rgb(300, 0, 0)",
+    ])
+      expect(marksOf(doc([{ type: "textStyle", attrs: { color } }]))).toEqual(
+        [],
+      );
+    // A highlight without a valid color falls back to the default yellow.
+    expect(
+      marksOf(doc([{ type: "highlight", attrs: { color: "javascript:x" } }])),
+    ).toEqual([{ type: "highlight" }]);
+  });
+  it("mostra as cores no texto salvo", () => {
+    const html = renderToStaticMarkup(
+      <RichTextContent
+        value={serializeDescription(
+          doc([
+            { type: "textStyle", attrs: { color: "#1d4ed8" } },
+            { type: "highlight", attrs: { color: "#bbf7d0" } },
+          ]),
+        )}
+      />,
+    );
+    expect(html).toContain('style="color:#1d4ed8"');
+    expect(html).toContain(
+      '<mark class="rt-highlight" style="background-color:#bbf7d0">',
+    );
+  });
+});

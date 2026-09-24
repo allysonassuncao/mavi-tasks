@@ -17,6 +17,7 @@ import {
   type Team,
   type TimeEntry,
   type AppNotification,
+  type TaskTemplate,
 } from "./types";
 
 export interface Filters {
@@ -63,6 +64,7 @@ export interface CompanyLookups {
     supervisor?: boolean;
   }[];
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
+  taskTemplates: TaskTemplate[];
 }
 
 /**
@@ -163,8 +165,8 @@ export async function companyLookups(
   forceRefresh = false,
 ): Promise<CompanyLookups> {
   if (!supabase) throw Error("Supabase não configurado");
-  // v3: team supervisors; bumped whenever the cached shape changes.
-  const cacheKey = `lookups:v3:${company}`;
+  // v4: task templates; bumped whenever the cached shape changes.
+  const cacheKey = `lookups:v4:${company}`;
 
   return cache.fetchWithCache(
     cacheKey,
@@ -178,6 +180,7 @@ export async function companyLookups(
         teams: [],
         teamMembers: [],
         clientTeams: [],
+        taskTemplates: [],
       };
 
       // Order for stable paging: by name where there is one (the order the
@@ -191,11 +194,12 @@ export async function companyLookups(
         ["teams", "teams", ["name", "id"]],
         ["teamMembers", "team_members", ["team_id", "user_id"]],
         ["clientTeams", "client_teams", ["client_id", "team_id"]],
+        ["taskTemplates", "task_templates", ["name", "id"]],
       ] as const;
 
       await Promise.all(
         tables.map(async ([key, table, keyColumns]) => {
-          (result[key] as unknown) = await fetchAllRows((count) => {
+          const rows = fetchAllRows((count) => {
             let query = supabase!
               .from(table)
               .select("*", count ? { count } : undefined)
@@ -203,6 +207,10 @@ export async function companyLookups(
             for (const column of keyColumns) query = query.order(column);
             return query;
           });
+          // Templates are optional: until their migration runs (or if they
+          // can't be read) the app works without them.
+          (result[key] as unknown) =
+            key === "taskTemplates" ? await rows.catch(() => []) : await rows;
         }),
       );
 
@@ -571,6 +579,7 @@ export async function snapshot(
     teams: lookups.teams,
     teamMembers: lookups.teamMembers,
     clientTeams: lookups.clientTeams,
+    taskTemplates: lookups.taskTemplates ?? [],
     tasks: taskQueryResult.tasks,
     hours,
   };
@@ -584,7 +593,7 @@ export async function snapshot(
  */
 export function getCachedSnapshot(company: string): Snapshot | null {
   const companyList = cache.get<Company[]>("companies");
-  const lookups = cache.get<CompanyLookups>(`lookups:v3:${company}`);
+  const lookups = cache.get<CompanyLookups>(`lookups:v4:${company}`);
   if (!lookups) return null;
 
   const hours = cache.get<TimeEntry[]>(`hours:${company}`) ?? [];
@@ -599,6 +608,7 @@ export function getCachedSnapshot(company: string): Snapshot | null {
     teams: lookups.teams,
     teamMembers: lookups.teamMembers,
     clientTeams: lookups.clientTeams,
+    taskTemplates: lookups.taskTemplates ?? [],
     tasks: [],
     hours,
   };
@@ -962,7 +972,7 @@ export function patchCachedLookups(
   updater: (current: CompanyLookups) => CompanyLookups,
 ): void {
   cache.update<CompanyLookups>(
-    `lookups:v3:${company}`,
+    `lookups:v4:${company}`,
     (current) => (current ? updater(current) : null),
     CACHE_TTL.LOOKUPS,
   );
@@ -985,7 +995,7 @@ export function patchCachedHours(company: string, entry: TimeEntry): void {
 }
 
 export function invalidateCompanyCache(company: string): void {
-  cache.invalidate(`lookups:v3:${company}`);
+  cache.invalidate(`lookups:v4:${company}`);
   cache.invalidate(`tasks:${company}:`);
   cache.invalidate(`task_scopes:${company}:`);
   cache.invalidate(`hours:${company}`);
@@ -994,7 +1004,7 @@ export function invalidateCompanyCache(company: string): void {
 }
 
 export function invalidateLookupsCache(company: string): void {
-  cache.invalidate(`lookups:v3:${company}`);
+  cache.invalidate(`lookups:v4:${company}`);
 }
 
 export function invalidateTasksCache(company: string): void {

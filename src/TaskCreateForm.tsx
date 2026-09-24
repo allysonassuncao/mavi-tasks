@@ -1,6 +1,7 @@
 import { Input, Select, SelectOption, Checkbox, Button, Skeleton } from "./ui";
 import {
   lazy,
+  useMemo,
   Suspense,
   useEffect,
   useRef,
@@ -12,6 +13,8 @@ import { Check, ChevronDown, Paperclip, X } from "lucide-react";
 import { Modal, Loading } from "./components";
 import { ContractPicker } from "./ContractPicker";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
+import { CustomFieldsForm } from "./CustomFieldsForm";
+import { customFieldsError, templateFieldsFor } from "./templateFields";
 import { type Snapshot, priorities } from "./types";
 import { canCreateTaskIn, dateKey } from "./domain";
 import {
@@ -114,6 +117,13 @@ export function TaskCreateForm({
   const locked = saving || !!uploads.current.taskId;
   const working = busy || saving || editorUploading;
   const activeMembers = data.members.filter((m) => m.active);
+  // Template fields for this product and assignee: they change as either
+  // does (values typed for fields still shown are kept).
+  const customFields = useMemo(
+    () => (contract ? templateFieldsFor(data, contract, assignee) : []),
+    [data, contract, assignee],
+  );
+  const [customValues, setCustomValues] = useState<Record<string, unknown>>({});
   const me = activeMembers.find((m) => m.user_id === user);
 
   // Modal opens the dialog in its own (later) effect, which steals focus.
@@ -155,6 +165,7 @@ export function TaskCreateForm({
   function resetForNext() {
     uploads.current = { pending: [] };
     setTitle("");
+    setCustomValues({});
     setFormKey((v) => v + 1);
     setCreated((v) => v + 1);
     redrawUploads();
@@ -166,6 +177,11 @@ export function TaskCreateForm({
     setError("");
     const f = new FormData(e.currentTarget),
       s = (key: string) => String(f.get(key) ?? "");
+    const fieldsProblem = customFieldsError(customFields, customValues);
+    if (fieldsProblem) {
+      setError(fieldsProblem);
+      return;
+    }
     const args = {
       p_company: company,
       p_contract: contract,
@@ -180,6 +196,19 @@ export function TaskCreateForm({
       p_estimated: Number(s("estimated")) * 60,
       p_client_approval: f.has("client_approval"),
       p_parent: s("parent") || null,
+      // Only the fields shown now; the database checks them against the
+      // templates that apply and keeps its own copy in the task. Sent only
+      // when there are fields, so tasks without templates never depend on it.
+      ...(customFields.length
+        ? {
+            p_custom: Object.fromEntries(
+              customFields.map((cf) => {
+                const key = `${cf.template_id}.${cf.id}`;
+                return [key, customValues[key] ?? null];
+              }),
+            ),
+          }
+        : {}),
     };
     submitting.current = true;
     setSaving(true);
@@ -311,6 +340,11 @@ export function TaskCreateForm({
               </div>
             </div>
           </div>
+          <CustomFieldsForm
+            fields={customFields}
+            values={customValues}
+            onChange={setCustomValues}
+          />
           <Suspense fallback={<Loading compact />}>
             <RichTextEditor
               key={formKey}

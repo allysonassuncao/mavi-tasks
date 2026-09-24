@@ -4,10 +4,12 @@ export type RichNode = {
   type: string;
   text?: string;
   content?: RichNode[];
-  marks?: { type: string }[];
+  marks?: RichMark[];
   /** inlineImage: imageId and alt; mention: id (the person) and label. */
   attrs?: { imageId?: string; alt?: string; id?: string; label?: string };
 };
+/** Text formatting; colored ones carry `attrs.color` as "#rrggbb". */
+export type RichMark = { type: string; attrs?: { color?: string } };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const blocks = new Set([
   "doc",
@@ -18,6 +20,44 @@ const blocks = new Set([
   "hardBreak",
 ]);
 const marks = new Set(["bold", "italic", "strike"]);
+/** Marks whose color is kept: text color (textStyle) and highlight. */
+const colorMarks = new Set(["textStyle", "highlight"]);
+/**
+ * A color as stored: "#rrggbb", or null. Pasted text may bring rgb() or
+ * short hex; anything else (names, url(), expressions) is dropped, so a
+ * color can never carry more than a color into the page's style.
+ */
+export function normalizeColor(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(v)) return v;
+  if (/^#[0-9a-f]{3}$/.test(v))
+    return "#" + [...v.slice(1)].map((c) => c + c).join("");
+  const rgb = v.match(
+    /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*[\d.]+\s*)?\)$/,
+  );
+  if (rgb && rgb.slice(1, 4).every((n) => Number(n) <= 255))
+    return (
+      "#" +
+      rgb
+        .slice(1, 4)
+        .map((n) => Number(n).toString(16).padStart(2, "0"))
+        .join("")
+    );
+  return null;
+}
+function cleanMark(m: RichMark | null | undefined): RichMark | null {
+  if (!m || typeof m !== "object") return null;
+  if (marks.has(m.type)) return { type: m.type };
+  if (colorMarks.has(m.type)) {
+    const color = normalizeColor(m.attrs?.color);
+    // A highlight without a color is the default yellow; a text style
+    // without one means nothing and is left out.
+    if (color) return { type: m.type, attrs: { color } };
+    return m.type === "highlight" ? { type: "highlight" } : null;
+  }
+  return null;
+}
 export function sanitizeDescription(value: unknown): RichNode {
   let remaining = 10000;
   function clean(value: unknown, depth: number): RichNode | null {
@@ -59,9 +99,7 @@ export function sanitizeDescription(value: unknown): RichNode {
         type: "text",
         text: node.text,
         marks: Array.isArray(node.marks)
-          ? node.marks
-              .filter((m) => m && marks.has(m.type))
-              .map((m) => ({ type: m.type }))
+          ? node.marks.map(cleanMark).filter((m): m is RichMark => !!m)
           : [],
       };
     }

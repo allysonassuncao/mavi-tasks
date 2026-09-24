@@ -10,8 +10,13 @@ import {
   type NodeViewProps,
 } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { Color, TextStyle } from "@tiptap/extension-text-style";
+import Highlight from "@tiptap/extension-highlight";
+import { ColorMenu, HIGHLIGHT_COLORS, TEXT_COLORS } from "./ColorMenu";
 import {
+  Baseline,
   Bold,
+  Highlighter,
   Italic,
   List,
   ListOrdered,
@@ -91,6 +96,10 @@ export default function RichTextEditor({
         link: false,
         underline: false,
       }),
+      // Text color and highlight (any color): kept as "#rrggbb" when saved.
+      TextStyle,
+      Color,
+      Highlight.configure({ multicolor: true }),
     ],
     content: parseDescription(defaultValue),
     editorProps: {
@@ -158,6 +167,11 @@ export default function RichTextEditor({
       italic: editor?.isActive("italic"),
       bullet: editor?.isActive("bulletList"),
       ordered: editor?.isActive("orderedList"),
+      color: (editor?.getAttributes("textStyle").color as string) ?? null,
+      highlight: editor?.isActive("highlight")
+        ? ((editor.getAttributes("highlight").color as string) ??
+          HIGHLIGHT_COLORS[0].color)
+        : null,
     }),
   });
   if (!editor) return <Loading compact />;
@@ -206,7 +220,44 @@ export default function RichTextEditor({
           role="group"
           aria-label={`Formatação: ${label}`}
         >
-          {actions.map((a) => (
+          {actions.slice(0, 2).map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              disabled={disabled || uploading}
+              className="icon-btn"
+              aria-label={a.label}
+              title={a.label}
+              aria-pressed={a.active}
+              onClick={a.run}
+            >
+              <a.icon size={17} />
+            </button>
+          ))}
+          <ColorMenu
+            label="Cor do texto"
+            icon={Baseline}
+            swatches={TEXT_COLORS}
+            current={state?.color}
+            disabled={disabled || uploading}
+            onPick={(color) => editor.chain().focus().setColor(color).run()}
+            onClear={() => editor.chain().focus().unsetColor().run()}
+            clearLabel="Cor padrão"
+          />
+          <ColorMenu
+            label="Destacar texto"
+            icon={Highlighter}
+            swatches={HIGHLIGHT_COLORS}
+            current={state?.highlight}
+            disabled={disabled || uploading}
+            onPick={(color) =>
+              editor.chain().focus().setHighlight({ color }).run()
+            }
+            onClear={() => editor.chain().focus().unsetHighlight().run()}
+            clearLabel="Sem destaque"
+          />
+          <span className="editor-toolbar-sep" aria-hidden="true" />
+          {actions.slice(2).map((a) => (
             <button
               key={a.label}
               type="button"

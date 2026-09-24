@@ -13,6 +13,7 @@
     "test:db:push": "node scripts/test-web-push.mjs",
     "test:db:status": "node scripts/test-correction-status.mjs",
     "test:db:drive": "node scripts/test-drive-sharing.mjs",
+    "test:db:templates": "node scripts/test-task-templates.mjs",
     "benchmark:rls": "node scripts/benchmark-rls.mjs",
     "format": "prettier --write src scripts supabase/functions *.json *.ts *.html *.md",
     "format:check": "prettier --check src scripts supabase/functions *.json *.ts *.html *.md"
@@ -23,7 +24,9 @@
     "@radix-ui/react-select": "2.3.7",
     "@supabase/supabase-js": "2.116.0",
     "@tiptap/core": "3.31.3",
+    "@tiptap/extension-highlight": "3.31.3",
     "@tiptap/extension-mention": "3.31.3",
+    "@tiptap/extension-text-style": "3.31.3",
     "@tiptap/pm": "3.31.3",
     "@tiptap/react": "3.31.3",
     "@tiptap/starter-kit": "3.31.3",

@@ -130,6 +130,8 @@ import {
 } from "./domain";
 import { useNow } from "./useClock";
 import { Expandable, Paged, Pagination } from "./Pagination";
+import { TaskTemplatesPanel } from "./TaskTemplates";
+import { SidebarNav, type NavTarget } from "./SidebarNav";
 import { requestPasswordReset } from "./profile";
 import { pushActive, syncPush } from "./push";
 import {
@@ -150,6 +152,8 @@ import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
 import { useTaskSeconds } from "./useTaskTime";
 import { NotificationInbox } from "./NotificationInbox";
+import { OnlineMembers, PresenceDot } from "./OnlineMembers";
+import { usePresence } from "./presence";
 import {
   notificationState,
   showNotification,
@@ -185,7 +189,11 @@ const navigation = [
 // supabase/migrations/20260921120000_performance_optimizations.sql) patch
 // local state directly instead of forcing a full snapshot refetch — the task
 // list and dashboards no longer flash a loading state for a one-row change.
-const TASK_ROW_MUTATIONS = new Set(["transition_task", "update_task"]);
+const TASK_ROW_MUTATIONS = new Set([
+  "transition_task",
+  "update_task",
+  "set_task_custom_fields",
+]);
 const TIMER_ROW_MUTATIONS = new Set(["start_timer", "stop_timer"]);
 const SELF_HANDLED_MUTATIONS = new Set(["add_comment"]);
 // Collaborators see these modules scoped to them: clients/projects they serve
@@ -373,6 +381,9 @@ export default function App() {
     isAdmin = member?.role === "admin",
     isManager = member?.role === "manager",
     isLeader = isAdmin || isManager;
+  // Who from the company has the app open (joined once the person's
+  // membership is known).
+  const presence = usePresence(member ? company : "", user, demo, data.members);
   // Task list tabs (see TASK_SCOPES): "" is every task. Collaborators only
   // see their own tasks, the ones they take part in and, when they supervise
   // a team, that team's (the tasks policy) — so "Outras equipes" never
@@ -1112,6 +1123,8 @@ export default function App() {
           name.startsWith("update_project") ||
           name.startsWith("create_team") ||
           name.startsWith("update_team") ||
+          name === "save_task_template" ||
+          name === "delete_task_template" ||
           name === "update_my_profile" ||
           name === "update_member" ||
           name === "set_my_avatar"
@@ -1248,6 +1261,30 @@ export default function App() {
       return;
     event.preventDefault();
     go(next);
+  }
+  /** A menu destination as a link: page, filters and settings section. */
+  function navHref(to: NavTarget) {
+    const query = to.query ? new URLSearchParams(to.query).toString() : "";
+    return (
+      pageUrl(to.page, companyPath) +
+      (query ? `?${query}` : "") +
+      (to.hash ? `#${to.hash}` : "")
+    );
+  }
+  function openNav(to: NavTarget) {
+    navigate(navHref(to));
+    setSidebar(false);
+    setForm(null);
+    setQuery("");
+    if (!to.hash) return;
+    // The section appears once the page has rendered.
+    let tries = 0;
+    const scroll = () => {
+      const el = document.getElementById(to.hash!);
+      if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
+      else if (tries++ < 20) setTimeout(scroll, 50);
+    };
+    scroll();
   }
   async function logout() {
     api.clearAllCaches();
@@ -1581,62 +1618,25 @@ export default function App() {
           </div>
           <ChevronsUpDown size={14} />
         </div>
-        <span className="nav-label">PRINCIPAL</span>
-        <nav aria-label="Navegação principal">
-          {navigation
-            .filter((item) => isLeader || MEMBER_PAGES.includes(item.id))
-            .map((item) => (
-              <a
-                key={item.id}
-                href={pageUrl(item.id, companyPath)}
-                aria-current={
-                  page === item.id || (page === "search" && item.id === "tasks")
-                    ? "page"
-                    : undefined
-                }
-                className={
-                  page === item.id || (page === "search" && item.id === "tasks")
-                    ? "active"
-                    : ""
-                }
-                title={item.label}
-                onClick={(event) => followLink(event, item.id)}
-              >
-                <item.icon size={19} />
-                <span>{item.label}</span>
-                {item.id === "tasks" && !!stats?.total && (
-                  <span className="nav-count">{stats.total}</span>
-                )}
-              </a>
-            ))}
-        </nav>
-        <div className="sidebar-products">
-          <span className="nav-label">PRODUTOS</span>
-          {data.products
-            .filter(
+        <div className="sidebar-scroll">
+          <SidebarNav
+            page={page ?? "overview"}
+            params={new URLSearchParams(location.split("?")[1] ?? "")}
+            isLeader={isLeader}
+            allowed={(p) => isLeader || MEMBER_PAGES.includes(p)}
+            taskCount={stats?.total}
+            products={data.products.filter(
               (p) =>
                 isLeader ||
-                data.tasks.some((t) => {
-                  const contract = data.contracts.find(
-                    (c) => c.id === t.contract_id,
-                  );
-                  return contract?.product_id === p.id;
-                }),
-            )
-            .map((p) => (
-              <Button
-                key={p.id}
-                title={p.name}
-                onClick={() => {
-                  go("tasks");
-                  setProduct(p.id);
-                }}
-              >
-                <span className="product-dot" style={{ background: p.color }} />
-                <span className="sidebar-text">{p.name}</span>
-                <ChevronRight size={13} />
-              </Button>
-            ))}
+                data.tasks.some(
+                  (t) =>
+                    data.contracts.find((c) => c.id === t.contract_id)
+                      ?.product_id === p.id,
+                ),
+            )}
+            href={navHref}
+            onNavigate={openNav}
+          />
         </div>
         <div className="sidebar-bottom">
           <button
@@ -1653,20 +1653,6 @@ export default function App() {
             )}
             <span className="sidebar-text">Recolher menu</span>
           </button>
-          {isLeader && (
-            <a
-              className={
-                page === "settings" ? "settings-link active" : "settings-link"
-              }
-              href={pageUrl("settings", companyPath)}
-              aria-current={page === "settings" ? "page" : undefined}
-              title="Equipe e configurações"
-              onClick={(event) => followLink(event, "settings")}
-            >
-              <Settings2 size={18} />{" "}
-              <span className="sidebar-text">Equipe e configurações</span>
-            </a>
-          )}
           <div className="profile">
             <a
               className={`profile-link ${page === "profile" ? "active" : ""}`}
@@ -1774,9 +1760,12 @@ export default function App() {
                 )}
               </Button>
             )}
-            <span className="online-label">
-              <span /> {demo ? "Demonstração" : "Conectado"}
-            </span>
+            <OnlineMembers
+              members={data.members}
+              presence={presence}
+              user={user}
+              demo={demo}
+            />
             <button
               type="button"
               className="topbar-avatar"
@@ -2782,7 +2771,7 @@ export default function App() {
               {page === "settings" && isLeader && (
                 <>
                   <div className="settings-grid">
-                    <section className="panel">
+                    <section className="panel" id="config-pessoas">
                       <div className="panel-heading">
                         <div>
                           <h2>Pessoas do espaço</h2>
@@ -2807,7 +2796,12 @@ export default function App() {
                         {(page) =>
                           page.map((m) => (
                             <div className="member-row" key={m.user_id}>
-                              <Avatar name={m.name} src={m.avatar_url} />
+                              <span className="online-avatar">
+                                <Avatar name={m.name} src={m.avatar_url} />
+                                <PresenceDot
+                                  state={presence.get(m.user_id)?.state}
+                                />
+                              </span>
                               <div className="member-info">
                                 <strong>{m.name}</strong>
                                 {m.email && (
@@ -2869,7 +2863,7 @@ export default function App() {
                         </small>
                       </div>
                     </section>
-                    <section className="panel">
+                    <section className="panel" id="config-produtos">
                       <div className="panel-heading">
                         <h2>Catálogo de produtos</h2>
                         {isLeader && (
@@ -2893,7 +2887,7 @@ export default function App() {
                         </div>
                       ))}
                     </section>
-                    <section className="panel">
+                    <section className="panel" id="config-equipes">
                       <div className="panel-heading">
                         <h2>Equipes</h2>
                         {isLeader && (
@@ -2959,6 +2953,12 @@ export default function App() {
                         </div>
                       ))}
                     </section>
+                    <TaskTemplatesPanel
+                      data={data}
+                      company={company}
+                      mutate={mutate}
+                      notify={notify}
+                    />
                   </div>
                 </>
               )}

@@ -6,6 +6,7 @@ import type { Client, Contract, Product, Project, Snapshot } from "./types";
 import { ContractPicker } from "./ContractPicker";
 import { TeamPicker } from "./TeamPicker";
 import { ReviewSettings } from "./ReviewSettings";
+import { ColorField, PRODUCT_COLORS } from "./ColorMenu";
 import { contractDetail, defaultContractName, projectReview } from "./domain";
 export type EntityEdit =
   | { kind: "client"; entity: Client }
@@ -38,6 +39,9 @@ export function EditEntityForm({
   const [linkProduct, setLinkProduct] = useState(
     edit.kind === "contract" ? edit.entity.product_id : "",
   );
+  const [color, setColor] = useState(
+    edit.kind === "product" ? edit.entity.color : "",
+  );
   const [clientTeams, setClientTeams] = useState(() =>
     edit.kind === "client"
       ? data.clientTeams
@@ -64,6 +68,10 @@ export function EditEntityForm({
       args.p_email = f.get("email");
       args.p_teams = clientTeams;
     }
+    // Only when changed: renaming keeps working on databases still without
+    // the color parameter (migration 20260929140000).
+    if (edit.kind === "product" && color !== edit.entity.color)
+      args.p_color = color;
     if (edit.kind === "project") {
       args.p_due = f.get("due") || null;
       args.p_contract = f.get("contract");
@@ -122,6 +130,20 @@ export function EditEntityForm({
               value={clientTeams}
               onChange={setClientTeams}
             />
+          </>
+        )}
+        {edit.kind === "product" && (
+          <>
+            <ColorField
+              legend="Cor do produto"
+              swatches={PRODUCT_COLORS}
+              value={color}
+              onChange={setColor}
+            />
+            <small className="color-field-preview">
+              <span className="product-dot" style={{ background: color }} />É a
+              cor que identifica o produto nas listas, no Drive e nos clientes.
+            </small>
           </>
         )}
         {edit.kind === "project" && (

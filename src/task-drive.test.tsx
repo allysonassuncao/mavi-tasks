@@ -28,7 +28,7 @@ describe("Drive na tarefa", () => {
     expect(html).toContain(client.name);
     expect(html).not.toContain(`>${other.name}<`);
     expect(html).not.toMatch(/>Drive<\/button>/);
-    expect(html).toContain("Buscar arquivo nas pastas deste cliente");
+    expect(html).toContain("Buscar arquivos e pastas deste cliente");
   });
   it("mostra os produtos contratados por esse cliente", () => {
     const products = data.contracts.filter(

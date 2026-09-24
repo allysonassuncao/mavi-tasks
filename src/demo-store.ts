@@ -1,9 +1,16 @@
 import { demoSnapshot, demoUser } from "./demo";
 import { projectReview, taskActions } from "./domain";
+import {
+  customFieldsError,
+  customKey,
+  isEmpty,
+  templateFieldsFor,
+} from "./templateFields";
 import { mentionedIds, richTextPlain, transitionComment } from "./rich-text";
 import {
   type Snapshot,
   type Status,
+  type TaskCustomField,
   type Task,
   type Comment,
   type Attachment,
@@ -159,6 +166,7 @@ export class DemoStore {
           changes.email = a.p_email;
           if (a.p_teams) this.setClientTeams(entity.id, a.p_teams);
         }
+        if (kind === "product" && a.p_color) changes.color = a.p_color;
         if (kind === "project") {
           if (
             a.p_contract !== (entity as any).contract_id &&
@@ -291,8 +299,14 @@ export class DemoStore {
         this.setTeamPeople(team.id, a.p_users ?? [], a.p_supervisors ?? []);
         break;
       }
-      case "create_task":
+      case "create_task": {
+        // Mirrors public.create_task: the templates that apply add their
+        // fields, and the required ones must be filled in.
+        const fields = templateFieldsFor(this.data, a.p_contract, a.p_assignee);
+        const problem = customFieldsError(fields, a.p_custom ?? {});
+        if (problem) throw Error(problem);
         this.data.tasks.unshift({
+          custom_fields: fillDemoFields(fields, a.p_custom ?? {}),
           id,
           company_id,
           contract_id: a.p_contract,
@@ -320,6 +334,57 @@ export class DemoStore {
           archived: false,
           created_at: now,
         });
+        break;
+      }
+      case "set_task_custom_fields": {
+        if (!task) throw Error("Tarefa não encontrada");
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        if (
+          task.creator_id !== demoUser &&
+          role !== "admin" &&
+          role !== "manager"
+        )
+          throw Error("Sem permissão");
+        if (task.version !== a.p_version)
+          throw Error("A tarefa mudou. Atualize antes de continuar.");
+        const fields = task.custom_fields ?? [];
+        const problem = customFieldsError(fields, a.p_values ?? {});
+        if (problem) throw Error(problem);
+        task.custom_fields = fillDemoFields(fields, a.p_values ?? {});
+        task.version++;
+        event("fields_edited");
+        break;
+      }
+      case "save_task_template": {
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        if (role !== "admin" && role !== "manager")
+          throw Error(
+            "Somente administradores e gestores configuram templates",
+          );
+        if (!a.p_product && !a.p_team)
+          throw Error("Escolha um produto, uma equipe ou os dois.");
+        const template = {
+          id: a.p_id ?? id,
+          company_id,
+          name: String(a.p_name).trim(),
+          product_id: a.p_product ?? null,
+          team_id: a.p_team ?? null,
+          fields: a.p_fields,
+          active: a.p_active ?? true,
+        };
+        this.data.taskTemplates = a.p_id
+          ? this.data.taskTemplates.map((t) => (t.id === a.p_id ? template : t))
+          : [...this.data.taskTemplates, template];
+        return template.id;
+      }
+      case "delete_task_template":
+        this.data.taskTemplates = this.data.taskTemplates.filter(
+          (t) => t.id !== a.p_template,
+        );
         break;
       case "update_task": {
         if (!task) throw Error("Tarefa não encontrada");
@@ -626,4 +691,26 @@ function pauseComment(
       : "Pausou o trabalho",
     `Sessão de ${sessionLabel(entry.started_at, entry.ended_at!)}`,
   );
+}
+
+/** Values as the database stores them (see mavi_private.custom_value). */
+function fillDemoFields(
+  fields: TaskCustomField[],
+  values: Record<string, unknown>,
+): TaskCustomField[] {
+  return fields.map(({ value: _old, ...f }) => {
+    const v = values[customKey(f)];
+    const value = isEmpty(v)
+      ? null
+      : f.type === "number"
+        ? Number(String(v).replace(",", "."))
+        : f.type === "multiselect"
+          ? [...new Set(v as string[])].sort()
+          : f.type === "checkbox"
+            ? true
+            : typeof v === "string"
+              ? v.trim()
+              : (v as string);
+    return { ...f, value };
+  });
 }

@@ -89,6 +89,7 @@ import { attachmentAccept, uploadAttachment } from "./attachments";
 import { attachmentType } from "./upload-types";
 import { FileViewer } from "./FileViewer";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
+import { TaskCustomFieldsPanel } from "./CustomFieldsForm";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
 export type FormPreset = {
@@ -1073,6 +1074,18 @@ export function TaskDetail({
               </div>
             </div>
           </div>
+          <TaskCustomFieldsPanel
+            task={task}
+            canEdit={canEdit}
+            busy={busy}
+            onSave={(values, version) =>
+              mutate("set_task_custom_fields", {
+                p_task: task.id,
+                p_version: version,
+                p_values: values,
+              })
+            }
+          />
           <section
             className={`focus-timer${isRunning ? " is-running" : ""}`}
             aria-label="Controle de execução"

@@ -88,6 +88,8 @@ export interface Task {
   status_changed_at?: string;
   /** Everyone who was ever responsible or was mentioned in it. */
   participant_ids?: string[];
+  /** Template fields filled in when the task was created (its own copy). */
+  custom_fields?: TaskCustomField[];
   revision: number;
   version: number;
   archived: boolean;
@@ -158,6 +160,53 @@ export interface Snapshot {
     supervisor?: boolean;
   }[];
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
+  /** Custom fields for new tasks, by product and/or team (see TaskTemplate). */
+  taskTemplates: TaskTemplate[];
+}
+export type CustomFieldType =
+  | "text"
+  | "textarea"
+  | "url"
+  | "number"
+  | "date"
+  | "select"
+  | "multiselect"
+  | "checkbox";
+/** A field of a template, as configured. */
+export interface TemplateField {
+  /** Stable within its template: values are keyed by it. */
+  id: string;
+  label: string;
+  type: CustomFieldType;
+  required: boolean;
+  /** For select and multiselect. */
+  options?: string[];
+  help?: string;
+}
+/**
+ * Extra fields a task must (or may) carry, configured by leaders. It applies
+ * to a new task when its product is the task's and its team is one of the
+ * assignee's (null = any); every matching template adds its fields.
+ */
+export interface TaskTemplate {
+  id: string;
+  company_id: string;
+  name: string;
+  product_id: string | null;
+  team_id: string | null;
+  fields: TemplateField[];
+  active: boolean;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+/** A value as stored: text, number, date (YYYY-MM-DD), options or yes. */
+export type CustomValue = string | number | boolean | string[] | null;
+/** A field as a task carries it: copied from its template, with the value. */
+export interface TaskCustomField extends TemplateField {
+  template_id: string;
+  template_name: string;
+  value?: CustomValue;
 }
 /**
  * Status keys predate the free flow and were kept: "rejected" is Alteração.
@@ -201,6 +250,7 @@ export const emptySnapshot: Snapshot = {
   hours: [],
   teamMembers: [],
   clientTeams: [],
+  taskTemplates: [],
 };
 export type DriveVisibility = "private" | "public";
 export interface DriveFile {

@@ -320,6 +320,62 @@ export function demoSnapshot(): Snapshot {
     clientTeams: clients.flatMap((c) =>
       teams.map((t) => ({ company_id, client_id: c.id, team_id: t.id })),
     ),
+    // Shows the template builder and the extra fields in the demo.
+    taskTemplates: [
+      {
+        id: "tpl-ads",
+        company_id,
+        name: "Criativos de Make Ads",
+        product_id: "pd-1",
+        team_id: null,
+        active: true,
+        fields: [
+          {
+            id: "briefing",
+            label: "Link do briefing",
+            type: "url" as const,
+            required: true,
+            help: "Documento com objetivo, público e referências.",
+          },
+          {
+            id: "formato",
+            label: "Formato",
+            type: "select" as const,
+            required: true,
+            options: ["Feed", "Stories", "Reels", "Carrossel"],
+          },
+          {
+            id: "pecas",
+            label: "Quantidade de peças",
+            type: "number" as const,
+            required: false,
+          },
+        ],
+      },
+      {
+        id: "tpl-criacao",
+        company_id,
+        name: "Padrão Criação & Conteúdo",
+        product_id: null,
+        team_id: "team-2",
+        active: true,
+        fields: [
+          {
+            id: "redes",
+            label: "Redes sociais",
+            type: "multiselect" as const,
+            required: false,
+            options: ["Instagram", "TikTok", "LinkedIn", "YouTube"],
+          },
+          {
+            id: "aprovacao",
+            label: "Cliente já aprovou o roteiro",
+            type: "checkbox" as const,
+            required: false,
+          },
+        ],
+      },
+    ],
     hours: tasks.slice(0, 6).map((t, i) => ({
       id: `time-${i}`,
       company_id,

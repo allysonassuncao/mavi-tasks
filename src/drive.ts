@@ -1,5 +1,7 @@
 import { supabase } from "./supabase";
 import { fetchAllRows, rpc } from "./api";
+import { contractProductLabel } from "./domain";
+import { fold } from "./task-search";
 import type {
   DriveAuditEntry,
   DriveFile,
@@ -8,6 +10,7 @@ import type {
   DriveLocation,
   PublicFolderView,
   DriveVisibility,
+  Snapshot,
 } from "./types";
 
 /** Columns clients may read; the bucket path is intentionally not among them. */
@@ -50,18 +53,89 @@ export async function searchDriveFiles(
 ): Promise<DriveFile[]> {
   if (!supabase) throw Error("Supabase não configurado");
   const pattern = `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-  let query = supabase
-    .from("drive_files")
-    .select(DRIVE_COLUMNS)
-    .eq("company_id", company)
-    .eq("status", "ready")
-    .ilike("name", pattern);
-  if (client) query = query.eq("client_id", client);
-  const { data, error } = await query
-    .order("name", { ascending: true })
-    .limit(100);
-  if (error) throw error;
-  return (data ?? []) as DriveFile[];
+  // Every match, page by page: a capped list hid files past the first ones.
+  return fetchAllRows<DriveFile>((count) => {
+    let query = supabase!
+      .from("drive_files")
+      .select(DRIVE_COLUMNS, count ? { count } : undefined)
+      .eq("company_id", company)
+      .eq("status", "ready")
+      .ilike("name", pattern);
+    if (client) query = query.eq("client_id", client);
+    return query.order("name").order("id");
+  });
+}
+
+/** A client, product or folder whose name matched a Drive search. */
+export type DriveFolderMatch = {
+  key: string;
+  kind: "client" | "product" | "folder";
+  name: string;
+  at: DriveLocation;
+  color?: string;
+  folder?: DriveFolder;
+};
+
+/**
+ * Clients, contracted products and folders (among those already loaded) whose
+ * name contains `text`, ignoring case and accents. With `client`, only what
+ * sits under that client.
+ */
+export function matchDriveFolders(
+  data: Snapshot,
+  folders: DriveFolder[],
+  text: string,
+  client?: string,
+): DriveFolderMatch[] {
+  const q = fold(text.trim());
+  if (!q) return [];
+  const hit = (name: string) => fold(name).includes(q);
+  const byName = (a: DriveFolderMatch, b: DriveFolderMatch) =>
+    a.name.localeCompare(b.name, "pt-BR");
+  const clients: DriveFolderMatch[] = client
+    ? []
+    : data.clients
+        .filter((c) => !c.archived && hit(c.name))
+        .map((c) => ({
+          key: `client-${c.id}`,
+          kind: "client" as const,
+          name: c.name,
+          at: { client: c.id },
+          color: c.color,
+        }));
+  const products: DriveFolderMatch[] = data.contracts
+    .filter((k) => !k.archived && (!client || k.client_id === client))
+    .map((k) => ({
+      key: `product-${k.id}`,
+      kind: "product" as const,
+      name: contractProductLabel(data, k.id),
+      at: { client: k.client_id, contract: k.id },
+      color: data.products.find((p) => p.id === k.product_id)?.color,
+    }))
+    .filter((m) => hit(m.name));
+  const seen = new Set<string>();
+  const custom: DriveFolderMatch[] = folders
+    .filter((f) => {
+      if (seen.has(f.id)) return false;
+      seen.add(f.id);
+      return (!client || f.client_id === client) && hit(f.name);
+    })
+    .map((f) => ({
+      key: `folder-${f.id}`,
+      kind: "folder" as const,
+      name: f.name,
+      at: {
+        client: f.client_id ?? undefined,
+        contract: f.contract_id ?? undefined,
+        folder: f.id,
+      },
+      folder: f,
+    }));
+  return [
+    ...clients.sort(byName),
+    ...products.sort(byName),
+    ...custom.sort(byName),
+  ];
 }
 
 /** Every folder the person can see, read page by page (see fetchAllRows). */

@@ -62,6 +62,7 @@ import {
   renameDriveFile,
   renameDriveFolder,
   searchDriveFiles,
+  matchDriveFolders,
   setDriveVisibility,
   uploadDriveFile,
   mySharedFolders,
@@ -250,6 +251,7 @@ function DriveTree({
       setResults(null);
       return;
     }
+    setResults(null);
     const id = setTimeout(() => {
       searchDriveFiles(company, text, root?.client)
         .then(setResults)
@@ -288,6 +290,30 @@ function DriveTree({
         : []),
       ...chainOf(item.folder_id).map((f) => f.name),
     ].join(" › ");
+  }
+
+  // A search looks at folder names too (clients, products and folders), not
+  // only at files.
+  const searching = !!query.trim();
+  const folderMatches = useMemo(
+    () =>
+      matchDriveFolders(
+        data,
+        [...folders, ...sharedWithMe],
+        query,
+        root?.client,
+      ),
+    [data, folders, sharedWithMe, query, root?.client],
+  );
+  function whereOf(m: (typeof folderMatches)[number]) {
+    if (m.kind === "client") return "";
+    if (m.kind === "product")
+      return root ? "" : ["Drive", clientName(m.at.client)].join(" › ");
+    return pathOf({
+      client_id: m.folder?.client_id ?? null,
+      contract_id: m.folder?.contract_id ?? null,
+      folder_id: m.folder?.parent_id ?? null,
+    });
   }
 
   // What is shown inside the current location.
@@ -619,6 +645,7 @@ function DriveTree({
       share?: () => void;
     },
     isPublic = false,
+    where = "",
   ) => {
     const Icon =
       icon === "client" ? Building2 : icon === "product" ? Package : Folder;
@@ -646,6 +673,11 @@ function DriveTree({
                 </span>
               )}
             </small>
+            {where && (
+              <small className="drive-folder-path" title={where}>
+                {where}
+              </small>
+            )}
           </span>
         </button>
         {(actions?.rename || actions?.remove || actions?.share) && (
@@ -710,20 +742,20 @@ function DriveTree({
             type="search"
             aria-label={
               root
-                ? "Buscar arquivo nas pastas deste cliente"
-                : "Buscar arquivo em todas as pastas"
+                ? "Buscar arquivos e pastas deste cliente"
+                : "Buscar arquivos e pastas"
             }
             placeholder={
               root
-                ? "Buscar arquivo nas pastas deste cliente"
-                : "Buscar arquivo em todas as pastas"
+                ? "Buscar arquivos e pastas deste cliente"
+                : "Buscar arquivos e pastas"
             }
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             icon={Search}
           />
         </span>
-        {canWrite && !results && (
+        {canWrite && !searching && (
           <div className="drive-upload-controls">
             <Button
               className="btn secondary"
@@ -765,13 +797,13 @@ function DriveTree({
             Drive
           </button>
         )}
-        {viaShare && !results && (
+        {viaShare && !searching && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
             <span>Compartilhadas comigo</span>
           </>
         )}
-        {!viaShare && (root || (!results && at.client)) && (
+        {!viaShare && (root || (!searching && at.client)) && (
           <>
             {!root && <ChevronRight size={15} aria-hidden="true" />}
             <button type="button" onClick={() => go({ client: at.client })}>
@@ -779,7 +811,7 @@ function DriveTree({
             </button>
           </>
         )}
-        {!viaShare && !results && place.contract && (
+        {!viaShare && !searching && place.contract && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
             <button
@@ -792,7 +824,7 @@ function DriveTree({
             </button>
           </>
         )}
-        {!results &&
+        {!searching &&
           chainOf(at.folder).map((f) => (
             <span key={f.id} className="drive-crumb">
               <ChevronRight size={15} aria-hidden="true" />
@@ -810,7 +842,7 @@ function DriveTree({
               </button>
             </span>
           ))}
-        {results && (
+        {searching && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
             <span>Resultados da busca</span>
@@ -818,7 +850,7 @@ function DriveTree({
         )}
       </nav>
 
-      {!canWrite && !results && (
+      {!canWrite && !searching && (
         <p className="drive-readonly" role="note">
           <Lock size={13} />
           {place.client
@@ -860,23 +892,59 @@ function DriveTree({
         </div>
       )}
 
-      {results ? (
-        results.length ? (
-          <Paged items={results} pageSize={50} noun="arquivos" resetKey={query}>
-            {(page) => fileRows(page, true)}
-          </Paged>
-        ) : (
-          <div className="panel drive-empty">
-            <Empty
-              title="Nenhum arquivo encontrado"
-              body={
-                root
-                  ? "A busca considera as pastas deste cliente que você acessa."
-                  : "A busca considera todas as pastas que você acessa."
-              }
-            />
-          </div>
-        )
+      {searching ? (
+        <>
+          {folderMatches.length > 0 && (
+            <Paged
+              items={folderMatches}
+              pageSize={48}
+              noun="pastas"
+              resetKey={query}
+            >
+              {(page) => (
+                <div className="drive-folders">
+                  {page.map((m) =>
+                    folderCard(
+                      m.key,
+                      m.name,
+                      m.kind,
+                      () => go(m.at),
+                      m.color,
+                      undefined,
+                      m.folder?.visibility === "public",
+                      whereOf(m),
+                    ),
+                  )}
+                </div>
+              )}
+            </Paged>
+          )}
+          {results === null ? (
+            <Loading compact />
+          ) : results.length ? (
+            <Paged
+              items={results}
+              pageSize={50}
+              noun="arquivos"
+              resetKey={query}
+            >
+              {(page) => fileRows(page, true)}
+            </Paged>
+          ) : (
+            !folderMatches.length && (
+              <div className="panel drive-empty">
+                <Empty
+                  title="Nada encontrado"
+                  body={
+                    root
+                      ? "A busca considera os arquivos e as pastas deste cliente que você acessa."
+                      : "A busca considera os arquivos e as pastas que você acessa."
+                  }
+                />
+              </div>
+            )
+          )}
+        </>
       ) : (
         <>
           {(clients.length > 0 ||
