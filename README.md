@@ -89,6 +89,26 @@ Antes do primeiro deploy, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLIS
 
 `vercel.json` inclui fallback de rotas e cabeçalhos de segurança. Se usar domínio personalizado para a API do Supabase, revisar `connect-src` da CSP antes da publicação. Depois de publicar, configurar no Supabase Auth a Site URL e o redirect exato `https://SEU-DOMINIO/?setup=1`.
 
+### Variáveis de servidor
+
+| Variável | Uso |
+| --- | --- |
+| `GCS_CREDENTIALS` | JSON da conta de serviço do Google Cloud Storage (anexos, Drive, fotos) |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Par de chaves das notificações push (`npx web-push generate-vapid-keys`) |
+| `VAPID_SUBJECT` | Contato do remetente das notificações, ex.: `mailto:suporte@empresa.com.br` |
+| `PUSH_SECRET` | Segredo aleatório (32+ caracteres) que o banco usa para chamar `/api/push` |
+
+### Notificações push (com o app fechado)
+
+Uma tarefa nova para outra pessoa, ou uma menção, vira uma linha em `notifications` (caixa de entrada). A migração `20260929100000_web_push` entrega cada linha, com os navegadores registrados da pessoa, a `/api/push` via `pg_net`; a função assina com VAPID e envia. Para ligar, depois de aplicar a migração e configurar as variáveis acima na Vercel (e fazer redeploy), registrar no SQL Editor do Supabase:
+
+```sql
+insert into mavi_private.push_config(url, secret)
+values ('https://SEU-DOMINIO/api/push', '<o mesmo PUSH_SECRET da Vercel>');
+```
+
+Cada pessoa ativa as notificações no sino do topo; no iPhone, só com o app instalado na tela de início (iOS 16.4+). Sem essa configuração o app continua avisando enquanto está aberto.
+
 Conta identificada: `allysoncombr`. Nenhum deploy foi executado pelo agente. Não é necessário autenticar o CLI da Vercel para seguir pelo fluxo GitHub escolhido. Domínio final ainda não definido.
 
 ## Verificação realizada e critérios de homologação

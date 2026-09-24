@@ -5708,21 +5708,42 @@ label .input-control .ui-input {
 .drive-empty {
   padding: 30px 0;
 }
-.drive-drop {
+/* Drop area highlight (useFileDrop.tsx): Drive, task, new task. */
+.drop-overlay {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
+  padding: 20px;
   border: 2px dashed #9fcb67;
   border-radius: 14px;
-  background: #f4faebe6;
+  background: #f4faebeb;
   color: #3f5a2c;
-  font-weight: 600;
+  text-align: center;
   pointer-events: none;
+  animation: drop-in 0.12s ease-out;
+}
+.drop-overlay strong {
+  font-size: 1rem;
+  font-weight: 650;
+}
+.drop-overlay small {
+  color: #6b8455;
+  font-size: 0.78rem;
+}
+@keyframes drop-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drop-overlay {
+    animation: none;
+  }
 }
 @media (max-width: 760px) {
   .drive-upload-controls {
@@ -6808,4 +6829,249 @@ label .input-control .ui-input {
 }
 .ui-search-more {
   border-top: 1px solid #eef1ed;
+}
+/* Drop areas are positioned so the highlight covers exactly them. */
+.task-detail.task-workspace,
+.entity-form.quick-task {
+  position: relative;
+}
+.upload-zone-hint {
+  color: #8f9e80;
+  font-weight: 400;
+}
+
+/* Sharing a Drive folder (ShareFolderDialog.tsx). */
+.share-folder {
+  gap: 16px;
+}
+.share-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.share-block > small,
+.share-hint {
+  color: #7f8f72;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.share-toggle {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.share-toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.share-toggle strong,
+.share-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.share-toggle small {
+  color: #7f8f72;
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.share-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fbf3e2;
+  color: #8a6418;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.share-warning svg {
+  flex: none;
+  margin-top: 2px;
+}
+.share-link {
+  display: flex;
+  gap: 8px;
+}
+.share-link .input-control {
+  flex: 1;
+  min-width: 0;
+}
+.share-people {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.share-people label {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.share-people label:hover {
+  background: #f5f8f2;
+}
+.share-people label > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.share-people strong {
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.share-people small {
+  overflow: hidden;
+  color: #8f9e80;
+  font-size: 0.72rem;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-empty {
+  padding: 10px 4px;
+  color: #8f9e80;
+  font-size: 0.8rem;
+}
+/* Folder card badge: the folder has a public link. */
+.drive-folder-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #3f6fb0;
+}
+.drive-shared {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.drive-shared h3 {
+  margin: 4px 0 0;
+  color: #6e7c63;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+/* Public folder page (/pasta/<token>). */
+.public-folder-page {
+  align-items: start;
+  padding-top: 8vh;
+}
+.public-folder-card {
+  max-width: 680px;
+}
+.public-folder-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.public-folder-path > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.public-folder-path svg {
+  color: #b3bda8;
+}
+.public-folder-path button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #5d7a3f;
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.public-folder-path button:hover {
+  text-decoration: underline;
+}
+.public-folder-path h1 {
+  margin: 0;
+  font-size: 1.3rem;
+  overflow-wrap: anywhere;
+}
+.public-folder-list {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.public-folder-list > li + li {
+  border-top: 1px solid var(--border);
+}
+.public-folder-item,
+.public-folder-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+}
+.public-folder-item {
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.public-folder-item:hover {
+  background: #f5f8f2;
+}
+.public-folder-item > svg:first-child {
+  color: #9eb975;
+}
+.public-folder-item strong,
+.public-folder-file strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.88rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.public-folder-file > svg {
+  flex: none;
+  color: #809087;
+}
+.public-folder-file > span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.public-folder-card .public-folder-file small {
+  letter-spacing: 0;
+  font-size: 0.72rem;
+}
+.public-folder-empty {
+  margin: 8px 0 0;
+  color: #8f9e80;
+  font-size: 0.85rem;
 }

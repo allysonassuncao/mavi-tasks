@@ -40,22 +40,46 @@ export async function toggleNotifications(): Promise<NotificationState> {
 
 export function showNotification(
   title: string,
-  options: { body: string; tag: string; onClick: () => void },
+  options: {
+    body: string;
+    tag: string;
+    onClick: () => void;
+    /** Opened when the service worker's notification is clicked. */
+    url?: string;
+  },
 ) {
   if (notificationState() !== "on") return;
-  try {
-    const n = new Notification(title, {
-      body: options.body,
-      tag: options.tag,
-      icon: "/favicon.svg",
-    });
-    n.onclick = () => {
-      window.focus();
-      options.onClick();
-      n.close();
-    };
-  } catch {
-    // Some browsers (e.g. Android Chrome) only allow notifications from a
-    // service worker; the in-app toast still informs the user.
-  }
+  const fallback = () => {
+    try {
+      const n = new Notification(title, {
+        body: options.body,
+        tag: options.tag,
+        icon: "/icons/icon-192-v2.png",
+      });
+      n.onclick = () => {
+        window.focus();
+        options.onClick();
+        n.close();
+      };
+    } catch {
+      // No way to notify here; the in-app toast still informs the user.
+    }
+  };
+  // Installed apps and Android only allow notifications from the service
+  // worker (a click there opens the task through its "mavi:open" message).
+  if (!("serviceWorker" in navigator)) return fallback();
+  navigator.serviceWorker
+    .getRegistration()
+    .then((reg) =>
+      reg
+        ? reg.showNotification(title, {
+            body: options.body,
+            tag: options.tag,
+            icon: "/icons/icon-192-v2.png",
+            badge: "/icons/icon-192-v2.png",
+            data: { url: options.url ?? "/" },
+          })
+        : fallback(),
+    )
+    .catch(fallback);
 }

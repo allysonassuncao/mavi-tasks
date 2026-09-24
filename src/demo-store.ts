@@ -132,6 +132,7 @@ export class DemoStore {
         body,
         created_at: new Date().toISOString(),
       });
+    const statusBefore = task?.status;
     switch (name) {
       case "update_client":
       case "update_product":
@@ -300,7 +301,7 @@ export class DemoStore {
           parent_id: a.p_parent ?? null,
           title: a.p_title,
           description: a.p_description ?? "",
-          status: "open",
+          status: "progress",
           status_changed_at: now,
           priority: a.p_priority ?? "normal",
           creator_id: demoUser,
@@ -382,11 +383,17 @@ export class DemoStore {
           else throw Error("Status inválido");
           if (target === from && assignee === task.assignee_id)
             throw Error("Escolha outro status ou outro responsável");
-          if (next !== from && ["returned", "rejected"].includes(next) && !note)
+          if (
+            next !== from &&
+            ["returned", "rejected", "correction"].includes(next) &&
+            !note
+          )
             throw Error(
               next === "returned"
                 ? "Informe quais informações faltam"
-                : "Descreva a alteração solicitada",
+                : next === "correction"
+                  ? "Descreva a correção necessária"
+                  : "Descreva a alteração solicitada",
             );
         } else if (a.p_action === "approve_internal") {
           if (!acts.approveInternal) throw Error("Sem permissão para aprovar");
@@ -411,7 +418,8 @@ export class DemoStore {
         }
         if (
           a.p_action === "reopen" ||
-          (next !== from && ["returned", "rejected"].includes(next))
+          (next !== from &&
+            ["returned", "rejected", "correction"].includes(next))
         )
           task.revision++;
         if (
@@ -576,6 +584,20 @@ export class DemoStore {
       default:
         throw Error("Operação indisponível na demonstração");
     }
+    // Mirrors mavi_private.pause_on_status_change: a new status pauses every
+    // timer running on the task.
+    if (task && statusBefore && task.status !== statusBefore)
+      for (const h of this.data.hours)
+        if (h.task_id === task.id && !h.ended_at) {
+          h.ended_at = new Date().toISOString();
+          timerComment(
+            task.id,
+            transitionComment(
+              `Pausou o trabalho (status alterado para ${statuses[task.status].label})`,
+              `Sessão de ${sessionLabel(h.started_at, h.ended_at)}`,
+            ),
+          );
+        }
     this.data = {
       ...this.data,
       tasks: [...this.data.tasks],

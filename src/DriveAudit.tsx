@@ -20,6 +20,8 @@ export const auditActions: Record<string, string> = {
   folder_created: "Pasta criada",
   folder_renamed: "Pasta renomeada",
   folder_deleted: "Pasta excluída",
+  folder_shared: "Compartilhamento da pasta alterado",
+  public_folder_opened: "Pasta aberta pelo link público",
 };
 const visibilityLabel = (v: unknown) =>
   v === "public" ? "Público" : v === "private" ? "Privado" : String(v ?? "");
@@ -90,6 +92,17 @@ export function DriveAudit({
     const d = e.details;
     if (e.action === "visibility_changed")
       return `${visibilityLabel(d.from)} → ${visibilityLabel(d.to)}`;
+    if (e.action === "folder_shared") {
+      const names = (ids: unknown) =>
+        (Array.isArray(ids) ? ids : []).map((id) => who(String(id)));
+      const added = names(d.added),
+        removed = names(d.removed);
+      return [
+        `Link ${d.visibility === "public" ? "público ativo" : "desativado"}`,
+        ...(added.length ? [`incluiu ${added.join(", ")}`] : []),
+        ...(removed.length ? [`removeu ${removed.join(", ")}`] : []),
+      ].join(" · ");
+    }
     if (e.action === "file_renamed" || e.action === "folder_renamed")
       return `“${d.from}” → “${d.to}”`;
     if (

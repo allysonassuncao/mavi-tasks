@@ -15,6 +15,36 @@ interface CacheRecord<T = unknown> {
 }
 
 const memoryStore = new Map<string, CacheRecord>();
+/** Key prefixes kept in memory only (see setMemoryOnly). */
+let memoryOnly: string[] = [];
+const persisted = (key: string) => !memoryOnly.some((p) => key.startsWith(p));
+
+/**
+ * Keys under these prefixes are never written to (or read from)
+ * localStorage, and copies left there by older versions are dropped. For
+ * data other people change all the time: a copy from a previous visit would
+ * show stale state, since nothing kept it up to date while the app was
+ * closed.
+ */
+export function setMemoryOnly(prefixes: string[]): void {
+  memoryOnly = prefixes;
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i);
+      if (
+        k?.startsWith(STORAGE_PREFIX) &&
+        !persisted(k.slice(STORAGE_PREFIX.length))
+      )
+        stale.push(k);
+    }
+    stale.forEach((k) => storage.removeItem(k));
+  } catch {
+    // Ignore storage errors.
+  }
+}
 const inFlightRequests = new Map<string, Promise<unknown>>();
 
 function getStorage(): Storage | null {
@@ -33,7 +63,7 @@ function getStorage(): Storage | null {
 
 function readFromStorage<T>(key: string): CacheRecord<T> | null {
   const storage = getStorage();
-  if (!storage) return null;
+  if (!storage || !persisted(key)) return null;
   try {
     const raw = storage.getItem(STORAGE_PREFIX + key);
     if (!raw) return null;
@@ -50,7 +80,7 @@ function readFromStorage<T>(key: string): CacheRecord<T> | null {
 
 function writeToStorage<T>(key: string, record: CacheRecord<T>): void {
   const storage = getStorage();
-  if (!storage) return;
+  if (!storage || !persisted(key)) return;
   try {
     storage.setItem(STORAGE_PREFIX + key, JSON.stringify(record));
   } catch {

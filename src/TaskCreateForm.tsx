@@ -11,6 +11,7 @@ import {
 import { Check, ChevronDown, Paperclip, X } from "lucide-react";
 import { Modal, Loading } from "./components";
 import { ContractPicker } from "./ContractPicker";
+import { DropOverlay, useFileDrop } from "./useFileDrop";
 import { type Snapshot, priorities } from "./types";
 import { canCreateTaskIn, dateKey } from "./domain";
 import {
@@ -127,7 +128,7 @@ export function TaskCreateForm({
     setDetailsMounted(true);
     setShowDetails((v) => !v);
   }
-  function addFiles(files: FileList | null) {
+  function addFiles(files: FileList | File[] | null) {
     setError("");
     const errors: string[] = [];
     for (const file of Array.from(files ?? [])) {
@@ -149,6 +150,8 @@ export function TaskCreateForm({
     setError(errors.join(" "));
     redrawUploads();
   }
+  // Files dropped on the form join the attachments sent with the task.
+  const drop = useFileDrop(addFiles, !demo && !saving);
   function resetForNext() {
     uploads.current = { pending: [] };
     setTitle("");
@@ -215,7 +218,14 @@ export function TaskCreateForm({
         className="entity-form quick-task"
         onSubmit={submit}
         onKeyDown={submitShortcut}
+        {...drop.handlers}
       >
+        {drop.active && (
+          <DropOverlay
+            label="Solte para anexar à nova tarefa"
+            hint="Os arquivos são enviados ao criar a tarefa"
+          />
+        )}
         <fieldset className="create-fields" disabled={locked}>
           <Input
             ref={titleRef}
@@ -318,7 +328,8 @@ export function TaskCreateForm({
           <label
             className={`upload-zone creation-upload ${saving || demo ? "disabled" : ""}`}
           >
-            <Paperclip size={17} /> Adicionar anexos
+            <Paperclip size={17} /> Adicionar anexos{" "}
+            <span className="upload-zone-hint">ou arraste para cá</span>
             <Input
               type="file"
               multiple

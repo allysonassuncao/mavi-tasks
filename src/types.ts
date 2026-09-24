@@ -1,5 +1,11 @@
 export type Status =
-  "open" | "progress" | "returned" | "rejected" | "review" | "done";
+  | "open"
+  | "progress"
+  | "returned"
+  | "rejected"
+  | "correction"
+  | "review"
+  | "done";
 export type Role = "admin" | "manager" | "member";
 export interface Company {
   id: string;
@@ -90,7 +96,7 @@ export interface Task {
 /** A notice for one person, e.g. they were mentioned in a comment. */
 export interface AppNotification {
   id: string;
-  kind: "mention";
+  kind: "mention" | "assigned";
   task_id: string;
   task_title: string;
   actor_id: string | null;
@@ -154,8 +160,9 @@ export interface Snapshot {
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
 }
 /**
- * Status keys predate the free flow and were kept: "open" is Em delegação and
- * "rejected" is Alteração. Listed in menu order; Entregue is the closed one.
+ * Status keys predate the free flow and were kept: "rejected" is Alteração.
+ * "open" (Em delegação) was retired — tasks start Em andamento — and stays
+ * only so older history still reads. In menu order; Entregue is the closed one.
  */
 export const statuses: Record<Status, { label: string; color: string }> = {
   open: { label: "Em delegação", color: "#7c8796" },
@@ -163,16 +170,19 @@ export const statuses: Record<Status, { label: string; color: string }> = {
   returned: { label: "Devolvida", color: "#db8757" },
   review: { label: "Em validação", color: "#9a7cd3" },
   rejected: { label: "Alteração", color: "#cf4f5f" },
+  correction: { label: "Correção", color: "#c28a1e" },
   done: { label: "Entregue", color: "#4f9879" },
 };
 /** Statuses a task moves between freely until it is delivered. */
 export const workingStatuses: Status[] = [
-  "open",
   "progress",
   "returned",
   "review",
   "rejected",
+  "correction",
 ];
+/** Statuses offered in filters and board columns (the retired one left out). */
+export const listedStatuses: Status[] = [...workingStatuses, "done"];
 export const priorities = {
   low: "Baixa",
   normal: "Normal",
@@ -217,6 +227,30 @@ export interface DriveFolder {
   name: string;
   created_by: string;
   created_at: string;
+  /** "public": anyone with /pasta/<share_token> views it (read-only). */
+  visibility?: DriveVisibility;
+  share_token?: string;
+}
+/** Who a folder is shared with, as the sharing dialog edits it. */
+export interface DriveFolderSharing {
+  visibility: DriveVisibility;
+  share_token: string;
+  members: string[];
+}
+/** One level of a publicly shared folder (/pasta/<token>). */
+export interface PublicFolderView {
+  root: { id: string; name: string };
+  folder: string;
+  /** From the shared folder down to the one shown. */
+  path: { id: string; name: string }[];
+  folders: { id: string; name: string }[];
+  files: {
+    id: string;
+    name: string;
+    content_type: string;
+    size_bytes: number;
+    created_at: string;
+  }[];
 }
 /** Where an item lives in the Drive tree; all empty means the root. */
 export interface DriveLocation {

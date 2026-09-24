@@ -9,6 +9,10 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:db": "node scripts/test-database.mjs",
+    "test:db:live": "node scripts/test-live-sync.mjs",
+    "test:db:push": "node scripts/test-web-push.mjs",
+    "test:db:status": "node scripts/test-correction-status.mjs",
+    "test:db:drive": "node scripts/test-drive-sharing.mjs",
     "benchmark:rls": "node scripts/benchmark-rls.mjs",
     "format": "prettier --write src scripts supabase/functions *.json *.ts *.html *.md",
     "format:check": "prettier --check src scripts supabase/functions *.json *.ts *.html *.md"
@@ -27,12 +31,14 @@
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-day-picker": "10.0.1",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "web-push": "3.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.10",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "@types/web-push": "3.6.4",
     "@vitejs/plugin-react": "^4.7.0",
     "prettier": "^3.9.8",
     "supabase": "2.117.0",

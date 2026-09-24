@@ -27,8 +27,7 @@ describe("Responsável sugerido ao mudar o status", () => {
     creator_id: "user-julia",
     assignee_id: "user-lucas",
   };
-  it("delegação e falta de informação voltam ao criador", () => {
-    expect(suggestedAssignee(data, task, "open")).toBe("user-julia");
+  it("falta de informação volta ao criador", () => {
     expect(suggestedAssignee(data, task, "returned")).toBe("user-julia");
   });
   it("validação vai para quem valida", () => {
@@ -56,6 +55,10 @@ describe("Responsável sugerido ao mudar o status", () => {
       },
     ];
     expect(suggestedAssignee(data, inReview, "rejected", events)).toBe(
+      "user-lucas",
+    );
+    // Correção follows the same rule.
+    expect(suggestedAssignee(data, inReview, "correction", events)).toBe(
       "user-lucas",
     );
   });
@@ -214,5 +217,18 @@ describe("Menções com @", () => {
       p_body: self,
     });
     expect(store.inbox("user-allyson")).toHaveLength(before);
+  });
+});
+
+describe("Status disponíveis", () => {
+  it("Em delegação saiu dos menus e Correção entrou", async () => {
+    const { workingStatuses, listedStatuses, statuses } =
+      await import("./types");
+    expect(workingStatuses).not.toContain("open");
+    expect(listedStatuses).not.toContain("open");
+    expect(workingStatuses).toContain("correction");
+    expect(statuses.correction.label).toBe("Correção");
+    // Older history still reads.
+    expect(statuses.open.label).toBe("Em delegação");
   });
 });

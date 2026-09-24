@@ -81,8 +81,11 @@ export function NotificationInbox({
                     />
                     <span>
                       <span className="inbox-line">
-                        <strong>{n.actor_name ?? "Alguém"}</strong> mencionou
-                        você em <strong>{n.task_title}</strong>
+                        <strong>{n.actor_name ?? "Alguém"}</strong>{" "}
+                        {n.kind === "assigned"
+                          ? "criou uma tarefa para você:"
+                          : "mencionou você em"}{" "}
+                        <strong>{n.task_title}</strong>
                       </span>
                       {n.excerpt && <small>{n.excerpt}</small>}
                     </span>
@@ -95,8 +98,8 @@ export function NotificationInbox({
         ) : (
           <p className="inbox-empty">
             <AtSign size={18} />
-            Quando alguém mencionar você com @ em uma tarefa, o aviso aparece
-            aqui.
+            Quando criarem uma tarefa para você ou mencionarem você com @, o
+            aviso aparece aqui.
           </p>
         )}
       </Popover.Content>

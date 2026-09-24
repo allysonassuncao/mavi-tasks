@@ -4,7 +4,7 @@ import { Button, Input, Select, SelectOption } from "./ui";
 import { Avatar, Badge, Empty, Loading } from "./components";
 import { dateLabel } from "./domain";
 import { useUrlState } from "./router";
-import { statuses, type Comment, type Snapshot } from "./types";
+import { listedStatuses, statuses, type Comment, type Snapshot } from "./types";
 import {
   SEARCH_FIELDS,
   hasCriteria,
@@ -263,9 +263,9 @@ export function TaskSearch({
         </Select>
         <Select aria-label="Status" value={status} onValueChange={setStatus}>
           <SelectOption value="">Todos os status</SelectOption>
-          {Object.entries(statuses).map(([k, v]) => (
+          {listedStatuses.map((k) => (
             <SelectOption key={k} value={k}>
-              {v.label}
+              {statuses[k].label}
             </SelectOption>
           ))}
         </Select>

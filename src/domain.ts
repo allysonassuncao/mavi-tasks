@@ -439,7 +439,7 @@ export function suggestedAssignee(
   const pick = (...ids: (string | null | undefined)[]) =>
     ids.find(active) ?? task.assignee_id;
   if (target === task.status) return task.assignee_id;
-  if (target === "open" || target === "returned") return pick(task.creator_id);
+  if (target === "returned") return pick(task.creator_id);
   if (target === "review") {
     const review = projectReview(
       data.projects.find((p) => p.id === task.project_id),
@@ -457,21 +457,19 @@ export function suggestedAssignee(
   }
   return pick(lastExecutor(task, events));
 }
+/** Statuses in which the task is being executed (or reworked). */
+const EXECUTING = ["progress", "rejected", "correction"];
 /** Whoever last held the task while it was being executed or changed. */
 function lastExecutor(task: Task, events: TaskEvent[]) {
-  if (["progress", "rejected"].includes(task.status)) return task.assignee_id;
+  if (EXECUTING.includes(task.status)) return task.assignee_id;
   const executing = [...events]
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .find(
       (e) =>
-        ["progress", "rejected"].includes(String(e.detail.from)) &&
+        EXECUTING.includes(String(e.detail.from)) &&
         typeof e.detail.assignee_from === "string",
     );
-  return executing
-    ? String(executing.detail.assignee_from)
-    : task.status === "open"
-      ? task.assignee_id
-      : null;
+  return executing ? String(executing.detail.assignee_from) : null;
 }
 /**
  * How long the task has spent in each status (as in ClickUp's status menu),

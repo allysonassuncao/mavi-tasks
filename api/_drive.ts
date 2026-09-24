@@ -144,7 +144,14 @@ export type DriveRequest =
   | { action: "sign-upload"; file: string }
   | { action: "download"; file: string; inline?: boolean }
   | { action: "delete"; file: string }
-  | { action: "public"; token: string; inline?: boolean };
+  | { action: "public"; token: string; inline?: boolean }
+  /** A file inside a publicly shared folder (or one of its subfolders). */
+  | {
+      action: "public-folder-file";
+      token: string;
+      file: string;
+      inline?: boolean;
+    };
 
 /** The browser behind a request, recorded in the Drive audit trail. */
 export type RequestOrigin = { ip?: string; user_agent?: string };
@@ -167,16 +174,29 @@ export async function handleDrive(
   const isId = (v: unknown): v is string =>
     typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
 
-  if (req.action === "public") {
+  if (req.action === "public" || req.action === "public-folder-file") {
     if (typeof req.token !== "string" || !/^[0-9a-f]{64}$/.test(req.token))
       return fail(404, "Link inválido ou arquivo indisponível.");
+    if (req.action === "public-folder-file" && !isId(req.file))
+      return fail(404, "Link inválido ou arquivo indisponível.");
+    // Anonymous: the database checks the token (and that the file is in
+    // the shared folder) and records the access.
     const target = await callRpc<
       { path: string; name: string; content_type: string; size_bytes: number }[]
-    >(env, fetchImpl, null, "drive_public_target", {
-      p_token: req.token,
-      p_inline: !!req.inline,
-      p_origin: origin,
-    });
+    >(
+      env,
+      fetchImpl,
+      null,
+      req.action === "public"
+        ? "drive_public_target"
+        : "drive_public_folder_file",
+      {
+        p_token: req.token,
+        ...(req.action === "public" ? {} : { p_file: req.file }),
+        p_inline: !!req.inline,
+        p_origin: origin,
+      },
+    );
     const file = target.ok ? target.data[0] : undefined;
     if (!file) return fail(404, "Link inválido ou arquivo indisponível.");
     return {

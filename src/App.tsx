@@ -104,6 +104,7 @@ import {
   type Member,
   emptySnapshot,
   statuses,
+  listedStatuses,
   priorities,
 } from "./types";
 import {
@@ -130,6 +131,7 @@ import {
 import { useNow } from "./useClock";
 import { Expandable, Paged, Pagination } from "./Pagination";
 import { requestPasswordReset } from "./profile";
+import { pushActive, syncPush } from "./push";
 import {
   CreateForm,
   type FormPreset,
@@ -251,6 +253,27 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
   const [notifications, setNotifications] =
     useState<NotificationState>(notificationState);
+  // Registers this browser for push (notifications with the app closed)
+  // whenever the signed-in person has notifications on; removes it when off.
+  const pushUser = demo ? "" : (session?.user.id ?? "");
+  useEffect(() => {
+    if (!pushUser || notifications === "unsupported") return;
+    void syncPush(notifications === "on");
+  }, [pushUser, notifications]);
+  // A click on a push notification, with the app already open (sw.js).
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; url?: string } | null;
+      if (data?.type !== "mavi:open" || !data.url) return;
+      const id = taskIdFromPath(data.url);
+      if (id) setSelected(id);
+      else navigate(data.url);
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () =>
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, []);
   function toggleCollapsed() {
     setCollapsed((was) => {
       try {
@@ -325,6 +348,13 @@ export default function App() {
     [error, setError] = useState(""),
     [toast, setToast] = useState(""),
     [refresh, setRefresh] = useState(0),
+    // Live updates (see the subscription below): reload the task views, the
+    // open task, its comments/history, and the person's running timer —
+    // without forcing a refetch of the catalogs, as `refresh` does.
+    [liveTick, setLiveTick] = useState(0),
+    [detailTick, setDetailTick] = useState(0),
+    [extrasTick, setExtrasTick] = useState(0),
+    [timerTick, setTimerTick] = useState(0),
     [reportRefresh, setReportRefresh] = useState(0);
   useEffect(() => {
     if (!legacyMine) return;
@@ -398,7 +428,7 @@ export default function App() {
       clearInterval(interval);
       window.removeEventListener("focus", focus);
     };
-  }, [demo, session, user, refresh]);
+  }, [demo, session, user, refresh, timerTick]);
   useEffect(() => {
     let alive = true;
     setDetailError("");
@@ -439,7 +469,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [selected, company, demo, session, refresh, isLeader, user]);
+  }, [selected, company, demo, session, refresh, detailTick, isLeader, user]);
   const period = /^\d{4}-(0[1-9]|1[0-2])$/.test(periodValue)
     ? periodValue
     : dateKey().slice(0, 7);
@@ -565,6 +595,7 @@ export default function App() {
       setAccessNotice(DEACTIVATED);
       api.clearAllCaches();
       setData(emptySnapshot);
+      await syncPush(false);
       await supabase!.auth.signOut({ scope: "local" }).catch(() => {});
     }
     void check();
@@ -695,6 +726,7 @@ export default function App() {
     clientFilter,
     projectFilter,
     refresh,
+    liveTick,
     isLeader,
     listScope,
     page === "tasks",
@@ -750,6 +782,7 @@ export default function App() {
     clientFilter,
     projectFilter,
     refresh,
+    liveTick,
   ]);
   useEffect(() => {
     if (demo || !company || !session) return;
@@ -798,13 +831,84 @@ export default function App() {
   }
 
   // Latest values for the long-lived realtime subscription below.
-  const live = useRef({ user, openTask: setSelected, loadInbox });
-  live.current = { user, openTask: setSelected, loadInbox };
-  // Realtime subscription: automatically detects changes from other users/tabs and updates cache & state
+  const supervisesTeam = data.teamMembers.some(
+    (tm) => tm.user_id === user && tm.supervisor,
+  );
+  const liveState = {
+    user,
+    isLeader,
+    supervisesTeam,
+    tasks: data.tasks,
+    selected,
+    openTask: setSelected,
+    loadInbox,
+  };
+  const live = useRef(liveState);
+  live.current = liveState;
+  // Whether live notices are arriving; while not, views refetch on focus.
+  const liveOk = useRef(false);
+  // Live updates. The database announces each change (ids only) on the
+  // company's private topic; this app keeps the ones that concern the person
+  // (their tasks, their teams' when supervising, everything for leaders, or
+  // whatever is on screen), forgets those tasks from the cache, and reloads
+  // only what is shown. One move sends a few notices (task, history,
+  // comment, timer), so they are gathered for a moment and applied once.
   useEffect(() => {
     if (!company || demo || !session) return;
+    const pending = {
+      tasks: new Set<string>(),
+      extras: new Set<string>(),
+      hours: false,
+      timer: false,
+      lookups: false,
+    };
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    let lookupsTimer: ReturnType<typeof setTimeout> | undefined;
+    const reloadLookups = () => {
+      clearTimeout(lookupsTimer);
+      // Catalog edits come in bursts (an import, a team change): wait for
+      // them to settle before refetching the (possibly large) catalogs.
+      lookupsTimer = setTimeout(() => {
+        api
+          .companyLookups(company, true)
+          .then((lookups) => setData((d) => ({ ...d, ...lookups })))
+          .catch(() => {});
+      }, 1500);
+    };
+    const flush = () => {
+      const { tasks, extras, hours, timer, lookups } = pending;
+      const open = live.current.selected;
+      if (tasks.size || hours) {
+        setLiveTick((v) => v + 1);
+        setReportRefresh((v) => v + 1);
+      }
+      if (open && tasks.has(open)) setDetailTick((v) => v + 1);
+      if (open && (tasks.has(open) || extras.has(open)))
+        setExtrasTick((v) => v + 1);
+      if (timer) setTimerTick((v) => v + 1);
+      if (lookups) reloadLookups();
+      pending.tasks = new Set();
+      pending.extras = new Set();
+      pending.hours = pending.timer = pending.lookups = false;
+    };
+    const schedule = () => {
+      clearTimeout(flushTimer);
+      flushTimer = setTimeout(flush, 350);
+    };
+    // Everything may be stale (missed notices, or none arriving at all).
+    const resync = () => {
+      api.forgetTaskData(company);
+      pending.hours = pending.timer = pending.lookups = true;
+      const open = live.current.selected;
+      if (open) pending.tasks.add(open);
+      else pending.tasks.add("*");
+      schedule();
+    };
     const unsubscribe = api.subscribeToCompanyChanges(company, {
       user,
+      // A new task for the person, or a mention: the inbox row arrives
+      // here while the app is open. With push on, the browser already shows
+      // the system notification (same tag), so only the toast is added.
       onNotification: (row) => {
         live.current.loadInbox();
         api
@@ -812,77 +916,86 @@ export default function App() {
           .then((list) => {
             const n = list.find((x) => x.id === row.id);
             if (!n) return;
-            const text = `${n.actor_name ?? "Alguém"} mencionou você em ${n.task_title}`;
-            notify(text);
-            showNotification("Você foi mencionado", {
-              body: n.excerpt ? `${text}: ${n.excerpt}` : text,
-              tag: n.id,
-              onClick: () => live.current.openTask(n.task_id),
-            });
+            const who = n.actor_name ?? "Alguém";
+            const assigned = n.kind === "assigned";
+            notify(
+              assigned
+                ? `Nova tarefa para você: ${n.task_title}`
+                : `${who} mencionou você em ${n.task_title}`,
+            );
+            if (pushActive()) return;
+            showNotification(
+              assigned ? "Nova tarefa para você" : `${who} mencionou você`,
+              {
+                body: assigned
+                  ? `${who} criou: ${n.task_title}`
+                  : n.excerpt
+                    ? `${n.task_title}: ${n.excerpt}`
+                    : n.task_title,
+                tag: n.id,
+                url: `/tarefas/${n.task_id}`,
+                onClick: () => live.current.openTask(n.task_id),
+              },
+            );
           })
           .catch(() => {});
       },
-      onTaskChange: (task, eventType) => {
-        const me = live.current.user;
+      onChange: (change) => {
+        if (change.kind === "lookup") {
+          api.invalidateLookupsCache(company);
+          pending.lookups = true;
+          return schedule();
+        }
+        const l = live.current;
+        const mine = change.users.includes(l.user);
         if (
-          eventType === "INSERT" &&
-          task.assignee_id === me &&
-          task.creator_id !== me
-        ) {
-          notify(`Nova tarefa para você: ${task.title}`);
-          showNotification("Nova tarefa para você", {
-            body: `${task.title} · prazo ${dateLabel(task.due_date)}`,
-            tag: task.id,
-            onClick: () => live.current.openTask(task.id),
-          });
-        }
-        if (eventType === "INSERT") {
-          setData((d) =>
-            d.tasks.some((t) => t.id === task.id)
-              ? d
-              : { ...d, tasks: [task, ...d.tasks] },
-          );
-        } else if (eventType === "UPDATE") {
-          setData((d) => ({
-            ...d,
-            tasks: d.tasks.map((t) => (t.id === task.id ? task : t)),
-          }));
-          setDetailTask((t) => (t && t.id === task.id ? task : t));
-        } else if (eventType === "DELETE") {
-          setData((d) => ({
-            ...d,
-            tasks: d.tasks.filter((t) => t.id !== task.id),
-          }));
-          setDetailTask((t) => (t && t.id === task.id ? null : t));
-        }
-        setReportRefresh((v) => v + 1);
-      },
-      onLookupChange: () => {
-        api
-          .companyLookups(company, true)
-          .then((lookups) => {
-            setData((d) => ({ ...d, ...lookups }));
+          !api.liveChangeConcerns(change, {
+            ...l,
+            onScreen: (id) =>
+              l.selected === id || l.tasks.some((t) => t.id === id),
           })
-          .catch(() => {});
-      },
-      onHoursChange: (entry, eventType) => {
-        if (eventType !== "DELETE") {
-          setData((d) => ({ ...d, hours: upsertById(d.hours, entry) }));
+        )
+          return;
+        if (change.kind === "task") {
+          api.forgetTask(company, change.task);
+          pending.tasks.add(change.task);
+        } else if (change.kind === "extras") {
+          api.invalidateTaskExtras(change.task);
+          pending.extras.add(change.task);
         } else {
-          setData((d) => ({
-            ...d,
-            hours: d.hours.filter((h) => h.id !== entry.id),
-          }));
+          api.invalidateHoursCache(company);
+          api.invalidateTaskExtras(change.task);
+          pending.hours = true;
+          pending.extras.add(change.task);
+          // A timer of the person may have been paused (status change).
+          if (mine) pending.timer = true;
         }
-        setReportRefresh((v) => v + 1);
+        schedule();
       },
-      onTaskExtrasChange: (taskId) => {
-        if (selected === taskId) {
-          setRefresh((v) => v + 1);
-        }
+      onResync: resync,
+      onStatus: (ok) => {
+        liveOk.current = ok;
       },
     });
-    return unsubscribe;
+    // Without live notices (connection down, or blocked), refetch what is on
+    // screen when the person comes back to the tab, at most every 15s.
+    let lastCatchUp = Date.now();
+    const catchUp = () => {
+      if (document.visibilityState !== "visible" || liveOk.current) return;
+      if (Date.now() - lastCatchUp < 15000) return;
+      lastCatchUp = Date.now();
+      resync();
+    };
+    window.addEventListener("focus", catchUp);
+    document.addEventListener("visibilitychange", catchUp);
+    return () => {
+      unsubscribe();
+      clearTimeout(flushTimer);
+      clearTimeout(lookupsTimer);
+      liveOk.current = false;
+      window.removeEventListener("focus", catchUp);
+      document.removeEventListener("visibilitychange", catchUp);
+    };
   }, [company, demo, session]);
 
   const notify = useCallback((message: string) => setToast(message), []);
@@ -957,9 +1070,18 @@ export default function App() {
           tasks: d.tasks.map((t) => (t.id === updated.id ? updated : t)),
         }));
         setDetailTask((t) => (t && t.id === updated.id ? updated : t));
+        // Lists are refetched, not patched: the task may now belong in other
+        // ones (status, assignee, tab). With live notices on, the database's
+        // notice of this very change triggers that reload.
+        api.forgetTask(company, updated.id);
+        // …and the fresh row is kept as the task's detail.
         api.patchCachedTask(company, updated);
-        api.invalidateTaskExtras(updated.id);
+        setExtrasTick((v) => v + 1);
         setReportRefresh((v) => v + 1);
+        if (!liveOk.current) setLiveTick((v) => v + 1);
+        // A status change pauses every timer on the task (in the database).
+        api.invalidateHoursCache(company);
+        setTimerTick((v) => v + 1);
       } else if (TIMER_ROW_MUTATIONS.has(name) && result) {
         const entry = result as TimeEntry;
         setCurrentRunning(entry.ended_at ? null : entry);
@@ -971,7 +1093,8 @@ export default function App() {
         if (name === "create_task" && result) {
           const newTask = await api.taskById(company, result as string, true);
           if (newTask) {
-            api.addCachedTask(company, newTask);
+            api.forgetTask(company, newTask.id);
+            if (!liveOk.current) setLiveTick((v) => v + 1);
             setData((d) => ({
               ...d,
               tasks: [newTask, ...d.tasks.filter((t) => t.id !== newTask.id)],
@@ -1135,6 +1258,8 @@ export default function App() {
       return;
     }
     try {
+      // This browser stops receiving the person's notifications.
+      await syncPush(false);
       await supabase?.auth.signOut();
     } finally {
       api.clearAllCaches();
@@ -2201,9 +2326,9 @@ export default function App() {
                       <SelectOption value="">
                         Todos os status (exceto entregues)
                       </SelectOption>
-                      {Object.entries(statuses).map(([k, v]) => (
+                      {listedStatuses.map((k) => (
                         <SelectOption key={k} value={k}>
-                          {v.label}
+                          {statuses[k].label}
                         </SelectOption>
                       ))}
                     </Select>
@@ -2254,8 +2379,9 @@ export default function App() {
                     />
                   ) : view === "board" ? (
                     <div className="board">
-                      {Object.entries(statuses)
-                        .filter(([key]) => key !== "done" || status === "done")
+                      {listedStatuses
+                        .filter((key) => key !== "done" || status === "done")
+                        .map((key) => [key, statuses[key]] as const)
                         .map(([key, value]) => (
                           <section className="board-column" key={key}>
                             <h3>
@@ -2955,7 +3081,7 @@ export default function App() {
           busy={busy}
           demo={demo}
           demoStore={demoStore.current}
-          refresh={refresh}
+          refresh={refresh + extrasTick}
           mutate={mutate}
           onClose={() => setSelected(null)}
           notify={notify}

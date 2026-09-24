@@ -88,6 +88,7 @@ import { ReviewSettings } from "./ReviewSettings";
 import { attachmentAccept, uploadAttachment } from "./attachments";
 import { attachmentType } from "./upload-types";
 import { FileViewer } from "./FileViewer";
+import { DropOverlay, useFileDrop } from "./useFileDrop";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
 export type FormPreset = {
@@ -553,6 +554,12 @@ function noteForm(action: string, target: Status | null, current: Status) {
       min: 3,
       submit: "Mover para Alteração",
     };
+  if (target === "correction")
+    return {
+      label: "O que precisa ser corrigido?",
+      min: 3,
+      submit: "Mover para Correção",
+    };
   return {
     label: "Comentário (opcional)",
     min: 0,
@@ -613,7 +620,8 @@ export function TaskDetail({
     [action, setAction] = useState(""),
     // Where a move or reopening takes the task (its status, for reassigning).
     [target, setTarget] = useState<Status | null>(null),
-    [uploading, setUploading] = useState(false);
+    [uploading, setUploading] = useState(false),
+    [uploadProgress, setUploadProgress] = useState("");
   const [editorUploading, setEditorUploading] = useState(false);
   const [commentRevision, setCommentRevision] = useState(0);
   const [viewing, setViewing] = useState<number | null>(null);
@@ -863,21 +871,37 @@ export function TaskDetail({
       setError((e as Error).message);
     }
   }
-  async function upload(file: File) {
-    if (!supabase || demo) return;
+  // One after the other; a file that fails doesn't stop the rest.
+  async function upload(files: File[]) {
+    if (!supabase || demo || !files.length) return;
     setUploading(true);
     setError("");
-    try {
-      await uploadAttachment(task.id, file);
-      invalidateTaskExtras(task.id);
-      setLocalRefresh((v) => v + 1);
-      notify("Arquivo anexado.");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setUploading(false);
+    const failed: string[] = [];
+    let sent = 0;
+    for (const [i, file] of files.entries()) {
+      setUploadProgress(files.length > 1 ? `${i + 1} de ${files.length}` : "");
+      try {
+        await uploadAttachment(task.id, file);
+        sent++;
+      } catch (e) {
+        failed.push((e as Error).message);
+      }
     }
+    invalidateTaskExtras(task.id);
+    setLocalRefresh((v) => v + 1);
+    setUploading(false);
+    setUploadProgress("");
+    if (failed.length) setError(failed.join(" "));
+    if (sent)
+      notify(sent === 1 ? "Arquivo anexado." : `${sent} arquivos anexados.`);
   }
+  // Files dropped anywhere on the task become attachments; the panel opens
+  // on Anexos to show them arriving.
+  const drop = useFileDrop((files) => {
+    setTab("files");
+    setPanelOpen(true);
+    void upload(files);
+  }, !demo && !uploading);
   async function download(a: Attachment) {
     try {
       const publicUrl = getGcsPublicUrl(a.path);
@@ -904,7 +928,14 @@ export function TaskDetail({
       <div
         className={`task-detail task-workspace${panelOpen ? "" : " panel-collapsed"}`}
         data-panel={tab}
+        {...drop.handlers}
       >
+        {drop.active && (
+          <DropOverlay
+            label="Solte para anexar à tarefa"
+            hint="PDF, imagens, documentos, planilhas ou ZIP · até 20 MB cada"
+          />
+        )}
         <div className="task-main">
           <div className="detail-breadcrumb">
             {n.client?.name}
@@ -1556,10 +1587,12 @@ export function TaskDetail({
                       ) : uploading ? (
                         <span role="status" aria-busy="true">
                           <Skeleton className="skeleton-upload" />
-                          <span className="sr-only">Enviando arquivo…</span>
+                          <span className="sr-only">
+                            Enviando arquivo {uploadProgress}…
+                          </span>
                         </span>
                       ) : (
-                        "Clique para anexar um arquivo"
+                        "Clique ou arraste arquivos para anexar"
                       )}
                     </strong>
                     <small>
@@ -1567,11 +1600,11 @@ export function TaskDetail({
                     </small>
                     <Input
                       type="file"
+                      multiple
                       disabled={demo || uploading}
                       accept={attachmentAccept}
                       onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) void upload(file);
+                        void upload(Array.from(e.target.files ?? []));
                         e.target.value = "";
                       }}
                     />

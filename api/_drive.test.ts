@@ -140,6 +140,44 @@ describe("handleDrive", () => {
       "Bearer publishable",
     );
   });
+  it("arquivo de pasta pública passa pelo banco com token e arquivo", async () => {
+    const bad = await handleDrive(
+      { action: "public-folder-file", token: "a".repeat(64), file: "x" },
+      null,
+      env,
+      rpcReply([]),
+    );
+    expect(bad.status).toBe(404);
+    const fetchMock = rpcReply([
+      {
+        path: "drive/c/f",
+        name: "a.png",
+        content_type: "image/png",
+        size_bytes: 10,
+      },
+    ]);
+    const file = "00000000-0000-4000-8000-000000000009";
+    const ok = await handleDrive(
+      {
+        action: "public-folder-file",
+        token: "b".repeat(64),
+        file,
+        inline: true,
+      },
+      null,
+      env,
+      fetchMock,
+    );
+    expect(ok.status).toBe(200);
+    const [url, init] = (fetchMock as any).mock.calls[0];
+    expect(url).toContain("/rpc/drive_public_folder_file");
+    expect(JSON.parse(init.body)).toMatchObject({
+      p_token: "b".repeat(64),
+      p_file: file,
+      p_inline: true,
+    });
+    expect(init.headers.Authorization).toBe("Bearer publishable");
+  });
   it("exclui o registro e depois o objeto no GCS", async () => {
     const fetchMock = vi
       .fn()

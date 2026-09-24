@@ -65,6 +65,22 @@ export interface CompanyLookups {
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
 }
 
+/**
+ * Task data changes with every move of anyone on the team, so it is kept in
+ * memory only and kept current by the live notices (subscribeToCompanyChanges);
+ * a copy persisted from an earlier visit would come back stale. Catalogs
+ * (lookups, companies) stay in localStorage: large, rarely changed, and
+ * revalidated in the background.
+ */
+cache.setMemoryOnly([
+  "tasks:",
+  "task:",
+  "task_extras:",
+  "task_scopes:",
+  "hours:",
+  "summary:",
+]);
+
 /** The most rows Supabase (PostgREST max-rows) returns per request. */
 export const PAGE_ROWS = 1000;
 
@@ -941,44 +957,6 @@ export function patchCachedTask(company: string, updatedTask: Task): void {
   cache.invalidate(`task_scopes:${company}:`);
 }
 
-export function addCachedTask(company: string, newTask: Task): void {
-  // 1. Direct task cache
-  cache.set(`task:${company}:${newTask.id}`, newTask, CACHE_TTL.TASK_DETAIL);
-
-  // 2. Prepend task to cached task queries for this company
-  cache.updateMatching<{ tasks: Task[]; count: number }>(
-    `tasks:${company}:`,
-    (_key, cached) => {
-      if (cached.tasks.some((t) => t.id === newTask.id)) return cached;
-      return {
-        tasks: [newTask, ...cached.tasks],
-        count: cached.count + 1,
-      };
-    },
-  );
-
-  // 3. Invalidate summary cache (and the tab counts)
-  invalidateSummaryCache(company);
-  cache.invalidate(`task_scopes:${company}:`);
-}
-
-export function removeCachedTask(company: string, taskId: string): void {
-  cache.remove(`task:${company}:${taskId}`);
-  cache.invalidate(`task_scopes:${company}:`);
-  cache.updateMatching<{ tasks: Task[]; count: number }>(
-    `tasks:${company}:`,
-    (_key, cached) => {
-      const filtered = cached.tasks.filter((t) => t.id !== taskId);
-      if (filtered.length === cached.tasks.length) return cached;
-      return {
-        tasks: filtered,
-        count: Math.max(0, cached.count - 1),
-      };
-    },
-  );
-  invalidateSummaryCache(company);
-}
-
 export function patchCachedLookups(
   company: string,
   updater: (current: CompanyLookups) => CompanyLookups,
@@ -1040,8 +1018,66 @@ export function invalidateTaskExtras(id: string): void {
   cache.remove(`task_extras:${id}`);
 }
 
+/**
+ * Drops one task from every cache after it changed (here or by someone
+ * else): its detail and extras, and the lists, tab counts and report
+ * figures it may appear in — lists are refetched rather than patched, since
+ * a changed task may now belong in different ones (another status,
+ * assignee or tab).
+ */
+export function forgetTask(company: string, taskId: string): void {
+  cache.remove(`task:${company}:${taskId}`);
+  cache.remove(`task_extras:${taskId}`);
+  cache.invalidate(`tasks:${company}:`);
+  cache.invalidate(`task_scopes:${company}:`);
+  invalidateSummaryCache(company);
+}
+
+/** Every task-related cache of the company (e.g. after missed notices). */
+export function forgetTaskData(company: string): void {
+  invalidateTasksCache(company);
+  cache.invalidate("task_extras:");
+}
+
 export function clearAllCaches(): void {
   cache.clear();
+}
+
+/**
+ * A notice from the database (migration live_task_sync) on the company's
+ * private topic: ids only — what changed, and who is involved.
+ */
+export type LiveChange =
+  | {
+      kind: "task" | "extras" | "hours";
+      op: "insert" | "update" | "delete";
+      task: string;
+      /** Creator, assignee and participants (before and after). */
+      users: string[];
+    }
+  | { kind: "lookup"; table: string };
+
+/**
+ * Whether a task notice concerns the person: always for leaders (they see
+ * every task) and team supervisors (their teams' tasks); otherwise when
+ * they are among its creator, assignee and participants — before or after
+ * the change — or the task is on their screen.
+ */
+export function liveChangeConcerns(
+  change: Extract<LiveChange, { task: string }>,
+  who: {
+    user: string;
+    isLeader: boolean;
+    supervisesTeam: boolean;
+    onScreen: (taskId: string) => boolean;
+  },
+) {
+  return (
+    who.isLeader ||
+    who.supervisesTeam ||
+    change.users.includes(who.user) ||
+    who.onScreen(change.task)
+  );
 }
 
 export interface RealtimeCallbacks {
@@ -1049,153 +1085,84 @@ export interface RealtimeCallbacks {
   user?: string;
   /** A new notification for `user` (e.g. they were mentioned). */
   onNotification?: (row: { id: string; task_id: string }) => void;
-  onTaskChange?: (
-    task: Task,
-    eventType: "INSERT" | "UPDATE" | "DELETE",
-  ) => void;
-  onLookupChange?: (
-    table: string,
-    row: unknown,
-    eventType: "INSERT" | "UPDATE" | "DELETE",
-  ) => void;
-  onHoursChange?: (
-    entry: TimeEntry,
-    eventType: "INSERT" | "UPDATE" | "DELETE",
-  ) => void;
-  onTaskExtrasChange?: (taskId: string) => void;
+  onChange?: (change: LiveChange) => void;
+  /** Back online after a drop: notices sent meanwhile were missed. */
+  onResync?: () => void;
+  /** Whether live notices are arriving (false: fall back to refetching). */
+  onStatus?: (live: boolean) => void;
 }
 
 /**
- * Subscribes to Supabase Realtime for automatic detection of new records or actions.
- * Automatically updates or invalidates the local cache and notifies listener callbacks.
+ * Live updates for a company. The database broadcasts one small notice per
+ * change on "mavi:company:<id>" (a private topic: Realtime checks that the
+ * person is an active member once, when joining), so every open app hears
+ * about changes without polling and without per-row policy checks per
+ * subscriber. Notifications keep their own per-person subscription.
  */
 export function subscribeToCompanyChanges(
   company: string,
   callbacks: RealtimeCallbacks = {},
 ): () => void {
   if (!supabase) return () => {};
-
-  const channelName = `mavi:realtime:${company}:${Date.now()}`;
-  const channel = supabase
-    .channel(channelName)
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "tasks",
-        filter: `company_id=eq.${company}`,
-      },
-      (payload) => {
-        const eventType = payload.eventType as "INSERT" | "UPDATE" | "DELETE";
-        const task = (
-          eventType === "DELETE" ? payload.old : payload.new
-        ) as Task;
-        if (eventType === "INSERT") {
-          addCachedTask(company, task);
-        } else if (eventType === "UPDATE") {
-          patchCachedTask(company, task);
-        } else if (eventType === "DELETE") {
-          removeCachedTask(company, task.id);
+  const client = supabase;
+  let joined = false,
+    dropped = false,
+    closed = false;
+  const live = client
+    .channel(`mavi:company:${company}`, { config: { private: true } })
+    .on("broadcast", { event: "change" }, ({ payload }) =>
+      callbacks.onChange?.(payload as LiveChange),
+    );
+  // Private topics are authorised with the person's session token.
+  void client.realtime
+    .setAuth()
+    .catch(() => {})
+    .finally(() => {
+      if (closed) return;
+      live.subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          if (joined && dropped) callbacks.onResync?.();
+          joined = true;
+          dropped = false;
+          callbacks.onStatus?.(true);
+        } else if (
+          status === "CHANNEL_ERROR" ||
+          status === "TIMED_OUT" ||
+          status === "CLOSED"
+        ) {
+          dropped = true;
+          if (!closed) callbacks.onStatus?.(false);
         }
-        callbacks.onTaskChange?.(task, eventType);
-      },
-    )
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "time_entries",
-        filter: `company_id=eq.${company}`,
-      },
-      (payload) => {
-        const eventType = payload.eventType as "INSERT" | "UPDATE" | "DELETE";
-        const entry = (
-          eventType === "DELETE" ? payload.old : payload.new
-        ) as TimeEntry;
-        if (eventType !== "DELETE") {
-          patchCachedHours(company, entry);
-        } else {
-          invalidateHoursCache(company);
-        }
-        callbacks.onHoursChange?.(entry, eventType);
-      },
-    );
+      });
+    });
 
-  // Task extras tables: comments, attachments, task_events (histórico)
-  const extrasTables = ["comments", "attachments", "task_events"];
-  for (const table of extrasTables) {
-    channel.on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table,
-        filter: `company_id=eq.${company}`,
-      },
-      (payload) => {
-        const row = (payload.new || payload.old) as { task_id?: string };
-        if (row?.task_id) {
-          invalidateTaskExtras(row.task_id);
-          callbacks.onTaskExtrasChange?.(row.task_id);
-        }
-      },
-    );
-  }
-
-  if (callbacks.user)
-    channel.on(
-      "postgres_changes",
-      {
-        event: "INSERT",
-        schema: "public",
-        table: "notifications",
-        filter: `user_id=eq.${callbacks.user}`,
-      },
-      (payload) => {
-        const row = payload.new as {
-          id: string;
-          task_id: string;
-          company_id: string;
-        };
-        if (row.company_id === company) callbacks.onNotification?.(row);
-      },
-    );
-
-  const lookupTables = [
-    "clients",
-    "products",
-    "contracts",
-    "projects",
-    "teams",
-    "team_members",
-    "client_teams",
-    "memberships",
-  ];
-
-  for (const table of lookupTables) {
-    channel.on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table,
-        filter: `company_id=eq.${company}`,
-      },
-      (payload) => {
-        const eventType = payload.eventType as "INSERT" | "UPDATE" | "DELETE";
-        const row = eventType === "DELETE" ? payload.old : payload.new;
-        invalidateLookupsCache(company);
-        callbacks.onLookupChange?.(table, row, eventType);
-      },
-    );
-  }
-
-  channel.subscribe();
+  const inbox = callbacks.user
+    ? client
+        .channel(`mavi:inbox:${company}:${callbacks.user}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${callbacks.user}`,
+          },
+          (payload) => {
+            const row = payload.new as {
+              id: string;
+              task_id: string;
+              company_id: string;
+            };
+            if (row.company_id === company) callbacks.onNotification?.(row);
+          },
+        )
+        .subscribe()
+    : null;
 
   return () => {
-    void supabase?.removeChannel(channel);
+    closed = true;
+    void client.removeChannel(live);
+    if (inbox) void client.removeChannel(inbox);
   };
 }
 

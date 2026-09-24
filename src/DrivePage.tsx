@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type DragEvent,
   type FormEvent,
   type ReactNode,
 } from "react";
@@ -24,6 +23,7 @@ import {
   Folder,
   FolderPlus,
   Globe,
+  Share2,
   History,
   Link2,
   Lock,
@@ -36,6 +36,8 @@ import {
 import { Button, Input, Select, SelectOption, Loading } from "./ui";
 import { Empty } from "./components";
 import { Paged } from "./Pagination";
+import { DropOverlay, useFileDrop } from "./useFileDrop";
+import { ShareFolderDialog } from "./ShareFolderDialog";
 import type {
   DriveFile,
   DriveFolder,
@@ -62,6 +64,8 @@ import {
   searchDriveFiles,
   setDriveVisibility,
   uploadDriveFile,
+  mySharedFolders,
+  shareableFolder,
 } from "./drive";
 
 type Upload = { key: string; name: string; progress: number; error?: string };
@@ -188,7 +192,6 @@ function DriveTree({
   const [newVisibility, setNewVisibility] =
     useState<DriveVisibility>("private");
   const [uploads, setUploads] = useState<Upload[]>([]);
-  const [dragging, setDragging] = useState(false);
   const [busyId, setBusyId] = useState("");
   const [editing, setEditing] = useState<Editing>(null);
   const [draft, setDraft] = useState("");
@@ -197,6 +200,16 @@ function DriveTree({
     index: number;
   } | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  // Folder sharing: the folder being shared, and folders others shared with
+  // the person (listed at the Drive root).
+  const [sharing, setSharing] = useState<DriveFolder | null>(null);
+  const [sharedWithMe, setSharedWithMe] = useState<DriveFolder[]>([]);
+  useEffect(() => {
+    if (root) return;
+    mySharedFolders(company)
+      .then(setSharedWithMe)
+      .catch(() => setSharedWithMe([]));
+  }, [company, root]);
 
   const folderById = useMemo(
     () => new Map(folders.map((f) => [f.id, f])),
@@ -423,12 +436,7 @@ function DriveTree({
       setError(`Copie o link: ${publicFileUrl(file)}`);
     }
   }
-  function onDrop(e: DragEvent) {
-    e.preventDefault();
-    setDragging(false);
-    if (canWrite && e.dataTransfer.files.length)
-      void upload(e.dataTransfer.files);
-  }
+  const drop = useFileDrop((files) => void upload(files), canWrite);
 
   const who = (id: string) =>
     data.members.find((m) => m.user_id === id)?.name ?? "—";
@@ -605,7 +613,12 @@ function DriveTree({
     icon: "client" | "product" | "folder",
     open: () => void,
     color?: string,
-    actions?: { rename?: () => void; remove?: () => void },
+    actions?: {
+      rename?: () => void;
+      remove?: () => void;
+      share?: () => void;
+    },
+    isPublic = false,
   ) => {
     const Icon =
       icon === "client" ? Building2 : icon === "product" ? Package : Folder;
@@ -626,11 +639,27 @@ function DriveTree({
                 : icon === "product"
                   ? "Produto"
                   : "Pasta"}
+              {isPublic && (
+                <span className="drive-folder-badge" title="Link público ativo">
+                  {" · "}
+                  <Globe size={11} aria-hidden="true" /> Pública
+                </span>
+              )}
             </small>
           </span>
         </button>
-        {(actions?.rename || actions?.remove) && (
+        {(actions?.rename || actions?.remove || actions?.share) && (
           <span className="drive-folder-actions">
+            {actions.share && (
+              <Button
+                className="icon-btn"
+                aria-label={`Compartilhar ${title}`}
+                title="Compartilhar"
+                onClick={actions.share}
+              >
+                <Share2 size={13} />
+              </Button>
+            )}
             {actions.rename && (
               <Button
                 className="icon-btn"
@@ -657,7 +686,12 @@ function DriveTree({
     );
   };
 
+  // Reached through a share, without access to the client: the path shown
+  // starts at the shared folder, not at a client the person can't open.
+  const viaShare =
+    !root && !!place.client && !data.clients.some((c) => c.id === place.client);
   const empty =
+    !(!at.client && !at.folder && sharedWithMe.length) &&
     !clients.length &&
     !products.length &&
     !subfolders.length &&
@@ -667,16 +701,8 @@ function DriveTree({
 
   return (
     <div
-      className={`drive-page ${dragging ? "dragging" : ""}`}
-      onDragOver={(e) => {
-        if (!canWrite) return;
-        e.preventDefault();
-        setDragging(true);
-      }}
-      onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setDragging(false);
-      }}
-      onDrop={onDrop}
+      className={`drive-page ${drop.active ? "dragging" : ""}`}
+      {...drop.handlers}
     >
       <div className="drive-toolbar">
         <span className="drive-search">
@@ -739,7 +765,13 @@ function DriveTree({
             Drive
           </button>
         )}
-        {(root || (!results && at.client)) && (
+        {viaShare && !results && (
+          <>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>Compartilhadas comigo</span>
+          </>
+        )}
+        {!viaShare && (root || (!results && at.client)) && (
           <>
             {!root && <ChevronRight size={15} aria-hidden="true" />}
             <button type="button" onClick={() => go({ client: at.client })}>
@@ -747,7 +779,7 @@ function DriveTree({
             </button>
           </>
         )}
-        {!results && place.contract && (
+        {!viaShare && !results && place.contract && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
             <button
@@ -892,19 +924,26 @@ function DriveTree({
                               folder: f.id,
                             }),
                           undefined,
-                          canWrite
-                            ? {
-                                rename: () =>
+                          {
+                            rename: canWrite
+                              ? () =>
                                   startEdit(
                                     { kind: "folder", id: f.id },
                                     f.name,
-                                  ),
-                                remove:
-                                  isLeader || f.created_by === user
-                                    ? () => void removeFolder(f)
-                                    : undefined,
-                              }
-                            : undefined,
+                                  )
+                              : undefined,
+                            remove:
+                              canWrite && (isLeader || f.created_by === user)
+                                ? () => void removeFolder(f)
+                                : undefined,
+                            // Same rule as the database: creator or leader.
+                            share:
+                              shareableFolder(f) &&
+                              (isLeader || f.created_by === user)
+                                ? () => setSharing(f)
+                                : undefined,
+                          },
+                          f.visibility === "public",
                         )
                       ),
                   ),
@@ -925,6 +964,25 @@ function DriveTree({
                 </div>
               )}
             </Paged>
+          )}
+          {!root && !at.client && !at.folder && sharedWithMe.length > 0 && (
+            <section
+              className="drive-shared"
+              aria-label="Pastas compartilhadas com você"
+            >
+              <h3>Compartilhadas comigo</h3>
+              <div className="drive-folders">
+                {sharedWithMe.map((f) =>
+                  folderCard(`shared-${f.id}`, f.name, "folder", () =>
+                    go({
+                      client: f.client_id ?? undefined,
+                      contract: f.contract_id ?? undefined,
+                      folder: f.id,
+                    }),
+                  ),
+                )}
+              </div>
+            </section>
           )}
           {files === null ? (
             <Loading compact />
@@ -955,6 +1013,28 @@ function DriveTree({
           ) : null}
         </>
       )}
+      {sharing && (
+        <ShareFolderDialog
+          folder={sharing}
+          data={data}
+          user={user}
+          notify={notify}
+          onClose={() => setSharing(null)}
+          onSaved={(saved) =>
+            setFolders((list) =>
+              list.map((f) =>
+                f.id === sharing.id
+                  ? {
+                      ...f,
+                      visibility: saved.visibility,
+                      share_token: saved.share_token,
+                    }
+                  : f,
+              ),
+            )
+          }
+        />
+      )}
       {viewer && (
         <FileViewer
           files={viewer.list.map((f) => ({
@@ -970,12 +1050,15 @@ function DriveTree({
           onClose={() => setViewer(null)}
         />
       )}
-      {dragging && (
-        <div className="drive-drop" aria-hidden="true">
-          <CloudUpload size={32} />
-          Solte para enviar (
-          {newVisibility === "public" ? "público" : "privado"})
-        </div>
+      {drop.active && (
+        <DropOverlay
+          label="Solte para enviar a esta pasta"
+          hint={
+            newVisibility === "public"
+              ? "Os arquivos ficam públicos (acesso por link)"
+              : "Os arquivos ficam privados"
+          }
+        />
       )}
     </div>
   );

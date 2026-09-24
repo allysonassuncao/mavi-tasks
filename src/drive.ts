@@ -4,7 +4,9 @@ import type {
   DriveAuditEntry,
   DriveFile,
   DriveFolder,
+  DriveFolderSharing,
   DriveLocation,
+  PublicFolderView,
   DriveVisibility,
 } from "./types";
 
@@ -213,6 +215,58 @@ export function openPublicFile(token: string, inline = false) {
     size_bytes: number;
     url: string;
   }>({ action: "public", token, inline });
+}
+
+// ------------------------------------------------------------ folder sharing
+export function publicFolderUrl(token: string) {
+  return `${window.location.origin}/pasta/${token}`;
+}
+/** Only folders inside a contracted product can be shared. */
+export const shareableFolder = (f: Pick<DriveFolder, "contract_id">) =>
+  !!f.contract_id;
+export function folderSharing(folder: string): Promise<DriveFolderSharing> {
+  return rpc("drive_folder_sharing", { p_folder: folder });
+}
+export function setFolderSharing(
+  folder: string,
+  isPublic: boolean,
+  members: string[],
+): Promise<DriveFolderSharing> {
+  return rpc("set_drive_folder_sharing", {
+    p_folder: folder,
+    p_public: isPublic,
+    p_members: members,
+  });
+}
+/** Folders shared directly with the signed-in person. */
+export async function mySharedFolders(company: string): Promise<DriveFolder[]> {
+  return ((await rpc("my_shared_drive_folders", { p_company: company })) ??
+    []) as DriveFolder[];
+}
+/** A level of a public folder; null when the link is off or wrong. */
+export async function openPublicFolder(
+  token: string,
+  folder?: string,
+): Promise<PublicFolderView | null> {
+  return rpc("drive_public_folder", {
+    p_token: token,
+    p_folder: folder ?? null,
+  });
+}
+export function logPublicFolderOpened(token: string) {
+  return rpc("log_drive_public_folder", { p_token: token });
+}
+export function openPublicFolderFile(
+  token: string,
+  file: string,
+  inline = false,
+) {
+  return driveServer<{ url: string }>({
+    action: "public-folder-file",
+    token,
+    file,
+    inline,
+  });
 }
 
 export function formatBytes(bytes: number) {
