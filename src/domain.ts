@@ -6,6 +6,7 @@ import {
   type Status,
   type Project,
   type ProjectApprover,
+  type Contract,
 } from "./types";
 export function dateKey(date = new Date(), timezone = "America/Sao_Paulo") {
   return new Intl.DateTimeFormat("en-CA", {
@@ -258,8 +259,20 @@ export function canApproveTask(data: Snapshot, task: Task, userId: string) {
   return isTaskSupervisor(data, task, userId);
 }
 /**
+ * Whether new work may start in a contracted product: neither it nor its
+ * client is archived (the database rejects new projects and tasks of an
+ * archived client; see 20260930110000_archive_client).
+ */
+export function contractOpen(data: Snapshot, contract: Contract) {
+  return (
+    !contract.archived &&
+    !data.clients.find((c) => c.id === contract.client_id)?.archived
+  );
+}
+/**
  * Mirrors mavi_private.contract_access, which create_task checks: admins
  * everywhere, everyone else only in clients served by one of their teams.
+ * Never in an archived client.
  */
 export function canCreateTaskIn(
   data: Snapshot,
@@ -268,8 +281,10 @@ export function canCreateTaskIn(
 ) {
   const me = data.members.find((m) => m.user_id === userId && m.active);
   if (!me) return false;
+  const contract = data.contracts.find((c) => c.id === contractId);
+  if (!contract || !contractOpen(data, contract)) return false;
   if (me.role === "admin") return true;
-  const clientId = data.contracts.find((c) => c.id === contractId)?.client_id;
+  const clientId = contract.client_id;
   const myTeams = new Set(
     data.teamMembers
       .filter((tm) => tm.user_id === userId)

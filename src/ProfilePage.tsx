@@ -99,7 +99,15 @@ export function ProfilePage({
     try {
       // The demo has no storage: it keeps the optimized image in memory.
       const url = demo ? photo.preview : await uploadAvatar(photo);
-      await mutate("set_my_avatar", { p_url: url });
+      // The size is recorded for the Armazenamento page. Databases still
+      // without migration 20260930100000 only know p_url.
+      await mutate("set_my_avatar", {
+        p_url: url,
+        p_size: photo.blob.size,
+      }).catch((e: Error) => {
+        if (!/could not find the function/i.test(e.message)) throw e;
+        return mutate("set_my_avatar", { p_url: url });
+      });
       setPhoto(null);
       notify("Foto de perfil atualizada.");
     } catch (err) {

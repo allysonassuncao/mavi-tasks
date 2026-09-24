@@ -1,6 +1,6 @@
 import { calendarDays, monthRange } from "./schedule";
 import { EditEntityForm, type EntityEdit } from "./EditEntityForm";
-import { taskIdFromPath, taskUrl } from "./router";
+import { dashboardIdFromPath, taskIdFromPath, taskUrl } from "./router";
 import {
   usePage,
   useUrlState,
@@ -33,7 +33,9 @@ import {
   FolderKanban,
   Clock3,
   ChartNoAxesCombined,
+  Database,
   HardDrive,
+  PanelsTopLeft,
   Megaphone,
   Bell,
   BellOff,
@@ -150,6 +152,7 @@ import { ProjectsBrowser } from "./ProjectsBrowser";
 import { TeamForm } from "./TeamForm";
 import { Drive } from "./DrivePage";
 import { CampaignsPage } from "./CampaignsPage";
+import { StoragePage } from "./StoragePage";
 import { ProfilePage } from "./ProfilePage";
 import { MemberForm } from "./MemberForm";
 import { TaskSearch } from "./TaskSearch";
@@ -178,6 +181,10 @@ const ScheduleNavigation = lazy(() =>
   import("./TaskSchedule").then((m) => ({ default: m.ScheduleNavigation })),
 );
 const Reports = lazy(() => import("./Reports"));
+// Leaders only, and heavy (editor, charts): loaded when first opened.
+const DashboardsPage = lazy(() =>
+  import("./DashboardsPage").then((m) => ({ default: m.DashboardsPage })),
+);
 
 const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
@@ -189,6 +196,8 @@ const navigation = [
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
+  { id: "storage", label: "Armazenamento", icon: Database },
+  { id: "dashboards", label: "Dashboards", icon: PanelsTopLeft },
 ] as const;
 // Mutations that return the affected row (see the RPCs in
 // supabase/migrations/20260921120000_performance_optimizations.sql) patch
@@ -338,6 +347,9 @@ export default function App() {
   );
   const [formPreset, setFormPreset] = useState<FormPreset>({});
   const selected = taskIdFromPath(location.split("?")[0]);
+  // People a dashboard is shared with open it by its link (the module itself
+  // is for leaders).
+  const openDashboard = dashboardIdFromPath(location.split("?")[0]);
   const taskBackground = useRef<string | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -510,10 +522,23 @@ export default function App() {
   }, [authReady, demo, session, isLogin, location, needsPassword]);
   useEffect(() => {
     if (!authReady || !member || isLogin) return;
-    if (page && !canOpenPage(page, isAdmin, isLeader)) {
+    if (
+      page &&
+      !canOpenPage(page, isAdmin, isLeader) &&
+      !(page === "dashboards" && openDashboard)
+    ) {
       navigate(pageUrl(isLeader ? "overview" : "tasks", companyPath), true);
     }
-  }, [authReady, member, isAdmin, isLeader, page, companyPath, isLogin]);
+  }, [
+    authReady,
+    member,
+    isAdmin,
+    isLeader,
+    page,
+    companyPath,
+    isLogin,
+    openDashboard,
+  ]);
   useEffect(() => {
     if (
       !authReady ||
@@ -1133,6 +1158,7 @@ export default function App() {
         } else if (
           name.startsWith("create_client") ||
           name.startsWith("update_client") ||
+          name === "set_client_archived" ||
           name.startsWith("create_product") ||
           name.startsWith("update_product") ||
           name.startsWith("create_contract") ||
@@ -1865,6 +1891,10 @@ export default function App() {
                     hours: "Seu tempo, registrado com clareza.",
                     drive:
                       "Arquivos da equipe, privados ou compartilhados por link.",
+                    storage:
+                      "Quanto espaço os arquivos enviados ocupam, na agência, por pessoa e por cliente.",
+                    dashboards:
+                      "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
                     profile: "Seu nome, sua foto e sua senha.",
                     reports: isLeader
                       ? "Entenda o ritmo e os resultados da operação."
@@ -1877,6 +1907,8 @@ export default function App() {
             {page !== "drive" &&
               page !== "profile" &&
               page !== "campaigns" &&
+              page !== "storage" &&
+              page !== "dashboards" &&
               (![
                 "products",
                 "contracts",
@@ -1961,16 +1993,18 @@ export default function App() {
             <Loading />
           ) : (
             <>
-              {page && !canOpenPage(page, isAdmin, isLeader) && (
-                <Empty
-                  title="Acesso restrito"
-                  body={
-                    ADMIN_PAGES.includes(page)
-                      ? "Esta área é exclusiva de administradores. Redirecionando..."
-                      : "Esta área é exclusiva de administradores e gestores. Redirecionando..."
-                  }
-                />
-              )}
+              {page &&
+                !canOpenPage(page, isAdmin, isLeader) &&
+                !(page === "dashboards" && openDashboard) && (
+                  <Empty
+                    title="Acesso restrito"
+                    body={
+                      ADMIN_PAGES.includes(page)
+                        ? "Esta área é exclusiva de administradores. Redirecionando..."
+                        : "Esta área é exclusiva de administradores e gestores. Redirecionando..."
+                    }
+                  />
+                )}
               {((isLeader && page === "overview") || page === "reports") && (
                 <>
                   <div className="section-top">
@@ -2595,6 +2629,14 @@ export default function App() {
                   onEditClient={(c) =>
                     setEntityEdit({ kind: "client", entity: c })
                   }
+                  onArchiveClient={(c, archived) =>
+                    void mutate("set_client_archived", {
+                      p_client: c.id,
+                      p_archived: archived,
+                    }).catch(() => {
+                      /* mutate shows the error */
+                    })
+                  }
                   onEditContract={(k) =>
                     setEntityEdit({ kind: "contract", entity: k })
                   }
@@ -2792,6 +2834,39 @@ export default function App() {
                   company={company}
                   user={user}
                   isLeader={isLeader}
+                  notify={notify}
+                />
+              )}
+              {page === "dashboards" && (isLeader || openDashboard) && (
+                <Suspense fallback={<Loading compact />}>
+                  <DashboardsPage
+                    key={company}
+                    data={catalogData}
+                    company={company}
+                    demo={demo}
+                    isLeader={isLeader}
+                    user={user}
+                    notify={notify}
+                    dashboardId={openDashboard}
+                    onOpen={(id) =>
+                      navigate(
+                        id
+                          ? `${pageUrl("dashboards", companyPath)}/${id}`
+                          : pageUrl("dashboards", companyPath),
+                      )
+                    }
+                    internalUrl={(id) =>
+                      `${window.location.origin}${pageUrl("dashboards", companyPath)}/${id}`
+                    }
+                  />
+                </Suspense>
+              )}
+              {page === "storage" && isLeader && (
+                <StoragePage
+                  key={company}
+                  demo={demo}
+                  data={catalogData}
+                  company={company}
                   notify={notify}
                 />
               )}

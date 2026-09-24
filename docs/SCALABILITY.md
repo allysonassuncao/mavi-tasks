@@ -105,3 +105,29 @@ where created_at < now() - interval '1 month';
 Para pausar as exclusões: `select cron.unschedule('mavi-task-event-retention');` e `select cron.unschedule('mavi-storage-reconcile');`. Isso não recupera objetos/eventos já removidos. Os nomes e segredos do job não contêm a chave administrativa.
 
 O Advisor remoto foi consultado antes de qualquer implantação: ainda aponta `pg_trgm` no schema público, RPCs de mutação existentes com `SECURITY DEFINER` e proteção de senhas vazadas desabilitada. São características anteriores a esta mudança; as novas RPCs públicas são `SECURITY INVOKER`, com helpers privados e permissões testadas. O aviso de RLS sem política em tabelas privadas é intencional para acesso exclusivo por funções privilegiadas. Referências: [extensões](https://supabase.com/docs/guides/database/database-linter?lint=0014_extension_in_public), [RPCs privilegiadas](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable), [senhas](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection).
+
+## Dashboards
+
+Migração `20260930140000_dashboards`. Os indicadores são agregados no Postgres por `mavi_private.dashboard_sql`, que monta o SQL só a partir de nomes da lista fechada (fontes `tasks`/`hours`, métricas, campos de data, filtros e agrupamentos) e trata todo valor como literal; nenhum SQL vem do navegador. Cada consulta é sempre limitada à empresa do dashboard.
+
+- **Um painel por chamada** (`dashboard_panel_data`), carregado quando entra na tela, com no máximo 6 chamadas simultâneas por página.
+- **Cache de 60 s** por versão do dashboard, painel, período e filtros (`mavi_private.dashboard_cache`); o job `mavi-dashboard-cache-cleanup` apaga as entradas antigas a cada 10 minutos. "Atualizar" ignora o cache para quem está logado; links públicos sempre usam o cache.
+- **Limites**: categorias voltam como top N (até 50) + "Outros" (até 1000 grupos quando há fórmula); séries diárias até 400 dias (acima disso, semana ou mês); período máximo de ~10 anos; até 5 consultas por painel e 48 painéis por dashboard.
+- **Joins só quando necessários**: horas por dia ou por pessoa não leem tarefas nem contratos.
+- **Índices** novos: `tasks_company_created` e `tasks_company_delivered` (prazo e início das horas já tinham índice).
+
+Carga medida com `npm run benchmark:dashboards` (150 mil tarefas e 400 mil apontamentos por empresa, duas empresas, PGlite em WebAssembly com uma thread — o Postgres hospedado costuma ser várias vezes mais rápido):
+
+| Painel                                      | Melhor tempo |
+| ------------------------------------------- | ------------ |
+| Número com comparação, 30 dias              | 3 ms         |
+| Linha de entregas por dia, 30 dias          | 3 ms         |
+| Horas por semana, 1 ano                     | 153 ms       |
+| Top 10 clientes por horas, 1 ano            | 319 ms       |
+| Atrasadas por pessoa, 2 anos                | 107 ms       |
+| Fórmula horas ÷ entregas por cliente, 1 ano | 291 ms       |
+| Prazo médio por mês, 2 anos                 | 48 ms        |
+
+Os painéis mais caros são os que cruzam horas com cliente/produto em períodos longos (join com tarefas e contratos). Se o volume crescer muito além disso, o próximo passo é uma tabela de agregados diários (horas por dia, pessoa e produto contratado) mantida por gatilho.
+
+No Supabase, o papel `anon` costuma ter `statement_timeout` de 3 s e `authenticated` de 8 s; os links públicos dependem do cache e dos limites acima para ficar bem abaixo disso. A senha dos links fica em `password_hash` (bcrypt, `pgcrypto` no schema `extensions`), nunca é lida pelo app, e 10 senhas erradas em 15 minutos bloqueiam o link até o fim da janela.

@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowUpRight,
   CalendarDays,
   ChevronRight,
@@ -51,6 +53,7 @@ export function ClientPortfolio({
   canManage,
   projectProgress,
   onEditClient,
+  onArchiveClient,
   onEditContract,
   onEditProject,
   onAddContract,
@@ -64,6 +67,8 @@ export function ClientPortfolio({
   canManage: boolean;
   projectProgress: (project: Project) => { done: number; total: number };
   onEditClient: (client: Client) => void;
+  /** Archives (true) or restores (false) a client, after confirmation. */
+  onArchiveClient: (client: Client, archived: boolean) => void;
   onEditContract: (contract: Contract) => void;
   onEditProject: (project: Project) => void;
   onAddContract: (clientId: string) => void;
@@ -207,6 +212,27 @@ export function ClientPortfolio({
                         onClick={() => onEditClient(client)}
                       >
                         <Pencil size={15} />
+                      </Button>
+                      <Button
+                        className="icon-btn"
+                        aria-label={`${open ? "Arquivar" : "Desarquivar"} ${client.name}`}
+                        title={
+                          open ? "Arquivar cliente" : "Desarquivar cliente"
+                        }
+                        onClick={() => {
+                          const ok = window.confirm(
+                            open
+                              ? `Arquivar ${client.name}?\n\nO cliente sai da carteira ativa e não recebe novos produtos, projetos nem tarefas. Produtos, projetos, tarefas e arquivos continuam guardados, e você pode desarquivá-lo depois.`
+                              : `Desarquivar ${client.name}?\n\nO cliente volta para a carteira ativa e pode receber novos produtos, projetos e tarefas.`,
+                          );
+                          if (ok) onArchiveClient(client, open);
+                        }}
+                      >
+                        {open ? (
+                          <Archive size={15} />
+                        ) : (
+                          <ArchiveRestore size={15} />
+                        )}
                       </Button>
                       {open && (
                         <Button

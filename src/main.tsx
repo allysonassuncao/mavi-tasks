@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { PublicFile } from "./PublicFile";
@@ -16,12 +16,22 @@ const publicFile = window.location.pathname.match(
 const publicFolder = window.location.pathname.match(
   /^\/pasta\/([0-9a-f]{64})\/?$/,
 );
+const PublicDashboard = lazy(() =>
+  import("./PublicDashboard").then((m) => ({ default: m.PublicDashboard })),
+);
+const publicDashboard = window.location.pathname.match(
+  /^\/painel\/([0-9a-f]{64})\/?$/,
+);
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     {publicFile ? (
       <PublicFile token={publicFile[1]} />
     ) : publicFolder ? (
       <PublicFolder token={publicFolder[1]} />
+    ) : publicDashboard ? (
+      <Suspense fallback={null}>
+        <PublicDashboard token={publicDashboard[1]} />
+      </Suspense>
     ) : (
       <App />
     )}

@@ -7,12 +7,14 @@ import { attachmentType, inlineImageTypes } from "../src/upload-types.js";
  * an object path: the database resolves the path, as the requesting user,
  * only for that user's own recent, still-pending record. The signed URL fixes
  * the content type and caps the size at what was declared when preparing.
+ *
+ * It also deletes task attachments permanently (Armazenamento page): the
+ * database removes the record if the caller may (delete_attachment) and
+ * returns the object path, which is then removed from the bucket.
  */
-export type UploadRequest = {
-  kind: "attachment" | "inline-image";
-  id: string;
-  contentType?: string;
-};
+export type UploadRequest =
+  | { kind: "attachment" | "inline-image"; id: string; contentType?: string }
+  | { action: "delete-attachment"; id: string };
 
 export async function handleUpload(
   body: unknown,
@@ -25,7 +27,34 @@ export async function handleUpload(
     return fail(500, "Credenciais do Google Cloud Storage não configuradas.");
   if (!authorization?.startsWith("Bearer "))
     return fail(401, "Autenticação necessária.");
-  const req = (body ?? {}) as Partial<UploadRequest>;
+  const req = (body ?? {}) as {
+    kind?: string;
+    action?: string;
+    id?: unknown;
+    contentType?: string;
+  };
+  if (req.action === "delete-attachment") {
+    if (typeof req.id !== "string" || !/^[0-9a-f-]{36}$/i.test(req.id))
+      return fail(400, "Registro inválido.");
+    const removed = await callRpc<string>(
+      env,
+      fetchImpl,
+      authorization,
+      "delete_attachment",
+      { p_attachment: req.id },
+    );
+    if (!removed.ok) return fail(removed.status, removed.error);
+    // The record is gone either way; a failed object removal only leaves an
+    // object that no record points to.
+    const res = await fetchImpl(
+      signGcsUrl(env.credentials, env.bucket, removed.data, "DELETE"),
+      { method: "DELETE" },
+    ).catch(() => null);
+    return {
+      status: 200,
+      body: { deleted: true, storage: !!res && (res.ok || res.status === 404) },
+    };
+  }
   if (req.kind !== "attachment" && req.kind !== "inline-image")
     return fail(400, "Tipo de envio inválido.");
   if (typeof req.id !== "string" || !/^[0-9a-f-]{36}$/i.test(req.id))

@@ -9,6 +9,7 @@ import {
   durationWithSeconds,
   canApproveTask,
   canCreateTaskIn,
+  contractOpen,
   teamClientIds,
   contractDetail,
   contractProductLabel,
@@ -231,6 +232,15 @@ describe("Onde a pessoa pode criar tarefas", () => {
     expect(canCreateTaskIn(data, contract.id, "user-allyson")).toBe(true);
     expect(canCreateTaskIn(data, contract.id, "user-lucas")).toBe(true);
     expect(canCreateTaskIn(data, contract.id, "user-julia")).toBe(false);
+  });
+  it("ninguém cria em cliente arquivado, nem o administrador", () => {
+    const data = demoSnapshot();
+    const contract = data.contracts[0];
+    const client = data.clients.find((c) => c.id === contract.client_id)!;
+    expect(contractOpen(data, contract)).toBe(true);
+    client.archived = true;
+    expect(contractOpen(data, contract)).toBe(false);
+    expect(canCreateTaskIn(data, contract.id, "user-allyson")).toBe(false);
   });
 });
 

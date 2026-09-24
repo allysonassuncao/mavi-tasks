@@ -1,5 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
+import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { readFile, readdir } from "node:fs/promises";
 
 /**
@@ -7,8 +8,8 @@ import { readFile, readdir } from "node:fs/promises";
  * `until` (e.g. to insert data a later migration must convert).
  */
 export async function createTestDatabase({ until } = {}) {
-  const db = new PGlite({ extensions: { pg_trgm } });
-  await db.exec(`create role anon; create role authenticated; create role service_role bypassrls; create schema auth; create schema storage;
+  const db = new PGlite({ extensions: { pg_trgm, pgcrypto } });
+  await db.exec(`create role anon; create role authenticated; create role service_role bypassrls; create schema auth; create schema storage; create schema extensions;
 create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz);
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
 grant usage on schema auth,public,storage to authenticated,anon;grant execute on function auth.uid() to authenticated,anon;

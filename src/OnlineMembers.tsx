@@ -69,7 +69,7 @@ export function OnlineMembers({
           </span>
           <span className="online-count">
             <i className="presence-dot online" aria-hidden="true" />
-            {online} online
+            {online} <span className="online-word">online</span>
           </span>
           {demo && <small className="online-demo">Demonstração</small>}
         </button>

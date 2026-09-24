@@ -58,6 +58,7 @@ import {
   workingStatuses,
 } from "./types";
 import {
+  contractOpen,
   dateLabel,
   defaultContractName,
   isLate,
@@ -122,11 +123,13 @@ export function CreateForm({
   const [contract, setContract] = useState(
       data.contracts.some((c) => c.id === preset.contract)
         ? preset.contract!
-        : (data.contracts.find((c) => !c.archived)?.id ?? ""),
+        : (data.contracts.find((c) => contractOpen(data, c))?.id ?? ""),
     ),
     [error, setError] = useState("");
+  // Archived clients take no new products.
+  const openClients = data.clients.filter((c) => !c.archived);
   const [linkClient, setLinkClient] = useState(
-    preset.client ?? data.clients[0]?.id ?? "",
+    preset.client ?? openClients[0]?.id ?? "",
   );
   const [linkProduct, setLinkProduct] = useState(
     () =>
@@ -326,12 +329,12 @@ export function CreateForm({
                     value={linkClient}
                     onValueChange={setLinkClient}
                   >
-                    {!data.clients.length && (
+                    {!openClients.length && (
                       <SelectOption value="">
                         Cadastre um cliente primeiro
                       </SelectOption>
                     )}
-                    {data.clients.map((c) => (
+                    {openClients.map((c) => (
                       <SelectOption key={c.id} value={c.id}>
                         {c.name}
                       </SelectOption>
@@ -497,6 +500,8 @@ function eventLabel(e: TaskEvent) {
   if (e.action === "move")
     return from === to ? "Responsável alterado" : `Status: ${statusLabel(to)}`;
   if (e.action === "reopen") return `Tarefa reaberta · ${statusLabel(to)}`;
+  if (e.action === "attachment_deleted")
+    return `Anexo excluído · ${String(e.detail.name ?? "")}`;
   if (e.action === "start" && from === "returned")
     return "Reenviada ao responsável";
   return (

@@ -12,6 +12,8 @@ export const pagePaths = {
   hours: "/horas",
   reports: "/relatorios",
   drive: "/drive",
+  storage: "/armazenamento",
+  dashboards: "/dashboards",
   profile: "/perfil",
   settings: "/configuracoes",
 } as const;
@@ -107,6 +109,7 @@ export function resolvePage(path: string): Page | null {
   const normalized = routeParts(path).path;
   if (normalized === "/") return "overview";
   if (taskIdFromPath(path)) return "tasks";
+  if (dashboardIdFromPath(path)) return "dashboards";
   return (
     (Object.keys(pagePaths) as Page[]).find(
       (page) => pagePaths[page] === normalized,
@@ -204,4 +207,13 @@ export function taskUrl(task: { id: string; title: string }, company: string) {
       .replace(/^-|-$/g, "")
       .slice(0, 100) || "tarefa";
   return `${pageUrl("tasks", company)}/${task.id}/${slug}`;
+}
+
+/** The dashboard in /dashboards/<id> (ids are uuids; the demo's start with "demo-"). */
+export function dashboardIdFromPath(path: string) {
+  return (
+    routeParts(path).path.match(
+      /^\/dashboards\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|demo-[0-9a-z-]{1,60})$/i,
+    )?.[1] ?? null
+  );
 }

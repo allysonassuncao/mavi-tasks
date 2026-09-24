@@ -97,4 +97,44 @@ describe("handleUpload", () => {
       "https://db.example.com/rest/v1/rpc/inline_image_upload_target",
     );
   });
+  it("exclui anexo: o banco decide e o objeto sai do bucket", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(`c/t/${id}`)))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const res = await handleUpload(
+      { action: "delete-attachment", id },
+      "Bearer user-token",
+      env,
+      fetchMock as unknown as typeof fetch,
+    );
+    expect(res).toEqual({
+      status: 200,
+      body: { deleted: true, storage: true },
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://db.example.com/rest/v1/rpc/delete_attachment",
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      p_attachment: id,
+    });
+    const removal = new URL(fetchMock.mock.calls[1][0]);
+    expect(fetchMock.mock.calls[1][1].method).toBe("DELETE");
+    expect(removal.pathname).toBe(`/public-bucket/c/t/${id}`);
+  });
+  it("exclusão negada pelo banco não toca no bucket", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "Sem permissão" }), {
+        status: 403,
+      }),
+    );
+    const res = await handleUpload(
+      { action: "delete-attachment", id },
+      "Bearer user-token",
+      env,
+      fetchMock as unknown as typeof fetch,
+    );
+    expect(res.status).toBe(403);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

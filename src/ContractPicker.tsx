@@ -1,7 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import { Select, SelectOption } from "./ui";
 import type { Snapshot } from "./types";
-import { contractParts, contractProductLabel } from "./domain";
+import { contractOpen, contractParts, contractProductLabel } from "./domain";
 
 /**
  * Picks a contracted product the way people think about it — first the
@@ -33,7 +33,9 @@ export function ContractPicker({
   allowed?: (contractId: string) => boolean;
 }) {
   const contracts = data.contracts.filter(
-    (c) => (!c.archived && (!allowed || allowed(c.id))) || c.id === contract,
+    (c) =>
+      (contractOpen(data, c) && (!allowed || allowed(c.id))) ||
+      c.id === contract,
   );
   const current = contracts.find((c) => c.id === contract);
   const clientId = current?.client_id ?? "";

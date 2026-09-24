@@ -59,3 +59,23 @@ export async function saveTaskWithAttachments(
     changed();
   }
 }
+/**
+ * Deletes a task attachment permanently (Armazenamento page): the server
+ * (api/_uploads.ts) asks the database, then removes the object.
+ */
+export async function deleteAttachment(id: string) {
+  const token = supabase
+    ? (await supabase.auth.getSession()).data.session?.access_token
+    : undefined;
+  if (!token) throw Error("Entre novamente para excluir arquivos.");
+  const res = await fetch("/api/gcs/sign-upload", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action: "delete-attachment", id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Error(data.error ?? "Não foi possível excluir o anexo.");
+}

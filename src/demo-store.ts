@@ -223,6 +223,20 @@ export class DemoStore {
         Object.assign(entity, changes);
         break;
       }
+      case "set_client_archived": {
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        if (role !== "admin" && role !== "manager")
+          throw Error("Sem permissão");
+        if (!this.data.clients.some((c) => c.id === a.p_client))
+          throw Error("Cadastro não encontrado");
+        // A new list, so views filtering by status recompute.
+        this.data.clients = this.data.clients.map((c) =>
+          c.id === a.p_client ? { ...c, archived: !!a.p_archived } : c,
+        );
+        break;
+      }
       case "create_client":
         this.data.clients.push({
           id,
