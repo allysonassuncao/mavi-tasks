@@ -7,6 +7,7 @@ import {
   FolderKanban,
   HardDrive,
   LayoutDashboard,
+  Megaphone,
   Package,
   Settings2,
   Users,
@@ -162,6 +163,12 @@ export function SidebarNav({
           label: "Projetos",
           icon: FolderKanban,
           to: { page: "projects" },
+        },
+        {
+          key: "campaigns",
+          label: "Campanhas",
+          icon: Megaphone,
+          to: { page: "campaigns" },
         },
         {
           key: "hours",

@@ -8,6 +8,7 @@ export const pagePaths = {
   products: "/produtos",
   contracts: "/produtos-contratados",
   projects: "/projetos",
+  campaigns: "/campanhas",
   hours: "/horas",
   reports: "/relatorios",
   drive: "/drive",
@@ -88,6 +89,9 @@ export function safeReturnPath(value: string | null) {
     "situacao",
     "de",
     "ate",
+    "campanha",
+    "plataforma",
+    "atencao",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);

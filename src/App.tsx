@@ -34,6 +34,7 @@ import {
   Clock3,
   ChartNoAxesCombined,
   HardDrive,
+  Megaphone,
   Bell,
   BellOff,
   BellRing,
@@ -148,6 +149,7 @@ import { ClientPortfolio } from "./ClientPortfolio";
 import { ProjectsBrowser } from "./ProjectsBrowser";
 import { TeamForm } from "./TeamForm";
 import { Drive } from "./DrivePage";
+import { CampaignsPage } from "./CampaignsPage";
 import { ProfilePage } from "./ProfilePage";
 import { MemberForm } from "./MemberForm";
 import { TaskSearch } from "./TaskSearch";
@@ -183,6 +185,7 @@ const navigation = [
   { id: "clients", label: "Clientes", icon: Users },
   { id: "products", label: "Produtos", icon: Package },
   { id: "projects", label: "Projetos", icon: FolderKanban },
+  { id: "campaigns", label: "Campanhas", icon: Megaphone },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
@@ -210,6 +213,12 @@ const MEMBER_PAGES: readonly Page[] = [
   "drive",
   "profile",
 ];
+// Modules exclusive to the company's administrators (not even managers).
+const ADMIN_PAGES: readonly Page[] = ["campaigns"];
+function canOpenPage(page: Page, isAdmin: boolean, isLeader: boolean) {
+  if (ADMIN_PAGES.includes(page)) return isAdmin;
+  return isLeader || MEMBER_PAGES.includes(page);
+}
 // A UI preference, not cached data: it lives outside the "mavi:cache:" prefix
 // that logout clears, so it survives signing out.
 const SIDEBAR_KEY = "mavi:sidebar-collapsed";
@@ -501,10 +510,10 @@ export default function App() {
   }, [authReady, demo, session, isLogin, location, needsPassword]);
   useEffect(() => {
     if (!authReady || !member || isLogin) return;
-    if (!isLeader && page && !MEMBER_PAGES.includes(page)) {
-      navigate(pageUrl("tasks", companyPath), true);
+    if (page && !canOpenPage(page, isAdmin, isLeader)) {
+      navigate(pageUrl(isLeader ? "overview" : "tasks", companyPath), true);
     }
-  }, [authReady, member, isLeader, page, companyPath, isLogin]);
+  }, [authReady, member, isAdmin, isLeader, page, companyPath, isLogin]);
   useEffect(() => {
     if (
       !authReady ||
@@ -1633,7 +1642,7 @@ export default function App() {
             page={page ?? "overview"}
             params={new URLSearchParams(location.split("?")[1] ?? "")}
             isLeader={isLeader}
-            allowed={(p) => isLeader || MEMBER_PAGES.includes(p)}
+            allowed={(p) => canOpenPage(p, isAdmin, isLeader)}
             taskCount={stats?.total}
             products={data.products.filter(
               (p) =>
@@ -1851,6 +1860,8 @@ export default function App() {
                       "Serviços ativos de cada cliente. Cada serviço pode ter projetos e tarefas avulsas.",
                     projects:
                       "Campanhas e entregas com começo e fim, organizadas por cliente.",
+                    campaigns:
+                      "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
                     hours: "Seu tempo, registrado com clareza.",
                     drive:
                       "Arquivos da equipe, privados ou compartilhados por link.",
@@ -1865,6 +1876,7 @@ export default function App() {
             </div>
             {page !== "drive" &&
               page !== "profile" &&
+              page !== "campaigns" &&
               (![
                 "products",
                 "contracts",
@@ -1949,10 +1961,14 @@ export default function App() {
             <Loading />
           ) : (
             <>
-              {!isLeader && page && !MEMBER_PAGES.includes(page) && (
+              {page && !canOpenPage(page, isAdmin, isLeader) && (
                 <Empty
                   title="Acesso restrito"
-                  body="Esta área é exclusiva de administradores e gestores. Redirecionando..."
+                  body={
+                    ADMIN_PAGES.includes(page)
+                      ? "Esta área é exclusiva de administradores. Redirecionando..."
+                      : "Esta área é exclusiva de administradores e gestores. Redirecionando..."
+                  }
                 />
               )}
               {((isLeader && page === "overview") || page === "reports") && (
@@ -2755,6 +2771,16 @@ export default function App() {
                   email={session?.user.email ?? member?.email ?? ""}
                   demo={demo}
                   mutate={mutate}
+                  notify={notify}
+                />
+              )}
+              {page === "campaigns" && isAdmin && (
+                <CampaignsPage
+                  key={company}
+                  demo={demo}
+                  data={catalogData}
+                  company={company}
+                  user={user}
                   notify={notify}
                 />
               )}
