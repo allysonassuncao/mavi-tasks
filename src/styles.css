@@ -563,6 +563,20 @@ main {
 .eyebrow:first-letter {
   text-transform: uppercase;
 }
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.spin {
+  animation: rotate 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
 .page-heading p {
   font-size: 0.83rem;
   color: #899492;
@@ -1672,6 +1686,21 @@ tbody tr:last-child td {
   gap: 10px;
   align-items: center;
   max-width: 90vw;
+}
+.toast.connection-toast {
+  inset: 18px auto auto 50%;
+  margin: 0;
+  overflow: visible;
+  z-index: 2147483647;
+}
+.toast-offline {
+  background: #fff2e9;
+  color: #8a4f3a;
+  border-color: #eedacb;
+  box-shadow: 0 7px 30px #6b3a2622;
+}
+.toast-offline > svg {
+  flex-shrink: 0;
 }
 .modal {
   border: 1px solid #e0e8d7;
@@ -3932,6 +3961,11 @@ label .input-control .ui-input {
   line-height: 1.5;
   color: #667963;
 }
+.detail-title-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
 .share-task {
   display: inline-flex;
   flex: none;
@@ -3964,7 +3998,7 @@ label .input-control .ui-input {
   .timer-play {
     width: 100%;
   }
-  .share-task span {
+  .share-task:not(.edit-task) span {
     display: none;
   }
 }
@@ -10944,6 +10978,65 @@ label .input-control .ui-input {
   .agenda-list {
     height: calc(100vh - 250px);
     max-height: none;
+  }
+}
+
+/* The Agenda fills the window under the top bar (App renders no page
+   heading for it; the footer is left out here): the page itself never scrolls, only the side panel and the
+   calendar (grid, month or list) do — one scrollbar each. */
+.main-shell:has(> main > .agenda) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+main:has(> .agenda) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+main:has(> .agenda) > .app-footer {
+  display: none;
+}
+main > .agenda {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+}
+main > .agenda .agenda-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 0;
+}
+main > .agenda .agenda-surface {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+main > .agenda .agenda-grid,
+main > .agenda .agenda-list,
+main > .agenda .agenda-month {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+}
+main > .agenda .agenda-list,
+main > .agenda .agenda-month {
+  overflow-y: auto;
+}
+@media (min-width: 901px) {
+  main > .agenda .agenda-side {
+    position: static;
+    max-height: none;
+    min-height: 0;
   }
 }
 

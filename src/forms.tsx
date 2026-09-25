@@ -44,6 +44,7 @@ import {
   Reply,
   Repeat,
   CircleX,
+  Pencil,
   X,
 } from "lucide-react";
 import { Modal, Avatar, Empty, Loading } from "./components";
@@ -795,9 +796,6 @@ export function TaskDetail({
     task.estimated_minutes > 0 ? totalSeconds / 60 / task.estimated_minutes : 0;
   const late = Boolean(task.due_date) && isLate(task);
   useEffect(() => {
-    if (!isRunning) setEditing(false);
-  }, [isRunning]);
-  useEffect(() => {
     let alive = true;
     if (demo) {
       setExtras({
@@ -995,7 +993,7 @@ export function TaskDetail({
   }
   async function edit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (editorUploading || !isRunning || !canEdit) return;
+    if (editorUploading || !canEdit) return;
     const fd = new FormData(e.currentTarget);
     try {
       await mutate("update_task", {
@@ -1090,23 +1088,37 @@ export function TaskDetail({
           </div>
           <div className="detail-title">
             <h2>{task.title}</h2>
-            <button
-              type="button"
-              className="share-task"
-              title="Copiar link da tarefa"
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(window.location.href)
-                  .then(() => notify("Link da tarefa copiado."))
-                  .catch(() =>
-                    setError(
-                      "Copie o endereço da barra do navegador para compartilhar.",
-                    ),
-                  )
-              }
-            >
-              <Copy size={15} /> <span>Copiar link</span>
-            </button>
+            <div className="detail-title-actions">
+              {/* Whoever created the task (or a leader) edits it any time,
+                  without starting the timer first. */}
+              {canEdit && !editing && (
+                <button
+                  type="button"
+                  className="share-task edit-task"
+                  title="Editar tarefa"
+                  onClick={() => setEditing(true)}
+                >
+                  <Pencil size={15} /> <span>Editar</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="share-task"
+                title="Copiar link da tarefa"
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(window.location.href)
+                    .then(() => notify("Link da tarefa copiado."))
+                    .catch(() =>
+                      setError(
+                        "Copie o endereço da barra do navegador para compartilhar.",
+                      ),
+                    )
+                }
+              >
+                <Copy size={15} /> <span>Copiar link</span>
+              </button>
+            </div>
           </div>
           {error && (
             <p className="form-error" role="alert">
@@ -1315,28 +1327,7 @@ export function TaskDetail({
               </p>
             </div>
           </section>
-          {!isRunning ? (
-            <section
-              className="description-locked"
-              aria-label="Descrição bloqueada até iniciar"
-            >
-              <div className="blurred-placeholder" aria-hidden="true">
-                <p>
-                  Contexto, referências e orientações para realizar esta tarefa.
-                </p>
-                <p>
-                  Instruções e detalhes do trabalho aparecem nesta área de
-                  leitura.
-                </p>
-                <p>Entregáveis e critérios para validação.</p>
-              </div>
-              <div className="description-unlock">
-                <LockKeyhole size={24} />
-                <strong>Inicie a tarefa para visualizar a descrição</strong>
-                <span>Use o botão Iniciar acima.</span>
-              </div>
-            </section>
-          ) : editing ? (
+          {editing ? (
             <form className="entity-form inline-edit" onSubmit={edit}>
               <label>
                 Título
@@ -1424,15 +1415,31 @@ export function TaskDetail({
                 </Button>
               </div>
             </form>
+          ) : !isRunning ? (
+            <section
+              className="description-locked"
+              aria-label="Descrição bloqueada até iniciar"
+            >
+              <div className="blurred-placeholder" aria-hidden="true">
+                <p>
+                  Contexto, referências e orientações para realizar esta tarefa.
+                </p>
+                <p>
+                  Instruções e detalhes do trabalho aparecem nesta área de
+                  leitura.
+                </p>
+                <p>Entregáveis e critérios para validação.</p>
+              </div>
+              <div className="description-unlock">
+                <LockKeyhole size={24} />
+                <strong>Inicie a tarefa para visualizar a descrição</strong>
+                <span>Use o botão Iniciar acima.</span>
+              </div>
+            </section>
           ) : (
             <section className="detail-description">
               <div>
                 <h3>Descrição</h3>
-                {canEdit && (
-                  <Button className="text-btn" onClick={() => setEditing(true)}>
-                    Editar tarefa
-                  </Button>
-                )}
               </div>
               <RichTextContent value={task.description} />
             </section>

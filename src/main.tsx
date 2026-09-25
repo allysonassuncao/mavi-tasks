@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { ConnectionStatus } from "./ConnectionStatus";
 import { PublicFile } from "./PublicFile";
 import { PublicFolder } from "./PublicFolder";
 import "./styles.css";
@@ -35,5 +36,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     ) : (
       <App />
     )}
+    <ConnectionStatus />
   </React.StrictMode>,
 );

@@ -378,6 +378,8 @@ export default function App() {
     // open task, its comments/history, and the person's running timer —
     // without forcing a refetch of the catalogs, as `refresh` does.
     [liveTick, setLiveTick] = useState(0),
+    // "Atualizar" on the Tarefas page: waiting for the list it asked for.
+    [reloading, setReloading] = useState(false),
     [detailTick, setDetailTick] = useState(0),
     [extrasTick, setExtrasTick] = useState(0),
     [timerTick, setTimerTick] = useState(0),
@@ -430,9 +432,16 @@ export default function App() {
   const playingTimer: Playing | null = activeTimer
     ? { entry: activeTimer, hours: data.hours, company, demo }
     : null;
+  // The person's running timer is read on sign-in and again only when it may
+  // have changed: live notices of their time entries (and resyncs after a
+  // dropped connection) bump timerTick, and so do their own timer actions.
+  // No polling: with thousands of people signed in, a request every few
+  // seconds each would load the database for nothing.
+  const timerSyncedAt = useRef(0);
   useEffect(() => {
     let alive = true;
     async function syncTimer() {
+      timerSyncedAt.current = Date.now();
       if (demo) {
         setCurrentRunning(
           demoStore.current.data.hours.find(
@@ -453,13 +462,20 @@ export default function App() {
       }
     }
     void syncTimer();
-    const interval = setInterval(syncTimer, 10000);
-    const focus = () => void syncTimer();
-    window.addEventListener("focus", focus);
+    // Notices only cover the open company: a timer started elsewhere (another
+    // company, on another device) shows up when the person comes back to the
+    // tab, checked at most once a minute.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - timerSyncedAt.current < 60_000) return;
+      void syncTimer();
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       alive = false;
-      clearInterval(interval);
-      window.removeEventListener("focus", focus);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [demo, session, user, refresh, timerTick]);
   useEffect(() => {
@@ -1048,6 +1064,36 @@ export default function App() {
   }, [company, demo, session]);
 
   const notify = useCallback((message: string) => setToast(message), []);
+  // Drops every cached copy of the company's data (memory and localStorage)
+  // and reads the tasks again, with the catalogs, hours and open details.
+  function reloadTasks() {
+    if (reloading) return;
+    if (demo) {
+      notify("Na demonstração os dados já estão atualizados.");
+      return;
+    }
+    api.clearCompanyCaches(company);
+    reloadSawLoading.current = false;
+    setReloading(true);
+    setRefresh((v) => v + 1);
+    setReportRefresh((v) => v + 1);
+    setExtrasTick((v) => v + 1);
+  }
+  const reloadSawLoading = useRef(false);
+  useEffect(() => {
+    if (!reloading) return;
+    if (loading) {
+      reloadSawLoading.current = true;
+      return;
+    }
+    if (!reloadSawLoading.current) {
+      // The request may finish before a render shows it loading.
+      const fallback = setTimeout(() => setReloading(false), 8000);
+      return () => clearTimeout(fallback);
+    }
+    setReloading(false);
+    notify("Tarefas atualizadas.");
+  }, [reloading, loading, notify]);
   async function mutate(name: string, args: Record<string, unknown>) {
     setBusy(true);
     setError("");
@@ -1865,128 +1911,143 @@ export default function App() {
           </div>
         )}
         <main>
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                {new Date().toLocaleDateString("pt-BR", {
-                  weekday: "long",
-                  day: "numeric",
-                  month: "long",
-                })}
-              </div>
-              <h1>
-                {page === "overview"
-                  ? "Visão geral"
-                  : page === "profile"
-                    ? "Meu perfil"
-                    : page === "search"
-                      ? "Tarefas"
-                      : (navigation.find((n) => n.id === page)?.label ??
-                        "Equipe e configurações")}
-              </h1>
-              <p>
-                {
+          {/* The Agenda uses the whole page, like Google Agenda: no heading. */}
+          {page !== "agenda" && (
+            <div className="page-heading">
+              <div>
+                <div className="eyebrow">
+                  {new Date().toLocaleDateString("pt-BR", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                  })}
+                </div>
+                <h1>
+                  {page === "overview"
+                    ? "Visão geral"
+                    : page === "profile"
+                      ? "Meu perfil"
+                      : page === "search"
+                        ? "Tarefas"
+                        : (navigation.find((n) => n.id === page)?.label ??
+                          "Equipe e configurações")}
+                </h1>
+                <p>
                   {
-                    overview:
-                      "Uma visão clara do trabalho. Mais espaço para criar.",
-                    tasks: "Organize prioridades e acompanhe cada entrega.",
-                    agenda:
-                      "Seu Google Agenda: veja, crie e edite eventos sem sair do workspace.",
-                    search:
-                      "Encontre qualquer tarefa pelo que foi escrito nela.",
-                    clients:
-                      "Cada cliente com os produtos que contratou e os projetos de cada um.",
-                    products:
-                      "O catálogo do que a agência vende. Adicione cada produto aos clientes que o contrataram.",
-                    contracts:
-                      "Serviços ativos de cada cliente. Cada serviço pode ter projetos e tarefas avulsas.",
-                    projects:
-                      "Campanhas e entregas com começo e fim, organizadas por cliente.",
-                    campaigns:
-                      "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
-                    hours: "Seu tempo, registrado com clareza.",
-                    drive:
-                      "Arquivos da equipe, privados ou compartilhados por link.",
-                    storage:
-                      "Quanto espaço os arquivos enviados ocupam, na agência, por pessoa e por cliente.",
-                    dashboards:
-                      "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
-                    profile: "Seu nome, sua foto e sua senha.",
-                    reports: isLeader
-                      ? "Entenda o ritmo e os resultados da operação."
-                      : "Seu ritmo e seus resultados no período.",
-                    settings: "Pessoas e produtos do seu espaço de trabalho.",
-                  }[page]
-                }
-              </p>
-            </div>
-            {page !== "drive" &&
-              page !== "profile" &&
-              page !== "campaigns" &&
-              page !== "storage" &&
-              page !== "agenda" &&
-              page !== "dashboards" &&
-              (![
-                "products",
-                "contracts",
-                "clients",
-                "projects",
-                "settings",
-              ].includes(page) ||
-                isLeader) && (
-                <Button
-                  className="btn primary"
-                  onClick={() =>
-                    openForm(
-                      page === "contracts"
-                        ? "contract"
-                        : page === "products"
-                          ? "product"
-                          : page === "clients"
-                            ? "client"
-                            : page === "projects"
-                              ? "project"
-                              : page === "hours"
-                                ? "time"
-                                : page === "settings"
-                                  ? "user"
-                                  : "task",
-                    )
+                    {
+                      overview:
+                        "Uma visão clara do trabalho. Mais espaço para criar.",
+                      tasks: "Organize prioridades e acompanhe cada entrega.",
+                      agenda:
+                        "Seu Google Agenda: veja, crie e edite eventos sem sair do workspace.",
+                      search:
+                        "Encontre qualquer tarefa pelo que foi escrito nela.",
+                      clients:
+                        "Cada cliente com os produtos que contratou e os projetos de cada um.",
+                      products:
+                        "O catálogo do que a agência vende. Adicione cada produto aos clientes que o contrataram.",
+                      contracts:
+                        "Serviços ativos de cada cliente. Cada serviço pode ter projetos e tarefas avulsas.",
+                      projects:
+                        "Campanhas e entregas com começo e fim, organizadas por cliente.",
+                      campaigns:
+                        "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
+                      hours: "Seu tempo, registrado com clareza.",
+                      drive:
+                        "Arquivos da equipe, privados ou compartilhados por link.",
+                      storage:
+                        "Quanto espaço os arquivos enviados ocupam, na agência, por pessoa e por cliente.",
+                      dashboards:
+                        "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
+                      profile: "Seu nome, sua foto e sua senha.",
+                      reports: isLeader
+                        ? "Entenda o ritmo e os resultados da operação."
+                        : "Seu ritmo e seus resultados no período.",
+                      settings: "Pessoas e produtos do seu espaço de trabalho.",
+                    }[page]
                   }
-                >
-                  {page === "settings" ? (
-                    <UserPlus size={18} />
-                  ) : (
-                    <Plus size={18} />
-                  )}
-                  {page === "contracts"
-                    ? "Adicionar produto contratado"
-                    : page === "products"
-                      ? "Novo produto"
-                      : page === "clients"
-                        ? "Novo cliente"
-                        : page === "projects"
-                          ? "Novo projeto"
-                          : page === "hours"
-                            ? "Registrar horas"
-                            : page === "settings"
-                              ? "Convidar usuário"
-                              : "Nova tarefa"}
-                  {![
-                    "contracts",
+                </p>
+              </div>
+              <div className="page-actions">
+                {page === "tasks" && (
+                  <Button
+                    className="btn secondary"
+                    onClick={reloadTasks}
+                    disabled={reloading}
+                    title="Buscar as tarefas de novo, sem usar dados guardados no navegador"
+                  >
+                    <RefreshCw size={17} className={reloading ? "spin" : ""} />
+                    {reloading ? "Atualizando…" : "Atualizar"}
+                  </Button>
+                )}
+                {page !== "drive" &&
+                  page !== "profile" &&
+                  page !== "campaigns" &&
+                  page !== "storage" &&
+                  page !== "dashboards" &&
+                  (![
                     "products",
+                    "contracts",
                     "clients",
                     "projects",
-                    "hours",
                     "settings",
-                  ].includes(page) && (
-                    <kbd className="kbd-hint" title="Atalho: tecla N">
-                      N
-                    </kbd>
+                  ].includes(page) ||
+                    isLeader) && (
+                    <Button
+                      className="btn primary"
+                      onClick={() =>
+                        openForm(
+                          page === "contracts"
+                            ? "contract"
+                            : page === "products"
+                              ? "product"
+                              : page === "clients"
+                                ? "client"
+                                : page === "projects"
+                                  ? "project"
+                                  : page === "hours"
+                                    ? "time"
+                                    : page === "settings"
+                                      ? "user"
+                                      : "task",
+                        )
+                      }
+                    >
+                      {page === "settings" ? (
+                        <UserPlus size={18} />
+                      ) : (
+                        <Plus size={18} />
+                      )}
+                      {page === "contracts"
+                        ? "Adicionar produto contratado"
+                        : page === "products"
+                          ? "Novo produto"
+                          : page === "clients"
+                            ? "Novo cliente"
+                            : page === "projects"
+                              ? "Novo projeto"
+                              : page === "hours"
+                                ? "Registrar horas"
+                                : page === "settings"
+                                  ? "Convidar usuário"
+                                  : "Nova tarefa"}
+                      {![
+                        "contracts",
+                        "products",
+                        "clients",
+                        "projects",
+                        "hours",
+                        "settings",
+                      ].includes(page) && (
+                        <kbd className="kbd-hint" title="Atalho: tecla N">
+                          N
+                        </kbd>
+                      )}
+                    </Button>
                   )}
-                </Button>
-              )}
-          </div>
+              </div>
+            </div>
+          )}
           {error && (
             <div className="error-banner" role="alert">
               <TriangleAlert size={18} />

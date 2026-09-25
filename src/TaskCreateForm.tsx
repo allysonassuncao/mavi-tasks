@@ -25,13 +25,7 @@ import {
   priorities,
   recurrenceFrequencies,
 } from "./types";
-import {
-  canCreateTaskIn,
-  dateKey,
-  dateLabel,
-  nextRecurrence,
-  showsProjectField,
-} from "./domain";
+import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
 import {
   attachmentAccept,
   validateAttachment,
@@ -163,14 +157,6 @@ export function TaskCreateForm({
         }),
     [data, contractClient],
   );
-  // The product's projects (optional, under "Adicionar detalhes"), when the
-  // product shows the "Projeto" field (a choice of each product).
-  const projects = showsProjectField(data, contract)
-    ? data.projects.filter(
-        (p) => p.contract_id === contract && (!p.archived || p.id === project),
-      )
-    : [];
-  const projectName = projects.find((p) => p.id === project)?.name;
   const byTeam = assignMode === "team";
   // A team chosen for another client no longer applies.
   const team = clientTeams.some(
@@ -264,7 +250,7 @@ export function TaskCreateForm({
       p_due: due,
       p_start: s("start_date") || null,
       p_project: project || null,
-      p_team: byTeam ? team : s("team") || null,
+      p_team: byTeam ? team : null,
       p_description: s("description"),
       p_priority: s("priority") || "normal",
       p_estimated: Number(s("estimated")) * 60,
@@ -355,10 +341,10 @@ export function TaskCreateForm({
             <ContractPicker
               data={data}
               contract={contract}
-              onContractChange={(id) => {
-                setContract(id);
-                setProject("");
-              }}
+              onContractChange={setContract}
+              // Shown only when the product has projects.
+              project={project}
+              onProjectChange={setProject}
               allowed={(id) => canCreateTaskIn(data, id, user)}
             />
           ) : (
@@ -558,15 +544,7 @@ export function TaskCreateForm({
           >
             <ChevronDown size={16} className={showDetails ? "open" : ""} />
             {showDetails ? "Ocultar detalhes" : "Adicionar detalhes"}
-            {!showDetails && (
-              <small>
-                {projectName
-                  ? `projeto ${projectName} · prioridade, estimativa…`
-                  : projects.length
-                    ? "projeto, prioridade, estimativa, equipe…"
-                    : "prioridade, estimativa, equipe…"}
-              </small>
-            )}
+            {!showDetails && <small>prioridade, estimativa, repetição…</small>}
           </button>
           {detailsMounted && (
             <div
@@ -579,35 +557,6 @@ export function TaskCreateForm({
               <section className="details-section" aria-label="Organização">
                 <h4>Organização</h4>
                 <div className="details-grid">
-                  {projects.length > 0 && (
-                    <label>
-                      Projeto
-                      <Select value={project} onValueChange={setProject}>
-                        <SelectOption value="">Sem projeto</SelectOption>
-                        {projects.map((p) => (
-                          <SelectOption key={p.id} value={p.id}>
-                            {p.name}
-                          </SelectOption>
-                        ))}
-                      </Select>
-                    </label>
-                  )}
-                  {/* A task sent to a team belongs to that team. */}
-                  {!byTeam && (
-                    <label>
-                      Equipe
-                      <Select name="team" key={contract}>
-                        <SelectOption value="">
-                          Sem equipe principal
-                        </SelectOption>
-                        {clientTeams.map(({ team: t }) => (
-                          <SelectOption key={t.id} value={t.id}>
-                            {t.name}
-                          </SelectOption>
-                        ))}
-                      </Select>
-                    </label>
-                  )}
                   <label>
                     Tarefa principal
                     <Select name="parent" key={contract}>

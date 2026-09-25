@@ -1071,6 +1071,20 @@ export function forgetTaskData(company: string): void {
   cache.invalidate("task_extras:");
 }
 
+/**
+ * Everything cached for the company, in memory and in localStorage (lists,
+ * details, comments, hours, catalogs and the companies list), so the next
+ * reads come from the database ("Atualizar" on the Tarefas page).
+ */
+export function clearCompanyCaches(company: string): void {
+  cache.invalidate(
+    (key) =>
+      key.includes(company) ||
+      key.startsWith("task_extras:") ||
+      key === "companies",
+  );
+}
+
 export function clearAllCaches(): void {
   cache.clear();
 }
