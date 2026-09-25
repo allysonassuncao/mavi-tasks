@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  Bot,
   CalendarDays,
   Check,
   ChevronDown,
@@ -74,6 +75,12 @@ import {
   type RepeatPreset,
   type View,
 } from "./calendar";
+import {
+  clientFromEvent,
+  inviteMavi,
+  maviInvite,
+  meetingLink,
+} from "./mavi-bot";
 
 type Notify = (message: string) => void;
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -221,6 +228,7 @@ export function AgendaPage({
       data={data}
       demo={demo}
       account={connection.account_email}
+      userEmail={email}
       notify={notify}
       onDisconnected={disconnected}
     />
@@ -257,6 +265,7 @@ function AgendaView({
   data,
   demo,
   account,
+  userEmail,
   notify,
   onDisconnected,
 }: {
@@ -264,6 +273,8 @@ function AgendaView({
   data: Snapshot;
   demo: boolean;
   account: string;
+  /** The signed-in person's e-mail (not the Google account's). */
+  userEmail: string;
   notify: Notify;
   onDisconnected: (reason?: string) => void;
 }) {
@@ -280,6 +291,19 @@ function AgendaView({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [maviForm, setMaviForm] = useState(false);
+  // Invites the Make's MAVI to a call (it joins, records and transcribes).
+  const addMavi = async (
+    link: string,
+    client: Snapshot["clients"][number] | null,
+  ) => {
+    if (!demo) await inviteMavi(maviInvite(userEmail, link, client));
+    notify(
+      demo
+        ? "MAVI convidada (demonstração: nada foi enviado)."
+        : "MAVI convidada: ela entra na chamada para gravar e transcrever.",
+    );
+  };
   const [tick, setTick] = useState(0);
   // The side panel: open by default on wide screens, a drawer on phones.
   const [aside, setAside] = useState(
@@ -410,14 +434,24 @@ function AgendaView({
       )}
       <aside className="agenda-side" aria-label="Agendas" hidden={!aside}>
         <Button
-          className="agenda-create"
+          className="btn primary agenda-create"
           onClick={() => {
             if (phone()) toggleAside();
             create(defaultStart(cursor));
           }}
           disabled={!writable.length}
         >
-          <Plus size={20} /> Criar
+          <Plus size={18} /> Criar
+        </Button>
+        <Button
+          className="btn secondary agenda-create agenda-mavi"
+          onClick={() => {
+            if (phone()) toggleAside();
+            setMaviForm(true);
+          }}
+          title="Convidar a MAVI para gravar e transcrever uma reunião"
+        >
+          <Bot size={18} /> Adicionar MAVI
         </Button>
         <MiniMonth
           cursor={cursor}
@@ -569,6 +603,12 @@ function AgendaView({
           event={dialog.event}
           calendar={byId.get(dialog.event.calendarId)}
           color={paint(dialog.event).color}
+          client={clientFromEvent(
+            data.clients,
+            dialog.event.title,
+            plainText(dialog.event.description ?? ""),
+          )}
+          onAddMavi={addMavi}
           onClose={() => setDialog(null)}
           onEdit={() => setDialog({ mode: "edit", event: dialog.event })}
           onDelete={async (scope) => {
@@ -592,6 +632,13 @@ function AgendaView({
               handle(err);
             }
           }}
+        />
+      )}
+      {maviForm && (
+        <MaviForm
+          clients={data.clients}
+          onInvite={addMavi}
+          onClose={() => setMaviForm(false)}
         />
       )}
       {dialog?.mode === "edit" && (
@@ -1270,6 +1317,8 @@ function EventDetails({
   event,
   calendar,
   color,
+  client,
+  onAddMavi,
   onClose,
   onEdit,
   onDelete,
@@ -1277,12 +1326,32 @@ function EventDetails({
   event: AgendaEvent;
   calendar?: AgendaCalendar;
   color: string;
+  /** The client the event is about, found in its title or description. */
+  client: Snapshot["clients"][number] | null;
+  onAddMavi: (
+    link: string,
+    client: Snapshot["clients"][number] | null,
+  ) => Promise<void>;
   onClose: () => void;
   onEdit: () => void;
   onDelete: (scope?: "this" | "following") => Promise<void>;
 }) {
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [mavi, setMavi] = useState<"idle" | "sending" | "sent">("idle");
+  const [maviError, setMaviError] = useState("");
+  async function addMavi() {
+    if (!event.meetUrl) return;
+    setMavi("sending");
+    setMaviError("");
+    try {
+      await onAddMavi(event.meetUrl, client);
+      setMavi("sent");
+    } catch (err) {
+      setMavi("idle");
+      setMaviError((err as Error).message);
+    }
+  }
   const description = plainText(event.description);
   async function remove(scope?: "this" | "following") {
     setChoosing(false);
@@ -1310,14 +1379,39 @@ function EventDetails({
           </p>
         )}
         {event.meetUrl && (
-          <a
-            className="btn primary agenda-meet"
-            href={event.meetUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Video size={16} /> Entrar com Google Meet
-          </a>
+          <div className="agenda-meet-row">
+            <div className="agenda-meet-actions">
+              <a
+                className="btn primary agenda-meet"
+                href={event.meetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Video size={16} /> Entrar com Google Meet
+              </a>
+              <Button
+                className="btn secondary"
+                onClick={() => void addMavi()}
+                loading={mavi === "sending"}
+                disabled={mavi === "sent"}
+                title="A MAVI entra na chamada como participante, grava e transcreve a reunião"
+              >
+                {mavi === "sent" ? <Check size={16} /> : <Bot size={16} />}
+                {mavi === "sent" ? "MAVI convidada" : "Adicionar MAVI"}
+              </Button>
+            </div>
+            <small className="muted">
+              {mavi === "sent"
+                ? "A MAVI entra na chamada para gravar e transcrever."
+                : "A MAVI entra na chamada, grava e transcreve a reunião."}
+              {client ? ` Cliente: ${client.name}.` : ""}
+            </small>
+            {maviError && (
+              <p className="form-error" role="alert">
+                {maviError}
+              </p>
+            )}
+          </div>
         )}
         {event.location && (
           <p>
@@ -1404,6 +1498,124 @@ function EventDetails({
 }
 
 // ------------------------------------------------------------ editor
+/**
+ * "Adicionar MAVI" from the side panel: any meeting, pasted by link, with an
+ * optional client so the recording is filed under it.
+ */
+function MaviForm({
+  clients,
+  onInvite,
+  onClose,
+}: {
+  clients: Snapshot["clients"];
+  onInvite: (
+    link: string,
+    client: Snapshot["clients"][number] | null,
+  ) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [link, setLink] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const active = clients
+    .filter((c) => !c.archived)
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  async function submit() {
+    const url = meetingLink(link);
+    if (!url) {
+      setError(
+        "Cole o link completo da reunião (ex.: https://meet.google.com/…).",
+      );
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await onInvite(url, active.find((c) => c.id === clientId) ?? null);
+      onClose();
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal
+      title="Adicionar MAVI à reunião"
+      onClose={() => !busy && onClose()}
+      busy={busy}
+    >
+      <form
+        className="entity-form agenda-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <div className="mavi-intro">
+          <span className="mavi-intro-icon" aria-hidden="true">
+            <Bot size={20} />
+          </span>
+          <p>
+            Convide a <strong>MAVI da Make</strong> para a sua chamada: ela
+            entra como participante, <strong>grava</strong> a reunião e entrega
+            a <strong>transcrição</strong>, para você focar na conversa em vez
+            de anotar.
+          </p>
+        </div>
+        <label>
+          Link da reunião
+          <Input
+            inputMode="url"
+            autoComplete="off"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            required
+            autoFocus
+            icon={Video}
+            placeholder="https://meet.google.com/abc-defg-hij"
+          />
+        </label>
+        <label>
+          Cliente (opcional)
+          <Select value={clientId} onValueChange={setClientId}>
+            <SelectOption value="">Sem cliente</SelectOption>
+            {active.map((c) => (
+              <SelectOption key={c.id} value={c.id}>
+                {c.name}
+              </SelectOption>
+            ))}
+          </Select>
+          <small className="muted">
+            Com o cliente, a gravação e a transcrição ficam ligadas a ele.
+          </small>
+        </label>
+        <small className="muted">
+          Avise os participantes de que a reunião será gravada.
+        </small>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="agenda-form-actions">
+          <Button
+            type="button"
+            className="btn secondary"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancelar
+          </Button>
+          <Button type="submit" className="btn primary" loading={busy}>
+            <Bot size={16} /> Convidar MAVI
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function EventForm({
   api,
   data,

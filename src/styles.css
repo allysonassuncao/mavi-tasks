@@ -10019,29 +10019,14 @@ label .input-control .ui-input {
 .agenda-backdrop {
   display: none;
 }
+/* "Criar" and "Adicionar MAVI": the app's own buttons, full width. */
 .agenda-create {
-  justify-self: start;
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  height: 52px;
-  padding: 0 24px 0 16px;
-  border: 0;
-  border-radius: 16px;
-  background: #fff;
-  color: #1f1f1f;
-  font-size: 0.9rem;
-  font-weight: 500;
-  box-shadow:
-    0 1px 2px #3c404333,
-    0 1px 3px 1px #3c404326;
-  cursor: pointer;
+  min-height: 42px;
+  padding-inline: 16px;
+  font-size: 0.82rem;
 }
-.agenda-create:hover:not(:disabled) {
-  background: #f6f9fe;
-  box-shadow:
-    0 1px 3px #3c404355,
-    0 4px 8px 3px #3c404326;
+.agenda-side > .agenda-create + .agenda-create {
+  margin-top: -6px;
 }
 .agenda-mini-head {
   display: flex;
@@ -10763,8 +10748,47 @@ label .input-control .ui-input {
   font-size: 0.74rem;
 }
 .agenda-meet {
-  justify-self: start;
   text-decoration: none;
+}
+.agenda-meet-row {
+  display: grid;
+  gap: 6px;
+}
+.agenda-meet-row > small {
+  font-size: 0.72rem;
+}
+.agenda-meet-row .form-error {
+  margin: 0;
+}
+.agenda-meet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mavi-intro {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid #e0e8d7;
+  border-radius: 10px;
+  background: #f5f9ef;
+}
+.mavi-intro p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #4d5b4a;
+}
+.mavi-intro-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: #c8ec8e;
+  color: #2d3e27;
 }
 .agenda-attendees {
   display: grid;
