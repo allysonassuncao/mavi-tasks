@@ -158,6 +158,15 @@ import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
 import { useTaskSeconds } from "./useTaskTime";
 import { NotificationInbox } from "./NotificationInbox";
+import { useInboxTitle } from "./inbox-title";
+import { authErrorMessage } from "./auth-errors";
+import {
+  ADMIN_PAGES,
+  MODULES,
+  canOpenPage,
+  firstPage,
+  moduleOf,
+} from "./modules";
 import { OnlineMembers, PresenceDot } from "./OnlineMembers";
 import { usePresence } from "./presence";
 import {
@@ -213,25 +222,6 @@ const TASK_ROW_MUTATIONS = new Set([
 ]);
 const TIMER_ROW_MUTATIONS = new Set(["start_timer", "stop_timer"]);
 const SELF_HANDLED_MUTATIONS = new Set(["add_comment"]);
-// Collaborators see these modules scoped to them: clients/projects they serve
-// (read-only, plus creating tasks) and only their own hours and reports.
-const MEMBER_PAGES: readonly Page[] = [
-  "tasks",
-  "agenda",
-  "search",
-  "clients",
-  "projects",
-  "hours",
-  "reports",
-  "drive",
-  "profile",
-];
-// Modules exclusive to the company's administrators (not even managers).
-const ADMIN_PAGES: readonly Page[] = ["campaigns"];
-function canOpenPage(page: Page, isAdmin: boolean, isLeader: boolean) {
-  if (ADMIN_PAGES.includes(page)) return isAdmin;
-  return isLeader || MEMBER_PAGES.includes(page);
-}
 // A UI preference, not cached data: it lives outside the "mavi:cache:" prefix
 // that logout clears, so it survives signing out.
 const SIDEBAR_KEY = "mavi:sidebar-collapsed";
@@ -409,6 +399,10 @@ export default function App() {
     isAdmin = member?.role === "admin",
     isManager = member?.role === "manager",
     isLeader = isAdmin || isManager;
+  // The profile's rules, plus the modules an administrator hid from the
+  // person (src/modules.ts).
+  const hiddenPages = member?.hidden_pages ?? [];
+  const allowed = (p: Page) => canOpenPage(p, member?.role, hiddenPages);
   // Who from the company has the app open (joined once the person's
   // membership is known).
   const presence = usePresence(member ? company : "", user, demo, data.members);
@@ -527,18 +521,15 @@ export default function App() {
   }, [authReady, demo, session, isLogin, location, needsPassword]);
   useEffect(() => {
     if (!authReady || !member || isLogin) return;
-    if (
-      page &&
-      !canOpenPage(page, isAdmin, isLeader) &&
-      !(page === "dashboards" && openDashboard)
-    ) {
-      navigate(pageUrl(isLeader ? "overview" : "tasks", companyPath), true);
+    if (page && !allowed(page) && !(page === "dashboards" && openDashboard)) {
+      navigate(pageUrl(firstPage(member.role, hiddenPages), companyPath), true);
     }
   }, [
     authReady,
     member,
     isAdmin,
     isLeader,
+    hiddenPages.join(),
     page,
     companyPath,
     isLogin,
@@ -865,6 +856,8 @@ export default function App() {
       .catch(() => {});
   }, [company, demo, session, user]);
   useEffect(loadInbox, [loadInbox]);
+  // The tab's title counts the unread notices and flags a new one.
+  useInboxTitle(inbox, !!member && (demo || !!session));
   function openNotification(n: AppNotification) {
     setSelected(n.task_id);
     if (n.read_at) return;
@@ -1183,6 +1176,7 @@ export default function App() {
           name === "delete_task_template" ||
           name === "update_my_profile" ||
           name === "update_member" ||
+          name === "set_member_pages" ||
           name === "set_my_avatar"
         ) {
           api.invalidateLookupsCache(company);
@@ -1688,7 +1682,7 @@ export default function App() {
             page={page ?? "overview"}
             params={new URLSearchParams(location.split("?")[1] ?? "")}
             isLeader={isLeader}
-            allowed={(p) => canOpenPage(p, isAdmin, isLeader)}
+            allowed={allowed}
             taskCount={stats?.total}
             products={data.products.filter(
               (p) =>
@@ -2017,14 +2011,16 @@ export default function App() {
           ) : (
             <>
               {page &&
-                !canOpenPage(page, isAdmin, isLeader) &&
+                !allowed(page) &&
                 !(page === "dashboards" && openDashboard) && (
                   <Empty
                     title="Acesso restrito"
                     body={
-                      ADMIN_PAGES.includes(page)
-                        ? "Esta área é exclusiva de administradores. Redirecionando..."
-                        : "Esta área é exclusiva de administradores e gestores. Redirecionando..."
+                      hiddenPages.includes(moduleOf(page) ?? "")
+                        ? "Este módulo não está disponível para você. Fale com um administrador se precisar dele. Redirecionando..."
+                        : ADMIN_PAGES.includes(page)
+                          ? "Esta área é exclusiva de administradores. Redirecionando..."
+                          : "Esta área é exclusiva de administradores e gestores. Redirecionando..."
                     }
                   />
                 )}
@@ -2839,7 +2835,7 @@ export default function App() {
                   notify={notify}
                 />
               )}
-              {page === "campaigns" && isAdmin && (
+              {page === "campaigns" && isLeader && (
                 <CampaignsPage
                   key={company}
                   demo={demo}
@@ -2961,6 +2957,21 @@ export default function App() {
                                 {m.email && (
                                   <span className="member-email">
                                     {m.email}
+                                  </span>
+                                )}
+                                {isAdmin && !!m.hidden_pages?.length && (
+                                  <span
+                                    className="member-email"
+                                    title={`Módulos escondidos: ${MODULES.filter(
+                                      (x) => m.hidden_pages?.includes(x.id),
+                                    )
+                                      .map((x) => x.label)
+                                      .join(", ")}`}
+                                  >
+                                    {m.hidden_pages.length}{" "}
+                                    {m.hidden_pages.length === 1
+                                      ? "módulo escondido"
+                                      : "módulos escondidos"}
                                   </span>
                                 )}
                               </div>
@@ -3592,7 +3603,8 @@ function Login({
           ? Error(DEACTIVATED)
           : error;
     } catch (e) {
-      setError((e as Error).message);
+      // Supabase answers in English: shown in Portuguese.
+      setError(authErrorMessage(e as Error));
     } finally {
       setBusy(false);
     }
@@ -3770,7 +3782,7 @@ function SetPassword({ onDone }: { onDone: () => void }) {
       if (error) throw error;
       onDone();
     } catch (e) {
-      setError((e as Error).message);
+      setError(authErrorMessage(e as Error));
     } finally {
       setBusy(false);
     }

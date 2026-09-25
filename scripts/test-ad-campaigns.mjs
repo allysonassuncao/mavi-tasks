@@ -58,8 +58,9 @@ async function check(title, fn) {
   }
 }
 
-// Tiago's team (Tráfego) serves the client, and Gabi is a manager: neither
-// is an administrator, so neither sees nor changes campaigns.
+// Tiago's team (Tráfego) serves the client, but he is a collaborator: he
+// neither sees nor changes campaigns. Gabi is a manager: since migration
+// 20261009090000_ad_campaigns_leaders she uses the module like an admin.
 await as(admin);
 const team = await rpc("create_team", [A, "Tráfego", [trafego]]);
 const client = await rpc("create_client", [A, "Vittalium", ""]);
@@ -133,13 +134,13 @@ await check(
   },
 );
 
-await check("só administradores da empresa cadastram", async () => {
+await check("só administradores e gestores da empresa cadastram", async () => {
   await campaign(admin2, { name: "Google - Lead" });
-  for (const user of [manager, trafego, outsider])
+  for (const user of [trafego, outsider])
     await assert.rejects(campaign(user), /exclusivo de administradores/);
   // Without permission, nothing is revealed about the contract.
   await assert.rejects(
-    campaign(manager, { contract: uid(999) }),
+    campaign(trafego, { contract: uid(999) }),
     /exclusivo de administradores/,
   );
   await assert.rejects(
@@ -159,10 +160,10 @@ await check("links precisam começar com http(s)", async () => {
   );
 });
 
-await check("só administradores da empresa leem", async () => {
+await check("só administradores e gestores da empresa leem", async () => {
   assert.equal((await visible(admin, "ad_campaigns")).length, 2);
   assert.equal((await visible(admin2, "ad_campaigns")).length, 2);
-  for (const user of [manager, trafego, outsider])
+  for (const user of [trafego, outsider])
     assert.equal((await visible(user, "ad_campaigns")).length, 0);
   await as(null);
   await assert.rejects(
@@ -188,7 +189,6 @@ await check("ninguém escreve direto nas tabelas", async () => {
 
 await check("ciclo novo: vínculos gravados; atual só se pedido", async () => {
   await assert.rejects(cycle(trafego, main), /Sem permissão/);
-  await assert.rejects(cycle(manager, main), /Sem permissão/);
   const first = await cycle(admin, main);
   const [row] = await sql("select * from ad_campaigns where id=$1", [main]);
   assert.equal(row.current_cycle_id, null);
@@ -213,7 +213,7 @@ await check("ciclo novo: vínculos gravados; atual só se pedido", async () => {
 });
 
 await check("ativar exige ciclo atual e motivo", async () => {
-  await as(manager);
+  await as(trafego);
   await assert.rejects(
     rpc("set_ad_campaign_current_cycle", [main, current]),
     /Sem permissão/,
@@ -328,7 +328,7 @@ await check("edição registra antes e depois, e checa a versão", async () => {
         { account_id: "act_1", campaign_id: "c2" },
       ]),
     ]);
-  await as(manager);
+  await as(trafego);
   await assert.rejects(edit(y.version, 3500), /Sem permissão/);
   await as(admin);
   await edit(y.version, 3500);
@@ -409,13 +409,20 @@ await check("plataforma não muda com mais de um ciclo", async () => {
   });
 });
 
-await check("ciclos, vínculos e histórico: só administradores", async () => {
-  const events = await visible(admin2, "ad_campaign_events");
-  assert.ok(events.some((e) => e.action === "status"));
-  for (const user of [manager, trafego, outsider])
-    for (const table of ["ad_cycles", "ad_cycle_links", "ad_campaign_events"])
-      assert.equal((await visible(user, table)).length, 0, `${user} ${table}`);
-});
+await check(
+  "ciclos, vínculos e histórico: só administradores e gestores",
+  async () => {
+    const events = await visible(admin2, "ad_campaign_events");
+    assert.ok(events.some((e) => e.action === "status"));
+    for (const user of [trafego, outsider])
+      for (const table of ["ad_cycles", "ad_cycle_links", "ad_campaign_events"])
+        assert.equal(
+          (await visible(user, table)).length,
+          0,
+          `${user} ${table}`,
+        );
+  },
+);
 
 await check("administrador desativado perde o acesso", async () => {
   await sql("update memberships set active=false where user_id=$1", [admin2]);
@@ -488,99 +495,196 @@ await check("Google: conta sem traços, MCC e nomes gravados", async () => {
 });
 
 let metaState;
-await check("só administradores iniciam uma conexão", async () => {
-  await as(manager);
-  await assert.rejects(
-    rpc("ad_begin_connect", [A, "meta"]),
-    /exclusivo de administradores/,
-  );
-  await as(outsider);
-  await assert.rejects(
-    rpc("ad_begin_connect", [A, "meta"]),
-    /exclusivo de administradores/,
-  );
-  await as(admin);
-  await assert.rejects(rpc("ad_begin_connect", [A, "tiktok"]), /inválida/);
-  metaState = await rpc("ad_begin_connect", [A, "meta"]);
-  assert.match(metaState, /^[0-9a-f]{64}$/);
-});
-
-await check("Meta: o retorno grava o token por conta de anúncio", async () => {
-  await as(null);
-  const accounts = JSON.stringify([
-    {
-      account_id: "111",
-      name: "Vittalium",
-      currency: "BRL",
-      account_status: 1,
-    },
-    { account_id: "222", name: "Outro", currency: "BRL", account_status: 2 },
-    { account_id: "act_x", name: "Inválida" },
+// Begins a Meta connection for a client (as the "Conectar o Facebook do
+// cliente" button) and finishes it as Facebook's redirect would.
+const metaLogin = async (
+  who,
+  clientId,
+  fbId,
+  fbName,
+  token,
+  accounts,
+  campaignId = null,
+) => {
+  await as(who);
+  const state = await rpc("ad_begin_connect", [
+    A,
+    "meta",
+    clientId,
+    campaignId,
   ]);
-  const args = (state) => [
-    state,
-    "fb1",
-    "Ana no Facebook",
-    cipher(10),
-    "2026-11-20T00:00:00Z",
-    accounts,
-  ];
-  await assert.rejects(
-    rpc("ad_complete_google_connect", [
-      metaState,
-      "a@x",
-      "",
-      cipher(5),
-      null,
-      null,
-    ]),
-    /Conexão expirada/,
-  );
-  assert.equal(await rpc("ad_complete_meta_connect", args(metaState)), 2);
-  await assert.rejects(
-    rpc("ad_complete_meta_connect", args(metaState)),
-    /Conexão expirada/,
-  );
-  await as(admin);
-  const list = await rows("ad_meta_account_list", [A]);
-  assert.deepEqual(
-    list.map((a) => [a.account_id, a.name, a.fb_user_name]),
-    [
-      ["222", "Outro", "Ana no Facebook"],
-      ["111", "Vittalium", "Ana no Facebook"],
-    ],
-  );
-  assert.ok(list.every((a) => !("token_cipher" in a)));
-  const [token] = await rows("ad_meta_token", [A, "111"]);
-  assert.equal(token.token_cipher, cipher(10));
-  const status = await rpc("ad_connections", [A]);
-  assert.equal(status.meta.accounts, 2);
-  assert.equal(status.google, null);
-});
-
-await check("Meta: quem conecta por último assume a conta", async () => {
-  await sql("update memberships set active=true where user_id=$1", [admin2]);
-  await as(admin2);
-  const state = await rpc("ad_begin_connect", [A, "meta"]);
   await as(null);
-  await rpc("ad_complete_meta_connect", [
+  return rpc("ad_complete_meta_connect", [
     state,
-    "fb2",
-    "Beto no Facebook",
-    cipher(20),
+    fbId,
+    fbName,
+    token,
     null,
-    JSON.stringify([{ account_id: "111", name: "Vittalium" }]),
+    JSON.stringify(accounts),
   ]);
-  const [row] = await sql(
-    "select fb_user_name,connected_by,token_cipher from mavi_private.ad_meta_accounts where company_id=$1 and account_id='111'",
-    [A],
-  );
-  assert.deepEqual(row, {
-    fb_user_name: "Beto no Facebook",
-    connected_by: admin2,
-    token_cipher: cipher(20),
-  });
-});
+};
+await check(
+  "só administradores e gestores conectam; o Meta pede o cliente",
+  async () => {
+    for (const user of [trafego, outsider]) {
+      await as(user);
+      await assert.rejects(
+        rpc("ad_begin_connect", [A, "meta", client, null]),
+        /exclusivo de administradores/,
+      );
+    }
+    await as(admin);
+    await assert.rejects(
+      rpc("ad_begin_connect", [A, "tiktok", null, null]),
+      /inválida/,
+    );
+    await assert.rejects(
+      rpc("ad_begin_connect", [A, "meta", null, null]),
+      /Escolha o cliente/,
+    );
+    metaState = await rpc("ad_begin_connect", [A, "meta", client, main]);
+    assert.match(metaState, /^[0-9a-f]{64}$/);
+  },
+);
+
+let pendingId;
+await check(
+  "Meta: as contas ficam pendentes até escolher as do cliente",
+  async () => {
+    await as(null);
+    const accounts = JSON.stringify([
+      {
+        account_id: "111",
+        name: "Vittalium",
+        currency: "BRL",
+        account_status: 1,
+      },
+      { account_id: "222", name: "Outro", currency: "BRL", account_status: 2 },
+      { account_id: "act_x", name: "Inválida" },
+    ]);
+    const args = (state) => [
+      state,
+      "fb1",
+      "Ana no Facebook",
+      cipher(10),
+      "2026-11-20T00:00:00Z",
+      accounts,
+    ];
+    await assert.rejects(
+      rpc("ad_complete_google_connect", [
+        metaState,
+        "a@x",
+        "",
+        cipher(5),
+        null,
+        null,
+      ]),
+      /Conexão expirada/,
+    );
+    const back = await rpc("ad_complete_meta_connect", args(metaState));
+    assert.equal(back.campaign, main);
+    pendingId = back.pending;
+    await assert.rejects(
+      rpc("ad_complete_meta_connect", args(metaState)),
+      /Conexão expirada/,
+    );
+    await as(admin);
+    // Nothing is the client's until chosen.
+    assert.deepEqual(await rows("ad_meta_account_list", [A]), []);
+    const pending = await rpc("ad_meta_pending", [pendingId]);
+    assert.equal(pending.client, "Vittalium");
+    assert.equal(pending.profile, "Ana no Facebook");
+    assert.deepEqual(
+      pending.accounts.map((a) => [a.account_id, a.client_id]),
+      [
+        ["222", null],
+        ["111", null],
+      ],
+    );
+    assert.ok(
+      !JSON.stringify(pending).includes(cipher(10)),
+      "no token in the chooser",
+    );
+    await as(trafego);
+    await assert.rejects(
+      rpc("ad_meta_pending", [pendingId]),
+      /exclusivo de administradores/,
+    );
+    await as(admin);
+    await assert.rejects(
+      rpc("ad_confirm_meta_accounts", [pendingId, []]),
+      /Marque ao menos uma/,
+    );
+    assert.equal(
+      await rpc("ad_confirm_meta_accounts", [pendingId, ["111", "222"]]),
+      2,
+    );
+    await assert.rejects(rpc("ad_meta_pending", [pendingId]), /expirou/);
+    const list = await rows("ad_meta_account_list", [A]);
+    assert.deepEqual(
+      list.map((a) => [a.account_id, a.client_name, a.fb_user_name]),
+      [
+        ["222", "Vittalium", "Ana no Facebook"],
+        ["111", "Vittalium", "Ana no Facebook"],
+      ],
+    );
+    const [token] = await rows("ad_meta_token", [A, "111"]);
+    assert.equal(token.token_cipher, cipher(10));
+    const status = await rpc("ad_connections", [A]);
+    assert.equal(status.meta.accounts, 2);
+    assert.equal(status.google, null);
+    // A profile that sees no account: nothing to choose.
+    assert.equal(
+      await metaLogin(admin, client, "fb0", "Vazio", cipher(3), []),
+      null,
+    );
+  },
+);
+
+await check(
+  "uma conta é de um cliente só; reconectar o cliente renova o token",
+  async () => {
+    await sql("update memberships set active=true where user_id=$1", [admin2]);
+    const other = await metaLogin(
+      admin2,
+      otherClient,
+      "fb2",
+      "Beto no Facebook",
+      cipher(20),
+      [{ account_id: "111", name: "Vittalium" }],
+    );
+    await as(admin2);
+    const offer = await rpc("ad_meta_pending", [other.pending]);
+    assert.equal(offer.accounts[0].client, "Vittalium");
+    await assert.rejects(
+      rpc("ad_confirm_meta_accounts", [other.pending, ["111"]]),
+      /A conta 111 já é do cliente Vittalium/,
+    );
+    const again = await metaLogin(
+      admin2,
+      client,
+      "fb2",
+      "Beto no Facebook",
+      cipher(20),
+      [{ account_id: "111", name: "Vittalium" }],
+    );
+    await as(admin2);
+    assert.equal(
+      await rpc("ad_confirm_meta_accounts", [again.pending, ["111"]]),
+      1,
+    );
+    const [row] = await sql(
+      "select fb_user_name,connected_by,token_cipher,client_id from mavi_private.ad_meta_accounts where company_id=$1 and account_id='111'",
+      [A],
+    );
+    assert.deepEqual(row, {
+      fb_user_name: "Beto no Facebook",
+      connected_by: admin2,
+      token_cipher: cipher(20),
+      client_id: client,
+    });
+  },
+);
 
 await check(
   "estado expirado, de outra plataforma ou de ex-admin não vale",
@@ -605,9 +709,7 @@ await check(
     await assert.rejects(complete(old), /Conexão expirada/);
     await as(admin);
     const demoted = await rpc("ad_begin_connect", [A, "google"]);
-    await sql("update memberships set role='manager' where user_id=$1", [
-      admin,
-    ]);
+    await sql("update memberships set role='member' where user_id=$1", [admin]);
     await assert.rejects(complete(demoted), /Conexão expirada/);
     await sql("update memberships set role='admin' where user_id=$1", [admin]);
   },
@@ -633,7 +735,7 @@ await check(
     await rpc("ad_google_save_access", [A, cipher(6), "2026-10-01T11:00:00Z"]);
     const status = await rpc("ad_connections", [A]);
     assert.equal(status.google.email, "agencia@make.com");
-    await as(manager);
+    await as(trafego);
     await assert.rejects(rows("ad_google_tokens", [A]), /exclusivo/);
     await assert.rejects(rpc("ad_connections", [A]), /exclusivo/);
     await as(admin);
@@ -650,6 +752,7 @@ await check("ninguém lê as conexões direto nas tabelas", async () => {
       "ad_meta_accounts",
       "ad_google_connections",
       "ad_oauth_states",
+      "ad_meta_pending",
     ])
       await assert.rejects(
         db.query(`select * from mavi_private.${table}`),
@@ -698,7 +801,7 @@ await check(
       /Sem permissão/,
     );
     await assert.rejects(targets(admin), /Sem permissão/);
-    await assert.rejects(targets(manager, [null, synced, 15]), /Sem permissão/);
+    await assert.rejects(targets(trafego, [null, synced, 15]), /Sem permissão/);
     const mine = await targets(admin, [null, synced, 15]);
     assert.deepEqual(
       mine.map((t) => t.cycle_id),
@@ -853,7 +956,7 @@ await check(
       )[0].n,
       2,
     );
-    await as(manager);
+    await as(trafego);
     await assert.rejects(
       rpc("ad_sync_store", [null, syncCycle, "manual", "ok", "", "[]", null]),
       /Sem permissão/,
@@ -861,25 +964,32 @@ await check(
   },
 );
 
-await check("números e sincronizações: só administradores leem", async () => {
-  assert.ok((await visible(admin, "ad_daily_metrics")).length >= 2);
-  assert.ok((await visible(admin, "ad_cycle_snapshots")).length >= 1);
-  for (const user of [manager, trafego, outsider])
-    for (const table of [
-      "ad_daily_metrics",
-      "ad_cycle_snapshots",
-      "ad_sync_runs",
-    ])
-      assert.equal((await visible(user, table)).length, 0, `${user} ${table}`);
-  await as(admin);
-  await assert.rejects(
-    db.query(
-      "insert into ad_daily_metrics(company_id,campaign_id,cycle_id,day,multiplier,source) values ($1,$2,$3,now(),1,'manual')",
-      [A, synced, syncCycle],
-    ),
-    /permission denied/,
-  );
-});
+await check(
+  "números e sincronizações: só administradores e gestores leem",
+  async () => {
+    assert.ok((await visible(admin, "ad_daily_metrics")).length >= 2);
+    assert.ok((await visible(admin, "ad_cycle_snapshots")).length >= 1);
+    for (const user of [trafego, outsider])
+      for (const table of [
+        "ad_daily_metrics",
+        "ad_cycle_snapshots",
+        "ad_sync_runs",
+      ])
+        assert.equal(
+          (await visible(user, table)).length,
+          0,
+          `${user} ${table}`,
+        );
+    await as(admin);
+    await assert.rejects(
+      db.query(
+        "insert into ad_daily_metrics(company_id,campaign_id,cycle_id,day,multiplier,source) values ($1,$2,$3,now(),1,'manual')",
+        [A, synced, syncCycle],
+      ),
+      /permission denied/,
+    );
+  },
+);
 
 // ------------------------------------------------------------ paged list
 const page = (who, args = {}) =>
@@ -1039,9 +1149,327 @@ await check("aguardando ativação: novas nunca ativadas, à parte", async () =>
   await sql("update ad_campaigns set legacy_id = 'x1' where id = $1", [fresh]);
 });
 
-await check("lista paginada: só administradores", async () => {
-  for (const user of [manager, trafego, outsider])
+await check("lista paginada: só administradores e gestores", async () => {
+  for (const user of [trafego, outsider])
     await assert.rejects(page(user), /exclusivo de administradores/);
 });
+
+// ------------------------------------------------------------ workspace
+await check(
+  "Meta por cliente: a lista e a remoção de um cliente só",
+  async () => {
+    const carla = await metaLogin(
+      admin,
+      otherClient,
+      "fb3",
+      "Carla no Facebook",
+      cipher(30),
+      [{ account_id: "333", name: "Conta da Carla" }],
+    );
+    await as(admin);
+    await rpc("ad_confirm_meta_accounts", [carla.pending, ["333"]]);
+    const clients = await rpc("ad_meta_clients", [A]);
+    const byName = Object.fromEntries(clients.map((c) => [c.client, c]));
+    assert.deepEqual(
+      byName["Vittalium"].accounts.map((a) => a.account_id).sort(),
+      ["111", "222"],
+    );
+    assert.deepEqual(
+      byName["Outro cliente"].accounts.map((a) => a.account_id),
+      ["333"],
+    );
+    // A client with active Meta campaigns and no connection still shows up.
+    assert.deepEqual(byName["Açaí Ltda"].accounts, []);
+    assert.ok(byName["Açaí Ltda"].campaigns >= 1);
+    assert.equal(await rpc("ad_disconnect_meta_client", [A, otherClient]), 1);
+    const after = await rows("ad_meta_account_list", [A]);
+    assert.ok(after.every((a) => a.account_id !== "333"));
+    assert.ok(after.some((a) => a.account_id === "111"));
+    await as(trafego);
+    await assert.rejects(
+      rpc("ad_meta_clients", [A]),
+      /exclusivo de administradores/,
+    );
+    await assert.rejects(
+      rpc("ad_disconnect_meta_client", [A, client]),
+      /exclusivo de administradores/,
+    );
+  },
+);
+
+await check(
+  "resumo da sincronização: devidos, sincronizados, erros e em dia",
+  async () => {
+    await as(admin);
+    const o = await rpc("ad_sync_overview", [A]);
+    assert.equal(o.configured, true);
+    assert.equal(o.job, null, "no pg_cron in the test database");
+    assert.equal(o.today, today);
+    // The synced cycle ("Sync - Meta") is due; its last run today failed.
+    assert.ok(o.due >= 1);
+    assert.ok(o.failed >= 1);
+    assert.ok(
+      o.errors.some(
+        (e) => e.campaign === "Sync - Meta" && /token expirado/.test(e.message),
+      ),
+    );
+    assert.equal(o.synced + o.failed + o.pending, o.due);
+    // Its data goes up to yesterday: up to date despite the error.
+    assert.ok(o.up_to_date >= 1);
+    assert.ok(o.last_schedule);
+    await as(trafego);
+    await assert.rejects(
+      rpc("ad_sync_overview", [A]),
+      /exclusivo de administradores/,
+    );
+  },
+);
+
+await check("comentários da campanha: tipo, ciclo atual e autor", async () => {
+  await as(admin);
+  const body = 'mavi:richtext:v1:{"type":"doc","content":[]}';
+  // Without a current cycle, the comment belongs to the campaign only.
+  const loose = await rpc("add_ad_campaign_comment", [
+    synced,
+    "information",
+    body,
+  ]);
+  assert.equal(loose.cycle_id, null);
+  await rpc("delete_ad_campaign_comment", [loose.id]);
+  await rpc("set_ad_campaign_current_cycle", [synced, syncCycle]);
+  const c = await rpc("add_ad_campaign_comment", [
+    synced,
+    "optimization",
+    body,
+  ]);
+  assert.equal(c.cycle_id, syncCycle);
+  assert.equal(c.author_id, admin);
+  await assert.rejects(
+    rpc("add_ad_campaign_comment", [synced, "outro", body]),
+    /o que você realizou/,
+  );
+  await assert.rejects(
+    rpc("add_ad_campaign_comment", [synced, "information", "  "]),
+    /Escreva/,
+  );
+  await as(trafego);
+  await assert.rejects(
+    rpc("add_ad_campaign_comment", [synced, "information", body]),
+    /Sem permissão/,
+  );
+  assert.equal((await visible(trafego, "ad_campaign_comments")).length, 0);
+  assert.equal((await visible(admin2, "ad_campaign_comments")).length, 1);
+  // Only the author removes it.
+  await as(admin2);
+  await assert.rejects(
+    rpc("delete_ad_campaign_comment", [c.id]),
+    /Só quem escreveu/,
+  );
+  await as(admin);
+  await rpc("delete_ad_campaign_comment", [c.id]);
+  assert.equal((await visible(admin, "ad_campaign_comments")).length, 0);
+});
+
+// ------------------------------------------------------------ edits
+await check(
+  "editar um dia: métricas e M, vira manual e fica no histórico",
+  async () => {
+    const day = shift(-1);
+    await as(trafego);
+    await assert.rejects(
+      rpc("update_ad_daily_metric", [syncCycle, day, '{"spend":1}']),
+      /Sem permissão/,
+    );
+    await as(admin);
+    for (const [values, error] of [
+      [{ clicks: 1.5 }, /Cliques é um número inteiro/],
+      [{ spend: -1 }, /Investimento não pode ser negativo/],
+      [{ conversions: "10" }, /Informe um número em Conversões/],
+      [{ multiplier: 0 }, /O M deve ser maior que 0/],
+      [{ spend: 1e12 }, /grande demais/],
+    ])
+      await assert.rejects(
+        rpc("update_ad_daily_metric", [syncCycle, day, JSON.stringify(values)]),
+        error,
+      );
+    await assert.rejects(
+      rpc("update_ad_daily_metric", [syncCycle, shift(-9), "{}"]),
+      /Sem permissão/,
+      "a day without a record",
+    );
+    await rpc("update_ad_daily_metric", [
+      syncCycle,
+      day,
+      JSON.stringify({ spend: 80.456, conversions: 4, multiplier: 3 }),
+    ]);
+    const [row] = await sql(
+      "select spend::float, conversions::float, multiplier::float, source from ad_daily_metrics where cycle_id=$1 and day=$2",
+      [syncCycle, day],
+    );
+    assert.deepEqual(row, {
+      spend: 80.46,
+      conversions: 4,
+      multiplier: 3,
+      source: "manual",
+    });
+    const events = async () =>
+      sql(
+        "select action, detail from ad_campaign_events where cycle_id=$1 and action like '%_edited' order by id",
+        [syncCycle],
+      );
+    const [e] = await events();
+    assert.equal(e.action, "daily_edited");
+    assert.equal(e.detail.day, day);
+    assert.deepEqual(Object.keys(e.detail.changes).sort(), [
+      "conversions",
+      "multiplier",
+      "spend",
+    ]);
+    assert.deepEqual(e.detail.changes.spend, { from: 65, to: 80.46 });
+    // Saving the same values changes nothing and logs nothing.
+    await rpc("update_ad_daily_metric", [
+      syncCycle,
+      day,
+      JSON.stringify({ spend: 80.46 }),
+    ]);
+    assert.equal((await events()).length, 1);
+  },
+);
+
+await check(
+  "editar um acumulado: período, métricas e Bom/Ruim; a sincronização o preserva",
+  async () => {
+    const [{ id }] = await sql(
+      "select id from ad_cycle_snapshots where cycle_id=$1",
+      [syncCycle],
+    );
+    await as(trafego);
+    await assert.rejects(
+      rpc("update_ad_cycle_snapshot", [id, '{"conversions":1}']),
+      /Sem permissão/,
+    );
+    await as(admin);
+    await assert.rejects(
+      rpc("update_ad_cycle_snapshot", [
+        id,
+        JSON.stringify({ period_end: shift(-11) }),
+      ]),
+      /A data final vai de/,
+    );
+    await assert.rejects(
+      rpc("update_ad_cycle_snapshot", [id, '{"goal_status":"ótimo"}']),
+      /Status inválido/,
+    );
+    // CPA 900/100 = 9 ≤ 12: by the goal it is Bom.
+    await rpc("update_ad_cycle_snapshot", [
+      id,
+      JSON.stringify({
+        conversions: 100,
+        period_end: shift(-2),
+        goal_status: "auto",
+      }),
+    ]);
+    const snap = async () =>
+      (
+        await sql(
+          "select conversions::float, period_end::text, goal_status, source from ad_cycle_snapshots where id=$1",
+          [id],
+        )
+      )[0];
+    assert.deepEqual(await snap(), {
+      conversions: 100,
+      period_end: shift(-2),
+      goal_status: "good",
+      source: "manual",
+    });
+    await rpc("update_ad_cycle_snapshot", [id, '{"goal_status":"bad"}']);
+    assert.equal((await snap()).goal_status, "bad");
+    const [e] = await sql(
+      "select detail from ad_campaign_events where cycle_id=$1 and action='snapshot_edited' order by id limit 1",
+      [syncCycle],
+    );
+    assert.deepEqual(Object.keys(e.detail.changes).sort(), [
+      "conversions",
+      "goal_status",
+      "period_end",
+    ]);
+    // The sync of today keeps the edited snapshot and the edited day.
+    await rpc("ad_sync_store", [
+      null,
+      syncCycle,
+      "manual",
+      "ok",
+      "",
+      JSON.stringify([{ day: shift(-1), spend: 1, conversions: 1 }]),
+      JSON.stringify({ period_end: shift(-1), spend: 5, conversions: 1 }),
+    ]);
+    assert.deepEqual(await snap(), {
+      conversions: 100,
+      period_end: shift(-2),
+      goal_status: "bad",
+      source: "manual",
+    });
+    const [day] = await sql(
+      "select spend::float from ad_daily_metrics where cycle_id=$1 and day=$2",
+      [syncCycle, shift(-1)],
+    );
+    assert.equal(day.spend, 80.46);
+  },
+);
+
+// ------------------------------------------------------------ managers
+await check(
+  "gestores usam o módulo como administradores; colaboradores não",
+  async () => {
+    // Reads the list, the numbers and the sync, like an administrator.
+    assert.ok((await visible(manager, "ad_campaigns")).length > 0);
+    assert.ok((await visible(manager, "ad_daily_metrics")).length > 0);
+    assert.ok((await page(manager)).total >= 1);
+    await as(manager);
+    assert.ok((await rpc("ad_sync_overview", [A])).due >= 0);
+    assert.ok((await targets(manager, [null, synced, 15])).length >= 1);
+    // Creates a campaign and its cycle, and edits a day.
+    const id = await campaign(manager, { name: "Gestora - Meta" });
+    await cycle(manager, id, {
+      start: "2026-01-01",
+      end: "2026-01-31",
+      current: true,
+      links: [{ account_id: "act_9", campaign_id: "c-gabi" }],
+    });
+    await as(manager);
+    await rpc("update_ad_daily_metric", [
+      syncCycle,
+      shift(-1),
+      JSON.stringify({ spend: 81 }),
+    ]);
+    // Connects a client's Facebook, all the way back from the redirect.
+    const done = await metaLogin(
+      manager,
+      client,
+      "fb-gabi",
+      "Gabi",
+      cipher(12),
+      [{ account_id: "777", name: "Conta da Gabi" }],
+    );
+    assert.ok(done.pending);
+    await as(manager);
+    assert.equal(
+      await rpc("ad_confirm_meta_accounts", [done.pending, ["777"]]),
+      1,
+    );
+    // A manager turned collaborator loses it all.
+    await sql("update memberships set role='member' where user_id=$1", [
+      manager,
+    ]);
+    assert.equal((await visible(manager, "ad_campaigns")).length, 0);
+    await assert.rejects(
+      page(manager),
+      /exclusivo de administradores e gestores/,
+    );
+    await sql("update memberships set role='manager' where user_id=$1", [
+      manager,
+    ]);
+  },
+);
 
 console.log(`\n${passed} verificações de campanhas passaram.`);

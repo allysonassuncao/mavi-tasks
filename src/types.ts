@@ -23,6 +23,8 @@ export interface Member {
   active: boolean;
   /** Profile photo (public URL); initials are shown when absent. */
   avatar_url?: string | null;
+  /** Modules an administrator hid from the person (src/modules.ts). */
+  hidden_pages?: string[];
 }
 export interface Client {
   id: string;
@@ -37,6 +39,11 @@ export interface Product {
   company_id: string;
   name: string;
   color: string;
+  /**
+   * Whether creating a task in this product shows the "Projeto" field (when
+   * the contracted product has projects). Leaders choose; on by default.
+   */
+  task_project_field?: boolean;
 }
 export interface Contract {
   id: string;

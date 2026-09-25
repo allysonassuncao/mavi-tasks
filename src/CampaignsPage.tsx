@@ -11,10 +11,8 @@ import {
   CalendarClock,
   CirclePause,
   CirclePlay,
-  ExternalLink,
   History,
   Link2,
-  Megaphone,
   Pencil,
   Plug,
   Plus,
@@ -75,7 +73,13 @@ import {
   type CycleInput,
 } from "./campaigns";
 import { demoCampaigns } from "./campaigns-demo";
-import { AdConnections, CycleLinks, accountLabel } from "./CampaignLinks";
+import {
+  AdConnections,
+  ClientMetaConnection,
+  CycleLinks,
+  MetaAccountChooser,
+  accountLabel,
+} from "./CampaignLinks";
 import { CampaignDayToDay } from "./CampaignDayToDay";
 
 type Props = {
@@ -99,7 +103,7 @@ const emptyData: CampaignData = { campaigns: [], cycles: [] };
 
 /**
  * Campanhas: cadastro de campanhas (por produto contratado) e de seus ciclos.
- * Módulo exclusivo de administradores (App só o abre para eles, e o banco
+ * Módulo de administradores e gestores (App só o abre para eles, e o banco
  * repete a regra).
  * A troca do ciclo atual é sempre manual; a tela só aponta quando o ciclo
  * atual terminou ou quando o próximo investimento precisa entrar.
@@ -132,10 +136,16 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
   const [eventsTick, setEventsTick] = useState(0);
   // Back from Facebook or Google (api/ads-callback): say how it went.
   const [connection, setConnection] = useUrlState<string>("conexao", "");
+  // A Facebook login waiting for the client's accounts to be ticked.
+  const [pending, setPending] = useUrlState<string>("pendente", "");
+  // Bumped when a connection changed: whoever shows accounts reads again.
+  const [connectionTick, setConnectionTick] = useState(0);
   useEffect(() => {
     if (!connection) return;
-    notify(connectionResult(connection));
     setConnection("");
+    // The chooser (pendente) says the rest.
+    if (connection === "meta-escolher") return;
+    notify(connectionResult(connection));
     setConnections(true);
   }, [connection, setConnection, notify]);
 
@@ -188,6 +198,8 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           today={today}
           eventsTick={eventsTick}
           notify={notify}
+          connectionTick={connectionTick}
+          onPending={setPending}
           onBack={() => {
             setTab("");
             setViewedCycle("");
@@ -261,6 +273,11 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           today={today}
           company={company}
           ads={backend.ads}
+          client={
+            contractParts(data, cycleForm.campaign.contract_id).client ?? null
+          }
+          connectionTick={connectionTick}
+          onPending={setPending}
           onClose={() => setCycleForm(null)}
           onSave={async (input, makeCurrent) => {
             if (cycleForm.cycle) {
@@ -285,6 +302,25 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           ads={backend.ads}
           onClose={() => setConnections(false)}
           notify={notify}
+          onOpenCampaign={(id) => {
+            setConnections(false);
+            setSelected(id);
+          }}
+          onPending={setPending}
+          refresh={connectionTick}
+        />
+      )}
+      {pending && (
+        <MetaAccountChooser
+          key={pending}
+          ads={backend.ads}
+          pending={pending}
+          onClose={() => setPending("")}
+          onDone={(message) => {
+            setPending("");
+            setConnectionTick((t) => t + 1);
+            notify(message);
+          }}
         />
       )}
       {statusForm && (
@@ -707,6 +743,8 @@ function CampaignDetail({
   today,
   eventsTick,
   notify,
+  connectionTick,
+  onPending,
   onBack,
   onEdit,
   onStatus,
@@ -722,6 +760,8 @@ function CampaignDetail({
   today: string;
   eventsTick: number;
   notify: (message: string) => void;
+  connectionTick: number;
+  onPending: (id: string) => void;
   onBack: () => void;
   onEdit: () => void;
   onStatus: (to: AdCampaignStatus) => void;
@@ -734,6 +774,8 @@ function CampaignDetail({
   const current = currentCycle(state, campaign);
   const alert = cycleAlert(state, campaign, today);
   const [events, setEvents] = useState<AdCampaignEvent[] | null>(null);
+  // Editing a record of the Linha do tempo adds to the history.
+  const [editsTick, setEditsTick] = useState(0);
   useEffect(() => {
     let live = true;
     backend
@@ -743,7 +785,7 @@ function CampaignDetail({
     return () => {
       live = false;
     };
-  }, [backend, company, campaign.id, eventsTick]);
+  }, [backend, company, campaign.id, eventsTick, editsTick]);
   const suggestion =
     alert.kind === "ended" ||
     alert.kind === "ends_today" ||
@@ -753,140 +795,112 @@ function CampaignDetail({
         ? alert.suggestion
         : null;
 
+  const actions = (
+    <>
+      <Button className="btn secondary" onClick={onEdit}>
+        <Pencil size={15} /> Editar
+      </Button>
+      {campaign.status === "active" ? (
+        <Button className="btn secondary" onClick={() => onStatus("inactive")}>
+          <CirclePause size={15} /> Inativar
+        </Button>
+      ) : (
+        <Button
+          className="btn primary"
+          onClick={() => onStatus("active")}
+          disabled={!current}
+          title={current ? undefined : "Defina o ciclo atual antes de ativar"}
+        >
+          <CirclePlay size={15} /> Ativar
+        </Button>
+      )}
+    </>
+  );
+  const banner =
+    alert.kind !== "none" ? (
+      <div
+        className={`campaign-alert ${alert.kind === "ended" ? "danger" : "warn"}`}
+        role="status"
+      >
+        <CalendarClock size={18} />
+        <span>
+          {alert.kind === "no_cycle" &&
+            "Esta campanha ainda não tem ciclo. Cadastre o primeiro para registrar a verba e a meta."}
+          {alert.kind === "no_current" &&
+            "Nenhum ciclo está marcado como atual. Escolha qual ciclo está valendo."}
+          {alert.kind === "ended" &&
+            `O ciclo atual terminou em ${shortDate(current!.end_date)} e não foi trocado. A troca é manual: ${
+              suggestion
+                ? "defina o próximo ciclo como atual."
+                : "cadastre o próximo ciclo."
+            }`}
+          {alert.kind === "ends_today" &&
+            (suggestion
+              ? "O ciclo atual termina hoje. O próximo já está cadastrado; troque quando ele começar."
+              : "O ciclo atual termina hoje e não há próximo ciclo cadastrado.")}
+          {alert.kind === "ending" &&
+            `O ciclo atual termina em ${alert.days} ${alert.days === 1 ? "dia" : "dias"} e não há próximo ciclo: é hora de cobrar o próximo investimento.`}
+        </span>
+        <span className="campaign-alert-actions">
+          {suggestion && suggestion.id !== current?.id && (
+            <Button
+              className="btn secondary"
+              onClick={() => onMakeCurrent(suggestion)}
+            >
+              <Star size={15} /> Tornar atual:{" "}
+              {shortDate(suggestion.start_date)} a{" "}
+              {shortDate(suggestion.end_date)}
+            </Button>
+          )}
+          {!suggestion && (
+            <Button className="btn primary" onClick={onNewCycle}>
+              <Plus size={15} /> Cadastrar{" "}
+              {cycles.length ? "próximo" : "primeiro"} ciclo
+            </Button>
+          )}
+        </span>
+      </div>
+    ) : null;
+
   return (
     <div className="campaign-detail">
       <Button className="text-btn campaign-back" onClick={onBack}>
         <ArrowLeft size={16} /> Todas as campanhas
       </Button>
-      <section className="panel campaign-head">
-        <div>
-          <span className="campaign-eyebrow">
-            <Megaphone size={14} /> {parts.client?.name} · {parts.product?.name}
-            {parts.detail && ` (${parts.detail})`}
-          </span>
-          <h2>{campaign.name}</h2>
-          <div className="campaign-tags">
-            <PlatformLabel platform={campaign.platform} />
-            <StatusChip status={campaign.status} />
-          </div>
-          <dl className="campaign-facts">
-            {campaign.briefing_url && (
-              <div>
-                <dt>Briefing</dt>
-                <dd>
-                  <a
-                    href={campaign.briefing_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Abrir <ExternalLink size={12} />
-                  </a>
-                </dd>
-              </div>
-            )}
-            {campaign.media_plan_url && (
-              <div>
-                <dt>Plano de mídia</dt>
-                <dd>
-                  <a
-                    href={campaign.media_plan_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Abrir <ExternalLink size={12} />
-                  </a>
-                </dd>
-              </div>
-            )}
-            {campaign.notes && (
-              <div className="wide">
-                <dt>Observações</dt>
-                <dd className="campaign-notes">{campaign.notes}</dd>
-              </div>
-            )}
-          </dl>
-        </div>
-        <div className="campaign-actions">
-          <Button className="btn secondary" onClick={onEdit}>
-            <Pencil size={15} /> Editar
-          </Button>
-          {campaign.status === "active" ? (
-            <Button
-              className="btn secondary"
-              onClick={() => onStatus("inactive")}
-            >
-              <CirclePause size={15} /> Inativar
-            </Button>
-          ) : (
-            <Button
-              className="btn primary"
-              onClick={() => onStatus("active")}
-              disabled={!current}
-              title={
-                current ? undefined : "Defina o ciclo atual antes de ativar"
-              }
-            >
-              <CirclePlay size={15} /> Ativar
-            </Button>
-          )}
-        </div>
-      </section>
-
-      {alert.kind !== "none" && (
-        <div
-          className={`campaign-alert ${alert.kind === "ended" ? "danger" : "warn"}`}
-          role="status"
-        >
-          <CalendarClock size={18} />
-          <span>
-            {alert.kind === "no_cycle" &&
-              "Esta campanha ainda não tem ciclo. Cadastre o primeiro para registrar a verba e a meta."}
-            {alert.kind === "no_current" &&
-              "Nenhum ciclo está marcado como atual. Escolha qual ciclo está valendo."}
-            {alert.kind === "ended" &&
-              `O ciclo atual terminou em ${shortDate(current!.end_date)} e não foi trocado. A troca é manual: ${
-                suggestion
-                  ? "defina o próximo ciclo como atual."
-                  : "cadastre o próximo ciclo."
-              }`}
-            {alert.kind === "ends_today" &&
-              (suggestion
-                ? "O ciclo atual termina hoje. O próximo já está cadastrado; troque quando ele começar."
-                : "O ciclo atual termina hoje e não há próximo ciclo cadastrado.")}
-            {alert.kind === "ending" &&
-              `O ciclo atual termina em ${alert.days} ${alert.days === 1 ? "dia" : "dias"} e não há próximo ciclo: é hora de cobrar o próximo investimento.`}
-          </span>
-          <span className="campaign-alert-actions">
-            {suggestion && suggestion.id !== current?.id && (
-              <Button
-                className="btn secondary"
-                onClick={() => onMakeCurrent(suggestion)}
-              >
-                <Star size={15} /> Tornar atual:{" "}
-                {shortDate(suggestion.start_date)} a{" "}
-                {shortDate(suggestion.end_date)}
-              </Button>
-            )}
-            {!suggestion && (
-              <Button className="btn primary" onClick={onNewCycle}>
-                <Plus size={15} /> Cadastrar{" "}
-                {cycles.length ? "próximo" : "primeiro"} ciclo
-              </Button>
-            )}
-          </span>
-        </div>
-      )}
-
       <CampaignDayToDay
         campaign={campaign}
         cycles={cycles}
         current={current}
         company={company}
+        data={data}
+        tags={
+          <>
+            <PlatformLabel platform={campaign.platform} />
+            <StatusChip status={campaign.status} />
+          </>
+        }
+        actions={actions}
+        banner={banner}
+        connection={
+          campaign.platform === "meta" &&
+          parts.client && (
+            <ClientMetaConnection
+              ads={backend.ads}
+              company={company}
+              client={parts.client}
+              campaign={campaign.id}
+              refresh={connectionTick}
+              onPending={onPending}
+              notify={notify}
+            />
+          )
+        }
         metricsBackend={backend.metrics}
         today={today}
         events={events}
         describeEvent={(e) => describeEvent(e, state)}
         notify={notify}
+        onRecordEdited={() => setEditsTick((t) => t + 1)}
         cyclesTab={
           <>
             <section className="panel">
@@ -1120,9 +1134,42 @@ function describeEvent(e: AdCampaignEvent, state: CampaignData) {
         .join("; ");
       return `${e.action === "updated" ? "alterou a campanha" : `alterou o ciclo de ${period(e.cycle_id)}`}${changes ? ` — ${changes}` : ""}.`;
     }
+    case "daily_edited":
+    case "snapshot_edited": {
+      const changes = Object.entries(
+        (d.changes ?? {}) as Record<string, { from: unknown; to: unknown }>,
+      )
+        .map(
+          ([f, c]) =>
+            `${recordLabels[f] ?? f}: ${showRecord(f, c.from)} → ${showRecord(f, c.to)}`,
+        )
+        .join("; ");
+      return `editou o registro ${e.action === "daily_edited" ? `diário de ${shortDate(String(d.day))}` : `de ${shortDate(String(d.taken_on))}`}${changes ? ` — ${changes}` : ""}.`;
+    }
     default:
       return e.action;
   }
+}
+const recordLabels: Record<string, string> = {
+  multiplier: "M",
+  spend: "investimento (sem M)",
+  impressions: "impressões",
+  reach: "alcance",
+  clicks: "cliques",
+  conversions: "conversões",
+  view_content: "vis. produto",
+  add_to_cart: "add. carrinho",
+  initiate_checkout: "fin. compra",
+  period_end: "data final",
+  goal_status: "status",
+};
+function showRecord(field: string, value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (field === "spend") return money(Number(value));
+  if (field === "period_end") return shortDate(String(value));
+  if (field === "goal_status")
+    return value === "good" ? "Bom" : value === "bad" ? "Ruim" : String(value);
+  return Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
 }
 
 /** A link as people read it: the campaign's name, or the account's. */
@@ -1158,19 +1205,13 @@ function CampaignForm({
   const [platform, setPlatform] = useState<AdPlatform>(
     campaign?.platform ?? "meta",
   );
-  const [briefing, setBriefing] = useState(campaign?.briefing_url ?? "");
-  const [plan, setPlan] = useState(campaign?.media_plan_url ?? "");
-  const [notes, setNotes] = useState(campaign?.notes ?? "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const url = (v: string) => !v.trim() || /^https?:\/\//i.test(v.trim());
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
     if (!contract) return setError("Escolha o cliente e o produto contratado.");
     if (name.trim().length < 2) return setError("Dê um nome à campanha.");
-    if (!url(briefing) || !url(plan))
-      return setError("Os links precisam começar com http:// ou https://.");
     setError("");
     setSaving(true);
     try {
@@ -1178,9 +1219,10 @@ function CampaignForm({
         contract_id: contract,
         name: name.trim(),
         platform,
-        briefing_url: briefing.trim(),
-        media_plan_url: plan.trim(),
-        notes,
+        // No longer in the form: what a campaign had (the MASO's links) stays.
+        briefing_url: campaign?.briefing_url ?? "",
+        media_plan_url: campaign?.media_plan_url ?? "",
+        notes: campaign?.notes ?? "",
       });
     } catch (err) {
       setError((err as Error).message);
@@ -1239,35 +1281,6 @@ function CampaignForm({
               </small>
             )}
           </label>
-          <div className="form-columns">
-            <label>
-              Link do briefing
-              <Input
-                type="url"
-                value={briefing}
-                onChange={(e) => setBriefing(e.target.value)}
-                placeholder="https://"
-              />
-            </label>
-            <label>
-              Link do plano de mídia
-              <Input
-                type="url"
-                value={plan}
-                onChange={(e) => setPlan(e.target.value)}
-                placeholder="https://"
-              />
-            </label>
-          </div>
-          <label>
-            Observações
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              maxLength={4000}
-              rows={3}
-            />
-          </label>
           {!campaign && (
             <small>
               A campanha nasce inativa. Depois dela você cadastra o ciclo
@@ -1302,6 +1315,9 @@ function CycleForm({
   today,
   company,
   ads,
+  client,
+  connectionTick,
+  onPending,
   onClose,
   onSave,
 }: {
@@ -1312,6 +1328,9 @@ function CycleForm({
   today: string;
   company: string;
   ads: CampaignsBackend["ads"];
+  client: { id: string; name: string } | null;
+  connectionTick: number;
+  onPending: (id: string) => void;
   onClose: () => void;
   onSave: (input: CycleInput, makeCurrent: boolean) => Promise<void>;
 }) {
@@ -1507,6 +1526,10 @@ function CycleForm({
             platform={campaign.platform}
             company={company}
             ads={ads}
+            client={client}
+            campaign={campaign.id}
+            refresh={connectionTick}
+            onPending={onPending}
             links={draft.links}
             onChange={(links) => set("links", links)}
           />

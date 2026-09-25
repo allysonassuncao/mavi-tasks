@@ -20,7 +20,7 @@ import {
  *  - the cycle-to-date totals up to yesterday (a snapshot: reach and
  *    frequency are only right at that level).
  * The database calls POST /api/ads-sync with ADS_SYNC_SECRET on a schedule
- * (pg_cron, like the push notifications); an administrator can also sync a
+ * (pg_cron, like the push notifications); an admin or manager can also sync a
  * campaign now, with their session.
  */
 
@@ -476,7 +476,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
  * POST /api/ads-sync. With the schedule's secret: the next cycles not synced
  * today, in batches, while time allows (the schedule calls again). With an
- * administrator's session and { campaign }: that campaign's cycles, now.
+ * admin's or manager's session and { campaign }: that campaign's cycles, now.
  */
 export async function handleAdsSync(
   body: unknown,

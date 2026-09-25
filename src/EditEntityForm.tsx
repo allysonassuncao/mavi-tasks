@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Save } from "lucide-react";
 import { Modal } from "./components";
-import { Input, Select, SelectOption, Button } from "./ui";
+import { Input, Select, SelectOption, Button, Checkbox } from "./ui";
 import type { Client, Contract, Product, Project, Snapshot } from "./types";
 import { ContractPicker } from "./ContractPicker";
 import { TeamPicker } from "./TeamPicker";
@@ -42,6 +42,9 @@ export function EditEntityForm({
   const [color, setColor] = useState(
     edit.kind === "product" ? edit.entity.color : "",
   );
+  const [projectField, setProjectField] = useState(
+    edit.kind === "product" ? edit.entity.task_project_field !== false : true,
+  );
   const [clientTeams, setClientTeams] = useState(() =>
     edit.kind === "client"
       ? data.clientTeams
@@ -72,6 +75,12 @@ export function EditEntityForm({
     // the color parameter (migration 20260929140000).
     if (edit.kind === "product" && color !== edit.entity.color)
       args.p_color = color;
+    // Also only when changed (migration 20261008090000).
+    if (
+      edit.kind === "product" &&
+      projectField !== (edit.entity.task_project_field !== false)
+    )
+      args.p_task_project_field = projectField;
     if (edit.kind === "project") {
       args.p_due = f.get("due") || null;
       args.p_contract = f.get("contract");
@@ -143,6 +152,18 @@ export function EditEntityForm({
             <small className="color-field-preview">
               <span className="product-dot" style={{ background: color }} />É a
               cor que identifica o produto nas listas, no Drive e nos clientes.
+            </small>
+            <label className="checkbox-label">
+              <Checkbox
+                checked={projectField}
+                onCheckedChange={(v) => setProjectField(v === true)}
+              />
+              Exibir o campo Projeto ao criar tarefas
+            </label>
+            <small>
+              {projectField
+                ? "Ao criar uma tarefa deste produto, o campo Projeto aparece quando o cliente tem projetos nele."
+                : "Ao criar uma tarefa deste produto, o campo Projeto não aparece: as tarefas ficam avulsas."}
             </small>
           </>
         )}

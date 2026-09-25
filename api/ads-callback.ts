@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { adsEnv, handleAdsCallback } from "./_ads.js";
 
-/** Facebook's or Google's redirect after an administrator connects them. */
+/** Facebook's or Google's redirect after an admin or manager connects them. */
 export default async function handler(
   req: IncomingMessage,
   res: ServerResponse,

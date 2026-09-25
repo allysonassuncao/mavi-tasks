@@ -25,7 +25,13 @@ import {
   priorities,
   recurrenceFrequencies,
 } from "./types";
-import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
+import {
+  canCreateTaskIn,
+  dateKey,
+  dateLabel,
+  nextRecurrence,
+  showsProjectField,
+} from "./domain";
 import {
   attachmentAccept,
   validateAttachment,
@@ -157,10 +163,13 @@ export function TaskCreateForm({
         }),
     [data, contractClient],
   );
-  // The product's projects (optional, under "Adicionar detalhes").
-  const projects = data.projects.filter(
-    (p) => p.contract_id === contract && (!p.archived || p.id === project),
-  );
+  // The product's projects (optional, under "Adicionar detalhes"), when the
+  // product shows the "Projeto" field (a choice of each product).
+  const projects = showsProjectField(data, contract)
+    ? data.projects.filter(
+        (p) => p.contract_id === contract && (!p.archived || p.id === project),
+      )
+    : [];
   const projectName = projects.find((p) => p.id === project)?.name;
   const byTeam = assignMode === "team";
   // A team chosen for another client no longer applies.

@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { Modal } from "./components";
 import { Button, Checkbox, Input, Select, SelectOption } from "./ui";
 import type { Member, Role, Snapshot } from "./types";
+import { ADMIN_PAGES, MODULES, roleAllows } from "./modules";
 
 const roles: { id: Role; label: string }[] = [
   { id: "member", label: "Colaborador — Execução de tarefas e apontamentos" },
@@ -13,7 +14,8 @@ const roles: { id: Role; label: string }[] = [
 /**
  * Admins and managers edit a person's name, access profile, teams and status.
  * Mirrors update_member: managers cannot touch admins or grant admin, and
- * nobody changes their own profile or deactivates themselves.
+ * nobody changes their own profile or deactivates themselves. Admins also
+ * pick the modules the person sees (set_member_pages).
  */
 export function MemberForm({
   member,
@@ -46,6 +48,8 @@ export function MemberForm({
       .filter((tm) => tm.user_id === member.user_id)
       .map((tm) => tm.team_id),
   );
+  // Modules an administrator hid from the person (src/modules.ts).
+  const [hidden, setHidden] = useState<string[]>(member.hidden_pages ?? []);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   // Survives a failed sync, when `member` already reflects the saved status.
@@ -70,6 +74,13 @@ export function MemberForm({
         p_active: active,
         p_teams: teams,
       });
+      const before = [...(member.hidden_pages ?? [])].sort().join();
+      if (callerIsAdmin && [...hidden].sort().join() !== before)
+        await mutate("set_member_pages", {
+          p_company: company,
+          p_user: member.user_id,
+          p_hidden: hidden,
+        });
       if (needsSync.current && syncAccess) {
         try {
           await syncAccess(member.user_id);
@@ -154,6 +165,56 @@ export function MemberForm({
                     {t.name}
                   </label>
                 ))}
+              </div>
+            </fieldset>
+          )}
+          {callerIsAdmin && (
+            <fieldset className="member-teams member-modules">
+              <legend>Módulos visíveis</legend>
+              <small>
+                Os módulos do menu que {name.trim() || member.name} vê. O perfil
+                de acesso continua valendo: o que ele não permite fica de fora.
+                Meu perfil e Equipe e configurações seguem só o perfil.
+              </small>
+              <div className="team-picker-list">
+                {MODULES.map((m) => {
+                  const byRole = roleAllows(m.id, role);
+                  return (
+                    <label
+                      className="checkbox-label"
+                      key={m.id}
+                      title={
+                        byRole
+                          ? undefined
+                          : ADMIN_PAGES.includes(m.id)
+                            ? "Só administradores veem este módulo"
+                            : "Só gestores e administradores veem este módulo"
+                      }
+                    >
+                      <Checkbox
+                        checked={byRole && !hidden.includes(m.id)}
+                        disabled={!byRole}
+                        onCheckedChange={(on) =>
+                          setHidden((list) =>
+                            on === true
+                              ? list.filter((id) => id !== m.id)
+                              : [...new Set([...list, m.id])],
+                          )
+                        }
+                      />
+                      <span>
+                        {m.label}
+                        {!byRole && (
+                          <small className="member-module-note">
+                            {ADMIN_PAGES.includes(m.id)
+                              ? "só administradores"
+                              : "gestores e administradores"}
+                          </small>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </fieldset>
           )}

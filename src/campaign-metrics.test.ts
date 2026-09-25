@@ -7,6 +7,7 @@ import {
   diverges,
   emptyTotals,
   grade,
+  historicalGoal,
   liveDeltas,
   sumDays,
   type CampaignMetrics,
@@ -176,5 +177,28 @@ describe("dia a dia e LIVE", () => {
   });
   it("soma os dias", () => {
     expect(sumDays([day("a", 10), day("b", 5.5)]).spend).toBe(15.5);
+  });
+});
+
+describe("meta com base histórica", () => {
+  const rated = (n: number, status: "good" | "bad", cost: number) =>
+    Array.from({ length: n }, (_, i) =>
+      snapshot(`2026-08-${String(i + 1).padStart(2, "0")}`, {
+        spend: cost * 10,
+        conversions: 10,
+        goal_status: status,
+      }),
+    );
+  it("precisa de 15 análises e de uma meta acima do histórico", () => {
+    // Goal cost: 1200 ÷ 100 = 12. History: Bom at 10, Ruim at 30 → 20.
+    const history = [...rated(10, "good", 10), ...rated(6, "bad", 30)];
+    expect(historicalGoal(history, cycle)).toEqual({
+      analyses: 16,
+      cost: 20,
+      quantity: 60,
+    });
+    expect(historicalGoal(history.slice(0, 14), cycle)).toBeNull();
+    // A campaign that usually costs less than the goal: nothing to say.
+    expect(historicalGoal(rated(20, "good", 8), cycle)).toBeNull();
   });
 });

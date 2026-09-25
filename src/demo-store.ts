@@ -27,6 +27,7 @@ import {
   statuses,
   workingStatuses,
 } from "./types";
+import { MODULES } from "./modules";
 export class DemoStore {
   data: Snapshot = demoSnapshot();
   comments: Comment[] = [];
@@ -212,6 +213,8 @@ export class DemoStore {
           if (a.p_teams) this.setClientTeams(entity.id, a.p_teams);
         }
         if (kind === "product" && a.p_color) changes.color = a.p_color;
+        if (kind === "product" && a.p_task_project_field != null)
+          changes.task_project_field = a.p_task_project_field;
         if (kind === "project") {
           if (
             a.p_contract !== (entity as any).contract_id &&
@@ -305,6 +308,22 @@ export class DemoStore {
           approver: a.p_approver ?? "creator",
         });
         break;
+      case "set_member_pages": {
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        const target = this.data.members.find((m) => m.user_id === a.p_user);
+        if (role !== "admin")
+          throw Error(
+            "Somente administradores escolhem os módulos de cada pessoa.",
+          );
+        if (!target) throw Error("Usuário não encontrado na empresa");
+        const hidden = [...new Set<string>(a.p_hidden ?? [])].sort();
+        if (hidden.some((h) => !MODULES.some((m) => m.id === h)))
+          throw Error("Módulo inválido");
+        target.hidden_pages = hidden;
+        break;
+      }
       case "update_member": {
         const role = this.data.members.find(
           (m) => m.user_id === demoUser,

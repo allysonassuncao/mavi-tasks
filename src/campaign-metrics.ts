@@ -59,10 +59,39 @@ export type SyncResult = {
   synced: number;
   errors: { cycle: string; message: string }[];
 };
+/** The metrics of a record, as typed in an edit (net of M). */
+export type MetricValues = Pick<
+  DailyMetric,
+  | "spend"
+  | "impressions"
+  | "reach"
+  | "clicks"
+  | "conversions"
+  | "view_content"
+  | "add_to_cart"
+  | "initiate_checkout"
+>;
+/** A day of the "Dia a dia": its metrics and the day's M. */
+export type DailyEdit = MetricValues & { multiplier: number };
+/**
+ * A snapshot of the "MASO" sub-tab: the end of its period, the metrics and
+ * Bom/Ruim ("auto": by the cycle's goal, as the daily sync rates it).
+ */
+export type SnapshotEdit = MetricValues & {
+  period_end: string;
+  goal_status: "good" | "bad" | "auto";
+};
 export interface MetricsBackend {
   load(company: string, campaign: string): Promise<CampaignMetrics>;
   /** Syncs the campaign's cycles now (an administrator's button). */
   sync(company: string, campaign: string): Promise<SyncResult>;
+  /**
+   * Edits (update_ad_daily_metric / update_ad_cycle_snapshot, migration
+   * 20261006090000_ad_record_edits): the record becomes "manual", which the
+   * sync keeps, and the change goes to the campaign's history.
+   */
+  updateDaily(row: DailyMetric, values: DailyEdit): Promise<void>;
+  updateSnapshot(snapshot: CycleSnapshot, values: SnapshotEdit): Promise<void>;
 }
 
 // ------------------------------------------------------------ totals
@@ -420,4 +449,38 @@ export async function syncNow(campaign: string): Promise<SyncResult> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Error(data.error ?? "Não foi possível sincronizar.");
   return data as SyncResult;
+}
+
+/**
+ * "Meta desta campanha (com base histórica)" (MASO, spec 6.11): with at
+ * least 15 snapshots rated Bom/Ruim in the campaign's history, the usual
+ * cost per result is the mean of the Bom ones' average cost and the Ruim
+ * ones' (the MASO summed the Bom into the Ruim average, a bug). It shows
+ * when that cost is above the cycle's goal cost — the goal asks for more
+ * than the campaign usually delivers — with the quantity it would bring.
+ * Net of M, like the costs it compares.
+ */
+export function historicalGoal(
+  snapshots: CycleSnapshot[],
+  cycle: Pick<AdCycle, "budget" | "multiplier" | "goal_results">,
+) {
+  const rated = snapshots.filter(
+    (s) => s.goal_status && s.conversions > 0 && s.spend > 0,
+  );
+  if (rated.length < 15 || cycle.goal_results <= 0) return null;
+  const mean = (list: CycleSnapshot[]) =>
+    list.length
+      ? list.reduce((sum, s) => sum + s.spend / s.conversions, 0) / list.length
+      : null;
+  const good = mean(rated.filter((s) => s.goal_status === "good"));
+  const bad = mean(rated.filter((s) => s.goal_status === "bad"));
+  const usual =
+    good !== null && bad !== null ? (good + bad) / 2 : (good ?? bad)!;
+  const net = cycle.budget / cycle.multiplier;
+  if (!(usual > net / cycle.goal_results)) return null;
+  return {
+    analyses: rated.length,
+    cost: usual,
+    quantity: Math.round(net / usual),
+  };
 }

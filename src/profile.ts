@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { authErrorMessage } from "./auth-errors";
 
 /** Avatar edge in pixels: sharp at 2× the largest avatar shown (45 px). */
 export const AVATAR_SIZE = 256;
@@ -136,7 +137,7 @@ async function uploadImage(
 export async function changePassword(password: string) {
   if (!supabase) throw Error("Supabase não configurado");
   const { error } = await supabase.auth.updateUser({ password });
-  if (error) throw error;
+  if (error) throw Error(authErrorMessage(error));
 }
 
 /**

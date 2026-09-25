@@ -5,12 +5,14 @@ import {
   currentCycle,
   cycleAlert,
   monthlyEnd,
+  shortDate,
   type AdCampaign,
   type AdCampaignEvent,
   type AdCycle,
   type AdCycleLink,
   type AdPlatform,
   type AdsBackend,
+  type PendingConnection,
   type PlatformAccount,
   type PlatformCampaign,
   type CampaignData,
@@ -23,6 +25,7 @@ import {
   type CampaignMetrics,
   type CycleSnapshot,
   type DailyMetric,
+  type MetricValues,
   type MetricsBackend,
   type SyncRun,
 } from "./campaign-metrics";
@@ -31,7 +34,7 @@ import {
  * The campaigns of the demonstration, in memory only: reloading discards
  * changes. Applies the same rules as the database functions (overlapping
  * periods, inherited M, versions, manual current cycle). Only administrators
- * reach the page, as in the database.
+ * and managers reach the page, as in the database.
  */
 export function demoCampaigns(
   data: () => Snapshot,
@@ -123,8 +126,10 @@ export function demoCampaigns(
   });
 
   return {
-    ads: demoAds(),
-    metrics: demoMetrics(store, () => user),
+    ads: demoAds(store, data),
+    metrics: demoMetrics(store, (campaign, cycle, action, detail) =>
+      log(campaignOf(campaign), cycle, action, detail),
+    ),
     // The same rules as ad_campaign_page: only active campaigns, or the new
     // ones never activated ("pending"), searched, filtered and paged.
     async page(_company, q) {
@@ -386,20 +391,32 @@ const normalized = (platform: AdPlatform, account: string) =>
 /* Platforms in the demonstration: made-up accounts and campaigns.      */
 
 const DEMO_ACCOUNTS: Record<"meta" | "google", PlatformAccount[]> = {
-  meta: [
-    ["1234567890", "Norte Coffee · Make", "Ativa", true],
-    ["2345678901", "Aurora Estética · Make", "Ativa", true],
-    ["3456789012", "Conta antiga (livre)", "Desativada", false],
-  ].map(([id, name, status, active]) => ({
-    id: id as string,
-    name: name as string,
-    status: status as string,
-    active: active as boolean,
+  // Two Facebook profiles, as in the agency: each reaches its own accounts.
+  meta: (
+    [
+      ["1234567890", "Norte Coffee · Make", "Ativa", true, "fb-demo-1", 45],
+      ["2345678901", "Aurora Estética · Make", "Ativa", true, "fb-demo-2", 5],
+      [
+        "3456789012",
+        "Conta antiga (livre)",
+        "Desativada",
+        false,
+        "fb-demo-1",
+        45,
+      ],
+    ] as const
+  ).map(([id, name, status, active, profile, days]) => ({
+    id,
+    name,
+    status,
+    active,
     currency: "BRL",
     manager_id: "",
     manager_name: "",
-    expires_at: new Date(Date.now() + 45 * 86_400_000).toISOString(),
-    connected_by: "Allyson Assunção",
+    expires_at: new Date(Date.now() + days * 86_400_000).toISOString(),
+    connected_by:
+      profile === "fb-demo-1" ? "Allyson Assunção" : "Perfil Tráfego 02",
+    connected_by_id: profile,
   })),
   google: [
     ["1234567890", "Norte Coffee Ads"],
@@ -440,7 +457,26 @@ const DEMO_CAMPAIGNS: Record<string, [string, string, boolean, string][]> = {
 
 /** One set of connections for the whole demonstration session. */
 const demoConnected = { meta: true, google: true };
-function demoAds(): AdsBackend {
+/** Connections waiting for the client's accounts to be chosen. */
+const demoPending = new Map<string, PendingConnection>();
+function demoAds(store: Store, data: () => Snapshot): AdsBackend {
+  const clientOf = (campaignId: string) => {
+    const c = store.campaigns.find((x) => x.id === campaignId);
+    return (
+      data().contracts.find((k) => k.id === c?.contract_id)?.client_id ?? null
+    );
+  };
+  const clientName = (id: string | null | undefined) =>
+    data().clients.find((c) => c.id === id)?.name ?? "";
+  // Each demo account belongs to the client of a seeded campaign.
+  for (const a of DEMO_ACCOUNTS.meta)
+    if (a.client_id === undefined)
+      a.client_id =
+        a.id === "1234567890"
+          ? clientOf("demo-campaign-1")
+          : a.id === "2345678901"
+            ? clientOf("demo-campaign-2")
+            : null;
   const wait = () => new Promise((r) => setTimeout(r, 250));
   const need = (provider: "meta" | "google") => {
     if (!demoConnected[provider])
@@ -471,18 +507,196 @@ function demoAds(): AdsBackend {
           : { configured: true },
       };
     },
-    async connect(_company, provider) {
+    async connect(_company, provider, context) {
       await wait();
       demoConnected[provider] = true;
-      return null;
+      if (provider !== "meta") return { pending: "" };
+      if (!context?.client)
+        throw Error("Escolha o cliente da conexão do Facebook");
+      // The client's profile sees its account (and, here, another client's).
+      const id = crypto.randomUUID();
+      const own = DEMO_ACCOUNTS.meta.find(
+        (a) => a.client_id === context.client,
+      );
+      const other = DEMO_ACCOUNTS.meta.find(
+        (a) => a.client_id && a.client_id !== context.client,
+      );
+      demoPending.set(id, {
+        id,
+        client_id: context.client,
+        client: clientName(context.client),
+        campaign_id: context.campaign ?? null,
+        profile: `Perfil de ${clientName(context.client)}`,
+        expires_at: new Date(Date.now() + 60 * 86_400_000).toISOString(),
+        accounts: [
+          own
+            ? {
+                account_id: own.id,
+                name: own.name,
+                currency: "BRL",
+                account_status: 1,
+                client_id: own.client_id ?? null,
+                client: clientName(own.client_id),
+              }
+            : {
+                account_id: "4567890123",
+                name: `${clientName(context.client)} · Make`,
+                currency: "BRL",
+                account_status: 1,
+                client_id: null,
+                client: null,
+              },
+          ...(other && other.client_id !== own?.client_id
+            ? [
+                {
+                  account_id: other.id,
+                  name: other.name,
+                  currency: "BRL",
+                  account_status: 1,
+                  client_id: other.client_id ?? null,
+                  client: clientName(other.client_id),
+                },
+              ]
+            : []),
+        ],
+      });
+      return { pending: id };
     },
-    async disconnect(_company, provider) {
+    async disconnect(_company, provider, target) {
+      if (provider === "meta" && target?.client) {
+        DEMO_ACCOUNTS.meta = DEMO_ACCOUNTS.meta.filter(
+          (a) => a.client_id !== target.client,
+        );
+        return;
+      }
+      if (provider === "meta" && target?.profile) {
+        DEMO_ACCOUNTS.meta = DEMO_ACCOUNTS.meta.filter(
+          (a) => a.connected_by_id !== target.profile,
+        );
+        return;
+      }
       demoConnected[provider] = false;
     },
-    async accounts(_company, provider) {
+    async pending(id) {
+      const p = demoPending.get(id);
+      if (!p) throw Error("A conexão expirou. Conecte de novo.");
+      return structuredClone(p);
+    },
+    async confirm(id, accounts) {
+      const p = demoPending.get(id);
+      if (!p) throw Error("A conexão expirou. Conecte de novo.");
+      if (!accounts.length) throw Error("Marque ao menos uma conta do cliente");
+      for (const a of p.accounts.filter((x) =>
+        accounts.includes(x.account_id),
+      )) {
+        if (a.client_id && a.client_id !== p.client_id)
+          throw Error(`A conta ${a.account_id} já é do cliente ${a.client}`);
+        const account: PlatformAccount = {
+          id: a.account_id,
+          name: a.name,
+          status: "Ativa",
+          active: true,
+          currency: a.currency,
+          manager_id: "",
+          manager_name: "",
+          expires_at: p.expires_at,
+          connected_by: p.profile,
+          connected_by_id: `fb-${p.client_id}`,
+          client_id: p.client_id,
+          client_name: p.client,
+        };
+        DEMO_ACCOUNTS.meta = [
+          ...DEMO_ACCOUNTS.meta.filter((x) => x.id !== a.account_id),
+          account,
+        ];
+      }
+      demoPending.delete(id);
+      return accounts.length;
+    },
+    async clients() {
+      const ids = new Set<string>();
+      for (const c of store.campaigns)
+        if (c.platform === "meta" && c.status === "active") {
+          const id = clientOf(c.id);
+          if (id) ids.add(id);
+        }
+      for (const a of DEMO_ACCOUNTS.meta) if (a.client_id) ids.add(a.client_id);
+      return [...ids]
+        .map((id) => {
+          const accounts = DEMO_ACCOUNTS.meta.filter((a) => a.client_id === id);
+          return {
+            client_id: id,
+            client: clientName(id),
+            campaigns: store.campaigns.filter(
+              (c) =>
+                c.platform === "meta" &&
+                c.status === "active" &&
+                clientOf(c.id) === id,
+            ).length,
+            expires_at:
+              accounts
+                .map((a) => a.expires_at ?? "")
+                .filter(Boolean)
+                .sort()[0] ?? null,
+            accounts: accounts.map((a) => ({
+              account_id: a.id,
+              name: a.name,
+              profile: a.connected_by ?? "",
+              expires_at: a.expires_at ?? null,
+              account_status: 1,
+            })),
+          };
+        })
+        .sort((a, b) => a.client.localeCompare(b.client, "pt-BR"));
+    },
+    async overview() {
+      const today = dateKey();
+      const due = store.cycles.filter(
+        (y) =>
+          y.links.length &&
+          y.start_date < today &&
+          y.end_date >= addDays(today, -8),
+      );
+      const name = (y: AdCycle) =>
+        store.campaigns.find((c) => c.id === y.campaign_id)?.name ?? "";
+      const failed = due.slice(0, 1);
+      return {
+        configured: true,
+        job: {
+          schedule: "*/20 9-12 * * *",
+          active: true,
+          last_run: {
+            status: "succeeded",
+            start_time: `${today}T09:40:00Z`,
+            message: "1 row",
+          },
+        },
+        today,
+        last_schedule: `${today}T09:40:12Z`,
+        due: due.length,
+        synced: due.length - failed.length,
+        failed: failed.length,
+        pending: 0,
+        up_to_date: due.length - failed.length,
+        errors: failed.map((y) => ({
+          campaign_id: y.campaign_id,
+          campaign: name(y),
+          message:
+            "O acesso ao Facebook da conta 2345678901 expirou. Conecte de novo.",
+        })),
+        stale: failed.map((y) => ({
+          campaign_id: y.campaign_id,
+          campaign: name(y),
+          last_day: addDays(today, -3),
+        })),
+      };
+    },
+    async accounts(_company, provider, client) {
       await wait();
       need(provider);
-      return DEMO_ACCOUNTS[provider].map((a) => ({ ...a }));
+      return DEMO_ACCOUNTS[provider]
+        .filter((a) => !client || a.client_id === client)
+        .map((a) => ({ ...a }));
     },
     async campaigns(_company, provider, account) {
       await wait();
@@ -590,7 +804,50 @@ function demoCycleMetrics(y: AdCycle, today: string) {
   if (daily.length > 3) daily[2] = { ...daily[2], spend: daily[2].spend + 5 };
   return { daily, snapshots };
 }
-function demoMetrics(store: Store, user: () => string): MetricsBackend {
+const METRIC_KEYS: [keyof MetricValues, string][] = [
+  ["spend", "Investimento"],
+  ["impressions", "Impressões"],
+  ["reach", "Alcance"],
+  ["clicks", "Cliques"],
+  ["conversions", "Conversões"],
+  ["view_content", "Visualização de produto"],
+  ["add_to_cart", "Adição ao carrinho"],
+  ["initiate_checkout", "Finalização de compra"],
+];
+/** The checks of mavi_private.ad_edit_metrics. */
+function checkMetrics(values: MetricValues): MetricValues {
+  const out = {} as MetricValues;
+  for (const [k, label] of METRIC_KEYS) {
+    const x = values[k];
+    if (typeof x !== "number" || !Number.isFinite(x))
+      throw Error(`Informe um número em ${label}`);
+    if (x < 0) throw Error(`${label} não pode ser negativo`);
+    if (x >= 1e12) throw Error(`${label} está grande demais`);
+    const whole = k === "impressions" || k === "reach" || k === "clicks";
+    if (whole && !Number.isInteger(x))
+      throw Error(`${label} é um número inteiro`);
+    out[k] = whole ? x : Math.round(x * 100) / 100;
+  }
+  return out;
+}
+function changes(before: object, after: object) {
+  const b = before as Record<string, unknown>,
+    a = after as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.keys(a)
+      .filter((k) => b[k] !== a[k])
+      .map((k) => [k, { from: b[k], to: a[k] }]),
+  );
+}
+function demoMetrics(
+  store: Store,
+  log: (
+    campaign: string,
+    cycle: string,
+    action: string,
+    detail: Record<string, unknown>,
+  ) => void,
+): MetricsBackend {
   const runs: SyncRun[] = [];
   const build = (campaign: string): CampaignMetrics => {
     const today = dateKey();
@@ -599,18 +856,76 @@ function demoMetrics(store: Store, user: () => string): MetricsBackend {
     return {
       daily: parts
         .flatMap((p) => p.daily)
+        .map((r) => ({ ...r, ...store.edits.get(`d:${r.cycle_id}:${r.day}`) }))
         .sort((a, b) => a.day.localeCompare(b.day)),
-      snapshots: parts.flatMap((p) => p.snapshots),
+      snapshots: parts
+        .flatMap((p) => p.snapshots)
+        .map((x) => ({ ...x, ...store.edits.get(`s:${x.cycle_id}:${x.id}`) })),
       runs: runs.filter((r) => cycles.some((y) => y.id === r.cycle_id)),
     };
+  };
+  const cycleOf = (id: string) => {
+    const y = store.cycles.find((c) => c.id === id);
+    if (!y) throw Error("Sem permissão");
+    return y;
   };
   return {
     async load(_company, campaign) {
       return build(campaign);
     },
+    async updateDaily(row, values) {
+      const y = cycleOf(row.cycle_id);
+      const m = checkMetrics(values);
+      if (!(values.multiplier > 0 && values.multiplier <= 100))
+        throw Error("O M deve ser maior que 0 e no máximo 100");
+      const after = {
+        multiplier: Math.round(values.multiplier * 1000) / 1000,
+        ...m,
+      };
+      const diff = changes(row, after);
+      if (!Object.keys(diff).length) return;
+      store.edits.set(`d:${row.cycle_id}:${row.day}`, {
+        ...after,
+        source: "manual",
+      });
+      log(y.campaign_id, y.id, "daily_edited", { day: row.day, changes: diff });
+    },
+    async updateSnapshot(snapshot, values) {
+      const y = cycleOf(snapshot.cycle_id);
+      const m = checkMetrics(values);
+      const last = [y.end_date, snapshot.period_end].sort()[1];
+      if (
+        !values.period_end ||
+        values.period_end < snapshot.period_start ||
+        values.period_end > last
+      )
+        throw Error(
+          `A data final vai de ${shortDate(snapshot.period_start)} a ${shortDate(last)}`,
+        );
+      const net = y.budget / y.multiplier;
+      const goal_status =
+        values.goal_status !== "auto"
+          ? values.goal_status
+          : y.goal_results <= 0
+            ? null
+            : m.conversions > 0 &&
+                m.spend / m.conversions <= net / y.goal_results
+              ? "good"
+              : "bad";
+      const after = { period_end: values.period_end, ...m, goal_status };
+      const diff = changes(snapshot, after);
+      if (!Object.keys(diff).length) return;
+      store.edits.set(`s:${snapshot.cycle_id}:${snapshot.id}`, {
+        ...after,
+        source: "manual",
+      });
+      log(y.campaign_id, y.id, "snapshot_edited", {
+        taken_on: snapshot.taken_on,
+        changes: diff,
+      });
+    },
     async sync(_company, campaign) {
       await new Promise((r) => setTimeout(r, 400));
-      void user;
       const cycles = store.cycles.filter(
         (y) => y.campaign_id === campaign && y.links.length,
       );
@@ -632,6 +947,8 @@ type Store = {
   campaigns: AdCampaign[];
   cycles: AdCycle[];
   events: AdCampaignEvent[];
+  /** The records edited by hand, over the generated numbers. */
+  edits: Map<string, Partial<DailyMetric & CycleSnapshot>>;
   seq: number;
 };
 let shared: { company: string; store: Store } | null = null;
@@ -645,7 +962,13 @@ function demoStore(data: Snapshot): Store {
 
 /** Two Make Ads campaigns, one mid-cycle and one whose cycle ended. */
 function seed(data: Snapshot): Store {
-  const store: Store = { campaigns: [], cycles: [], events: [], seq: 0 };
+  const store: Store = {
+    campaigns: [],
+    cycles: [],
+    events: [],
+    edits: new Map(),
+    seq: 0,
+  };
   const contracts = data.contracts.filter(
     (k) =>
       !k.archived &&

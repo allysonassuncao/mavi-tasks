@@ -186,6 +186,25 @@ describe("conectar", () => {
     expect(url.searchParams.get("scope")).toBe("ads_read,business_management");
     expect(url.searchParams.get("redirect_uri")).toBe(env.redirectUri);
   });
+  it("Meta: a conexão leva o cliente e a campanha de volta", async () => {
+    const { fetch, calls } = network([
+      [/rpc\/ad_begin_connect/, () => json("c".repeat(64))],
+    ]);
+    const client = "00000000-0000-4000-8000-0000000000c1";
+    const campaign = "00000000-0000-4000-8000-0000000000a1";
+    await handleAds(
+      { action: "connect", company, provider: "meta", client, campaign },
+      auth,
+      env,
+      fetch,
+    );
+    expect(rpcArgs(calls[0])).toEqual({
+      p_company: company,
+      p_provider: "meta",
+      p_client: client,
+      p_campaign: campaign,
+    });
+  });
   it("Google: consentimento offline com o escopo do Google Ads", async () => {
     const { fetch, calls } = network([
       [/rpc\/ad_begin_connect/, () => json("b".repeat(64))],
@@ -199,6 +218,8 @@ describe("conectar", () => {
     expect(rpcArgs(calls[0])).toEqual({
       p_company: company,
       p_provider: "google",
+      p_client: null,
+      p_campaign: null,
     });
     const url = new URL(String(result.body.url));
     expect(url.searchParams.get("scope")).toContain(GOOGLE_ADS_SCOPE);
@@ -227,6 +248,28 @@ describe("conectar", () => {
     );
     expect(result.status).toBe(403);
     expect(result.body.error).toMatch(/exclusivo de administradores/);
+  });
+});
+
+describe("Meta: desconectar um perfil", () => {
+  it("remove só as contas do perfil pedido", async () => {
+    const { fetch, calls } = network([
+      [/rpc\/ad_disconnect_meta_profile/, () => json(3)],
+    ]);
+    const result = await handleAds(
+      { action: "disconnect", company, provider: "meta", profile: "fb9" },
+      auth,
+      env,
+      fetch,
+    );
+    expect(result.body).toEqual({ disconnected: true, accounts: 3 });
+    expect(JSON.parse(calls[0].body!)).toEqual({
+      p_company: company,
+      p_fb_user_id: "fb9",
+    });
+    expect(calls.some((c) => c.url.includes("rpc/ad_disconnect\b"))).toBe(
+      false,
+    );
   });
 });
 
@@ -368,13 +411,35 @@ describe("Meta: campanhas da conta", () => {
               currency: "BRL",
               account_status: 1,
               token_expires_at: "2026-11-01T00:00:00Z",
+              fb_user_id: "fb1",
               fb_user_name: "Ana",
+              client_id: "cl-1",
+              client_name: "Vittalium",
+            },
+            {
+              account_id: "456",
+              name: "Outro cliente",
+              currency: "BRL",
+              account_status: 1,
+              token_expires_at: null,
+              fb_user_id: "fb2",
+              fb_user_name: "Beto",
+              client_id: "cl-2",
+              client_name: "Outro",
             },
           ]),
       ],
     ]);
-    const result = await handleAds(
+    // Only the client's accounts (the cycle form of its campaign).
+    const all = await handleAds(
       { action: "accounts", company, provider: "meta" },
+      auth,
+      env,
+      fetch,
+    );
+    expect(all.body.accounts).toHaveLength(2);
+    const result = await handleAds(
+      { action: "accounts", company, provider: "meta", client: "cl-1" },
       auth,
       env,
       fetch,
@@ -390,6 +455,9 @@ describe("Meta: campanhas da conta", () => {
         manager_name: "",
         expires_at: "2026-11-01T00:00:00Z",
         connected_by: "Ana",
+        connected_by_id: "fb1",
+        client_id: "cl-1",
+        client_name: "Vittalium",
       },
     ]);
   });
@@ -634,7 +702,10 @@ describe("retorno da plataforma (callback)", () => {
             ],
           }),
       ],
-      [/rpc\/ad_complete_meta_connect/, () => json(1)],
+      [
+        /rpc\/ad_complete_meta_connect/,
+        () => json({ pending: "p-1", campaign: "ca-1" }),
+      ],
     ]);
     const result = await handleAdsCallback(
       new URLSearchParams({ code: "abc", state: `meta.${state}` }),
@@ -642,7 +713,7 @@ describe("retorno da plataforma (callback)", () => {
       fetch,
     );
     expect(result.location).toBe(
-      "https://workspace.example.com/campanhas?conexao=meta-conectado",
+      "https://workspace.example.com/campanhas?campanha=ca-1&pendente=p-1&conexao=meta-escolher",
     );
     const stored = calls.find((c) => c.url.includes("complete_meta"))!;
     // The redirect has no session: the database checks the state instead.

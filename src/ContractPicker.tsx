@@ -1,12 +1,19 @@
 import { ChevronRight } from "lucide-react";
 import { Select, SelectOption } from "./ui";
 import type { Snapshot } from "./types";
-import { contractOpen, contractParts, contractProductLabel } from "./domain";
+import {
+  contractOpen,
+  contractParts,
+  contractProductLabel,
+  showsProjectField,
+} from "./domain";
 
 /**
  * Picks a contracted product the way people think about it — first the
  * client, then which of that client's products — and, optionally, one of
- * that product's projects. Replaces flat "Cliente · Produto — nome" lists.
+ * that product's projects — when the product shows the "Projeto" field
+ * (a choice of each product, made by leaders). Replaces flat
+ * "Cliente · Produto — nome" lists.
  */
 export function ContractPicker({
   data,
@@ -46,7 +53,7 @@ export function ContractPicker({
   const projects = data.projects.filter(
     (p) => p.contract_id === contract && (!p.archived || p.id === project),
   );
-  const withProject = !!onProjectChange;
+  const withProject = !!onProjectChange && showsProjectField(data, contract);
   function pickContract(id: string) {
     onContractChange(id);
     onProjectChange?.("");

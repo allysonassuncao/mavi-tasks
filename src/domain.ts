@@ -163,6 +163,16 @@ export function byId<T extends { id: string }>(list: readonly T[]) {
   idIndexes.set(list, { size: list.length, map });
   return map;
 }
+/**
+ * Whether creating a task in this contracted product shows "Projeto": the
+ * product's choice (products.task_project_field, on unless turned off).
+ */
+export function showsProjectField(data: Snapshot, contractId: string) {
+  const productId = data.contracts.find((c) => c.id === contractId)?.product_id;
+  return (
+    data.products.find((p) => p.id === productId)?.task_project_field !== false
+  );
+}
 export function contractParts(data: Snapshot, contractId: string | null) {
   const contract = contractId
     ? byId(data.contracts).get(contractId)

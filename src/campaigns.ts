@@ -513,6 +513,11 @@ export type PlatformAccount = {
   manager_name: string;
   expires_at?: string | null;
   connected_by?: string;
+  /** Meta: the Facebook profile whose token reaches the account. */
+  connected_by_id?: string;
+  /** Meta: the client the account belongs to. */
+  client_id?: string | null;
+  client_name?: string;
 };
 export type PlatformCampaign = {
   id: string;
@@ -523,10 +528,36 @@ export type PlatformCampaign = {
 };
 export interface AdsBackend {
   status(company: string): Promise<AdsStatus>;
-  /** Where to send the administrator to allow access (null: done here). */
-  connect(company: string, provider: AdsProvider): Promise<string | null>;
-  disconnect(company: string, provider: AdsProvider): Promise<void>;
-  accounts(company: string, provider: AdsProvider): Promise<PlatformAccount[]>;
+  /**
+   * Starts a connection. Meta is always for a client (its Facebook
+   * profile); the campaign is where to come back to. Gives the platform's
+   * address, or (demonstration) the pending choice right away.
+   */
+  connect(
+    company: string,
+    provider: AdsProvider,
+    context?: { client?: string; campaign?: string },
+  ): Promise<ConnectStart>;
+  /** Meta: a client's accounts, or a profile's; otherwise the platform. */
+  disconnect(
+    company: string,
+    provider: AdsProvider,
+    target?: { client?: string; profile?: string },
+  ): Promise<void>;
+  /** After the Facebook login: the accounts to choose the client's. */
+  pending(id: string): Promise<PendingConnection>;
+  /** The accounts chosen become the client's; returns how many. */
+  confirm(id: string, accounts: string[]): Promise<number>;
+  /** Clients with active Meta campaigns or connected accounts. */
+  clients(company: string): Promise<MetaClient[]>;
+  /** How the daily sync is going (ad_sync_overview). */
+  overview(company: string): Promise<SyncOverview>;
+  /** Meta with a client: only that client's accounts. */
+  accounts(
+    company: string,
+    provider: AdsProvider,
+    client?: string,
+  ): Promise<PlatformAccount[]>;
   campaigns(
     company: string,
     provider: AdsProvider,
@@ -534,6 +565,60 @@ export interface AdsBackend {
     manager: string,
   ): Promise<PlatformCampaign[]>;
 }
+export type ConnectStart = { url: string } | { pending: string };
+export type PendingConnection = {
+  id: string;
+  client_id: string;
+  client: string;
+  campaign_id: string | null;
+  /** The Facebook profile that logged in. */
+  profile: string;
+  expires_at: string | null;
+  accounts: {
+    account_id: string;
+    name: string;
+    currency: string;
+    account_status: number | null;
+    /** The client the account already belongs to, if any. */
+    client_id: string | null;
+    client: string | null;
+  }[];
+};
+export type MetaClient = {
+  client_id: string;
+  client: string;
+  /** Active Meta campaigns of the client. */
+  campaigns: number;
+  expires_at: string | null;
+  accounts: {
+    account_id: string;
+    name: string;
+    profile: string;
+    expires_at: string | null;
+    account_status: number | null;
+  }[];
+};
+export type SyncOverview = {
+  /** ad_sync_config has the URL and the secret. */
+  configured: boolean;
+  /** The pg_cron job (null: not scheduled, or pg_cron missing). */
+  job: {
+    schedule: string;
+    active: boolean;
+    last_run: { status: string; start_time: string; message: string } | null;
+  } | null;
+  today: string;
+  last_schedule: string | null;
+  /** Cycles to sync today, and how they went. */
+  due: number;
+  synced: number;
+  failed: number;
+  pending: number;
+  /** Cycles with numbers up to yesterday (or their end). */
+  up_to_date: number;
+  errors: { campaign_id: string; campaign: string; message: string }[];
+  stale: { campaign_id: string; campaign: string; last_day: string | null }[];
+};
 export class AdsApiError extends Error {
   constructor(
     message: string,
@@ -566,20 +651,52 @@ async function adsServer<T>(body: Record<string, unknown>): Promise<T> {
 }
 export const serverAds: AdsBackend = {
   status: (company) => adsServer({ action: "status", company }),
-  async connect(company, provider) {
-    return (
-      await adsServer<{ url: string }>({ action: "connect", company, provider })
-    ).url;
+  async connect(company, provider, context) {
+    return await adsServer<{ url: string }>({
+      action: "connect",
+      company,
+      provider,
+      client: context?.client,
+      campaign: context?.campaign,
+    });
   },
-  async disconnect(company, provider) {
-    await adsServer({ action: "disconnect", company, provider });
+  async disconnect(company, provider, target) {
+    await adsServer({
+      action: "disconnect",
+      company,
+      provider,
+      profile: target?.profile,
+      client: target?.client,
+    });
   },
-  async accounts(company, provider) {
+  async pending(id) {
+    return (await rpc("ad_meta_pending", {
+      p_pending: id,
+    })) as PendingConnection;
+  },
+  async confirm(id, accounts) {
+    return (await rpc("ad_confirm_meta_accounts", {
+      p_pending: id,
+      p_accounts: accounts,
+    })) as number;
+  },
+  async clients(company) {
+    return (await rpc("ad_meta_clients", {
+      p_company: company,
+    })) as MetaClient[];
+  },
+  async overview(company) {
+    return (await rpc("ad_sync_overview", {
+      p_company: company,
+    })) as SyncOverview;
+  },
+  async accounts(company, provider, client) {
     return (
       await adsServer<{ accounts: PlatformAccount[] }>({
         action: "accounts",
         company,
         provider,
+        client,
       })
     ).accounts;
   },
@@ -603,10 +720,10 @@ export function connectionResult(value: string) {
   return (
     {
       conectado: `${name} conectado.`,
-      "sem-contas": `${name} conectado, mas este usuário não tem acesso a nenhuma conta de anúncio.`,
+      "sem-contas": `${name} conectado, mas este perfil não tem acesso a nenhuma conta de anúncio. Entre no Facebook com o perfil do cliente e conecte de novo.`,
       cancelado: `Conexão com o ${name} cancelada.`,
       "sem-permissao": `O ${name} não concedeu a permissão necessária. Conecte de novo e aceite o acesso ao Google Ads.`,
-      expirado: `A conexão demorou demais ou você não é mais administrador. Tente de novo.`,
+      expirado: `A conexão demorou demais ou você não é mais administrador nem gestor. Tente de novo.`,
     }[result] ?? `Não foi possível conectar o ${name}. Tente de novo.`
   );
 }
@@ -801,5 +918,18 @@ export const supabaseCampaigns: CampaignsBackend = {
       ),
     sync: (_company, campaign) =>
       import("./campaign-metrics").then((m) => m.syncNow(campaign)),
+    async updateDaily(row, values) {
+      await rpc("update_ad_daily_metric", {
+        p_cycle: row.cycle_id,
+        p_day: row.day,
+        p_values: values,
+      });
+    },
+    async updateSnapshot(snapshot, values) {
+      await rpc("update_ad_cycle_snapshot", {
+        p_id: snapshot.id,
+        p_values: values,
+      });
+    },
   },
 };

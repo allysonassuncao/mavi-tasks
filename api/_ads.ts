@@ -7,7 +7,7 @@ import { appOrigin } from "./_origin.js";
  * Campanhas: the ad accounts and campaigns of Meta and Google Ads, read live
  * so a cycle can be linked to them (as the MASO did in the cycle form).
  *
- * - Meta: an administrator signs in with Facebook; the long-lived token is
+ * - Meta: an admin or manager signs in with Facebook; the long-lived token is
  *   kept per ad account it reaches (the last person to connect takes an
  *   account over), as in the MASO.
  * - Google Ads: one agency connection (an account with access to the MCC),
@@ -16,7 +16,8 @@ import { appOrigin } from "./_origin.js";
  * Tokens (Meta's and Google's) are sealed with GOOGLE_TOKEN_KEY_ADS before
  * reaching the database
  * (migration 20261001090000_ad_platform_connections) and never reach the
- * browser. Only the company's administrators get past the database functions.
+ * browser. Only the company's admins and managers get past the database
+ * functions.
  */
 
 export type AdsEnv = {
@@ -185,6 +186,11 @@ export type PlatformAccount = {
   /** Meta: when this account's token expires, and whose it is. */
   expires_at?: string | null;
   connected_by?: string;
+  /** Meta: the Facebook profile whose token reaches the account. */
+  connected_by_id?: string;
+  /** Meta: the client the account belongs to. */
+  client_id?: string | null;
+  client_name?: string;
 };
 
 function appSecretProof(env: AdsEnv, token: string) {
@@ -531,9 +537,31 @@ async function googleCampaigns(
 // ------------------------------------------------------------ handlers
 export type AdsRequest =
   | { action: "status"; company: string }
-  | { action: "connect"; company: string; provider: AdsProvider }
-  | { action: "disconnect"; company: string; provider: AdsProvider }
-  | { action: "accounts"; company: string; provider: AdsProvider }
+  | {
+      action: "connect";
+      company: string;
+      provider: AdsProvider;
+      /** Meta: the client whose Facebook profile connects (required). */
+      client?: string;
+      /** Where to come back to after choosing the accounts. */
+      campaign?: string;
+    }
+  | {
+      action: "disconnect";
+      company: string;
+      provider: AdsProvider;
+      /** Meta: only this Facebook profile's accounts (the others stay). */
+      profile?: string;
+      /** Meta: only this client's accounts. */
+      client?: string;
+    }
+  | {
+      action: "accounts";
+      company: string;
+      provider: AdsProvider;
+      /** Meta: only this client's accounts. */
+      client?: string;
+    }
   | {
       action: "campaigns";
       company: string;
@@ -594,7 +622,17 @@ export async function handleAds(
         fetchImpl,
         authorization,
         "ad_begin_connect",
-        { p_company: company, p_provider: provider },
+        {
+          p_company: company,
+          p_provider: provider,
+          p_client:
+            provider === "meta" && UUID.test(String(req.client ?? ""))
+              ? req.client
+              : null,
+          p_campaign: UUID.test(String(req.campaign ?? ""))
+            ? req.campaign
+            : null,
+        },
       );
       const url =
         provider === "meta"
@@ -623,6 +661,26 @@ export async function handleAds(
     }
 
     if (req.action === "disconnect") {
+      if (provider === "meta" && UUID.test(String(req.client ?? ""))) {
+        const removed = await rpc<number>(
+          env,
+          fetchImpl,
+          authorization,
+          "ad_disconnect_meta_client",
+          { p_company: company, p_client: req.client },
+        );
+        return { status: 200, body: { disconnected: true, accounts: removed } };
+      }
+      if (provider === "meta" && req.profile) {
+        const removed = await rpc<number>(
+          env,
+          fetchImpl,
+          authorization,
+          "ad_disconnect_meta_profile",
+          { p_company: company, p_fb_user_id: String(req.profile) },
+        );
+        return { status: 200, body: { disconnected: true, accounts: removed } };
+      }
       if (provider === "google") {
         const [row] = await rpc<{ refresh_token_cipher: string }[]>(
           env,
@@ -667,22 +725,31 @@ export async function handleAds(
           currency: string;
           account_status: number | null;
           token_expires_at: string | null;
+          fb_user_id: string;
           fb_user_name: string;
+          client_id: string | null;
+          client_name: string | null;
         }[]
       >(env, fetchImpl, authorization, "ad_meta_account_list", {
         p_company: company,
       });
-      const accounts: PlatformAccount[] = rows.map((a) => ({
-        id: a.account_id,
-        name: a.name || a.account_id,
-        status: META_ACCOUNT_STATUS[a.account_status ?? 0] ?? "",
-        active: a.account_status === 1 || a.account_status === 201,
-        currency: a.currency,
-        manager_id: "",
-        manager_name: "",
-        expires_at: a.token_expires_at,
-        connected_by: a.fb_user_name,
-      }));
+      const client = String(req.client ?? "");
+      const accounts: PlatformAccount[] = rows
+        .filter((a) => !client || a.client_id === client)
+        .map((a) => ({
+          id: a.account_id,
+          name: a.name || a.account_id,
+          status: META_ACCOUNT_STATUS[a.account_status ?? 0] ?? "",
+          active: a.account_status === 1 || a.account_status === 201,
+          currency: a.currency,
+          manager_id: "",
+          manager_name: "",
+          expires_at: a.token_expires_at,
+          connected_by: a.fb_user_name,
+          connected_by_id: a.fb_user_id,
+          client_id: a.client_id,
+          client_name: a.client_name ?? "",
+        }));
       return { status: 200, body: { accounts } };
     }
 
@@ -714,7 +781,7 @@ export async function handleAds(
 /**
  * The platform's redirect after consent (GET /api/ads-callback?code&state):
  * exchanges the code, stores the sealed token against the state and sends
- * the administrator back to Campanhas (?conexao=<platform>-<result>).
+ * the admin or manager back to Campanhas (?conexao=<platform>-<result>).
  */
 export async function handleAdsCallback(
   query: URLSearchParams,
@@ -722,11 +789,14 @@ export async function handleAdsCallback(
   fetchImpl: Fetch = fetch,
 ): Promise<{ status: number; location: string }> {
   const [provider, state = ""] = (query.get("state") ?? "").split(".");
-  const back = (result: string) => ({
+  const back = (result: string, extra: Record<string, string> = {}) => ({
     status: 302,
-    location: `${new URL(env.redirectUri).origin}/campanhas?conexao=${
-      provider === "google" ? "google" : "meta"
-    }-${result}`,
+    location: `${new URL(env.redirectUri).origin}/campanhas?${new URLSearchParams(
+      {
+        ...extra,
+        conexao: `${provider === "google" ? "google" : "meta"}-${result}`,
+      },
+    ).toString()}`,
   });
   if (provider !== "meta" && provider !== "google") return back("erro");
   if (!configured(env, provider)) return back("erro");
@@ -778,29 +848,31 @@ export async function handleAdsCallback(
         fields: "account_id,name,currency,account_status",
         limit: "200",
       });
-      const stored = await callRpc<number>(
-        env,
-        fetchImpl,
-        null,
-        "ad_complete_meta_connect",
-        {
-          p_state: state,
-          p_fb_user_id: me.id ?? "",
-          p_fb_user_name: me.name ?? "",
-          p_token_cipher: seal(key, token),
-          p_expires_at: expiresIn
-            ? new Date(Date.now() + expiresIn * 1000).toISOString()
-            : null,
-          p_accounts: accounts.map((a) => ({
-            account_id: a.account_id ?? "",
-            name: a.name ?? "",
-            currency: a.currency ?? "",
-            account_status: a.account_status ?? null,
-          })),
-        },
-      );
+      const stored = await callRpc<{
+        pending: string;
+        campaign: string | null;
+      } | null>(env, fetchImpl, null, "ad_complete_meta_connect", {
+        p_state: state,
+        p_fb_user_id: me.id ?? "",
+        p_fb_user_name: me.name ?? "",
+        p_token_cipher: seal(key, token),
+        p_expires_at: expiresIn
+          ? new Date(Date.now() + expiresIn * 1000).toISOString()
+          : null,
+        p_accounts: accounts.map((a) => ({
+          account_id: a.account_id ?? "",
+          name: a.name ?? "",
+          currency: a.currency ?? "",
+          account_status: a.account_status ?? null,
+        })),
+      });
       if (!stored.ok) return back("expirado");
-      return back(stored.data > 0 ? "conectado" : "sem-contas");
+      if (!stored.data) return back("sem-contas");
+      // Back to the campaign, where the client's accounts are chosen.
+      return back("escolher", {
+        ...(stored.data.campaign ? { campanha: stored.data.campaign } : {}),
+        pendente: stored.data.pending,
+      });
     } catch {
       return back("erro");
     }

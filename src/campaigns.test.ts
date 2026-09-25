@@ -305,8 +305,63 @@ describe("contas e campanhas das plataformas", () => {
       code: "not_connected",
     });
     expect((await ads.status(company)).google.email).toBeUndefined();
-    expect(await ads.connect(company, "google")).toBeNull();
+    expect(await ads.connect(company, "google")).toEqual({ pending: "" });
     expect((await ads.status(company)).google.email).toBeTruthy();
+  });
+  it("Facebook por cliente: conecta, escolhe as contas do cliente e remove", async () => {
+    const backend = demoCampaigns(() => data, demoUser);
+    const { ads } = backend;
+    const [row] = (
+      await backend.page(company, {
+        scope: "active",
+        search: "",
+        platform: "meta",
+        attention: false,
+        limit: 50,
+        offset: 0,
+      })
+    ).rows.filter((r) => r.campaign.platform === "meta");
+    const client = data.contracts.find(
+      (k) => k.id === row.campaign.contract_id,
+    )!.client_id;
+    const own = await ads.accounts(company, "meta", client);
+    expect(own.length).toBeGreaterThan(0);
+    expect(own.every((a) => a.client_id === client)).toBe(true);
+    const listed = await ads.clients(company);
+    expect(listed.find((c) => c.client_id === client)?.accounts.length).toBe(
+      own.length,
+    );
+
+    const start = await ads.connect(company, "meta", {
+      client,
+      campaign: row.campaign.id,
+    });
+    expect("pending" in start && start.pending).toBeTruthy();
+    const pending = await ads.pending((start as { pending: string }).pending);
+    expect(pending.client_id).toBe(client);
+    const other = pending.accounts.find(
+      (a) => a.client_id && a.client_id !== client,
+    );
+    if (other)
+      await expect(ads.confirm(pending.id, [other.account_id])).rejects.toThrow(
+        /já é do cliente/,
+      );
+    const mine = pending.accounts.filter(
+      (a) => !a.client_id || a.client_id === client,
+    );
+    expect(
+      await ads.confirm(
+        pending.id,
+        mine.map((a) => a.account_id),
+      ),
+    ).toBe(mine.length);
+
+    expect(await ads.disconnect(company, "meta", { client })).toBeUndefined();
+    expect(await ads.accounts(company, "meta", client)).toEqual([]);
+    expect(
+      (await ads.clients(company)).find((c) => c.client_id === client)
+        ?.accounts,
+    ).toEqual([]);
   });
   it("uma campanha da plataforma fica em uma só campanha; ids normalizados", async () => {
     const backend = demoCampaigns(() => data, demoUser);
@@ -417,5 +472,64 @@ describe("lista paginada (demonstração com as regras do servidor)", () => {
       limit: 50,
     });
     expect(found.rows.map((r) => r.campaign.name)).toContain(name);
+  });
+});
+
+describe("editar registros da Linha do tempo (demonstração)", () => {
+  it("dia e acumulado viram manuais, com as mesmas regras do banco", async () => {
+    const data = demoSnapshot();
+    const company = data.companies[0].id;
+    const backend = demoCampaigns(() => data, demoUser);
+    const { metrics } = backend;
+    const [row] = (
+      await backend.page(company, {
+        scope: "active",
+        search: "",
+        platform: "",
+        attention: false,
+        limit: 50,
+        offset: 0,
+      })
+    ).rows;
+    const loaded = await metrics.load(company, row.campaign.id);
+    const day = loaded.daily[loaded.daily.length - 1];
+    await expect(
+      metrics.updateDaily(day, { ...day, clicks: 1.5 }),
+    ).rejects.toThrow(/Cliques é um número inteiro/);
+    await expect(
+      metrics.updateDaily(day, { ...day, multiplier: 0 }),
+    ).rejects.toThrow(/O M deve ser/);
+    await metrics.updateDaily(day, { ...day, spend: 123.456, multiplier: 4 });
+    const after = await metrics.load(company, row.campaign.id);
+    expect(
+      after.daily.find((r) => r.cycle_id === day.cycle_id && r.day === day.day),
+    ).toMatchObject({ spend: 123.46, multiplier: 4, source: "manual" });
+
+    const snap = after.snapshots[after.snapshots.length - 1];
+    await expect(
+      metrics.updateSnapshot(snap, {
+        ...snap,
+        period_end: "2000-01-01",
+        goal_status: "auto",
+      }),
+    ).rejects.toThrow(/A data final vai de/);
+    await metrics.updateSnapshot(snap, {
+      ...snap,
+      conversions: 0,
+      goal_status: "auto",
+    });
+    const edited = (
+      await metrics.load(company, row.campaign.id)
+    ).snapshots.find((x) => x.cycle_id === snap.cycle_id && x.id === snap.id);
+    expect(edited).toMatchObject({
+      conversions: 0,
+      goal_status: "bad",
+      source: "manual",
+    });
+    const events = await backend.events(company, row.campaign.id);
+    expect(events.slice(0, 2).map((e) => e.action)).toEqual([
+      "snapshot_edited",
+      "daily_edited",
+    ]);
   });
 });
