@@ -300,8 +300,8 @@ function AgendaView({
     if (!demo) await inviteMavi(maviInvite(userEmail, link, client));
     notify(
       demo
-        ? "MAVI convidada (demonstração: nada foi enviado)."
-        : "MAVI convidada: ela entra na chamada para gravar e transcrever.",
+        ? "MAVI convidada (demonstração: nada foi enviado). Na conta real, ela pode levar até 2 minutos para entrar na chamada."
+        : "MAVI convidada! Ela pode levar até 2 minutos para entrar na chamada e começar a gravar e transcrever.",
     );
   };
   const [tick, setTick] = useState(0);
@@ -1402,7 +1402,7 @@ function EventDetails({
             </div>
             <small className="muted">
               {mavi === "sent"
-                ? "A MAVI entra na chamada para gravar e transcrever."
+                ? "Convite enviado. A MAVI pode levar até 2 minutos para entrar na chamada."
                 : "A MAVI entra na chamada, grava e transcreve a reunião."}
               {client ? ` Cliente: ${client.name}.` : ""}
             </small>

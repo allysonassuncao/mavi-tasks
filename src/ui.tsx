@@ -27,6 +27,7 @@ import {
   Search,
   type LucideIcon,
   ListFilter,
+  X,
 } from "lucide-react";
 
 export function Input({
@@ -274,7 +275,24 @@ function SearchSelect({
   const [active, setActive] = useState(0);
   const listId = useId();
   const list = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  // A press anywhere outside the menu closes it, even where the page stops
+  // the event on its way up (a dialog, a card): listened to on the way down.
+  // The press that lands on the trigger is left to it (it toggles).
+  const closedByPress = useRef(0);
+  useEffect(() => {
+    if (!open) return;
+    const onPress = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (menu.current?.contains(target) || trigger.current?.contains(target))
+        return;
+      closedByPress.current = Date.now();
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPress, true);
+    return () => document.removeEventListener("pointerdown", onPress, true);
+  }, [open]);
   const matches = useMemo(
     () => searchOptions(options, query),
     [options, query],
@@ -347,6 +365,12 @@ function SearchSelect({
           disabled={disabled}
           className={`ui-select ui-search-select ${className}`}
           data-placeholder={current?.value ? undefined : ""}
+          onClick={(e) => {
+            // Inside a <label>, pressing its text (or a hint in it) clicks
+            // the trigger too: that press was meant to close the menu, so
+            // it must not open it again.
+            if (Date.now() - closedByPress.current < 600) e.preventDefault();
+          }}
         >
           <ListFilter
             size={16}
@@ -374,7 +398,11 @@ function SearchSelect({
         />
       )}
       <Popover.Content
+        ref={menu}
         className="ui-select-menu ui-search-menu"
+        // The menu sits inside the field's <label>: a click on an option
+        // would also "click" the trigger through it and reopen the menu.
+        onClick={(e) => e.preventDefault()}
         sideOffset={6}
         align="start"
         onOpenAutoFocus={(e) => {
@@ -400,6 +428,18 @@ function SearchSelect({
             onKeyDown={onKey}
             autoComplete="off"
           />
+          <button
+            type="button"
+            className="ui-search-close"
+            aria-label="Fechar lista"
+            title="Fechar lista (Esc)"
+            onClick={() => {
+              setOpen(false);
+              trigger.current?.focus();
+            }}
+          >
+            <X size={15} />
+          </button>
         </span>
         <div
           ref={list}

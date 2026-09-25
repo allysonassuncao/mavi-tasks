@@ -7293,7 +7293,21 @@ label .input-control .ui-input {
   flex-direction: column;
   width: var(--radix-popover-trigger-width);
   min-width: 260px;
-  max-height: min(380px, var(--radix-popover-content-available-height));
+  max-height: min(320px, var(--radix-popover-content-available-height));
+}
+.ui-search-close {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-right: -4px;
+  border-radius: 6px;
+  color: #809087;
+}
+.ui-search-close:hover {
+  background: #eef2ef;
+  color: var(--ink);
 }
 .ui-search-field {
   display: flex;
