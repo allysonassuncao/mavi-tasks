@@ -323,7 +323,7 @@ export function googleTotals(objective: Objective, row: GoogleRow): Totals {
         : objective === "engagement"
           ? impressions
           : objective === "video"
-            ? num(m.videoViews)
+            ? num(m.videoTrueviewViews)
             : num(m.conversions),
   };
 }
@@ -380,8 +380,10 @@ async function readGoogle(
       (b) => b.results ?? [],
     );
   };
+  // video_views became video_trueview_views in v22 (the MASO's v21 still
+  // took the old name; v25 rejects it).
   const metrics =
-    "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.video_views";
+    "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.video_trueview_views";
   for (const [account, { manager, campaigns }] of accounts) {
     const filter = campaigns.length
       ? ` AND campaign.id IN (${campaigns.join(",")})`

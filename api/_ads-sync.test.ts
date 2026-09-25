@@ -136,7 +136,7 @@ describe("o que conta como resultado", () => {
       impressions: "1000",
       clicks: "50",
       conversions: 4.5,
-      videoViews: "30",
+      videoTrueviewViews: "30",
     };
     expect(googleTotals("lead", { metrics })).toMatchObject({
       spend: 12.5,
@@ -273,6 +273,13 @@ describe("POST /api/ads-sync", () => {
     expect(search[0].headers["login-customer-id"]).toBe("5550001111");
     expect(search[0].headers.Authorization).toBe("Bearer acc");
     expect(JSON.parse(search[0].body!).query).toContain("campaign.id IN (9)");
+    // v22+ name (metrics.video_views is rejected by v25).
+    for (const c of search) {
+      expect(JSON.parse(c.body!).query).toContain(
+        "metrics.video_trueview_views",
+      );
+      expect(JSON.parse(c.body!).query).not.toContain("metrics.video_views");
+    }
     const stored = JSON.parse(
       calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
     );

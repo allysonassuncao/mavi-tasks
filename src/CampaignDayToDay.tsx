@@ -1277,9 +1277,12 @@ function SnapshotsTable({
                         "—"
                       )}
                     </td>
-                    <td className="cell-note">
-                      {r.s.author_label || "—"}
-                      {r.s.source === "manual" && " · editado"}
+                    <td>
+                      {/* A span: cell-note is display:block, which breaks a td. */}
+                      <span className="campaign-by">
+                        {r.s.author_label || "—"}
+                        {r.s.source === "manual" && " · editado"}
+                      </span>
                     </td>
                     <td>
                       <EditButton

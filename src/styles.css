@@ -11780,3 +11780,9 @@ tr:hover .campaign-edit-record,
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* Campanhas: "Por" of the timeline (inline, unlike .cell-note). */
+.campaign-by {
+  color: #9da793;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
