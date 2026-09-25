@@ -1409,7 +1409,8 @@ export default function App() {
     try {
       // This browser stops receiving the person's notifications.
       await syncPush(false);
-      await supabase?.auth.signOut();
+      // Only this device: a global sign-out ends the session on every other one.
+      await supabase?.auth.signOut({ scope: "local" });
     } finally {
       api.clearAllCaches();
       setData(emptySnapshot);

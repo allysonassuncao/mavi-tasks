@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mockSupabase = vi.hoisted(() => ({
   auth: {
     getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+    refreshSession: vi.fn(),
   },
   rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   functions: {
@@ -189,6 +190,62 @@ describe("Inclusão de novos usuários", () => {
       await expect(
         inviteUser("comp-1", "novo@empresa.com", "Novo Colaborador", "member"),
       ).rejects.toThrow("Limite de 10 convites por hora atingido.");
+    });
+
+    it("renova a sessão e tenta de novo quando o token foi recusado", async () => {
+      mockSupabase.auth.getSession.mockResolvedValue({
+        data: { session: { access_token: "velho" } },
+      });
+      mockSupabase.auth.refreshSession.mockResolvedValue({
+        data: { session: { access_token: "novo" } },
+        error: null,
+      });
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          json: async () => ({ error: "Sessão inválida." }),
+        } as unknown as Response)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ user_id: "usr_retry" }),
+        } as unknown as Response);
+
+      const res = await inviteUser(
+        "comp-1",
+        "novo@empresa.com",
+        "Novo Colaborador",
+        "member",
+      );
+
+      expect(res.user_id).toBe("usr_retry");
+      const calls = vi.mocked(globalThis.fetch).mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(
+        (calls[1][1]!.headers as Record<string, string>).Authorization,
+      ).toBe("Bearer novo");
+    });
+
+    it("pede novo login quando a sessão não pode ser renovada", async () => {
+      mockSupabase.auth.getSession.mockResolvedValue({
+        data: { session: { access_token: "velho" } },
+      });
+      mockSupabase.auth.refreshSession.mockResolvedValue({
+        data: { session: null },
+        error: new Error("Invalid Refresh Token"),
+      });
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "Sessão inválida." }),
+      } as unknown as Response);
+
+      await expect(
+        inviteUser("comp-1", "novo@empresa.com", "Novo Colaborador", "member"),
+      ).rejects.toThrow("Sua sessão expirou. Entre novamente para continuar.");
+      expect(mockSupabase.functions.invoke).not.toHaveBeenCalled();
     });
   });
 });

@@ -691,6 +691,36 @@ export async function currentTimer(): Promise<TimeEntry | null> {
   return data as TimeEntry | null;
 }
 
+class SessionExpiredError extends Error {
+  constructor() {
+    super("Sua sessão expirou. Entre novamente para continuar.");
+  }
+}
+
+/**
+ * POSTs to an admin endpoint with the current access token. A token whose
+ * session was ended elsewhere still passes the gateway until it expires, so a
+ * 401 renews the session once and retries; a failed renewal means the person
+ * must sign in again.
+ */
+async function postWithSession(path: string, body: unknown): Promise<Response> {
+  const send = (token?: string) =>
+    fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+  const session = await supabase?.auth.getSession();
+  const res = await send(session?.data?.session?.access_token);
+  if (res.status !== 401 || !supabase) return res;
+  const { data, error } = await supabase.auth.refreshSession();
+  if (error || !data.session) throw new SessionExpiredError();
+  return send(data.session.access_token);
+}
+
 async function parseFunctionError(
   error: unknown,
   fallback: string,
@@ -731,15 +761,11 @@ export async function inviteUser(
 
   // 1. Try local dev server / Vercel API endpoint
   try {
-    const session = await supabase?.auth.getSession();
-    const token = session?.data?.session?.access_token;
-    const res = await fetch("/api/invite-user", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ company_id: company, email, name, role }),
+    const res = await postWithSession("/api/invite-user", {
+      company_id: company,
+      email,
+      name,
+      role,
     });
     if (res.ok) {
       result = await res.json();
@@ -749,7 +775,8 @@ export async function inviteUser(
         err.error || `Erro ao convidar usuário (${res.status})`,
       );
     }
-  } catch {
+  } catch (e) {
+    if (e instanceof SessionExpiredError) throw e;
     // Network or server unreachable; will fallback to direct invoke if no explicit API error
   }
 
@@ -798,21 +825,12 @@ export async function resetUserPassword(
   let apiError: Error | null = null;
 
   try {
-    const session = await supabase?.auth.getSession();
-    const token = session?.data?.session?.access_token;
-    const res = await fetch("/api/user-admin", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        company_id: company,
-        target_user_id: userId,
-        action: "reset_password",
-        mode,
-        new_password: newPassword,
-      }),
+    const res = await postWithSession("/api/user-admin", {
+      company_id: company,
+      target_user_id: userId,
+      action: "reset_password",
+      mode,
+      new_password: newPassword,
     });
     if (res.ok) {
       result = await res.json();
@@ -822,7 +840,8 @@ export async function resetUserPassword(
         err.error || `Erro ao redefinir senha (${res.status})`,
       );
     }
-  } catch {
+  } catch (e) {
+    if (e instanceof SessionExpiredError) throw e;
     // Network or server unreachable; will fallback to direct invoke if no explicit API error
   }
 
@@ -858,20 +877,11 @@ export async function updateUserEmail(
   let apiError: Error | null = null;
 
   try {
-    const session = await supabase?.auth.getSession();
-    const token = session?.data?.session?.access_token;
-    const res = await fetch("/api/user-admin", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        company_id: company,
-        target_user_id: userId,
-        action: "update_email",
-        new_email: newEmail,
-      }),
+    const res = await postWithSession("/api/user-admin", {
+      company_id: company,
+      target_user_id: userId,
+      action: "update_email",
+      new_email: newEmail,
     });
     if (res.ok) {
       result = await res.json();
@@ -881,7 +891,8 @@ export async function updateUserEmail(
         err.error || `Erro ao atualizar e-mail (${res.status})`,
       );
     }
-  } catch {
+  } catch (e) {
+    if (e instanceof SessionExpiredError) throw e;
     // Network or server unreachable; will fallback to direct invoke if no explicit API error
   }
 
@@ -922,16 +933,7 @@ export async function syncUserAccess(
     action: "sync_access",
   };
   try {
-    const session = await supabase?.auth.getSession();
-    const token = session?.data?.session?.access_token;
-    const res = await fetch("/api/user-admin", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(body),
-    });
+    const res = await postWithSession("/api/user-admin", body);
     if (res.ok) return await res.json();
     if (res.status !== 404) {
       const err = await res.json().catch(() => ({}));
