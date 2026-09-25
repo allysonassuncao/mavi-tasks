@@ -56,6 +56,7 @@ import {
   objectives,
   platforms,
   shortDate,
+  splitList,
   supabaseCampaigns,
   type AdCampaign,
   type AdCampaignEvent,
@@ -1530,6 +1531,11 @@ function CycleForm({
             campaign={campaign.id}
             refresh={connectionTick}
             onPending={onPending}
+            landingPages={
+              draft.destination === "make_landing_page"
+                ? splitList(draft.landing_pages)
+                : []
+            }
             links={draft.links}
             onChange={(links) => set("links", links)}
           />

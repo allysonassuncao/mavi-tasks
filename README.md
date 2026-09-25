@@ -181,6 +181,25 @@ Pelo SQL, a mesma conferência: `select * from cron.job where jobname = 'mavi-ad
 
 3. Rodar os arquivos no SQL Editor do Supabase, na ordem. Cada um é uma transação; rodar de novo não duplica nada.
 
+### Campanhas: formulários do Facebook (cadastros) na página de captura da Make
+
+Como no MASO (ciclo, "Integrar Formulário do Facebook?"): ao marcar no ciclo uma campanha do Meta com objetivo de cadastros (`OUTCOME_LEADS` / `LEAD_GENERATION`), o MAVI pede a integração do formulário nativo com uma **página de captura da Make**. Na janela **Integração do Formulário do Facebook** escolhem-se a página do Facebook (as que o perfil da conta administra, ou o ID), o formulário (lido do Facebook), a página de captura (as do ciclo, ou outra) e o ID do cliente na Make. O servidor pega o token da página, **inscreve a página no webhook `leadgen` do app** e guarda o token cifrado (migração `20261010090000_ad_lead_forms`). A cada cadastro, o Facebook chama **`/api/meta-leadgen`**, que confere a assinatura (`X-Hub-Signature-256` com o `META_APP_SECRET`), registra o cadastro uma única vez, lê os campos com o token da página, acha as UTMs (campanha, conjunto e anúncio) e envia à API de optin da Make (`/api/optin/v7`) o mesmo corpo que o MASO enviava; o aviso bruto também segue para `LEADGEN_FORWARD_URL` (o fluxo de automação). Se a Make ou o Facebook falharem, o webhook responde 500 e o Facebook reenvia; campos obrigatórios faltando ficam registrados como erro (a janela mostra o último erro e os cadastros dos últimos 30 dias).
+
+Variáveis na Vercel: `META_WEBHOOK_VERIFY_TOKEN` (um texto aleatório; gere com `openssl rand -hex 24`), `LEADGEN_FORWARD_URL` (o webhook do fluxo que o MASO usava, opcional) e, se precisar, `MAKE_OPTIN_URL` (padrão: a API de optin v7). Usa também `META_APP_SECRET`, `ADS_SYNC_SECRET` e `GOOGLE_TOKEN_KEY_ADS`. O login do Facebook passa a pedir também `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata`, `pages_manage_ads` e `leads_retrieval` (as mesmas do MASO, no mesmo app).
+
+**Virada do MASO para o MAVI** (o app do Meta tem uma única URL de webhook): 1) importe os formulários já integrados no MASO com `scripts/import-maso-lead-forms.mjs` (exportações `produto_capture_formulario_facebook.sql` e `usuarios_make_facebook_page.sql`; mesmo uso e cuidados do import de tokens abaixo); 2) no app do Meta → Webhooks → **Page**, troque a Callback URL para `https://<domínio>/api/meta-leadgen` com o `META_WEBHOOK_VERIFY_TOKEN` e mantenha `leadgen` assinado. A partir daí o `webhook/facebook/leadgen.php` do MASO para de receber. Testes: `npm run test:db:lead-forms` e `npm run test:db:import-lead-forms`.
+
+### Campanhas: acessos do Facebook importados do MASO
+
+Para ninguém precisar reconectar o Facebook cliente a cliente, `scripts/import-maso-meta-tokens.mjs` traz os acessos que o MASO já tinha: lê as exportações `usuarios_make_facebook.sql` (perfil, token e data do token) e `usuarios_make_facebook_accounts_makeads.sql` (cada conta de anúncio, o perfil que a enxerga e o token) e grava um SQL para o pgAdmin. Os tokens saem **cifrados** com a mesma `GOOGLE_TOKEN_KEY_ADS` do servidor (o arquivo nunca tem o token aberto). O cliente de cada conta vem do próprio MAVI: as campanhas do Meta cujos ciclos usam a conta (a ativa primeiro, depois o ciclo mais recente); uma conta que nenhuma campanha usa entra sem cliente. A validade é estimada em 60 dias desde a geração do token no MASO. Uma conta já conectada no MAVI por uma pessoa nunca é tocada; rodar de novo só troca um token importado por outro mais novo. Requer a migração `20261005090000_ad_client_connections`.
+
+```bash
+read -s GOOGLE_TOKEN_KEY_ADS && export GOOGLE_TOKEN_KEY_ADS
+node scripts/import-maso-meta-tokens.mjs --input ../maso-export/usuarios_make_facebook.sql --input ../maso-export/usuarios_make_facebook_accounts_makeads.sql --company <uuid> --author <uuid> --out meta-tokens.sql
+```
+
+No pgAdmin, abra `meta-tokens.sql` e use **Execute script (F5)**; o resumo final mostra quantas contas entraram com e sem cliente. Apague o arquivo depois. Teste: `npm run test:db:import-meta-tokens`.
+
 ### Notificações push (com o app fechado)
 
 Uma tarefa nova para outra pessoa, ou uma menção, vira uma linha em `notifications` (caixa de entrada). A migração `20260929100000_web_push` entrega cada linha, com os navegadores registrados da pessoa, a `/api/push` via `pg_net`; a função assina com VAPID e envia. Para ligar, depois de aplicar a migração e configurar as variáveis acima na Vercel (e fazer redeploy), registrar no SQL Editor do Supabase:

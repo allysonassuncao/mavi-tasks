@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ClipboardList,
   Keyboard,
   Plug,
   Plus,
@@ -12,8 +13,10 @@ import {
 import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
 import { Modal } from "./components";
 import { fold } from "./domain";
+import { LeadFormAsk, LeadFormIntegration } from "./CampaignLeadForms";
 import {
   AdsApiError,
+  isLeadObjective,
   platforms,
   searchablePlatform,
   shortDate,
@@ -23,6 +26,7 @@ import {
   type AdsConnection,
   type AdsProvider,
   type AdsStatus,
+  type LinkedLeadForm,
   type MetaClient,
   type PendingConnection,
   type PlatformAccount,
@@ -87,6 +91,7 @@ export function CycleLinks({
   campaign,
   refresh = 0,
   onPending,
+  landingPages = [],
   links,
   onChange,
 }: {
@@ -95,6 +100,8 @@ export function CycleLinks({
   ads: AdsBackend;
   /** The campaign's client: on Meta, only its accounts are listed. */
   client: { id: string; name: string } | null;
+  /** The cycle's Make capture pages (for the Facebook lead forms). */
+  landingPages?: string[];
   campaign?: string;
   /** Changes after a connection is completed: read the accounts again. */
   refresh?: number;
@@ -128,6 +135,23 @@ export function CycleLinks({
   }, [ads, company, provider, client?.id, tick, refresh]);
 
   const reload = () => setTick((t) => t + 1);
+  // Facebook lead forms of the client (campaigns that collect leads).
+  const [leadForms, setLeadForms] = useState<LinkedLeadForm[] | null>(null);
+  const [leadTick, setLeadTick] = useState(0);
+  const [asking, setAsking] = useState<string | null>(null);
+  const [integrating, setIntegrating] = useState<string | null>(null);
+  const [leadMessage, setLeadMessage] = useState("");
+  useEffect(() => {
+    if (provider !== "meta") return;
+    let live = true;
+    ads
+      .leadForms(company, client?.id ?? null)
+      .then((list) => live && setLeadForms(list))
+      .catch(() => live && setLeadForms([]));
+    return () => {
+      live = false;
+    };
+  }, [ads, company, provider, client?.id, leadTick]);
   // Connected in another tab: read the accounts again on coming back.
   const [awaiting, setAwaiting] = useState(false);
   useEffect(() => {
@@ -280,6 +304,17 @@ export function CycleLinks({
           links={g.links}
           quiet={!!problem}
           refresh={tick}
+          lead={
+            provider === "meta"
+              ? {
+                  linked: leadForms,
+                  // Like the MASO: a campaign that collects leads asks for
+                  // its form (when the client has none linked yet).
+                  onTick: () => leadForms?.length === 0 && setAsking(g.id),
+                  onIntegrate: () => setIntegrating(g.id),
+                }
+              : undefined
+          }
           onChange={(next) =>
             onChange(groups.flatMap((x) => (x.id === g.id ? next : x.links)))
           }
@@ -333,6 +368,36 @@ export function CycleLinks({
       >
         <Keyboard size={14} /> Digitar IDs manualmente
       </Button>
+      {leadMessage && (
+        <p className="cell-note" role="status">
+          {leadMessage}
+        </p>
+      )}
+      {asking && (
+        <LeadFormAsk
+          onClose={() => setAsking(null)}
+          onStart={() => {
+            setIntegrating(asking);
+            setAsking(null);
+          }}
+        />
+      )}
+      {integrating && (
+        <LeadFormIntegration
+          ads={ads}
+          company={company}
+          account={integrating}
+          client={client}
+          landingPages={landingPages}
+          linked={leadForms ?? []}
+          onClose={() => setIntegrating(null)}
+          onChanged={(message, done) => {
+            setLeadMessage(message);
+            setLeadTick((t) => t + 1);
+            if (done) setIntegrating(null);
+          }}
+        />
+      )}
     </fieldset>
   );
 }
@@ -348,6 +413,7 @@ function AccountLinks({
   links,
   quiet,
   refresh,
+  lead,
   onChange,
   onRemove,
 }: {
@@ -362,6 +428,12 @@ function AccountLinks({
   quiet: boolean;
   /** Changes after a new connection: read the campaigns again. */
   refresh: number;
+  /** Meta: the client's Facebook lead forms, for campaigns that collect leads. */
+  lead?: {
+    linked: LinkedLeadForm[] | null;
+    onTick: () => void;
+    onIntegrate: () => void;
+  };
   onChange: (links: AdCycleLink[]) => void;
   onRemove: () => void;
 }) {
@@ -401,7 +473,11 @@ function AccountLinks({
     manager_id: manager,
     account_name: name,
   };
+  const collectsLeads = (campaigns ?? []).some(
+    (c) => picked.has(c.id) && isLeadObjective(c.kind),
+  );
   const toggle = (c: PlatformCampaign, on: boolean) => {
+    if (on && isLeadObjective(c.kind)) lead?.onTick();
     const rest = links.filter((l) => l.campaign_id && l.campaign_id !== c.id);
     const next = on
       ? [...rest, { ...base, campaign_id: c.id, campaign_name: c.name }]
@@ -446,6 +522,34 @@ function AccountLinks({
           <Trash2 size={14} />
         </Button>
       </div>
+      {lead && collectsLeads && (
+        <div
+          className={`campaign-lead-notice${lead.linked?.length === 0 ? " warn" : ""}`}
+          role="status"
+        >
+          <ClipboardList size={16} />
+          <span>
+            <strong>Campanha de cadastros (formulário do Facebook).</strong>{" "}
+            {lead.linked === null
+              ? "Conferindo os formulários integrados…"
+              : lead.linked.length
+                ? `Integrados: ${lead.linked
+                    .map(
+                      (f) =>
+                        `${f.form_name || f.form_id} → ${f.landing_page_id}`,
+                    )
+                    .join("; ")}.`
+                : "Nenhum formulário integrado: os cadastros não chegam à página de captura da Make."}
+          </span>
+          <Button
+            type="button"
+            className="btn secondary"
+            onClick={lead.onIntegrate}
+          >
+            Integrar formulário
+          </Button>
+        </div>
+      )}
       {problem && !quiet && (
         <p className="campaign-links-problem" role="alert">
           <TriangleAlert size={15} /> <span>{problem.message}</span>

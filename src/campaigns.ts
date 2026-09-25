@@ -564,7 +564,57 @@ export interface AdsBackend {
     account: string,
     manager: string,
   ): Promise<PlatformCampaign[]>;
+  /** Meta lead forms: the Pages the account's Facebook profile manages. */
+  pages(company: string, account: string): Promise<FacebookPage[]>;
+  /** A Page's lead forms (active first). */
+  forms(
+    company: string,
+    account: string,
+    page: string,
+  ): Promise<{ page: FacebookPage; forms: LeadForm[] }>;
+  /** Links a form to a Make capture page (subscribes the Page's leads). */
+  linkForm(company: string, input: LeadFormInput): Promise<void>;
+  /** The forms linked (a client's, or all). */
+  leadForms(company: string, client?: string | null): Promise<LinkedLeadForm[]>;
+  unlinkForm(id: string): Promise<void>;
 }
+/** Campaign objectives that collect leads with Facebook forms (MASO rule). */
+export const LEAD_OBJECTIVES = ["OUTCOME_LEADS", "LEAD_GENERATION"];
+export const isLeadObjective = (kind: string) =>
+  LEAD_OBJECTIVES.includes(kind.toUpperCase());
+export type FacebookPage = { id: string; name: string };
+export type LeadForm = {
+  id: string;
+  name: string;
+  status: string;
+  active: boolean;
+  leads: number | null;
+};
+export type LeadFormInput = {
+  account: string;
+  page: string;
+  form: string;
+  form_name: string;
+  client: string | null;
+  landing_page: string;
+  make_user: string;
+};
+export type LinkedLeadForm = {
+  id: string;
+  client_id: string | null;
+  client: string | null;
+  page_id: string;
+  page_name: string;
+  form_id: string;
+  form_name: string;
+  landing_page_id: string;
+  make_user_id: string;
+  source: "mavi" | "maso";
+  updated_at: string;
+  last_lead_at: string | null;
+  sent_30d: number;
+  last_error: { at: string; message: string } | null;
+};
 export type ConnectStart = { url: string } | { pending: string };
 export type PendingConnection = {
   id: string;
@@ -710,6 +760,35 @@ export const serverAds: AdsBackend = {
         manager,
       })
     ).campaigns;
+  },
+  async pages(company, account) {
+    return (
+      await adsServer<{ pages: FacebookPage[] }>({
+        action: "pages",
+        company,
+        provider: "meta",
+        account,
+      })
+    ).pages;
+  },
+  forms: (company, account, page) =>
+    adsServer({ action: "forms", company, provider: "meta", account, page }),
+  async linkForm(company, input) {
+    await adsServer({
+      action: "link-form",
+      company,
+      provider: "meta",
+      ...input,
+    });
+  },
+  async leadForms(company, client) {
+    return (await rpc("ad_lead_forms_overview", {
+      p_company: company,
+      p_client: client ?? null,
+    })) as LinkedLeadForm[];
+  },
+  async unlinkForm(id) {
+    await rpc("ad_delete_lead_form", { p_id: id });
   },
 };
 /** What the connection's return (?conexao=meta-conectado) means. */

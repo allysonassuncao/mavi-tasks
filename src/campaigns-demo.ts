@@ -12,6 +12,8 @@ import {
   type AdCycleLink,
   type AdPlatform,
   type AdsBackend,
+  type LeadForm,
+  type LinkedLeadForm,
   type PendingConnection,
   type PlatformAccount,
   type PlatformCampaign,
@@ -717,8 +719,107 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
         }),
       );
     },
+    async pages(_company, account) {
+      await wait();
+      need("meta");
+      if (!DEMO_ACCOUNTS.meta.some((a) => a.id === normalized("meta", account)))
+        throw new AdsApiError(
+          "Esta conta de anúncio não está conectada. Conecte com um usuário que tenha acesso a ela.",
+          "not_connected",
+        );
+      return DEMO_PAGES.map(({ id, name }) => ({ id, name }));
+    },
+    async forms(_company, _account, page) {
+      await wait();
+      const p = DEMO_PAGES.find((x) => x.id === page.trim());
+      if (!p)
+        throw new AdsApiError(
+          "O perfil do Facebook desta conta não administra esta página. Use a página certa ou conecte o Facebook com quem a administra.",
+          "no_page_access",
+        );
+      return {
+        page: { id: p.id, name: p.name },
+        forms: p.forms.map((f) => ({ ...f })),
+      };
+    },
+    async linkForm(_company, input) {
+      await wait();
+      const p = DEMO_PAGES.find((x) => x.id === input.page);
+      const f = p?.forms.find((x) => x.id === input.form);
+      if (!p || !f) throw new AdsApiError("Formulário do Facebook inválido.");
+      if (!/^[0-9A-Za-z_-]{1,60}$/.test(input.landing_page.trim()))
+        throw new AdsApiError("Escolha a página de captura da Make");
+      if (!/^[0-9]{1,20}$/.test(input.make_user.trim()))
+        throw new AdsApiError("Informe o ID do cliente na Make (números)");
+      const now = new Date().toISOString();
+      const row: LinkedLeadForm = {
+        id:
+          demoLeadForms.find((x) => x.form_id === f.id)?.id ??
+          crypto.randomUUID(),
+        client_id: input.client,
+        client: data().clients.find((c) => c.id === input.client)?.name ?? null,
+        page_id: p.id,
+        page_name: p.name,
+        form_id: f.id,
+        form_name: input.form_name || f.name,
+        landing_page_id: input.landing_page.trim(),
+        make_user_id: input.make_user.trim(),
+        source: "mavi",
+        updated_at: now,
+        last_lead_at: null,
+        sent_30d: 0,
+        last_error: null,
+      };
+      demoLeadForms = [row, ...demoLeadForms.filter((x) => x.form_id !== f.id)];
+    },
+    async leadForms(_company, client) {
+      return demoLeadForms
+        .filter((f) => !client || f.client_id === client)
+        .map((f) => ({ ...f }));
+    },
+    async unlinkForm(id) {
+      demoLeadForms = demoLeadForms.filter((f) => f.id !== id);
+    },
   };
 }
+
+/** Facebook Pages of the demonstration, with their lead forms. */
+const DEMO_PAGES: { id: string; name: string; forms: LeadForm[] }[] = [
+  {
+    id: "104455667788",
+    name: "Norte Coffee",
+    forms: [
+      {
+        id: "880011",
+        name: "Avaliação gratuita",
+        status: "Ativo",
+        active: true,
+        leads: 42,
+      },
+      {
+        id: "880012",
+        name: "Cadastro · Black Friday",
+        status: "Arquivado",
+        active: false,
+        leads: 310,
+      },
+    ],
+  },
+  {
+    id: "104455667799",
+    name: "Aurora Estética",
+    forms: [
+      {
+        id: "880021",
+        name: "Agende sua consulta",
+        status: "Ativo",
+        active: true,
+        leads: 17,
+      },
+    ],
+  },
+];
+let demoLeadForms: LinkedLeadForm[] = [];
 
 /* ------------------------------------------------------------------ */
 /* Numbers in the demonstration: made up, but consistent with the cycle  */

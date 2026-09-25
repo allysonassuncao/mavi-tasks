@@ -74,7 +74,18 @@ export function adsEnv(
 }
 
 export type AdsProvider = "meta" | "google";
-export const META_SCOPE = "ads_read,business_management";
+// The Pages and their lead forms (the MASO asked for the same ones, in the
+// same Meta app): list the Pages, subscribe them to the "leadgen" webhook,
+// list the forms and read each lead.
+export const META_SCOPE = [
+  "ads_read",
+  "business_management",
+  "pages_show_list",
+  "pages_read_engagement",
+  "pages_manage_metadata",
+  "pages_manage_ads",
+  "leads_retrieval",
+].join(",");
 export const GOOGLE_ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -201,7 +212,7 @@ function appSecretProof(env: AdsEnv, token: string) {
 }
 
 /** A Graph API GET with the token in the header (never in a URL we build). */
-async function graph<T>(
+export async function graph<T>(
   env: AdsEnv,
   fetchImpl: Fetch,
   token: string,
@@ -238,6 +249,35 @@ async function graph<T>(
   return body;
 }
 
+/** A Graph API POST (form fields), the token in the header as in graph(). */
+async function graphPost<T>(
+  env: AdsEnv,
+  fetchImpl: Fetch,
+  token: string,
+  path: string,
+  fields: Record<string, string>,
+): Promise<T> {
+  const url = new URL(`https://graph.facebook.com/${env.meta.version}${path}`);
+  url.searchParams.set("appsecret_proof", appSecretProof(env, token));
+  const res = await fetchImpl(url.toString(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams(fields).toString(),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: { message?: string; code?: number };
+  } & T;
+  if (!res.ok || body.error)
+    throw new AdsError(
+      502,
+      `Facebook: ${body.error?.message ?? res.statusText}`,
+    );
+  return body;
+}
+
 /** Every page of a Graph list (the MASO read only the first two). */
 export async function graphAll<T>(
   env: AdsEnv,
@@ -263,13 +303,14 @@ export async function graphAll<T>(
   return items;
 }
 
-async function metaCampaigns(
+/** The (unsealed) token that reaches a connected Meta ad account. */
+async function metaAccountToken(
   env: AdsEnv,
   fetchImpl: Fetch,
   authorization: string,
   company: string,
   account: string,
-): Promise<PlatformCampaign[]> {
+) {
   const [row] = await rpc<
     { token_cipher: string; token_expires_at: string | null }[]
   >(env, fetchImpl, authorization, "ad_meta_token", {
@@ -288,7 +329,23 @@ async function metaCampaigns(
       "O acesso ao Facebook desta conta expirou. Conecte o Facebook de novo.",
       "expired",
     );
-  const token = unseal(env.tokenKey!, row.token_cipher);
+  return unseal(env.tokenKey!, row.token_cipher);
+}
+
+async function metaCampaigns(
+  env: AdsEnv,
+  fetchImpl: Fetch,
+  authorization: string,
+  company: string,
+  account: string,
+): Promise<PlatformCampaign[]> {
+  const token = await metaAccountToken(
+    env,
+    fetchImpl,
+    authorization,
+    company,
+    account,
+  );
   const items = await graphAll<{
     id: string;
     name?: string;
@@ -306,6 +363,95 @@ async function metaCampaigns(
     active: c.effective_status === "ACTIVE",
     kind: c.objective ?? "",
   }));
+}
+
+// ------------------------------------------------------------ lead forms
+/**
+ * Facebook lead forms (Meta Lead Ads) linked to Make capture pages, as the
+ * MASO did in the cycle ("Integrar Formulário do Facebook?"): the Pages the
+ * account's profile manages, each Page's forms and, to link one, the Page's
+ * own token (kept sealed) with the Page subscribed to the app's "leadgen"
+ * webhook (/api/meta-leadgen receives the leads).
+ */
+export type FacebookPage = { id: string; name: string };
+export type LeadForm = {
+  id: string;
+  name: string;
+  status: string;
+  active: boolean;
+  leads: number | null;
+};
+const FORM_STATUS: Record<string, string> = {
+  ACTIVE: "Ativo",
+  ARCHIVED: "Arquivado",
+  DELETED: "Excluído",
+  DRAFT: "Rascunho",
+};
+const pageIdOf = (value: unknown) => {
+  const id = String(value ?? "").trim();
+  return /^[0-9]{1,30}$/.test(id) ? id : null;
+};
+
+async function metaPages(env: AdsEnv, fetchImpl: Fetch, token: string) {
+  const pages = await graphAll<{ id: string; name?: string }>(
+    env,
+    fetchImpl,
+    token,
+    "/me/accounts",
+    { fields: "id,name", limit: "100" },
+  );
+  return pages
+    .map((p) => ({ id: p.id, name: p.name ?? p.id }))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+}
+
+/** The Page's own token (the account's profile must manage the Page). */
+async function metaPageToken(
+  env: AdsEnv,
+  fetchImpl: Fetch,
+  token: string,
+  page: string,
+) {
+  const body = await graph<{ name?: string; access_token?: string }>(
+    env,
+    fetchImpl,
+    token,
+    `/${page}`,
+    { fields: "name,access_token" },
+  );
+  if (!body.access_token)
+    throw new AdsError(
+      403,
+      "O perfil do Facebook desta conta não administra esta página. Use a página certa ou conecte o Facebook com quem a administra.",
+      "no_page_access",
+    );
+  return { name: body.name ?? "", token: body.access_token };
+}
+
+async function metaLeadForms(
+  env: AdsEnv,
+  fetchImpl: Fetch,
+  pageToken: string,
+  page: string,
+): Promise<LeadForm[]> {
+  const forms = await graphAll<{
+    id: string;
+    name?: string;
+    status?: string;
+    leads_count?: number;
+  }>(env, fetchImpl, pageToken, `/${page}/leadgen_forms`, {
+    fields: "id,name,status,leads_count",
+    limit: "100",
+  });
+  return forms
+    .map((f) => ({
+      id: f.id,
+      name: f.name ?? f.id,
+      status: FORM_STATUS[f.status ?? ""] ?? f.status ?? "",
+      active: f.status === "ACTIVE",
+      leads: typeof f.leads_count === "number" ? f.leads_count : null,
+    }))
+    .sort((a, b) => Number(b.active) - Number(a.active));
 }
 
 // ------------------------------------------------------------ Google Ads
@@ -568,6 +714,29 @@ export type AdsRequest =
       provider: AdsProvider;
       account: string;
       manager?: string;
+    }
+  /** Meta: the Pages the account's profile manages. */
+  | { action: "pages"; company: string; provider: "meta"; account: string }
+  /** Meta: a Page's lead forms. */
+  | {
+      action: "forms";
+      company: string;
+      provider: "meta";
+      account: string;
+      page: string;
+    }
+  /** Meta: links a lead form to a Make capture page. */
+  | {
+      action: "link-form";
+      company: string;
+      provider: "meta";
+      account: string;
+      page: string;
+      form: string;
+      form_name?: string;
+      client?: string | null;
+      landing_page: string;
+      make_user: string;
     };
 
 export async function handleAds(
@@ -751,6 +920,72 @@ export async function handleAds(
           client_name: a.client_name ?? "",
         }));
       return { status: 200, body: { accounts } };
+    }
+
+    if (
+      req.action === "pages" ||
+      req.action === "forms" ||
+      req.action === "link-form"
+    ) {
+      if (provider !== "meta") return fail(400, "Só no Facebook.");
+      const account = accountId("meta", req.account);
+      if (!account) return fail(400, "Conta de anúncio inválida.");
+      const token = await metaAccountToken(
+        env,
+        fetchImpl,
+        authorization,
+        company,
+        account,
+      );
+      if (req.action === "pages")
+        return {
+          status: 200,
+          body: { pages: await metaPages(env, fetchImpl, token) },
+        };
+      const page = pageIdOf(req.page);
+      if (!page) return fail(400, "Página do Facebook inválida.");
+      const pageAccess = await metaPageToken(env, fetchImpl, token, page);
+      if (req.action === "forms")
+        return {
+          status: 200,
+          body: {
+            page: { id: page, name: pageAccess.name },
+            forms: await metaLeadForms(env, fetchImpl, pageAccess.token, page),
+          },
+        };
+      const form = pageIdOf(req.form);
+      if (!form) return fail(400, "Formulário do Facebook inválido.");
+      // The leads of the Page's forms go to the app's webhook.
+      const subscribed = await graphPost<{ success?: boolean }>(
+        env,
+        fetchImpl,
+        pageAccess.token,
+        `/${page}/subscribed_apps`,
+        { subscribed_fields: "leadgen" },
+      );
+      if (!subscribed.success)
+        return fail(
+          502,
+          "O Facebook não confirmou a inscrição da página para receber os cadastros.",
+        );
+      const saved = await rpc<Record<string, unknown>>(
+        env,
+        fetchImpl,
+        authorization,
+        "ad_save_lead_form",
+        {
+          p_company: company,
+          p_client: UUID.test(String(req.client ?? "")) ? req.client : null,
+          p_page_id: page,
+          p_page_name: pageAccess.name,
+          p_page_token_cipher: seal(env.tokenKey!, pageAccess.token),
+          p_form_id: form,
+          p_form_name: String(req.form_name ?? "").slice(0, 300),
+          p_landing_page: String(req.landing_page ?? "").trim(),
+          p_make_user: String(req.make_user ?? "").trim(),
+        },
+      );
+      return { status: 200, body: { form: saved } };
     }
 
     if (req.action === "campaigns") {

@@ -3,6 +3,7 @@ import {
   addDays,
   amountText,
   connectionResult,
+  isLeadObjective,
   cycleAlert,
   cycleDays,
   cycleInput,
@@ -531,5 +532,48 @@ describe("editar registros da Linha do tempo (demonstração)", () => {
       "snapshot_edited",
       "daily_edited",
     ]);
+  });
+});
+
+describe("formulários do Facebook (demonstração)", () => {
+  it("lista páginas e formulários, liga à página de captura e remove", async () => {
+    const data = demoSnapshot();
+    const company = data.companies[0].id;
+    const { ads } = demoCampaigns(() => data, demoUser);
+    expect(isLeadObjective("OUTCOME_LEADS")).toBe(true);
+    expect(isLeadObjective("lead_generation")).toBe(true);
+    expect(isLeadObjective("OUTCOME_SALES")).toBe(false);
+    // Earlier tests remove some demo accounts: any connected one will do.
+    const [account] = await ads.accounts(company, "meta");
+    const pages = await ads.pages(company, `act_${account.id}`);
+    expect(pages.length).toBeGreaterThan(0);
+    const { forms } = await ads.forms(company, account.id, pages[0].id);
+    expect(forms[0].active).toBe(true);
+    const input = {
+      account: account.id,
+      page: pages[0].id,
+      form: forms[0].id,
+      form_name: forms[0].name,
+      client: null,
+      landing_page: "12345",
+      make_user: "2477",
+    };
+    await expect(
+      ads.linkForm(company, { ...input, make_user: "abc" }),
+    ).rejects.toThrow(/ID do cliente na Make/);
+    await expect(
+      ads.linkForm(company, { ...input, landing_page: "" }),
+    ).rejects.toThrow(/página de captura/);
+    await ads.linkForm(company, input);
+    // Linking the same form again moves it (one capture page per form).
+    await ads.linkForm(company, { ...input, landing_page: "777" });
+    const linked = await ads.leadForms(company);
+    expect(linked.filter((f) => f.form_id === forms[0].id)).toHaveLength(1);
+    expect(linked[0].landing_page_id).toBe("777");
+    await ads.unlinkForm(linked[0].id);
+    expect(await ads.leadForms(company)).toEqual([]);
+    await expect(ads.forms(company, account.id, "1")).rejects.toMatchObject({
+      code: "no_page_access",
+    });
   });
 });

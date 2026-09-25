@@ -183,7 +183,9 @@ describe("conectar", () => {
       "https://www.facebook.com/v23.0/dialog/oauth",
     );
     expect(url.searchParams.get("state")).toBe(`meta.${"a".repeat(64)}`);
-    expect(url.searchParams.get("scope")).toBe("ads_read,business_management");
+    expect(url.searchParams.get("scope")).toBe(
+      "ads_read,business_management,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_manage_ads,leads_retrieval",
+    );
     expect(url.searchParams.get("redirect_uri")).toBe(env.redirectUri);
   });
   it("Meta: a conexão leva o cliente e a campanha de volta", async () => {
@@ -781,5 +783,194 @@ describe("retorno da plataforma (callback)", () => {
     );
     expect(args.p_email).toBe("agencia@make.com");
     expect(unseal(key, args.p_refresh_cipher)).toBe("r");
+  });
+});
+
+describe("Meta: formulários de cadastro (Lead Ads)", () => {
+  const token = [
+    /rpc\/ad_meta_token/,
+    () =>
+      json([{ token_cipher: seal(key, "fb-token"), token_expires_at: null }]),
+  ] as [RegExp, () => Response];
+  const page = [
+    /GET https:\/\/graph\.facebook\.com\/v23\.0\/9001\?fields=name%2Caccess_token/,
+    () => json({ name: "Página Vittalium", access_token: "page-token" }),
+  ] as [RegExp, () => Response];
+
+  it("lista as páginas que o perfil da conta administra", async () => {
+    const { fetch, calls } = network([
+      token,
+      [
+        /GET https:\/\/graph\.facebook\.com\/v23\.0\/me\/accounts/,
+        () =>
+          json({
+            data: [
+              { id: "2", name: "Zeta" },
+              { id: "1", name: "Alfa" },
+            ],
+          }),
+      ],
+    ]);
+    const result = await handleAds(
+      { action: "pages", company, provider: "meta", account: "act_123" },
+      auth,
+      env,
+      fetch,
+    );
+    expect(result.body.pages).toEqual([
+      { id: "1", name: "Alfa" },
+      { id: "2", name: "Zeta" },
+    ]);
+    expect(calls[1].headers.Authorization).toBe("Bearer fb-token");
+  });
+
+  it("lista os formulários da página com o token dela (ativos primeiro)", async () => {
+    const { fetch, calls } = network([
+      token,
+      page,
+      [
+        /GET https:\/\/graph\.facebook\.com\/v23\.0\/9001\/leadgen_forms/,
+        () =>
+          json({
+            data: [
+              { id: "5002", name: "Antigo", status: "ARCHIVED" },
+              {
+                id: "5001",
+                name: "Avaliação",
+                status: "ACTIVE",
+                leads_count: 12,
+              },
+            ],
+          }),
+      ],
+    ]);
+    const result = await handleAds(
+      {
+        action: "forms",
+        company,
+        provider: "meta",
+        account: "123",
+        page: "9001",
+      },
+      auth,
+      env,
+      fetch,
+    );
+    expect(result.body).toEqual({
+      page: { id: "9001", name: "Página Vittalium" },
+      forms: [
+        {
+          id: "5001",
+          name: "Avaliação",
+          status: "Ativo",
+          active: true,
+          leads: 12,
+        },
+        {
+          id: "5002",
+          name: "Antigo",
+          status: "Arquivado",
+          active: false,
+          leads: null,
+        },
+      ],
+    });
+    expect(calls[2].headers.Authorization).toBe("Bearer page-token");
+    // No token ever goes back to the browser.
+    expect(JSON.stringify(result.body)).not.toContain("token");
+  });
+
+  it("página que o perfil não administra", async () => {
+    const { fetch } = network([
+      token,
+      [
+        /GET https:\/\/graph\.facebook\.com\/v23\.0\/9001/,
+        () => json({ name: "X" }),
+      ],
+    ]);
+    const result = await handleAds(
+      {
+        action: "forms",
+        company,
+        provider: "meta",
+        account: "123",
+        page: "9001",
+      },
+      auth,
+      env,
+      fetch,
+    );
+    expect([result.status, result.body.code]).toEqual([403, "no_page_access"]);
+  });
+
+  it("liga o formulário: inscreve a página no webhook e guarda o token cifrado", async () => {
+    const { fetch, calls } = network([
+      token,
+      page,
+      [
+        /POST https:\/\/graph\.facebook\.com\/v23\.0\/9001\/subscribed_apps/,
+        () => json({ success: true }),
+      ],
+      [/rpc\/ad_save_lead_form/, () => json({ id: "lf-1", form_id: "5001" })],
+    ]);
+    const result = await handleAds(
+      {
+        action: "link-form",
+        company,
+        provider: "meta",
+        account: "123",
+        page: "9001",
+        form: "5001",
+        form_name: "Avaliação",
+        client: "00000000-0000-4000-8000-000000000002",
+        landing_page: " 12345 ",
+        make_user: "2477",
+      },
+      auth,
+      env,
+      fetch,
+    );
+    expect(result).toEqual({
+      status: 200,
+      body: { form: { id: "lf-1", form_id: "5001" } },
+    });
+    const subscribe = calls[2];
+    expect(subscribe.body).toBe("subscribed_fields=leadgen");
+    expect(subscribe.headers.Authorization).toBe("Bearer page-token");
+    const args = rpcArgs(calls[3]);
+    expect(args).toMatchObject({
+      p_page_id: "9001",
+      p_page_name: "Página Vittalium",
+      p_form_id: "5001",
+      p_landing_page: "12345",
+      p_make_user: "2477",
+      p_client: "00000000-0000-4000-8000-000000000002",
+    });
+    expect(unseal(key, args.p_page_token_cipher)).toBe("page-token");
+  });
+
+  it("o Facebook não confirma a inscrição: não liga", async () => {
+    const { fetch, calls } = network([
+      token,
+      page,
+      [/POST .*subscribed_apps/, () => json({ success: false })],
+    ]);
+    const result = await handleAds(
+      {
+        action: "link-form",
+        company,
+        provider: "meta",
+        account: "123",
+        page: "9001",
+        form: "5001",
+        landing_page: "12345",
+        make_user: "2477",
+      },
+      auth,
+      env,
+      fetch,
+    );
+    expect(result.status).toBe(502);
+    expect(calls.some((c) => c.url.includes("ad_save_lead_form"))).toBe(false);
   });
 });

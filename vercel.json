@@ -3,7 +3,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/ads-sync.ts": { "maxDuration": 60 }
+    "api/ads-sync.ts": { "maxDuration": 60 },
+    "api/meta-leadgen.ts": { "maxDuration": 60 }
   },
   "rewrites": [
     {
