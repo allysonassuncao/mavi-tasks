@@ -1474,4 +1474,76 @@ await check(
   },
 );
 
+// ------------------------------------------------------------ Google from the MASO
+await check(
+  "Google vindo do MASO: impressões saem do 'alcance' (migração 20261012090000)",
+  async () => {
+    const { readFileSync } = await import("node:fs");
+    const google = await campaign(admin, {
+      name: "Google do MASO",
+      platform: "google",
+    });
+    const gCycle = await cycle(admin, google, {
+      start: "2026-03-01",
+      end: "2026-03-31",
+      links: [{ account_id: "2223334444", campaign_id: "g-maso" }],
+    });
+    const meta = await campaign(admin, { name: "Meta do MASO" });
+    const mCycle = await cycle(admin, meta, {
+      start: "2026-03-01",
+      end: "2026-03-31",
+      links: [{ account_id: "act_77", campaign_id: "m-maso" }],
+    });
+    for (const [c, y] of [
+      [google, gCycle],
+      [meta, mCycle],
+    ]) {
+      await sql(
+        `insert into ad_cycle_snapshots(company_id, campaign_id, cycle_id, taken_on, period_start, period_end,
+         impressions, reach, source) values ($1,$2,$3,'2026-03-10','2026-03-01','2026-03-09',0,5597,'maso')`,
+        [A, c, y],
+      );
+      await sql(
+        `insert into ad_daily_metrics(company_id, campaign_id, cycle_id, day, multiplier, impressions, reach, source)
+         values ($1,$2,$3,'2026-03-09',1,0,306,'maso')`,
+        [A, c, y],
+      );
+    }
+    const migration = readFileSync(
+      new URL(
+        "../supabase/migrations/20261012090000_ad_google_maso_impressions.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const read = async (y) => ({
+      snapshot: (
+        await sql(
+          "select impressions::int, reach::int from ad_cycle_snapshots where cycle_id=$1",
+          [y],
+        )
+      )[0],
+      day: (
+        await sql(
+          "select impressions::int, reach::int from ad_daily_metrics where cycle_id=$1",
+          [y],
+        )
+      )[0],
+    });
+    for (let run = 0; run < 2; run++) {
+      await db.exec("reset role");
+      await db.exec(migration);
+      assert.deepEqual(await read(gCycle), {
+        snapshot: { impressions: 5597, reach: 0 },
+        day: { impressions: 306, reach: 0 },
+      });
+      // Meta has reach: untouched.
+      assert.deepEqual(await read(mCycle), {
+        snapshot: { impressions: 0, reach: 5597 },
+        day: { impressions: 0, reach: 306 },
+      });
+    }
+  },
+);
+
 console.log(`\n${passed} verificações de campanhas passaram.`);

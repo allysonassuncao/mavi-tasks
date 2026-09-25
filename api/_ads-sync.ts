@@ -138,13 +138,17 @@ export function syncWindow(t: SyncTarget) {
  *    onsite_conversion.messaging_first_reply (the MASO's since 19/07/2023);
  *    VIDEO video_view; LEAD and the rest offsite_conversion.fb_pixel_lead.
  *
- * Google (conversions by conversion action name, accents removed; each
- * action's count rounded, as the MASO did):
+ * Google (conversion actions by name, accents removed; each action's
+ * count rounded, as the MASO did):
  *  - TRÁFEGO: clicks; ENGAJAMENTO: impressions; VIDEO: TrueView views;
- *  - otherwise the actions whose name matches the MASO's list, never the
- *    "view/cart/checkout" ones, plus the calls from ads (phone_calls);
- *    for the Make capture page only WhatsApp/phone/local/purchase actions
- *    (the leads come from the Make server); VENDA splits the funnel by name.
+ *  - otherwise every action of Google's "Conversões" (metrics.conversions:
+ *    the primary ones), never the micro-conversions "view/cart/checkout",
+ *    plus the calls from ads (phone_calls). The MASO also required the name
+ *    to be in a list (lead, contato, whats…) and an action named otherwise
+ *    counted as zero — its analysts then typed the number by hand;
+ *  - for the Make capture page only WhatsApp/phone/local/purchase actions,
+ *    the MASO's list (the page's leads come from the Make server, and its
+ *    form's conversion would count them twice); VENDA splits the funnel.
  */
 type MetaAction = { action_type: string; value: string };
 type MetaRow = {
@@ -342,8 +346,6 @@ export type GoogleAction = { name: string; conversions: number };
 
 // The MASO's lists (InsightsReportConversionV3), on names without accents.
 const GOOGLE_NEVER = /visualiza|viu|finali|checkout|cart|content|carri/i;
-const GOOGLE_COUNTS =
-  /whats|phone|compra|lead|local|purch|cadastro|contato|inscreve|subscription|subs|inscritos|inscri|instala/i;
 const GOOGLE_COUNTS_MAKE_PAGE = /whats|phone|local|compra|purch/i;
 const GOOGLE_VIEW = /visualiza|visualizacao|content|viu/i;
 const GOOGLE_CART = /cart|carri/i;
@@ -351,18 +353,19 @@ const GOOGLE_CHECKOUT = /iniciate|initiate|finalizacao|iniciar/i;
 const plain = (name: string) => name.normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 /**
- * A campaign's conversion actions as the MASO counted them: each action's
- * conversions rounded, the ones in its list (never "view/cart/checkout"),
- * and the sales funnel by name.
+ * A campaign's conversion actions: each action's conversions rounded (as
+ * the MASO), every one but the "view/cart/checkout" micro-conversions (on
+ * the Make page, only the MASO's WhatsApp/phone/local/purchase list), and
+ * the sales funnel by name.
  */
 export function googleActionTotals(
   destination: Destination,
   actions: GoogleAction[],
 ) {
-  const counts =
+  const counts = (name: string) =>
     destination === "make_landing_page"
-      ? GOOGLE_COUNTS_MAKE_PAGE
-      : GOOGLE_COUNTS;
+      ? GOOGLE_COUNTS_MAKE_PAGE.test(name)
+      : true;
   const out = {
     counted: 0,
     view_content: 0,
@@ -372,7 +375,7 @@ export function googleActionTotals(
   for (const a of actions) {
     const name = plain(a.name);
     const n = Math.round(a.conversions);
-    if (!GOOGLE_NEVER.test(name) && counts.test(name)) out.counted += n;
+    if (!GOOGLE_NEVER.test(name) && counts(name)) out.counted += n;
     if (GOOGLE_VIEW.test(name)) out.view_content += n;
     if (GOOGLE_CART.test(name)) out.add_to_cart += n;
     if (GOOGLE_CHECKOUT.test(name)) out.initiate_checkout += n;

@@ -837,6 +837,7 @@ export function buildModel(tables, mapping, options = {}) {
     const cycle = {
       legacy,
       campaign: campaign.legacy,
+      platform: campaign.platform,
       competence: monthStart(competence ?? start),
       start,
       end,
@@ -942,6 +943,19 @@ export function buildModel(tables, mapping, options = {}) {
     return cycle;
   };
 
+  /**
+   * Impressions and reach. The MASO's Google cron saved the impressions in
+   * `alcance` (Google has no reach) and left `impressao` empty: on Google
+   * that number is the impressions, and there is no reach.
+   */
+  const audience = (report, row, cycle, where) => {
+    const impressions = metric(report, row.impressao, "impressões", where, 0);
+    const reach = metric(report, row.alcance, "alcance", where, 0);
+    return cycle.platform === "google" && !(impressions > 0)
+      ? { impressions: reach, reach: 0 }
+      : { impressions, reach };
+  };
+
   const snapshots = new Map();
   for (const { row, index } of byId(
     tables.get("maso_acompanhamento_registro") ?? [],
@@ -984,8 +998,7 @@ export function buildModel(tables, mapping, options = {}) {
       periodStart,
       periodEnd,
       spend: metric(report, row.investimento_total, "investimento", where),
-      impressions: metric(report, row.impressao, "impressões", where, 0),
-      reach: metric(report, row.alcance, "alcance", where, 0),
+      ...audience(report, row, cycle, where),
       clicks: metric(report, row.total_clique, "cliques", where, 0),
       conversions: metric(report, row.conversoes, "conversões", where),
       viewContent: metric(
@@ -1055,8 +1068,7 @@ export function buildModel(tables, mapping, options = {}) {
       day,
       multiplier: Math.round(multiplier * 1000) / 1000,
       spend: metric(report, row.investimento_total, "investimento", where),
-      impressions: metric(report, row.impressao, "impressões", where, 0),
-      reach: metric(report, row.alcance, "alcance", where, 0),
+      ...audience(report, row, cycle, where),
       clicks: metric(report, row.total_clique, "cliques", where, 0),
       conversions: metric(report, row.conversoes, "conversões", where),
       viewContent: metric(

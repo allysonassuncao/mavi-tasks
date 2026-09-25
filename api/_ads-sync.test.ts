@@ -193,20 +193,32 @@ describe("o que conta como resultado (regras dos crons do MASO)", () => {
     { name: "Iniciar checkout", conversions: 3 },
     { name: "Tempo no site", conversions: 30 },
   ];
-  it("Google: ações pelo nome (lista do MASO), sem acento, arredondadas", () => {
+  it("Google: todas as conversões, menos as micro (visualização/carrinho/checkout)", () => {
     expect(googleActionTotals("external_page", googleActions)).toEqual({
-      // WhatsApp 3 + phone 1 + lead 3 + compra 2 + inscricao 1; never the
-      // view/cart/checkout ones ("Finalização de compra" has "compra", but
-      // "finali" rules it out); "Tempo no site" is in no list.
-      counted: 10,
+      // WhatsApp 3 + phone 1 + lead 3 + compra 2 + inscricao 1 + tempo no
+      // site 30; never the view/cart/checkout ones ("Finalização de compra"
+      // has "compra", but "finali" rules it out).
+      counted: 40,
       view_content: 50,
       add_to_cart: 9,
       initiate_checkout: 7,
     });
-    // Make page: only WhatsApp, phone, local and purchase.
+    // An action named outside the MASO's list still counts (the MASO gave
+    // 0 and its analyst typed the number by hand).
+    expect(
+      googleActionTotals("external_page", [
+        { name: "Formulário site", conversions: 33 },
+      ]).counted,
+    ).toBe(33);
+    // Make page: only WhatsApp, phone, local and purchase (the MASO's list).
     expect(googleActionTotals("make_landing_page", googleActions).counted).toBe(
       6,
     );
+    expect(
+      googleActionTotals("make_landing_page", [
+        { name: "Formulário site", conversions: 33 },
+      ]).counted,
+    ).toBe(0);
   });
   it("Google: por objetivo, com as ligações dos anúncios", () => {
     const metrics = {
@@ -220,7 +232,7 @@ describe("o que conta como resultado (regras dos crons do MASO)", () => {
       googleTotals("lead", "external_page", { metrics }, googleActions),
     ).toMatchObject({
       spend: 12.5,
-      conversions: 12,
+      conversions: 42,
       clicks: 50,
       reach: 0,
       view_content: 0,
@@ -228,7 +240,7 @@ describe("o que conta como resultado (regras dos crons do MASO)", () => {
     expect(
       googleTotals("sale", "external_page", { metrics }, googleActions),
     ).toMatchObject({
-      conversions: 12,
+      conversions: 42,
       view_content: 50,
       add_to_cart: 9,
       initiate_checkout: 7,
@@ -236,7 +248,7 @@ describe("o que conta como resultado (regras dos crons do MASO)", () => {
     expect(
       googleTotals("message", "external_page", { metrics }, googleActions)
         .conversions,
-    ).toBe(12);
+    ).toBe(42);
     expect(
       googleTotals("lead", "make_landing_page", { metrics }, googleActions)
         .conversions,
