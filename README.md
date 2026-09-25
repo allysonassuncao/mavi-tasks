@@ -91,7 +91,7 @@ O proprietário fará a integração manual com [allysonassuncao/mavi-tasks](htt
 
 Antes do primeiro deploy, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLISHABLE_KEY` com os valores de `.env.local`, disponível somente na máquina local. Sem essas variáveis o frontend abre em modo demonstração. Configurá-las separadamente em Preview e Production; cada ambiente deve apontar ao Supabase correspondente. Nunca usar uma chave `service_role` ou secreta nessas variáveis.
 
-`vercel.json` inclui fallback de rotas e cabeçalhos de segurança. Se usar domínio personalizado para a API do Supabase, revisar `connect-src` da CSP antes da publicação. Depois de publicar, configurar no Supabase Auth a Site URL e os redirects exatos `https://workspace.maso.app.br/?setup=1` e `https://workspace.maso.app.br/?reset=1`.
+`vercel.json` inclui fallback de rotas e cabeçalhos de segurança. Se usar domínio personalizado para a API do Supabase, revisar `connect-src` da CSP antes da publicação. O `connect-src` também libera `https://api.maso.app.br`, o webhook do MASO usado pelo botão "Adicionar MAVI" da Agenda. Depois de publicar, configurar no Supabase Auth a Site URL e os redirects exatos `https://workspace.maso.app.br/?setup=1` e `https://workspace.maso.app.br/?reset=1`.
 
 ### Variáveis de servidor
 
