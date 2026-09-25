@@ -1272,8 +1272,9 @@ export function AdConnections({
             <h3>Sincronização diária</h3>
             <p className="cell-note">
               Todos os dias, das 06:00 às 09:40, o MAVI busca no Meta e no
-              Google os números de ontem (e refaz os últimos 7 dias) dos ciclos
-              em andamento com contas vinculadas.
+              Google os números do ciclo inteiro até ontem (refazendo cada dia)
+              dos ciclos em andamento com contas vinculadas, com as regras de
+              conversão do MASO.
             </p>
           </header>
           {!overview ? (

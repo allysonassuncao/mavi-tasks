@@ -1,10 +1,12 @@
 import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
+  googleActionTotals,
   googleTotals,
   handleAdsSync,
   metaResults,
   syncWindow,
+  usesMakeLeads,
   type SyncEnv,
   type SyncTarget,
 } from "./_ads-sync";
@@ -24,6 +26,8 @@ const env: SyncEnv = {
     version: "v25",
   },
   secret: "s".repeat(40),
+  makeLeadsUrl: "https://make.example.com/api/capture/mavi-leads.php",
+  makeLeadsSecret: "m".repeat(40),
 };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status });
@@ -69,15 +73,15 @@ const target = (extra: Partial<SyncTarget> = {}): SyncTarget => ({
 });
 
 describe("janela de leitura", () => {
-  it("o ciclo inteiro na primeira vez; depois os últimos 7 dias; até ontem", () => {
+  it("sempre o ciclo inteiro até ontem (ou até o fim do ciclo)", () => {
     expect(syncWindow(target())).toEqual({
       since: "2026-09-20",
       until: "2026-09-23",
     });
+    // Synced before: still the whole cycle (a rule change reaches every day).
     expect(
       syncWindow(target({ start_date: "2026-09-01", last_day: "2026-09-22" })),
-    ).toEqual({ since: "2026-09-17", until: "2026-09-23" });
-    // Ended cycles stop at their end; cycles starting today have nothing.
+    ).toEqual({ since: "2026-09-01", until: "2026-09-23" });
     expect(
       syncWindow(
         target({
@@ -86,67 +90,169 @@ describe("janela de leitura", () => {
           last_day: "2026-09-18",
         }),
       ),
-    ).toEqual({ since: "2026-09-17", until: "2026-09-19" });
+    ).toEqual({ since: "2026-08-20", until: "2026-09-19" });
     expect(syncWindow(target({ start_date: "2026-09-24" }))).toBeNull();
   });
 });
 
-describe("o que conta como resultado", () => {
+describe("o que conta como resultado (regras dos crons do MASO)", () => {
   const actions = [
     {
       action_type: "onsite_conversion.messaging_conversation_started_7d",
       value: "12",
     },
+    { action_type: "onsite_conversion.messaging_first_reply", value: "10" },
     { action_type: "offsite_conversion.fb_pixel_lead", value: "5" },
     { action_type: "lead", value: "9" },
-    { action_type: "onsite_conversion.lead_grouped", value: "4" },
-    { action_type: "offsite_conversion.fb_pixel_purchase", value: "3" },
+    { action_type: "leadgen_grouped", value: "4" },
+    { action_type: "onsite_conversion.lead_grouped", value: "6" },
+    { action_type: "offsite_conversion.fb_pixel_purchase", value: "2" },
     { action_type: "purchase", value: "3" },
     { action_type: "landing_page_view", value: "40" },
-    { action_type: "offsite_conversion.fb_pixel_add_to_cart", value: "7" },
+    { action_type: "offsite_conversion.fb_pixel_add_to_cart", value: "8" },
+    { action_type: "add_to_cart", value: "7" },
+    { action_type: "initiate_checkout", value: "5" },
     { action_type: "offsite_conversion.fb_pixel_custom", value: "2" },
     {
       action_type: "offsite_conversion.fb_pixel_complete_registration",
       value: "1",
     },
     { action_type: "post_engagement", value: "300" },
+    { action_type: "video_view", value: "70" },
   ];
   const row = { actions, inline_link_clicks: "80" };
-  it("Meta: pelo objetivo e pelo destino (regra do MASO)", () => {
-    expect(metaResults("message", "external_page", row).conversions).toBe(12);
-    expect(metaResults("lead", "external_page", row).conversions).toBe(5);
-    expect(metaResults("lead", "lead_form", row).conversions).toBe(4);
-    expect(metaResults("traffic", "external_page", row).conversions).toBe(80);
-    expect(metaResults("engagement", "external_page", row).conversions).toBe(
-      300,
-    );
-    expect(metaResults("custom", "external_page", row).conversions).toBe(3);
+  const c = (
+    o: Parameters<typeof metaResults>[0],
+    d: Parameters<typeof metaResults>[1],
+  ) => metaResults(o, d, row).conversions;
+
+  it("Meta, página externa: cada objetivo com a ação do MASO", () => {
+    // MENSAGEM: first reply (the MASO's since 19/07/2023), not 7-day conversations.
+    expect(c("message", "external_page")).toBe(10);
+    // LEAD: the pixel's lead only (not "lead", which adds other leads).
+    expect(c("lead", "external_page")).toBe(5);
+    // PERSONALIZADA: the pixel's custom events.
+    expect(c("custom", "external_page")).toBe(2);
+    expect(c("video", "external_page")).toBe(70);
+    // VENDA: purchases, and the funnel with the aggregated actions.
     expect(metaResults("sale", "external_page", row)).toEqual({
       conversions: 3,
       view_content: 40,
       add_to_cart: 7,
-      initiate_checkout: 0,
+      initiate_checkout: 5,
     });
-    // The funnel only for sales and custom conversions.
     expect(metaResults("lead", "external_page", row).view_content).toBe(0);
   });
-  it("Google: conversões; tráfego = cliques; engajamento = impressões", () => {
+  it("Meta: tráfego e engajamento valem em qualquer destino", () => {
+    for (const d of [
+      "external_page",
+      "lead_form",
+      "make_landing_page",
+    ] as const) {
+      expect(c("traffic", d)).toBe(80);
+      expect(c("engagement", d)).toBe(300);
+    }
+  });
+  it("Meta, formulário do Facebook: leadgen_grouped em qualquer objetivo", () => {
+    for (const o of ["lead", "message", "sale", "custom"] as const)
+      expect(c(o, "lead_form")).toBe(4);
+    // Without leadgen_grouped, the newer name.
+    expect(
+      metaResults("lead", "lead_form", {
+        actions: [
+          { action_type: "onsite_conversion.lead_grouped", value: "6" },
+        ],
+      }).conversions,
+    ).toBe(6);
+  });
+  it("Meta, página de captura da Make: os cadastros vêm da Make", () => {
+    expect(c("lead", "make_landing_page")).toBe(0);
+    expect(
+      usesMakeLeads({ objective: "lead", destination: "make_landing_page" }),
+    ).toBe(true);
+    expect(
+      usesMakeLeads({ objective: "sale", destination: "make_landing_page" }),
+    ).toBe(true);
+    expect(
+      usesMakeLeads({ objective: "traffic", destination: "make_landing_page" }),
+    ).toBe(false);
+    expect(
+      usesMakeLeads({ objective: "lead", destination: "external_page" }),
+    ).toBe(false);
+  });
+
+  const googleActions = [
+    { name: "Clique no WhatsApp", conversions: 3.4 },
+    { name: "Ligações de anúncios (phone)", conversions: 1 },
+    { name: "Lead - Formulário", conversions: 2.6 },
+    { name: "Compra", conversions: 2 },
+    { name: "Inscrição newsletter", conversions: 1 },
+    { name: "Visualização de página", conversions: 50 },
+    { name: "Adição ao carrinho", conversions: 9 },
+    { name: "Finalização de compra", conversions: 4 },
+    { name: "Iniciar checkout", conversions: 3 },
+    { name: "Tempo no site", conversions: 30 },
+  ];
+  it("Google: ações pelo nome (lista do MASO), sem acento, arredondadas", () => {
+    expect(googleActionTotals("external_page", googleActions)).toEqual({
+      // WhatsApp 3 + phone 1 + lead 3 + compra 2 + inscricao 1; never the
+      // view/cart/checkout ones ("Finalização de compra" has "compra", but
+      // "finali" rules it out); "Tempo no site" is in no list.
+      counted: 10,
+      view_content: 50,
+      add_to_cart: 9,
+      initiate_checkout: 7,
+    });
+    // Make page: only WhatsApp, phone, local and purchase.
+    expect(googleActionTotals("make_landing_page", googleActions).counted).toBe(
+      6,
+    );
+  });
+  it("Google: por objetivo, com as ligações dos anúncios", () => {
     const metrics = {
       costMicros: "12500000",
       impressions: "1000",
       clicks: "50",
-      conversions: 4.5,
+      phoneCalls: "2",
       videoTrueviewViews: "30",
     };
-    expect(googleTotals("lead", { metrics })).toMatchObject({
+    expect(
+      googleTotals("lead", "external_page", { metrics }, googleActions),
+    ).toMatchObject({
       spend: 12.5,
-      conversions: 4.5,
+      conversions: 12,
       clicks: 50,
       reach: 0,
+      view_content: 0,
     });
-    expect(googleTotals("traffic", { metrics }).conversions).toBe(50);
-    expect(googleTotals("engagement", { metrics }).conversions).toBe(1000);
-    expect(googleTotals("video", { metrics }).conversions).toBe(30);
+    expect(
+      googleTotals("sale", "external_page", { metrics }, googleActions),
+    ).toMatchObject({
+      conversions: 12,
+      view_content: 50,
+      add_to_cart: 9,
+      initiate_checkout: 7,
+    });
+    expect(
+      googleTotals("message", "external_page", { metrics }, googleActions)
+        .conversions,
+    ).toBe(12);
+    expect(
+      googleTotals("lead", "make_landing_page", { metrics }, googleActions)
+        .conversions,
+    ).toBe(8);
+    expect(
+      googleTotals("traffic", "external_page", { metrics }, googleActions)
+        .conversions,
+    ).toBe(50);
+    expect(
+      googleTotals("engagement", "external_page", { metrics }, googleActions)
+        .conversions,
+    ).toBe(1000);
+    expect(
+      googleTotals("video", "external_page", { metrics }, googleActions)
+        .conversions,
+    ).toBe(30);
   });
 });
 
@@ -175,8 +281,7 @@ describe("POST /api/ads-sync", () => {
                 inline_link_clicks: "20",
                 actions: [
                   {
-                    action_type:
-                      "onsite_conversion.messaging_conversation_started_7d",
+                    action_type: "onsite_conversion.messaging_first_reply",
                     value: "6",
                   },
                 ],
@@ -251,19 +356,41 @@ describe("POST /api/ads-sync", () => {
       [/oauth2\.googleapis\.com\/token/, () => json({ access_token: "acc" })],
       [
         /googleAds:searchStream/,
-        (call) =>
-          json([
+        (call) => {
+          const query: string = JSON.parse(call.body!).query;
+          const daily = query.includes("segments.date,");
+          const segments = daily ? { date: "2026-09-22" } : {};
+          return json([
             {
-              results: JSON.parse(call.body!).query.includes("segments.date,")
+              results: query.includes("conversion_action_name")
                 ? [
                     {
-                      segments: { date: "2026-09-22" },
-                      metrics: { costMicros: "5000000", conversions: 2 },
+                      segments: {
+                        ...segments,
+                        conversionActionName: "Lead site",
+                      },
+                      campaign: { id: "9" },
+                      metrics: { conversions: 2 },
+                    },
+                    {
+                      segments: {
+                        ...segments,
+                        conversionActionName: "Visualização",
+                      },
+                      campaign: { id: "9" },
+                      metrics: { conversions: 40 },
                     },
                   ]
-                : [{ metrics: { costMicros: "5000000", conversions: 2 } }],
+                : [
+                    {
+                      segments,
+                      campaign: { id: "9" },
+                      metrics: { costMicros: "5000000", phoneCalls: "1" },
+                    },
+                  ],
             },
-          ]),
+          ]);
+        },
       ],
       [/rpc\/ad_sync_store/, () => json(4)],
     ]);
@@ -273,19 +400,120 @@ describe("POST /api/ads-sync", () => {
     expect(search[0].headers["login-customer-id"]).toBe("5550001111");
     expect(search[0].headers.Authorization).toBe("Bearer acc");
     expect(JSON.parse(search[0].body!).query).toContain("campaign.id IN (9)");
-    // v22+ name (metrics.video_views is rejected by v25).
-    for (const c of search) {
-      expect(JSON.parse(c.body!).query).toContain(
-        "metrics.video_trueview_views",
-      );
-      expect(JSON.parse(c.body!).query).not.toContain("metrics.video_views");
+    // v22+ name (metrics.video_views is rejected by v25), in the metrics queries.
+    const queries = search.map((c) => JSON.parse(c.body!).query as string);
+    for (const q of queries.filter(
+      (q) => !q.includes("conversion_action_name"),
+    )) {
+      expect(q).toContain("metrics.video_trueview_views");
+      expect(q).toContain("metrics.phone_calls");
     }
+    for (const q of queries) expect(q).not.toContain("metrics.video_views");
     const stored = JSON.parse(
       calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
     );
     expect(
       stored.p_days.find((d: { day: string }) => d.day === "2026-09-22"),
-    ).toMatchObject({ spend: 5, conversions: 2 });
+    ).toMatchObject({ spend: 5, conversions: 3 });
+    expect(stored.p_snapshot).toMatchObject({ spend: 5, conversions: 3 });
+    // Four queries: metrics and conversion actions, per day and for the cycle.
+    expect(search).toHaveLength(4);
+  });
+
+  it("página de captura da Make: os cadastros vêm do servidor da Make", async () => {
+    const make = target({
+      objective: "lead",
+      destination: "make_landing_page",
+      landing_pages: ["12345", "12346"],
+    });
+    let batch = [make];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [
+        /act_111\/insights.*time_increment=1/,
+        () =>
+          json({
+            data: [
+              {
+                date_start: "2026-09-21",
+                spend: "20",
+                actions: [
+                  {
+                    action_type: "offsite_conversion.fb_pixel_lead",
+                    value: "9",
+                  },
+                ],
+              },
+            ],
+          }),
+      ],
+      [/act_111\/insights/, () => json({ data: [{ spend: "20" }] })],
+      [
+        /POST https:\/\/make\.example\.com/,
+        () => json({ days: { "2026-09-21": 3, "2026-09-22": 1 }, total: 4 }),
+      ],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(result.body).toEqual({ synced: 1, errors: [] });
+    const leads = calls.find((c) => c.url.includes("make.example.com"))!;
+    expect(leads.headers["X-Mavi-Secret"]).toBe(env.makeLeadsSecret);
+    expect(JSON.parse(leads.body!)).toEqual({
+      squeezes: ["12345", "12346"],
+      since: "2026-09-20",
+      until: "2026-09-23",
+    });
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    const day = (d: string) =>
+      stored.p_days.find((x: { day: string }) => x.day === d);
+    // The pixel's leads don't count: the page's do, even on a day without spend.
+    expect(day("2026-09-21")).toMatchObject({ spend: 20, conversions: 3 });
+    expect(day("2026-09-22")).toMatchObject({ spend: 0, conversions: 1 });
+    expect(stored.p_snapshot.conversions).toBe(4);
+  });
+
+  it("página de captura da Make sem a leitura configurada: erro, sem números", async () => {
+    let batch = [
+      target({
+        objective: "lead",
+        destination: "make_landing_page",
+        landing_pages: ["1"],
+      }),
+    ];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [/act_111\/insights/, () => json({ data: [] })],
+      [/rpc\/ad_sync_store/, () => json(0)],
+    ]);
+    const result = await handleAdsSync(
+      {},
+      `Bearer ${env.secret}`,
+      { ...env, makeLeadsSecret: "" },
+      fetch,
+    );
+    expect(
+      String((result.body.errors as { message: string }[])[0].message),
+    ).toContain("MAKE_LEADS_SECRET");
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    expect(stored.p_status).toBe("error");
   });
 
   it("erro da plataforma vira registro de erro, sem números", async () => {

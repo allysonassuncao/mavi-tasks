@@ -816,6 +816,8 @@ await check(
     // The connected account's encrypted token comes along.
     assert.equal(t.meta_tokens["111"].token_cipher, cipher(20));
     assert.equal(t.last_day, null);
+    // The Make capture pages go along (destination make_landing_page).
+    assert.deepEqual(t.landing_pages, []);
     // Future cycles and cycles without links are left out.
     assert.ok(all.every((x) => x.start_date < today));
   },

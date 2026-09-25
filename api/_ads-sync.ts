@@ -24,12 +24,25 @@ import {
  * campaign now, with their session.
  */
 
-export type SyncEnv = AdsEnv & { secret: string };
+export type SyncEnv = AdsEnv & {
+  secret: string;
+  /** The Make server's endpoint for the capture pages' leads. */
+  makeLeadsUrl: string;
+  makeLeadsSecret: string;
+};
+export const MAKE_LEADS_URL =
+  "https://www.makevendas.com.br/api/capture/mavi-leads.php";
 export function syncEnv(
   env: Record<string, string | undefined> = process.env,
   base: AdsEnv,
 ): SyncEnv {
-  return { ...base, secret: env.ADS_SYNC_SECRET ?? "" };
+  const url = env.MAKE_LEADS_URL?.trim();
+  return {
+    ...base,
+    secret: env.ADS_SYNC_SECRET ?? "",
+    makeLeadsUrl: url && /^https:\/\//.test(url) ? url : MAKE_LEADS_URL,
+    makeLeadsSecret: env.MAKE_LEADS_SECRET ?? "",
+  };
 }
 
 type Objective =
@@ -44,6 +57,8 @@ export type SyncTarget = {
   destination: Destination;
   start_date: string;
   end_date: string;
+  /** The Make capture pages (destination make_landing_page). */
+  landing_pages?: string[];
   today: string;
   last_day: string | null;
   links: { account_id: string; campaign_id: string; manager_id: string }[];
@@ -93,23 +108,62 @@ export function addDays(date: string, n: number) {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
-/** Days to read: from the last sync (7 days back) or the cycle's start. */
+/**
+ * Days to read: the whole cycle up to yesterday (or its end), every time —
+ * late attribution and a change of rule reach every day, and a cycle is a
+ * few weeks (one call per account).
+ */
 export function syncWindow(t: SyncTarget) {
   const until = [t.end_date, addDays(t.today, -1)].sort()[0];
-  const since = t.last_day
-    ? [t.start_date, addDays(t.today, -7)].sort().reverse()[0]
-    : t.start_date;
+  const since = t.start_date;
   return since <= until ? { since, until } : null;
 }
 
-// ------------------------------------------------------------ Meta
-type MetaAction = { action_type: string; value: string };
-/**
- * What counts as a result on Meta, by objective and destination (the MASO's
- * rule, spec 11.4): the first action type present in the list wins; for
- * custom conversions they add up. Messages: conversations started (7 days),
- * the one the MASO showed on screen.
+// ------------------------------------------------------------ rules
+/*
+ * What counts as the cycle's result, by platform, objective and
+ * destination — the rules of the MASO crons (cron/registro-acompanhamento-
+ * campanhas-facebook.php and -google.php), with their accidents fixed:
+ *
+ * Meta (insights `actions`):
+ *  - TRÁFEGO: link clicks (inline_link_clicks); ENGAJAMENTO: post_engagement
+ *    (whatever the destination);
+ *  - formulário do Facebook (Lead Ads): leadgen_grouped, for any objective
+ *    (the MASO computed it so; its record then read the objective's field);
+ *  - página de captura da Make: the pages' distinct leads, from the Make
+ *    server (makeLeads below), as the MASO read dados_capture;
+ *  - página externa: VENDA purchase (+ funnel landing_page_view,
+ *    add_to_cart, initiate_checkout); PERSONALIZADA
+ *    offsite_conversion.fb_pixel_custom; MENSAGEM
+ *    onsite_conversion.messaging_first_reply (the MASO's since 19/07/2023);
+ *    VIDEO video_view; LEAD and the rest offsite_conversion.fb_pixel_lead.
+ *
+ * Google (conversions by conversion action name, accents removed; each
+ * action's count rounded, as the MASO did):
+ *  - TRÁFEGO: clicks; ENGAJAMENTO: impressions; VIDEO: TrueView views;
+ *  - otherwise the actions whose name matches the MASO's list, never the
+ *    "view/cart/checkout" ones, plus the calls from ads (phone_calls);
+ *    for the Make capture page only WhatsApp/phone/local/purchase actions
+ *    (the leads come from the Make server); VENDA splits the funnel by name.
  */
+type MetaAction = { action_type: string; value: string };
+type MetaRow = {
+  date_start?: string;
+  spend?: string;
+  impressions?: string;
+  reach?: string;
+  inline_link_clicks?: string;
+  actions?: MetaAction[];
+};
+
+/** The Make capture page's leads are the result (not the platform's). */
+export const usesMakeLeads = (
+  t: Pick<SyncTarget, "objective" | "destination">,
+) =>
+  t.destination === "make_landing_page" &&
+  t.objective !== "traffic" &&
+  t.objective !== "engagement";
+
 export function metaResults(
   objective: Objective,
   destination: Destination,
@@ -120,67 +174,41 @@ export function metaResults(
 > {
   const actions = row.actions ?? [];
   const value = (type: string) =>
-    actions.find((a) => a.action_type === type)?.value;
-  const first = (types: string[]) => {
-    for (const t of types) {
-      const v = value(t);
-      if (v !== undefined) return num(v);
-    }
-    return 0;
-  };
-  const sum = (types: string[]) =>
-    types.reduce((s, t) => s + num(value(t) ?? 0), 0);
-  const conversions =
-    objective === "traffic"
-      ? num(row.inline_link_clicks)
-      : objective === "engagement"
-        ? first(["post_engagement"])
-        : objective === "message"
-          ? first(["onsite_conversion.messaging_conversation_started_7d"])
-          : objective === "video"
-            ? first(["video_view"])
-            : objective === "sale"
-              ? first([
-                  "offsite_conversion.fb_pixel_purchase",
-                  "purchase",
-                  "omni_purchase",
-                ])
-              : objective === "custom"
-                ? sum([
-                    "offsite_conversion.fb_pixel_custom",
-                    "offsite_conversion.fb_pixel_complete_registration",
-                  ])
-                : destination === "lead_form"
-                  ? first([
-                      "onsite_conversion.lead_grouped",
-                      "leadgen_grouped",
-                      "lead",
-                    ])
-                  : first(["offsite_conversion.fb_pixel_lead", "lead"]);
+    num(actions.find((a) => a.action_type === type)?.value);
+  const has = (type: string) => actions.some((a) => a.action_type === type);
+  const none = { view_content: 0, add_to_cart: 0, initiate_checkout: 0 };
+  if (objective === "traffic")
+    return { conversions: num(row.inline_link_clicks), ...none };
+  if (objective === "engagement")
+    return { conversions: value("post_engagement"), ...none };
+  if (destination === "lead_form")
+    return {
+      // leadgen_grouped is the MASO's; newer answers name it so too.
+      conversions: has("leadgen_grouped")
+        ? value("leadgen_grouped")
+        : value("onsite_conversion.lead_grouped"),
+      ...none,
+    };
+  // The Make capture page's leads come from the Make server.
+  if (destination === "make_landing_page") return { conversions: 0, ...none };
   const funnel = objective === "sale" || objective === "custom";
   return {
-    conversions,
-    view_content: funnel ? first(["landing_page_view"]) : 0,
-    add_to_cart: funnel
-      ? first(["offsite_conversion.fb_pixel_add_to_cart", "add_to_cart"])
-      : 0,
-    initiate_checkout: funnel
-      ? first([
-          "offsite_conversion.fb_pixel_initiate_checkout",
-          "initiate_checkout",
-        ])
-      : 0,
+    conversions:
+      objective === "sale"
+        ? value("purchase")
+        : objective === "custom"
+          ? value("offsite_conversion.fb_pixel_custom")
+          : objective === "message"
+            ? value("onsite_conversion.messaging_first_reply")
+            : objective === "video"
+              ? value("video_view")
+              : value("offsite_conversion.fb_pixel_lead"),
+    view_content: funnel ? value("landing_page_view") : 0,
+    add_to_cart: funnel ? value("add_to_cart") : 0,
+    initiate_checkout: funnel ? value("initiate_checkout") : 0,
   };
 }
 
-type MetaRow = {
-  date_start?: string;
-  spend?: string;
-  impressions?: string;
-  reach?: string;
-  inline_link_clicks?: string;
-  actions?: MetaAction[];
-};
 function metaTotals(t: SyncTarget, row: MetaRow): Totals {
   return {
     spend: num(row.spend),
@@ -223,6 +251,7 @@ async function readMeta(
         "expired",
       );
     const token = unseal(env.tokenKey!, stored.token_cipher);
+    // Every account adds up (the MASO kept only the last account's results).
     const base: Record<string, string> = {
       level: "account",
       fields: "spend,impressions,reach,inline_link_clicks,actions",
@@ -253,7 +282,8 @@ async function readMeta(
         add(days.get(row.date_start) ?? zero(), metaTotals(t, row)),
       );
     }
-    // Cycle-to-date, deduplicated reach (the snapshot).
+    // Cycle-to-date at the account level: deduplicated reach (the MASO
+    // summed its ad sets' reach, counting a person once per ad set).
     const [total] = await graphAll<MetaRow>(
       env,
       fetchImpl,
@@ -304,27 +334,81 @@ async function googleAccess(env: AdsEnv, fetchImpl: Fetch, t: SyncTarget) {
 }
 
 type GoogleRow = {
-  segments?: { date?: string };
+  segments?: { date?: string; conversionActionName?: string };
+  campaign?: { id?: string };
   metrics?: Record<string, string | number | undefined>;
 };
-/** Google results: conversions, or clicks/impressions/views (MASO rule). */
-export function googleTotals(objective: Objective, row: GoogleRow): Totals {
+export type GoogleAction = { name: string; conversions: number };
+
+// The MASO's lists (InsightsReportConversionV3), on names without accents.
+const GOOGLE_NEVER = /visualiza|viu|finali|checkout|cart|content|carri/i;
+const GOOGLE_COUNTS =
+  /whats|phone|compra|lead|local|purch|cadastro|contato|inscreve|subscription|subs|inscritos|inscri|instala/i;
+const GOOGLE_COUNTS_MAKE_PAGE = /whats|phone|local|compra|purch/i;
+const GOOGLE_VIEW = /visualiza|visualizacao|content|viu/i;
+const GOOGLE_CART = /cart|carri/i;
+const GOOGLE_CHECKOUT = /iniciate|initiate|finalizacao|iniciar/i;
+const plain = (name: string) => name.normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+/**
+ * A campaign's conversion actions as the MASO counted them: each action's
+ * conversions rounded, the ones in its list (never "view/cart/checkout"),
+ * and the sales funnel by name.
+ */
+export function googleActionTotals(
+  destination: Destination,
+  actions: GoogleAction[],
+) {
+  const counts =
+    destination === "make_landing_page"
+      ? GOOGLE_COUNTS_MAKE_PAGE
+      : GOOGLE_COUNTS;
+  const out = {
+    counted: 0,
+    view_content: 0,
+    add_to_cart: 0,
+    initiate_checkout: 0,
+  };
+  for (const a of actions) {
+    const name = plain(a.name);
+    const n = Math.round(a.conversions);
+    if (!GOOGLE_NEVER.test(name) && counts.test(name)) out.counted += n;
+    if (GOOGLE_VIEW.test(name)) out.view_content += n;
+    if (GOOGLE_CART.test(name)) out.add_to_cart += n;
+    if (GOOGLE_CHECKOUT.test(name)) out.initiate_checkout += n;
+  }
+  return out;
+}
+
+/** One campaign's (or the sum's) totals on Google, by objective and destination. */
+export function googleTotals(
+  objective: Objective,
+  destination: Destination,
+  row: GoogleRow,
+  actions: GoogleAction[] = [],
+): Totals {
   const m = row.metrics ?? {};
   const impressions = num(m.impressions);
   const clicks = num(m.clicks);
-  return {
+  const base = {
     ...zero(),
     spend: num(m.costMicros) / 1e6,
     impressions,
     clicks,
-    conversions:
-      objective === "traffic"
-        ? clicks
-        : objective === "engagement"
-          ? impressions
-          : objective === "video"
-            ? num(m.videoTrueviewViews)
-            : num(m.conversions),
+  };
+  if (objective === "traffic") return { ...base, conversions: clicks };
+  if (objective === "engagement") return { ...base, conversions: impressions };
+  if (objective === "video")
+    return { ...base, conversions: num(m.videoTrueviewViews) };
+  const a = googleActionTotals(destination, actions);
+  const sale = objective === "sale" && destination !== "make_landing_page";
+  return {
+    ...base,
+    // The Make page's leads are added from the Make server.
+    conversions: a.counted + num(m.phoneCalls),
+    view_content: sale ? a.view_content : 0,
+    add_to_cart: sale ? a.add_to_cart : 0,
+    initiate_checkout: sale ? a.initiate_checkout : 0,
   };
 }
 
@@ -383,33 +467,123 @@ async function readGoogle(
   // video_views became video_trueview_views in v22 (the MASO's v21 still
   // took the old name; v25 rejects it).
   const metrics =
-    "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.video_trueview_views";
+    "metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.video_trueview_views, metrics.phone_calls";
+  // Totals of one period: metrics per campaign, and each campaign's
+  // conversion actions (a segment the cost metrics can't come with).
+  const read = async (
+    account: string,
+    manager: string,
+    filter: string,
+    period: string,
+    daily: boolean,
+  ) => {
+    const date = daily ? "segments.date, " : "";
+    const [rows, actionRows] = await Promise.all([
+      search(
+        account,
+        manager,
+        `SELECT ${date}campaign.id, ${metrics} FROM campaign WHERE ${period}${filter}`,
+      ),
+      search(
+        account,
+        manager,
+        `SELECT ${date}campaign.id, segments.conversion_action_name, metrics.conversions FROM campaign WHERE ${period}${filter}`,
+      ),
+    ]);
+    const key = (r: GoogleRow) =>
+      `${daily ? (r.segments?.date ?? "") : ""}|${r.campaign?.id ?? ""}`;
+    const actions = new Map<string, GoogleAction[]>();
+    for (const r of actionRows) {
+      const name = r.segments?.conversionActionName;
+      if (!name) continue;
+      const list = actions.get(key(r)) ?? [];
+      list.push({ name, conversions: num(r.metrics?.conversions) });
+      actions.set(key(r), list);
+    }
+    return rows.map((r) => ({
+      day: r.segments?.date ?? "",
+      totals: googleTotals(
+        t.objective,
+        t.destination,
+        r,
+        actions.get(key(r)) ?? [],
+      ),
+    }));
+  };
   for (const [account, { manager, campaigns }] of accounts) {
     const filter = campaigns.length
       ? ` AND campaign.id IN (${campaigns.join(",")})`
       : "";
-    const daily = await search(
+    for (const { day, totals } of await read(
       account,
       manager,
-      `SELECT segments.date, ${metrics} FROM campaign WHERE segments.date BETWEEN '${since}' AND '${until}'${filter}`,
-    );
-    for (const row of daily) {
-      const day = row.segments?.date;
-      if (!day) continue;
-      days.set(
-        day,
-        add(days.get(day) ?? zero(), googleTotals(t.objective, row)),
-      );
-    }
-    const total = await search(
+      filter,
+      `segments.date BETWEEN '${since}' AND '${until}'`,
+      true,
+    ))
+      if (day) days.set(day, add(days.get(day) ?? zero(), totals));
+    for (const { totals } of await read(
       account,
       manager,
-      `SELECT ${metrics} FROM campaign WHERE segments.date BETWEEN '${t.start_date}' AND '${until}'${filter}`,
-    );
-    for (const row of total)
-      snapshot = add(snapshot, googleTotals(t.objective, row));
+      filter,
+      `segments.date BETWEEN '${t.start_date}' AND '${until}'`,
+      false,
+    ))
+      snapshot = add(snapshot, totals);
   }
   return { days, snapshot };
+}
+
+// ------------------------------------------------------------ Make pages
+/**
+ * The distinct leads of the cycle's Make capture pages (MASO:
+ * buscaQntLeadsLPMake, dados_capture visible leads), per day and for the
+ * period, from the Make server (api/capture/mavi-leads.php there).
+ */
+export async function makeLeads(
+  env: SyncEnv,
+  fetchImpl: Fetch,
+  pages: string[],
+  since: string,
+  until: string,
+) {
+  if (!env.makeLeadsSecret)
+    throw new AdsError(
+      500,
+      "Esta campanha conta os cadastros da página de captura da Make, e a leitura deles não está configurada: falta MAKE_LEADS_SECRET na Vercel.",
+    );
+  const squeezes = [...new Set(pages.map((p) => p.trim()).filter(Boolean))];
+  if (!squeezes.length)
+    throw new AdsError(
+      400,
+      "O ciclo tem destino página de captura da Make, mas nenhuma página: informe as páginas no ciclo.",
+    );
+  let res: Response;
+  try {
+    res = await fetchImpl(env.makeLeadsUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Mavi-Secret": env.makeLeadsSecret,
+      },
+      body: JSON.stringify({ squeezes, since, until }),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (e) {
+    throw new AdsError(502, `Make: ${(e as Error).message}`);
+  }
+  const body = (await res.json().catch(() => ({}))) as {
+    days?: Record<string, number>;
+    total?: number;
+    error?: string;
+  };
+  if (!res.ok) throw new AdsError(502, `Make: ${body.error ?? res.statusText}`);
+  return {
+    days: new Map(
+      Object.entries(body.days ?? {}).map(([d, n]) => [d, num(n)] as const),
+    ),
+    total: num(body.total),
+  };
 }
 
 // ------------------------------------------------------------ run
@@ -451,6 +625,22 @@ export async function syncCycle(
       window.since,
       window.until,
     );
+    // The capture page's leads are the result (Google adds its calls and
+    // WhatsApp/purchase actions to them, as the MASO did).
+    if (usesMakeLeads(t)) {
+      const leads = await makeLeads(
+        env,
+        fetchImpl,
+        t.landing_pages ?? [],
+        window.since,
+        window.until,
+      );
+      for (const [day, n] of leads.days) {
+        const d = days.get(day) ?? zero();
+        days.set(day, { ...d, conversions: d.conversions + n });
+      }
+      snapshot.conversions += leads.total;
+    }
     // Days without delivery are stored as zero, so gaps read as zero.
     const list = [];
     for (let d = window.since; d <= window.until; d = addDays(d, 1))
