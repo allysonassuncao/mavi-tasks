@@ -24,6 +24,7 @@ import {
   type SlPlan,
   type SlPost,
   type SlRevision,
+  type SlTask,
 } from "./social-leads";
 
 /**
@@ -38,7 +39,12 @@ export interface PlanBundle {
   revisions: SlRevision[];
   /** What the AI cost on this plan (generations and adjustments). */
   usage: SlUsage[];
+  /** The art tasks of the posts (production). */
+  tasks: SlTask[];
 }
+/** Who receives each post's art task: a team (distributed) or a person. */
+export type ReleaseTarget = { team: string } | { user: string };
+export type ReleaseAssign = Record<number, ReleaseTarget>;
 /** The palette the AI read from the site or Instagram. */
 export interface BrandColorsFound {
   colors: { hex: string; name: string }[];
@@ -70,7 +76,24 @@ export interface SocialLeadsBackend {
     company: string,
     product: string,
     team: string | null,
+    designTeam: string | null,
+    artDays: number,
   ): Promise<void>;
+  /**
+   * One art task per approved post without one, for the team or person
+   * chosen per post (none: the creative team); opens the client's cycle once.
+   */
+  release(
+    plan: string,
+    assign: ReleaseAssign,
+  ): Promise<{ created: number; cycle: boolean }>;
+  setArts(
+    plan: string,
+    number: number,
+    arts: MediaFile[],
+  ): Promise<MediaFile[]>;
+  /** The Meta campaign created from the plan (leaders); returns its id. */
+  createCampaign(plan: string): Promise<string>;
   contract(company: string, contract: string): Promise<ContractBundle>;
   plan(plan: string): Promise<PlanBundle>;
   saveBriefing(
@@ -83,12 +106,13 @@ export interface SocialLeadsBackend {
     /** Null keeps the files as they are. */
     media?: BriefingMedia | null,
   ): Promise<number>;
-  /** Sends a file to the client's Drive (folder BRIEFING_FOLDER). */
+  /** Sends a file to the client's Drive (a folder of the product, BRIEFING_FOLDER by default). */
   uploadMedia(
     company: string,
     contract: string,
     file: File,
     onProgress: (fraction: number) => void,
+    folder?: string,
   ): Promise<MediaFile>;
   /** A short-lived address that shows the file. */
   mediaUrl(file: MediaFile): Promise<string>;
@@ -148,6 +172,8 @@ export type LinkSource = {
     decision: "approved" | "rejected",
     note: string,
   ): Promise<void>;
+  /** Where an art of the plan is shown (an <img>/<video> source). */
+  artUrl(token: string, art: { id: string }): string;
 };
 
 async function server<T>(body: Record<string, unknown>): Promise<T> {
@@ -201,12 +227,35 @@ export const serverSocialLeads: SocialLeadsBackend = {
     invalidateLookupsCache(company);
     return contract;
   },
-  async setSettings(company, product, team) {
+  async setSettings(company, product, team, designTeam, artDays) {
     await rpc("set_social_leads_settings", {
       p_company: company,
       p_product: product,
       p_team: team,
+      p_design_team: designTeam,
+      p_art_days: artDays,
     });
+  },
+  async release(plan, assign) {
+    return (await rpc("social_leads_release", {
+      p_plan: plan,
+      p_assign: assign,
+    })) as {
+      created: number;
+      cycle: boolean;
+    };
+  },
+  async setArts(plan, number, arts) {
+    return (await rpc("social_leads_set_arts", {
+      p_plan: plan,
+      p_number: number,
+      p_arts: arts,
+    })) as MediaFile[];
+  },
+  async createCampaign(plan) {
+    return (await rpc("social_leads_create_campaign", {
+      p_plan: plan,
+    })) as string;
   },
   async contract(company, contract) {
     const [b, p, j] = await Promise.all([
@@ -265,12 +314,21 @@ export const serverSocialLeads: SocialLeadsBackend = {
         .limit(500),
     ]);
     for (const q of [p, x, r]) if (q.error) throw q.error;
+    const posts = (x.data ?? []) as SlPost[];
+    const ids = posts.map((y) => y.task_id).filter((v): v is string => !!v);
+    const t = ids.length
+      ? await db()
+          .from("tasks")
+          .select("id,title,status,assignee_id,due_date")
+          .in("id", ids)
+      : { data: [], error: null };
     return {
       plan: p.data as unknown as SlPlan,
-      posts: (x.data ?? []) as SlPost[],
+      posts,
       revisions: (r.data ?? []) as SlRevision[],
       // The cost is a detail: without it (e.g. migration not applied yet) the plan still opens.
       usage: u.error ? [] : ((u.data ?? []) as SlUsage[]),
+      tasks: t.error ? [] : ((t.data ?? []) as SlTask[]),
     };
   },
   async saveBriefing(
@@ -292,19 +350,25 @@ export const serverSocialLeads: SocialLeadsBackend = {
       ...(media ? { p_media: media } : {}),
     })) as number;
   },
-  async uploadMedia(company, contract, file, onProgress) {
+  async uploadMedia(
+    company,
+    contract,
+    file,
+    onProgress,
+    name = BRIEFING_FOLDER,
+  ) {
     const found = await db()
       .from("drive_folders")
       .select("id")
       .eq("company_id", company)
       .eq("contract_id", contract)
       .is("parent_id", null)
-      .eq("name", BRIEFING_FOLDER)
+      .eq("name", name)
       .limit(1);
     if (found.error) throw found.error;
     const folder =
       found.data?.[0]?.id ??
-      (await createDriveFolder(company, BRIEFING_FOLDER, { contract }));
+      (await createDriveFolder(company, name, { contract }));
     const id = await uploadDriveFile(
       company,
       { folder },
@@ -448,6 +512,7 @@ export interface SharedPlan {
     note: string;
     decided_at: string | null;
     decided_via: "link" | "team" | null;
+    arts?: { id: string; name: string; type: string }[];
   }[];
 }
 export async function sharedPlan(token: string): Promise<SharedPlan> {
@@ -471,7 +536,11 @@ export async function clientDecide(
 export const serverLink: LinkSource = {
   load: sharedPlan,
   decide: clientDecide,
+  artUrl: (token, art) =>
+    `/api/social-leads?arte=${encodeURIComponent(art.id)}&link=${encodeURIComponent(token)}`,
 };
+/** The Drive folder of a month's arts and PDFs. */
+export const monthFolder = (label: string) => `Artes · ${label}`;
 export function shareUrl(token: string) {
   return `${window.location.origin}/aprovacao/${token}`;
 }
@@ -480,7 +549,16 @@ export function shareUrl(token: string) {
 const now = () => new Date().toISOString();
 const id = () => `demo-${Math.random().toString(36).slice(2, 10)}`;
 type DemoState = {
-  settings: { product: string; team: string | null } | null;
+  settings: {
+    product: string;
+    team: string | null;
+    designTeam?: string | null;
+    artDays?: number;
+  } | null;
+  tasks: SlTask[];
+  /** Contracts whose follow-up cycle was opened. */
+  cycles: Record<string, boolean>;
+  campaigns: Record<string, { id: string; name: string; active: boolean }>;
   briefings: Record<string, SlBriefing>;
   plans: SlPlan[];
   posts: SlPost[];
@@ -575,6 +653,9 @@ export function demoSocialLeads(
       tokens: {},
       usage: [],
       files: {},
+      tasks: [],
+      cycles: {},
+      campaigns: {},
     };
   const s = demoState;
   const spend = (plan: string, kind: SlUsage["kind"], cost: number) =>
@@ -717,9 +798,12 @@ export function demoSocialLeads(
                       .filter(Boolean)
                       .sort()
                       .at(-1) ?? null,
+                  tasks: posts.filter((x) => x.task_id).length,
+                  arts: posts.filter((x) => x.arts?.length).length,
                 }
               : null,
             job: s.jobs[k.id] ?? null,
+            campaign: s.campaigns[k.id] ?? null,
           };
         })
         .sort((a, b) => a.client_name.localeCompare(b.client_name));
@@ -727,6 +811,8 @@ export function demoSocialLeads(
         configured: true,
         product_id: s.settings.product,
         team_id: s.settings.team,
+        design_team_id: s.settings.designTeam ?? null,
+        art_days: s.settings.artDays ?? 5,
         items,
       };
     },
@@ -755,9 +841,68 @@ export function demoSocialLeads(
       emit();
       return contract;
     },
-    async setSettings(_c, productId, team) {
-      s.settings = { product: productId, team };
+    async setSettings(_c, productId, team, designTeam, artDays) {
+      s.settings = { product: productId, team, designTeam, artDays };
       emit();
+    },
+    async release(planId, assign) {
+      const plan = s.plans.find((p) => p.id === planId)!;
+      const client = clientOf(plan.contract_id).name;
+      const team = s.settings?.designTeam ?? s.settings?.team ?? null;
+      const people = data.teamMembers
+        .filter((t) => t.team_id === team)
+        .map((t) => t.user_id);
+      const todo = s.posts.filter(
+        (x) => x.plan_id === planId && x.decision === "approved" && !x.task_id,
+      );
+      if (!todo.length) throw new Error("Nenhum post aprovado sem tarefa.");
+      const due = new Date(Date.now() + (s.settings?.artDays ?? 5) * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      todo.forEach((x, i) => {
+        const target = assign[x.number];
+        const members =
+          target && "team" in target
+            ? data.teamMembers
+                .filter((t) => t.team_id === target.team)
+                .map((t) => t.user_id)
+            : people;
+        const task: SlTask = {
+          id: id(),
+          title: `Arte do post ${x.number} · ${plan.label} · ${client}`,
+          status: "progress",
+          assignee_id:
+            target && "user" in target
+              ? target.user
+              : (members[i % Math.max(members.length, 1)] ?? user),
+          due_date: due,
+        };
+        s.tasks.push(task);
+        x.task_id = task.id;
+      });
+      const cycle = !s.cycles[plan.contract_id];
+      s.cycles[plan.contract_id] = true;
+      emit();
+      return { created: todo.length, cycle };
+    },
+    async setArts(planId, number, arts) {
+      const x = s.posts.find(
+        (p) => p.plan_id === planId && p.number === number,
+      )!;
+      x.arts = arts;
+      emit();
+      return arts;
+    },
+    async createCampaign(planId) {
+      const plan = s.plans.find((p) => p.id === planId)!;
+      const campaign = {
+        id: id(),
+        name: `Social Leads · ${clientOf(plan.contract_id).name}`,
+        active: false,
+      };
+      s.campaigns[plan.contract_id] = campaign;
+      emit();
+      return campaign.id;
     },
     async contract(_c, contract) {
       return {
@@ -778,6 +923,9 @@ export function demoSocialLeads(
           .filter((r) => r.plan_id === planId)
           .sort((a, b) => b.number - a.number),
         usage: s.usage.filter((u) => u.plan_id === planId),
+        tasks: s.tasks.filter((t) =>
+          s.posts.some((x) => x.plan_id === planId && x.task_id === t.id),
+        ),
       };
     },
     async saveBriefing(
@@ -969,9 +1117,15 @@ export function demoSocialLeads(
               note: x.note,
               decided_at: x.decided_at,
               decided_via: x.decided_via,
+              arts: (x.arts ?? []).map((a) => ({
+                id: a.id,
+                name: a.name,
+                type: a.type,
+              })),
             })),
         };
       },
+      artUrl: (_token, art) => s.files[art.id] ?? "",
       async decide(token, number, decision, note) {
         const planId = Object.keys(s.tokens).find((k) => s.tokens[k] === token);
         const p = s.posts.find(

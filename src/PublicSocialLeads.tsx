@@ -284,6 +284,48 @@ function PublicPost({
         )}
       </div>
       <h3>{post.gancho}</h3>
+      {!!post.arts?.length && (
+        <div className={`sl-public-arts n${Math.min(post.arts.length, 4)}`}>
+          {post.arts.slice(0, 4).map((a) =>
+            a.type.startsWith("video/") ? (
+              <video
+                key={a.id}
+                src={source.artUrl(token, a)}
+                controls
+                playsInline
+                preload="metadata"
+              />
+            ) : a.type.startsWith("image/") ? (
+              <a
+                key={a.id}
+                href={source.artUrl(token, a)}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`Ver ${a.name}`}
+              >
+                <img
+                  src={source.artUrl(token, a)}
+                  alt={`Arte do post ${post.numero}`}
+                  loading="lazy"
+                />
+              </a>
+            ) : (
+              <a
+                key={a.id}
+                className="sl-public-file"
+                href={source.artUrl(token, a)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {a.name}
+              </a>
+            ),
+          )}
+          {post.arts.length > 4 && (
+            <small>+{post.arts.length - 4} arquivos</small>
+          )}
+        </div>
+      )}
       <p>{post.direcaoCopy}</p>
       <div className="sl-public-facts">
         <span>

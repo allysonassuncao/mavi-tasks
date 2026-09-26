@@ -13659,3 +13659,191 @@ label .sl-money .ui-input,
   color: #95a785;
   font-size: 0.8rem;
 }
+
+/* Social Leads · fase 2: produção, artes e PDFs */
+.sl-post-prod {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.sl-task-chip,
+.sl-art-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 600;
+  background: #edf3fc;
+  color: #4f6f9e;
+}
+.sl-task-chip.review {
+  background: #f2edf9;
+  color: #7f64aa;
+}
+.sl-task-chip.done {
+  background: #edf6ed;
+  color: #4f8150;
+}
+.sl-task-chip.returned,
+.sl-task-chip.rejected,
+.sl-task-chip.correction {
+  background: #fbefe7;
+  color: #a86f47;
+}
+.sl-art-chip {
+  background: #f5fbea;
+  color: #5e8a33;
+}
+.sl-production {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.sl-production h4 {
+  font-size: 0.86rem;
+}
+.sl-task-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  font-size: 0.78rem;
+  color: #4b5a58;
+}
+.sl-alert.info-soft {
+  background: #f5fbea;
+  color: #44602a;
+}
+.sl-pdfs {
+  display: grid;
+  gap: 10px;
+}
+.sl-pdf-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+}
+.sl-pdf-card:hover:not(:disabled) {
+  border-color: #9fc970;
+  background: #f8fcf1;
+}
+.sl-pdf-card > svg {
+  color: #5e8a33;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.sl-pdf-card strong {
+  display: block;
+  font-size: 0.9rem;
+}
+.sl-pdf-card small {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.76rem;
+  color: #6d7a78;
+  line-height: 1.45;
+}
+.sl-public-arts {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr 1fr;
+}
+.sl-public-arts.n1 {
+  grid-template-columns: 1fr;
+}
+.sl-public-arts a,
+.sl-public-arts video {
+  display: block;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #eef1f1;
+}
+.sl-public-arts img,
+.sl-public-arts video {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  display: block;
+}
+.sl-public-arts.n1 img,
+.sl-public-arts.n1 video {
+  aspect-ratio: auto;
+  max-height: 520px;
+  object-fit: contain;
+  background: #eef1f1;
+}
+.sl-public-file {
+  padding: 14px;
+  font-size: 0.82rem;
+  color: var(--ink);
+  text-decoration: underline;
+}
+.sl-public-arts small {
+  grid-column: 1 / -1;
+  color: #899492;
+  font-size: 0.74rem;
+}
+/* Social Leads · quem recebe cada tarefa de arte */
+.sl-release-all {
+  padding: 12px 14px;
+  border-radius: 11px;
+  background: #f5fbea;
+  border: 1px solid #dce9c8;
+}
+.sl-release-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  overflow: hidden;
+}
+.sl-release-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
+  border-top: 1px solid #f0f2f2;
+}
+.sl-release-list li:first-child {
+  border-top: 0;
+}
+.sl-release-post {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+}
+.sl-release-post strong {
+  display: block;
+  font-size: 0.84rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sl-release-post small {
+  display: block;
+  font-size: 0.7rem;
+  color: #899492;
+}
+@media (max-width: 760px) {
+  .sl-release-list li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+}

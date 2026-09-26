@@ -16,6 +16,7 @@ import {
   missingChannel,
   nextActions,
   parseImport,
+  stageLabel,
   stageOf,
   type PlanContent,
   type PortfolioItem,
@@ -287,11 +288,71 @@ describe("etapas e próximas ações", () => {
       ["c", "bad", "open-plan"],
       ["b", "warn", "share"],
       ["e", "warn", "next-month"],
-      ["a", "good", "open-plan"],
+      ["a", "good", "release"],
       ["d", "info", "open-briefing"],
     ]);
     expect(list[0].title).toBe("C: criar o Instagram");
     expect(list[1].title).toBe("B: aprovação parada há 4 dias");
+  });
+});
+
+describe("produção e campanha", () => {
+  const now = new Date("2026-09-25T12:00:00Z").getTime();
+  const base = {
+    contract_id: "k",
+    contract_name: "Social Leads",
+    client_id: "c",
+    client_name: "Cliente",
+    client_color: "#999",
+    contract_created_at: "2026-09-01T00:00:00Z",
+    can_write: true,
+    briefing: {
+      fields: {},
+      campaign_objective: null,
+      responsible_id: null,
+      updated_at: "2026-09-24T12:00:00Z",
+    },
+    plan_count: 1,
+    job: null,
+  };
+  const plan = (over: object) => ({
+    id: "p",
+    month_number: 1,
+    label: "Mês 1",
+    created_at: "2026-09-20T00:00:00Z",
+    updated_at: "2026-09-20T00:00:00Z",
+    share_enabled: true,
+    shared_at: "2026-09-21T00:00:00Z",
+    alerts: 0,
+    first_alert: null,
+    approved: 8,
+    rejected: 0,
+    last_decision_at: null,
+    ...over,
+  });
+  const step = (over: object, campaign: PortfolioItem["campaign"] = null) => {
+    const item = { ...base, plan: plan(over), campaign } as PortfolioItem;
+    const [a] = nextActions([item], now);
+    return [stageOf(item), stageLabel(item), a?.action ?? null];
+  };
+  it("do aprovado até a campanha no ar", () => {
+    expect(step({ tasks: 0 })).toEqual([3, "Plano aprovado", "release"]);
+    expect(step({ tasks: 8, arts: 3 })).toEqual([
+      3,
+      "Produção · 3/8 artes",
+      "open-plan",
+    ]);
+    expect(step({ tasks: 8, arts: 8 })).toEqual([
+      3,
+      "Produção · 8/8 artes",
+      "campaign",
+    ]);
+    expect(
+      step({ tasks: 8, arts: 8 }, { id: "x", name: "C", active: false }),
+    ).toEqual([3, "Produção · 8/8 artes", "campaign"]);
+    expect(
+      step({ tasks: 8, arts: 8 }, { id: "x", name: "C", active: true }),
+    ).toEqual([4, "Campanha no ar", null]);
   });
 });
 

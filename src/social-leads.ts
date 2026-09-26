@@ -71,6 +71,18 @@ export interface SlPost {
   decided_by: string | null;
   decided_at: string | null;
   updated_at: string;
+  /** The art task, once production was released. */
+  task_id?: string | null;
+  /** The art files, in the client's Drive. */
+  arts?: MediaFile[];
+}
+/** An art task as the plan shows it. */
+export interface SlTask {
+  id: string;
+  title: string;
+  status: string;
+  assignee_id: string;
+  due_date: string;
 }
 export interface SlPlan {
   id: string;
@@ -343,13 +355,22 @@ export interface PortfolioItem {
     approved: number;
     rejected: number;
     last_decision_at: string | null;
+    /** Posts with an art task / with art files. */
+    tasks?: number;
+    arts?: number;
   } | null;
   job: SlJob | null;
+  /** The client's Meta campaign (id and name only for leaders). */
+  campaign?: { id: string | null; name: string | null; active: boolean } | null;
 }
 export interface Portfolio {
   configured: boolean;
   product_id?: string;
   team_id?: string | null;
+  /** Who receives the art tasks (the squad when not set). */
+  design_team_id?: string | null;
+  /** Days to deliver an art after production is released. */
+  art_days?: number;
   items: PortfolioItem[];
 }
 
@@ -662,7 +683,7 @@ export const stages = [
 /** 0 briefing · 1 plano (a revisar) · 2 aprovação · 3 aprovado/produção. */
 export function stageOf(item: PortfolioItem) {
   if (!item.plan) return 0;
-  if (item.plan.approved === 8) return 3;
+  if (item.plan.approved === 8) return item.campaign?.active ? 4 : 3;
   if (!item.plan.share_enabled && item.plan.approved + item.plan.rejected === 0)
     return 1;
   return 2;
@@ -672,7 +693,11 @@ export function stageLabel(item: PortfolioItem) {
   if (item.job?.status === "running") return "Gerando o plano…";
   if (!p) return item.briefing ? "Briefing em andamento" : "Sem briefing";
   const decided = p.approved + p.rejected;
-  if (p.approved === 8) return "Plano aprovado";
+  if (p.approved === 8) {
+    if (item.campaign?.active) return "Campanha no ar";
+    if (!p.tasks) return "Plano aprovado";
+    return `Produção · ${p.arts ?? 0}/8 artes`;
+  }
   if (!p.share_enabled && decided === 0) return "Plano para revisar";
   return `Aprovação · ${decided}/8`;
 }
@@ -685,7 +710,14 @@ export type NextAction = {
   title: string;
   detail: string;
   /** What the button does. */
-  action: "open-plan" | "open-briefing" | "generate" | "share" | "next-month";
+  action:
+    | "open-plan"
+    | "open-briefing"
+    | "generate"
+    | "share"
+    | "next-month"
+    | "release"
+    | "campaign";
   label: string;
 };
 const DAY = 86_400_000;
@@ -762,25 +794,52 @@ export function nextActions(
     }
     if (p.approved === 8) {
       const age = daysSince(p.created_at, now);
-      out.push(
-        age >= 25
-          ? {
-              ...base,
-              tone: "warn",
-              title: `${i.client_name}: hora do plano do Mês ${p.month_number + 1}`,
-              detail: `O ${p.label} foi criado há ${age} dias.`,
-              action: "next-month",
-              label: "Gerar próximo mês",
-            }
-          : {
-              ...base,
-              tone: "good",
-              title: `${i.client_name}: o cliente aprovou os 8 posts`,
-              detail: "Produção das artes liberada.",
-              action: "open-plan",
-              label: "Abrir plano",
-            },
-      );
+      const arts = p.arts ?? 0;
+      if (age >= 25)
+        out.push({
+          ...base,
+          tone: "warn",
+          title: `${i.client_name}: hora do plano do Mês ${p.month_number + 1}`,
+          detail: `O ${p.label} foi criado há ${age} dias.`,
+          action: "next-month",
+          label: "Gerar próximo mês",
+        });
+      else if ((p.tasks ?? 0) < 8)
+        out.push({
+          ...base,
+          tone: "good",
+          title: `${i.client_name}: o cliente aprovou os 8 posts`,
+          detail: "Libere a produção: cada post vira uma tarefa de arte.",
+          action: "release",
+          label: "Liberar produção",
+        });
+      else if (arts < 8)
+        out.push({
+          ...base,
+          tone: "info",
+          title: `${i.client_name}: produção em andamento`,
+          detail: `${arts} de 8 posts com arte.`,
+          action: "open-plan",
+          label: "Ver artes",
+        });
+      else if (!i.campaign)
+        out.push({
+          ...base,
+          tone: "good",
+          title: `${i.client_name}: artes prontas, falta a campanha`,
+          detail: "Crie a campanha do Meta com o post que vira anúncio.",
+          action: "campaign",
+          label: "Criar campanha",
+        });
+      else if (!i.campaign.active)
+        out.push({
+          ...base,
+          tone: "warn",
+          title: `${i.client_name}: campanha criada, ainda inativa`,
+          detail: "Complete o ciclo e ative em Campanhas.",
+          action: "campaign",
+          label: "Abrir campanha",
+        });
       continue;
     }
     if (p.rejected > 0) {

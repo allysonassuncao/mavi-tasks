@@ -4,6 +4,7 @@ import {
   addUsage,
   handleSocialLeads,
   newMeter,
+  publicArt,
   planRequest,
   siteDomains,
   socialLeadsEnv,
@@ -575,5 +576,71 @@ describe("cores da marca", () => {
       status: 403,
       body: { error: "Sem permissão para editar este cliente." },
     });
+  });
+});
+
+describe("artes no link do cliente", () => {
+  const token = "a".repeat(64);
+  const file = "00000000-0000-4000-8000-000000000040";
+  it("confere o token no banco (sem login) e redireciona para o endereço assinado", async () => {
+    const db = fakeDb({
+      social_leads_public_art: () => ({
+        body: [
+          {
+            path: "drive/a/art1",
+            name: "post1.png",
+            content_type: "image/png",
+          },
+        ],
+      }),
+    });
+    const r = await publicArt(
+      new URLSearchParams({ arte: file, link: token }),
+      env,
+      {
+        fetch: db.fetchImpl,
+        sign: (f) => `https://storage.test/${f.path}?sig=1`,
+      },
+    );
+    expect(r).toEqual({
+      status: 302,
+      location: "https://storage.test/drive/a/art1?sig=1",
+    });
+    expect(db.calls[0]).toMatchObject({
+      name: "social_leads_public_art",
+      args: { p_token: token, p_file: file },
+      auth: "Bearer anon",
+    });
+  });
+  it("não responde a token ou arquivo errados", async () => {
+    const db = fakeDb({ social_leads_public_art: () => ({ body: [] }) });
+    const sign = () => "https://x";
+    expect(
+      (
+        await publicArt(new URLSearchParams({ arte: file, link: token }), env, {
+          fetch: db.fetchImpl,
+          sign,
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await publicArt(
+          new URLSearchParams({ arte: "../x", link: token }),
+          env,
+          { fetch: db.fetchImpl, sign },
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await publicArt(
+          new URLSearchParams({ arte: file, link: "curto" }),
+          env,
+          { fetch: db.fetchImpl, sign },
+        )
+      ).status,
+    ).toBe(404);
+    expect(db.calls.length).toBe(1);
   });
 });

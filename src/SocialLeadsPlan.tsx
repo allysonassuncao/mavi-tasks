@@ -7,8 +7,13 @@ import {
   FileJson,
   History,
   Link2,
+  CalendarClock,
+  FileText,
+  Hammer,
+  Image as ImageIcon,
   Lock,
   Megaphone,
+  Presentation,
   Pencil,
   RefreshCw,
   RotateCcw,
@@ -28,8 +33,12 @@ import {
   SelectOption,
   Textarea,
 } from "./ui";
-import type { Snapshot } from "./types";
+import { statuses, type Snapshot, type Status } from "./types";
+import { navigate, routeParts } from "./router";
 import {
+  monthFolder,
+  serverLink,
+  type ReleaseAssign,
   shareUrl,
   useLiveSocialLeads,
   type PlanBundle,
@@ -55,10 +64,26 @@ import {
   type SlJob,
   type SlPlan,
   type SlPost,
+  type MediaFile,
+  type SlTask,
 } from "./social-leads";
+import { MediaInput, type Uploading } from "./SocialLeadsFields";
+
+/** A place in the app, inside the current company (/agencias/<slug>/…). */
+const appPath = (path: string) => {
+  const company = routeParts(window.location.pathname).company;
+  return (company ? `/agencias/${company}` : "") + path;
+};
 
 /** Why the plan was opened from the portfolio. */
-export type PlanIntent = "share" | "next-month" | null;
+export type PlanIntent = "share" | "next-month" | "release" | "campaign" | null;
+/** Who produces the arts and in how many days (Social Leads settings). */
+export type Production = {
+  /** The creative team (or the squad): the default receiver of the arts. */
+  teamId: string | null;
+  teamName: string | null;
+  artDays: number;
+};
 
 const dateTime = (iso: string | null | undefined) =>
   iso
@@ -78,6 +103,8 @@ const decisionLabel: Record<Decision, string> = {
 
 export function PlanView({
   item,
+  isLeader,
+  production,
   clientName,
   briefing,
   plans,
@@ -94,6 +121,8 @@ export function PlanView({
   notify,
 }: {
   item: PortfolioItem;
+  isLeader: boolean;
+  production: Production;
   clientName: string;
   briefing: SlBriefing | null;
   plans: SlPlan[];
@@ -117,7 +146,14 @@ export function PlanView({
   >("posts");
   const [openPost, setOpenPost] = useState<number | null>(null);
   const [modal, setModal] = useState<
-    null | "share" | "regenerate" | "next-month" | "import"
+    | null
+    | "share"
+    | "regenerate"
+    | "next-month"
+    | "import"
+    | "release"
+    | "campaign"
+    | "pdf"
   >(null);
   const [preview, setPreview] = useState<null | {
     text: string;
@@ -164,6 +200,12 @@ export function PlanView({
     if (!intent) return;
     if (intent === "share" && plan) setModal("share");
     if (intent === "next-month") setModal("next-month");
+    if (intent === "release" && plan) setModal("release");
+    if (intent === "campaign" && plan) {
+      if (item.campaign?.id)
+        navigate(appPath(`/campanhas?campanha=${item.campaign.id}`));
+      else setModal("campaign");
+    }
     clearIntent();
   }, [intent, plan]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -268,10 +310,19 @@ export function PlanView({
   const people = (id: string | null) =>
     data.members.find((m) => m.user_id === id)?.name;
   const stage = allApproved
-    ? 3
+    ? item.campaign?.active
+      ? 4
+      : 3
     : bundle.plan.share_enabled || approved + rejected
       ? 2
       : 1;
+  // Production: approved posts still without an art task, arts sent.
+  const toRelease = posts.filter(
+    (p) => p.decision === "approved" && !p.task_id,
+  ).length;
+  const withTask = posts.filter((p) => p.task_id).length;
+  const withArt = posts.filter((p) => p.arts?.length).length;
+  const taskOf = (p: SlPost) => bundle.tasks.find((t) => t.id === p.task_id);
 
   const write = async (
     next: PlanContent,
@@ -318,10 +369,16 @@ export function PlanView({
                       ? `${approved + rejected} de 8 · link enviado ${relativeDays(bundle.plan.shared_at)}`
                       : `${approved + rejected} de 8 · link não enviado`
                     : i === 3
-                      ? allApproved
-                        ? "liberada"
-                        : "depois da aprovação"
-                      : "no Meta, na próxima etapa"}
+                      ? withTask
+                        ? `${withArt} de 8 com arte · ${withTask} ${withTask === 1 ? "tarefa" : "tarefas"}`
+                        : allApproved
+                          ? "pronta para liberar"
+                          : "depois da aprovação"
+                      : item.campaign
+                        ? item.campaign.active
+                          ? "no ar no Meta"
+                          : "criada, ainda inativa"
+                        : "depois das artes"}
             </small>
           </div>
         ))}
@@ -352,16 +409,43 @@ export function PlanView({
         </p>
         {item.can_write && (
           <div className="sl-plan-actions">
-            {!isLatest ? null : allApproved ? (
+            {toRelease > 0 && (
               <Button
                 className="btn primary"
+                onClick={() => setModal("release")}
+              >
+                <Hammer size={16} /> Liberar produção ({toRelease})
+              </Button>
+            )}
+            {allApproved && toRelease === 0 && isLeader && (
+              <Button
+                className={`btn ${withArt === 8 && !item.campaign?.active ? "primary" : "secondary"}`}
+                onClick={() =>
+                  item.campaign?.id
+                    ? navigate(
+                        appPath(`/campanhas?campanha=${item.campaign.id}`),
+                      )
+                    : setModal("campaign")
+                }
+              >
+                <Megaphone size={16} />
+                {item.campaign?.id ? "Abrir campanha" : "Criar campanha"}
+              </Button>
+            )}
+            {!isLatest ? null : allApproved ? (
+              <Button
+                className={`btn ${toRelease === 0 && (item.campaign?.active || !isLeader) ? "primary" : "secondary"}`}
                 onClick={() => setModal("next-month")}
                 disabled={running}
               >
                 <Sparkles size={16} /> Gerar Mês {bundle.plan.month_number + 1}
               </Button>
             ) : (
-              <Button className="btn primary" onClick={() => setModal("share")}>
+              // With posts to release, the release is the main action.
+              <Button
+                className={`btn ${toRelease > 0 ? "secondary" : "primary"}`}
+                onClick={() => setModal("share")}
+              >
                 {bundle.plan.share_enabled ? (
                   <Link2 size={16} />
                 ) : (
@@ -399,6 +483,13 @@ export function PlanView({
               title="Colar a atualização devolvida pelo chat"
             >
               <FileJson size={15} /> Colar do chat
+            </Button>
+            <Button
+              className="btn secondary"
+              onClick={() => setModal("pdf")}
+              title="PDF do designer e PDF de apresentação"
+            >
+              <FileText size={15} /> PDFs
             </Button>
           </div>
         )}
@@ -483,6 +574,27 @@ export function PlanView({
                       <TriangleAlert size={12} /> “{f[0].term}”: {f[0].why}
                     </span>
                   )}
+                  {(p.task_id || !!p.arts?.length) && (
+                    <span className="sl-post-prod">
+                      {p.task_id && (
+                        <span
+                          className={`sl-task-chip ${taskOf(p)?.status ?? ""}`}
+                        >
+                          <Hammer size={11} />
+                          {taskOf(p)
+                            ? (statuses[taskOf(p)!.status as Status]?.label ??
+                              "Tarefa")
+                            : "Tarefa"}
+                        </span>
+                      )}
+                      {!!p.arts?.length && (
+                        <span className="sl-art-chip">
+                          <ImageIcon size={11} /> {p.arts.length}{" "}
+                          {p.arts.length === 1 ? "arte" : "artes"}
+                        </span>
+                      )}
+                    </span>
+                  )}
                   <span className="sl-post-foot">
                     <span className={`sl-decision ${p.decision}`}>
                       {decisionLabel[p.decision]}
@@ -553,6 +665,30 @@ export function PlanView({
             );
             notify(`Post ${openPost} salvo. A versão anterior ficou guardada.`);
           }}
+          production={{
+            task: taskOf(posts.find((p) => p.number === openPost)!),
+            assignee: people(
+              taskOf(posts.find((p) => p.number === openPost)!)?.assignee_id ??
+                null,
+            ),
+            onOpenTask: (id) => navigate(appPath(`/tarefas/${id}`)),
+            urlOf: (f) => backend.mediaUrl(f),
+            onUpload: async (file, onProgress) =>
+              backend.uploadMedia(
+                company,
+                item.contract_id,
+                file,
+                onProgress,
+                monthFolder(bundle.plan.label),
+              ),
+            onSave: async (arts) => {
+              await backend.setArts(plan.id, openPost, arts);
+              load();
+              onChanged();
+            },
+            onDelete: (f) => backend.deleteMedia(f),
+            notify,
+          }}
         />
       )}
       {modal === "share" && (
@@ -567,6 +703,99 @@ export function PlanView({
             load();
             onChanged();
           }}
+          notify={notify}
+        />
+      )}
+      {modal === "release" && (
+        <ReleaseModal
+          label={bundle.plan.label}
+          posts={posts.filter((p) => p.decision === "approved" && !p.task_id)}
+          waiting={8 - withTask - toRelease}
+          firstRelease={withTask === 0}
+          production={production}
+          clientId={item.client_id}
+          data={data}
+          onClose={() => setModal(null)}
+          onRelease={async (assign) => {
+            const r = await backend.release(plan.id, assign);
+            notify(
+              `${r.created} ${r.created === 1 ? "tarefa de arte criada" : "tarefas de arte criadas"}${r.cycle ? " e ciclo do cliente iniciado" : ""}.`,
+            );
+            setModal(null);
+            load();
+            onChanged();
+          }}
+        />
+      )}
+      {modal === "campaign" && (
+        <Modal
+          title="Criar a campanha no Meta"
+          onClose={() => setModal(null)}
+          busy={busy === "campaign"}
+        >
+          <div className="entity-form">
+            <p>
+              A campanha <strong>Social Leads · {clientName}</strong> é criada
+              em Campanhas, ainda inativa, com o objetivo, a região, o público,
+              o orçamento e o post que vira anúncio nas observações. Lá você
+              completa o ciclo (verba, datas, conta de anúncio) e ativa. Quando
+              ela estiver ativa, este cliente aparece como “Campanha no ar”.
+            </p>
+            {withArt < 8 && (
+              <p className="sl-alert warn">
+                <TriangleAlert size={15} />
+                {withArt} de 8 posts com arte. Dá para criar agora e ativar
+                quando o anúncio estiver pronto.
+              </p>
+            )}
+            <div className="form-footer">
+              <Button className="btn secondary" onClick={() => setModal(null)}>
+                Cancelar
+              </Button>
+              <Button
+                className="btn primary"
+                loading={busy === "campaign"}
+                onClick={() => {
+                  setBusy("campaign");
+                  backend
+                    .createCampaign(plan.id)
+                    .then((id) => {
+                      notify(
+                        "Campanha criada. Complete o ciclo e ative em Campanhas.",
+                      );
+                      onChanged();
+                      navigate(appPath(`/campanhas?campanha=${id}`));
+                    })
+                    .catch((e) => notify((e as Error).message))
+                    .finally(() => setBusy(""));
+                }}
+              >
+                <Megaphone size={15} /> Criar e abrir em Campanhas
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {modal === "pdf" && (
+        <PdfModal
+          plan={bundle.plan}
+          posts={posts}
+          content={content}
+          briefing={briefing}
+          clientName={clientName}
+          company={data.companies.find((c) => c.id === company)?.name ?? ""}
+          responsible={people(briefing?.responsible_id ?? null) ?? null}
+          backend={backend}
+          onSaveCopy={(file) =>
+            backend.uploadMedia(
+              company,
+              item.contract_id,
+              file,
+              () => {},
+              monthFolder(bundle.plan.label),
+            )
+          }
+          onClose={() => setModal(null)}
           notify={notify}
         />
       )}
@@ -679,6 +908,7 @@ function PostModal({
   onClose,
   onDecide,
   onEdit,
+  production,
 }: {
   post: SlPost;
   content: PlanContent;
@@ -688,6 +918,7 @@ function PostModal({
   onClose: () => void;
   onDecide: (d: Decision, note: string) => Promise<void>;
   onEdit: (patch: Partial<PlanPost>) => Promise<void>;
+  production: ProductionProps;
 }) {
   const [note, setNote] = useState(post.note);
   const [editing, setEditing] = useState(false);
@@ -962,11 +1193,130 @@ function PostModal({
               ) : (
                 <p className="sl-muted">Pendente.</p>
               )}
+              {(post.decision === "approved" ||
+                post.task_id ||
+                !!post.arts?.length) && (
+                <PostProduction
+                  post={post}
+                  canWrite={canWrite}
+                  {...production}
+                />
+              )}
             </div>
           </>
         )}
       </div>
     </Modal>
+  );
+}
+
+type ProductionProps = {
+  task: SlTask | undefined;
+  assignee: string | undefined;
+  onOpenTask: (id: string) => void;
+  urlOf: (f: MediaFile) => Promise<string>;
+  onUpload: (file: File, onProgress: (f: number) => void) => Promise<MediaFile>;
+  onSave: (arts: MediaFile[]) => Promise<void>;
+  onDelete: (f: MediaFile) => Promise<void>;
+  notify: (m: string) => void;
+};
+/** The post's art task and its arts (sent to the client's Drive). */
+function PostProduction({
+  post,
+  canWrite,
+  task,
+  assignee,
+  onOpenTask,
+  urlOf,
+  onUpload,
+  onSave,
+  onDelete,
+  notify,
+}: ProductionProps & { post: SlPost; canWrite: boolean }) {
+  const [uploading, setUploading] = useState<Uploading[]>([]);
+  const arts = useRef<MediaFile[]>(post.arts ?? []);
+  arts.current = post.arts ?? arts.current;
+  const add = async (files: File[]) => {
+    for (const file of files) {
+      const kind = file.type.split("/")[0];
+      if (
+        !["image", "video"].includes(kind) &&
+        file.type !== "application/pdf"
+      ) {
+        notify(`${file.name}: envie imagem, vídeo ou PDF.`);
+        continue;
+      }
+      if (file.size > 500 * 1024 * 1024) {
+        notify(`${file.name}: envie arquivos de até 500 MB.`);
+        continue;
+      }
+      const key = `${Date.now()}-${file.name}`;
+      setUploading((u) => [...u, { key, name: file.name, progress: 0 }]);
+      try {
+        const sent = await onUpload(file, (progress) =>
+          setUploading((u) =>
+            u.map((x) => (x.key === key ? { ...x, progress } : x)),
+          ),
+        );
+        arts.current = [...arts.current, sent];
+        await onSave(arts.current);
+      } catch (e) {
+        notify((e as Error).message);
+      } finally {
+        setUploading((u) => u.filter((x) => x.key !== key));
+      }
+    }
+  };
+  return (
+    <div className="sl-production">
+      <h4>Produção</h4>
+      {task ? (
+        <p className="sl-task-line">
+          <span className={`sl-task-chip ${task.status}`}>
+            <Hammer size={11} />{" "}
+            {statuses[task.status as Status]?.label ?? task.status}
+          </span>
+          <span>
+            {assignee ?? "Equipe de criação"} · até{" "}
+            {new Date(`${task.due_date}T12:00:00`).toLocaleDateString("pt-BR")}
+          </span>
+          <button
+            type="button"
+            className="sl-link"
+            onClick={() => onOpenTask(task.id)}
+          >
+            Abrir tarefa
+          </button>
+        </p>
+      ) : post.task_id ? (
+        <p className="sl-muted">Tarefa de arte criada (sem acesso para ver).</p>
+      ) : (
+        <p className="sl-muted">
+          Sem tarefa de arte ainda: use “Liberar produção”.
+        </p>
+      )}
+      <MediaInput
+        files={post.arts ?? []}
+        uploading={uploading}
+        accept="image/*,video/*,application/pdf"
+        what="as artes"
+        disabled={!canWrite}
+        onAdd={(files) => void add(files)}
+        onRemove={(f) => {
+          arts.current = arts.current.filter((a) => a.id !== f.id);
+          onSave(arts.current)
+            .then(() =>
+              onDelete(f).catch(() =>
+                notify(
+                  `${f.name} saiu do post, mas continua no Drive do cliente.`,
+                ),
+              ),
+            )
+            .catch((e) => notify((e as Error).message));
+        }}
+        urlOf={urlOf}
+      />
+    </div>
   );
 }
 
@@ -1255,6 +1605,348 @@ function AdjustBox({
         </p>
       )}
     </form>
+  );
+}
+
+/**
+ * "Liberar produção": who receives each post's art task. One choice for all
+ * the posts at once, and each post can then be changed: a team (the task goes
+ * to whoever has the fewest open tasks) or a person. The creative team comes
+ * chosen. A team that doesn't serve the client yet starts serving it; a
+ * person outside the client's teams gets the task but can't send the arts to
+ * the post.
+ */
+function ReleaseModal({
+  label,
+  posts,
+  waiting,
+  firstRelease,
+  production,
+  clientId,
+  data,
+  onClose,
+  onRelease,
+}: {
+  label: string;
+  posts: SlPost[];
+  /** Posts not approved yet (they stay for a next release). */
+  waiting: number;
+  firstRelease: boolean;
+  production: Production;
+  clientId: string;
+  data: Snapshot;
+  onClose: () => void;
+  onRelease: (assign: ReleaseAssign) => Promise<void>;
+}) {
+  const initial = production.teamId ? `team:${production.teamId}` : "";
+  const [all, setAll] = useState(initial);
+  const [each, setEach] = useState<Record<number, string>>(() =>
+    Object.fromEntries(posts.map((p) => [p.number, initial])),
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const clientTeams = new Set(
+    data.clientTeams
+      .filter((c) => c.client_id === clientId)
+      .map((c) => c.team_id),
+  );
+  const serves = (user: string) =>
+    data.members.find((m) => m.user_id === user)?.role === "admin" ||
+    data.teamMembers.some(
+      (t) => t.user_id === user && clientTeams.has(t.team_id),
+    );
+  const teams = [...data.teams].sort((a, b) => a.name.localeCompare(b.name));
+  const people = data.members
+    .filter((m) => m.active)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const options = [
+    ...teams.map((t) => ({
+      value: `team:${t.id}`,
+      label: `Equipe · ${t.name}${t.id === production.teamId ? " (criação)" : ""}${clientTeams.has(t.id) ? "" : " · passa a atender o cliente"}`,
+    })),
+    ...people.map((m) => ({
+      value: `user:${m.user_id}`,
+      label: `${m.name}${serves(m.user_id) ? "" : " · fora das equipes do cliente"}`,
+    })),
+  ];
+  const outside = Object.values(each).some(
+    (v) => v.startsWith("user:") && !serves(v.slice(5)),
+  );
+  const missing = posts.filter((p) => !each[p.number]).map((p) => p.number);
+  const perPost = new Set(Object.values(each)).size > 1;
+
+  return (
+    <Modal
+      title={`Liberar a produção do ${label}`}
+      onClose={onClose}
+      busy={busy}
+      wide
+    >
+      <form
+        className="entity-form sl-release"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (missing.length) return;
+          const assign: ReleaseAssign = {};
+          for (const p of posts) {
+            const [kind, id] = each[p.number].split(":");
+            assign[p.number] = kind === "user" ? { user: id } : { team: id };
+          }
+          setBusy(true);
+          setError("");
+          onRelease(assign)
+            .catch((err) => setError((err as Error).message))
+            .finally(() => setBusy(false));
+        }}
+      >
+        <p>
+          {posts.length}{" "}
+          {posts.length === 1 ? "post aprovado vira" : "posts aprovados viram"}{" "}
+          tarefa de arte, com prazo de {production.artDays}{" "}
+          {production.artDays === 1 ? "dia" : "dias"}. Cada tarefa leva o
+          gancho, a copy, a direção visual, o formato e o CTA do post. Para uma
+          equipe, a tarefa vai para quem tem menos tarefas em aberto.
+        </p>
+        <label className="sl-release-all">
+          <span className="sl-label">
+            Para todos os posts
+            <em>Muda todos de uma vez. Depois dá para trocar post a post.</em>
+          </span>
+          <Select
+            value={perPost ? "" : all}
+            onValueChange={(v) => {
+              if (!v) return;
+              setAll(v);
+              setEach(Object.fromEntries(posts.map((p) => [p.number, v])));
+            }}
+          >
+            <SelectOption value="">
+              {perPost ? "Cada post com o seu" : "Escolha uma equipe ou pessoa"}
+            </SelectOption>
+            {options.map((o) => (
+              <SelectOption key={o.value} value={o.value}>
+                {o.label}
+              </SelectOption>
+            ))}
+          </Select>
+        </label>
+        <ul className="sl-release-list">
+          {posts.map((p) => (
+            <li key={p.number}>
+              <span className="sl-release-post">
+                <span className="sl-num">
+                  {String(p.number).padStart(2, "0")}
+                </span>
+                <span>
+                  <strong>{p.hook}</strong>
+                  <small>
+                    {pillars[p.pillar]}
+                    {p.is_ad ? " · vira anúncio (prioridade alta)" : ""} ·{" "}
+                    {p.format}
+                  </small>
+                </span>
+              </span>
+              <Select
+                value={each[p.number] ?? ""}
+                aria-label={`Quem recebe o post ${p.number}`}
+                onValueChange={(v) => setEach((e) => ({ ...e, [p.number]: v }))}
+              >
+                <SelectOption value="">
+                  Escolha uma equipe ou pessoa
+                </SelectOption>
+                {options.map((o) => (
+                  <SelectOption key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectOption>
+                ))}
+              </Select>
+            </li>
+          ))}
+        </ul>
+        {outside && (
+          <p className="sl-alert warn">
+            <TriangleAlert size={15} />
+            Quem está fora das equipes do cliente recebe a tarefa, mas não
+            consegue subir as artes no post. Escolha a equipe dele ou adicione a
+            equipe ao cliente.
+          </p>
+        )}
+        {firstRelease && (
+          <p className="sl-alert info-soft">
+            <CalendarClock size={15} />
+            Na primeira liberação, o ciclo do cliente começa: acompanhamento
+            quinzenal e reunião mensal de resultados, tarefas que se repetem
+            para o responsável.
+          </p>
+        )}
+        {waiting > 0 && (
+          <p className="sl-muted">
+            {waiting}{" "}
+            {waiting === 1
+              ? "post ainda não aprovado fica"
+              : "posts ainda não aprovados ficam"}{" "}
+            para depois: libere de novo quando o cliente aprovar.
+          </p>
+        )}
+        {error && <p className="sl-alert bad">{error}</p>}
+        <div className="form-footer">
+          <Button type="button" className="btn secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            type="submit"
+            className="btn primary"
+            loading={busy}
+            disabled={!!missing.length}
+            title={
+              missing.length
+                ? `Escolha quem recebe o post ${missing.join(", ")}`
+                : ""
+            }
+          >
+            <Hammer size={15} /> Liberar {posts.length}{" "}
+            {posts.length === 1 ? "tarefa" : "tarefas"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** The designer's PDF and the presentation PDF, downloaded and kept in the Drive. */
+function PdfModal({
+  plan,
+  posts,
+  content,
+  briefing,
+  clientName,
+  company,
+  responsible,
+  backend,
+  onSaveCopy,
+  onClose,
+  notify,
+}: {
+  plan: SlPlan;
+  posts: SlPost[];
+  content: PlanContent;
+  briefing: SlBriefing | null;
+  clientName: string;
+  company: string;
+  responsible: string | null;
+  backend: SocialLeadsBackend;
+  onSaveCopy: (file: File) => Promise<MediaFile>;
+  onClose: () => void;
+  notify: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState<"" | "designer" | "presentation">("");
+  const approvedPosts = posts.filter((p) => p.decision === "approved");
+  const images = async (list: MediaFile[], max: number) => {
+    const { loadImage } = await import("./social-leads-pdf");
+    const out = [];
+    for (const f of list
+      .filter((a) => /^(image|video)\//.test(a.type))
+      .slice(0, max)) {
+      const img = await loadImage(
+        await backend.mediaUrl(f).catch(() => ""),
+        f.type,
+      );
+      if (img) out.push(img);
+    }
+    return out;
+  };
+  const make = async (kind: "designer" | "presentation") => {
+    setBusy(kind);
+    try {
+      const pdf = await import("./social-leads-pdf");
+      let blob: Blob;
+      if (kind === "designer") {
+        const [logo] = await images(briefing?.media?.brandLogo ?? [], 1);
+        blob = await pdf.designerPdf({
+          company,
+          client: clientName,
+          label: plan.label,
+          fields: briefing?.fields ?? {},
+          logo: logo ?? null,
+          posts: approvedPosts,
+        });
+      } else {
+        const arts: Record<number, Awaited<ReturnType<typeof images>>> = {};
+        for (const p of posts)
+          if (p.arts?.length) arts[p.number] = await images(p.arts, 4);
+        const link = plan.share_enabled
+          ? shareUrl((await backend.share(plan.id, true)).share_token)
+          : null;
+        blob = await pdf.presentationPdf({
+          company,
+          client: clientName,
+          label: plan.label,
+          createdAt: plan.created_at,
+          responsible,
+          content,
+          posts,
+          arts,
+          link,
+        });
+      }
+      const name = `${kind === "designer" ? "Designer" : "Apresentação"} · ${clientName} · ${plan.label}.pdf`;
+      pdf.downloadBlob(blob, name);
+      await onSaveCopy(new File([blob], name, { type: "application/pdf" }))
+        .then(() => notify("PDF baixado. Uma cópia ficou no Drive do cliente."))
+        .catch(() =>
+          notify("PDF baixado. Não foi possível guardar a cópia no Drive."),
+        );
+    } catch (e) {
+      notify((e as Error).message || "Não foi possível gerar o PDF.");
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <Modal title="PDFs do plano" onClose={onClose} busy={!!busy}>
+      <div className="entity-form sl-pdfs">
+        <button
+          type="button"
+          className="sl-pdf-card"
+          disabled={!!busy || !approvedPosts.length}
+          onClick={() => void make("designer")}
+        >
+          <FileText size={20} />
+          <span>
+            <strong>
+              {busy === "designer" ? "Gerando…" : "PDF do designer"}
+            </strong>
+            <small>
+              {approvedPosts.length
+                ? `Os ${approvedPosts.length} posts aprovados, com identidade visual, restrições e as direções de cada peça.`
+                : "Aparece quando houver posts aprovados."}
+            </small>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="sl-pdf-card"
+          disabled={!!busy}
+          onClick={() => void make("presentation")}
+        >
+          <Presentation size={20} />
+          <span>
+            <strong>
+              {busy === "presentation" ? "Gerando…" : "PDF de apresentação"}
+            </strong>
+            <small>
+              Slides para o cliente: diagnóstico, pilares, os 8 posts com as
+              artes e o anúncio. Sem alertas nem dados internos.
+            </small>
+          </span>
+        </button>
+        <p className="sl-muted">
+          O PDF é baixado e uma cópia fica no Drive do cliente, em “
+          {monthFolder(plan.label)}”.
+        </p>
+      </div>
+    </Modal>
   );
 }
 

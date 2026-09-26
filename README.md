@@ -229,7 +229,11 @@ O módulo **Onboarding** (menu Trabalho) tem, por enquanto, o **Social Leads**: 
 - **Custo da IA:** cada chamada à API da Claude (geração, ajuste, cores) é registrada com os tokens e o valor em dólar (`social_leads_ai_usage`); o plano mostra o total ("IA US$ 0,41", com o detalhe ao passar o mouse).
 - **Caixa de entrada:** o fim de uma geração (pronta ou com falha) avisa quem a pediu, com o custo, também por push. Os avisos deixam de ser só de tarefas (`notifications.task_id` opcional, com título, texto e endereço próprios).
 
-Para ligar: aplicar as migrações, configurar `ANTHROPIC_API_KEY` na Vercel e fazer redeploy. Testes: `npm run test:db:social-leads`, `npm run test:db:social-leads-media` e `npm run test:db:import-social-leads`.
+- **Produção (fase 2):** em Configurar, a **equipe de criação** (quem recebe as artes; sem ela, o squad) e o **prazo da arte**. **Liberar produção** cria uma tarefa por post aprovado, com as direções do post. Na janela, escolhe-se quem recebe (uma equipe ou uma pessoa) para todos os posts de uma vez ou post a post; a equipe de criação vem escolhida. Para uma equipe, `create_task` distribui para quem tem menos tarefas em aberto, e a equipe passa a atender o cliente. A primeira liberação abre o **ciclo do cliente**: acompanhamento quinzenal e reunião mensal de resultados, tarefas que se repetem para o responsável. As **artes** sobem no próprio post, para o Drive do cliente (pasta "Artes · Mês N"), e aparecem no post, nos PDFs e no link do cliente, que as pede a `GET /api/social-leads?arte=…&link=…`: o banco confere o token e o servidor redireciona para um endereço assinado de 10 minutos (migração `20261016090000_social_leads_production`).
+- **PDFs:** o do designer (posts aprovados, identidade visual, restrições) e o de apresentação (slides A4 paisagem com as artes, sem dados internos), gerados no navegador (jsPDF) e guardados no Drive do cliente.
+- **Campanha:** administradores e gestores criam a campanha do Meta a partir do plano (inativa, com o objetivo, a região, o público, o orçamento e o anúncio nas observações) e seguem em Campanhas; com ela ativa, o cliente fica em "Campanha no ar".
+
+Para ligar: aplicar as migrações, configurar `ANTHROPIC_API_KEY` na Vercel e fazer redeploy. Testes: `npm run test:db:social-leads`, `npm run test:db:social-leads-media`, `npm run test:db:social-leads-production` e `npm run test:db:import-social-leads`.
 
 ### Notificações push (com o app fechado)
 

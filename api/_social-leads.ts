@@ -866,3 +866,39 @@ async function colors(
     );
   }
 }
+
+// ------------------------------------------------------------ client link arts
+/**
+ * GET /api/social-leads?arte=<file>&link=<token>: an art of a post, for the
+ * client link (an <img>/<video> source). The database checks the token and
+ * that the file is an art of that plan; the answer is a redirect to a
+ * signed address valid for 10 minutes. The file itself stays private.
+ */
+export async function publicArt(
+  query: URLSearchParams,
+  env: SocialLeadsEnv,
+  deps: {
+    fetch: Fetch;
+    sign: (file: {
+      path: string;
+      name: string;
+      content_type: string;
+    }) => string | null;
+  },
+): Promise<{ status: number; location?: string; error?: string }> {
+  const token = query.get("link") ?? "";
+  const file = query.get("arte") ?? "";
+  if (!/^[0-9a-f]{64}$/.test(token) || !UUID.test(file))
+    return { status: 404, error: "Arte não encontrada." };
+  const found = await callRpc<
+    { path: string; name: string; content_type: string }[]
+  >(env, deps.fetch, null, "social_leads_public_art", {
+    p_token: token,
+    p_file: file,
+  });
+  const target = found.ok ? found.data[0] : undefined;
+  if (!target) return { status: 404, error: "Arte não encontrada." };
+  const url = deps.sign(target);
+  if (!url) return { status: 500, error: "Armazenamento não configurado." };
+  return { status: 302, location: url };
+}

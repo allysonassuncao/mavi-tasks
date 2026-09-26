@@ -33,7 +33,7 @@ import {
   type PortfolioItem,
 } from "./social-leads";
 import { BriefingWizard } from "./SocialLeadsBriefing";
-import { PlanView, type PlanIntent } from "./SocialLeadsPlan";
+import { PlanView, type PlanIntent, type Production } from "./SocialLeadsPlan";
 
 /**
  * Onboarding › Social Leads. The portfolio (clients with the Social Leads
@@ -104,7 +104,12 @@ export function SocialLeadsPage({
         backend={backend}
         current={
           portfolio.product_id
-            ? { product: portfolio.product_id, team: portfolio.team_id ?? null }
+            ? {
+                product: portfolio.product_id,
+                team: portfolio.team_id ?? null,
+                designTeam: portfolio.design_team_id ?? null,
+                artDays: portfolio.art_days ?? 5,
+              }
             : null
         }
         onDone={load}
@@ -121,7 +126,16 @@ export function SocialLeadsPage({
         data={data}
         company={company}
         user={user}
+        isLeader={isLeader}
         teamId={portfolio.team_id ?? null}
+        production={{
+          teamId: portfolio.design_team_id ?? portfolio.team_id ?? null,
+          teamName:
+            data.teams.find(
+              (t) => t.id === (portfolio.design_team_id ?? portfolio.team_id),
+            )?.name ?? null,
+          artDays: portfolio.art_days ?? 5,
+        }}
         backend={backend}
         tab={tab === "briefing" ? "briefing" : "plano"}
         setTab={(t) => setTab(t)}
@@ -318,7 +332,12 @@ function Setup({
   isLeader: boolean;
   backend: SocialLeadsBackend;
   /** What is configured now, when changing it. */
-  current: { product: string; team: string | null } | null;
+  current: {
+    product: string;
+    team: string | null;
+    designTeam: string | null;
+    artDays: number;
+  } | null;
   onDone: () => void;
   notify: (m: string) => void;
 }) {
@@ -328,6 +347,11 @@ function Setup({
   const [team, setTeam] = useState(
     current ? (current.team ?? "") : (squad?.id ?? ""),
   );
+  const creation = data.teams.find((t) => /cria|design|arte/i.test(t.name));
+  const [designTeam, setDesignTeam] = useState(
+    current ? (current.designTeam ?? "") : (creation?.id ?? ""),
+  );
+  const [artDays, setArtDays] = useState(String(current?.artDays ?? 5));
   const [busy, setBusy] = useState(false);
   if (!isLeader)
     return (
@@ -353,7 +377,13 @@ function Setup({
           e.preventDefault();
           setBusy(true);
           backend
-            .setSettings(company, product, team || null)
+            .setSettings(
+              company,
+              product,
+              team || null,
+              designTeam || null,
+              Math.min(60, Math.max(1, Number(artDays) || 5)),
+            )
             .then(() => {
               notify("Social Leads configurado.");
               onDone();
@@ -384,6 +414,37 @@ function Setup({
                 </SelectOption>
               ))}
             </Select>
+          </label>
+        </div>
+        <div className="form-columns">
+          <label>
+            <span className="sl-label">
+              Equipe de criação
+              <em>
+                Recebe as tarefas de arte (quem tem menos tarefas em aberto).
+              </em>
+            </span>
+            <Select value={designTeam} onValueChange={setDesignTeam}>
+              <SelectOption value="">A mesma do squad</SelectOption>
+              {data.teams.map((t) => (
+                <SelectOption key={t.id} value={t.id}>
+                  {t.name}
+                </SelectOption>
+              ))}
+            </Select>
+          </label>
+          <label>
+            <span className="sl-label">
+              Prazo da arte
+              <em>Dias a partir de quando a produção é liberada.</em>
+            </span>
+            <Input
+              type="number"
+              min={1}
+              max={60}
+              value={artDays}
+              onChange={(e) => setArtDays(e.target.value)}
+            />
           </label>
         </div>
         <div className="form-footer">
@@ -478,6 +539,8 @@ function PortfolioView({
     if (a.action === "open-briefing") onOpen(item, "briefing");
     else if (a.action === "share") onOpen(item, "plano", "share");
     else if (a.action === "next-month") onOpen(item, "plano", "next-month");
+    else if (a.action === "release") onOpen(item, "plano", "release");
+    else if (a.action === "campaign") onOpen(item, "plano", "campaign");
     else onOpen(item, "plano");
   };
 
@@ -750,7 +813,9 @@ function ClientView({
   data,
   company,
   user,
+  isLeader,
   teamId,
+  production,
   backend,
   tab,
   setTab,
@@ -764,7 +829,9 @@ function ClientView({
   data: Snapshot;
   company: string;
   user: string;
+  isLeader: boolean;
   teamId: string | null;
+  production: Production;
   backend: SocialLeadsBackend;
   tab: "plano" | "briefing";
   setTab: (t: "plano" | "briefing") => void;
@@ -902,6 +969,8 @@ function ClientView({
       ) : (
         <PlanView
           item={item}
+          isLeader={isLeader}
+          production={production}
           clientName={name}
           briefing={bundle.briefing}
           plans={plans}
