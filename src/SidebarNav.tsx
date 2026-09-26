@@ -17,7 +17,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import type { Page } from "./router";
+import { settingsTab, type Page } from "./router";
 import type { Product } from "./types";
 
 /** A place in the app: a page, optionally with filters (query) or a section (hash). */
@@ -289,10 +289,12 @@ export function SidebarNav({
   const FILTERS = ["escopo", "atrasadas", "produto"];
   const current = (to: NavTarget) => {
     if (to.page !== page) return false;
-    if (to.hash)
-      return (
-        typeof window !== "undefined" && window.location.hash === `#${to.hash}`
-      );
+    if (to.hash) {
+      if (typeof window === "undefined") return false;
+      const hash = window.location.hash.slice(1);
+      // Without a hash, the settings page opens on its first tab.
+      return (page === "settings" ? settingsTab(hash) : hash) === to.hash;
+    }
     if (to.page !== "tasks") return true;
     return FILTERS.every(
       (key) => (params.get(key) ?? "") === (to.query?.[key] ?? ""),

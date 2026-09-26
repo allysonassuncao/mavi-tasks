@@ -10,6 +10,8 @@ import {
   routeParts,
   taskUrl,
   taskIdFromPath,
+  settingsTab,
+  SETTINGS_TABS,
 } from "./router";
 
 describe("shareable routes", () => {
@@ -98,4 +100,10 @@ it("abre diretamente tarefas compartilhadas e preserva o retorno após login", (
   expect(safeReturnPath(url)).toBe(url);
   expect(loginDestination(url)).toContain("retorno=");
   expect(taskIdFromPath("/tarefas/invalid")).toBeNull();
+});
+
+it("abre Equipe e configurações na aba do endereço, ou em Pessoas", () => {
+  for (const tab of SETTINGS_TABS) expect(settingsTab(tab)).toBe(tab);
+  expect(settingsTab("")).toBe("config-pessoas");
+  expect(settingsTab("qualquer-coisa")).toBe("config-pessoas");
 });

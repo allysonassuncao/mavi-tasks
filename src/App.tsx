@@ -5,6 +5,9 @@ import {
   usePage,
   useUrlState,
   useLocation,
+  useHash,
+  settingsTab,
+  type SettingsTab,
   navigate,
   pageUrl,
   companySlug,
@@ -105,11 +108,13 @@ import {
   type Status,
   type Company,
   type Member,
+  type Role,
   emptySnapshot,
   statuses,
   listedStatuses,
   priorities,
 } from "./types";
+import { fold } from "./task-search";
 import {
   dateKey,
   dateLabel,
@@ -155,6 +160,7 @@ import { StoragePage } from "./StoragePage";
 import { CompanyLogoDialog, WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { ProfilePage } from "./ProfilePage";
 import { MemberForm } from "./MemberForm";
+import { MemberModulesMenu } from "./MemberModulesMenu";
 import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
 import { useTaskSeconds } from "./useTaskTime";
@@ -227,6 +233,11 @@ const TASK_ROW_MUTATIONS = new Set([
 ]);
 const TIMER_ROW_MUTATIONS = new Set(["start_timer", "stop_timer"]);
 const SELF_HANDLED_MUTATIONS = new Set(["add_comment"]);
+const ROLE_LABELS: Record<Role, string> = {
+  admin: "Administrador",
+  manager: "Gestor",
+  member: "Colaborador",
+};
 // A UI preference, not cached data: it lives outside the "mavi:cache:" prefix
 // that logout clears, so it survives signing out.
 const SIDEBAR_KEY = "mavi:sidebar-collapsed";
@@ -263,6 +274,7 @@ export default function App() {
     }),
     [companyRef, setCompanyRef] = useUrlState<string>("empresa", "");
   const location = useLocation();
+  const settingsView = settingsTab(useHash());
   const isLogin = location.split("?")[0].replace(/\/+$/, "") === "/login";
   const requestedCompany = data.companies.find(
     (c) => c.id === companyRef || companySlug(c, data.companies) === companyRef,
@@ -368,6 +380,8 @@ export default function App() {
         window.location.search,
     );
   }
+  // Search of the settings page's Pessoas tab.
+  const [memberQuery, setMemberQuery] = useState("");
   const [form, setForm] = useState<string | null>(null),
     [loading, setLoading] = useState(false),
     [companiesReady, setCompaniesReady] = useState(() => {
@@ -409,6 +423,14 @@ export default function App() {
   // The profile's rules, plus the modules an administrator hid from the
   // person (src/modules.ts).
   const hiddenPages = member?.hidden_pages ?? [];
+  // Pessoas tab of the settings page: by name, e-mail or access profile.
+  const memberTerms = fold(memberQuery).split(/\s+/).filter(Boolean);
+  const shownMembers = memberTerms.length
+    ? data.members.filter((m) => {
+        const text = fold(`${m.name} ${m.email ?? ""} ${ROLE_LABELS[m.role]}`);
+        return memberTerms.every((t) => text.includes(t));
+      })
+    : data.members;
   const allowed = (p: Page) => canOpenPage(p, member?.role, hiddenPages);
   // Who from the company has the app open (joined once the person's
   // membership is known).
@@ -1425,7 +1447,8 @@ export default function App() {
     setSidebar(false);
     setForm(null);
     setQuery("");
-    if (!to.hash) return;
+    // On the settings page the hash picks a tab: nothing to scroll to.
+    if (!to.hash || to.page === "settings") return;
     // The section appears once the page has rendered.
     let tries = 0;
     const scroll = () => {
@@ -2003,7 +2026,8 @@ export default function App() {
                       reports: isLeader
                         ? "Entenda o ritmo e os resultados da operação."
                         : "Seu ritmo e seus resultados no período.",
-                      settings: "Pessoas e produtos do seu espaço de trabalho.",
+                      settings:
+                        "Pessoas, equipes, produtos, templates e sugestões do seu espaço de trabalho.",
                     }[page]
                   }
                 </p>
@@ -2026,13 +2050,10 @@ export default function App() {
                   page !== "onboarding" &&
                   page !== "storage" &&
                   page !== "dashboards" &&
-                  (![
-                    "products",
-                    "contracts",
-                    "clients",
-                    "projects",
-                    "settings",
-                  ].includes(page) ||
+                  page !== "settings" &&
+                  (!["products", "contracts", "clients", "projects"].includes(
+                    page,
+                  ) ||
                     isLeader) && (
                     <Button
                       className="btn primary"
@@ -2048,17 +2069,11 @@ export default function App() {
                                   ? "project"
                                   : page === "hours"
                                     ? "time"
-                                    : page === "settings"
-                                      ? "user"
-                                      : "task",
+                                    : "task",
                         )
                       }
                     >
-                      {page === "settings" ? (
-                        <UserPlus size={18} />
-                      ) : (
-                        <Plus size={18} />
-                      )}
+                      <Plus size={18} />
                       {page === "contracts"
                         ? "Adicionar produto contratado"
                         : page === "products"
@@ -2069,16 +2084,13 @@ export default function App() {
                               ? "Novo projeto"
                               : page === "hours"
                                 ? "Registrar horas"
-                                : page === "settings"
-                                  ? "Convidar usuário"
-                                  : "Nova tarefa"}
+                                : "Nova tarefa"}
                       {![
                         "contracts",
                         "products",
                         "clients",
                         "projects",
                         "hours",
-                        "settings",
                       ].includes(page) && (
                         <kbd className="kbd-hint" title="Atalho: tecla N">
                           N
@@ -3035,217 +3047,295 @@ export default function App() {
               )}
               {page === "settings" && isLeader && (
                 <>
-                  <div className="settings-grid">
-                    <section className="panel" id="config-pessoas">
-                      <div className="panel-heading">
-                        <div>
-                          <h2>Pessoas do espaço</h2>
-                          <p>Perfis e vínculos ativos</p>
-                        </div>
-                        {isLeader && (
-                          <Button
-                            className="btn secondary"
-                            aria-label="Convidar usuário"
-                            onClick={() => openForm("user")}
-                          >
-                            <UserPlus size={17} /> Convidar usuário
-                          </Button>
-                        )}
-                      </div>
-                      <Paged
-                        items={data.members}
-                        pageSize={25}
-                        noun="pessoas"
-                        className=""
-                      >
-                        {(page) =>
-                          page.map((m) => (
-                            <div className="member-row" key={m.user_id}>
-                              <span className="online-avatar">
-                                <Avatar name={m.name} src={m.avatar_url} />
-                                <PresenceDot
-                                  state={presence.get(m.user_id)?.state}
-                                />
-                              </span>
-                              <div className="member-info">
-                                <strong>{m.name}</strong>
-                                {m.email && (
-                                  <span className="member-email">
-                                    {m.email}
-                                  </span>
-                                )}
-                                {isAdmin && !!m.hidden_pages?.length && (
-                                  <span
-                                    className="member-email"
-                                    title={`Módulos escondidos: ${MODULES.filter(
-                                      (x) => m.hidden_pages?.includes(x.id),
-                                    )
-                                      .map((x) => x.label)
-                                      .join(", ")}`}
-                                  >
-                                    {m.hidden_pages.length}{" "}
-                                    {m.hidden_pages.length === 1
-                                      ? "módulo escondido"
-                                      : "módulos escondidos"}
-                                  </span>
-                                )}
-                              </div>
-                              <span className="role-tag">
-                                {m.role === "admin"
-                                  ? "Administrador"
-                                  : m.role === "manager"
-                                    ? "Gestor"
-                                    : "Colaborador"}
-                              </span>
-                              <span>{m.active ? "Ativo" : "Inativo"}</span>
-                              {isLeader && (
-                                <div className="member-actions">
-                                  {(isAdmin || m.role !== "admin") && (
-                                    <Button
-                                      className="icon-btn"
-                                      title="Editar usuário"
-                                      aria-label={`Editar ${m.name}`}
-                                      onClick={() => setEditMember(m)}
-                                    >
-                                      <Pencil size={15} />
-                                    </Button>
-                                  )}
-                                  <Button
-                                    className="icon-btn"
-                                    title="Redefinir senha"
-                                    aria-label={`Redefinir senha de ${m.name}`}
-                                    onClick={() => setResetPasswordMember(m)}
-                                  >
-                                    <KeyRound size={15} />
-                                  </Button>
-                                  <Button
-                                    className="icon-btn"
-                                    title="Alterar e-mail"
-                                    aria-label={`Alterar e-mail de ${m.name}`}
-                                    onClick={() => setUpdateEmailMember(m)}
-                                  >
-                                    <Mail size={15} />
-                                  </Button>
-                                </div>
-                              )}
-                            </div>
-                          ))
+                  <div
+                    className="scope-tabs settings-tabs"
+                    role="tablist"
+                    aria-label="Seções de Equipe e configurações"
+                  >
+                    {(
+                      [
+                        ["config-pessoas", "Pessoas", data.members.length],
+                        ["config-equipes", "Equipes", data.teams.length],
+                        [
+                          "config-produtos",
+                          "Catálogo de produtos",
+                          data.products.length,
+                        ],
+                        [
+                          "config-templates",
+                          "Templates de tarefa",
+                          data.taskTemplates?.length ?? 0,
+                        ],
+                        ["config-sugestoes", "Sugestões", null],
+                      ] as [SettingsTab, string, number | null][]
+                    ).map(([id, label, n]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        role="tab"
+                        aria-selected={settingsView === id}
+                        className={settingsView === id ? "selected" : ""}
+                        onClick={() =>
+                          navigate(
+                            window.location.pathname +
+                              window.location.search +
+                              `#${id}`,
+                            true,
+                          )
                         }
-                      </Paged>
-                      <div className="panel-footer">
-                        <small>
-                          {data.members.length}{" "}
-                          {data.members.length === 1
-                            ? "membro cadastrado"
-                            : "membros cadastrados"}{" "}
-                          · Convites enviados com link seguro de primeiro
-                          acesso.
-                        </small>
-                      </div>
-                    </section>
-                    <section className="panel" id="config-produtos">
-                      <div className="panel-heading">
-                        <h2>Catálogo de produtos</h2>
-                        {isLeader && (
-                          <Button
-                            className="btn secondary"
-
-                            aria-label="Novo produto"
-                            onClick={() => openForm("product")}
-                          >
-                            <Plus size={17} /> Novo produto
-                          </Button>
-                        )}
-                      </div>
-                      {data.products.map((p) => (
-                        <div className="product-row" key={p.id}>
-                          <span
-                            className="product-dot"
-                            style={{ background: p.color }}
-                          />
-                          {p.name}
-                        </div>
-                      ))}
-                    </section>
-                    <section className="panel" id="config-equipes">
-                      <div className="panel-heading">
-                        <h2>Equipes</h2>
-                        {isLeader && (
-                          <Button
-                            className="btn secondary"
-                            aria-label="Nova equipe"
-                            onClick={() => openForm("team")}
-                          >
-                            <Plus size={17} /> Nova equipe
-                          </Button>
-                        )}
-                      </div>
-                      {data.teams.map((t) => (
-                        <div className="team-config" key={t.id}>
-                          <div className="team-config-info">
-                            <strong>{t.name}</strong>
-                            <small>
-                              <ShieldCheck size={12} />{" "}
-                              {data.teamMembers
-                                .filter(
-                                  (tm) => tm.team_id === t.id && tm.supervisor,
-                                )
-                                .map(
-                                  (tm) =>
-                                    data.members.find(
-                                      (m) => m.user_id === tm.user_id,
-                                    )?.name,
-                                )
-                                .filter(Boolean)
-                                .join(", ") || "Sem supervisor"}
-                            </small>
-                          </div>
-                          <div className="avatar-stack">
-                            {data.teamMembers
-                              .filter((m) => m.team_id === t.id)
-                              .map((tm) => (
-                                <Avatar
-                                  key={tm.user_id}
-                                  name={
-                                    data.members.find(
-                                      (m) => m.user_id === tm.user_id,
-                                    )?.name ?? "?"
-                                  }
-                                  src={
-                                    data.members.find(
-                                      (m) => m.user_id === tm.user_id,
-                                    )?.avatar_url
-                                  }
-                                  size="small"
-                                />
-                              ))}
+                      >
+                        {label}
+                        {n !== null && <span>{n}</span>}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="settings-tab-body" role="tabpanel">
+                    {settingsView === "config-pessoas" && (
+                      <section className="panel" id="config-pessoas">
+                        <div className="panel-heading">
+                          <div>
+                            <h2>Pessoas do espaço</h2>
+                            <p>Perfis e vínculos ativos</p>
                           </div>
                           {isLeader && (
                             <Button
-                              className="icon-btn"
-                              aria-label={`Editar equipe ${t.name}`}
-                              title="Editar equipe"
-                              onClick={() => openForm("team", { team: t.id })}
+                              className="btn secondary"
+                              aria-label="Convidar usuário"
+                              onClick={() => openForm("user")}
                             >
-                              <Pencil size={15} />
+                              <UserPlus size={17} /> Convidar usuário
                             </Button>
                           )}
                         </div>
-                      ))}
-                    </section>
-                    <TaskTemplatesPanel
-                      data={data}
-                      company={company}
-                      mutate={mutate}
-                      notify={notify}
-                    />
-                    <SuggestionSettingsPanel
-                      key={data.suggestionSettings?.[0]?.team_id ?? "none"}
-                      data={data}
-                      company={company}
-                      mutate={mutate}
-                      notify={notify}
-                    />
+                        <div className="member-search">
+                          <Input
+                            type="search"
+                            aria-label="Buscar pessoa"
+                            placeholder="Buscar por nome, e-mail ou perfil…"
+                            value={memberQuery}
+                            onChange={(e) => setMemberQuery(e.target.value)}
+                            icon={Search}
+                          />
+                        </div>
+                        {!shownMembers.length && (
+                          <p className="member-search-empty">
+                            Ninguém encontrado para “{memberQuery.trim()}”.
+                          </p>
+                        )}
+                        <Paged
+                          items={shownMembers}
+                          pageSize={25}
+                          noun="pessoas"
+                          resetKey={memberQuery}
+                          className=""
+                        >
+                          {(page) =>
+                            page.map((m) => (
+                              <div className="member-row" key={m.user_id}>
+                                <span className="online-avatar">
+                                  <Avatar name={m.name} src={m.avatar_url} />
+                                  <PresenceDot
+                                    state={presence.get(m.user_id)?.state}
+                                  />
+                                </span>
+                                <div className="member-info">
+                                  <strong>{m.name}</strong>
+                                  {m.email && (
+                                    <span className="member-email">
+                                      {m.email}
+                                    </span>
+                                  )}
+                                  {isAdmin && !!m.hidden_pages?.length && (
+                                    <span
+                                      className="member-email"
+                                      title={`Módulos escondidos: ${MODULES.filter(
+                                        (x) => m.hidden_pages?.includes(x.id),
+                                      )
+                                        .map((x) => x.label)
+                                        .join(", ")}`}
+                                    >
+                                      {m.hidden_pages.length}{" "}
+                                      {m.hidden_pages.length === 1
+                                        ? "módulo escondido"
+                                        : "módulos escondidos"}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="role-tag">
+                                  {ROLE_LABELS[m.role]}
+                                </span>
+                                <span>{m.active ? "Ativo" : "Inativo"}</span>
+                                {isLeader && (
+                                  <div className="member-actions">
+                                    {isAdmin && (
+                                      <MemberModulesMenu
+                                        member={m}
+                                        save={(hidden) =>
+                                          mutate("set_member_pages", {
+                                            p_company: company,
+                                            p_user: m.user_id,
+                                            p_hidden: hidden,
+                                          })
+                                        }
+                                      />
+                                    )}
+                                    {(isAdmin || m.role !== "admin") && (
+                                      <Button
+                                        className="icon-btn"
+                                        title="Editar usuário"
+                                        aria-label={`Editar ${m.name}`}
+                                        onClick={() => setEditMember(m)}
+                                      >
+                                        <Pencil size={15} />
+                                      </Button>
+                                    )}
+                                    <Button
+                                      className="icon-btn"
+                                      title="Redefinir senha"
+                                      aria-label={`Redefinir senha de ${m.name}`}
+                                      onClick={() => setResetPasswordMember(m)}
+                                    >
+                                      <KeyRound size={15} />
+                                    </Button>
+                                    <Button
+                                      className="icon-btn"
+                                      title="Alterar e-mail"
+                                      aria-label={`Alterar e-mail de ${m.name}`}
+                                      onClick={() => setUpdateEmailMember(m)}
+                                    >
+                                      <Mail size={15} />
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          }
+                        </Paged>
+                        <div className="panel-footer">
+                          <small>
+                            {memberQuery.trim() && `${shownMembers.length} de `}
+                            {data.members.length}{" "}
+                            {data.members.length === 1
+                              ? "membro cadastrado"
+                              : "membros cadastrados"}{" "}
+                            · Convites enviados com link seguro de primeiro
+                            acesso.
+                          </small>
+                        </div>
+                      </section>
+                    )}
+                    {settingsView === "config-produtos" && (
+                      <section className="panel" id="config-produtos">
+                        <div className="panel-heading">
+                          <h2>Catálogo de produtos</h2>
+                          {isLeader && (
+                            <Button
+                              className="btn secondary"
+
+                              aria-label="Novo produto"
+                              onClick={() => openForm("product")}
+                            >
+                              <Plus size={17} /> Novo produto
+                            </Button>
+                          )}
+                        </div>
+                        {data.products.map((p) => (
+                          <div className="product-row" key={p.id}>
+                            <span
+                              className="product-dot"
+                              style={{ background: p.color }}
+                            />
+                            {p.name}
+                          </div>
+                        ))}
+                      </section>
+                    )}
+                    {settingsView === "config-equipes" && (
+                      <section className="panel" id="config-equipes">
+                        <div className="panel-heading">
+                          <h2>Equipes</h2>
+                          {isLeader && (
+                            <Button
+                              className="btn secondary"
+                              aria-label="Nova equipe"
+                              onClick={() => openForm("team")}
+                            >
+                              <Plus size={17} /> Nova equipe
+                            </Button>
+                          )}
+                        </div>
+                        {data.teams.map((t) => (
+                          <div className="team-config" key={t.id}>
+                            <div className="team-config-info">
+                              <strong>{t.name}</strong>
+                              <small>
+                                <ShieldCheck size={12} />{" "}
+                                {data.teamMembers
+                                  .filter(
+                                    (tm) =>
+                                      tm.team_id === t.id && tm.supervisor,
+                                  )
+                                  .map(
+                                    (tm) =>
+                                      data.members.find(
+                                        (m) => m.user_id === tm.user_id,
+                                      )?.name,
+                                  )
+                                  .filter(Boolean)
+                                  .join(", ") || "Sem supervisor"}
+                              </small>
+                            </div>
+                            <div className="avatar-stack">
+                              {data.teamMembers
+                                .filter((m) => m.team_id === t.id)
+                                .map((tm) => (
+                                  <Avatar
+                                    key={tm.user_id}
+                                    name={
+                                      data.members.find(
+                                        (m) => m.user_id === tm.user_id,
+                                      )?.name ?? "?"
+                                    }
+                                    src={
+                                      data.members.find(
+                                        (m) => m.user_id === tm.user_id,
+                                      )?.avatar_url
+                                    }
+                                    size="small"
+                                  />
+                                ))}
+                            </div>
+                            {isLeader && (
+                              <Button
+                                className="icon-btn"
+                                aria-label={`Editar equipe ${t.name}`}
+                                title="Editar equipe"
+                                onClick={() => openForm("team", { team: t.id })}
+                              >
+                                <Pencil size={15} />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </section>
+                    )}
+                    {settingsView === "config-templates" && (
+                      <TaskTemplatesPanel
+                        data={data}
+                        company={company}
+                        mutate={mutate}
+                        notify={notify}
+                      />
+                    )}
+                    {settingsView === "config-sugestoes" && (
+                      <SuggestionSettingsPanel
+                        key={data.suggestionSettings?.[0]?.team_id ?? "none"}
+                        data={data}
+                        company={company}
+                        mutate={mutate}
+                        notify={notify}
+                      />
+                    )}
                   </div>
                 </>
               )}

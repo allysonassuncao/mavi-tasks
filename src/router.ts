@@ -35,6 +35,35 @@ function snapshot() {
 export function useLocation() {
   return useSyncExternalStore(subscribe, snapshot);
 }
+function subscribeHash(listener: () => void) {
+  window.addEventListener("hashchange", listener);
+  const stop = subscribe(listener);
+  return () => {
+    window.removeEventListener("hashchange", listener);
+    stop();
+  };
+}
+/** The part after "#", without it (the settings page's tab). */
+export function useHash() {
+  return useSyncExternalStore(subscribeHash, () =>
+    window.location.hash.slice(1),
+  );
+}
+
+/** Tabs of "Equipe e configurações", addressed by the URL's hash. */
+export const SETTINGS_TABS = [
+  "config-pessoas",
+  "config-equipes",
+  "config-produtos",
+  "config-templates",
+  "config-sugestoes",
+] as const;
+export type SettingsTab = (typeof SETTINGS_TABS)[number];
+export function settingsTab(hash: string): SettingsTab {
+  return (SETTINGS_TABS as readonly string[]).includes(hash)
+    ? (hash as SettingsTab)
+    : "config-pessoas";
+}
 export function routeParts(path: string) {
   const normalized = path.replace(/\/+$/, "") || "/";
   const match = normalized.match(/^\/agencias\/([a-z0-9-]+)(\/.*)?$/);
@@ -123,7 +152,8 @@ export function resolvePage(path: string): Page | null {
   );
 }
 export function navigate(url: string, replace = false) {
-  if (url === snapshot()) return;
+  // The hash counts: it picks the settings page's tab.
+  if (url === snapshot() + window.location.hash) return;
   window.history[replace ? "replaceState" : "pushState"](null, "", url);
   window.dispatchEvent(new Event(routeEvent));
 }
