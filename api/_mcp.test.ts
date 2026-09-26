@@ -22,6 +22,7 @@ const env: McpEnv = {
   embeddingModel: "text-embedding-3-small",
   workerSecret: "s".repeat(40),
   workerBudgetMs: 60_000,
+  providerKey: null,
   appOrigin: "https://app.example.com",
 };
 

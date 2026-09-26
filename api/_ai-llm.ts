@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { addUsage, newMeter, type Meter } from "./_social-leads.js";
+import type { ProviderModel } from "../src/ai-providers.js";
 
 /**
  * IA do MAVI · adaptador de modelo de linguagem.
@@ -55,7 +56,25 @@ export class LlmError extends Error {
   }
 }
 
-export type AnthropicEnv = { anthropicKey: string; model: string };
+export type AnthropicEnv = {
+  anthropicKey: string;
+  model: string;
+  /** Preços cadastrados na biblioteca (senão, os de tabela da Claude). */
+  price?: ProviderModel | null;
+  baseUrl?: string;
+};
+
+/**
+ * O que cada modelo aceita: raciocínio adaptativo e "effort" só nos Claude
+ * 4.6 em diante (o Haiku 4.5 não aceita); o fallback no servidor, nos Opus 5
+ * e Fable.
+ */
+export function claudeFeatures(model: string) {
+  const adaptive =
+    /^claude-(opus-(4-[6-9]|5)|sonnet-(4-6|5)|fable|mythos)/.test(model);
+  const fallbacks = /^claude-(opus-5|fable-5)/.test(model);
+  return { adaptive, fallbacks };
+}
 
 /** O pedido quando a IA termina a vez sem escrever a resposta. */
 export const ANSWER_NUDGE =
@@ -78,8 +97,14 @@ export function anthropicAdapter(
         "A IA não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY.",
       );
     const api: Client =
-      client ?? new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2 });
+      client ??
+      new Anthropic({
+        apiKey: env.anthropicKey,
+        maxRetries: 2,
+        ...(env.baseUrl ? { baseURL: env.baseUrl } : {}),
+      });
     const meter = newMeter(env.model);
+    const features = claudeFeatures(env.model);
     const tools: Anthropic.Beta.BetaToolUnion[] = request.tools.map((t) => ({
       name: t.name,
       description: t.description,
@@ -100,11 +125,22 @@ export function anthropicAdapter(
           model: env.model,
           // Espaço para raciocinar sobre muitos trechos e ainda responder.
           max_tokens: 32000,
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
+          ...(features.fallbacks
+            ? {
+                betas: ["server-side-fallback-2026-07-01"],
+                fallbacks: "default" as const,
+              }
+            : {}),
           // O resumo do raciocínio aparece para a pessoa enquanto a IA trabalha.
-          thinking: { type: "adaptive", display: "summarized" },
-          output_config: { effort: "medium" },
+          ...(features.adaptive
+            ? {
+                thinking: {
+                  type: "adaptive" as const,
+                  display: "summarized" as const,
+                },
+                output_config: { effort: "medium" as const },
+              }
+            : {}),
           system: [
             {
               type: "text",
@@ -128,7 +164,7 @@ export function anthropicAdapter(
         stream.on("text", (delta) => emit({ type: "text", text: delta }));
       }
       const message = await stream.finalMessage();
-      addUsage(meter, message.model, message.usage);
+      addUsage(meter, message.model, message.usage, env.price);
       if (message.stop_reason === "refusal")
         throw new LlmError(
           422,

@@ -174,8 +174,13 @@ export function addUsage(
     cache_read_input_tokens?: number | null;
     cache_creation_input_tokens?: number | null;
   },
+  /** Preços cadastrados na biblioteca de provedores (US$ por milhão). */
+  price?: { input: number; output: number; cached?: number } | null,
 ) {
-  const [inPrice, outPrice] = PRICES[model] ?? PRICES["claude-opus-5"];
+  const [inPrice, outPrice] = price
+    ? [price.input, price.output]
+    : (PRICES[model] ?? PRICES["claude-opus-5"]);
+  const readPrice = price?.cached ?? inPrice * 0.1;
   const input = usage.input_tokens ?? 0;
   const output = usage.output_tokens ?? 0;
   const read = usage.cache_read_input_tokens ?? 0;
@@ -188,7 +193,7 @@ export function addUsage(
   meter.cost +=
     (input * inPrice +
       write * inPrice * 1.25 +
-      read * inPrice * 0.1 +
+      read * readPrice +
       output * outPrice) /
     1e6;
 }

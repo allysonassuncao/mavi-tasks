@@ -13,6 +13,7 @@ import {
   taskIdFromPath,
   settingsTab,
   SETTINGS_TABS,
+  aiTab,
 } from "./router";
 
 describe("shareable routes", () => {
@@ -23,6 +24,14 @@ describe("shareable routes", () => {
     }
     expect(resolvePage("/")).toBe("overview");
     expect(resolvePage("/pagina-inexistente")).toBeNull();
+  });
+  it("Inteligência artificial em /ia, com o endereço antigo e as abas", () => {
+    expect(pageUrl("aiUsage", "make")).toBe("/agencias/make/ia");
+    expect(resolvePage("/agencias/make/consumo-ia")).toBe("aiUsage");
+    expect(aiTab("ia-provedores")).toBe("ia-provedores");
+    expect(aiTab("ia-regras")).toBe("ia-regras");
+    expect(aiTab("")).toBe("ia-consumo");
+    expect(aiTab("config-pessoas")).toBe("ia-consumo");
   });
   it("uses a readable company path and resolves scoped pages", () => {
     const company = { id: "tenant-1", name: "Make Acelerador de Vendas" };

@@ -18,18 +18,22 @@ import {
   type UsageRow,
 } from "./ai";
 
-type Tab = "user" | "client" | "contract" | "project" | "module";
+type Tab = "user" | "client" | "contract" | "project" | "module" | "model";
+/** Divisões sem limite próprio. */
+const NO_LIMIT = new Set<Tab>(["module", "model"]);
 const TABS: { id: Tab; label: string }[] = [
   { id: "user", label: "Pessoas" },
   { id: "client", label: "Clientes" },
   { id: "contract", label: "Produtos" },
   { id: "project", label: "Projetos" },
   { id: "module", label: "Módulos" },
+  { id: "model", label: "Modelos" },
 ];
 const MODULE_LABELS: Record<string, string> = {
   assistant: "Assistente (IA geral)",
   meetings: "Gravações da MAVI",
   index: "Indexação da base",
+  mcp: "IA externa (MCP)",
 };
 
 const money = (v: number) => {
@@ -89,6 +93,10 @@ export function AiUsagePage({
         return (
           data.projects.find((p) => p.id === id)?.name ?? "Projeto removido"
         );
+      if (type === "model") {
+        const [provider, ...model] = id.split("|");
+        return `${provider || "Padrão do servidor"} · ${model.join("|") || "?"}`;
+      }
       return MODULE_LABELS[id] ?? id;
     },
     [data],
@@ -123,10 +131,11 @@ export function AiUsagePage({
       contract: report.by_contract,
       project: report.by_project,
       module: report.by_module,
+      model: report.by_model ?? [],
     }[tab];
     const list = source.map((r) => ({ ...r, id: r.id ?? "" }));
     // Quem tem limite aparece mesmo sem gasto no período.
-    if (tab !== "module")
+    if (!NO_LIMIT.has(tab))
       for (const l of report.limits)
         if (l.type === tab && l.id && !list.some((r) => r.id === l.id))
           list.push({ id: l.id, cost: 0, asks: 0 });
@@ -279,7 +288,7 @@ export function AiUsagePage({
                   <th>{TABS.find((t) => t.id === tab)!.label.slice(0, -1)}</th>
                   <th className="num">Perguntas</th>
                   <th className="num">Gasto no período</th>
-                  {tab !== "module" && (
+                  {!NO_LIMIT.has(tab) && (
                     <>
                       <th className="num hide-mobile">Gasto no mês</th>
                       <th>Limite mensal</th>
@@ -291,7 +300,9 @@ export function AiUsagePage({
                 {rows.length ? (
                   rows.map((r) => {
                     const limit =
-                      tab !== "module" ? limitOf(tab, r.id) : undefined;
+                      !NO_LIMIT.has(tab)
+                        ? limitOf(tab as UsageLimit["type"], r.id)
+                        : undefined;
                     return (
                       <tr key={r.id}>
                         <td>
@@ -302,7 +313,7 @@ export function AiUsagePage({
                         </td>
                         <td className="num">{count(r.asks)}</td>
                         <td className="num">{money(r.cost)}</td>
-                        {tab !== "module" && (
+                        {!NO_LIMIT.has(tab) && (
                           <>
                             <td className="num hide-mobile">
                               {limit ? money(limit.month_spent) : "—"}
@@ -310,7 +321,13 @@ export function AiUsagePage({
                             <td>
                               <LimitInput
                                 value={limit?.monthly_usd}
-                                onSave={(v) => void saveLimit(tab, r.id, v)}
+                                onSave={(v) =>
+                                  void saveLimit(
+                                    tab as UsageLimit["type"],
+                                    r.id,
+                                    v,
+                                  )
+                                }
                                 label={`Limite mensal de ${nameOf(tab, r.id)} em dólares`}
                               />
                             </td>
@@ -329,19 +346,23 @@ export function AiUsagePage({
               </tbody>
             </table>
           </div>
-          {tab !== "module" && (
+          {!NO_LIMIT.has(tab) && (
             <NewLimit
-              tab={tab}
+              tab={tab as Exclude<Tab, "module" | "model">}
               data={data}
               nameOf={nameOf}
-              onSave={(id, v) => void saveLimit(tab, id, v)}
+              onSave={(id, v) =>
+                void saveLimit(tab as UsageLimit["type"], id, v)
+              }
             />
           )}
           <p className="muted ai-usage-note">
-            Valores em dólares, pelos preços das APIs (Claude para as respostas,
-            OpenAI para os vetores). Limites valem por mês (horário de Brasília)
-            e são conferidos antes de cada pergunta; limites de produto e de
-            projeto valem para perguntas feitas dentro deles.
+            Valores em dólares: as respostas pelos preços cadastrados de cada
+            provedor (no padrão do servidor, pelos de tabela da Claude) e os
+            vetores pelos da OpenAI. Limites valem por mês (horário de Brasília)
+            e são conferidos antes de cada pergunta, qualquer que seja o
+            provedor; limites de produto e de projeto valem para perguntas
+            feitas dentro deles.
           </p>
         </>
       )}
@@ -417,7 +438,7 @@ function NewLimit({
   nameOf,
   onSave,
 }: {
-  tab: Exclude<Tab, "module">;
+  tab: Exclude<Tab, "module" | "model">;
   data: Snapshot;
   nameOf: (type: Tab, id: string) => string;
   onSave: (id: string, value: string) => void;

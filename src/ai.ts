@@ -1,5 +1,11 @@
 import { supabase } from "./supabase";
 import { navigate, pageUrl, routeParts, taskUrl } from "./router";
+import type {
+  AiRoute,
+  ProviderKind,
+  ProviderModel,
+  RouteScope,
+} from "./ai-providers";
 
 /**
  * IA do MAVI no navegador: a mesma pergunta serve a qualquer módulo — o
@@ -225,6 +231,13 @@ export type UsageReport = {
   by_contract: UsageRow[];
   by_project: UsageRow[];
   by_module: UsageRow[];
+  /** Por provedor e modelo ("" é o padrão do servidor). */
+  by_model?: (UsageRow & {
+    provider: string;
+    model: string;
+    input_tokens: number;
+    output_tokens: number;
+  })[];
   by_day: { day: string; cost: number; asks: number }[];
   limits: UsageLimit[];
 };
@@ -245,6 +258,114 @@ export const setAiLimit = (
     p_type: type,
     p_id: id,
     p_amount: amount,
+  });
+
+// ------------------------------------------------------------ provedores
+export type AiProvider = {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  base_url: string | null;
+  /** Os 4 últimos caracteres da API Key salva. */
+  key_hint: string;
+  models: ProviderModel[];
+  active: boolean;
+  updated_at: string;
+  /** Quantas regras usam este provedor. */
+  routes: number;
+};
+export type AiLibrary = { providers: AiProvider[]; routes: AiRoute[] };
+export const providerLibrary = (company: string) =>
+  rpc<AiLibrary>("ai_provider_list", { p_company: company });
+export const setProviderActive = (
+  company: string,
+  id: string,
+  active: boolean,
+) =>
+  rpc("ai_set_provider_active", {
+    p_company: company,
+    p_id: id,
+    p_active: active,
+  });
+export const deleteProvider = (company: string, id: string) =>
+  rpc("ai_delete_provider", { p_company: company, p_id: id });
+/** Uma regra; provider nulo tira a regra. */
+export const setAiRoute = (
+  company: string,
+  type: RouteScope,
+  id: string | null,
+  provider: string | null,
+  model: string | null,
+) =>
+  rpc("ai_set_route", {
+    p_company: company,
+    p_type: type,
+    p_id: id,
+    p_provider: provider,
+    p_model: model,
+  });
+
+/** Ações que passam pelo servidor (a chave é selada lá, nunca no navegador). */
+async function providerAction<T>(body: Record<string, unknown>): Promise<T> {
+  const t = await token();
+  const res = await fetch("/api/ai", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(t ? { Authorization: `Bearer ${t}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Error(data.error ?? "Não foi possível falar com o servidor.");
+  return data as T;
+}
+export type ProviderDraft = {
+  id?: string;
+  name: string;
+  kind: ProviderKind;
+  base_url?: string;
+  /** Vazio numa alteração: mantém a chave salva. */
+  api_key?: string;
+  models: ProviderModel[];
+  active?: boolean;
+};
+export const saveProvider = (company: string, draft: ProviderDraft) =>
+  providerAction<{ id: string }>({
+    action: "ai-provider-save",
+    company,
+    ...draft,
+  });
+export type ListedModel = {
+  id: string;
+  label?: string;
+  input?: number;
+  output?: number;
+};
+/** Os modelos que a chave enxerga (a informada ou a salva do provedor). */
+export const fetchProviderModels = (
+  company: string,
+  args: { id?: string; kind: ProviderKind; base_url?: string; api_key?: string },
+) =>
+  providerAction<{ models: ListedModel[] }>({
+    action: "ai-provider-models",
+    company,
+    ...args,
+  });
+export const testProvider = (
+  company: string,
+  args: {
+    id?: string;
+    kind: ProviderKind;
+    base_url?: string;
+    api_key?: string;
+    model: string;
+  },
+) =>
+  providerAction<{ ok: boolean; ms: number; reply: string }>({
+    action: "ai-provider-test",
+    company,
+    ...args,
   });
 
 // ------------------------------------------------------------ onde a pessoa está

@@ -15,7 +15,7 @@ export const pagePaths = {
   reports: "/relatorios",
   drive: "/drive",
   storage: "/armazenamento",
-  aiUsage: "/consumo-ia",
+  aiUsage: "/ia",
   dashboards: "/dashboards",
   profile: "/perfil",
   settings: "/configuracoes",
@@ -61,6 +61,14 @@ export const SETTINGS_TABS = [
   "config-sugestoes",
 ] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
+/** Tabs of "Inteligência artificial", by the URL's hash. */
+export const AI_TABS = ["ia-consumo", "ia-provedores", "ia-regras"] as const;
+export type AiTab = (typeof AI_TABS)[number];
+export function aiTab(hash: string): AiTab {
+  return (AI_TABS as readonly string[]).includes(hash)
+    ? (hash as AiTab)
+    : "ia-consumo";
+}
 export function settingsTab(hash: string): SettingsTab {
   return (SETTINGS_TABS as readonly string[]).includes(hash)
     ? (hash as SettingsTab)
@@ -153,6 +161,8 @@ export function resolvePage(path: string): Page | null {
   const normalized = routeParts(path).path;
   if (normalized === "/") return "overview";
   if (normalized === "/onboarding") return "onboarding";
+  // Endereço antigo do painel de IA.
+  if (normalized === "/consumo-ia") return "aiUsage";
   if (taskIdFromPath(path)) return "tasks";
   if (dashboardIdFromPath(path)) return "dashboards";
   return (

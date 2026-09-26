@@ -158,7 +158,7 @@ import { ProjectsBrowser } from "./ProjectsBrowser";
 import { TeamForm } from "./TeamForm";
 import { Drive } from "./DrivePage";
 import { AiAssistant } from "./AiAssistant";
-import { AiUsagePage } from "./AiUsagePage";
+import { AiPage } from "./AiPage";
 import { CampaignsPage } from "./CampaignsPage";
 import { StoragePage } from "./StoragePage";
 import { CompanyLogoDialog, WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -177,6 +177,7 @@ import {
   canOpenPage,
   firstPage,
   moduleOf,
+  moduleOn,
 } from "./modules";
 import { OnlineMembers, PresenceDot } from "./OnlineMembers";
 import { usePresence } from "./presence";
@@ -224,7 +225,7 @@ const navigation = [
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
   { id: "storage", label: "Armazenamento", icon: Database },
-  { id: "aiUsage", label: "Consumo de IA", icon: Sparkles },
+  { id: "aiUsage", label: "Painel de IA", icon: Sparkles },
   { id: "dashboards", label: "Dashboards", icon: PanelsTopLeft },
 ] as const;
 // Mutations that return the affected row (see the RPCs in
@@ -1460,8 +1461,8 @@ export default function App() {
     setSidebar(false);
     setForm(null);
     setQuery("");
-    // On the settings page the hash picks a tab: nothing to scroll to.
-    if (!to.hash || to.page === "settings") return;
+    // On the settings and AI pages the hash picks a tab: nothing to scroll to.
+    if (!to.hash || to.page === "settings" || to.page === "aiUsage") return;
     // The section appears once the page has rendered.
     let tries = 0;
     const scroll = () => {
@@ -1802,6 +1803,7 @@ export default function App() {
             page={page ?? "overview"}
             params={new URLSearchParams(location.split("?")[1] ?? "")}
             isLeader={isLeader}
+            isAdmin={isAdmin}
             allowed={allowed}
             taskCount={stats?.total}
             products={data.products.filter(
@@ -2033,8 +2035,9 @@ export default function App() {
                         "Arquivos da equipe, privados ou compartilhados por link.",
                       storage:
                         "Quanto espaço os arquivos enviados ocupam, na agência, por pessoa e por cliente.",
-                      aiUsage:
-                        "Quanto a IA custou, por pessoa, cliente, produto e projeto, e os limites de gasto de cada um.",
+                      aiUsage: isAdmin
+                        ? "Consumo e limites de gasto, a biblioteca de provedores e modelos, e qual IA cada pessoa, cliente, produto e projeto usa."
+                        : "Quanto a IA custou, por pessoa, cliente, produto e projeto, e os limites de gasto de cada um.",
                       dashboards:
                         "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
                       profile: "Seu nome, sua foto e sua senha.",
@@ -3036,10 +3039,12 @@ export default function App() {
                 </Suspense>
               )}
               {page === "aiUsage" && isLeader && (
-                <AiUsagePage
+                <AiPage
                   key={company}
                   company={company}
                   data={catalogData}
+                  isAdmin={isAdmin}
+                  demo={demo}
                   notify={notify}
                 />
               )}
@@ -3383,7 +3388,7 @@ export default function App() {
           </footer>
         </main>
       </div>
-      {!demo && company && member && (
+      {!demo && company && member && moduleOn("assistant", member.role, hiddenPages) && (
         <AiAssistant
           key={company}
           company={company}

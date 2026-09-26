@@ -14,10 +14,11 @@ import {
   Package,
   Rocket,
   Settings2,
+  Sparkles,
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { settingsTab, type Page } from "./router";
+import { aiTab, settingsTab, type Page } from "./router";
 import type { Product } from "./types";
 
 /** A place in the app: a page, optionally with filters (query) or a section (hash). */
@@ -63,6 +64,7 @@ export function SidebarNav({
   page,
   params,
   isLeader,
+  isAdmin = false,
   allowed,
   taskCount,
   products,
@@ -73,6 +75,8 @@ export function SidebarNav({
   /** The current URL's filters (escopo, atrasadas, produto…). */
   params: URLSearchParams;
   isLeader: boolean;
+  /** Administrators also configure the AI providers. */
+  isAdmin?: boolean;
   /** Pages the person may open. */
   allowed: (page: Page) => boolean;
   taskCount?: number;
@@ -281,6 +285,32 @@ export function SidebarNav({
           icon: Database,
           to: { page: "storage" },
         },
+        {
+          key: "aiUsage",
+          label: "Painel de IA",
+          icon: Sparkles,
+          to: { page: "aiUsage" },
+          // Gestores veem só o consumo; o resto é dos administradores.
+          children: isAdmin
+            ? [
+                {
+                  key: "ai-usage",
+                  label: "Consumo e limites",
+                  to: { page: "aiUsage", hash: "ia-consumo" },
+                },
+                {
+                  key: "ai-providers",
+                  label: "Provedores e modelos",
+                  to: { page: "aiUsage", hash: "ia-provedores" },
+                },
+                {
+                  key: "ai-routes",
+                  label: "Quem usa qual IA",
+                  to: { page: "aiUsage", hash: "ia-regras" },
+                },
+              ]
+            : undefined,
+        },
       ],
     },
   ];
@@ -293,7 +323,13 @@ export function SidebarNav({
       if (typeof window === "undefined") return false;
       const hash = window.location.hash.slice(1);
       // Without a hash, the settings page opens on its first tab.
-      return (page === "settings" ? settingsTab(hash) : hash) === to.hash;
+      return (
+        (page === "settings"
+          ? settingsTab(hash)
+          : page === "aiUsage"
+            ? aiTab(hash)
+            : hash) === to.hash
+      );
     }
     if (to.page !== "tasks") return true;
     return FILTERS.every(

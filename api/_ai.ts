@@ -23,6 +23,14 @@ import {
   type AiSource,
   type ToolContext,
 } from "./_ai-tools.js";
+import {
+  adapterFor,
+  handleProviders,
+  providerKeyFrom,
+  resolveRoute,
+  routeConfig,
+  type ProviderConfig,
+} from "./_ai-providers.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -46,6 +54,8 @@ export type AiEnv = {
   workerSecret: string;
   /** Quanto o worker trabalha por chamada (ms). */
   workerBudgetMs: number;
+  /** Abre as API Keys da biblioteca de provedores (AI_PROVIDER_KEY). */
+  providerKey: Buffer | null;
   /** GCS do Drive: o worker baixa os arquivos para ler o texto. */
   credentials?: GcsCredentials | null;
   bucket?: string;
@@ -67,6 +77,7 @@ export function aiEnv(
     embeddingModel: env.AI_EMBEDDING_MODEL || "text-embedding-3-small",
     workerSecret: env.AI_WORKER_SECRET ?? "",
     workerBudgetMs: Number(env.AI_WORKER_BUDGET_MS) || 50_000,
+    providerKey: providerKeyFrom(env.AI_PROVIDER_KEY),
   };
 }
 
@@ -77,6 +88,8 @@ export type AiDeps = {
   now?: () => number;
   /** Baixa um arquivo do Drive (trocado nos testes). */
   download?: (path: string) => Promise<Uint8Array>;
+  /** O adaptador de um provedor da biblioteca (trocado nos testes). */
+  providerLlm?: (config: ProviderConfig) => LlmAdapter;
 };
 export function aiDeps(env: AiEnv): AiDeps {
   return {
@@ -201,11 +214,12 @@ export async function buildContext(
       email: string | null;
       role: string;
       active: boolean;
+      hidden_pages?: string[] | null;
     }>(
       env,
       deps,
       auth,
-      `memberships?select=user_id,name,email,role,active&company_id=eq.${company}`,
+      `memberships?select=user_id,name,email,role,active,hidden_pages&company_id=eq.${company}`,
     ),
     rest<{ id: string; name: string }>(
       env,
@@ -287,6 +301,8 @@ export async function buildContext(
     members: memberMap,
     clients: clientMap,
     today,
+    /** Os módulos que um administrador escondeu de quem pergunta. */
+    hidden: me.hidden_pages ?? [],
   };
 }
 
@@ -351,7 +367,7 @@ async function ask(
     state: "running",
   });
   const now = (deps.now ?? Date.now)();
-  const [base, limits, history] = await Promise.all([
+  const [base, limits, history, route] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
       env,
@@ -381,7 +397,17 @@ async function ask(
           ),
         ])
       : Promise.resolve(null),
+    // Qual provedor e modelo respondem (biblioteca de provedores).
+    resolveRoute(env, deps.fetch, auth, company, scope),
   ]);
+  // O assistente (o balão de todas as telas) é um módulo que o
+  // administrador desliga para cada pessoa.
+  if ((scope.module ?? "assistant") === "assistant" && base.hidden.includes("assistant"))
+    throw new AiError(403, "O assistente de IA está desligado para você.");
+  const provider = route ? routeConfig(env, route) : null;
+  const llm = provider
+    ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider)
+    : deps.llm;
   if (limits.ok && limits.data.blocked)
     throw new AiError(
       429,
@@ -448,7 +474,7 @@ async function ask(
   };
   let result: Awaited<ReturnType<LlmAdapter>> | undefined;
   try {
-    result = await deps.llm({
+    result = await llm({
       instructions: INSTRUCTIONS,
       context: base.context,
       messages,
@@ -474,13 +500,14 @@ async function ask(
         p_contract: scope.contract ?? null,
         p_project: scope.project ?? null,
         p_recording: null,
-        p_model: m?.model || env.model,
+        p_model: m?.model || provider?.model || env.model,
         p_input: m?.input ?? 0,
         p_output: m?.output ?? 0,
         p_cache_read: m?.cacheRead ?? 0,
         p_cache_write: m?.cacheWrite ?? 0,
         p_embedding: ctx.usage.embeddingTokens,
         p_cost: Math.round(((m?.cost ?? 0) + embedCost) * 1e6) / 1e6,
+        ...(route ? { p_provider: route.provider_id } : {}),
       }).catch(() => {});
   }
   const answer = result!.text;
@@ -717,6 +744,8 @@ export async function handleAi(
         return { status: 401, body: { error: "Não autorizado." } };
       return { status: 200, body: await runIndexer(env, deps) };
     }
+    if (typeof req.action === "string" && req.action.startsWith("ai-provider-"))
+      return handleProviders(req, authorization, env, deps);
     if (req.action === "ai-ask") {
       if (!authorization?.startsWith("Bearer "))
         return { status: 401, body: { error: "Entre na sua conta." } };

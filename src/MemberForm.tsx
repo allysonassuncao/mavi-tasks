@@ -172,9 +172,10 @@ export function MemberForm({
             <fieldset className="member-teams member-modules">
               <legend>Módulos visíveis</legend>
               <small>
-                Os módulos do menu que {name.trim() || member.name} vê. O perfil
-                de acesso continua valendo: o que ele não permite fica de fora.
-                Meu perfil e Equipe e configurações seguem só o perfil.
+                Os módulos do menu que {name.trim() || member.name} vê, e o
+                assistente de IA que fica em todas as telas. O perfil de acesso
+                continua valendo: o que ele não permite fica de fora. Meu perfil
+                e Equipe e configurações seguem só o perfil.
               </small>
               <div className="team-picker-list">
                 {MODULES.map((m) => {

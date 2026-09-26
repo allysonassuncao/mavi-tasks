@@ -1,0 +1,1340 @@
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  CheckCircle2,
+  ExternalLink,
+  KeyRound,
+  Pencil,
+  Plus,
+  Power,
+  RefreshCw,
+  Route,
+  Search,
+  Trash2,
+  XCircle,
+  Zap,
+} from "lucide-react";
+import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
+import { Modal } from "./components";
+import { contractProductLabel } from "./domain";
+import { fold } from "./task-search";
+import type { Snapshot } from "./types";
+import {
+  deleteProvider,
+  fetchProviderModels,
+  providerLibrary,
+  saveProvider,
+  setAiRoute,
+  setProviderActive,
+  testProvider,
+  type AiLibrary,
+  type AiProvider,
+  type ListedModel,
+  type ProviderDraft,
+} from "./ai";
+import {
+  CATALOG,
+  catalogEntry,
+  keyHint as keyHintOf,
+  pickRoute,
+  safeBaseUrl,
+  type AiRoute,
+  type ProviderKind,
+  type ProviderModel,
+  type RouteScope,
+} from "./ai-providers";
+
+/**
+ * Painel de IA › Provedores e modelos / Quem usa qual IA
+ * (administradores). A biblioteca guarda os provedores com a API Key (selada
+ * no servidor; aqui só aparece o final) e os modelos com os preços; as
+ * regras dizem qual provedor e modelo respondem para a empresa, cada pessoa,
+ * cliente, produto e projeto.
+ */
+
+const money = (v: number | undefined) =>
+  v === undefined || v === null || Number.isNaN(v)
+    ? "—"
+    : `US$ ${Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 4 })}`;
+
+/** O que a tela faz com a biblioteca (no banco, ou na demonstração). */
+export type LibraryApi = {
+  setActive: (id: string, active: boolean) => Promise<unknown>;
+  remove: (id: string) => Promise<unknown>;
+  setRoute: (
+    type: RouteScope,
+    id: string | null,
+    provider: string | null,
+    model: string | null,
+  ) => Promise<unknown>;
+  save: (draft: ProviderDraft) => Promise<{ id: string }>;
+  models: (
+    args: Parameters<typeof fetchProviderModels>[1],
+  ) => Promise<{ models: ListedModel[] }>;
+  test: (
+    args: Parameters<typeof testProvider>[1],
+  ) => Promise<{ ok: boolean; ms: number; reply: string }>;
+};
+
+/** A biblioteca, carregada uma vez e recarregada depois de cada mudança. */
+export function useAiLibrary(company: string, demo = false) {
+  const [library, setLibrary] = useState<AiLibrary | null>(() =>
+    demo ? demoLibrary() : null,
+  );
+  const [error, setError] = useState("");
+  const reload = useCallback(
+    () =>
+      demo
+        ? Promise.resolve()
+        : providerLibrary(company)
+            .then((l) => {
+              setLibrary(l);
+              setError("");
+            })
+            .catch((e) => setError((e as Error).message)),
+    [company, demo],
+  );
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+  const api = useMemo<LibraryApi>(
+    () =>
+      demo
+        ? demoApi(setLibrary)
+        : {
+            setActive: (id, active) => setProviderActive(company, id, active),
+            remove: (id) => deleteProvider(company, id),
+            setRoute: (type, id, provider, model) =>
+              setAiRoute(company, type, id, provider, model),
+            save: (draft) => saveProvider(company, draft),
+            models: (args) => fetchProviderModels(company, args),
+            test: (args) => testProvider(company, args),
+          },
+    [company, demo],
+  );
+  return { library, error, reload, api };
+}
+
+// ------------------------------------------------------------ demonstração
+const DEMO_OPENAI = "demo-openai";
+function demoLibrary(): AiLibrary {
+  const now = new Date().toISOString();
+  return {
+    providers: [
+      {
+        id: "demo-claude",
+        name: "Claude da agência",
+        kind: "anthropic",
+        base_url: null,
+        key_hint: "a1B2",
+        models: catalogEntry("anthropic")!.models.slice(0, 3),
+        active: true,
+        updated_at: now,
+        routes: 1,
+      },
+      {
+        id: DEMO_OPENAI,
+        name: "OpenAI",
+        kind: "openai",
+        base_url: null,
+        key_hint: "9xYz",
+        models: [
+          { id: "gpt-exemplo", label: "GPT (exemplo)", input: 2, output: 8 },
+          { id: "gpt-exemplo-mini", label: "GPT mini (exemplo)", input: 0.4, output: 1.6 },
+        ],
+        active: true,
+        updated_at: now,
+        routes: 0,
+      },
+    ],
+    routes: [
+      {
+        id: "demo-route-company",
+        type: "company",
+        scope_id: null,
+        provider_id: "demo-claude",
+        model: "claude-sonnet-5",
+      },
+    ],
+  };
+}
+function demoApi(
+  set: (update: (l: AiLibrary | null) => AiLibrary | null) => void,
+): LibraryApi {
+  const count = (l: AiLibrary): AiLibrary => ({
+    ...l,
+    providers: l.providers.map((p) => ({
+      ...p,
+      routes: l.routes.filter((r) => r.provider_id === p.id).length,
+    })),
+  });
+  const change = (fn: (l: AiLibrary) => AiLibrary) =>
+    Promise.resolve(set((l) => (l ? count(fn(l)) : l)));
+  return {
+    setActive: (id, active) =>
+      change((l) => ({
+        ...l,
+        providers: l.providers.map((p) => (p.id === id ? { ...p, active } : p)),
+      })),
+    remove: (id) =>
+      change((l) => ({
+        providers: l.providers.filter((p) => p.id !== id),
+        routes: l.routes.filter((r) => r.provider_id !== id),
+      })),
+    setRoute: (type, id, provider, model) =>
+      change((l) => {
+        const others = l.routes.filter(
+          (r) => !(r.type === type && r.scope_id === (type === "company" ? null : id)),
+        );
+        return {
+          ...l,
+          routes: provider
+            ? [
+                ...others,
+                {
+                  id: `demo-${type}-${id}`,
+                  type,
+                  scope_id: type === "company" ? null : id,
+                  provider_id: provider,
+                  model: model!,
+                },
+              ]
+            : others,
+        };
+      }),
+    save: async (draft) => {
+      const id = draft.id ?? `demo-${Date.now()}`;
+      await change((l) => {
+        const old = l.providers.find((p) => p.id === id);
+        const next: AiProvider = {
+          id,
+          name: draft.name,
+          kind: draft.kind,
+          base_url: draft.base_url ?? null,
+          key_hint: draft.api_key ? keyHintOf(draft.api_key) : (old?.key_hint ?? ""),
+          models: draft.models,
+          active: draft.active ?? true,
+          updated_at: new Date().toISOString(),
+          routes: 0,
+        };
+        return {
+          providers: old
+            ? l.providers.map((p) => (p.id === id ? next : p))
+            : [...l.providers, next],
+          routes: l.routes.filter(
+            (r) => r.provider_id !== id || draft.models.some((m) => m.id === r.model),
+          ),
+        };
+      });
+      return { id };
+    },
+    models: async (args) => ({
+      models: (catalogEntry(args.kind)?.models.length
+        ? catalogEntry(args.kind)!.models
+        : [
+            { id: "modelo-exemplo-grande", label: "Modelo grande (exemplo)" },
+            { id: "modelo-exemplo-rapido", label: "Modelo rápido (exemplo)" },
+          ]
+      ).map((m) => ({ ...m })),
+    }),
+    test: () =>
+      new Promise((resolve) =>
+        setTimeout(() => resolve({ ok: true, ms: 640, reply: "ok" }), 640),
+      ),
+  };
+}
+
+// ------------------------------------------------------------ biblioteca
+export function AiProvidersPanel({
+  api,
+  library,
+  error,
+  reload,
+  notify,
+}: {
+  api: LibraryApi;
+  library: AiLibrary | null;
+  error: string;
+  reload: () => Promise<void>;
+  notify: (message: string) => void;
+}) {
+  const [editing, setEditing] = useState<AiProvider | "new" | null>(null);
+  const [problem, setProblem] = useState("");
+
+  async function toggle(p: AiProvider) {
+    setProblem("");
+    try {
+      await api.setActive(p.id, !p.active);
+      notify(p.active ? `${p.name} desligado.` : `${p.name} ligado.`);
+      await reload();
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
+  }
+  async function remove(p: AiProvider) {
+    const rules = p.routes
+      ? ` As ${p.routes} regras que o usam deixam de valer (volta a regra mais geral).`
+      : "";
+    if (!window.confirm(`Remover o provedor "${p.name}" e a API Key salva?${rules}`))
+      return;
+    setProblem("");
+    try {
+      await api.remove(p.id);
+      notify("Provedor removido.");
+      await reload();
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
+  }
+
+  return (
+    <div className="ai-admin">
+      <section className="ai-admin-intro panel">
+        <div>
+          <strong>Biblioteca de provedores</strong>
+          <p>
+            Cadastre as contas de IA da agência — Claude, OpenAI, Gemini,
+            OpenRouter e outras compatíveis — com a API Key e os modelos
+            liberados. Depois, em <a href="#ia-regras">Quem usa qual IA</a>,
+            escolha o provedor e o modelo de cada pessoa, cliente, produto ou
+            projeto.
+          </p>
+        </div>
+        <Button className="btn primary" onClick={() => setEditing("new")}>
+          <Plus size={16} /> Adicionar provedor
+        </Button>
+      </section>
+      {(error || problem) && (
+        <p className="form-error" role="alert">
+          {error || problem}
+        </p>
+      )}
+      {!library ? (
+        !error && <Loading compact />
+      ) : (
+        <div className="ai-provider-list">
+          <article className="ai-provider-card builtin">
+            <header>
+              <span className="ai-provider-mark" aria-hidden="true">
+                <Zap size={16} />
+              </span>
+              <div>
+                <strong>Padrão do servidor</strong>
+                <small>Claude, com a chave da Vercel (ANTHROPIC_API_KEY)</small>
+              </div>
+            </header>
+            <p className="muted">
+              Responde quando nenhuma regra vale. O modelo é o de AI_MODEL.
+            </p>
+          </article>
+          {library.providers.map((p) => (
+            <ProviderCard
+              key={p.id}
+              api={api}
+              provider={p}
+              onEdit={() => setEditing(p)}
+              onToggle={() => void toggle(p)}
+              onRemove={() => void remove(p)}
+            />
+          ))}
+          {!library.providers.length && (
+            <button
+              type="button"
+              className="ai-provider-card ai-provider-empty"
+              onClick={() => setEditing("new")}
+            >
+              <Plus size={18} />
+              <strong>Adicione o primeiro provedor</strong>
+              <small>Enquanto isso, tudo usa o padrão do servidor.</small>
+            </button>
+          )}
+        </div>
+      )}
+      {editing && (
+        <ProviderDialog
+          api={api}
+          provider={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={async (name) => {
+            setEditing(null);
+            notify(`${name} salvo.`);
+            await reload();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProviderCard({
+  api,
+  provider: p,
+  onEdit,
+  onToggle,
+  onRemove,
+}: {
+  api: LibraryApi;
+  provider: AiProvider;
+  onEdit: () => void;
+  onToggle: () => void;
+  onRemove: () => void;
+}) {
+  const entry = catalogEntry(p.kind);
+  const [model, setModel] = useState(p.models[0]?.id ?? "");
+  const [test, setTest] = useState<
+    | { state: "running" }
+    | { state: "ok"; ms: number; reply: string }
+    | { state: "error"; message: string }
+    | null
+  >(null);
+  useEffect(() => {
+    if (!p.models.some((m) => m.id === model)) setModel(p.models[0]?.id ?? "");
+  }, [p.models, model]);
+  async function run() {
+    setTest({ state: "running" });
+    try {
+      const r = await api.test({ id: p.id, kind: p.kind, model });
+      setTest({ state: "ok", ms: r.ms, reply: r.reply });
+    } catch (e) {
+      setTest({ state: "error", message: (e as Error).message });
+    }
+  }
+  return (
+    <article className={`ai-provider-card${p.active ? "" : " off"}`}>
+      <header>
+        <span className="ai-provider-mark" aria-hidden="true">
+          {p.name.slice(0, 1).toUpperCase()}
+        </span>
+        <div>
+          <strong>{p.name}</strong>
+          <small>
+            {entry?.label ?? p.kind}
+            {p.base_url ? ` · ${p.base_url.replace(/^https:\/\//, "")}` : ""}
+          </small>
+        </div>
+        <span className={`ai-provider-state ${p.active ? "on" : ""}`}>
+          {p.active ? "Ativo" : "Desligado"}
+        </span>
+      </header>
+      <dl className="ai-provider-facts">
+        <div>
+          <dt>
+            <KeyRound size={13} aria-hidden="true" /> API Key
+          </dt>
+          <dd>•••• {p.key_hint || "salva"}</dd>
+        </div>
+        <div>
+          <dt>
+            <Route size={13} aria-hidden="true" /> Regras
+          </dt>
+          <dd>
+            {p.routes
+              ? `${p.routes} ${p.routes === 1 ? "regra usa" : "regras usam"}`
+              : "nenhuma regra ainda"}
+          </dd>
+        </div>
+      </dl>
+      <ul className="ai-model-chips" aria-label={`Modelos de ${p.name}`}>
+        {p.models.map((m) => (
+          <li key={m.id} title={`${money(m.input)} entrada · ${money(m.output)} saída, por milhão de tokens`}>
+            <span>{m.label || m.id}</span>
+            <small>
+              {m.input}/{m.output}
+            </small>
+          </li>
+        ))}
+      </ul>
+      <div className="ai-provider-test">
+        <Select
+          aria-label={`Modelo para testar em ${p.name}`}
+          value={model || "none"}
+          onValueChange={setModel}
+        >
+          {p.models.map((m) => (
+            <SelectOption key={m.id} value={m.id}>
+              {m.label || m.id}
+            </SelectOption>
+          ))}
+        </Select>
+        <Button
+          className="btn secondary"
+          onClick={() => void run()}
+          loading={test?.state === "running"}
+          disabled={!model}
+        >
+          Testar
+        </Button>
+        {test?.state === "ok" && (
+          <span className="ai-test-result ok" role="status">
+            <CheckCircle2 size={14} aria-hidden="true" /> Funcionou em{" "}
+            {(test.ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}{" "}
+            s
+          </span>
+        )}
+        {test?.state === "error" && (
+          <span className="ai-test-result error" role="alert">
+            <XCircle size={14} aria-hidden="true" /> {test.message}
+          </span>
+        )}
+      </div>
+      <footer>
+        <button type="button" className="text-btn" onClick={onEdit}>
+          <Pencil size={14} /> Editar
+        </button>
+        <button type="button" className="text-btn" onClick={onToggle}>
+          <Power size={14} /> {p.active ? "Desligar" : "Ligar"}
+        </button>
+        <button type="button" className="text-btn danger" onClick={onRemove}>
+          <Trash2 size={14} /> Remover
+        </button>
+      </footer>
+    </article>
+  );
+}
+
+type ModelRow = {
+  id: string;
+  label: string;
+  input: string;
+  output: string;
+  cached: string;
+};
+const toRow = (m: Partial<ProviderModel>): ModelRow => ({
+  id: m.id ?? "",
+  label: m.label ?? "",
+  input: m.input === undefined ? "" : String(m.input).replace(".", ","),
+  output: m.output === undefined ? "" : String(m.output).replace(".", ","),
+  cached: m.cached === undefined ? "" : String(m.cached).replace(".", ","),
+});
+const price = (v: string) =>
+  v.trim() === "" ? NaN : Number(v.trim().replace(",", "."));
+
+function ProviderDialog({
+  api,
+  provider,
+  onClose,
+  onSaved,
+}: {
+  api: LibraryApi;
+  provider: AiProvider | null;
+  onClose: () => void;
+  onSaved: (name: string) => Promise<void>;
+}) {
+  const [kind, setKind] = useState<ProviderKind | null>(provider?.kind ?? null);
+  const entry = kind ? catalogEntry(kind)! : null;
+  const [name, setName] = useState(provider?.name ?? "");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState(provider?.base_url ?? "");
+  const [rows, setRows] = useState<ModelRow[]>(
+    provider?.models.map(toRow) ?? [],
+  );
+  const [listed, setListed] = useState<ListedModel[] | null>(null);
+  const [listing, setListing] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function pick(k: ProviderKind) {
+    const e = catalogEntry(k)!;
+    setKind(k);
+    setName((n) => n || (k === "custom" ? "" : e.label));
+    setRows(e.models.map(toRow));
+    setListed(null);
+    setError("");
+  }
+  const connection = () => ({
+    id: provider?.id,
+    kind: kind!,
+    base_url: baseUrl.trim() || undefined,
+    api_key: apiKey.trim() || undefined,
+  });
+  async function loadModels() {
+    setError("");
+    setListing(true);
+    try {
+      const r = await api.models(connection());
+      setListed(r.models);
+      if (!r.models.length) setError("A API não devolveu nenhum modelo.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setListing(false);
+    }
+  }
+  function toggleListed(m: ListedModel, on: boolean) {
+    setRows((list) =>
+      on
+        ? list.some((r) => r.id === m.id)
+          ? list
+          : [...list, toRow(m)]
+        : list.filter((r) => r.id !== m.id),
+    );
+  }
+  function setRow(i: number, patch: Partial<ModelRow>) {
+    setRows((list) => list.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  }
+
+  async function save() {
+    setError("");
+    if (!kind || !entry) return;
+    if (!name.trim()) return setError("Dê um nome ao provedor.");
+    if (!provider && !apiKey.trim()) return setError("Informe a API Key.");
+    if (kind === "custom" && !baseUrl.trim())
+      return setError("Informe o endereço da API.");
+    if (baseUrl.trim()) {
+      const bad = safeBaseUrl(baseUrl);
+      if (bad) return setError(bad);
+    }
+    const models: ProviderModel[] = [];
+    for (const r of rows) {
+      if (!r.id.trim()) continue;
+      const input = price(r.input);
+      const output = price(r.output);
+      const cached = r.cached.trim() ? price(r.cached) : undefined;
+      if (!Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0)
+        return setError(
+          `Informe os preços de entrada e de saída do modelo ${r.id.trim()} (US$ por milhão de tokens).`,
+        );
+      if (cached !== undefined && (!Number.isFinite(cached) || cached < 0))
+        return setError(`Preço de cache inválido no modelo ${r.id.trim()}.`);
+      models.push({
+        id: r.id.trim(),
+        ...(r.label.trim() ? { label: r.label.trim() } : {}),
+        input,
+        output,
+        ...(cached !== undefined ? { cached } : {}),
+      });
+    }
+    if (!models.length) return setError("Adicione ao menos um modelo.");
+    setBusy(true);
+    try {
+      await api.save({
+        id: provider?.id,
+        name: name.trim(),
+        kind,
+        base_url: baseUrl.trim() || undefined,
+        api_key: apiKey.trim() || undefined,
+        models,
+        active: provider?.active ?? true,
+      });
+      await onSaved(name.trim());
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  const shownListed = useMemo(() => {
+    const q = fold(filter.trim());
+    return (listed ?? []).filter(
+      (m) => !q || fold(`${m.id} ${m.label ?? ""}`).includes(q),
+    );
+  }, [listed, filter]);
+
+  return (
+    <Modal
+      title={provider ? `Editar ${provider.name}` : "Adicionar provedor"}
+      onClose={onClose}
+      busy={busy}
+      className="ai-provider-dialog"
+    >
+      <div className="entity-form">
+        {!entry ? (
+          <>
+            <small className="muted">Escolha de onde vem a IA.</small>
+            <div className="ai-catalog" role="list">
+              {CATALOG.map((c) => (
+                <button
+                  key={c.kind}
+                  type="button"
+                  role="listitem"
+                  className="ai-catalog-item"
+                  onClick={() => pick(c.kind)}
+                >
+                  <span className="ai-provider-mark" aria-hidden="true">
+                    {c.kind === "custom" ? "+" : c.label.slice(0, 1)}
+                  </span>
+                  <span>
+                    <strong>{c.label}</strong>
+                    <small>
+                      {c.api === "anthropic"
+                        ? "API oficial da Claude"
+                        : c.kind === "openai"
+                          ? "API oficial da OpenAI"
+                          : c.kind === "custom"
+                            ? "Qualquer endereço /chat/completions"
+                            : "Pela API compatível com a OpenAI"}
+                    </small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="ai-dialog-kind">
+              <span className="ai-provider-mark" aria-hidden="true">
+                {entry.kind === "custom" ? "+" : entry.label.slice(0, 1)}
+              </span>
+              <strong>{entry.label}</strong>
+              {!provider && (
+                <button
+                  type="button"
+                  className="text-btn"
+                  onClick={() => setKind(null)}
+                >
+                  Trocar
+                </button>
+              )}
+            </div>
+            <label>
+              Nome na biblioteca
+              <Input
+                value={name}
+                maxLength={80}
+                placeholder="Ex.: OpenAI da agência"
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <label>
+              API Key
+              <Input
+                type="password"
+                autoComplete="off"
+                value={apiKey}
+                placeholder={
+                  provider
+                    ? `•••• ${provider.key_hint} — deixe em branco para manter`
+                    : "Cole a chave aqui"
+                }
+                onChange={(e) => setApiKey(e.target.value)}
+              />
+              <small className="ai-field-help">
+                Fica guardada criptografada; ninguém consegue vê-la de novo, nem
+                administradores.
+                {entry.keysUrl && (
+                  <>
+                    {" "}
+                    <a href={entry.keysUrl} target="_blank" rel="noreferrer">
+                      Onde criar a chave <ExternalLink size={11} />
+                    </a>
+                  </>
+                )}
+              </small>
+            </label>
+            {entry.kind === "custom" ? (
+              <label>
+                Endereço da API
+                <Input
+                  value={baseUrl}
+                  placeholder="https://api.exemplo.com/v1"
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                />
+                <small className="ai-field-help">
+                  O endereço antes de /chat/completions (Together, Fireworks,
+                  Azure OpenAI, um gateway próprio…).
+                </small>
+              </label>
+            ) : (
+              <details className="ai-advanced" open={!!baseUrl}>
+                <summary>Endereço da API (avançado)</summary>
+                <Input
+                  value={baseUrl}
+                  aria-label="Endereço da API"
+                  placeholder={entry.baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                />
+                <small className="ai-field-help">
+                  Deixe em branco para usar o endereço oficial.
+                </small>
+              </details>
+            )}
+
+            <section className="ai-models-editor" aria-label="Modelos liberados">
+              <div className="ai-models-head">
+                <strong>Modelos liberados</strong>
+                <span>
+                  <Button
+                    className="btn secondary"
+                    onClick={() => void loadModels()}
+                    loading={listing}
+                    disabled={!provider && !apiKey.trim()}
+                    title={
+                      !provider && !apiKey.trim()
+                        ? "Informe a API Key primeiro"
+                        : undefined
+                    }
+                  >
+                    <RefreshCw size={14} /> Buscar na API
+                  </Button>
+                  <Button
+                    className="btn secondary"
+                    onClick={() =>
+                      setRows((l) => [
+                        ...l,
+                        { id: "", label: "", input: "", output: "", cached: "" },
+                      ])
+                    }
+                  >
+                    <Plus size={14} /> Manual
+                  </Button>
+                </span>
+              </div>
+              <small className="ai-field-help">
+                Preços em US$ por milhão de tokens, usados no Consumo de IA e
+                nos limites.
+                {entry.pricingUrl && (
+                  <>
+                    {" "}
+                    <a href={entry.pricingUrl} target="_blank" rel="noreferrer">
+                      Tabela de preços de {entry.label}{" "}
+                      <ExternalLink size={11} />
+                    </a>
+                  </>
+                )}
+              </small>
+              {listed && listed.length > 0 && (
+                <div className="ai-listed">
+                  <Input
+                    type="search"
+                    icon={Search}
+                    placeholder={`Filtrar ${listed.length} modelos`}
+                    aria-label="Filtrar modelos"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                  />
+                  <ul>
+                    {shownListed.slice(0, 200).map((m) => (
+                      <li key={m.id}>
+                        <label className="checkbox-label">
+                          <Checkbox
+                            checked={rows.some((r) => r.id === m.id)}
+                            onCheckedChange={(on) => toggleListed(m, on === true)}
+                          />
+                          <span>
+                            {m.id}
+                            {m.label && m.label !== m.id && <small>{m.label}</small>}
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {rows.length > 0 ? (
+                <div className="ai-model-rows">
+                  <div className="ai-model-row head" aria-hidden="true">
+                    <span>Modelo (id na API)</span>
+                    <span>Entrada</span>
+                    <span>Saída</span>
+                    <span>Cache</span>
+                    <span />
+                  </div>
+                  {rows.map((r, i) => (
+                    <div className="ai-model-row" key={i}>
+                      <input
+                        className="ai-price"
+                        value={r.id}
+                        aria-label="Id do modelo"
+                        placeholder="ex.: gpt-…"
+                        onChange={(e) => setRow(i, { id: e.target.value })}
+                      />
+                      <input
+                        className="ai-price"
+                        value={r.input}
+                        inputMode="decimal"
+                        aria-label={`Preço de entrada de ${r.id || "modelo"}`}
+                        placeholder="US$"
+                        onChange={(e) => setRow(i, { input: e.target.value })}
+                      />
+                      <input
+                        className="ai-price"
+                        value={r.output}
+                        inputMode="decimal"
+                        aria-label={`Preço de saída de ${r.id || "modelo"}`}
+                        placeholder="US$"
+                        onChange={(e) => setRow(i, { output: e.target.value })}
+                      />
+                      <input
+                        className="ai-price"
+                        value={r.cached}
+                        inputMode="decimal"
+                        aria-label={`Preço de cache de ${r.id || "modelo"}`}
+                        placeholder="opc."
+                        onChange={(e) => setRow(i, { cached: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        aria-label={`Tirar ${r.id || "modelo"}`}
+                        onClick={() => setRows((l) => l.filter((_, k) => k !== i))}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted ai-models-empty">
+                  Busque os modelos na API ou adicione um manualmente.
+                </p>
+              )}
+            </section>
+          </>
+        )}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="form-footer">
+          <Button className="btn secondary" onClick={onClose} disabled={busy}>
+            Cancelar
+          </Button>
+          {entry && (
+            <Button
+              className="btn primary"
+              onClick={() => void save()}
+              loading={busy}
+            >
+              {provider ? "Salvar alterações" : "Adicionar à biblioteca"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ regras
+const SCOPES: { id: Exclude<RouteScope, "company">; label: string; one: string }[] = [
+  { id: "user", label: "Pessoas", one: "Pessoa" },
+  { id: "client", label: "Clientes", one: "Cliente" },
+  { id: "contract", label: "Produtos", one: "Produto" },
+  { id: "project", label: "Projetos", one: "Projeto" },
+];
+const SERVER = "server";
+
+export function AiRoutesPanel({
+  api,
+  data,
+  library,
+  error,
+  reload,
+  notify,
+}: {
+  api: LibraryApi;
+  data: Snapshot;
+  library: AiLibrary | null;
+  error: string;
+  reload: () => Promise<void>;
+  notify: (message: string) => void;
+}) {
+  const [tab, setTab] = useState<Exclude<RouteScope, "company">>("user");
+  const [problem, setProblem] = useState("");
+  const providers = library?.providers ?? [];
+  const routes = library?.routes ?? [];
+  const byId = new Map(providers.map((p) => [p.id, p]));
+
+  const nameOf = useCallback(
+    (type: RouteScope, id: string | null) => {
+      if (type === "company" || !id) return "Empresa toda";
+      if (type === "user")
+        return data.members.find((m) => m.user_id === id)?.name ?? "Pessoa removida";
+      if (type === "client")
+        return `Cliente ${data.clients.find((c) => c.id === id)?.name ?? "?"}`;
+      if (type === "contract") {
+        const k = data.contracts.find((c) => c.id === id);
+        const client = data.clients.find((c) => c.id === k?.client_id)?.name;
+        return k
+          ? `${contractProductLabel(data, id)} · cliente ${client ?? "?"}`
+          : "Produto removido";
+      }
+      return data.projects.find((p) => p.id === id)?.name ?? "Projeto removido";
+    },
+    [data],
+  );
+  const choiceLabel = (r: Pick<AiRoute, "provider_id" | "model"> | null) => {
+    if (!r) return "Padrão do servidor";
+    const p = byId.get(r.provider_id);
+    const m = p?.models.find((x) => x.id === r.model);
+    return `${p?.name ?? "?"} · ${m?.label || r.model}${p && !p.active ? " (desligado)" : ""}`;
+  };
+
+  async function set(
+    type: RouteScope,
+    id: string | null,
+    choice: string,
+    quiet = false,
+  ) {
+    setProblem("");
+    const [provider, ...model] = choice === SERVER ? [] : choice.split("|");
+    try {
+      await api.setRoute(
+        type,
+        id,
+        provider ?? null,
+        provider ? model.join("|") : null,
+      );
+      if (!quiet)
+        notify(provider ? "Regra salva." : "Regra removida: vale a mais geral.");
+      await reload();
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
+  }
+
+  if (!library)
+    return error ? (
+      <p className="form-error" role="alert">
+        {error}
+      </p>
+    ) : (
+      <Loading compact />
+    );
+
+  const companyRoute = routes.find((r) => r.type === "company") ?? null;
+  const shown = routes.filter((r) => r.type === tab);
+  const choices = (
+    <>
+      {providers.map((p) =>
+        p.models.map((m) => (
+          <SelectOption key={`${p.id}|${m.id}`} value={`${p.id}|${m.id}`}>
+            {`${p.name} · ${m.label || m.id}${p.active ? "" : " (desligado)"}`}
+          </SelectOption>
+        )),
+      )}
+    </>
+  );
+
+  return (
+    <div className="ai-admin">
+      <section className="panel ai-route-order">
+        <strong>Qual IA responde</strong>
+        <p>
+          Vale a regra mais específica para quem pergunta e onde a pergunta é
+          feita. Provedores desligados são pulados.
+        </p>
+        <ol aria-label="Ordem das regras">
+          {["Projeto", "Produto", "Cliente", "Pessoa", "Empresa", "Padrão do servidor"].map(
+            (s) => (
+              <li key={s}>{s}</li>
+            ),
+          )}
+        </ol>
+      </section>
+      {(error || problem) && (
+        <p className="form-error" role="alert">
+          {error || problem}
+        </p>
+      )}
+      {!providers.length && (
+        <p className="panel ai-route-empty">
+          Nenhum provedor na biblioteca ainda: tudo usa o padrão do servidor.{" "}
+          <a href="#ia-provedores">Adicionar um provedor</a>
+        </p>
+      )}
+
+      <section className="panel ai-usage-company">
+        <div>
+          <strong>Padrão da empresa</strong>
+          <small>Para todo mundo, quando não há regra mais específica.</small>
+        </div>
+        <Select
+          aria-label="IA padrão da empresa"
+          value={companyRoute ? `${companyRoute.provider_id}|${companyRoute.model}` : SERVER}
+          onValueChange={(v) => void set("company", null, v)}
+        >
+          <SelectOption value={SERVER}>Padrão do servidor</SelectOption>
+          {choices}
+        </Select>
+      </section>
+
+      <div className="drive-view drive-tabs" role="tablist">
+        {SCOPES.map((s) => {
+          const n = routes.filter((r) => r.type === s.id).length;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === s.id}
+              className={tab === s.id ? "selected" : ""}
+              onClick={() => setTab(s.id)}
+            >
+              {s.label}
+              {n > 0 && <span className="ai-tab-count">{n}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="panel drive-table-wrap">
+        <table className="drive-table ai-usage-table">
+          <thead>
+            <tr>
+              <th>{SCOPES.find((s) => s.id === tab)!.one}</th>
+              <th>Provedor e modelo</th>
+              <th aria-label="Ações" />
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length ? (
+              shown
+                .map((r) => ({ r, name: nameOf(tab, r.scope_id) }))
+                .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true }))
+                .map(({ r, name }) => (
+                  <tr key={r.id}>
+                    <td>
+                      <span className="ai-usage-name">{name}</span>
+                    </td>
+                    <td>
+                      <Select
+                        aria-label={`IA de ${name}`}
+                        value={`${r.provider_id}|${r.model}`}
+                        onValueChange={(v) => void set(tab, r.scope_id, v)}
+                      >
+                        <SelectOption value={SERVER}>
+                          Sem regra (vale a mais geral)
+                        </SelectOption>
+                        {choices}
+                      </Select>
+                    </td>
+                    <td className="num">
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        aria-label={`Tirar a regra de ${name}`}
+                        title="Tirar a regra"
+                        onClick={() => void set(tab, r.scope_id, SERVER)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+            ) : (
+              <tr>
+                <td colSpan={3} className="muted ai-empty-cell">
+                  Nenhuma regra para {SCOPES.find((s) => s.id === tab)!.label.toLowerCase()}:
+                  vale a regra mais geral.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {providers.length > 0 && (
+        <NewRoute
+          key={tab}
+          tab={tab}
+          data={data}
+          taken={new Set(shown.map((r) => r.scope_id ?? ""))}
+          nameOf={nameOf}
+          choices={choices}
+          onSave={(id, choice) => void set(tab, id, choice)}
+        />
+      )}
+      <RouteSimulator
+        data={data}
+        routes={routes}
+        active={new Set(providers.filter((p) => p.active).map((p) => p.id))}
+        nameOf={nameOf}
+        choiceLabel={choiceLabel}
+      />
+    </div>
+  );
+}
+
+function scopeOptions(
+  tab: Exclude<RouteScope, "company">,
+  data: Snapshot,
+  nameOf: (type: RouteScope, id: string) => string,
+) {
+  const ids =
+    tab === "user"
+      ? data.members.filter((m) => m.active).map((m) => m.user_id)
+      : tab === "client"
+        ? data.clients.filter((c) => !c.archived).map((c) => c.id)
+        : tab === "contract"
+          ? data.contracts.filter((k) => !k.archived).map((k) => k.id)
+          : data.projects.filter((p) => !p.archived).map((p) => p.id);
+  return ids
+    .map((id) => ({ id, name: nameOf(tab, id) }))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true }));
+}
+
+function NewRoute({
+  tab,
+  data,
+  taken,
+  nameOf,
+  choices,
+  onSave,
+}: {
+  tab: Exclude<RouteScope, "company">;
+  data: Snapshot;
+  taken: Set<string>;
+  nameOf: (type: RouteScope, id: string) => string;
+  choices: ReactNode;
+  onSave: (id: string, choice: string) => void;
+}) {
+  const options = useMemo(
+    () => scopeOptions(tab, data, nameOf).filter((o) => !taken.has(o.id)),
+    [tab, data, nameOf, taken],
+  );
+  const [id, setId] = useState("");
+  const [choice, setChoice] = useState("");
+  return (
+    <form
+      className="ai-new-limit"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (id && choice) {
+          onSave(id, choice);
+          setId("");
+          setChoice("");
+        }
+      }}
+    >
+      <strong>Nova regra</strong>
+      <Select
+        aria-label="Para quem"
+        value={id || "none"}
+        onValueChange={(v) => setId(v === "none" ? "" : v)}
+      >
+        <SelectOption value="none">Escolha…</SelectOption>
+        {options.map((o) => (
+          <SelectOption key={o.id} value={o.id}>
+            {o.name}
+          </SelectOption>
+        ))}
+      </Select>
+      <Select
+        aria-label="Provedor e modelo"
+        value={choice || "none"}
+        onValueChange={(v) => setChoice(v === "none" ? "" : v)}
+      >
+        <SelectOption value="none">Provedor e modelo…</SelectOption>
+        {choices}
+      </Select>
+      <Button className="btn primary" type="submit" disabled={!id || !choice}>
+        Definir
+      </Button>
+    </form>
+  );
+}
+
+/** "Quem responde?": a regra que vale para uma pessoa num lugar. */
+function RouteSimulator({
+  data,
+  routes,
+  active,
+  nameOf,
+  choiceLabel,
+}: {
+  data: Snapshot;
+  routes: AiRoute[];
+  active: ReadonlySet<string>;
+  nameOf: (type: RouteScope, id: string | null) => string;
+  choiceLabel: (r: AiRoute | null) => string;
+}) {
+  const [user, setUser] = useState("");
+  const [client, setClient] = useState("");
+  const [contract, setContract] = useState("");
+  const [project, setProject] = useState("");
+  const contracts = data.contracts.filter(
+    (k) => !k.archived && k.client_id === client,
+  );
+  const projects = data.projects.filter(
+    (p) => !p.archived && p.contract_id === contract,
+  );
+  const hit = pickRoute(
+    routes,
+    {
+      user: user || undefined,
+      client: client || undefined,
+      contract: contract || undefined,
+      project: project || undefined,
+    },
+    active,
+  );
+  const why = hit
+    ? hit.type === "company"
+      ? "pela regra da empresa"
+      : `pela regra de ${nameOf(hit.type, hit.scope_id)}`
+    : "nenhuma regra vale";
+  const none = (label: string) => <SelectOption value="none">{label}</SelectOption>;
+  return (
+    <section className="panel ai-simulator" aria-label="Quem responde">
+      <strong>Quem responde?</strong>
+      <div className="ai-simulator-fields">
+        <Select
+          aria-label="Pessoa"
+          value={user || "none"}
+          onValueChange={(v) => setUser(v === "none" ? "" : v)}
+        >
+          {none("Qualquer pessoa")}
+          {scopeOptions("user", data, nameOf).map((o) => (
+            <SelectOption key={o.id} value={o.id}>
+              {o.name}
+            </SelectOption>
+          ))}
+        </Select>
+        <Select
+          aria-label="Cliente"
+          value={client || "none"}
+          onValueChange={(v) => {
+            setClient(v === "none" ? "" : v);
+            setContract("");
+            setProject("");
+          }}
+        >
+          {none("Sem cliente (assistente geral)")}
+          {scopeOptions("client", data, nameOf).map((o) => (
+            <SelectOption key={o.id} value={o.id}>
+              {o.name}
+            </SelectOption>
+          ))}
+        </Select>
+        {client && contracts.length > 0 && (
+          <Select
+            aria-label="Produto"
+            value={contract || "none"}
+            onValueChange={(v) => {
+              setContract(v === "none" ? "" : v);
+              setProject("");
+            }}
+          >
+            {none("Qualquer produto")}
+            {contracts.map((k) => (
+              <SelectOption key={k.id} value={k.id}>
+                {contractProductLabel(data, k.id)}
+              </SelectOption>
+            ))}
+          </Select>
+        )}
+        {contract && projects.length > 0 && (
+          <Select
+            aria-label="Projeto"
+            value={project || "none"}
+            onValueChange={(v) => setProject(v === "none" ? "" : v)}
+          >
+            {none("Qualquer projeto")}
+            {projects.map((p) => (
+              <SelectOption key={p.id} value={p.id}>
+                {p.name}
+              </SelectOption>
+            ))}
+          </Select>
+        )}
+      </div>
+      <p className="ai-simulator-result" role="status">
+        Responde <strong>{choiceLabel(hit)}</strong>, {why}.
+      </p>
+      {client && (
+        <small className="muted">
+          As regras do cliente valem só para quem tem acesso a ele.
+        </small>
+      )}
+    </section>
+  );
+}

@@ -18,6 +18,7 @@
     "test:db:ai-assistant": "node scripts/test-ai-assistant.mjs",
     "test:db:ai-sources": "node scripts/test-ai-sources.mjs",
     "test:db:ai-mcp": "node scripts/test-ai-mcp.mjs",
+    "test:db:ai-providers": "node scripts/test-ai-providers.mjs",
     "test:db:templates": "node scripts/test-task-templates.mjs",
     "test:db:assign-team": "node scripts/test-assign-to-team.mjs",
     "test:db:recurrence": "node scripts/test-task-recurrence.mjs",

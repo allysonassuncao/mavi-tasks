@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { canOpenPage, firstPage, moduleOf, roleAllows } from "./modules";
+import {
+  canOpenPage,
+  firstPage,
+  moduleOf,
+  moduleOn,
+  roleAllows,
+} from "./modules";
 
 describe("módulos visíveis por pessoa", () => {
   it("as regras do perfil continuam valendo", () => {
@@ -53,5 +59,36 @@ describe("módulos visíveis por pessoa", () => {
     expect(firstPage("member", ["tasks", "agenda", "onboarding"])).toBe(
       "drive",
     );
+  });
+  it("o assistente de IA é um módulo de todos, que o administrador desliga", () => {
+    expect(moduleOn("assistant", "member")).toBe(true);
+    expect(moduleOn("assistant", "admin", ["tasks"])).toBe(true);
+    expect(moduleOn("assistant", "manager", ["assistant"])).toBe(false);
+    expect(moduleOn("assistant", undefined)).toBe(false);
+    // Não é página: nunca vira o destino depois do login.
+    expect(firstPage("admin", ["overview", "tasks"])).toBe("agenda");
+    const all = [
+      "overview",
+      "tasks",
+      "agenda",
+      "clients",
+      "products",
+      "projects",
+      "campaigns",
+      "onboarding",
+      "hours",
+      "reports",
+      "drive",
+      "storage",
+      "aiUsage",
+      "dashboards",
+      "assistant",
+    ];
+    expect(firstPage("admin", all)).toBe("profile");
+  });
+  it("Inteligência artificial: líderes, não colaboradores", () => {
+    expect(canOpenPage("aiUsage", "manager")).toBe(true);
+    expect(canOpenPage("aiUsage", "member")).toBe(false);
+    expect(canOpenPage("aiUsage", "admin", ["aiUsage"])).toBe(false);
   });
 });

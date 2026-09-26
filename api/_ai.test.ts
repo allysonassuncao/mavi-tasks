@@ -31,6 +31,7 @@ const env: AiEnv = {
   embeddingModel: "text-embedding-3-small",
   workerSecret: "s".repeat(40),
   workerBudgetMs: 60_000,
+  providerKey: null,
 };
 
 /** Banco falso: respostas por trecho da URL; guarda as chamadas. */

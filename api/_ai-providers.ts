@@ -1,0 +1,775 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { callRpc } from "./_drive.js";
+import { seal, unseal } from "./_google.js";
+import { newMeter, type Meter } from "./_social-leads.js";
+import {
+  ANSWER_NUDGE,
+  LlmError,
+  anthropicAdapter,
+  type LlmAdapter,
+} from "./_ai-llm.js";
+import {
+  CATALOG,
+  catalogEntry,
+  keyHint,
+  providerBaseUrl,
+  safeBaseUrl,
+  type ProviderModel,
+} from "../src/ai-providers.js";
+
+/**
+ * IA do MAVI · biblioteca de provedores (migration 20261025090000_ai_providers).
+ *
+ * - Qual IA responde: ai_resolve_route devolve a regra mais específica para
+ *   quem pergunta e onde (projeto › produto › cliente › pessoa › empresa),
+ *   com a API Key selada; aqui ela é aberta com AI_PROVIDER_KEY e vira um
+ *   adaptador (a mesma interface neutra de _ai-llm.ts). Sem regra, fica o
+ *   padrão do servidor (ANTHROPIC_API_KEY e AI_MODEL).
+ * - Administração (ações "ai-provider-*" de /api/ai): salvar um provedor
+ *   (a chave é selada aqui, nunca vai em texto ao banco), buscar os modelos
+ *   na API do provedor e testar a conexão. O banco confere que quem chama é
+ *   administrador.
+ */
+
+export type ProviderEnv = {
+  supabaseUrl: string;
+  supabaseKey: string;
+  /** 32 bytes (AI_PROVIDER_KEY, base64); null quando falta ou é inválida. */
+  providerKey: Buffer | null;
+};
+
+export function providerKeyFrom(value: string | undefined) {
+  if (!value) return null;
+  const key = Buffer.from(value, "base64");
+  return key.length === 32 ? key : null;
+}
+
+const MISSING_KEY =
+  "Falta na Vercel: AI_PROVIDER_KEY (32 bytes em base64 — gere com openssl rand -base64 32). Depois de salvar, faça um Redeploy.";
+
+/** O que ai_resolve_route devolve. */
+export type ResolvedRoute = {
+  scope: string;
+  provider_id: string;
+  provider: string;
+  kind: string;
+  base_url: string | null;
+  key_cipher: string;
+  model: string;
+  price: ProviderModel | null;
+};
+
+export type ProviderConfig = {
+  kind: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  price: ProviderModel | null;
+};
+
+type Fetch = typeof fetch;
+
+// ------------------------------------------------------------ custo
+/** Custo de uma resposta pelos preços cadastrados (US$ por milhão). */
+export function priceCost(
+  price: ProviderModel | null,
+  tokens: { input: number; output: number; cached: number },
+) {
+  if (!price) return 0;
+  return (
+    (tokens.input * price.input +
+      tokens.cached * (price.cached ?? price.input) +
+      tokens.output * price.output) /
+    1e6
+  );
+}
+
+// ------------------------------------------------------------ OpenAI (chat)
+type ChatMessage =
+  | { role: "system" | "user"; content: string }
+  | {
+      role: "assistant";
+      content: string | null;
+      tool_calls?: {
+        id: string;
+        type: "function";
+        function: { name: string; arguments: string };
+      }[];
+    }
+  | { role: "tool"; tool_call_id: string; content: string };
+
+type ChatChunk = {
+  choices?: {
+    index?: number;
+    delta?: {
+      content?: string | null;
+      reasoning_content?: string | null;
+      reasoning?: string | null;
+      tool_calls?: {
+        index?: number;
+        id?: string;
+        function?: { name?: string; arguments?: string };
+      }[];
+    };
+    finish_reason?: string | null;
+  }[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number } | null;
+  } | null;
+  error?: { message?: string };
+};
+
+/** As linhas "data: {...}" de uma resposta em SSE. */
+async function* sseData(body: ReadableStream<Uint8Array>) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (line.startsWith("data:")) yield line.slice(5).trim();
+    }
+  }
+  const rest = buffer.trim();
+  if (rest.startsWith("data:")) yield rest.slice(5).trim();
+}
+
+/** Uma mensagem de erro clara a partir da resposta do provedor. */
+async function providerError(res: Response, name: string) {
+  const text = await res.text().catch(() => "");
+  let detail = "";
+  try {
+    const body = JSON.parse(text);
+    detail = String(
+      body?.error?.message ?? body?.message ?? body?.error ?? "",
+    ).slice(0, 300);
+  } catch {
+    detail = text.slice(0, 200);
+  }
+  if (res.status === 401 || res.status === 403)
+    return new LlmError(
+      502,
+      `A API Key do provedor "${name}" foi recusada. Confira em Painel de IA › Provedores e modelos.`,
+    );
+  if (res.status === 404)
+    return new LlmError(
+      502,
+      `O provedor "${name}" não encontrou o modelo ou o endereço da API${detail ? `: ${detail}` : "."}`,
+    );
+  if (res.status === 429)
+    return new LlmError(
+      429,
+      `Limite de uso do provedor "${name}" atingido. Tente de novo em alguns minutos.`,
+    );
+  return new LlmError(
+    502,
+    `O provedor "${name}" respondeu com erro (${res.status})${detail ? `: ${detail}` : "."}`,
+  );
+}
+
+const authHeaders = (apiKey: string) => ({
+  Authorization: `Bearer ${apiKey}`,
+  "Content-Type": "application/json",
+});
+
+/**
+ * A API de chat da OpenAI (e das compatíveis): ferramentas em paralelo,
+ * texto e raciocínio em tempo real quando o provedor manda, e o custo pelos
+ * preços cadastrados.
+ */
+export function openAiChatAdapter(
+  config: ProviderConfig,
+  fetchImpl: Fetch = fetch,
+): LlmAdapter {
+  return async (request) => {
+    const meter: Meter = newMeter(config.model);
+    const tools = request.tools.map((t) => ({
+      type: "function" as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      },
+    }));
+    const messages: ChatMessage[] = [
+      {
+        role: "system",
+        content: `${request.instructions}\n\n${request.context}`,
+      },
+      ...request.messages.map((m) => ({ role: m.role, content: m.content })),
+    ];
+    const maxRounds = request.maxRounds ?? 6;
+    let nudged = false;
+    // Nem todo provedor aceita stream_options: sem ele, o uso vem se vier.
+    let usageOption = true;
+    for (let round = 0; ; round++) {
+      const last = round >= maxRounds;
+      const body = {
+        model: config.model,
+        messages,
+        ...(tools.length
+          ? { tools, tool_choice: last ? "none" : "auto" }
+          : {}),
+        stream: true,
+        ...(usageOption ? { stream_options: { include_usage: true } } : {}),
+      };
+      const res = await fetchImpl(`${config.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: authHeaders(config.apiKey),
+        body: JSON.stringify(body),
+        signal: request.signal,
+      });
+      if (!res.ok || !res.body) {
+        if (res.status === 400 && usageOption) {
+          const text = await res.clone().text().catch(() => "");
+          if (/stream_options/i.test(text)) {
+            usageOption = false;
+            round--;
+            continue;
+          }
+        }
+        throw await providerError(res, config.name);
+      }
+      let text = "";
+      let finish = "";
+      const calls: { id: string; name: string; args: string }[] = [];
+      for await (const data of sseData(res.body)) {
+        if (data === "[DONE]") break;
+        let chunk: ChatChunk;
+        try {
+          chunk = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        if (chunk.error)
+          throw new LlmError(
+            502,
+            `O provedor "${config.name}" interrompeu a resposta: ${chunk.error.message ?? "erro"}`,
+          );
+        if (chunk.usage) {
+          const cached = chunk.usage.prompt_tokens_details?.cached_tokens ?? 0;
+          const input = Math.max((chunk.usage.prompt_tokens ?? 0) - cached, 0);
+          const output = chunk.usage.completion_tokens ?? 0;
+          meter.input += input;
+          meter.cacheRead += cached;
+          meter.output += output;
+          meter.cost += priceCost(config.price, { input, output, cached });
+        }
+        const choice = chunk.choices?.[0];
+        if (!choice) continue;
+        const delta = choice.delta ?? {};
+        const thought = delta.reasoning_content ?? delta.reasoning;
+        if (thought) request.onEvent?.({ type: "thinking", text: thought });
+        if (delta.content) {
+          text += delta.content;
+          request.onEvent?.({ type: "text", text: delta.content });
+        }
+        for (const tc of delta.tool_calls ?? []) {
+          // Sem índice: pelo id; sem id, é a continuação da última chamada.
+          let i = tc.index ?? -1;
+          if (i < 0 && tc.id) i = calls.findIndex((c) => c?.id === tc.id);
+          if (i < 0) i = tc.id ? calls.length : Math.max(calls.length - 1, 0);
+          calls[i] ??= { id: tc.id ?? `call_${round}_${i}`, name: "", args: "" };
+          if (tc.id) calls[i].id = tc.id;
+          if (tc.function?.name) calls[i].name += tc.function.name;
+          if (tc.function?.arguments) calls[i].args += tc.function.arguments;
+        }
+        if (choice.finish_reason) finish = choice.finish_reason;
+      }
+      const used = calls.filter((c) => c && c.name);
+      if (used.length && !last) {
+        request.onEvent?.({ type: "round_end", tools: used.length });
+        messages.push({
+          role: "assistant",
+          content: text || null,
+          tool_calls: used.map((c) => ({
+            id: c.id,
+            type: "function",
+            function: { name: c.name, arguments: c.args || "{}" },
+          })),
+        });
+        const results = await Promise.all(
+          used.map(async (c) => {
+            let content: string;
+            try {
+              const input = c.args.trim() ? JSON.parse(c.args) : {};
+              content = await request.execute(c.name, input);
+            } catch (e) {
+              content = `Erro: ${(e as Error).message}`;
+            }
+            return { role: "tool" as const, tool_call_id: c.id, content };
+          }),
+        );
+        messages.push(...results);
+        continue;
+      }
+      const answer = text.trim();
+      if (!answer) {
+        if (!nudged) {
+          nudged = true;
+          request.onEvent?.({ type: "round_end", tools: 0 });
+          messages.push({ role: "user", content: ANSWER_NUDGE });
+          round = Math.max(round, maxRounds - 1);
+          continue;
+        }
+        throw new LlmError(
+          502,
+          `O provedor "${config.name}" não devolveu resposta (motivo: ${finish || "desconhecido"}). Tente de novo.`,
+        );
+      }
+      if (finish === "content_filter")
+        throw new LlmError(
+          422,
+          "A IA não respondeu a esta pergunta. Tente reformular.",
+        );
+      return {
+        text:
+          finish === "length"
+            ? `${answer}\n\n(A resposta foi cortada por ser longa demais.)`
+            : answer,
+        meter,
+        rounds: round,
+      };
+    }
+  };
+}
+
+// ------------------------------------------------------------ Claude
+/** A Claude com a chave e o modelo da biblioteca; erros com o nome do provedor. */
+export function anthropicProviderAdapter(
+  config: ProviderConfig,
+  client?: Pick<Anthropic, "beta">,
+): LlmAdapter {
+  const inner = anthropicAdapter(
+    {
+      anthropicKey: config.apiKey,
+      model: config.model,
+      price: config.price,
+      baseUrl: config.baseUrl,
+    },
+    client,
+  );
+  return async (request) => {
+    try {
+      return await inner(request);
+    } catch (e) {
+      if (e instanceof Anthropic.AuthenticationError)
+        throw new LlmError(
+          502,
+          `A API Key do provedor "${config.name}" foi recusada. Confira em Painel de IA › Provedores e modelos.`,
+        );
+      if (e instanceof Anthropic.NotFoundError)
+        throw new LlmError(
+          502,
+          `O provedor "${config.name}" não encontrou o modelo ${config.model}.`,
+        );
+      if (e instanceof Anthropic.RateLimitError)
+        throw new LlmError(
+          429,
+          `Limite de uso do provedor "${config.name}" atingido. Tente de novo em alguns minutos.`,
+        );
+      throw e;
+    }
+  };
+}
+
+export function adapterFor(config: ProviderConfig, fetchImpl: Fetch = fetch) {
+  return catalogEntry(config.kind)?.api === "anthropic"
+    ? anthropicProviderAdapter(config)
+    : openAiChatAdapter(config, fetchImpl);
+}
+
+/** Abre a regra devolvida pelo banco (a chave selada) numa configuração. */
+export function routeConfig(
+  env: Pick<ProviderEnv, "providerKey">,
+  route: ResolvedRoute,
+): ProviderConfig {
+  if (!env.providerKey)
+    throw new LlmError(
+      503,
+      `O provedor de IA "${route.provider}" está configurado, mas o servidor não consegue abrir a chave. ${MISSING_KEY}`,
+    );
+  let apiKey: string;
+  try {
+    apiKey = unseal(env.providerKey, route.key_cipher);
+  } catch {
+    throw new LlmError(
+      503,
+      `Não foi possível abrir a API Key do provedor "${route.provider}" (a AI_PROVIDER_KEY mudou?). Salve a chave de novo em Painel de IA › Provedores e modelos.`,
+    );
+  }
+  return {
+    kind: route.kind,
+    name: route.provider,
+    baseUrl: providerBaseUrl(route.kind, route.base_url),
+    apiKey,
+    model: route.model,
+    price: route.price,
+  };
+}
+
+/**
+ * Qual IA responde (null: o padrão do servidor). Se o banco ainda não tem a
+ * biblioteca (migration não aplicada), segue no padrão.
+ */
+export async function resolveRoute(
+  env: ProviderEnv,
+  fetchImpl: Fetch,
+  auth: string,
+  company: string,
+  scope: { client?: string; contract?: string; project?: string },
+): Promise<ResolvedRoute | null> {
+  const r = await callRpc<ResolvedRoute | null>(
+    env,
+    fetchImpl,
+    auth,
+    "ai_resolve_route",
+    {
+      p_company: company,
+      p_client: scope.client ?? null,
+      p_contract: scope.contract ?? null,
+      p_project: scope.project ?? null,
+    },
+  );
+  if (!r.ok) {
+    if (r.status !== 404) console.error("ai_resolve_route", r.status, r.error);
+    return null;
+  }
+  return r.data && r.data.key_cipher ? r.data : null;
+}
+
+// ------------------------------------------------------------ administração
+class ProviderError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+type Row = Record<string, unknown>;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const str = (v: unknown, max: number) =>
+  typeof v === "string" ? v.trim().slice(0, max) : "";
+
+async function rpc<T>(
+  env: ProviderEnv,
+  fetchImpl: Fetch,
+  auth: string,
+  name: string,
+  args: Row,
+) {
+  const r = await callRpc<T>(env, fetchImpl, auth, name, args);
+  if (!r.ok)
+    throw new ProviderError(
+      r.status === 401 ? 401 : r.status >= 500 ? 502 : 400,
+      r.error,
+    );
+  return r.data;
+}
+
+/** Tipo, endereço e chave: os do pedido ou os salvos no provedor. */
+async function connection(
+  env: ProviderEnv,
+  fetchImpl: Fetch,
+  auth: string,
+  req: Row,
+) {
+  const company = str(req.company, 40);
+  if (!UUID.test(company)) throw new ProviderError(400, "Empresa inválida.");
+  const id = typeof req.id === "string" && UUID.test(req.id) ? req.id : null;
+  let kind = str(req.kind, 20);
+  let baseUrl = str(req.base_url, 300);
+  let apiKey = str(req.api_key, 400);
+  let models: ProviderModel[] = [];
+  if (id) {
+    const [saved] = await rpc<
+      {
+        kind: string;
+        base_url: string | null;
+        key_cipher: string;
+        models: ProviderModel[];
+      }[]
+    >(env, fetchImpl, auth, "ai_provider_secret", {
+      p_company: company,
+      p_id: id,
+    });
+    if (!saved) throw new ProviderError(404, "Provedor não encontrado.");
+    kind ||= saved.kind;
+    baseUrl ||= saved.base_url ?? "";
+    models = saved.models ?? [];
+    if (!apiKey) {
+      if (!env.providerKey) throw new ProviderError(503, MISSING_KEY);
+      try {
+        apiKey = unseal(env.providerKey, saved.key_cipher);
+      } catch {
+        throw new ProviderError(
+          409,
+          "A chave salva não abre mais (a AI_PROVIDER_KEY mudou?). Informe a API Key de novo.",
+        );
+      }
+    }
+  } else {
+    // Só administradores seguem (a lista confere).
+    await rpc(env, fetchImpl, auth, "ai_provider_list", { p_company: company });
+  }
+  const entry = catalogEntry(kind);
+  if (!entry) throw new ProviderError(400, "Escolha o provedor.");
+  if (!apiKey) throw new ProviderError(400, "Informe a API Key.");
+  if (entry.kind === "custom" || baseUrl) {
+    const problem = safeBaseUrl(baseUrl || entry.baseUrl);
+    if (problem) throw new ProviderError(400, problem);
+  }
+  return {
+    company,
+    id,
+    entry,
+    apiKey,
+    baseUrl: providerBaseUrl(kind, baseUrl),
+    models,
+  };
+}
+
+/** Salva o provedor: a chave nova é selada aqui. */
+async function saveProvider(
+  env: ProviderEnv,
+  fetchImpl: Fetch,
+  auth: string,
+  req: Row,
+) {
+  const company = str(req.company, 40);
+  if (!UUID.test(company)) throw new ProviderError(400, "Empresa inválida.");
+  const id = typeof req.id === "string" && UUID.test(req.id) ? req.id : null;
+  const entry = catalogEntry(str(req.kind, 20));
+  if (!entry) throw new ProviderError(400, "Escolha o provedor.");
+  const baseUrl = str(req.base_url, 300);
+  if (entry.kind === "custom" && !baseUrl)
+    throw new ProviderError(400, "Informe o endereço da API.");
+  if (baseUrl) {
+    const problem = safeBaseUrl(baseUrl);
+    if (problem) throw new ProviderError(400, problem);
+  }
+  const apiKey = str(req.api_key, 400);
+  if (!id && !apiKey) throw new ProviderError(400, "Informe a API Key.");
+  if (apiKey && !env.providerKey) throw new ProviderError(503, MISSING_KEY);
+  const models = Array.isArray(req.models) ? req.models : [];
+  const saved = await rpc<string>(env, fetchImpl, auth, "ai_save_provider", {
+    p_company: company,
+    p_id: id,
+    p_name: str(req.name, 80),
+    p_kind: entry.kind,
+    p_base_url:
+      baseUrl && baseUrl.replace(/\/+$/, "") !== entry.baseUrl
+        ? baseUrl.replace(/\/+$/, "")
+        : null,
+    p_models: models,
+    p_key_cipher: apiKey ? seal(env.providerKey!, apiKey) : null,
+    p_key_hint: apiKey ? keyHint(apiKey) : null,
+    p_active: req.active === undefined ? true : req.active === true,
+  });
+  return { id: saved };
+}
+
+type ListedModel = {
+  id: string;
+  label?: string;
+  input?: number;
+  output?: number;
+};
+
+/** Os modelos que a chave enxerga, com os preços quando o provedor informa. */
+async function listModels(
+  env: ProviderEnv,
+  fetchImpl: Fetch,
+  auth: string,
+  req: Row,
+  anthropicClient?: (apiKey: string, baseUrl: string) => Pick<Anthropic, "models">,
+) {
+  const c = await connection(env, fetchImpl, auth, req);
+  const known = new Map(
+    [...c.entry.models, ...c.models].map((m) => [m.id, m] as const),
+  );
+  let listed: ListedModel[] = [];
+  if (c.entry.api === "anthropic") {
+    const client =
+      anthropicClient?.(c.apiKey, c.baseUrl) ??
+      new Anthropic({ apiKey: c.apiKey, baseURL: c.baseUrl, maxRetries: 1 });
+    try {
+      for await (const m of client.models.list())
+        listed.push({ id: m.id, label: m.display_name });
+    } catch (e) {
+      if (e instanceof Anthropic.AuthenticationError)
+        throw new ProviderError(400, "A API Key foi recusada pela Anthropic.");
+      throw new ProviderError(
+        502,
+        `A Anthropic respondeu com erro: ${(e as Error).message}`,
+      );
+    }
+  } else {
+    const res = await fetchImpl(`${c.baseUrl}/models`, {
+      headers: authHeaders(c.apiKey),
+    });
+    if (!res.ok) {
+      const e = await providerError(res, c.entry.label);
+      throw new ProviderError(res.status === 401 ? 400 : 502, e.message);
+    }
+    const body = (await res.json().catch(() => ({}))) as {
+      data?: {
+        id?: string;
+        name?: string;
+        pricing?: { prompt?: string; completion?: string };
+      }[];
+      models?: {
+        id?: string;
+        name?: string;
+        pricing?: { prompt?: string; completion?: string };
+      }[];
+    };
+    const perMillion = (v?: string) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e6 * 1e4) / 1e4 : undefined;
+    };
+    listed = (body.data ?? body.models ?? [])
+      .filter((m) => typeof m.id === "string" && m.id)
+      .map((m) => ({
+        // O Gemini devolve "models/gemini-…"; a API de chat usa sem o prefixo.
+        id: m.id!.replace(/^models\//, ""),
+        label: m.name && m.name !== m.id ? m.name : undefined,
+        input: perMillion(m.pricing?.prompt),
+        output: perMillion(m.pricing?.completion),
+      }));
+  }
+  const models = listed
+    .slice(0, 500)
+    .map((m) => {
+      const k = known.get(m.id);
+      return {
+        ...m,
+        label: m.label ?? k?.label,
+        input: m.input ?? k?.input,
+        output: m.output ?? k?.output,
+      };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return { models };
+}
+
+/** Uma pergunta curtinha ao modelo, para saber se chave, endereço e modelo funcionam. */
+async function testProvider(
+  env: ProviderEnv,
+  fetchImpl: Fetch,
+  auth: string,
+  req: Row,
+  now: () => number,
+  anthropicClient?: (apiKey: string, baseUrl: string) => Pick<Anthropic, "messages">,
+) {
+  const c = await connection(env, fetchImpl, auth, req);
+  const model = str(req.model, 120);
+  if (!model) throw new ProviderError(400, "Escolha o modelo para testar.");
+  const started = now();
+  let reply = "";
+  if (c.entry.api === "anthropic") {
+    const client =
+      anthropicClient?.(c.apiKey, c.baseUrl) ??
+      new Anthropic({ apiKey: c.apiKey, baseURL: c.baseUrl, maxRetries: 0 });
+    try {
+      const message = await client.messages.create({
+        model,
+        max_tokens: 256,
+        messages: [{ role: "user", content: "Responda apenas: ok" }],
+      });
+      reply = message.content
+        .map((b) => (b.type === "text" ? b.text : ""))
+        .join("")
+        .trim();
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      throw new ProviderError(
+        400,
+        status === 401
+          ? "A API Key foi recusada pela Anthropic."
+          : status === 404
+            ? `A Anthropic não encontrou o modelo ${model}.`
+            : `A Anthropic respondeu com erro: ${(e as Error).message}`,
+      );
+    }
+  } else {
+    const res = await fetchImpl(`${c.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: authHeaders(c.apiKey),
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "Responda apenas: ok" }],
+      }),
+    });
+    if (!res.ok) {
+      const e = await providerError(res, c.entry.label);
+      throw new ProviderError(400, e.message);
+    }
+    const body = (await res.json().catch(() => ({}))) as {
+      choices?: { message?: { content?: string | null } }[];
+    };
+    reply = (body.choices?.[0]?.message?.content ?? "").trim();
+  }
+  return { ok: true, ms: now() - started, reply: reply.slice(0, 120) };
+}
+
+export type ProviderDeps = {
+  fetch: Fetch;
+  now?: () => number;
+  /** Trocado nos testes. */
+  anthropic?: (apiKey: string, baseUrl: string) => Pick<Anthropic, "models" | "messages">;
+};
+
+export async function handleProviders(
+  body: unknown,
+  authorization: string | null,
+  env: ProviderEnv,
+  deps: ProviderDeps,
+): Promise<{ status: number; body: Row }> {
+  const req = (body ?? {}) as Row;
+  if (!authorization?.startsWith("Bearer "))
+    return { status: 401, body: { error: "Entre na sua conta." } };
+  try {
+    if (req.action === "ai-provider-save")
+      return {
+        status: 200,
+        body: await saveProvider(env, deps.fetch, authorization, req),
+      };
+    if (req.action === "ai-provider-models")
+      return {
+        status: 200,
+        body: await listModels(env, deps.fetch, authorization, req, deps.anthropic),
+      };
+    if (req.action === "ai-provider-test")
+      return {
+        status: 200,
+        body: await testProvider(
+          env,
+          deps.fetch,
+          authorization,
+          req,
+          deps.now ?? Date.now,
+          deps.anthropic,
+        ),
+      };
+    return { status: 400, body: { error: "Ação inválida." } };
+  } catch (err) {
+    if (err instanceof ProviderError || err instanceof LlmError)
+      return { status: err.status, body: { error: err.message } };
+    return {
+      status: 502,
+      body: { error: "Não foi possível falar com o provedor. Tente de novo." },
+    };
+  }
+}
+
+export { CATALOG };

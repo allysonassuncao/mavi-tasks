@@ -1,4 +1,4 @@
-import type { Page } from "./router";
+import { pagePaths, type Page } from "./router";
 import type { Role } from "./types";
 
 /**
@@ -25,9 +25,15 @@ export const MEMBER_PAGES: readonly Page[] = [
   "drive",
   "profile",
 ];
+/**
+ * Modules that aren't pages: the AI assistant, the bubble over every page.
+ * Everyone has it by profile; an administrator turns it off per person.
+ */
+export const WIDGET_MODULES = ["assistant"] as const;
+export type WidgetModule = (typeof WIDGET_MODULES)[number];
 // Modules exclusive to the company's administrators (not even managers).
 // Campanhas was one until migration 20261009090000_ad_campaigns_leaders.
-export const ADMIN_PAGES: readonly Page[] = [];
+export const ADMIN_PAGES: readonly (Page | WidgetModule)[] = [];
 
 /** The modules of the menu an administrator can hide, in the menu's order. */
 export const MODULES = [
@@ -44,8 +50,9 @@ export const MODULES = [
   { id: "projects", label: "Projetos" },
   { id: "hours", label: "Controle de horas" },
   { id: "storage", label: "Armazenamento" },
-  { id: "aiUsage", label: "Consumo de IA" },
-] as const satisfies readonly { id: Page; label: string }[];
+  { id: "aiUsage", label: "Painel de IA" },
+  { id: "assistant", label: "Assistente de IA" },
+] as const satisfies readonly { id: Page | WidgetModule; label: string }[];
 export type ModuleId = (typeof MODULES)[number]["id"];
 
 /** The module a page belongs to (the task search is Tarefas…), if any. */
@@ -55,10 +62,22 @@ export function moduleOf(page: Page): ModuleId | null {
   return MODULES.some((m) => m.id === page) ? (page as ModuleId) : null;
 }
 
+/** Whether the module (a page or the assistant) is on for the person. */
+export function moduleOn(
+  module: ModuleId,
+  role: Role | undefined,
+  hidden: readonly string[] = [],
+) {
+  return !hidden.includes(module) && roleAllows(module, role);
+}
+
 /** The access profile's rule alone. */
-export function roleAllows(page: Page, role: Role | undefined) {
-  if (ADMIN_PAGES.includes(page)) return role === "admin";
-  return role === "admin" || role === "manager" || MEMBER_PAGES.includes(page);
+export function roleAllows(page: Page | WidgetModule, role: Role | undefined) {
+  if ((WIDGET_MODULES as readonly string[]).includes(page)) return !!role;
+  if (ADMIN_PAGES.includes(page as Page)) return role === "admin";
+  return (
+    role === "admin" || role === "manager" || MEMBER_PAGES.includes(page as Page)
+  );
 }
 
 export function canOpenPage(
@@ -73,9 +92,12 @@ export function canOpenPage(
 
 /** Where to land when the page asked for can't be opened. */
 export function firstPage(role: Role | undefined, hidden: readonly string[]) {
+  const pages = MODULES.map((m) => m.id).filter(
+    (id): id is Extract<ModuleId, Page> => id in pagePaths,
+  );
   const order: Page[] =
     role === "admin" || role === "manager"
-      ? ["overview", "tasks", ...MODULES.map((m) => m.id)]
-      : ["tasks", ...MODULES.map((m) => m.id)];
+      ? ["overview", "tasks", ...pages]
+      : ["tasks", ...pages];
   return order.find((p) => canOpenPage(p, role, hidden)) ?? "profile";
 }
