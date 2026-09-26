@@ -57,15 +57,28 @@ export class LlmError extends Error {
 
 export type AnthropicEnv = { anthropicKey: string; model: string };
 
-/** Claude, com cache das instruções e ferramentas executadas em paralelo. */
-export function anthropicAdapter(env: AnthropicEnv): LlmAdapter {
+/** O pedido quando a IA termina a vez sem escrever a resposta. */
+export const ANSWER_NUDGE =
+  "Escreva agora a resposta final à minha pergunta, com base no que você já encontrou (cite as fontes [S#]). Se não encontrou nada relevante, diga isso.";
+
+type Client = Pick<Anthropic, "beta">;
+
+/**
+ * Claude, com cache das instruções e ferramentas executadas em paralelo.
+ * `client` só é passado nos testes.
+ */
+export function anthropicAdapter(
+  env: AnthropicEnv,
+  client?: Client,
+): LlmAdapter {
   return async (request) => {
-    if (!env.anthropicKey)
+    if (!env.anthropicKey && !client)
       throw new LlmError(
         503,
         "A IA não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY.",
       );
-    const client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2 });
+    const api: Client =
+      client ?? new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2 });
     const meter = newMeter(env.model);
     const tools: Anthropic.Beta.BetaToolUnion[] = request.tools.map((t) => ({
       name: t.name,
@@ -78,12 +91,15 @@ export function anthropicAdapter(env: AnthropicEnv): LlmAdapter {
       (m) => ({ role: m.role, content: m.content }),
     );
     const maxRounds = request.maxRounds ?? 6;
+    // Uma resposta sem texto ganha uma segunda chance (uma só).
+    let nudged = false;
     for (let round = 0; ; round++) {
       const last = round >= maxRounds;
-      const stream = client.beta.messages.stream(
+      const stream = api.beta.messages.stream(
         {
           model: env.model,
-          max_tokens: 16000,
+          // Espaço para raciocinar sobre muitos trechos e ainda responder.
+          max_tokens: 32000,
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default",
           // O resumo do raciocínio aparece para a pessoa enquanto a IA trabalha.
@@ -154,8 +170,30 @@ export function anthropicAdapter(env: AnthropicEnv): LlmAdapter {
         .map((b) => b.text)
         .join("")
         .trim();
-      if (!text)
-        throw new LlmError(502, "A IA não devolveu resposta. Tente de novo.");
+      if (!text) {
+        // Terminou só raciocinando (ou sem espaço): pede a resposta com o
+        // que já encontrou, sem novas ferramentas.
+        if (!nudged && message.stop_reason !== "stop_sequence") {
+          nudged = true;
+          request.onEvent?.({ type: "round_end", tools: 0 });
+          // A vez sem texto não volta (só raciocínio): vai só o pedido.
+          messages.push({ role: "user", content: ANSWER_NUDGE });
+          round = Math.max(round, maxRounds - 1);
+          continue;
+        }
+        const kinds = message.content.map((b) => b.type).join(", ") || "nada";
+        console.error("IA sem resposta", {
+          model: message.model,
+          stop_reason: message.stop_reason,
+          blocks: kinds,
+          round,
+          usage: message.usage,
+        });
+        throw new LlmError(
+          502,
+          `A IA não devolveu resposta (motivo: ${message.stop_reason ?? "desconhecido"}; veio: ${kinds}). Tente de novo.`,
+        );
+      }
       return {
         text:
           message.stop_reason === "max_tokens"

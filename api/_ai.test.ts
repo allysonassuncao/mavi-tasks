@@ -8,7 +8,12 @@ import {
   type AiStreamEvent,
 } from "./_ai";
 import { openAiEmbedder, vectorLiteral } from "./_ai-embeddings";
-import type { AgentRequest, LlmAdapter } from "./_ai-llm";
+import {
+  ANSWER_NUDGE,
+  anthropicAdapter,
+  type AgentRequest,
+  type LlmAdapter,
+} from "./_ai-llm";
 import { newMeter } from "./_social-leads";
 
 const company = "00000000-0000-4000-8000-000000000001";
@@ -603,3 +608,113 @@ describe("pergunta em tempo real (fase 2)", () => {
 });
 
 type ChatTurnLike = { role: "user" | "assistant"; content: string };
+
+describe("adaptador da Claude", () => {
+  /** Cliente falso: cada chamada devolve a próxima mensagem da lista. */
+  function fakeClient(replies: Record<string, unknown>[]) {
+    const requests: any[] = [];
+    const client = {
+      beta: {
+        messages: {
+          stream: (params: any) => {
+            requests.push(JSON.parse(JSON.stringify(params)));
+            const reply = replies[requests.length - 1];
+            return {
+              on: () => undefined,
+              finalMessage: async () => ({
+                model: "claude-opus-5",
+                usage: { input_tokens: 10, output_tokens: 5 },
+                ...reply,
+              }),
+            };
+          },
+        },
+      },
+    };
+    return { client: client as any, requests };
+  }
+  const base = {
+    instructions: "i",
+    context: "c",
+    messages: [{ role: "user" as const, content: "Qual a verba?" }],
+    tools: [],
+    execute: async () => "[S1] trecho",
+  };
+
+  it("terminou só raciocinando: pede a resposta uma vez, sem ferramentas", async () => {
+    const { client, requests } = fakeClient([
+      {
+        stop_reason: "end_turn",
+        content: [{ type: "thinking", thinking: "", signature: "x" }],
+      },
+      {
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "A verba é 3 mil [S1]." }],
+      },
+    ]);
+    const events: string[] = [];
+    const out = await anthropicAdapter(
+      { anthropicKey: "", model: "claude-opus-5" },
+      client,
+    )({
+      ...base,
+      onEvent: (e) => events.push(e.type),
+    });
+    expect(out.text).toBe("A verba é 3 mil [S1].");
+    expect(requests).toHaveLength(2);
+    expect(requests[1].tool_choice).toEqual({ type: "none" });
+    expect(requests[1].messages.at(-1)).toEqual({
+      role: "user",
+      content: ANSWER_NUDGE,
+    });
+    expect(requests[0].max_tokens).toBe(32000);
+    expect(events).toEqual(["round_end"]);
+  });
+
+  it("sem texto de novo: erro com o motivo", async () => {
+    const { client } = fakeClient([
+      { stop_reason: "max_tokens", content: [] },
+      {
+        stop_reason: "max_tokens",
+        content: [{ type: "thinking", thinking: "", signature: "x" }],
+      },
+    ]);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(
+      anthropicAdapter(
+        { anthropicKey: "", model: "claude-opus-5" },
+        client,
+      )(base),
+    ).rejects.toThrow(
+      "A IA não devolveu resposta (motivo: max_tokens; veio: thinking). Tente de novo.",
+    );
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("ferramentas: executa em paralelo e devolve os resultados", async () => {
+    const { client, requests } = fakeClient([
+      {
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "a",
+            name: "search_knowledge",
+            input: { query: "verba" },
+          },
+          { type: "tool_use", id: "b", name: "list_tasks", input: {} },
+        ],
+      },
+      { stop_reason: "end_turn", content: [{ type: "text", text: "Pronto." }] },
+    ]);
+    const out = await anthropicAdapter(
+      { anthropicKey: "", model: "claude-opus-5" },
+      client,
+    )(base);
+    expect(out.text).toBe("Pronto.");
+    expect(
+      requests[1].messages.at(-1).content.map((r: any) => r.tool_use_id),
+    ).toEqual(["a", "b"]);
+  });
+});

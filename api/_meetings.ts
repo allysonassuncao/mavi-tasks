@@ -195,7 +195,7 @@ export async function claudeAsk(
   const client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2 });
   const stream = client.beta.messages.stream({
     model: env.model,
-    max_tokens: 16000,
+    max_tokens: 32000,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     thinking: { type: "adaptive", display: "summarized" },
@@ -228,8 +228,19 @@ export async function claudeAsk(
     .map((b) => b.text)
     .join("")
     .trim();
-  if (!text)
-    throw new MeetingsError(502, "A IA não devolveu resposta. Tente de novo.");
+  if (!text) {
+    const kinds = message.content.map((b) => b.type).join(", ") || "nada";
+    console.error("IA sem resposta (reunião)", {
+      model: message.model,
+      stop_reason: message.stop_reason,
+      blocks: kinds,
+      usage: message.usage,
+    });
+    throw new MeetingsError(
+      502,
+      `A IA não devolveu resposta (motivo: ${message.stop_reason ?? "desconhecido"}; veio: ${kinds}). Tente de novo.`,
+    );
+  }
   if (message.stop_reason === "max_tokens")
     return `${text}\n\n(A resposta foi cortada por ser longa demais.)`;
   return text;
