@@ -12,6 +12,7 @@ import {
   pageUrl,
   companySlug,
   safeReturnPath,
+  oauthConsentReturn,
   loginDestination,
   resolvePage,
   type Page,
@@ -558,12 +559,12 @@ export default function App() {
     if (!demo && !session && !isLogin) {
       navigate(loginDestination(location), true);
     } else if ((demo || session) && isLogin) {
-      navigate(
-        safeReturnPath(
-          new URLSearchParams(window.location.search).get("retorno"),
-        ),
-        true,
+      const retorno = new URLSearchParams(window.location.search).get(
+        "retorno",
       );
+      const consent = session ? oauthConsentReturn(retorno) : null;
+      if (consent) window.location.replace(consent);
+      else navigate(safeReturnPath(retorno), true);
     }
   }, [authReady, demo, session, isLogin, location, needsPassword]);
   useEffect(() => {
@@ -3199,6 +3200,13 @@ export default function App() {
                                             p_company: company,
                                             p_user: m.user_id,
                                             p_hidden: hidden,
+                                          })
+                                        }
+                                        saveMcp={(access) =>
+                                          mutate("set_member_mcp", {
+                                            p_company: company,
+                                            p_user: m.user_id,
+                                            p_access: access,
                                           })
                                         }
                                       />

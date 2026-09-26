@@ -47,7 +47,9 @@ function gcsDevPlugin() {
         }
         if (
           req.url?.startsWith("/api/drive") ||
-          req.url?.startsWith("/api/ai")
+          req.url?.startsWith("/api/ai") ||
+          req.url?.startsWith("/api/mcp") ||
+          req.url?.startsWith("/.well-known/oauth-protected-resource")
         ) {
           // Same handler as the Vercel function (api/drive.ts); /api/ai is
           // rewritten to it on Vercel too.

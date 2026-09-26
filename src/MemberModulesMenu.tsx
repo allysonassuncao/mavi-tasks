@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { LayoutGrid } from "lucide-react";
+import { LayoutGrid, PlugZap } from "lucide-react";
 import { Checkbox } from "./ui";
 import type { Member } from "./types";
 import { ADMIN_PAGES, MODULES, roleAllows } from "./modules";
@@ -19,10 +19,13 @@ const sameList = (a: readonly string[], b: readonly string[]) =>
 export function MemberModulesMenu({
   member,
   save,
+  saveMcp,
 }: {
   member: Member;
   /** Saves the person's hidden modules. */
   save: (hidden: string[]) => Promise<unknown>;
+  /** Liga ou desliga a IA externa (MCP) da pessoa (set_member_mcp). */
+  saveMcp?: (access: "default" | "on" | "off") => Promise<unknown>;
 }) {
   const saved = member.hidden_pages ?? [];
   const [hidden, setHidden] = useState<string[]>(saved);
@@ -78,6 +81,35 @@ export function MemberModulesMenu({
     pending.current = next;
     clearTimeout(timer.current);
     timer.current = setTimeout(() => void flush(), SAVE_DELAY);
+  }
+
+  const leader = member.role === "admin" || member.role === "manager";
+  const mcpSaved = member.mcp_access ?? "default";
+  const [mcp, setMcp] = useState(mcpSaved);
+  const [mcpBusy, setMcpBusy] = useState(false);
+  useEffect(() => {
+    if (!mcpBusy) setMcp(mcpSaved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mcpSaved]);
+  const mcpOn = mcp === "on" || (mcp === "default" && leader);
+  async function toggleMcp(on: boolean) {
+    if (!saveMcp) return;
+    // Ligado volta ao padrão para quem já o tem pelo perfil.
+    const next = on ? (leader ? "default" : "on") : "off";
+    const previous = mcp;
+    setMcp(next);
+    setMcpBusy(true);
+    setError("");
+    try {
+      await saveMcp(next);
+      setStatus("saved");
+    } catch (err) {
+      setMcp(previous);
+      setError((err as Error).message);
+      setStatus("error");
+    } finally {
+      setMcpBusy(false);
+    }
   }
 
   const allowed = MODULES.filter((m) => roleAllows(m.id, member.role));
@@ -161,6 +193,22 @@ export function MemberModulesMenu({
               );
             })}
           </div>
+          {saveMcp && (
+            <label
+              className="checkbox-label member-modules-option member-modules-mcp"
+              title="Usar o MAVI no Claude, no ChatGPT e em outros apps de IA, só para consultar"
+            >
+              <Checkbox
+                checked={mcpOn}
+                disabled={mcpBusy}
+                onCheckedChange={(on) => void toggleMcp(on === true)}
+              />
+              <span>
+                <PlugZap size={13} aria-hidden="true" /> IA externa (MCP)
+              </span>
+              {mcp === "default" && <small>padrão</small>}
+            </label>
+          )}
           <div className="member-modules-foot">
             <button
               type="button"

@@ -185,7 +185,7 @@ function conversation(question: unknown, history: unknown): ChatTurn[] {
 }
 
 /** O que o modelo precisa saber sobre quem pergunta e onde. */
-async function buildContext(
+export async function buildContext(
   env: AiEnv,
   deps: AiDeps,
   auth: string,

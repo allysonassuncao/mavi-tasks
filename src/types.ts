@@ -25,6 +25,8 @@ export interface Member {
   avatar_url?: string | null;
   /** Modules an administrator hid from the person (src/modules.ts). */
   hidden_pages?: string[];
+  /** IA externa (MCP): 'default' libera para administradores e gestores. */
+  mcp_access?: "default" | "on" | "off";
 }
 export interface Client {
   id: string;

@@ -15715,3 +15715,243 @@ label .sl-money .ui-input,
     align-items: flex-start;
   }
 }
+
+/* IA do MAVI · tela de permissão do OAuth (/oauth/consent) */
+.oauth-card {
+  max-width: 480px;
+}
+.oauth-app {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.oauth-app > img,
+.oauth-app > svg {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  object-fit: contain;
+}
+.oauth-app > svg {
+  padding: 11px;
+  background: #eef6e2;
+  color: #4d7a1d;
+}
+.oauth-app small {
+  display: block;
+  margin-bottom: 4px;
+}
+.oauth-switch {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #4d7a1d;
+  font-size: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.oauth-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 0;
+  padding: 14px 16px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fafbf8;
+  font-size: 0.84rem;
+  color: var(--ink);
+}
+.oauth-scope li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  line-height: 1.4;
+}
+.oauth-scope svg {
+  flex: none;
+  margin-top: 1px;
+  color: #6b8a4a;
+}
+.oauth-warning {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fdf4e7;
+  color: #8a5a17;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.oauth-warning svg {
+  flex: none;
+  margin-top: 1px;
+}
+.oauth-uri {
+  text-align: center;
+  letter-spacing: 0.4px !important;
+}
+
+/* "Meu perfil" › Apps de IA conectados (servidor MCP) */
+.connected-apps {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 24px;
+}
+.connected-apps > :not(.panel-heading) {
+  margin: 0 24px;
+}
+.connected-apps .panel-heading {
+  padding-bottom: 0;
+}
+.connected-apps .panel-heading p {
+  max-width: 640px;
+  line-height: 1.5;
+}
+.connected-note {
+  font-size: 0.8rem;
+  color: #7d8a85;
+}
+.connected-url {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fafbf8;
+}
+.connected-url > span {
+  font-size: 0.72rem;
+  color: #97a19d;
+}
+.connected-url code {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+.connected-how {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.connected-how ol {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.connected-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 10px;
+  background: #f0f3eb;
+}
+.connected-tabs button {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font-size: 0.8rem;
+  color: #5d6b58;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.connected-tabs button.active {
+  background: #fff;
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px #12220f1a;
+}
+.connected-list h3 {
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  color: var(--ink);
+}
+.connected-list ul {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.connected-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+.connected-list li + li {
+  border-top: 1px solid var(--border);
+}
+.connected-list li > img,
+.connected-list li > svg {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+.connected-list li > svg {
+  padding: 7px;
+  background: #eef6e2;
+  color: #4d7a1d;
+}
+.connected-list li > div {
+  display: flex;
+  flex: 1 1 140px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.connected-list strong {
+  font-size: 0.86rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.connected-list small {
+  font-size: 0.74rem;
+  color: #97a19d;
+}
+@media (max-width: 560px) {
+  .connected-apps > :not(.panel-heading) {
+    margin: 0 16px;
+  }
+  .connected-list li {
+    flex-wrap: wrap;
+  }
+  .connected-list li .btn {
+    margin-left: auto;
+  }
+  .connected-url > span {
+    flex-basis: 100%;
+  }
+}
+.member-modules-mcp {
+  margin-top: 2px;
+  border-top: 1px solid #eef1ed;
+  border-radius: 0;
+  padding-top: 10px;
+}
+.member-modules-mcp > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

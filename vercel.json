@@ -22,6 +22,18 @@
       "destination": "/api/drive"
     },
     {
+      "source": "/api/mcp",
+      "destination": "/api/drive?mcp=1"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource/:path*",
+      "destination": "/api/drive?wk=1"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource",
+      "destination": "/api/drive?wk=1"
+    },
+    {
       "source": "/((?!assets/|icons/|favicon.svg|manifest.webmanifest|sw.js).*)",
       "destination": "/index.html"
     }

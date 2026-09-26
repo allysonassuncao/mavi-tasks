@@ -138,6 +138,11 @@ export function safeReturnPath(value: string | null) {
     if (!allowed.has(key)) url.searchParams.delete(key);
   return url.pathname + url.search;
 }
+/** Depois do login, volta à tela de permissão do OAuth (fora do app). */
+export function oauthConsentReturn(value: string | null) {
+  const m = value?.match(/^\/oauth\/consent\?authorization_id=([\w-]{1,200})$/);
+  return m ? `/oauth/consent?authorization_id=${m[1]}` : null;
+}
 export function loginDestination(current: string) {
   const next = safeReturnPath(current);
   return next === "/" || next === pagePaths.overview

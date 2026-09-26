@@ -10,6 +10,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { Avatar } from "./components";
+import { ConnectedApps } from "./ConnectedApps";
 import { Button, Input } from "./ui";
 import type { Snapshot } from "./types";
 import { formatBytes } from "./drive";
@@ -362,6 +363,7 @@ export function ProfilePage({
           </section>
         )}
       </div>
+      {!demo && <ConnectedApps notify={notify} />}
     </div>
   );
 }

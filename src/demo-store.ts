@@ -324,6 +324,19 @@ export class DemoStore {
         target.hidden_pages = hidden;
         break;
       }
+      case "set_member_mcp": {
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        const target = this.data.members.find((m) => m.user_id === a.p_user);
+        if (role !== "admin")
+          throw Error("Somente administradores liberam o MCP para cada pessoa.");
+        if (!target) throw Error("Usuário não encontrado na empresa");
+        if (!["default", "on", "off"].includes(a.p_access))
+          throw Error("Opção inválida");
+        target.mcp_access = a.p_access;
+        break;
+      }
       case "update_member": {
         const role = this.data.members.find(
           (m) => m.user_id === demoUser,

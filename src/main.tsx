@@ -31,6 +31,11 @@ const PublicSocialLeads = lazy(() =>
 const approvalLink = window.location.pathname.match(
   /^\/aprovacao\/([0-9a-f]{64})\/?$/,
 );
+// IA do MAVI: a tela de permissão do OAuth (Claude, ChatGPT e outros apps MCP).
+const OAuthConsent = lazy(() =>
+  import("./OAuthConsent").then((m) => ({ default: m.OAuthConsent })),
+);
+const oauthConsent = /^\/oauth\/consent\/?$/.test(window.location.pathname);
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     {publicFile ? (
@@ -44,6 +49,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     ) : approvalLink ? (
       <Suspense fallback={null}>
         <PublicSocialLeads token={approvalLink[1]} />
+      </Suspense>
+    ) : oauthConsent ? (
+      <Suspense fallback={null}>
+        <OAuthConsent />
       </Suspense>
     ) : (
       <App />

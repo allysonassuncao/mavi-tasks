@@ -7,6 +7,7 @@ import {
   companySlug,
   safeReturnPath,
   loginDestination,
+  oauthConsentReturn,
   routeParts,
   taskUrl,
   taskIdFromPath,
@@ -106,4 +107,20 @@ it("abre Equipe e configurações na aba do endereço, ou em Pessoas", () => {
   for (const tab of SETTINGS_TABS) expect(settingsTab(tab)).toBe(tab);
   expect(settingsTab("")).toBe("config-pessoas");
   expect(settingsTab("qualquer-coisa")).toBe("config-pessoas");
+});
+
+it("volta à tela de permissão do OAuth depois do login, e a nada mais", () => {
+  expect(oauthConsentReturn("/oauth/consent?authorization_id=abc-123_X")).toBe(
+    "/oauth/consent?authorization_id=abc-123_X",
+  );
+  for (const bad of [
+    null,
+    "/visao-geral",
+    "/oauth/consent",
+    "/oauth/consent?authorization_id=a&redirect=https://mal.com",
+    "https://mal.com/oauth/consent?authorization_id=a",
+    "//mal.com/oauth/consent?authorization_id=a",
+    "/oauth/consent?authorization_id=a%2F..",
+  ])
+    expect(oauthConsentReturn(bad)).toBeNull();
 });
