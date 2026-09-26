@@ -119,6 +119,200 @@ export interface SlBriefing {
   version: number;
   updated_at: string;
   updated_by?: string | null;
+  /** Files in the client's Drive (migration 20261015090000). */
+  media?: BriefingMedia;
+}
+/** Briefing fields that take files as well as text. */
+export type MediaKey = "socialProof" | "brandLogo" | "brandVisualElements";
+export interface MediaFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+}
+export type BriefingMedia = Partial<Record<MediaKey, MediaFile[]>>;
+/** What each media field accepts (the file input's accept). */
+export const mediaAccept: Record<MediaKey, string> = {
+  socialProof: "image/*,video/*,audio/*",
+  brandLogo: "image/*,video/*",
+  brandVisualElements: "image/*,video/*",
+};
+export function mediaAllowed(key: MediaKey, type: string) {
+  const kind = type.split("/")[0];
+  return key === "socialProof"
+    ? ["image", "video", "audio"].includes(kind)
+    : ["image", "video"].includes(kind);
+}
+/** One call to the AI and what it cost (social_leads_ai_usage). */
+export interface SlUsage {
+  kind: "generate" | "adjust" | "colors";
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number | string;
+  created_at: string;
+  created_by: string | null;
+}
+/** A plan's AI cost: the total, and the generations and adjustments in it. */
+export function usageSummary(rows: SlUsage[]) {
+  const sum = (list: SlUsage[]) =>
+    list.reduce((t, r) => t + Number(r.cost_usd || 0), 0);
+  const generate = rows.filter((r) => r.kind === "generate");
+  const adjust = rows.filter((r) => r.kind === "adjust");
+  return {
+    total: sum(rows),
+    generations: generate.length,
+    generateCost: sum(generate),
+    adjustments: adjust.length,
+    adjustCost: sum(adjust),
+    tokens: rows.reduce(
+      (t, r) =>
+        t +
+        r.input_tokens +
+        r.output_tokens +
+        r.cache_read_tokens +
+        r.cache_write_tokens,
+      0,
+    ),
+  };
+}
+/** "US$ 0,42" (and "menos de US$ 0,01" for a tiny, non-zero cost). */
+export function formatUsd(value: number) {
+  if (value > 0 && value < 0.005) return "menos de US$ 0,01";
+  return `US$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// ------------------------------------------------------------ masks
+/** "(11) 91234-5678" (mobile, with the 9) or "(11) 3456-7890" while typing. */
+export function formatPhoneBR(value: string) {
+  let d = value.replace(/\D/g, "");
+  // A pasted +55 goes away.
+  if (d.length > 11 && d.startsWith("55")) d = d.slice(2);
+  d = d.slice(0, 11);
+  if (!d) return "";
+  if (d.length <= 2) return `(${d}`;
+  const ddd = d.slice(0, 2);
+  const rest = d.slice(2);
+  if (rest.length <= 4) return `(${ddd}) ${rest}`;
+  // 10 digits: landline; 11: mobile with the 9.
+  const cut = rest.length === 9 ? 5 : 4;
+  return `(${ddd}) ${rest.slice(0, cut)}-${rest.slice(cut)}`;
+}
+export function phoneComplete(value: string) {
+  const d = value.replace(/\D/g, "");
+  return d.length === 11 && d[2] === "9";
+}
+
+export const currencies = [
+  { code: "BRL", label: "Real" },
+  { code: "USD", label: "Dólar" },
+  { code: "EUR", label: "Euro" },
+  { code: "GBP", label: "Libra" },
+  { code: "CAD", label: "Dólar CA" },
+  { code: "AUD", label: "Dólar AU" },
+  { code: "CHF", label: "Franco" },
+  { code: "JPY", label: "Iene" },
+  { code: "ARS", label: "Peso AR" },
+  { code: "CLP", label: "Peso CL" },
+  { code: "MXN", label: "Peso MX" },
+  { code: "PYG", label: "Guarani" },
+  { code: "UYU", label: "Peso UY" },
+] as const;
+export type CurrencyCode = (typeof currencies)[number]["code"];
+const moneyFormat = (code: string) =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: code });
+export const currencyDigits = (code: string) =>
+  moneyFormat(code).resolvedOptions().maximumFractionDigits ?? 2;
+/** The currency's symbol as the formatted value shows it ("R$", "US$", "€"…). */
+export function currencySymbol(code: string) {
+  return (
+    moneyFormat(code)
+      .formatToParts(0)
+      .find((p) => p.type === "currency")?.value ?? code
+  );
+}
+/** "R$ 1.200,00", "US$ 1.200,00", "€ 1.200,00". */
+export function formatMoney(amount: number, code: string) {
+  return moneyFormat(code)
+    .format(amount)
+    .replace(/\u00a0/g, " ");
+}
+/** Typing digits fills from the cents (like a card machine). */
+export function moneyFromDigits(digits: string, code: string) {
+  const d = digits
+    .replace(/\D/g, "")
+    .replace(/^0+(?=\d)/, "")
+    .slice(0, 13);
+  if (!d) return null;
+  return Number(d) / 10 ** currencyDigits(code);
+}
+/**
+ * A stored value read back: its currency and amount, or `legacy` when the
+ * text isn't one amount (e.g. "R$150,00 á R$700,00", from before the mask).
+ */
+export function parseMoney(text: string | undefined): {
+  code: CurrencyCode;
+  amount: number | null;
+  legacy: string | null;
+} {
+  const t = (text ?? "").trim();
+  if (!t) return { code: "BRL", amount: null, legacy: null };
+  // Longest symbols first ("US$" before "$").
+  const found = [...currencies]
+    .map((c) => ({ code: c.code, symbol: currencySymbol(c.code) }))
+    .sort((a, b) => b.symbol.length - a.symbol.length)
+    .find((c) => t.startsWith(c.symbol) || t.toUpperCase().startsWith(c.code));
+  const code: CurrencyCode = found?.code ?? "BRL";
+  const rest = found
+    ? t
+        .slice(
+          t.toUpperCase().startsWith(found.code)
+            ? found.code.length
+            : found.symbol.length,
+        )
+        .trim()
+    : t;
+  const numbers = rest.match(/\d[\d.,]*/g) ?? [];
+  if (numbers.length !== 1 || /[a-zá-ú]/i.test(rest.replace(numbers[0], "")))
+    return { code, amount: null, legacy: t };
+  const n = numbers[0];
+  // "1.200,50" and "500,00" (comma decimals); "1200" or "1.200" (thousands).
+  const amount = n.includes(",")
+    ? Number(n.replace(/\./g, "").replace(",", "."))
+    : Number(n.replace(/[.,]/g, ""));
+  return Number.isFinite(amount)
+    ? { code, amount, legacy: null }
+    : { code, amount: null, legacy: t };
+}
+
+/** A brand colour as the field edits it; hex may be missing ("azul"). */
+export type BrandColor = { hex: string | null; name: string };
+const HEX_IN = /#([0-9a-f]{6}|[0-9a-f]{3})\b/i;
+const fullHex = (h: string) => {
+  const v = h.replace("#", "").toLowerCase();
+  return `#${v.length === 3 ? [...v].map((c) => c + c).join("") : v}`;
+};
+/** "azul-marinho #0b1d3a, verde-água #14b8a6" → the list (and back). */
+export function parseColors(text: string | undefined): BrandColor[] {
+  return (text ?? "")
+    .split(/[,;\n]+|\s+e\s+/i)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const m = part.match(HEX_IN);
+      return {
+        hex: m ? fullHex(m[0]) : null,
+        name: part.replace(HEX_IN, "").replace(/\s+/g, " ").trim(),
+      };
+    });
+}
+export function serializeColors(list: BrandColor[]) {
+  return list
+    .filter((c) => c.hex || c.name.trim())
+    .map((c) => [c.name.trim(), c.hex].filter(Boolean).join(" "))
+    .join(", ");
 }
 /** One client of the portfolio (social_leads_portfolio). */
 export interface PortfolioItem {
@@ -224,6 +418,12 @@ export interface BriefingField {
   placeholder?: string;
   long?: boolean;
   type?: "date" | "url";
+  /** A masked or richer control instead of plain text. */
+  kind?: "phone" | "money" | "colors";
+  /** Also takes files (kept in the client's Drive). */
+  media?: MediaKey;
+  /** What the file button says ("imagem, vídeo ou áudio"). */
+  mediaWhat?: string;
 }
 export interface BriefingStep {
   id: string;
@@ -247,7 +447,7 @@ export const briefingSteps: BriefingStep[] = [
         placeholder: "Ex.: Escola infantil",
       },
       { key: "contactName", label: "Contato no cliente" },
-      { key: "contactWhats", label: "WhatsApp do contato" },
+      { key: "contactWhats", label: "WhatsApp do contato", kind: "phone" },
       { key: "briefingDate", label: "Data do briefing", type: "date" },
     ],
   },
@@ -272,7 +472,7 @@ export const briefingSteps: BriefingStep[] = [
         label: "Oferta em destaque",
         help: "O que o anúncio do mês vai oferecer.",
       },
-      { key: "averageTicket", label: "Ticket médio" },
+      { key: "averageTicket", label: "Ticket médio", kind: "money" },
     ],
   },
   {
@@ -287,6 +487,8 @@ export const briefingSteps: BriefingStep[] = [
         label: "Prova social",
         help: "Depoimentos e casos reais. Sem isso, a IA não inventa nenhum.",
         long: true,
+        media: "socialProof",
+        mediaWhat: "imagem, vídeo ou áudio",
       },
       { key: "swotForcas", label: "Forças", long: true },
       { key: "swotFraquezas", label: "Fraquezas", long: true },
@@ -315,14 +517,22 @@ export const briefingSteps: BriefingStep[] = [
       {
         key: "brandColors",
         label: "Cores da marca",
-        help: "Obrigatório quando não há Instagram, Facebook nem site.",
-        placeholder: "Ex.: azul-marinho #0b1d3a, verde-água",
+        help: "Obrigatório quando não há Instagram, Facebook nem site. A IA busca no site ou Instagram informados.",
+        kind: "colors",
       },
-      { key: "brandLogo", label: "Logo", placeholder: "Onde está o arquivo" },
+      {
+        key: "brandLogo",
+        label: "Logo",
+        placeholder: "Observações sobre o logo (opcional)",
+        media: "brandLogo",
+        mediaWhat: "imagem ou vídeo",
+      },
       {
         key: "brandVisualElements",
         label: "Elementos visuais",
         placeholder: "Ex.: ícones, texturas, fotos da equipe",
+        media: "brandVisualElements",
+        mediaWhat: "imagem ou vídeo",
       },
     ],
   },
@@ -330,7 +540,7 @@ export const briefingSteps: BriefingStep[] = [
     id: "campanha",
     title: "Campanha",
     fields: [
-      { key: "mediaBudget", label: "Verba de mídia por mês" },
+      { key: "mediaBudget", label: "Verba de mídia por mês", kind: "money" },
       {
         key: "notes",
         label: "Restrições e observações",
@@ -398,8 +608,11 @@ export function briefingReadiness(
   fields: BriefingFields,
   objective: CampaignObjective | null,
   clientName = "",
+  media: BriefingMedia = {},
 ): Readiness {
-  const has = (k: BriefingKey) => !!fields[k]?.trim();
+  // A field with files counts as filled (e.g. the logo sent, no text).
+  const has = (k: BriefingKey) =>
+    !!fields[k]?.trim() || !!media[k as MediaKey]?.length;
   const byStep = briefingSteps.map((s) => ({
     id: s.id,
     filled:

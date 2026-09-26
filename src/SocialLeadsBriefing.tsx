@@ -14,13 +14,32 @@ import {
   briefingReadiness,
   briefingSteps,
   campaignObjectives,
+  mediaAccept,
+  mediaAllowed,
+  missingChannel,
+  parseColors,
+  serializeColors,
+  type BriefingField,
   type BriefingFields,
   type BriefingKey,
+  type BriefingMedia,
   type CampaignObjective,
+  type MediaFile,
+  type MediaKey,
   type PortfolioItem,
   type SlBriefing,
   type SlJob,
 } from "./social-leads";
+import {
+  ColorsInput,
+  MediaInput,
+  MoneyInput,
+  PhoneInput,
+  type ColorSearch,
+  type Uploading,
+} from "./SocialLeadsFields";
+
+const MAX_FILE = 500 * 1024 * 1024;
 
 type Person = Member & { squad: boolean };
 
@@ -64,6 +83,17 @@ export function BriefingWizard({
   const [responsible, setResponsible] = useState<string | null>(
     briefing?.responsible_id ?? null,
   );
+  const [media, setMedia] = useState<BriefingMedia>(
+    () => briefing?.media ?? {},
+  );
+  const [uploading, setUploading] = useState<
+    (Uploading & { field: MediaKey })[]
+  >([]);
+  const [colorSearch, setColorSearch] = useState<ColorSearch>({
+    state: "idle",
+  });
+  // The site/Instagram last searched, so leaving the field again doesn't repeat it.
+  const searched = useRef("");
   const [step, setStep] = useState(0);
   const [status, setStatus] = useState<
     | { kind: "idle" | "saving" | "saved" }
@@ -74,8 +104,8 @@ export function BriefingWizard({
   const dirty = useRef(false);
   const timer = useRef(0);
   const saving = useRef<Promise<void> | null>(null);
-  const latest = useRef({ fields, objective, responsible });
-  latest.current = { fields, objective, responsible };
+  const latest = useRef({ fields, objective, responsible, media });
+  latest.current = { fields, objective, responsible, media };
 
   // Someone else saved (live notice) and nothing is pending here: show it.
   useEffect(() => {
@@ -85,6 +115,7 @@ export function BriefingWizard({
     setFields(briefing.fields);
     setObjective(briefing.campaign_objective);
     setResponsible(briefing.responsible_id);
+    setMedia(briefing.media ?? {});
   }, [briefing]);
 
   const save = (): Promise<void> => {
@@ -93,7 +124,12 @@ export function BriefingWizard({
     const run = async () => {
       if (saving.current) await saving.current.catch(() => {});
       dirty.current = false;
-      const { fields: f, objective: o, responsible: r } = latest.current;
+      const {
+        fields: f,
+        objective: o,
+        responsible: r,
+        media: m,
+      } = latest.current;
       setStatus({ kind: "saving" });
       try {
         version.current = await backend.saveBriefing(
@@ -103,6 +139,7 @@ export function BriefingWizard({
           o,
           r,
           version.current,
+          m,
         );
         setStatus({ kind: "saved" });
         onSaved();
@@ -140,7 +177,113 @@ export function BriefingWizard({
     touch();
   };
 
-  const readiness = briefingReadiness(fields, objective, item.client_name);
+  // Files: straight to the client's Drive, then saved in the briefing.
+  const addFiles = async (key: MediaKey, list: File[]) => {
+    for (const file of list) {
+      if (!mediaAllowed(key, file.type)) {
+        notify(
+          `${file.name}: envie ${key === "socialProof" ? "imagem, vídeo ou áudio" : "imagem ou vídeo"}.`,
+        );
+        continue;
+      }
+      if (file.size > MAX_FILE) {
+        notify(`${file.name}: envie arquivos de até 500 MB.`);
+        continue;
+      }
+      const tag = `${Date.now()}-${file.name}`;
+      setUploading((u) => [
+        ...u,
+        { key: tag, field: key, name: file.name, progress: 0 },
+      ]);
+      try {
+        const sent = await backend.uploadMedia(
+          company,
+          item.contract_id,
+          file,
+          (progress) =>
+            setUploading((u) =>
+              u.map((x) => (x.key === tag ? { ...x, progress } : x)),
+            ),
+        );
+        setMedia((m) => {
+          const next = { ...m, [key]: [...(m[key] ?? []), sent] };
+          latest.current = { ...latest.current, media: next };
+          return next;
+        });
+        dirty.current = true;
+        await save().catch(() => {});
+      } catch (e) {
+        notify((e as Error).message);
+      } finally {
+        setUploading((u) => u.filter((x) => x.key !== tag));
+      }
+    }
+  };
+  const removeFile = async (key: MediaKey, file: MediaFile) => {
+    setMedia((m) => {
+      const next = {
+        ...m,
+        [key]: (m[key] ?? []).filter((f) => f.id !== file.id),
+      };
+      latest.current = { ...latest.current, media: next };
+      return next;
+    });
+    dirty.current = true;
+    try {
+      await save();
+      await backend.deleteMedia(file);
+    } catch {
+      notify(
+        `${file.name} saiu do briefing, mas continua no Drive do cliente.`,
+      );
+    }
+  };
+
+  // Brand colours: the AI reads the site and/or Instagram. Runs by itself when
+  // one of them is filled in and no colour was written yet.
+  const channels = () => ({
+    website: missingChannel(latest.current.fields.websiteUrl)
+      ? undefined
+      : latest.current.fields.websiteUrl,
+    instagram: missingChannel(latest.current.fields.igHandle)
+      ? undefined
+      : latest.current.fields.igHandle,
+  });
+  const searchColors = async (auto: boolean) => {
+    const from = channels();
+    const key = `${from.website ?? ""}|${from.instagram ?? ""}`;
+    if (!from.website && !from.instagram) return;
+    if (
+      auto &&
+      (searched.current === key ||
+        parseColors(latest.current.fields.brandColors).length)
+    )
+      return;
+    searched.current = key;
+    setColorSearch({ state: "searching" });
+    try {
+      const r = await backend.brandColors(company, item.contract_id, from);
+      const before = latest.current.fields.brandColors ?? "";
+      const empty = !parseColors(before).length;
+      if (empty) set("brandColors", serializeColors(r.colors));
+      setColorSearch({
+        state: "done",
+        found: r.colors,
+        note: r.note,
+        cost: r.cost_usd,
+        applied: empty ? before : null,
+      });
+    } catch (e) {
+      setColorSearch({ state: "error", error: (e as Error).message });
+    }
+  };
+
+  const readiness = briefingReadiness(
+    fields,
+    objective,
+    item.client_name,
+    media,
+  );
   const running = job?.status === "running";
   const current = briefingSteps[step];
   const last = step === briefingSteps.length - 1;
@@ -232,29 +375,38 @@ export function BriefingWizard({
             </label>
           )}
           {current.fields.map((f) => (
-            <label key={f.key} className={f.long ? "sl-wide" : ""}>
-              <span className="sl-label">
-                {f.label}
-                {f.help && <em>{f.help}</em>}
-              </span>
-              {f.long ? (
-                <Textarea
-                  rows={3}
-                  value={fields[f.key] ?? ""}
-                  placeholder={f.placeholder}
-                  maxLength={8000}
-                  onChange={(e) => set(f.key, e.target.value)}
-                />
-              ) : (
-                <Input
-                  type={f.type === "date" ? "date" : "text"}
-                  value={fields[f.key] ?? ""}
-                  placeholder={f.placeholder}
-                  maxLength={8000}
-                  onChange={(e) => set(f.key, e.target.value)}
-                />
-              )}
-            </label>
+            <Field
+              key={f.key}
+              field={f}
+              value={fields[f.key] ?? ""}
+              onChange={(v) => set(f.key, v)}
+              disabled={!canWrite}
+              onBlur={
+                f.key === "igHandle" || f.key === "websiteUrl"
+                  ? () => void searchColors(true)
+                  : undefined
+              }
+              colors={
+                f.kind === "colors"
+                  ? {
+                      canSearch: !!(channels().website || channels().instagram),
+                      search: colorSearch,
+                      onSearch: () => void searchColors(false),
+                    }
+                  : undefined
+              }
+              files={
+                f.media
+                  ? {
+                      list: media[f.media] ?? [],
+                      uploading: uploading.filter((u) => u.field === f.media),
+                      onAdd: (list) => void addFiles(f.media!, list),
+                      onRemove: (file) => void removeFile(f.media!, file),
+                      urlOf: (file) => backend.mediaUrl(file),
+                    }
+                  : undefined
+              }
+            />
           ))}
           {current.id === "campanha" && (
             <div
@@ -357,6 +509,123 @@ export function BriefingWizard({
         )}
       </aside>
     </div>
+  );
+}
+
+/** One briefing field: text, or its mask, colours or files. */
+function Field({
+  field: f,
+  value,
+  onChange,
+  disabled,
+  onBlur,
+  colors,
+  files,
+}: {
+  field: BriefingField;
+  value: string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+  onBlur?: () => void;
+  colors?: {
+    canSearch: boolean;
+    search: ColorSearch;
+    onSearch: () => void;
+  };
+  files?: {
+    list: MediaFile[];
+    uploading: Uploading[];
+    onAdd: (files: File[]) => void;
+    onRemove: (file: MediaFile) => void;
+    urlOf: (file: MediaFile) => Promise<string>;
+  };
+}) {
+  const title = (
+    <span className="sl-label">
+      {f.label}
+      {f.help && <em>{f.help}</em>}
+    </span>
+  );
+  // Several controls: a group, not a <label> (it would focus only the first).
+  if (f.kind === "colors" || f.media)
+    return (
+      <div
+        className={`sl-field${f.long || f.media || f.kind === "colors" ? " sl-wide" : ""}`}
+        role="group"
+        aria-label={f.label}
+      >
+        {title}
+        {f.kind === "colors" && colors ? (
+          <ColorsInput
+            value={value}
+            onChange={onChange}
+            disabled={disabled}
+            {...colors}
+          />
+        ) : f.long ? (
+          <Textarea
+            rows={3}
+            value={value}
+            placeholder={f.placeholder}
+            maxLength={8000}
+            aria-label={f.label}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        ) : (
+          <Input
+            type="text"
+            value={value}
+            placeholder={f.placeholder}
+            maxLength={8000}
+            aria-label={f.label}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        )}
+        {f.media && files && (
+          <MediaInput
+            files={files.list}
+            uploading={files.uploading}
+            accept={mediaAccept[f.media]}
+            what={f.mediaWhat ?? "arquivos"}
+            disabled={disabled}
+            onAdd={files.onAdd}
+            onRemove={files.onRemove}
+            urlOf={files.urlOf}
+          />
+        )}
+      </div>
+    );
+  return (
+    <label className={f.long ? "sl-wide" : ""}>
+      {title}
+      {f.kind === "phone" ? (
+        <PhoneInput value={value} onChange={onChange} disabled={disabled} />
+      ) : f.kind === "money" ? (
+        <MoneyInput
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          label={f.label}
+        />
+      ) : f.long ? (
+        <Textarea
+          rows={3}
+          value={value}
+          placeholder={f.placeholder}
+          maxLength={8000}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : (
+        <Input
+          type={f.type === "date" ? "date" : "text"}
+          value={value}
+          placeholder={f.placeholder}
+          maxLength={8000}
+          onBlur={onBlur}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </label>
   );
 }
 

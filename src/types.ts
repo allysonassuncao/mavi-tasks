@@ -109,14 +109,19 @@ export interface Task {
 /** A notice for one person, e.g. they were mentioned in a comment. */
 export interface AppNotification {
   id: string;
-  kind: "mention" | "assigned" | "reply";
-  task_id: string;
+  /** "social_leads": a plan the AI finished (or failed) writing. */
+  kind: "mention" | "assigned" | "reply" | "social_leads";
+  /** Null for notices that aren't about a task (they carry a link). */
+  task_id: string | null;
+  /** The task's title, or the notice's own title. */
   task_title: string;
   actor_id: string | null;
   actor_name: string | null;
   excerpt: string | null;
   read_at: string | null;
   created_at: string;
+  /** Where the notice opens, when it isn't a task. */
+  link?: string | null;
 }
 export interface TimeEntry {
   id: string;

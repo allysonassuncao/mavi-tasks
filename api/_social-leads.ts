@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { callRpc } from "./_drive.js";
+import { defaultLookup, gatherBrand, type Lookup } from "./_brand-colors.js";
 import {
   briefingReadiness,
   campaignObjectives,
@@ -21,6 +22,12 @@ import {
  * - "adjust" returns the partial update of the chat importer for one request
  *   of the team ("deixe o post 6 mais leve"); the page shows what changes
  *   and applies it like an import.
+ * - "colors" reads the client's site and/or Instagram (api/_brand-colors.ts)
+ *   and has Claude pick the brand palette from the real colours and images.
+ *
+ * Every call to Claude is metered (tokens and dollars, including failed
+ * attempts) and recorded in social_leads_ai_usage, so each plan shows what
+ * the AI cost.
  *
  * Every database call runs as the signed-in person (their token), so the
  * database functions decide who may do what.
@@ -66,7 +73,10 @@ export type Deps = {
     env: SocialLeadsEnv,
     request: ModelRequest,
     signal: AbortSignal,
+    meter: Meter,
   ) => Promise<string>;
+  /** DNS for the colour search (checks addresses are public). */
+  lookup?: Lookup;
   /** Keeps the work going after the response (Vercel's waitUntil). */
   background: (work: Promise<unknown>) => void;
 };
@@ -113,7 +123,96 @@ export type ModelRequest = {
   schema: Record<string, unknown>;
   /** Domains web_fetch may open (none: no web tools). */
   domains: string[];
+  /** Images shown before the text (the colour search). */
+  images?: { media_type: string; data: string }[];
+  effort?: "low" | "medium" | "high";
+  maxTokens?: number;
 };
+
+// ------------------------------------------------------------ cost
+/** US$ per million tokens (input, output), first-party API prices. */
+const PRICES: Record<string, [number, number]> = {
+  "claude-opus-5": [5, 25],
+  "claude-opus-5-5": [4, 20],
+  "claude-sonnet-5": [2, 10],
+  "claude-fable-5-1": [10, 50],
+  "claude-fable-5": [10, 50],
+  "claude-opus-4-8": [5, 25],
+  "claude-haiku-4-5": [1, 5],
+};
+export type Meter = {
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+};
+export const newMeter = (model = ""): Meter => ({
+  model,
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  cost: 0,
+});
+/** Adds one response's usage (cache writes cost 1.25x, reads 0.1x the input). */
+export function addUsage(
+  meter: Meter,
+  model: string,
+  usage: {
+    input_tokens?: number | null;
+    output_tokens?: number | null;
+    cache_read_input_tokens?: number | null;
+    cache_creation_input_tokens?: number | null;
+  },
+) {
+  const [inPrice, outPrice] = PRICES[model] ?? PRICES["claude-opus-5"];
+  const input = usage.input_tokens ?? 0;
+  const output = usage.output_tokens ?? 0;
+  const read = usage.cache_read_input_tokens ?? 0;
+  const write = usage.cache_creation_input_tokens ?? 0;
+  meter.model = model;
+  meter.input += input;
+  meter.output += output;
+  meter.cacheRead += read;
+  meter.cacheWrite += write;
+  meter.cost +=
+    (input * inPrice +
+      write * inPrice * 1.25 +
+      read * inPrice * 0.1 +
+      output * outPrice) /
+    1e6;
+}
+/** Records what the AI cost; never blocks the answer. */
+async function logUsage(
+  env: SocialLeadsEnv,
+  deps: Deps,
+  auth: string,
+  at: {
+    company: string;
+    contract: string;
+    plan?: string | null;
+    job?: string | null;
+  },
+  kind: "generate" | "adjust" | "colors",
+  m: Meter,
+) {
+  if (!m.input && !m.output && !m.cacheRead && !m.cacheWrite) return;
+  await rpc(env, deps, auth, "social_leads_log_usage", {
+    p_company: at.company,
+    p_contract: at.contract,
+    p_plan: at.plan ?? null,
+    p_job: at.job ?? null,
+    p_kind: kind,
+    p_model: m.model || env.model,
+    p_input: m.input,
+    p_output: m.output,
+    p_cache_read: m.cacheRead,
+    p_cache_write: m.cacheWrite,
+    p_cost: Math.round(m.cost * 1e6) / 1e6,
+  }).catch(() => {});
+}
 
 const str = { type: "string" } as const;
 const obj = (properties: Record<string, unknown>) => ({
@@ -190,8 +289,14 @@ export const ADJUST_SCHEMA = obj({
   }),
 });
 
+const MEDIA_LABELS: Record<string, string> = {
+  socialProof: "Prova social",
+  brandLogo: "Logo",
+  brandVisualElements: "Elementos visuais",
+};
 type Context = {
   job: string;
+  media?: Record<string, { name: string; type: string }[]>;
   client_name: string;
   briefing: BriefingFields;
   campaign_objective: CampaignObjective | null;
@@ -226,8 +331,19 @@ export function planRequest(
     campaignObjective: ctx.campaign_objective,
     accountManager: ctx.responsible,
   };
+  const media = Object.entries(ctx.media ?? {})
+    .filter(([, list]) => list?.length)
+    .map(
+      ([key, list]) =>
+        `${MEDIA_LABELS[key] ?? key}: ${list.map((f) => f.name).join(", ")}`,
+    );
   const parts = [
     `Briefing do cliente (JSON):\n${JSON.stringify(briefing, null, 2)}`,
+    ...(media.length
+      ? [
+          `Arquivos anexados ao briefing (a equipe tem esses arquivos; cite-os na direção visual quando fizer sentido):\n${media.join("\n")}`,
+        ]
+      : []),
     `Objetivo da campanha: ${ctx.campaign_objective ? campaignObjectives[ctx.campaign_objective] : "não definido: escolha o mais adequado ao negócio e explique nos alertas"}.`,
   ];
   if (kind === "current" && ctx.previous) {
@@ -275,6 +391,7 @@ export async function claudeComplete(
   env: SocialLeadsEnv,
   request: ModelRequest,
   signal: AbortSignal,
+  meter: Meter,
 ): Promise<string> {
   const client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2 });
   const tools: Anthropic.Beta.BetaToolUnion[] = request.domains.length
@@ -289,7 +406,22 @@ export async function claudeComplete(
       ]
     : [];
   const messages: Anthropic.Beta.BetaMessageParam[] = [
-    { role: "user", content: request.user },
+    {
+      role: "user",
+      content: [
+        ...(request.images ?? []).map(
+          (i): Anthropic.Beta.BetaImageBlockParam => ({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: i.media_type as "image/png",
+              data: i.data,
+            },
+          }),
+        ),
+        { type: "text", text: request.user },
+      ],
+    },
   ];
   // Server tools may pause a long turn: send it back to continue.
   for (let round = 0; round < 4; round++) {
@@ -297,12 +429,12 @@ export async function claudeComplete(
       .stream(
         {
           model: env.model,
-          max_tokens: 64000,
+          max_tokens: request.maxTokens ?? 64000,
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default",
           thinking: { type: "adaptive" },
           output_config: {
-            effort: "high",
+            effort: request.effort ?? "high",
             format: { type: "json_schema", schema: request.schema },
           },
           system: [
@@ -318,6 +450,7 @@ export async function claudeComplete(
         { signal },
       )
       .finalMessage();
+    addUsage(meter, message.model, message.usage);
     if (message.stop_reason === "pause_turn") {
       messages.push({ role: "assistant", content: message.content });
       continue;
@@ -367,6 +500,13 @@ export function friendlyError(err: unknown): string {
 // ------------------------------------------------------------ actions
 export type SocialLeadsRequest =
   | {
+      action: "colors";
+      company: string;
+      contract: string;
+      website?: string | null;
+      instagram?: string | null;
+    }
+  | {
       action: "generate";
       company: string;
       contract: string;
@@ -406,6 +546,8 @@ export async function handleSocialLeads(
       return await generate(body, authorization, env, deps);
     if (body.action === "adjust")
       return await adjust(body, authorization, env, deps);
+    if (body.action === "colors")
+      return await colors(body, authorization, env, deps);
     return { status: 400, body: { error: "Ação desconhecida." } };
   } catch (err) {
     return {
@@ -471,6 +613,8 @@ async function run(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), env.deadlineMs);
   const request = planRequest(ctx, body.mode);
+  const meter = newMeter(env.model);
+  const at = { company: body.company, contract: body.contract, job: ctx.job };
   try {
     let lastError = "";
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -480,7 +624,7 @@ async function run(
             user: `${request.user}\n\nA resposta anterior foi recusada pela validação: ${lastError} Corrija e devolva o plano completo.`,
           }
         : request;
-      const text = await deps.complete(env, ask, controller.signal);
+      const text = await deps.complete(env, ask, controller.signal, meter);
       let content: unknown;
       try {
         content = JSON.parse(text);
@@ -508,6 +652,14 @@ async function run(
         },
       );
       if (saved.ok) {
+        await logUsage(
+          env,
+          deps,
+          auth,
+          { ...at, plan: saved.data.id },
+          "generate",
+          meter,
+        );
         await finish(env, deps, auth, ctx.job, saved.data.id, null);
         return;
       }
@@ -521,6 +673,15 @@ async function run(
       `O plano da IA não passou na validação: ${lastError}`,
     );
   } catch (err) {
+    // What the failed attempts cost still counts (on the plan being redone).
+    await logUsage(
+      env,
+      deps,
+      auth,
+      { ...at, plan: body.mode === "current" ? body.plan : null },
+      "generate",
+      meter,
+    );
     await finish(env, deps, auth, ctx.job, null, friendlyError(err));
   } finally {
     clearTimeout(timer);
@@ -566,8 +727,9 @@ async function adjust(
   };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), env.deadlineMs);
+  const meter = newMeter(env.model);
   try {
-    const text = await deps.complete(env, request, controller.signal);
+    const text = await deps.complete(env, request, controller.signal, meter);
     const parsed = JSON.parse(text) as {
       resumo: string;
       alteracoes: Record<string, unknown>;
@@ -586,9 +748,121 @@ async function adjust(
           resumo: parsed.resumo,
           alteracoes,
         },
+        cost_usd: meter.cost,
       },
     };
   } finally {
     clearTimeout(timer);
+    await logUsage(
+      env,
+      deps,
+      auth,
+      { company: body.company, contract: body.contract, plan: body.plan },
+      "adjust",
+      meter,
+    );
+  }
+}
+
+// ------------------------------------------------------------ brand colours
+export const COLORS_SCHEMA = obj({
+  colors: {
+    type: "array",
+    description: "De 1 a 6 cores da marca, da principal para a de apoio.",
+    items: obj({ hex: str, name: str }),
+  },
+  note: str,
+});
+
+async function colors(
+  body: Extract<SocialLeadsRequest, { action: "colors" }>,
+  auth: string,
+  env: SocialLeadsEnv,
+  deps: Deps,
+) {
+  if (!body.website?.trim() && !body.instagram?.trim())
+    return { status: 400, body: { error: "Informe o site ou o Instagram." } };
+  await rpc(env, deps, auth, "social_leads_check_write", {
+    p_company: body.company,
+    p_contract: body.contract,
+  });
+  const found = await gatherBrand(
+    { website: body.website, instagram: body.instagram },
+    { fetch: deps.fetch, lookup: deps.lookup ?? defaultLookup },
+  );
+  if (!found.colors.length && !found.images.length)
+    return {
+      status: 422,
+      body: {
+        error:
+          `Não consegui ler as cores. ${found.notes.join(" ")} Adicione as cores à mão.`.trim(),
+      },
+    };
+  const request: ModelRequest = {
+    system:
+      "Você identifica a identidade visual de uma marca para a equipe de social media. Use só o que foi lido do site e das imagens: nunca invente cor. Escreva em português do Brasil.",
+    user: [
+      found.title ? `Título do site: ${found.title}` : "",
+      found.sources.length ? `Lido de: ${found.sources.join(", ")}` : "",
+      found.colors.length
+        ? `Cores encontradas no código do site (hex: quantas vezes aparece; theme-color vem primeiro):\n${found.colors.map((c) => `${c.hex}: ${c.count}`).join("\n")}`
+        : "Nenhuma cor no código; use só as imagens.",
+      found.images.length
+        ? `As imagens acima são o logo, o ícone ou a foto de perfil da marca.`
+        : "",
+      `Escolha de 1 a 6 cores que formam a paleta da marca (ignore cinzas de texto, brancos e pretos de fundo, a não ser que sejam claramente parte da identidade). Para cada uma, o hex (#rrggbb) e um nome curto em português (ex.: "Azul-marinho"). Em "note", uma frase dizendo de onde tirou as cores.`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    schema: COLORS_SCHEMA,
+    domains: [],
+    images: found.images,
+    effort: "low",
+    maxTokens: 4000,
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  const meter = newMeter(env.model);
+  try {
+    const text = await deps.complete(env, request, controller.signal, meter);
+    const parsed = JSON.parse(text) as {
+      colors: { hex: string; name: string }[];
+      note: string;
+    };
+    const seen = new Set<string>();
+    const palette = (parsed.colors ?? [])
+      .map((c) => ({
+        hex: String(c.hex).trim().toLowerCase(),
+        name: String(c.name ?? "").trim(),
+      }))
+      .filter(
+        (c) =>
+          /^#[0-9a-f]{6}$/.test(c.hex) && !seen.has(c.hex) && seen.add(c.hex),
+      )
+      .slice(0, 6);
+    if (!palette.length)
+      return {
+        status: 422,
+        body: { error: "A IA não encontrou cores de marca. Adicione à mão." },
+      };
+    return {
+      status: 200,
+      body: {
+        colors: palette,
+        note: parsed.note,
+        warnings: found.notes,
+        cost_usd: meter.cost,
+      },
+    };
+  } finally {
+    clearTimeout(timer);
+    await logUsage(
+      env,
+      deps,
+      auth,
+      { company: body.company, contract: body.contract },
+      "colors",
+      meter,
+    );
   }
 }

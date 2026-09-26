@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   SYSTEM_PROMPT,
+  addUsage,
   handleSocialLeads,
+  newMeter,
   planRequest,
   siteDomains,
   socialLeadsEnv,
@@ -278,6 +280,7 @@ describe("pedido de ajuste", () => {
           resumo: "Post 6 mais leve",
           alteracoes: { posts: [{ numero: 6, gancho: "Leve" }] },
         },
+        cost_usd: 0,
       },
     });
     expect(seen[0].user).toContain("Pedido da equipe: Post 6 mais leve");
@@ -319,5 +322,258 @@ describe("pedido para a IA", () => {
       ["escola.com.br"],
     );
     expect(siteDomains({ websiteUrl: "nao tem" })).toEqual([]);
+  });
+});
+
+describe("custo da IA", () => {
+  it("soma entradas, saídas e cache pelo preço do modelo", () => {
+    const m = newMeter();
+    addUsage(m, "claude-opus-5", {
+      input_tokens: 10_000,
+      output_tokens: 8_000,
+      cache_creation_input_tokens: 2_000,
+      cache_read_input_tokens: 4_000,
+    });
+    // 10k×5 + 2k×5×1.25 + 4k×5×0.1 + 8k×25, por milhão.
+    expect(m.cost).toBeCloseTo(0.2645, 6);
+    addUsage(m, "claude-sonnet-5", {
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+    });
+    expect(m.cost).toBeCloseTo(2.2645, 6);
+    expect(m.model).toBe("claude-sonnet-5");
+  });
+
+  it("a geração registra o custo no plano antes de avisar", async () => {
+    const { fetchImpl, calls } = fakeDb({
+      social_leads_start_job: () => ({ body: context }),
+      social_leads_write_plan: () => ({ body: { id: planId, version: 1 } }),
+    });
+    const work: Promise<unknown>[] = [];
+    const d: Deps = {
+      fetch: fetchImpl,
+      complete: async (_e, _r, _s, meter) => {
+        addUsage(meter, "claude-opus-5", {
+          input_tokens: 1000,
+          output_tokens: 1000,
+        });
+        return "{}";
+      },
+      background: (p) => work.push(p),
+    };
+    await handleSocialLeads(
+      { action: "generate", company, contract, mode: "new" },
+      "Bearer t",
+      env,
+      d,
+    );
+    await Promise.all(work);
+    expect(calls.map((c) => c.name)).toEqual([
+      "social_leads_start_job",
+      "social_leads_write_plan",
+      "social_leads_log_usage",
+      "social_leads_finish_job",
+    ]);
+    expect(calls[2].args).toMatchObject({
+      p_plan: planId,
+      p_job: "job-1",
+      p_kind: "generate",
+      p_input: 1000,
+      p_output: 1000,
+      p_cost: 0.03,
+    });
+  });
+
+  it("uma geração que falhou também registra o que gastou", async () => {
+    const { fetchImpl, calls } = fakeDb({
+      social_leads_start_job: () => ({ body: context }),
+      social_leads_write_plan: () => ({
+        status: 400,
+        body: { message: "Post 2 repetido." },
+      }),
+    });
+    const work: Promise<unknown>[] = [];
+    const d: Deps = {
+      fetch: fetchImpl,
+      complete: async (_e, _r, _s, meter) => {
+        addUsage(meter, "claude-opus-5", {
+          input_tokens: 1000,
+          output_tokens: 0,
+        });
+        return "{}";
+      },
+      background: (p) => work.push(p),
+    };
+    await handleSocialLeads(
+      { action: "generate", company, contract, mode: "new" },
+      "Bearer t",
+      env,
+      d,
+    );
+    await Promise.all(work);
+    const log = calls.find((c) => c.name === "social_leads_log_usage")!;
+    expect(log.args).toMatchObject({
+      p_plan: null,
+      p_input: 2000,
+      p_cost: 0.01,
+    });
+  });
+});
+
+describe("cores da marca", () => {
+  const html = `<html><head><title>Agente Astra</title>
+    <meta name="theme-color" content="#0B1D3A">
+    <link rel="stylesheet" href="/app.css">
+    <link rel="icon" href="/logo.svg">
+    <style>.btn{background:#14b8a6}.x{color:rgba(20,184,166,1)}</style></head>
+    <body style="color:#333"></body></html>`;
+  const site = (url: string) => {
+    if (url === "https://agente.astravitta.com.br/")
+      return new Response(html, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    if (url.endsWith("/app.css"))
+      return new Response(".h{color:#0b1d3a}.a{color:#14B8A6}", {
+        headers: { "content-type": "text/css" },
+      });
+    if (url.endsWith("/logo.svg"))
+      return new Response('<svg><path fill="#0e4a6b"/></svg>', {
+        headers: { "content-type": "image/svg+xml" },
+      });
+    return new Response("", { status: 404 });
+  };
+  const publicDns = async () => ["93.184.216.34"];
+
+  it("lê o site, manda as cores reais para a IA e registra o custo", async () => {
+    const db = fakeDb({ social_leads_check_write: () => ({ body: true }) });
+    const seen: ModelRequest[] = [];
+    const d: Deps = {
+      fetch: (async (url: string, init?: RequestInit) =>
+        String(url).includes("/rest/v1/rpc/")
+          ? db.fetchImpl(url as any, init as any)
+          : site(String(url))) as any,
+      lookup: publicDns,
+      complete: async (_e, request, _s, meter) => {
+        seen.push(request);
+        addUsage(meter, "claude-opus-5", {
+          input_tokens: 800,
+          output_tokens: 100,
+        });
+        return JSON.stringify({
+          colors: [
+            { hex: "#0B1D3A", name: "Azul-marinho" },
+            { hex: "#14b8a6", name: "Verde-água" },
+            { hex: "azul", name: "inválida" },
+            { hex: "#14b8a6", name: "repetida" },
+          ],
+          note: "Do site.",
+        });
+      },
+      background: () => {},
+    };
+    const r = await handleSocialLeads(
+      {
+        action: "colors",
+        company,
+        contract,
+        website: "agente.astravitta.com.br",
+      },
+      "Bearer t",
+      env,
+      d,
+    );
+    expect(r.status).toBe(200);
+    expect((r.body as any).colors).toEqual([
+      { hex: "#0b1d3a", name: "Azul-marinho" },
+      { hex: "#14b8a6", name: "Verde-água" },
+    ]);
+    // theme-color first, then CSS, inline and the SVG logo's fill.
+    expect(seen[0].user).toMatch(/#0b1d3a: 1000/);
+    expect(seen[0].user).toMatch(/#14b8a6: 3/);
+    expect(seen[0].user).toMatch(/#0e4a6b: 5/);
+    expect(db.calls.map((c) => c.name)).toEqual([
+      "social_leads_check_write",
+      "social_leads_log_usage",
+    ]);
+    expect(db.calls[1].args).toMatchObject({ p_kind: "colors", p_plan: null });
+  });
+
+  it("não abre endereços internos", async () => {
+    const db = fakeDb({ social_leads_check_write: () => ({ body: true }) });
+    const fetched: string[] = [];
+    const d: Deps = {
+      fetch: (async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/rest/v1/rpc/"))
+          return db.fetchImpl(url as any, init as any);
+        fetched.push(String(url));
+        return new Response("", {
+          status: 302,
+          headers: { location: "http://169.254.169.254/latest" },
+        });
+      }) as any,
+      lookup: async (host) =>
+        host === "interno.test" ? ["10.0.0.5"] : ["93.184.216.34"],
+      complete: async () => "{}",
+      background: () => {},
+    };
+    for (const website of [
+      "http://localhost:3000",
+      "interno.test",
+      "http://127.0.0.1/",
+      "ftp://site.com",
+    ]) {
+      const r = await handleSocialLeads(
+        { action: "colors", company, contract, website },
+        "Bearer t",
+        env,
+        d,
+      );
+      expect(r.status).toBe(422);
+    }
+    expect(fetched).toEqual([]);
+    // A public site that redirects to the metadata address stops there.
+    const r = await handleSocialLeads(
+      {
+        action: "colors",
+        company,
+        contract,
+        website: "https://publico.com.br",
+      },
+      "Bearer t",
+      env,
+      d,
+    );
+    expect(r.status).toBe(422);
+    expect(fetched).toEqual(["https://publico.com.br/"]);
+  });
+
+  it("pede o site ou o Instagram e respeita a permissão", async () => {
+    const d = deps(fakeDb({}).fetchImpl, []);
+    expect(
+      (
+        await handleSocialLeads(
+          { action: "colors", company, contract },
+          "Bearer t",
+          env,
+          d,
+        )
+      ).status,
+    ).toBe(400);
+    const denied = fakeDb({
+      social_leads_check_write: () => ({
+        status: 403,
+        body: { message: "Sem permissão para editar este cliente." },
+      }),
+    });
+    const r = await handleSocialLeads(
+      { action: "colors", company, contract, instagram: "@a" },
+      "Bearer t",
+      env,
+      deps(denied.fetchImpl, []),
+    );
+    expect(r).toEqual({
+      status: 403,
+      body: { error: "Sem permissão para editar este cliente." },
+    });
   });
 });

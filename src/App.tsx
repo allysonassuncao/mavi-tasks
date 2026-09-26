@@ -879,8 +879,13 @@ export default function App() {
   useEffect(loadInbox, [loadInbox]);
   // The tab's title counts the unread notices and flags a new one.
   useInboxTitle(inbox, !!member && (demo || !!session));
+  // A notice that isn't about a task carries its own place in the app
+  // (e.g. /onboarding/social-leads?contrato=…), inside the current company.
+  const appLink = (link: string) =>
+    (companyPath ? `/agencias/${encodeURIComponent(companyPath)}` : "") + link;
   function openNotification(n: AppNotification) {
-    setSelected(n.task_id);
+    if (n.link) navigate(appLink(n.link));
+    else if (n.task_id) setSelected(n.task_id);
     if (n.read_at) return;
     const at = new Date().toISOString();
     setInbox((list) =>
@@ -907,6 +912,7 @@ export default function App() {
     tasks: data.tasks,
     selected,
     openTask: setSelected,
+    openLink: (link: string) => navigate(appLink(link)),
     loadInbox,
   };
   const live = useRef(liveState);
@@ -988,6 +994,21 @@ export default function App() {
           .then((list) => {
             const n = list.find((x) => x.id === row.id);
             if (!n) return;
+            // Social Leads: a plan the AI finished (or couldn't) writing.
+            if (n.link) {
+              notify(n.task_title);
+              if (pushActive()) return;
+              const link = n.link;
+              showNotification(n.task_title, {
+                body: n.excerpt ?? "",
+                tag: n.id,
+                url: link,
+                onClick: () => live.current.openLink(link),
+              });
+              return;
+            }
+            if (!n.task_id) return;
+            const taskId = n.task_id;
             const who = n.actor_name ?? "Alguém";
             const assigned = n.kind === "assigned";
             const said =
@@ -1007,8 +1028,8 @@ export default function App() {
                     ? `${n.task_title}: ${n.excerpt}`
                     : n.task_title,
                 tag: n.id,
-                url: `/tarefas/${n.task_id}`,
-                onClick: () => live.current.openTask(n.task_id),
+                url: `/tarefas/${taskId}`,
+                onClick: () => live.current.openTask(taskId),
               },
             );
           })

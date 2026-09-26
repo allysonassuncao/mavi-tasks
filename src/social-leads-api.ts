@@ -1,10 +1,19 @@
 import { useEffect, useRef } from "react";
 import { supabase } from "./supabase";
 import { invalidateLookupsCache, rpc } from "./api";
+import {
+  createDriveFolder,
+  deleteDriveFile,
+  driveViewUrl,
+  uploadDriveFile,
+} from "./drive";
 import type { Snapshot } from "./types";
 import {
   fullContent,
   type BriefingFields,
+  type BriefingMedia,
+  type MediaFile,
+  type SlUsage,
   type CampaignObjective,
   type Decision,
   type PlanContent,
@@ -27,7 +36,18 @@ export interface PlanBundle {
   plan: SlPlan;
   posts: SlPost[];
   revisions: SlRevision[];
+  /** What the AI cost on this plan (generations and adjustments). */
+  usage: SlUsage[];
 }
+/** The palette the AI read from the site or Instagram. */
+export interface BrandColorsFound {
+  colors: { hex: string; name: string }[];
+  note: string;
+  warnings: string[];
+  cost_usd: number;
+}
+/** The Drive folder, under the Social Leads product, that holds the briefing's files. */
+export const BRIEFING_FOLDER = "Briefing Social Leads";
 export interface ContractBundle {
   briefing: SlBriefing | null;
   plans: SlPlan[];
@@ -60,7 +80,24 @@ export interface SocialLeadsBackend {
     objective: CampaignObjective | null,
     responsible: string | null,
     version: number | null,
+    /** Null keeps the files as they are. */
+    media?: BriefingMedia | null,
   ): Promise<number>;
+  /** Sends a file to the client's Drive (folder BRIEFING_FOLDER). */
+  uploadMedia(
+    company: string,
+    contract: string,
+    file: File,
+    onProgress: (fraction: number) => void,
+  ): Promise<MediaFile>;
+  /** A short-lived address that shows the file. */
+  mediaUrl(file: MediaFile): Promise<string>;
+  deleteMedia(file: MediaFile): Promise<void>;
+  brandColors(
+    company: string,
+    contract: string,
+    from: { website?: string; instagram?: string },
+  ): Promise<BrandColorsFound>;
   writePlan(
     company: string,
     contract: string,
@@ -98,7 +135,7 @@ export interface SocialLeadsBackend {
     contract: string,
     plan: string,
     instruction: string,
-  ): Promise<unknown>;
+  ): Promise<{ update: unknown; cost_usd: number }>;
   /** The demo's stand-in for the client link (the real one needs the database). */
   link?: LinkSource;
 }
@@ -201,7 +238,7 @@ export const serverSocialLeads: SocialLeadsBackend = {
     };
   },
   async plan(plan) {
-    const [p, x, r] = await Promise.all([
+    const [p, x, r, u] = await Promise.all([
       db()
         .from("social_leads_plans")
         .select(PLAN_COLUMNS)
@@ -218,12 +255,22 @@ export const serverSocialLeads: SocialLeadsBackend = {
         .eq("plan_id", plan)
         .order("number", { ascending: false })
         .limit(50),
+      db()
+        .from("social_leads_ai_usage")
+        .select(
+          "kind,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cost_usd,created_at,created_by",
+        )
+        .eq("plan_id", plan)
+        .order("created_at")
+        .limit(500),
     ]);
     for (const q of [p, x, r]) if (q.error) throw q.error;
     return {
       plan: p.data as unknown as SlPlan,
       posts: (x.data ?? []) as SlPost[],
       revisions: (r.data ?? []) as SlRevision[],
+      // The cost is a detail: without it (e.g. migration not applied yet) the plan still opens.
+      usage: u.error ? [] : ((u.data ?? []) as SlUsage[]),
     };
   },
   async saveBriefing(
@@ -233,6 +280,7 @@ export const serverSocialLeads: SocialLeadsBackend = {
     objective,
     responsible,
     version,
+    media,
   ) {
     return (await rpc("save_social_leads_briefing", {
       p_company: company,
@@ -241,7 +289,48 @@ export const serverSocialLeads: SocialLeadsBackend = {
       p_objective: objective,
       p_responsible: responsible,
       p_version: version,
+      ...(media ? { p_media: media } : {}),
     })) as number;
+  },
+  async uploadMedia(company, contract, file, onProgress) {
+    const found = await db()
+      .from("drive_folders")
+      .select("id")
+      .eq("company_id", company)
+      .eq("contract_id", contract)
+      .is("parent_id", null)
+      .eq("name", BRIEFING_FOLDER)
+      .limit(1);
+    if (found.error) throw found.error;
+    const folder =
+      found.data?.[0]?.id ??
+      (await createDriveFolder(company, BRIEFING_FOLDER, { contract }));
+    const id = await uploadDriveFile(
+      company,
+      { folder },
+      file,
+      "private",
+      onProgress,
+    );
+    return {
+      id,
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      size: file.size,
+    };
+  },
+  mediaUrl: (file) => driveViewUrl(file.id),
+  async deleteMedia(file) {
+    await deleteDriveFile(file.id);
+  },
+  async brandColors(company, contract, from) {
+    return await server<BrandColorsFound>({
+      action: "colors",
+      company,
+      contract,
+      website: from.website ?? null,
+      instagram: from.instagram ?? null,
+    });
   },
   async writePlan(
     company,
@@ -299,15 +388,13 @@ export const serverSocialLeads: SocialLeadsBackend = {
     });
   },
   async adjust(company, contract, plan, instruction) {
-    return (
-      await server<{ update: unknown }>({
-        action: "adjust",
-        company,
-        contract,
-        plan,
-        instruction,
-      })
-    ).update;
+    return await server<{ update: unknown; cost_usd: number }>({
+      action: "adjust",
+      company,
+      contract,
+      plan,
+      instruction,
+    });
   },
 };
 
@@ -400,6 +487,9 @@ type DemoState = {
   revisions: SlRevision[];
   jobs: Record<string, SlJob>;
   tokens: Record<string, string>;
+  usage: (SlUsage & { plan_id: string })[];
+  /** Files "uploaded" in the demo: object URLs in this tab. */
+  files: Record<string, string>;
 };
 let demoState: DemoState | null = null;
 
@@ -483,8 +573,23 @@ export function demoSocialLeads(
       revisions: [],
       jobs: {},
       tokens: {},
+      usage: [],
+      files: {},
     };
   const s = demoState;
+  const spend = (plan: string, kind: SlUsage["kind"], cost: number) =>
+    s.usage.push({
+      plan_id: plan,
+      kind,
+      model: "claude-opus-5",
+      input_tokens: Math.round(cost * 90_000),
+      output_tokens: Math.round(cost * 22_000),
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      cost_usd: cost,
+      created_at: now(),
+      created_by: user,
+    });
   const emit = () =>
     window.dispatchEvent(new CustomEvent("mavi:social-leads", { detail: {} }));
   const contractOf = (k: string) => data.contracts.find((c) => c.id === k)!;
@@ -672,9 +777,18 @@ export function demoSocialLeads(
         revisions: s.revisions
           .filter((r) => r.plan_id === planId)
           .sort((a, b) => b.number - a.number),
+        usage: s.usage.filter((u) => u.plan_id === planId),
       };
     },
-    async saveBriefing(_c, contract, fields, objective, responsible, version) {
+    async saveBriefing(
+      _c,
+      contract,
+      fields,
+      objective,
+      responsible,
+      version,
+      media,
+    ) {
       const b = s.briefings[contract];
       if (b && version !== b.version)
         throw new Error(
@@ -688,9 +802,39 @@ export function demoSocialLeads(
         version: next,
         updated_at: now(),
         updated_by: user,
+        media: media ?? b?.media ?? {},
       };
       emit();
       return next;
+    },
+    async uploadMedia(_c, _k, file, onProgress) {
+      const fileId = id();
+      for (const f of [0.3, 0.7, 1]) {
+        await new Promise((r) => setTimeout(r, 150));
+        onProgress(f);
+      }
+      s.files[fileId] = URL.createObjectURL(file);
+      return { id: fileId, name: file.name, type: file.type, size: file.size };
+    },
+    async mediaUrl(file) {
+      return s.files[file.id] ?? "";
+    },
+    async deleteMedia(file) {
+      if (s.files[file.id]) URL.revokeObjectURL(s.files[file.id]);
+      delete s.files[file.id];
+    },
+    async brandColors() {
+      await new Promise((r) => setTimeout(r, 1200));
+      return {
+        colors: [
+          { hex: "#1c2728", name: "Verde-escuro" },
+          { hex: "#c8ed8d", name: "Verde-limão" },
+          { hex: "#f6f7f8", name: "Gelo" },
+        ],
+        note: "Demonstração: cores de exemplo, sem ler o site.",
+        warnings: [],
+        cost_usd: 0.004,
+      };
     },
     async writePlan(_c, contract, planId, content, _reason, version) {
       const plan = s.plans.find((p) => p.id === planId)!;
@@ -785,6 +929,7 @@ export function demoSocialLeads(
           finished_at: now(),
           plan_id: plan.id,
         });
+        spend(plan.id, "generate", 0.38);
         emit();
       }, 1800);
     },
@@ -850,7 +995,8 @@ export function demoSocialLeads(
         s.briefings[contract]?.fields.clientName || clientOf(contract).name;
       const post = Number(instruction.match(/post\s*(\d)/i)?.[1] ?? 1);
       await new Promise((r) => setTimeout(r, 900));
-      return {
+      spend(planId, "adjust", 0.03);
+      const update = {
         tipo: "social-leads-atualizacao",
         cliente: client,
         plano: planId,
@@ -864,6 +1010,7 @@ export function demoSocialLeads(
           ],
         },
       };
+      return { update, cost_usd: 0.03 };
     },
   };
 }

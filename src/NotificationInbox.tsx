@@ -1,5 +1,5 @@
 import * as Popover from "@radix-ui/react-popover";
-import { AtSign, CheckCheck, Inbox } from "lucide-react";
+import { AtSign, CheckCheck, Inbox, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Avatar } from "./components";
 import type { AppNotification, Member } from "./types";
@@ -14,8 +14,8 @@ function when(value: string) {
 
 /**
  * The person's inbox, as in ClickUp: who mentioned or replied to them, and
- * where. Opening
- * one marks it read and opens the task.
+ * where, plus notices of the Social Leads (a plan the AI finished). Opening
+ * one marks it read and opens the task (or the notice's place).
  */
 export function NotificationInbox({
   items,
@@ -75,21 +75,33 @@ export function NotificationInbox({
                       onOpen(n);
                     }}
                   >
-                    <Avatar
-                      name={n.actor_name ?? "?"}
-                      src={actor?.avatar_url}
-                      size="small"
-                    />
-                    <span>
-                      <span className="inbox-line">
-                        <strong>{n.actor_name ?? "Alguém"}</strong>{" "}
-                        {n.kind === "assigned"
-                          ? "criou uma tarefa para você:"
-                          : n.kind === "reply"
-                            ? "respondeu um comentário em"
-                            : "mencionou você em"}{" "}
-                        <strong>{n.task_title}</strong>
+                    {n.kind === "social_leads" ? (
+                      <span className="inbox-system" aria-hidden="true">
+                        <Sparkles size={15} />
                       </span>
+                    ) : (
+                      <Avatar
+                        name={n.actor_name ?? "?"}
+                        src={actor?.avatar_url}
+                        size="small"
+                      />
+                    )}
+                    <span>
+                      {n.kind === "social_leads" ? (
+                        <span className="inbox-line">
+                          <strong>{n.task_title}</strong>
+                        </span>
+                      ) : (
+                        <span className="inbox-line">
+                          <strong>{n.actor_name ?? "Alguém"}</strong>{" "}
+                          {n.kind === "assigned"
+                            ? "criou uma tarefa para você:"
+                            : n.kind === "reply"
+                              ? "respondeu um comentário em"
+                              : "mencionou você em"}{" "}
+                          <strong>{n.task_title}</strong>
+                        </span>
+                      )}
                       {n.excerpt && <small>{n.excerpt}</small>}
                     </span>
                     <time dateTime={n.created_at}>{when(n.created_at)}</time>
@@ -101,8 +113,9 @@ export function NotificationInbox({
         ) : (
           <p className="inbox-empty">
             <AtSign size={18} />
-            Quando criarem uma tarefa para você, mencionarem você com @ ou
-            responderem um comentário seu, o aviso aparece aqui.
+            Quando criarem uma tarefa para você, mencionarem você com @,
+            responderem um comentário seu ou a IA terminar um plano do Social
+            Leads, o aviso aparece aqui.
           </p>
         )}
       </Popover.Content>

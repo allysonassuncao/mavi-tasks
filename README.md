@@ -225,7 +225,11 @@ O módulo **Onboarding** (menu Trabalho) tem, por enquanto, o **Social Leads**: 
   node scripts/import-social-leads-artifact.mjs --input <pasta> --company "Make Acelerador de Vendas" --author <e-mail de um administrador> --out social-leads-import.sql
   ```
 
-Para ligar: aplicar a migração, configurar `ANTHROPIC_API_KEY` na Vercel e fazer redeploy. Testes: `npm run test:db:social-leads` e `npm run test:db:import-social-leads`.
+- **Campos do briefing:** WhatsApp com máscara de celular (com o 9); ticket médio e verba com máscara de moeda e escolha da moeda (real, dólar, euro, libra…); várias cores da marca, que a IA preenche sozinha lendo o site ou o Instagram assim que um deles é informado (`/api/social-leads`, ação `colors`: o servidor lê a página, o CSS, o logo SVG e as imagens, com bloqueio de endereços internos, e a Claude escolhe a paleta); prova social (imagem, vídeo ou áudio), logo e elementos visuais (imagem ou vídeo) vão para o Drive do cliente, na pasta "Briefing Social Leads" do produto (migração `20261015090000_social_leads_media_usage`).
+- **Custo da IA:** cada chamada à API da Claude (geração, ajuste, cores) é registrada com os tokens e o valor em dólar (`social_leads_ai_usage`); o plano mostra o total ("IA US$ 0,41", com o detalhe ao passar o mouse).
+- **Caixa de entrada:** o fim de uma geração (pronta ou com falha) avisa quem a pediu, com o custo, também por push. Os avisos deixam de ser só de tarefas (`notifications.task_id` opcional, com título, texto e endereço próprios).
+
+Para ligar: aplicar as migrações, configurar `ANTHROPIC_API_KEY` na Vercel e fazer redeploy. Testes: `npm run test:db:social-leads`, `npm run test:db:social-leads-media` e `npm run test:db:import-social-leads`.
 
 ### Notificações push (com o app fechado)
 

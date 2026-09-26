@@ -15,6 +15,7 @@ export function titleWithCount(base: string, unread: number) {
 
 /** What the title says about a notice that just arrived. */
 export function noticeTitle(n: AppNotification) {
+  if (n.kind === "social_leads") return `🔔 ${n.task_title}`;
   const who = n.actor_name?.trim() || "Alguém";
   const what =
     n.kind === "assigned"

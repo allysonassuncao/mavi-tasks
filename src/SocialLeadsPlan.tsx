@@ -37,6 +37,8 @@ import {
 } from "./social-leads-api";
 import {
   complianceFlags,
+  formatUsd,
+  usageSummary,
   editPost,
   fullContent,
   parseImport,
@@ -262,6 +264,7 @@ export function PlanView({
   const allApproved = approved === 8;
   const isLatest = plans.at(-1)?.id === plan.id;
   const flags = complianceFlags(content.posts);
+  const cost = usageSummary(bundle.usage ?? []);
   const people = (id: string | null) =>
     data.members.find((m) => m.user_id === id)?.name;
   const stage = allApproved
@@ -328,6 +331,24 @@ export function PlanView({
         <p>
           {bundle.plan.label} · criado em {date(bundle.plan.created_at)}
           {bundle.plan.summary ? ` · ${bundle.plan.summary}` : ""}
+          {cost.total > 0 && (
+            <span
+              className="sl-cost"
+              title={[
+                cost.generations
+                  ? `${cost.generations} ${cost.generations === 1 ? "geração" : "gerações"}: ${formatUsd(cost.generateCost)}`
+                  : "",
+                cost.adjustments
+                  ? `${cost.adjustments} ${cost.adjustments === 1 ? "ajuste" : "ajustes"}: ${formatUsd(cost.adjustCost)}`
+                  : "",
+                `${cost.tokens.toLocaleString("pt-BR")} tokens na API da Claude`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            >
+              <Sparkles size={12} /> IA {formatUsd(cost.total)}
+            </span>
+          )}
         </p>
         {item.can_write && (
           <div className="sl-plan-actions">
@@ -409,6 +430,26 @@ export function PlanView({
 
       {section === "posts" && (
         <>
+          {item.can_write && (
+            <AdjustBox
+              disabled={running}
+              onAsk={async (instruction) => {
+                const r = await backend.adjust(
+                  company,
+                  item.contract_id,
+                  plan.id,
+                  instruction,
+                );
+                setPreview({
+                  text: JSON.stringify(r.update),
+                  reason: "ajuste pedido à IA",
+                  source: "ai",
+                });
+                return r.cost_usd;
+              }}
+              notify={notify}
+            />
+          )}
           <div className="sl-posts">
             {posts.map((p) => {
               const f = flags.filter((x) => x.post === p.number);
@@ -458,25 +499,6 @@ export function PlanView({
               );
             })}
           </div>
-          {item.can_write && (
-            <AdjustBox
-              disabled={running}
-              onAsk={async (instruction) => {
-                const update = await backend.adjust(
-                  company,
-                  item.contract_id,
-                  plan.id,
-                  instruction,
-                );
-                setPreview({
-                  text: JSON.stringify(update),
-                  reason: "ajuste pedido à IA",
-                  source: "ai",
-                });
-              }}
-              notify={notify}
-            />
-          )}
         </>
       )}
       {section === "estrategia" && <Strategy content={content} />}
@@ -1130,47 +1152,108 @@ function ShareModal({
 }
 
 // ------------------------------------------------------------ AI and chat
+const ASK_EXAMPLES = [
+  "Deixe a linguagem dos posts mais leve",
+  "Troque o CTA do anúncio para chamar no WhatsApp",
+  "Mais posts de autoridade, menos de oferta",
+  "Reescreva o gancho do post 1",
+];
+/**
+ * "Pedir ajuste à IA": the most direct way to change the plan, so it sits
+ * above the posts. The AI returns only what changes; the preview shows the
+ * before and after, and applying keeps the previous version.
+ */
 function AdjustBox({
   disabled,
   onAsk,
   notify,
 }: {
   disabled: boolean;
-  onAsk: (instruction: string) => Promise<void>;
+  /** Resolves with what the request cost. */
+  onAsk: (instruction: string) => Promise<number>;
   notify: (m: string) => void;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [lastCost, setLastCost] = useState<number | null>(null);
+  const send = () => {
+    if (!text.trim() || busy) return;
+    setBusy(true);
+    onAsk(text.trim())
+      .then((cost) => {
+        setText("");
+        setLastCost(cost);
+      })
+      .catch((err) => notify((err as Error).message))
+      .finally(() => setBusy(false));
+  };
   return (
     <form
-      className="sl-ask"
+      className="sl-ask-card"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!text.trim()) return;
-        setBusy(true);
-        onAsk(text.trim())
-          .then(() => setText(""))
-          .catch((err) => notify((err as Error).message))
-          .finally(() => setBusy(false));
+        send();
       }}
     >
-      <Sparkles size={17} />
-      <Input
-        value={text}
-        maxLength={2000}
-        disabled={disabled || busy}
-        onChange={(e) => setText(e.target.value)}
-        placeholder='Pedir ajuste à IA: "deixe o post 6 mais leve e troque o CTA por WhatsApp"'
-        aria-label="Pedir ajuste à IA"
-      />
-      <Button
-        type="submit"
-        className="btn secondary"
-        loading={busy}
-        disabled={disabled || !text.trim()}
-      >
-        Ver mudanças
-      </Button>
+      <div className="sl-ask-head">
+        <span className="sl-ask-icon">
+          <Sparkles size={18} />
+        </span>
+        <div>
+          <strong>Pedir ajuste à IA</strong>
+          <small>
+            Diga o que mudar. Você vê o antes e depois antes de aplicar, e a
+            versão atual fica guardada.
+          </small>
+        </div>
+      </div>
+      <div className="sl-ask-body">
+        <Textarea
+          rows={2}
+          value={text}
+          maxLength={2000}
+          disabled={disabled || busy}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          placeholder='Ex.: "deixe o post 6 mais leve e troque o CTA por WhatsApp"'
+          aria-label="Pedir ajuste à IA"
+        />
+        <Button
+          type="submit"
+          className="btn primary"
+          loading={busy}
+          disabled={disabled || !text.trim()}
+        >
+          <Sparkles size={15} /> Ver mudanças
+        </Button>
+      </div>
+      <div className="sl-ask-examples">
+        {ASK_EXAMPLES.map((ex) => (
+          <button
+            key={ex}
+            type="button"
+            disabled={disabled || busy}
+            onClick={() => setText(ex)}
+          >
+            {ex}
+          </button>
+        ))}
+        {lastCost !== null && lastCost > 0 && (
+          <small className="sl-ask-cost">
+            Último ajuste: {formatUsd(lastCost)}
+          </small>
+        )}
+      </div>
+      {busy && (
+        <p className="sl-ai-note" role="status">
+          <Sparkles size={14} /> A IA está preparando as mudanças…
+        </p>
+      )}
     </form>
   );
 }

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatMoney,
+  formatPhoneBR,
+  formatUsd,
+  moneyFromDigits,
+  parseColors,
+  parseMoney,
+  phoneComplete,
+  serializeColors,
+  usageSummary,
   briefingReadiness,
   complianceFlags,
   editPost,
@@ -283,5 +292,92 @@ describe("etapas e próximas ações", () => {
     ]);
     expect(list[0].title).toBe("C: criar o Instagram");
     expect(list[1].title).toBe("B: aprovação parada há 4 dias");
+  });
+});
+
+describe("máscaras do briefing", () => {
+  it("celular brasileiro com o 9", () => {
+    expect(formatPhoneBR("11912345678")).toBe("(11) 91234-5678");
+    expect(formatPhoneBR("+55 (11) 91234-5678")).toBe("(11) 91234-5678");
+    expect(formatPhoneBR("1197450725")).toBe("(11) 9745-0725");
+    expect(formatPhoneBR("119")).toBe("(11) 9");
+    expect(formatPhoneBR("1191234567899")).toBe("(11) 91234-5678");
+    expect(phoneComplete("(11) 91234-5678")).toBe(true);
+    expect(phoneComplete("(11) 3456-7890")).toBe(false);
+  });
+  it("moeda: digita pelos centavos e troca a moeda", () => {
+    expect(moneyFromDigits("120000", "BRL")).toBe(1200);
+    expect(formatMoney(1200, "BRL")).toBe("R$ 1.200,00");
+    expect(formatMoney(1200, "USD")).toBe("US$ 1.200,00");
+    expect(formatMoney(1200, "EUR")).toBe("€ 1.200,00");
+    expect(formatMoney(1200, "GBP")).toBe("£ 1.200,00");
+    expect(moneyFromDigits("1200", "JPY")).toBe(1200);
+    expect(moneyFromDigits("", "BRL")).toBeNull();
+  });
+  it("moeda: lê o que já estava salvo", () => {
+    expect(parseMoney("US$ 1.200,00")).toEqual({
+      code: "USD",
+      amount: 1200,
+      legacy: null,
+    });
+    expect(parseMoney("€ 99,90")).toEqual({
+      code: "EUR",
+      amount: 99.9,
+      legacy: null,
+    });
+    expect(parseMoney("500,00")).toEqual({
+      code: "BRL",
+      amount: 500,
+      legacy: null,
+    });
+    expect(parseMoney("1200")).toEqual({
+      code: "BRL",
+      amount: 1200,
+      legacy: null,
+    });
+    // A faixa antiga do Stravitta fica como estava até alguém digitar.
+    expect(parseMoney("R$150,00 á R$700,00")).toMatchObject({
+      amount: null,
+      legacy: "R$150,00 á R$700,00",
+    });
+  });
+  it("cores: várias, com ou sem hex", () => {
+    const list = parseColors(
+      "azul-marinho #0B1D3A, verde-água #14b8a6; rosa e amarelo",
+    );
+    expect(list).toEqual([
+      { hex: "#0b1d3a", name: "azul-marinho" },
+      { hex: "#14b8a6", name: "verde-água" },
+      { hex: null, name: "rosa" },
+      { hex: null, name: "amarelo" },
+    ]);
+    expect(serializeColors(list)).toBe(
+      "azul-marinho #0b1d3a, verde-água #14b8a6, rosa, amarelo",
+    );
+    expect(parseColors("#fff")).toEqual([{ hex: "#ffffff", name: "" }]);
+  });
+  it("custo da IA por plano", () => {
+    const row = (kind: "generate" | "adjust", cost: number | string) => ({
+      kind,
+      model: "claude-opus-5",
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      cost_usd: cost,
+      created_at: "",
+      created_by: null,
+    });
+    const s = usageSummary([
+      row("generate", "0.38"),
+      row("adjust", 0.03),
+      row("adjust", 0.02),
+    ]);
+    expect(s.total).toBeCloseTo(0.43);
+    expect(s.generations).toBe(1);
+    expect(s.adjustments).toBe(2);
+    expect(s.tokens).toBe(450);
+    expect(formatUsd(0.43)).toBe("US$ 0,43");
+    expect(formatUsd(0.001)).toBe("menos de US$ 0,01");
   });
 });

@@ -654,7 +654,7 @@ await check(
   async () => {
     await db.exec("reset role");
     const msgs = await all(
-      "select topic,payload from realtime.messages where payload->>'kind'='social_leads' order by id",
+      "select topic,payload from realtime.messages where event='change' and payload->>'kind'='social_leads' order by id",
     );
     assert.ok(msgs.length > 0);
     assert.ok(msgs.every((m) => m.topic === `mavi:company:${A}`));
