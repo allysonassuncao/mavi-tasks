@@ -25,7 +25,7 @@ insert into contracts(company_id,id,client_id,product_id,name) values('${A}','${
 insert into social_leads_settings(company_id,product_id,team_id) values('${A}','${product}','${squad}');
 insert into meeting_recordings(id,company_id,client_id,source_id,title,recorded_at,duration_seconds,summary) values
  ('${meeting}','${A}','${client}','bot-1','Onboarding','2026-09-12 14:00+00',1800,'{"topicos":["escola"]}'),
- ('${silent}','${A}','${client}','bot-2','Alinhamento','2026-09-20 14:00+00',600,'{}'),
+ ('${silent}','${A}','${client}','bot-2','','2026-09-20 14:00+00',600,'{"title":"Alinhamento de campanha","overview":"Ajustes na verba e no público."}'),
  ('${foreign}','${A}','${otherClient}','bot-3','Outro cliente','2026-09-21 14:00+00',600,'{}');
 insert into meeting_transcripts(recording_id,company_id,speakers,segments) values
  ('${meeting}','${A}','{Lorena,Renato}','[[0,3,0,"Oi"],[4,8,1,"Somos uma escola de inglês"]]'),
@@ -64,10 +64,13 @@ await check(
     assert.deepEqual(
       list.map((m) => [m.title, m.has_transcript]),
       [
-        ["Alinhamento", false],
+        // The title of the recording's AI summary comes first.
+        ["Alinhamento de campanha", false],
         ["Onboarding", true],
       ],
     );
+    assert.equal(list[0].overview, "Ajustes na verba e no público.");
+    assert.deepEqual(list[1].speakers, []);
     await as(outsider);
     await assert.rejects(
       db.query("select public.social_leads_meetings($1,$2)", [A, contract]),

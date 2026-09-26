@@ -145,7 +145,7 @@ export function BriefingAiModal({
       title="Preencher o briefing com a IA"
       onClose={() => !busy && onClose()}
       busy={busy}
-      wide
+      className="sl-ai-dialog"
     >
       {!result ? (
         <div className="sl-ai-fill-modal">
@@ -225,14 +225,38 @@ export function BriefingAiModal({
                       onChange={() => setRecording(m.id)}
                     />
                     <span>
-                      <strong>{m.title || "Reunião sem título"}</strong>
+                      <strong>
+                        {m.title ||
+                          `Reunião de ${new Date(m.recorded_at).toLocaleDateString("pt-BR")}`}
+                      </strong>
                       <small>
-                        {new Date(m.recorded_at).toLocaleDateString("pt-BR")}
+                        {new Date(m.recorded_at).toLocaleDateString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                         {m.duration_seconds
                           ? ` · ${minutes(m.duration_seconds)}`
                           : ""}
-                        {m.has_transcript ? "" : " · ainda sem transcrição"}
+                        {m.speakers?.length
+                          ? ` · ${m.speakers.slice(0, 3).join(", ")}${m.speakers.length > 3 ? ` e mais ${m.speakers.length - 3}` : ""}`
+                          : ""}
                       </small>
+                      {m.overview && <em>{m.overview}</em>}
+                      {!m.has_transcript && (
+                        <small className="sl-ai-warn">
+                          Ainda sem transcrição
+                        </small>
+                      )}
+                      {m.has_transcript &&
+                        m.duration_seconds !== null &&
+                        m.duration_seconds < 120 && (
+                          <small className="sl-ai-warn">
+                            Reunião muito curta: pode ter pouco conteúdo
+                          </small>
+                        )}
                     </span>
                   </label>
                 </li>

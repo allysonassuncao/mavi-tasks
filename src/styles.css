@@ -12542,6 +12542,7 @@ tr:hover .campaign-edit-record,
   font-size: 0.74rem;
 }
 .sl-ai-file {
+  flex-direction: row;
   position: relative;
   cursor: pointer;
 }
@@ -12554,20 +12555,54 @@ tr:hover .campaign-edit-record,
 .sl-ai-meetings {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 4px 0 0;
   display: grid;
   gap: 8px;
-  max-height: 320px;
+  max-height: min(420px, 55vh);
   overflow-y: auto;
+}
+.modal.sl-ai-dialog {
+  width: 720px;
 }
 .sl-ai-meetings label {
   display: flex;
-  gap: 10px;
+  flex-direction: row;
+  gap: 12px;
   align-items: flex-start;
+  color: var(--ink);
+  font-weight: 400;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   cursor: pointer;
+}
+/* The app styles every input inside a label as a full-width field. */
+.sl-ai-meetings label input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 3px 0 0;
+  padding: 0;
+  border: 0;
+  accent-color: #6fae3a;
+}
+.sl-ai-meetings label > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.sl-ai-meetings em {
+  font-style: normal;
+  font-size: 0.78rem;
+  color: #5d6a68;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sl-ai-meetings .sl-ai-warn {
+  color: #a0661b;
 }
 .sl-ai-meetings label.selected {
   border-color: #a9d57a;
@@ -12622,7 +12657,9 @@ tr:hover .campaign-edit-record,
 }
 .sl-ai-check {
   display: flex;
+  flex-direction: row;
   align-items: center;
+  color: var(--ink);
   gap: 8px;
   font-size: 0.84rem;
   cursor: pointer;

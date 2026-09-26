@@ -36,12 +36,15 @@ export function Modal({
   onClose,
   wide = false,
   busy = false,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
   busy?: boolean;
+  /** Extra class on the dialog (e.g. a width of its own). */
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -59,7 +62,7 @@ export function Modal({
     <dialog
       ref={ref}
       aria-label={title}
-      className={wide ? "modal sheet" : "modal"}
+      className={`${wide ? "modal sheet" : "modal"} ${className}`.trim()}
       onCancel={(e) => {
         e.preventDefault();
         if (!busy) onClose();

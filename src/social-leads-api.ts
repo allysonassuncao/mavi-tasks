@@ -55,7 +55,10 @@ export type ReleaseCycle = { followup: string; meeting: string };
 /** A meeting of the client in "Gravações da MAVI". */
 export interface MeetingOption {
   id: string;
+  /** The recording's AI summary title, else the meeting's ('' when none). */
   title: string;
+  overview?: string;
+  speakers?: string[];
   recorded_at: string;
   duration_seconds: number | null;
   has_transcript: boolean;
@@ -1095,6 +1098,9 @@ export function demoSocialLeads(
         {
           id: "demo-reuniao",
           title: "Onboarding com o cliente",
+          overview:
+            "Apresentação do estúdio, oferta do mês e o público que eles querem atingir.",
+          speakers: ["Allyson Assunção", "Renata"],
           recorded_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
           duration_seconds: 2460,
           has_transcript: true,
