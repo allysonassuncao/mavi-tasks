@@ -12,6 +12,7 @@ import {
   PanelsTopLeft,
   Megaphone,
   Package,
+  Rocket,
   Settings2,
   Users,
   type LucideIcon,
@@ -197,6 +198,19 @@ export function SidebarNav({
           label: "Campanhas",
           icon: Megaphone,
           to: { page: "campaigns" },
+        },
+        {
+          key: "onboarding",
+          label: "Onboarding",
+          icon: Rocket,
+          to: { page: "onboarding" },
+          children: [
+            {
+              key: "onboarding-social-leads",
+              label: "Social Leads",
+              to: { page: "onboarding" },
+            },
+          ],
         },
         ...(isLeader ? [] : portfolio),
       ],

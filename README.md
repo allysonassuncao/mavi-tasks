@@ -111,6 +111,8 @@ Antes do primeiro deploy, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLIS
 | `META_GRAPH_VERSION`, `GOOGLE_ADS_API_VERSION`     | Opcionais. Padrões: `v23.0` e `v25` (a v21 do Google Ads, usada pelo MASO, foi desligada em 05/08/2026)                                                               |
 | `ADS_REDIRECT_URI`                                 | Opcional. Padrão: `<APP_ORIGIN>/api/ads-callback`; em desenvolvimento, `http://localhost:5173/api/ads-callback`                                                       |
 | `ADS_SYNC_SECRET`                                  | Segredo aleatório (32+ caracteres) com que o banco chama `/api/ads-sync` (sincronização diária de Campanhas)                                                          |
+| `ANTHROPIC_API_KEY`                                | Chave da API da Claude (console.anthropic.com), usada pelo Social Leads para escrever e ajustar o plano do mês (`/api/social-leads`). Cobrada por uso                 |
+| `SOCIAL_LEADS_MODEL`                               | Opcional. Padrão: `claude-opus-5`                                                                                                                                     |
 
 ### Agenda (Google Agenda)
 
@@ -208,6 +210,22 @@ node scripts/import-maso-meta-tokens.mjs --input ../maso-export/usuarios_make_fa
 ```
 
 No pgAdmin, abra `meta-tokens.sql` e use **Execute script (F5)**; o resumo final mostra quantas contas entraram com e sem cliente. Apague o arquivo depois. Teste: `npm run test:db:import-meta-tokens`.
+
+### Onboarding › Social Leads
+
+O módulo **Onboarding** (menu Trabalho) tem, por enquanto, o **Social Leads**: o briefing, o plano do mês escrito pela IA e a aprovação do cliente, trazidos do artefato "Briefing Social Leads" (build B29) para o MAVI (migração `20261013090000_social_leads`, página `src/SocialLeadsPage.tsx`, regras em `src/social-leads.ts`).
+
+- **Carteira:** os clientes com o produto contratado escolhido como Social Leads (na primeira vez, um administrador ou gestor escolhe o produto e a equipe do squad). Cada cliente mostra a etapa (Briefing, Plano, Aprovação, Produção, Campanha) e o próximo passo; **Próximas ações** lista o que está bloqueado, parado ou pronto para avançar. Quem vê segue a regra de Clientes e Projetos; grava quem atende o cliente (equipe do cliente) e os líderes que o veem. O módulo pode ser escondido por pessoa em "Módulos visíveis".
+- **Briefing:** os campos do artefato em 5 passos, salvos enquanto se digita (com versão: se outra pessoa salvou antes, a tela avisa em vez de sobrescrever). O painel **Pronto para a IA** repete as validações do B29: sem Instagram, Facebook nem site, as cores da marca são obrigatórias.
+- **Plano do mês:** `/api/social-leads` abre uma geração no banco (uma por cliente), responde na hora e continua em segundo plano (`waitUntil`, até 300 s): a Claude escreve o plano no contrato do artefato (resposta em formato fixo, com as 9 regras do B29 no prompt), pode ler o site do cliente, e o banco confere de novo a estrutura (4 pilares, 8 posts, um anúncio); uma estrutura recusada é pedida de novo uma vez. A tela recebe o resultado pelo Realtime. **Pedir ajuste à IA** e **Colar do chat** (o JSON `social-leads-atualizacao` da skill) mostram o que muda antes de aplicar; o post alterado volta a pendente. Toda escrita arquiva o plano vigente em **Versões** (restaurável), e o plano com os 8 posts aprovados não é regenerado.
+- **Aprovação do cliente:** **Enviar para aprovação** liga o link `/aprovacao/<token>` (com mensagem pronta para o WhatsApp); o cliente aprova ou pede ajuste em cada post, sem entrar no app, e a decisão aparece na hora para a equipe, com a origem ("pelo cliente" ou "registrado por"). O link mostra só o que a apresentação mostrava: sem alertas, orçamento, posicionamentos, perguntas do formulário, roteamento do lead, SWOT e segmentação. Trocar o link invalida o anterior.
+- **Importação do artefato:** `scripts/import-social-leads-artifact.mjs` gera o SQL do SQL Editor a partir da exportação do banco do artefato (`clients/<slug>.json` e `clients/<slug>/plans/*.json`). Acha o produto contratado pelo nome do cliente e o responsável pelo nome do membro, mantém as decisões e a data de criação do plano, lista quem não foi encontrado e não duplica ao rodar de novo. As artes ficam no artefato (a lista vai no fim do arquivo).
+
+  ```bash
+  node scripts/import-social-leads-artifact.mjs --input <pasta> --company "Make Acelerador de Vendas" --author <e-mail de um administrador> --out social-leads-import.sql
+  ```
+
+Para ligar: aplicar a migração, configurar `ANTHROPIC_API_KEY` na Vercel e fazer redeploy. Testes: `npm run test:db:social-leads` e `npm run test:db:import-social-leads`.
 
 ### Notificações push (com o app fechado)
 

@@ -37,6 +37,7 @@ import {
   HardDrive,
   PanelsTopLeft,
   Megaphone,
+  Rocket,
   Bell,
   BellOff,
   BellRing,
@@ -192,6 +193,9 @@ const Reports = lazy(() => import("./Reports"));
 const AgendaPage = lazy(() =>
   import("./AgendaPage").then((m) => ({ default: m.AgendaPage })),
 );
+const SocialLeadsPage = lazy(() =>
+  import("./SocialLeadsPage").then((m) => ({ default: m.SocialLeadsPage })),
+);
 // Leaders only, and heavy (editor, charts): loaded when first opened.
 const DashboardsPage = lazy(() =>
   import("./DashboardsPage").then((m) => ({ default: m.DashboardsPage })),
@@ -205,6 +209,7 @@ const navigation = [
   { id: "products", label: "Produtos", icon: Package },
   { id: "projects", label: "Projetos", icon: FolderKanban },
   { id: "campaigns", label: "Campanhas", icon: Megaphone },
+  { id: "onboarding", label: "Social Leads", icon: Rocket },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
@@ -965,6 +970,10 @@ export default function App() {
       const open = live.current.selected;
       if (open) pending.tasks.add(open);
       else pending.tasks.add("*");
+      // Social Leads notices sent meanwhile were missed too.
+      window.dispatchEvent(
+        new CustomEvent("mavi:social-leads", { detail: {} }),
+      );
       schedule();
     };
     const unsubscribe = api.subscribeToCompanyChanges(company, {
@@ -1006,6 +1015,13 @@ export default function App() {
           .catch(() => {});
       },
       onChange: (change) => {
+        // Onboarding › Social Leads listens for its own notices.
+        if (change.kind === "social_leads") {
+          window.dispatchEvent(
+            new CustomEvent("mavi:social-leads", { detail: change }),
+          );
+          return;
+        }
         if (change.kind === "lookup") {
           api.invalidateLookupsCache(company);
           pending.lookups = true;
@@ -1953,6 +1969,8 @@ export default function App() {
                         "Campanhas e entregas com começo e fim, organizadas por cliente.",
                       campaigns:
                         "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
+                      onboarding:
+                        "Onboarding: briefing, plano do mês com IA e aprovação do cliente pelo link.",
                       hours: "Seu tempo, registrado com clareza.",
                       drive:
                         "Arquivos da equipe, privados ou compartilhados por link.",
@@ -1984,6 +2002,7 @@ export default function App() {
                 {page !== "drive" &&
                   page !== "profile" &&
                   page !== "campaigns" &&
+                  page !== "onboarding" &&
                   page !== "storage" &&
                   page !== "dashboards" &&
                   (![
@@ -2906,6 +2925,19 @@ export default function App() {
                   user={user}
                   notify={notify}
                 />
+              )}
+              {page === "onboarding" && (
+                <Suspense fallback={<Loading compact />}>
+                  <SocialLeadsPage
+                    key={company}
+                    data={catalogData}
+                    company={company}
+                    user={user}
+                    isLeader={isLeader}
+                    demo={demo}
+                    notify={notify}
+                  />
+                </Suspense>
               )}
               {page === "drive" && (
                 <Drive

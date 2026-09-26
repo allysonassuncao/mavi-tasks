@@ -16,6 +16,7 @@ import type { Role } from "./types";
 export const MEMBER_PAGES: readonly Page[] = [
   "tasks",
   "agenda",
+  "onboarding",
   "search",
   "clients",
   "projects",
@@ -34,6 +35,7 @@ export const MODULES = [
   { id: "tasks", label: "Tarefas" },
   { id: "agenda", label: "Agenda" },
   { id: "campaigns", label: "Campanhas" },
+  { id: "onboarding", label: "Onboarding" },
   { id: "drive", label: "Drive" },
   { id: "reports", label: "Relatórios" },
   { id: "dashboards", label: "Dashboards" },

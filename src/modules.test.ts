@@ -9,6 +9,8 @@ describe("módulos visíveis por pessoa", () => {
     expect(roleAllows("campaigns", "member")).toBe(false);
     expect(roleAllows("products", "member")).toBe(false);
     expect(roleAllows("tasks", "member")).toBe(true);
+    // Onboarding › Social Leads: collaborators see the clients they serve.
+    expect(roleAllows("onboarding", "member")).toBe(true);
     // Hiding never grants: a collaborator still doesn't see Produtos.
     expect(canOpenPage("products", "member", [])).toBe(false);
   });
@@ -31,6 +33,7 @@ describe("módulos visíveis por pessoa", () => {
       "products",
       "projects",
       "campaigns",
+      "onboarding",
       "hours",
       "reports",
       "drive",
@@ -45,6 +48,9 @@ describe("módulos visíveis por pessoa", () => {
     expect(firstPage("admin", [])).toBe("overview");
     expect(firstPage("member", [])).toBe("tasks");
     expect(firstPage("manager", ["overview", "tasks"])).toBe("agenda");
-    expect(firstPage("member", ["tasks", "agenda"])).toBe("drive");
+    expect(firstPage("member", ["tasks", "agenda"])).toBe("onboarding");
+    expect(firstPage("member", ["tasks", "agenda", "onboarding"])).toBe(
+      "drive",
+    );
   });
 });

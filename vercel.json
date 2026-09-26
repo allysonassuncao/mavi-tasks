@@ -4,7 +4,8 @@
   "outputDirectory": "dist",
   "functions": {
     "api/ads-sync.ts": { "maxDuration": 60 },
-    "api/meta-leadgen.ts": { "maxDuration": 60 }
+    "api/meta-leadgen.ts": { "maxDuration": 60 },
+    "api/social-leads.ts": { "maxDuration": 300 }
   },
   "rewrites": [
     {

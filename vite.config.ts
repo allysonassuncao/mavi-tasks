@@ -37,6 +37,14 @@ function gcsDevPlugin() {
           await google(req, res);
           return;
         }
+        if (req.url?.startsWith("/api/social-leads")) {
+          // Same handler as the Vercel function (api/social-leads.ts).
+          const { default: socialLeads } = await server.ssrLoadModule(
+            "/api/social-leads.ts",
+          );
+          await socialLeads(req, res);
+          return;
+        }
         if (req.url?.startsWith("/api/drive")) {
           // Same handler as the Vercel function (api/drive.ts).
           const { default: drive } =

@@ -1103,7 +1103,9 @@ export type LiveChange =
       /** Creator, assignee and participants (before and after). */
       users: string[];
     }
-  | { kind: "lookup"; table: string };
+  | { kind: "lookup"; table: string }
+  /** Onboarding › Social Leads: something of this contracted product changed. */
+  | { kind: "social_leads"; contract: string; table: string };
 
 /**
  * Whether a task notice concerns the person: always for leaders (they see

@@ -23,6 +23,14 @@ const PublicDashboard = lazy(() =>
 const publicDashboard = window.location.pathname.match(
   /^\/painel\/([0-9a-f]{64})\/?$/,
 );
+const PublicSocialLeads = lazy(() =>
+  import("./PublicSocialLeads").then((m) => ({
+    default: m.PublicSocialLeads,
+  })),
+);
+const approvalLink = window.location.pathname.match(
+  /^\/aprovacao\/([0-9a-f]{64})\/?$/,
+);
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     {publicFile ? (
@@ -32,6 +40,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     ) : publicDashboard ? (
       <Suspense fallback={null}>
         <PublicDashboard token={publicDashboard[1]} />
+      </Suspense>
+    ) : approvalLink ? (
+      <Suspense fallback={null}>
+        <PublicSocialLeads token={approvalLink[1]} />
       </Suspense>
     ) : (
       <App />

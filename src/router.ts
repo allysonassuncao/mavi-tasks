@@ -10,6 +10,7 @@ export const pagePaths = {
   contracts: "/produtos-contratados",
   projects: "/projetos",
   campaigns: "/campanhas",
+  onboarding: "/onboarding/social-leads",
   hours: "/horas",
   reports: "/relatorios",
   drive: "/drive",
@@ -95,6 +96,9 @@ export function safeReturnPath(value: string | null) {
     "campanha",
     "plataforma",
     "atencao",
+    "contrato",
+    "aba",
+    "mes",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);
@@ -109,6 +113,7 @@ export function loginDestination(current: string) {
 export function resolvePage(path: string): Page | null {
   const normalized = routeParts(path).path;
   if (normalized === "/") return "overview";
+  if (normalized === "/onboarding") return "onboarding";
   if (taskIdFromPath(path)) return "tasks";
   if (dashboardIdFromPath(path)) return "dashboards";
   return (
