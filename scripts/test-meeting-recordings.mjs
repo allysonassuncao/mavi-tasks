@@ -293,6 +293,28 @@ await check(
 );
 
 await check(
+  "bot reaproveitado em várias reuniões: uma gravação por transcrição",
+  () => {
+    const [first, second] = [
+      ["31", "2025-05-02 15:32:31+00"],
+      ["32", "2025-05-02 16:44:19+00"],
+    ].map(([id, created_at]) =>
+      buildRecording(
+        meeting("bot-x", "4282"),
+        { ...transcription("A."), id, created_at },
+        { customer: "4282", how: "customer_id" },
+        videos,
+        true,
+      ),
+    );
+    assert.deepEqual(
+      [first.source_id, first.recorded_at, second.source_id],
+      ["bot-x#31", "2025-05-02 15:32:31+00", "bot-x#32"],
+    );
+  },
+);
+
+await check(
   "os arquivos SQL importam e não duplicam ao rodar de novo",
   async () => {
     const recordings = [one, gone, unknown];

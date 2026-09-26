@@ -446,8 +446,18 @@ const sqlArray = (list) =>
 const sqlJson = (v) => `${sqlString(JSON.stringify(v))}::jsonb`;
 const sqlNum = (v) => (Number.isFinite(v) ? String(v) : "null");
 
-/** Uma reunião pronta para o SQL (ou null quando não entra). */
-export function buildRecording(meeting, transcription, client, videos) {
+/**
+ * Uma reunião pronta para o SQL (ou null quando não entra). `shared`: o
+ * gravador reaproveitou o id do bot em várias reuniões (início de 2025) —
+ * cada transcrição é uma reunião, com a própria data.
+ */
+export function buildRecording(
+  meeting,
+  transcription,
+  client,
+  videos,
+  shared = false,
+) {
   const transcript = normalizeTranscript(
     parseJson(transcription.original_transcript),
   );
@@ -462,11 +472,16 @@ export function buildRecording(meeting, transcription, client, videos) {
   const attendees = parseJson(meeting.employees_attendees);
   const speakers = parseJson(transcription.speakers);
   return {
-    source_id: meeting.bot_id,
+    source_id: shared
+      ? `${meeting.bot_id}#${transcription.id}`
+      : meeting.bot_id,
     customer: client.customer,
     how: client.how,
     title: clean(meeting.title).slice(0, 300),
-    recorded_at: meeting.created_at,
+    recorded_at:
+      shared && transcription.created_at
+        ? transcription.created_at
+        : meeting.created_at,
     duration_seconds:
       lastEnd > 0
         ? Math.round(lastEnd)
@@ -593,14 +608,15 @@ async function main(argv) {
 
   // 1ª passada: quem tem transcrição e quem participou (para achar o cliente).
   const transcribed = new Map();
+  const perBot = new Map();
   for await (const t of copyRows(
     join(dir, "meet_record_transcription.sql"),
     "meet_record_transcription",
-  ))
-    transcribed.set(
-      unescapeCopy(t.bot_id),
-      parseJson(unescapeCopy(t.speakers)),
-    );
+  )) {
+    const bot = unescapeCopy(t.bot_id);
+    transcribed.set(bot, parseJson(unescapeCopy(t.speakers)));
+    perBot.set(bot, (perBot.get(bot) ?? 0) + 1);
+  }
   const meetings = rows.map((m) => ({
     bot: m.bot_id,
     user_email: m.user_email ?? "",
@@ -655,7 +671,13 @@ async function main(argv) {
       skipped.sem_cliente++;
       continue;
     }
-    const r = buildRecording(meeting, t, client, videos);
+    const r = buildRecording(
+      meeting,
+      t,
+      client,
+      videos,
+      (perBot.get(t.bot_id) ?? 0) > 1,
+    );
     if (!r) {
       skipped.vazia++;
       continue;
