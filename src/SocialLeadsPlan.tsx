@@ -13,6 +13,7 @@ import {
   Image as ImageIcon,
   Lock,
   Megaphone,
+  MessageSquare,
   Presentation,
   Pencil,
   RefreshCw,
@@ -67,6 +68,8 @@ import {
   type SlPost,
   type MediaFile,
   type SlTask,
+  type SlPostEvent,
+  describeEvent,
 } from "./social-leads";
 import { MediaInput, type Uploading } from "./SocialLeadsFields";
 
@@ -701,6 +704,11 @@ export function PlanView({
             onDelete: (f) => backend.deleteMedia(f),
             notify,
           }}
+          events={(bundle.events ?? []).filter((e) => e.number === openPost)}
+          onComment={async (note) => {
+            await backend.comment(plan.id, openPost, note);
+            load();
+          }}
         />
       )}
       {modal === "share" && (
@@ -922,6 +930,8 @@ function PostModal({
   onDecide,
   onEdit,
   production,
+  events,
+  onComment,
 }: {
   post: SlPost;
   content: PlanContent;
@@ -932,6 +942,9 @@ function PostModal({
   onDecide: (d: Decision, note: string) => Promise<void>;
   onEdit: (patch: Partial<PlanPost>) => Promise<void>;
   production: ProductionProps;
+  /** This post's history, oldest first. */
+  events: SlPostEvent[];
+  onComment: (note: string) => Promise<void>;
 }) {
   const [note, setNote] = useState(post.note);
   const [editing, setEditing] = useState(false);
@@ -1216,10 +1229,146 @@ function PostModal({
                 />
               )}
             </div>
+            <PostHistory events={events} onComment={onComment} />
           </>
         )}
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Everything that happened to the post, as a timeline: approvals and
+ * adjustments (by the team or the client on the link) with their notes,
+ * edits with what changed, arts, the art task and the team's comments.
+ */
+function PostHistory({
+  events,
+  onComment,
+}: {
+  events: SlPostEvent[];
+  onComment: (note: string) => Promise<void>;
+}) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const list = useRef<HTMLOListElement>(null);
+  // The newest is at the bottom, next to the comment box.
+  useEffect(() => {
+    const el = list.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [events.length]);
+  const send = () => {
+    if (!note.trim() || busy) return;
+    setBusy(true);
+    setError("");
+    onComment(note)
+      .then(() => setNote(""))
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <section className="sl-history" aria-label="Histórico do post">
+      <h4>
+        <History size={15} /> Histórico
+        <small>
+          {events.length}{" "}
+          {events.length === 1 ? "acontecimento" : "acontecimentos"}
+        </small>
+      </h4>
+      {events.length ? (
+        <ol className="sl-history-list" ref={list}>
+          {events.map((e) => {
+            const d = describeEvent(e);
+            return (
+              <li key={e.id} className={`sl-history-item ${d.tone} ${e.kind}`}>
+                <span className="sl-history-dot" aria-hidden="true">
+                  {e.kind === "approved" ? (
+                    <Check size={12} />
+                  ) : e.kind === "rejected" ? (
+                    <X size={12} />
+                  ) : e.kind === "comment" ? (
+                    <MessageSquare size={11} />
+                  ) : e.kind === "edited" ? (
+                    e.via === "ai" ? (
+                      <Sparkles size={11} />
+                    ) : (
+                      <Pencil size={11} />
+                    )
+                  ) : e.kind === "arts" ? (
+                    <ImageIcon size={11} />
+                  ) : e.kind === "task" ? (
+                    <Hammer size={11} />
+                  ) : e.kind === "reopened" ? (
+                    <RotateCcw size={11} />
+                  ) : null}
+                </span>
+                <div className="sl-history-body">
+                  <p className="sl-history-title">
+                    <strong>{d.title}</strong>
+                    <time dateTime={e.created_at}>
+                      {dateTime(e.created_at)}
+                    </time>
+                  </p>
+                  {e.note && <blockquote>{e.note}</blockquote>}
+                  {!!d.changes.length && (
+                    <dl className="sl-history-changes">
+                      {d.changes.map((c) => (
+                        <div key={c.label}>
+                          <dt>{c.label}</dt>
+                          <dd>
+                            <del>{c.before || "—"}</del>
+                            <ins>{c.after || "—"}</ins>
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  {d.lines.map((l) => (
+                    <p key={l} className="sl-history-line">
+                      {l}
+                    </p>
+                  ))}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <p className="sl-muted">Nada registrado ainda.</p>
+      )}
+      <form
+        className="sl-history-compose"
+        onSubmit={(e) => {
+          e.preventDefault();
+          send();
+        }}
+      >
+        <Textarea
+          rows={2}
+          value={note}
+          maxLength={2000}
+          aria-label="Comentar no histórico do post"
+          placeholder="Comente: o que o cliente disse, uma decisão, um lembrete para a criação…"
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              send();
+            }
+          }}
+        />
+        <Button
+          type="submit"
+          className="btn secondary"
+          loading={busy}
+          disabled={!note.trim()}
+        >
+          <Send size={14} /> Comentar
+        </Button>
+      </form>
+      {error && <p className="sl-alert bad">{error}</p>}
+    </section>
   );
 }
 

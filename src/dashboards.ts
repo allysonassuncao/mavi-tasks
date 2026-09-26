@@ -10,7 +10,7 @@ import { priorities, statuses, type Status } from "./types";
  * formulas, how results become series, the grid layout and the API calls.
  */
 
-export type Source = "tasks" | "hours";
+export type Source = "tasks" | "hours" | "social_leads";
 export type Viz = "stat" | "line" | "area" | "bar" | "hbar" | "donut" | "table";
 export type GroupBy =
   | "none"
@@ -22,7 +22,8 @@ export type GroupBy =
   | "person"
   | "creator"
   | "status"
-  | "priority";
+  | "priority"
+  | "stage";
 export type Interval = "auto" | "day" | "week" | "month";
 /** "money" (R$) is only drawn by Campanhas' charts, not a dashboard metric. */
 export type Unit = "number" | "hours" | "days" | "percent" | "money";
@@ -213,6 +214,57 @@ export const sources: Record<
     dateFields: [{ key: "started_at", label: "Início do apontamento" }],
     filters: ["client", "product", "project", "team", "person", "entry_source"],
   },
+  // Migration 20261020120000: the posts' history, the plans and the clients.
+  social_leads: {
+    label: "Social Leads",
+    metrics: [
+      {
+        key: "approvals",
+        label: "Aprovações de posts",
+        unit: "number",
+        additive: true,
+      },
+      {
+        key: "rejections",
+        label: "Pedidos de ajuste (reprovas)",
+        unit: "number",
+        additive: true,
+      },
+      {
+        key: "approval_rate",
+        label: "Taxa de aprovação (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "rejection_rate",
+        label: "Taxa de reprova (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "adjust_per_post",
+        label: "Ajustes por post avaliado",
+        unit: "number",
+        additive: false,
+      },
+      {
+        key: "approval_days",
+        label: "Tempo até a aprovação do plano (dias)",
+        unit: "days",
+        additive: false,
+      },
+      {
+        key: "clients",
+        label: "Clientes (situação de hoje, por etapa)",
+        unit: "number",
+        additive: true,
+      },
+    ],
+    // Each metric has its own date: the decision, the plan's approval.
+    dateFields: [{ key: "event", label: "Data da decisão ou aprovação" }],
+    filters: ["client", "product", "team", "person"],
+  },
 };
 export const metricDef = (q: Pick<Query, "source" | "metric">) =>
   sources[q.source]?.metrics.find((m) => m.key === q.metric);
@@ -235,24 +287,41 @@ export const groupOptions: {
   label: string;
   sources: Source[];
 }[] = [
-  { key: "none", label: "Total (sem agrupar)", sources: ["tasks", "hours"] },
+  {
+    key: "none",
+    label: "Total (sem agrupar)",
+    sources: ["tasks", "hours", "social_leads"],
+  },
   {
     key: "time",
     label: "Tempo (dia, semana, mês)",
-    sources: ["tasks", "hours"],
+    sources: ["tasks", "hours", "social_leads"],
   },
-  { key: "client", label: "Cliente", sources: ["tasks", "hours"] },
-  { key: "product", label: "Produto", sources: ["tasks", "hours"] },
+  {
+    key: "client",
+    label: "Cliente",
+    sources: ["tasks", "hours", "social_leads"],
+  },
+  {
+    key: "product",
+    label: "Produto",
+    sources: ["tasks", "hours", "social_leads"],
+  },
   { key: "project", label: "Projeto", sources: ["tasks", "hours"] },
   { key: "team", label: "Equipe", sources: ["tasks", "hours"] },
   {
     key: "person",
     label: "Pessoa (responsável ou quem registrou)",
-    sources: ["tasks", "hours"],
+    sources: ["tasks", "hours", "social_leads"],
   },
   { key: "creator", label: "Criador da tarefa", sources: ["tasks"] },
   { key: "status", label: "Status", sources: ["tasks"] },
   { key: "priority", label: "Prioridade", sources: ["tasks"] },
+  {
+    key: "stage",
+    label: "Etapa (clientes do Social Leads)",
+    sources: ["social_leads"],
+  },
 ];
 /** Groupings every query of the panel supports. */
 export const groupsFor = (queries: Pick<Query, "source">[]) =>
@@ -871,6 +940,129 @@ export function starterPanels(): Panel[] {
           q("A", "tasks", "count", { label: "Tarefas" }),
           q("B", "tasks", "late", { label: "Atrasadas" }),
           q("C", "hours", "hours", { label: "Horas" }),
+        ],
+      },
+    },
+  ];
+}
+
+/** Social Leads: approvals, adjustments, time to approval and stages. */
+export function socialLeadsPanels(): Panel[] {
+  const q = (
+    ref: string,
+    metric: string,
+    extra: Partial<Query> = {},
+  ): Query => ({
+    ref,
+    source: "social_leads",
+    metric,
+    dateField: "event",
+    filters: [],
+    ...extra,
+  });
+  const stat = (
+    id: string,
+    title: string,
+    x: number,
+    y: number,
+    w: number,
+    metric: string,
+    extra: Partial<PanelSpec> = {},
+  ): Panel => ({
+    id,
+    title,
+    x,
+    y,
+    w,
+    h: 3,
+    spec: {
+      viz: "stat",
+      groupBy: "none",
+      compare: true,
+      queries: [q("A", metric)],
+      ...extra,
+    },
+  });
+  return [
+    stat("aprovacoes", "Aprovações de posts", 0, 0, 3, "approvals"),
+    stat("taxa-aprovacao", "Taxa de aprovação", 3, 0, 3, "approval_rate", {
+      unit: "percent",
+    }),
+    stat("reprovas", "Pedidos de ajuste", 6, 0, 3, "rejections"),
+    stat("taxa-reprova", "Taxa de reprova", 9, 0, 3, "rejection_rate", {
+      unit: "percent",
+    }),
+    stat(
+      "ajustes-post",
+      "Ajustes por post avaliado",
+      0,
+      3,
+      4,
+      "adjust_per_post",
+      {
+        decimals: 2,
+      },
+    ),
+    stat(
+      "tempo-aprovacao",
+      "Tempo até a aprovação do plano",
+      4,
+      3,
+      4,
+      "approval_days",
+      {
+        unit: "days",
+      },
+    ),
+    stat("clientes", "Clientes no Social Leads", 8, 3, 4, "clients", {
+      compare: false,
+    }),
+    {
+      id: "decisoes-tempo",
+      title: "Aprovações × ajustes",
+      x: 0,
+      y: 6,
+      w: 8,
+      h: 5,
+      spec: {
+        viz: "line",
+        groupBy: "time",
+        interval: "auto",
+        queries: [
+          q("A", "approvals", { label: "Aprovações" }),
+          q("B", "rejections", { label: "Ajustes" }),
+        ],
+      },
+    },
+    {
+      id: "etapas",
+      title: "Clientes por etapa",
+      x: 8,
+      y: 6,
+      w: 4,
+      h: 5,
+      spec: {
+        viz: "donut",
+        groupBy: "stage",
+        queries: [q("A", "clients")],
+      },
+    },
+    {
+      id: "por-cliente",
+      title: "Por cliente",
+      x: 0,
+      y: 11,
+      w: 12,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "client",
+        limit: 20,
+        queries: [
+          q("A", "approvals", { label: "Aprovações" }),
+          q("B", "rejections", { label: "Ajustes" }),
+          q("C", "approval_rate", { label: "Taxa de aprovação" }),
+          q("D", "approval_days", { label: "Dias até aprovar" }),
         ],
       },
     },

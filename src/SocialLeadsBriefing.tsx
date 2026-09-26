@@ -10,6 +10,7 @@ import {
 import { Button, Input, Select, SelectOption, Textarea } from "./ui";
 import type { Member } from "./types";
 import type { SocialLeadsBackend } from "./social-leads-api";
+import { BriefingAiModal } from "./SocialLeadsBriefingAi";
 import {
   briefingReadiness,
   briefingSteps,
@@ -100,6 +101,7 @@ export function BriefingWizard({
     | { kind: "error" | "conflict"; message: string }
   >({ kind: "idle" });
   const [generating, setGenerating] = useState(false);
+  const [aiFill, setAiFill] = useState(false);
   const version = useRef<number | null>(briefing?.version ?? null);
   const dirty = useRef(false);
   const timer = useRef(0);
@@ -304,6 +306,40 @@ export function BriefingWizard({
 
   return (
     <div className="sl-wizard">
+      {canWrite && (
+        <div className="sl-ai-fill">
+          <Sparkles size={18} aria-hidden="true" />
+          <span>
+            <strong>Tem as notas ou a gravação da reunião?</strong>
+            <small>
+              A IA lê a transcrição (ou uma reunião em Gravações da MAVI) e
+              sugere os campos. Você revisa antes de entrar.
+            </small>
+          </span>
+          <Button className="btn secondary" onClick={() => setAiFill(true)}>
+            <Sparkles size={15} /> Preencher com a IA
+          </Button>
+        </div>
+      )}
+      {aiFill && (
+        <BriefingAiModal
+          company={company}
+          contract={item.contract_id}
+          backend={backend}
+          current={fields}
+          currentObjective={objective}
+          onClose={() => setAiFill(false)}
+          onApply={(found, foundObjective, count) => {
+            setFields((f) => ({ ...f, ...found }));
+            if (foundObjective) setObjective(foundObjective);
+            touch();
+            setAiFill(false);
+            notify(
+              `${count} ${count === 1 ? "campo preenchido" : "campos preenchidos"} pela IA. Revise os passos e ajuste o que precisar.`,
+            );
+          }}
+        />
+      )}
       <nav className="sl-steps" aria-label="Passos do briefing">
         {briefingSteps.map((s, i) => {
           const r = readiness.byStep[i];

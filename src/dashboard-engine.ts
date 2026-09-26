@@ -40,6 +40,9 @@ function series(
   tz: string,
   now: Date,
 ): SeriesRow[] {
+  // Social Leads lives in its own store in the demo: no figures here.
+  if (q.source === "social_leads")
+    return group === "none" ? [{ k: "total", v: 0 }] : [];
   const today = dateKey(now, tz);
   const contract = new Map(data.contracts.map((k) => [k.id, k]));
   const taskById = new Map(data.tasks.map((t) => [t.id, t]));

@@ -25,6 +25,9 @@ import {
   type SlPost,
   type SlRevision,
   type SlTask,
+  type SlPostEvent,
+  postEventsFor,
+  type BriefingSuggestion,
 } from "./social-leads";
 
 /**
@@ -41,12 +44,22 @@ export interface PlanBundle {
   usage: SlUsage[];
   /** The art tasks of the posts (production). */
   tasks: SlTask[];
+  /** Each post's history: decisions, notes, edits, arts, comments. */
+  events: SlPostEvent[];
 }
 /** Who receives each post's art task: a team (distributed) or a person. */
 export type ReleaseTarget = { team: string } | { user: string };
 export type ReleaseAssign = Record<number, ReleaseTarget>;
 /** Who gets the client's cycle tasks (only on the release that opens it). */
 export type ReleaseCycle = { followup: string; meeting: string };
+/** A meeting of the client in "Gravações da MAVI". */
+export interface MeetingOption {
+  id: string;
+  title: string;
+  recorded_at: string;
+  duration_seconds: number | null;
+  has_transcript: boolean;
+}
 /** The palette the AI read from the site or Instagram. */
 export interface BrandColorsFound {
   colors: { hex: string; name: string }[];
@@ -126,6 +139,14 @@ export interface SocialLeadsBackend {
     contract: string,
     from: { website?: string; instagram?: string },
   ): Promise<BrandColorsFound>;
+  /** The client's recorded meetings (none when the module isn't there). */
+  meetings(company: string, contract: string): Promise<MeetingOption[]>;
+  /** The AI reads notes, a transcript or a meeting into briefing fields. */
+  readBriefing(
+    company: string,
+    contract: string,
+    from: { text?: string; recording?: string },
+  ): Promise<BriefingSuggestion>;
   writePlan(
     company: string,
     contract: string,
@@ -137,6 +158,8 @@ export interface SocialLeadsBackend {
     summary: string,
   ): Promise<{ id: string; version: number }>;
   restore(revision: string, version: number): Promise<void>;
+  /** A team comment on a post's history. */
+  comment(plan: string, number: number, note: string): Promise<void>;
   decide(
     plan: string,
     number: number,
@@ -291,7 +314,7 @@ export const serverSocialLeads: SocialLeadsBackend = {
     };
   },
   async plan(plan) {
-    const [p, x, r, u] = await Promise.all([
+    const [p, x, r, u, e] = await Promise.all([
       db()
         .from("social_leads_plans")
         .select(PLAN_COLUMNS)
@@ -316,6 +339,15 @@ export const serverSocialLeads: SocialLeadsBackend = {
         .eq("plan_id", plan)
         .order("created_at")
         .limit(500),
+      db()
+        .from("social_leads_post_events")
+        .select(
+          "id,plan_id,number,kind,via,actor_id,actor_name,note,detail,created_at",
+        )
+        .eq("plan_id", plan)
+        .order("created_at")
+        .order("seq")
+        .limit(2000),
     ]);
     for (const q of [p, x, r]) if (q.error) throw q.error;
     const posts = (x.data ?? []) as SlPost[];
@@ -333,6 +365,8 @@ export const serverSocialLeads: SocialLeadsBackend = {
       // The cost is a detail: without it (e.g. migration not applied yet) the plan still opens.
       usage: u.error ? [] : ((u.data ?? []) as SlUsage[]),
       tasks: t.error ? [] : ((t.data ?? []) as SlTask[]),
+      // Without the history (migration not applied yet) the plan still opens.
+      events: e.error ? [] : ((e.data ?? []) as SlPostEvent[]),
     };
   },
   async saveBriefing(
@@ -400,6 +434,25 @@ export const serverSocialLeads: SocialLeadsBackend = {
       instagram: from.instagram ?? null,
     });
   },
+  async meetings(company, contract) {
+    try {
+      return ((await rpc("social_leads_meetings", {
+        p_company: company,
+        p_contract: contract,
+      })) ?? []) as MeetingOption[];
+    } catch {
+      return [];
+    }
+  },
+  async readBriefing(company, contract, from) {
+    return server<BriefingSuggestion>({
+      action: "briefing",
+      company,
+      contract,
+      text: from.text ?? null,
+      recording: from.recording ?? null,
+    });
+  },
   async writePlan(
     company,
     contract,
@@ -425,6 +478,13 @@ export const serverSocialLeads: SocialLeadsBackend = {
     await rpc("social_leads_restore", {
       p_revision: revision,
       p_version: version,
+    });
+  },
+  async comment(plan, number, note) {
+    await rpc("social_leads_comment", {
+      p_plan: plan,
+      p_number: number,
+      p_note: note,
     });
   },
   async decide(plan, number, decision, note) {
@@ -572,6 +632,11 @@ type DemoState = {
   usage: (SlUsage & { plan_id: string })[];
   /** Files "uploaded" in the demo: object URLs in this tab. */
   files: Record<string, string>;
+  /** Each post's history, and the posts as last seen (to find changes). */
+  events: SlPostEvent[];
+  seen: Record<string, SlPost>;
+  /** Why the plan is being written now (like the database's revision). */
+  reason: string | null;
 };
 let demoState: DemoState | null = null;
 
@@ -660,6 +725,9 @@ export function demoSocialLeads(
       tasks: [],
       cycles: {},
       campaigns: {},
+      events: [],
+      seen: {},
+      reason: null,
     };
   const s = demoState;
   const spend = (plan: string, kind: SlUsage["kind"], cost: number) =>
@@ -675,8 +743,38 @@ export function demoSocialLeads(
       created_at: now(),
       created_by: user,
     });
-  const emit = () =>
+  const nameOf = (u: string | null) =>
+    data.members.find((m) => m.user_id === u)?.name ?? "";
+  // Like the database trigger: every change to a post goes to its history.
+  const emit = () => {
+    for (const x of s.posts) {
+      const plan = s.plans.find((p) => p.id === x.plan_id);
+      if (!plan) continue;
+      const key = `${x.plan_id}:${x.number}`;
+      const task = x.task_id
+        ? s.tasks.find((t) => t.id === x.task_id)
+        : undefined;
+      for (const e of postEventsFor(s.seen[key], x, {
+        actor: user,
+        actorName: nameOf(user),
+        clientName:
+          s.briefings[plan.contract_id]?.fields.clientName ||
+          clientOf(plan.contract_id).name,
+        source: plan.source,
+        reason: s.reason,
+        summary: plan.summary,
+        name: nameOf,
+        task: task && {
+          assignee: nameOf(task.assignee_id) || undefined,
+          due: task.due_date ?? undefined,
+        },
+      }))
+        s.events.push({ ...e, id: id(), created_at: now() });
+      s.seen[key] = { ...x, arts: x.arts && [...x.arts] };
+    }
+    s.reason = null;
     window.dispatchEvent(new CustomEvent("mavi:social-leads", { detail: {} }));
+  };
   const contractOf = (k: string) => data.contracts.find((c) => c.id === k)!;
   const clientOf = (k: string) =>
     data.clients.find((c) => c.id === contractOf(k).client_id)!;
@@ -933,6 +1031,7 @@ export function demoSocialLeads(
         tasks: s.tasks.filter((t) =>
           s.posts.some((x) => x.plan_id === planId && x.task_id === t.id),
         ),
+        events: s.events.filter((e) => e.plan_id === planId),
       };
     },
     async saveBriefing(
@@ -991,7 +1090,61 @@ export function demoSocialLeads(
         cost_usd: 0.004,
       };
     },
-    async writePlan(_c, contract, planId, content, _reason, version) {
+    async meetings() {
+      return [
+        {
+          id: "demo-reuniao",
+          title: "Onboarding com o cliente",
+          recorded_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+          duration_seconds: 2460,
+          has_transcript: true,
+        },
+      ];
+    },
+    async readBriefing(_c, contract, from) {
+      if (!from.recording && !from.text?.trim())
+        throw new Error(
+          "Cole as notas ou a transcrição, ou escolha uma reunião.",
+        );
+      await new Promise((r) => setTimeout(r, 1500));
+      const name =
+        s.briefings[contract]?.fields.clientName || clientOf(contract).name;
+      return {
+        fields: {
+          clientName: name,
+          segment: "Estúdio de design de interiores",
+          contactName: "Renata",
+          businessWhat:
+            "Projetos de interiores residenciais e comerciais, do conceito à obra.",
+          positioning: "Referência em projetos acolhedores e funcionais.",
+          featuredOffer: "Consultoria de 2 horas com 20% de desconto",
+          averageTicket: "R$ 4.500,00",
+          targetAudience:
+            "Casais de 28 a 45 anos reformando o primeiro apartamento.",
+          notes: "Não prometer prazo de obra.",
+        },
+        objective: "ctwa",
+        evidence: {
+          segment: "a gente faz projeto de interiores, casa e loja",
+          featuredOffer: "queria puxar a consultoria de duas horas com 20%",
+          notes: "prazo de obra a gente nunca promete",
+        },
+        missing: ["competitors", "socialProof", "mediaBudget"],
+        summary: "Demonstração: campos de exemplo, sem chamar a IA.",
+        source: from.recording ? "Onboarding com o cliente" : "Texto colado",
+        cost_usd: 0.06,
+      };
+    },
+    async writePlan(
+      _c,
+      contract,
+      planId,
+      content,
+      reason,
+      version,
+      _source,
+      summary,
+    ) {
       const plan = s.plans.find((p) => p.id === planId)!;
       if (plan.version !== version)
         throw new Error(
@@ -1021,6 +1174,8 @@ export function demoSocialLeads(
           : { ...p, status: "pendente" as const, observacao: "" };
       });
       putPlan(contract, { ...content, posts: kept }, planId);
+      if (summary) plan.summary = summary;
+      s.reason = reason;
       emit();
       return { id: planId, version: plan.version };
     },
@@ -1028,6 +1183,24 @@ export function demoSocialLeads(
       const r = s.revisions.find((x) => x.id === revision)!;
       const plan = s.plans.find((p) => p.id === r.plan_id)!;
       putPlan(plan.contract_id, r.content, plan.id);
+      s.reason = `antes de restaurar a versão ${r.number}`;
+      emit();
+    },
+    async comment(planId, number, note) {
+      const plan = s.plans.find((p) => p.id === planId)!;
+      if (!note.trim()) throw new Error("Escreva o comentário.");
+      s.events.push({
+        id: id(),
+        plan_id: plan.id,
+        number,
+        kind: "comment",
+        via: "team",
+        actor_id: user,
+        actor_name: nameOf(user),
+        note: note.trim(),
+        detail: {},
+        created_at: now(),
+      });
       emit();
     },
     async decide(planId, number, decision, note) {
@@ -1079,6 +1252,7 @@ export function demoSocialLeads(
           samplePlan(client, n),
           mode === "current" ? planId : undefined,
         );
+        if (mode === "current") s.reason = "regeneração do mês";
         Object.assign(job, {
           status: "done",
           finished_at: now(),

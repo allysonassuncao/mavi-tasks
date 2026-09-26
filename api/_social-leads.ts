@@ -2,9 +2,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { callRpc } from "./_drive.js";
 import { defaultLookup, gatherBrand, type Lookup } from "./_brand-colors.js";
 import {
+  briefingAiKeys,
   briefingReadiness,
+  briefingSteps,
   campaignObjectives,
+  cleanBriefingSuggestion,
   type BriefingFields,
+  type BriefingKey,
   type CampaignObjective,
   type PlanContent,
 } from "../src/social-leads.js";
@@ -24,6 +28,10 @@ import {
  *   and applies it like an import.
  * - "colors" reads the client's site and/or Instagram (api/_brand-colors.ts)
  *   and has Claude pick the brand palette from the real colours and images.
+ * - "briefing" reads notes, a transcript (pasted or from a file) or a
+ *   meeting of the client in "Gravações da MAVI" and returns the briefing
+ *   fields it answers, each with the passage it came from; the page shows
+ *   them for the team to choose what goes in.
  *
  * Every call to Claude is metered (tokens and dollars, including failed
  * attempts) and recorded in social_leads_ai_usage, so each plan shows what
@@ -195,7 +203,7 @@ async function logUsage(
     plan?: string | null;
     job?: string | null;
   },
-  kind: "generate" | "adjust" | "colors",
+  kind: "generate" | "adjust" | "colors" | "briefing",
   m: Meter,
 ) {
   if (!m.input && !m.output && !m.cacheRead && !m.cacheWrite) return;
@@ -519,6 +527,14 @@ export type SocialLeadsRequest =
       contract: string;
       plan: string;
       instruction: string;
+    }
+  | {
+      action: "briefing";
+      company: string;
+      contract: string;
+      /** Notes or a transcript; or the meeting to read (not both). */
+      text?: string | null;
+      recording?: string | null;
     };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -548,6 +564,8 @@ export async function handleSocialLeads(
       return await adjust(body, authorization, env, deps);
     if (body.action === "colors")
       return await colors(body, authorization, env, deps);
+    if (body.action === "briefing")
+      return await briefing(body, authorization, env, deps);
     return { status: 400, body: { error: "Ação desconhecida." } };
   } catch (err) {
     return {
@@ -862,6 +880,187 @@ async function colors(
       auth,
       { company: body.company, contract: body.contract },
       "colors",
+      meter,
+    );
+  }
+}
+
+// ------------------------------------------------------------ briefing by AI
+/** About 50 thousand tokens: a long meeting fits; a whole book doesn't. */
+export const BRIEFING_MAX_CHARS = 200_000;
+const briefingLabels = Object.fromEntries(
+  briefingSteps.flatMap((s) => s.fields).map((f) => [f.key, f.label]),
+) as Record<BriefingKey, string>;
+export const BRIEFING_SCHEMA = obj({
+  fields: obj(Object.fromEntries(briefingAiKeys.map((k) => [k, str]))),
+  campaignObjective: { type: "string", enum: ["ctwa", "form_nativo", ""] },
+  evidence: {
+    type: "array",
+    description:
+      "De onde veio cada campo preenchido: um trecho curto do material.",
+    items: obj({ field: { type: "string", enum: briefingAiKeys }, quote: str }),
+  },
+  missing: {
+    type: "array",
+    description: "Campos importantes que o material não responde.",
+    items: { type: "string", enum: briefingAiKeys },
+  },
+  resumo: str,
+});
+
+const clockOf = (s: number) => {
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(Math.floor(s % 60)).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+};
+/** A meeting transcript as lines "[mm:ss] Nome: fala" (same speaker joined). */
+export function meetingText(
+  speakers: string[],
+  segments: [number | null, number | null, number | null, string][],
+) {
+  const lines: string[] = [];
+  let at: number | null = null;
+  let who: number | null = null;
+  let said: string[] = [];
+  const name = (i: number | null) =>
+    i != null && speakers[i] ? speakers[i] : `Falante ${(i ?? 0) + 1}`;
+  const flush = () => {
+    if (said.length)
+      lines.push(
+        `${at != null ? `[${clockOf(at)}] ` : ""}${name(who)}: ${said.join(" ")}`,
+      );
+    said = [];
+  };
+  for (const [start, , speaker, text] of segments) {
+    if (
+      !said.length ||
+      speaker !== who ||
+      (start != null && at != null && start - at >= 45)
+    ) {
+      flush();
+      at = start;
+      who = speaker;
+    }
+    said.push(String(text ?? "").trim());
+  }
+  flush();
+  return lines.join("\n");
+}
+
+async function briefing(
+  body: Extract<SocialLeadsRequest, { action: "briefing" }>,
+  auth: string,
+  env: SocialLeadsEnv,
+  deps: Deps,
+) {
+  let material = String(body.text ?? "").trim();
+  let source = "Texto colado";
+  let meetingDate: string | null = null;
+  if (body.recording) {
+    if (!UUID.test(body.recording))
+      return { status: 400, body: { error: "Reunião inválida." } };
+    const m = await rpc<{
+      title: string;
+      recorded_at: string;
+      speakers: string[];
+      segments: [number | null, number | null, number | null, string][];
+      summary: Record<string, unknown>;
+    }>(env, deps, auth, "social_leads_meeting_text", {
+      p_company: body.company,
+      p_contract: body.contract,
+      p_recording: body.recording,
+    });
+    meetingDate = m.recorded_at.slice(0, 10);
+    const when = new Date(m.recorded_at).toLocaleDateString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+    });
+    source = `${m.title || "Reunião"} · ${when}`;
+    material = [
+      `Reunião "${m.title || "sem título"}", gravada em ${when}.`,
+      m.summary && Object.keys(m.summary).length
+        ? `Resumo automático da reunião (JSON):\n${JSON.stringify(m.summary)}`
+        : "",
+      `Transcrição:\n${meetingText(m.speakers ?? [], m.segments ?? [])}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  } else {
+    if (!material)
+      return {
+        status: 400,
+        body: {
+          error: "Cole as notas ou a transcrição, ou escolha uma reunião.",
+        },
+      };
+    await rpc(env, deps, auth, "social_leads_check_write", {
+      p_company: body.company,
+      p_contract: body.contract,
+    });
+  }
+  if (material.length > BRIEFING_MAX_CHARS)
+    return {
+      status: 400,
+      body: {
+        error: `O material passou de ${BRIEFING_MAX_CHARS.toLocaleString("pt-BR")} caracteres. Envie só a parte da reunião sobre o cliente.`,
+      },
+    };
+  const request: ModelRequest = {
+    system:
+      "Você preenche o briefing de onboarding do produto Social Leads (gestão de Instagram e Facebook com tráfego pago no Meta) a partir do que o cliente disse. Use só o que está no material: nunca invente nome, número, depoimento, concorrente ou promessa. Escreva em português do Brasil, em frases curtas e objetivas, como a equipe preencheria.",
+    user: [
+      `Campos do briefing (chave: rótulo):\n${briefingAiKeys.map((k) => `${k}: ${briefingLabels[k]}`).join("\n")}`,
+      `Regras de formato: campo sem resposta no material fica "" (vazio). Dinheiro (averageTicket, mediaBudget): só o número em reais com ponto decimal, ex.: 1500.00. WhatsApp: só os dígitos com DDD. briefingDate: AAAA-MM-DD${meetingDate ? ` (a reunião foi em ${meetingDate})` : ""}. igHandle: @perfil. websiteUrl: o endereço. As forças, fraquezas, oportunidades e ameaças podem resumir o que foi dito, sem inventar. campaignObjective: "ctwa" se o cliente quer conversas no WhatsApp, "form_nativo" se quer cadastros por formulário, "" se não ficou claro. Em evidence, um trecho curto (até 200 caracteres) do material para cada campo preenchido. Em missing, os campos importantes que faltam. Em resumo, uma frase sobre o que foi aproveitado.`,
+      `Material (${source}):\n${material}`,
+    ].join("\n\n"),
+    schema: BRIEFING_SCHEMA,
+    domains: [],
+    effort: "low",
+    maxTokens: 12000,
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  const meter = newMeter(env.model);
+  try {
+    const text = await deps.complete(env, request, controller.signal, meter);
+    const parsed = JSON.parse(text) as {
+      fields: Record<string, string>;
+      campaignObjective: string;
+      evidence: { field: BriefingKey; quote: string }[];
+      missing: BriefingKey[];
+      resumo: string;
+    };
+    const fields = cleanBriefingSuggestion(parsed.fields ?? {});
+    if (meetingDate && !fields.briefingDate) fields.briefingDate = meetingDate;
+    const evidence: Partial<Record<BriefingKey, string>> = {};
+    for (const e of parsed.evidence ?? [])
+      if (fields[e.field] && e.quote?.trim())
+        evidence[e.field] = e.quote.trim().slice(0, 300);
+    return {
+      status: 200,
+      body: {
+        fields,
+        objective:
+          parsed.campaignObjective in campaignObjectives
+            ? parsed.campaignObjective
+            : null,
+        evidence,
+        missing: (parsed.missing ?? []).filter(
+          (k) => briefingAiKeys.includes(k) && !fields[k],
+        ),
+        summary: String(parsed.resumo ?? ""),
+        source,
+        cost_usd: meter.cost,
+      },
+    };
+  } finally {
+    clearTimeout(timer);
+    await logUsage(
+      env,
+      deps,
+      auth,
+      { company: body.company, contract: body.contract },
+      "briefing",
       meter,
     );
   }

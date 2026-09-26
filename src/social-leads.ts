@@ -159,7 +159,7 @@ export function mediaAllowed(key: MediaKey, type: string) {
 }
 /** One call to the AI and what it cost (social_leads_ai_usage). */
 export interface SlUsage {
-  kind: "generate" | "adjust" | "colors";
+  kind: "generate" | "adjust" | "colors" | "briefing";
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -1163,4 +1163,415 @@ export function editPost(
     else if (patch.ehAnuncio) p.ehAnuncio = false;
   }
   return next;
+}
+
+// ------------------------------------------------------------ post history
+/** What happened to a post (migration 20261020090000_social_leads_post_history). */
+export type PostEventKind =
+  | "created"
+  | "approved"
+  | "rejected"
+  | "reopened"
+  | "edited"
+  | "arts"
+  | "task"
+  | "comment";
+/** The post's content fields the history compares (database names). */
+export const postFields = {
+  pillar: "Pilar",
+  hook: "Gancho",
+  copy_direction: "Direção de copy",
+  visual_direction: "Direção visual",
+  format: "Formato",
+  cta: "CTA",
+  is_ad: "Anúncio do mês",
+} as const;
+export type PostField = keyof typeof postFields;
+export interface PostEventDetail {
+  source?: string;
+  before?: Partial<Record<PostField, string | boolean>>;
+  after?: Partial<Record<PostField, string | boolean>>;
+  reason?: string;
+  summary?: string;
+  /** The approval was for the previous text: the post went back to pending. */
+  reset?: boolean;
+  added?: { id: string; name: string; type: string }[];
+  removed?: string[];
+  task?: string;
+  assignee?: string;
+  team?: string;
+  due?: string;
+}
+export interface SlPostEvent {
+  id: string;
+  plan_id: string;
+  number: number;
+  kind: PostEventKind;
+  via: "team" | "link" | "ai";
+  actor_id: string | null;
+  /** Who did it, as named at the time (on the link, the client). */
+  actor_name: string;
+  note: string;
+  detail: PostEventDetail;
+  created_at: string;
+}
+export type PostEventDraft = Omit<SlPostEvent, "id" | "created_at">;
+
+/**
+ * The events a change to a post makes, as the database trigger
+ * mavi_private.social_leads_log_post writes them (used by the demo).
+ */
+export function postEventsFor(
+  before: SlPost | undefined,
+  after: SlPost,
+  ctx: {
+    actor: string | null;
+    actorName: string;
+    clientName: string;
+    source: string;
+    reason?: string | null;
+    summary?: string;
+    name: (user: string | null) => string;
+    task?: { assignee?: string; team?: string; due?: string };
+  },
+): PostEventDraft[] {
+  const base = {
+    plan_id: after.plan_id,
+    number: after.number,
+    actor_id: ctx.actor,
+    actor_name: ctx.actorName,
+    note: "",
+    detail: {} as PostEventDetail,
+  };
+  const out: PostEventDraft[] = [];
+  const via = ctx.source === "ai" ? "ai" : "team";
+  if (!before) {
+    out.push({
+      ...base,
+      kind: "created",
+      via,
+      detail: { source: ctx.source },
+    });
+    if (after.decision !== "pending")
+      out.push({
+        ...base,
+        kind: after.decision,
+        via: "team",
+        actor_id: after.decided_by,
+        actor_name: ctx.name(after.decided_by),
+        note: after.note,
+      });
+    return out;
+  }
+  const was: PostEventDetail["before"] = {};
+  const now: PostEventDetail["after"] = {};
+  for (const f of Object.keys(postFields) as PostField[])
+    if (before[f] !== after[f]) {
+      was[f] = before[f];
+      now[f] = after[f];
+    }
+  const edited = Object.keys(was).length > 0;
+  const reason = ctx.reason ?? undefined;
+  if (edited) {
+    const detail: PostEventDetail = { before: was, after: now };
+    if (reason) detail.reason = reason;
+    if (reason === "ajuste pedido à IA" && ctx.summary)
+      detail.summary = ctx.summary;
+    if (before.decision !== "pending" && after.decision === "pending")
+      detail.reset = true;
+    out.push({
+      ...base,
+      kind: "edited",
+      via:
+        reason === "ajuste pedido à IA" || reason === "regeneração do mês"
+          ? "ai"
+          : "team",
+      detail,
+    });
+  }
+  if (
+    (before.decision !== after.decision ||
+      before.decided_at !== after.decided_at) &&
+    !(edited && after.decision === "pending")
+  ) {
+    const detail: PostEventDetail = reason ? { reason } : {};
+    if (after.decision === "pending")
+      out.push({ ...base, kind: "reopened", via: "team", detail });
+    else if (after.decided_via === "link")
+      out.push({
+        ...base,
+        kind: after.decision,
+        via: "link",
+        actor_id: null,
+        actor_name: ctx.clientName,
+        note: after.note,
+      });
+    else
+      out.push({
+        ...base,
+        kind: after.decision,
+        via: "team",
+        actor_id: after.decided_by ?? ctx.actor,
+        actor_name: ctx.name(after.decided_by ?? ctx.actor),
+        note: after.note,
+        detail,
+      });
+  }
+  const oldArts = before.arts ?? [];
+  const newArts = after.arts ?? [];
+  const added = newArts
+    .filter((a) => !oldArts.some((o) => o.id === a.id))
+    .map((a) => ({ id: a.id, name: a.name, type: a.type }));
+  const removed = oldArts
+    .filter((a) => !newArts.some((o) => o.id === a.id))
+    .map((a) => a.name);
+  if (added.length || removed.length)
+    out.push({
+      ...base,
+      kind: "arts",
+      via: "team",
+      detail: { added, removed },
+    });
+  if (after.task_id && before.task_id !== after.task_id)
+    out.push({
+      ...base,
+      kind: "task",
+      via: "team",
+      detail: { task: after.task_id, ...ctx.task },
+    });
+  return out;
+}
+
+const shown = (f: PostField, v: string | boolean | undefined) =>
+  f === "is_ad"
+    ? v
+      ? "Sim"
+      : "Não"
+    : f === "pillar"
+      ? (pillars[v as Pillar] ?? String(v ?? ""))
+      : String(v ?? "");
+const plural = (n: number, one: string, many: string) =>
+  `${n} ${n === 1 ? one : many}`;
+
+/** How the timeline shows an event: a title, a tone and what changed. */
+export function describeEvent(e: SlPostEvent): {
+  title: string;
+  tone: "good" | "bad" | "info" | "neutral";
+  changes: { label: string; before: string; after: string }[];
+  lines: string[];
+} {
+  const who = e.actor_name || (e.via === "link" ? "O cliente" : "Alguém");
+  const d = e.detail ?? {};
+  const lines: string[] = [];
+  const changes = (Object.keys(d.after ?? {}) as PostField[]).map((f) => ({
+    label: postFields[f] ?? f,
+    before: shown(f, d.before?.[f]),
+    after: shown(f, d.after?.[f]),
+  }));
+  const restored = d.reason?.match(/restaurar a versão (\d+)/)?.[1];
+  switch (e.kind) {
+    case "created":
+      return {
+        title:
+          d.source === "import"
+            ? "Post importado"
+            : d.source === "manual"
+              ? `Post criado por ${who}`
+              : "Post criado pela IA",
+        tone: "neutral",
+        changes: [],
+        lines,
+      };
+    case "approved":
+    case "rejected": {
+      const ok = e.kind === "approved";
+      if (restored) lines.push(`Na restauração da versão ${restored}.`);
+      return {
+        title:
+          e.via === "link"
+            ? `${who} ${ok ? "aprovou" : "pediu ajuste"} pelo link`
+            : `${ok ? "Aprovado" : "Ajuste pedido"} · registrado por ${who}`,
+        tone: ok ? "good" : "bad",
+        changes: [],
+        lines,
+      };
+    }
+    case "reopened":
+      return {
+        title:
+          d.reason === "regeneração do mês"
+            ? "Voltou para pendente na regeneração do plano"
+            : restored
+              ? `Voltou para pendente na restauração da versão ${restored}`
+              : `${who} voltou o post para pendente`,
+        tone: "neutral",
+        changes: [],
+        lines,
+      };
+    case "edited":
+      if (d.summary) lines.push(d.summary);
+      if (d.reset)
+        lines.push(
+          "Voltou para pendente: a decisão anterior valia para o texto antigo.",
+        );
+      return {
+        title:
+          d.reason === "ajuste pedido à IA"
+            ? `Ajustado pela IA, a pedido de ${who}`
+            : d.reason === "regeneração do mês"
+              ? `Refeito pela IA na regeneração, a pedido de ${who}`
+              : restored
+                ? `${who} restaurou a versão ${restored}`
+                : d.reason === "importação da conversa no chat"
+                  ? `${who} importou uma mudança da conversa no chat`
+                  : `Editado por ${who}`,
+        tone: "info",
+        changes,
+        lines,
+      };
+    case "arts": {
+      const add = d.added ?? [];
+      const rem = d.removed ?? [];
+      if (add.length)
+        lines.push(`Enviadas: ${add.map((a) => a.name).join(", ")}`);
+      if (rem.length) lines.push(`Retiradas: ${rem.join(", ")}`);
+      return {
+        title: add.length
+          ? `${e.actor_name || "A equipe"} enviou ${plural(add.length, "arte", "artes")}`
+          : `${e.actor_name || "A equipe"} retirou ${plural(rem.length, "arte", "artes")}`,
+        tone: "info",
+        changes: [],
+        lines,
+      };
+    }
+    case "task":
+      if (d.due)
+        lines.push(
+          `Prazo: ${new Date(`${d.due}T12:00:00`).toLocaleDateString("pt-BR")}`,
+        );
+      return {
+        title: `Tarefa de arte criada para ${d.assignee ?? (d.team ? `a equipe ${d.team}` : "a equipe")}`,
+        tone: "info",
+        changes: [],
+        lines,
+      };
+    case "comment":
+      return { title: `${who} comentou`, tone: "neutral", changes: [], lines };
+  }
+}
+
+// ------------------------------------------------------------ briefing by AI
+/** What the AI may fill from notes or a transcript (colours have their own search). */
+export const briefingAiKeys: BriefingKey[] = briefingKeys.filter(
+  (k) => k !== "brandColors",
+);
+/** The AI's reading of the notes or the meeting, for the team to review. */
+export interface BriefingSuggestion {
+  fields: BriefingFields;
+  objective: CampaignObjective | null;
+  /** The passage each field came from (a short quote). */
+  evidence: Partial<Record<BriefingKey, string>>;
+  /** Fields the material doesn't answer: ask the client. */
+  missing: BriefingKey[];
+  summary: string;
+  /** What was read ("Reunião de onboarding · 12/09"). */
+  source: string;
+  cost_usd: number;
+}
+const fieldKind = (key: BriefingKey) =>
+  briefingSteps.flatMap((s) => s.fields).find((f) => f.key === key);
+
+/**
+ * The AI's fields in the briefing's own formats: money as the mask writes it
+ * (the AI sends "1500.00"), the WhatsApp with the mask, the date as
+ * AAAA-MM-DD, the Instagram with @ and the site with https://. Empty, unknown
+ * or too long values are dropped.
+ */
+export function cleanBriefingSuggestion(
+  raw: Record<string, unknown>,
+): BriefingFields {
+  const out: BriefingFields = {};
+  for (const key of briefingAiKeys) {
+    const v = raw[key];
+    if (typeof v !== "string") continue;
+    let text = v.trim().slice(0, 4000);
+    if (!text) continue;
+    const f = fieldKind(key);
+    if (f?.kind === "money") {
+      const n = Number(text.replace(/[^\d.,-]/g, "").replace(",", "."));
+      if (Number.isFinite(n) && n > 0) text = formatMoney(n, "BRL");
+    } else if (f?.kind === "phone") {
+      const digits = text.replace(/\D/g, "");
+      if (digits.length < 10) continue;
+      text = formatPhoneBR(digits);
+    } else if (f?.type === "date") {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || isNaN(Date.parse(text)))
+        continue;
+    } else if (key === "igHandle") {
+      const handle = text
+        .replace(/^(https?:\/\/)?(www\.)?instagram\.com\//i, "")
+        .replace(/[/?].*$/, "")
+        .replace(/^@?/, "");
+      if (!/^[\w.]{1,30}$/.test(handle)) continue;
+      text = `@${handle}`;
+    } else if (f?.type === "url") {
+      if (!/^https?:\/\//i.test(text)) text = `https://${text}`;
+      try {
+        new URL(text);
+      } catch {
+        continue;
+      }
+    }
+    out[key] = text;
+  }
+  return out;
+}
+
+/**
+ * The briefing after applying the chosen suggestions: only the fields the
+ * team kept (by default, the empty ones), never touching the rest.
+ */
+export function applyBriefingSuggestion(
+  current: BriefingFields,
+  suggestion: BriefingFields,
+  chosen: BriefingKey[],
+): BriefingFields {
+  const next = { ...current };
+  for (const key of chosen) {
+    const v = suggestion[key];
+    if (v) next[key] = v;
+  }
+  return next;
+}
+/** Which suggestions start ticked: the ones filling an empty field. */
+export function defaultBriefingChoice(
+  current: BriefingFields,
+  suggestion: BriefingFields,
+): BriefingKey[] {
+  return (Object.keys(suggestion) as BriefingKey[]).filter(
+    (k) => !current[k]?.trim(),
+  );
+}
+
+/**
+ * The text of a transcript file: subtitles (.vtt, .srt) lose the numbering,
+ * the timings and the WEBVTT header; repeated lines in a row go too.
+ */
+export function transcriptFromFile(name: string, text: string) {
+  const clean = text.replace(/\r\n?/g, "\n").replace(/^﻿/, "");
+  if (!/\.(vtt|srt)$/i.test(name)) return clean.trim();
+  const lines: string[] = [];
+  for (const raw of clean.split("\n")) {
+    const line = raw.replace(/<[^>]+>/g, "").trim();
+    if (
+      !line ||
+      /^WEBVTT/.test(line) ||
+      /^NOTE\b/.test(line) ||
+      /^\d+$/.test(line) ||
+      /-->/.test(line)
+    )
+      continue;
+    if (lines.at(-1) !== line) lines.push(line);
+  }
+  return lines.join("\n");
 }

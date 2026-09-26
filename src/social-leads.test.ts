@@ -18,6 +18,14 @@ import {
   parseImport,
   stageLabel,
   stageOf,
+  describeEvent,
+  postEventsFor,
+  cleanBriefingSuggestion,
+  applyBriefingSuggestion,
+  defaultBriefingChoice,
+  transcriptFromFile,
+  type SlPost,
+  type SlPostEvent,
   type PlanContent,
   type PortfolioItem,
 } from "./social-leads";
@@ -440,5 +448,204 @@ describe("máscaras do briefing", () => {
     expect(s.tokens).toBe(450);
     expect(formatUsd(0.43)).toBe("US$ 0,43");
     expect(formatUsd(0.001)).toBe("menos de US$ 0,01");
+  });
+});
+
+describe("histórico do post", () => {
+  const post: SlPost = {
+    plan_id: "p",
+    number: 3,
+    pillar: "posicionar",
+    hook: "Gancho",
+    copy_direction: "Copy",
+    visual_direction: "Visual",
+    format: "Reels",
+    cta: "Seguir",
+    is_ad: false,
+    decision: "pending",
+    note: "",
+    decided_via: null,
+    decided_by: null,
+    decided_at: null,
+    updated_at: "2026-09-26T10:00:00Z",
+  };
+  const ctx = {
+    actor: "u1",
+    actorName: "Lorena",
+    clientName: "Stravitta",
+    source: "ai",
+    name: (u: string | null) => (u === "u1" ? "Lorena" : ""),
+  };
+
+  it("registra criação, decisão do cliente e edição que volta a pendente", () => {
+    expect(postEventsFor(undefined, post, ctx).map((e) => e.kind)).toEqual([
+      "created",
+    ]);
+    const rejected: SlPost = {
+      ...post,
+      decision: "rejected",
+      note: "Trocar a foto",
+      decided_via: "link",
+      decided_at: "2026-09-26T11:00:00Z",
+    };
+    const [byClient] = postEventsFor(post, rejected, ctx);
+    expect(byClient).toMatchObject({
+      kind: "rejected",
+      via: "link",
+      actor_id: null,
+      actor_name: "Stravitta",
+      note: "Trocar a foto",
+    });
+    const edited: SlPost = {
+      ...rejected,
+      hook: "Gancho novo",
+      decision: "pending",
+      note: "",
+      decided_via: null,
+      decided_at: null,
+    };
+    const events = postEventsFor(rejected, edited, {
+      ...ctx,
+      reason: "ajuste pedido à IA",
+      summary: "Troquei o gancho",
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "edited",
+      via: "ai",
+      detail: {
+        before: { hook: "Gancho" },
+        after: { hook: "Gancho novo" },
+        reset: true,
+        summary: "Troquei o gancho",
+      },
+    });
+  });
+
+  it("artes e tarefa viram acontecimentos; nada muda, nada registra", () => {
+    expect(postEventsFor(post, { ...post }, ctx)).toEqual([]);
+    const withArt: SlPost = {
+      ...post,
+      task_id: "t1",
+      arts: [{ id: "a", name: "feed.png", type: "image/png", size: 1 }],
+    };
+    const kinds = postEventsFor(post, withArt, {
+      ...ctx,
+      task: { assignee: "Marina" },
+    });
+    expect(kinds.map((e) => [e.kind, e.detail])).toEqual([
+      [
+        "arts",
+        {
+          added: [{ id: "a", name: "feed.png", type: "image/png" }],
+          removed: [],
+        },
+      ],
+      ["task", { task: "t1", assignee: "Marina" }],
+    ]);
+  });
+
+  it("descreve cada acontecimento em português", () => {
+    const e = (over: Partial<SlPostEvent>): SlPostEvent => ({
+      id: "e",
+      plan_id: "p",
+      number: 1,
+      kind: "comment",
+      via: "team",
+      actor_id: "u1",
+      actor_name: "Lorena",
+      note: "",
+      detail: {},
+      created_at: "2026-09-26T10:00:00Z",
+      ...over,
+    });
+    expect(
+      describeEvent(
+        e({ kind: "rejected", via: "link", actor_name: "Stravitta" }),
+      ).title,
+    ).toBe("Stravitta pediu ajuste pelo link");
+    expect(describeEvent(e({ kind: "approved" })).title).toBe(
+      "Aprovado · registrado por Lorena",
+    );
+    const edit = describeEvent(
+      e({
+        kind: "edited",
+        detail: {
+          before: { is_ad: false, pillar: "oferta" },
+          after: { is_ad: true, pillar: "autoridade" },
+          reason: "antes de restaurar a versão 2",
+          reset: true,
+        },
+      }),
+    );
+    expect(edit.title).toBe("Lorena restaurou a versão 2");
+    expect(edit.changes).toEqual([
+      { label: "Anúncio do mês", before: "Não", after: "Sim" },
+      { label: "Pilar", before: "Oferta", after: "Autoridade" },
+    ]);
+    expect(edit.lines[0]).toMatch(/Voltou para pendente/);
+    expect(
+      describeEvent(e({ kind: "task", detail: { team: "Criação" } })).title,
+    ).toBe("Tarefa de arte criada para a equipe Criação");
+    expect(
+      describeEvent(
+        e({ kind: "arts", detail: { added: [], removed: ["x.png"] } }),
+      ).title,
+    ).toBe("Lorena retirou 1 arte");
+  });
+});
+
+describe("briefing pela IA", () => {
+  it("põe cada campo no formato do briefing e descarta o inválido", () => {
+    expect(
+      cleanBriefingSuggestion({
+        clientName: "  Aurora Studio ",
+        averageTicket: "4500.00",
+        mediaBudget: "abc",
+        contactWhats: "+55 11 91234-5678",
+        briefingDate: "12/09/2026",
+        igHandle: "instagram.com/aurora.studio",
+        fbHandle: "",
+        websiteUrl: "aurora.com.br",
+        brandColors: "#000000",
+        segment: 42,
+      }),
+    ).toEqual({
+      clientName: "Aurora Studio",
+      averageTicket: "R$ 4.500,00",
+      mediaBudget: "abc",
+      contactWhats: "(11) 91234-5678",
+      igHandle: "@aurora.studio",
+      websiteUrl: "https://aurora.com.br",
+    });
+  });
+
+  it("marca só os vazios e aplica só o escolhido", () => {
+    const current = { clientName: "Aurora", segment: "" };
+    const found = { clientName: "Aurora Studio", segment: "Design" };
+    expect(defaultBriefingChoice(current, found)).toEqual(["segment"]);
+    expect(applyBriefingSuggestion(current, found, ["segment"])).toEqual({
+      clientName: "Aurora",
+      segment: "Design",
+    });
+  });
+
+  it("tira numeração, tempos e repetições das legendas", () => {
+    const vtt = `WEBVTT
+
+1
+00:00:01.000 --> 00:00:03.000
+<v Renata>Oi, tudo bem?
+
+2
+00:00:03.000 --> 00:00:05.000
+<v Renata>Oi, tudo bem?
+A gente faz interiores.`;
+    expect(transcriptFromFile("reuniao.vtt", vtt)).toBe(
+      "Oi, tudo bem?\nA gente faz interiores.",
+    );
+    expect(transcriptFromFile("notas.txt", "  1\n2 --> 3 \r\n")).toBe(
+      "1\n2 --> 3",
+    );
   });
 });

@@ -48,6 +48,7 @@ import {
   setDashboardSharing,
   sources,
   starterPanels,
+  socialLeadsPanels,
   vizOptions,
   compact,
   type Dashboard,
@@ -340,7 +341,7 @@ function DashboardList({
         <div className="panel">
           <Empty
             title="Seu primeiro dashboard"
-            body="Monte painéis com indicadores de tarefas e horas da agência: números, gráficos e tabelas, com filtros por período, cliente, produto, equipe e pessoa."
+            body="Monte painéis com indicadores de tarefas, horas e Social Leads da agência: números, gráficos e tabelas, com filtros por período, cliente, produto, equipe e pessoa."
             action={
               <Button className="btn primary" onClick={() => setCreating(true)}>
                 <Plus size={16} /> Novo dashboard
@@ -356,7 +357,12 @@ function DashboardList({
             const d = {
               name,
               description,
-              panels: template ? starterPanels() : [],
+              panels:
+                template === "operation"
+                  ? starterPanels()
+                  : template === "social_leads"
+                    ? socialLeadsPanels()
+                    : [],
               variables: { range: { preset: "30d" as const }, filters: {} },
             };
             const saved = demo
@@ -371,6 +377,7 @@ function DashboardList({
   );
 }
 
+type Template = "operation" | "social_leads" | null;
 function CreateDashboard({
   onClose,
   onCreate,
@@ -379,12 +386,12 @@ function CreateDashboard({
   onCreate: (
     name: string,
     description: string,
-    template: boolean,
+    template: Template,
   ) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [template, setTemplate] = useState(true);
+  const [template, setTemplate] = useState<Template>("operation");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   return (
@@ -429,12 +436,12 @@ function CreateDashboard({
         </label>
         <fieldset className="dash-template">
           <legend>Começar com</legend>
-          <label className={template ? "selected" : ""}>
+          <label className={template === "operation" ? "selected" : ""}>
             <input
               type="radio"
               name="template"
-              checked={template}
-              onChange={() => setTemplate(true)}
+              checked={template === "operation"}
+              onChange={() => setTemplate("operation")}
             />
             <strong>Modelo: visão da operação</strong>
             <small>
@@ -442,12 +449,25 @@ function CreateDashboard({
               status, clientes e pessoas) para ajustar.
             </small>
           </label>
-          <label className={!template ? "selected" : ""}>
+          <label className={template === "social_leads" ? "selected" : ""}>
             <input
               type="radio"
               name="template"
-              checked={!template}
-              onChange={() => setTemplate(false)}
+              checked={template === "social_leads"}
+              onChange={() => setTemplate("social_leads")}
+            />
+            <strong>Modelo: Social Leads</strong>
+            <small>
+              Aprovações e ajustes (quantidade e taxa), ajustes por post, tempo
+              até a aprovação e clientes por etapa.
+            </small>
+          </label>
+          <label className={template === null ? "selected" : ""}>
+            <input
+              type="radio"
+              name="template"
+              checked={template === null}
+              onChange={() => setTemplate(null)}
             />
             <strong>Em branco</strong>
             <small>Adicione os painéis um a um.</small>
@@ -1447,6 +1467,7 @@ function QueryEditor({
           >
             <SelectOption value="tasks">Tarefas</SelectOption>
             <SelectOption value="hours">Horas</SelectOption>
+            <SelectOption value="social_leads">Social Leads</SelectOption>
           </Select>
         </label>
         <label>

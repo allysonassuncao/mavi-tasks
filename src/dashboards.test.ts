@@ -9,6 +9,9 @@ import {
   placePanel,
   resolveRange,
   starterPanels,
+  socialLeadsPanels,
+  groupsFor,
+  metricDef,
   type Panel,
   type PanelResult,
   type PanelSpec,
@@ -276,6 +279,22 @@ describe("Grade dos painéis", () => {
   });
   it("o modelo inicial não tem painéis sobrepostos", () => {
     expect(overlap(starterPanels())).toBe(false);
+  });
+  it("o modelo Social Leads cabe na grade e só usa o catálogo", () => {
+    const panels = socialLeadsPanels();
+    expect(overlap(panels)).toBe(false);
+    for (const p of panels) {
+      expect(p.x + p.w).toBeLessThanOrEqual(12);
+      for (const q of p.spec.queries) expect(metricDef(q)).toBeTruthy();
+      expect(groupsFor(p.spec.queries).map((g) => g.key)).toContain(
+        p.spec.groupBy,
+      );
+    }
+    // "Etapa" only makes sense for the clients metric.
+    const stage = panels.filter((p) => p.spec.groupBy === "stage");
+    expect(
+      stage.every((p) => p.spec.queries.every((q) => q.metric === "clients")),
+    ).toBe(true);
   });
 });
 

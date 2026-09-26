@@ -644,3 +644,137 @@ describe("artes no link do cliente", () => {
     expect(db.calls.length).toBe(1);
   });
 });
+
+describe("briefing pela IA", () => {
+  const recording = "00000000-0000-4000-8000-000000000077";
+  const reply = JSON.stringify({
+    fields: {
+      clientName: "Agente Stravitta",
+      segment: "Escola de idiomas",
+      contactWhats: "11 91234-5678",
+      averageTicket: "450.00",
+      igHandle: "https://instagram.com/agentestravitta/",
+      websiteUrl: "agente.astravitta.com.br",
+      briefingDate: "",
+      competitors: "",
+    },
+    campaignObjective: "ctwa",
+    evidence: [
+      { field: "segment", quote: "a gente é uma escola de inglês" },
+      { field: "competitors", quote: "não falou" },
+    ],
+    missing: ["competitors", "segment", "nada"],
+    resumo: "Aproveitei nome, segmento e ticket.",
+  });
+
+  it("lê a reunião do cliente, formata os campos e registra o custo", async () => {
+    const db = fakeDb({
+      social_leads_meeting_text: () => ({
+        body: {
+          title: "Onboarding",
+          recorded_at: "2026-09-12T14:00:00Z",
+          speakers: ["Lorena", "Renato"],
+          segments: [
+            [0, 3, 0, "Oi Renato, tudo bem?"],
+            [4, 8, 1, "Tudo, a gente é uma escola de inglês."],
+            [9, 12, 1, "Ticket de 450 reais."],
+          ],
+          summary: {},
+        },
+      }),
+    });
+    const seen: ModelRequest[] = [];
+    const d = deps(db.fetchImpl, [reply], seen);
+    const complete = d.complete;
+    d.complete = async (e, request, signal, meter) => {
+      addUsage(meter, "claude-opus-5", {
+        input_tokens: 9000,
+        output_tokens: 700,
+      });
+      return complete(e, request, signal, meter);
+    };
+    const r = await handleSocialLeads(
+      { action: "briefing", company, contract, recording },
+      "Bearer t",
+      env,
+      d,
+    );
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({
+      fields: {
+        clientName: "Agente Stravitta",
+        segment: "Escola de idiomas",
+        contactWhats: "(11) 91234-5678",
+        averageTicket: "R$ 450,00",
+        igHandle: "@agentestravitta",
+        websiteUrl: "https://agente.astravitta.com.br",
+        // No date said: the meeting's day.
+        briefingDate: "2026-09-12",
+      },
+      objective: "ctwa",
+      evidence: { segment: "a gente é uma escola de inglês" },
+      missing: ["competitors"],
+      source: "Onboarding · 12/09/2026",
+    });
+    expect((r.body as any).fields.competitors).toBeUndefined();
+    // The transcript goes to the AI as lines, same speaker joined.
+    expect(seen[0].user).toContain(
+      "[00:04] Renato: Tudo, a gente é uma escola de inglês. Ticket de 450 reais.",
+    );
+    expect(seen[0].schema).toBeTruthy();
+    expect(db.calls.map((c) => c.name)).toEqual([
+      "social_leads_meeting_text",
+      "social_leads_log_usage",
+    ]);
+    expect(db.calls[1].args).toMatchObject({ p_kind: "briefing" });
+  });
+
+  it("aceita texto colado, confere quem edita e recusa o vazio", async () => {
+    const db = fakeDb({});
+    const seen: ModelRequest[] = [];
+    const r = await handleSocialLeads(
+      {
+        action: "briefing",
+        company,
+        contract,
+        text: "Notas: escola de inglês.",
+      },
+      "Bearer t",
+      env,
+      deps(db.fetchImpl, [reply], seen),
+    );
+    expect(r.status).toBe(200);
+    expect((r.body as any).source).toBe("Texto colado");
+    expect(db.calls[0].name).toBe("social_leads_check_write");
+    expect(seen[0].user).toContain("Notas: escola de inglês.");
+    const empty = await handleSocialLeads(
+      { action: "briefing", company, contract, text: "  " },
+      "Bearer t",
+      env,
+      deps(fakeDb({}).fetchImpl, []),
+    );
+    expect(empty.status).toBe(400);
+    const big = await handleSocialLeads(
+      { action: "briefing", company, contract, text: "x".repeat(200_001) },
+      "Bearer t",
+      env,
+      deps(fakeDb({}).fetchImpl, []),
+    );
+    expect(big.status).toBe(400);
+    const denied = await handleSocialLeads(
+      { action: "briefing", company, contract, text: "oi" },
+      "Bearer t",
+      env,
+      deps(
+        fakeDb({
+          social_leads_check_write: () => ({
+            status: 403,
+            body: { message: "Sem permissão." },
+          }),
+        }).fetchImpl,
+        [],
+      ),
+    );
+    expect(denied.status).toBe(403);
+  });
+});
