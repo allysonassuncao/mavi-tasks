@@ -12469,11 +12469,12 @@ tr:hover .campaign-edit-record,
 }
 /* Social Leads · briefing preenchido pela IA (notas, transcrição, gravação) */
 .sl-ai-fill {
+  /* Above the wizard's three columns (steps, form, readiness). */
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  margin-bottom: 14px;
   border-radius: 12px;
   background: #f5fbea;
   border: 1px solid #dce9c8;
