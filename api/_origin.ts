@@ -1,6 +1,6 @@
 /**
  * The app's official address. The Supabase functions behind /api/invite-user
- * and /api/user-admin check the request origin against their allowlist
+ * and /api/user-admin (api/edge-function.ts) check the request origin against their allowlist
  * (APP_ORIGIN / APP_ADDITIONAL_ORIGINS) and build the links they email from
  * it — invites land on /?setup=1, password resets on /?reset=1 — so it must
  * be a domain that serves the app. APP_ORIGIN on Vercel overrides it.

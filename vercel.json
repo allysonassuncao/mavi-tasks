@@ -9,6 +9,14 @@
   },
   "rewrites": [
     {
+      "source": "/api/invite-user",
+      "destination": "/api/edge-function?fn=invite-user"
+    },
+    {
+      "source": "/api/user-admin",
+      "destination": "/api/edge-function?fn=user-admin"
+    },
+    {
       "source": "/((?!assets/|icons/|favicon.svg|manifest.webmanifest|sw.js).*)",
       "destination": "/index.html"
     }
