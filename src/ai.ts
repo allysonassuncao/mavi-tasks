@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { navigate, routeParts, taskUrl } from "./router";
+import { navigate, pageUrl, routeParts, taskUrl } from "./router";
 
 /**
  * IA do MAVI no navegador: a mesma pergunta serve a qualquer módulo — o
@@ -15,12 +15,18 @@ export type AiScope = {
 };
 export type AiSource = {
   ref: string;
-  type: "meeting" | "task";
+  type: "meeting" | "task" | "file" | "social" | "campaign";
   id: string;
   title: string;
   date: string | null;
   client_id: string | null;
+  /** Social Leads: o produto contratado. */
+  contract_id?: string | null;
+  /** Reunião: segundo do trecho citado. */
   start?: number;
+  /** Arquivo: página, slide ou planilha citada. */
+  page?: number;
+  label?: string;
 };
 
 /** Um passo do trabalho da IA, como a tela mostra. */
@@ -284,11 +290,34 @@ export function sourceLabel(s: AiSource) {
     ]
       .filter(Boolean)
       .join(" · ");
+  if (s.type === "file") return s.label ? `Arquivo · ${s.label}` : "Arquivo";
+  if (s.type === "social") return "Social Leads";
+  if (s.type === "campaign") return "Campanha";
   return "Tarefa";
 }
 
-/** Abre uma tarefa citada (a reunião, quem mostra a resposta decide como abrir). */
-export function openTaskSource(s: AiSource) {
+/** O endereço (dentro da empresa aberta) que mostra uma fonte citada. */
+export function sourceUrl(s: AiSource) {
   const company = routeParts(window.location.pathname).company;
-  navigate(taskUrl({ id: s.id, title: s.title }, company));
+  if (s.type === "task") return taskUrl({ id: s.id, title: s.title }, company);
+  const q = new URLSearchParams();
+  let page: "drive" | "onboarding" | "campaigns" = "drive";
+  if (s.type === "meeting") {
+    q.set("gravacao", s.id);
+    if (s.start && s.start > 0) q.set("t", String(Math.floor(s.start)));
+  } else if (s.type === "file") q.set("arquivo", s.id);
+  else if (s.type === "social") {
+    page = "onboarding";
+    if (s.contract_id) q.set("contrato", s.contract_id);
+  } else {
+    page = "campaigns";
+    q.set("campanha", s.id);
+  }
+  const query = q.toString();
+  return pageUrl(page, company) + (query ? `?${query}` : "");
+}
+
+/** Abre uma fonte citada no lugar dela. */
+export function openAiSource(s: AiSource) {
+  navigate(sourceUrl(s));
 }

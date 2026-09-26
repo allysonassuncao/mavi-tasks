@@ -5,16 +5,18 @@ import {
   Lock,
   Pencil,
   Plus,
+  Search,
   Share2,
   Sparkles,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
-import { Loading, Select, SelectOption } from "./ui";
-import { Modal } from "./components";
+import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
+import { Avatar, Modal } from "./components";
+import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import { navigate } from "./router";
-import { recordingLink } from "./meetings";
 import { AiChat, AnswerText, entriesFrom, type ChatEntry } from "./AiChat";
 import {
   askAi,
@@ -23,7 +25,7 @@ import {
   currentAiPlace,
   deleteConversation,
   listConversations,
-  openTaskSource,
+  openAiSource,
   renameConversation,
   shareConversation,
   subscribeAiPlace,
@@ -161,13 +163,6 @@ export function AiAssistant({
       .then(setList)
       .catch((e) => setError((e as Error).message));
   }, [view, company]);
-
-  function openSource(s: AiSource) {
-    if (s.type === "meeting") {
-      const url = new URL(recordingLink(s.id, s.start));
-      navigate(url.pathname + url.search);
-    } else openTaskSource(s);
-  }
 
   async function rename(c: AiConversation) {
     const title = window.prompt("Novo nome da conversa", c.title)?.trim();
@@ -411,7 +406,11 @@ export function AiAssistant({
                 }));
             }}
             renderAnswer={(text, sources) => (
-              <AnswerText text={text} sources={sources} onSource={openSource} />
+              <AnswerText
+                text={text}
+                sources={sources}
+                onSource={openAiSource}
+              />
             )}
           />
         </>
@@ -443,6 +442,7 @@ function ShareDialog({
   notify: (message: string) => void;
 }) {
   const [picked, setPicked] = useState<Set<string> | null>(null);
+  const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<{ user: string; reason: string }[]>(
     [],
@@ -451,6 +451,10 @@ function ShareDialog({
   const people = data.members
     .filter((m) => m.active && m.user_id !== user)
     .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const q = fold(query.trim());
+  const shown = q
+    ? people.filter((m) => fold(`${m.name} ${m.email ?? ""}`).includes(q))
+    : people;
   useEffect(() => {
     conversationShares(conversation.id)
       .then((ids) => setPicked(new Set(ids)))
@@ -458,6 +462,14 @@ function ShareDialog({
   }, [conversation.id]);
   const name = (id: string) =>
     data.members.find((m) => m.user_id === id)?.name ?? "Alguém";
+  function toggle(id: string) {
+    setPicked((prev) => {
+      const next = new Set(prev ?? []);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
   async function save() {
     if (!picked) return;
     setBusy(true);
@@ -481,57 +493,85 @@ function ShareDialog({
   }
   return (
     <Modal title="Compartilhar conversa" onClose={onClose} busy={busy}>
-      <div className="ai-share">
-        <p className="muted">
-          Quem receber vê a conversa com as fontes citadas, sem poder continuar.
-          Só dá para compartilhar com quem já tem acesso a tudo que ela cita.
-        </p>
-        {picked === null ? (
+      <div className="entity-form share-folder">
+        {picked === null && !error ? (
           <Loading compact />
         ) : (
-          <ul>
-            {people.map((m) => (
-              <li key={m.user_id}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={picked.has(m.user_id)}
-                    onChange={(e) => {
-                      const next = new Set(picked);
-                      if (e.target.checked) next.add(m.user_id);
-                      else next.delete(m.user_id);
-                      setPicked(next);
-                    }}
-                  />
-                  {m.name}
-                </label>
-              </li>
-            ))}
-          </ul>
+          <section className="share-block">
+            <strong className="share-title">
+              <Users size={15} /> Pessoas com acesso
+            </strong>
+            <small>
+              Quem você escolher vê a conversa com as fontes citadas, sem poder
+              continuar. Só dá para compartilhar com quem já tem acesso a tudo
+              que ela cita.
+            </small>
+            <span className="share-search">
+              <Input
+                type="search"
+                icon={Search}
+                placeholder="Buscar pessoa"
+                aria-label="Buscar pessoa"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </span>
+            <ul className="share-people" aria-label="Pessoas do espaço">
+              {shown.map((m) => (
+                <li key={m.user_id}>
+                  <label>
+                    <Checkbox
+                      checked={!!picked?.has(m.user_id)}
+                      onCheckedChange={() => toggle(m.user_id)}
+                    />
+                    <Avatar name={m.name} src={m.avatar_url} size="small" />
+                    <span>
+                      <strong>{m.name}</strong>
+                      {m.email && <small>{m.email}</small>}
+                    </span>
+                  </label>
+                </li>
+              ))}
+              {!shown.length && (
+                <li className="share-empty">
+                  {people.length
+                    ? "Ninguém encontrado."
+                    : "Não há outras pessoas no espaço."}
+                </li>
+              )}
+            </ul>
+            {!!picked?.size && (
+              <small className="share-hint">
+                {picked.size === 1
+                  ? "1 pessoa selecionada"
+                  : `${picked.size} pessoas selecionadas`}
+              </small>
+            )}
+          </section>
         )}
         {refused.length > 0 && (
-          <div className="form-error" role="alert">
-            Não compartilhada com:{" "}
+          <p className="form-error" role="alert">
+            Não compartilhada com{" "}
             {refused.map((r) => `${name(r.user)} (${r.reason})`).join("; ")}.
-          </div>
+          </p>
         )}
         {error && (
           <p className="form-error" role="alert">
             {error}
           </p>
         )}
-        <div className="ai-share-actions">
-          <button type="button" className="btn secondary" onClick={onClose}>
+        <div className="form-footer">
+          <Button className="btn secondary" onClick={onClose} disabled={busy}>
             Cancelar
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             className="btn primary"
-            disabled={busy || picked === null}
             onClick={() => void save()}
+            loading={busy}
+            disabled={picked === null}
           >
-            Salvar
-          </button>
+            Salvar compartilhamento
+          </Button>
         </div>
       </div>
     </Modal>

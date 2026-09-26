@@ -10,8 +10,11 @@ import {
   Check,
   CheckSquare,
   ChevronRight,
+  FileText,
   Loader2,
+  Megaphone,
   MessageCircle,
+  Rocket,
   Send,
   Sparkles,
   Video,
@@ -123,11 +126,7 @@ export function AnswerText({
                   disabled={!onSource}
                   title={sourceLabel(s)}
                 >
-                  {s.type === "meeting" ? (
-                    <Video size={13} aria-hidden="true" />
-                  ) : (
-                    <CheckSquare size={13} aria-hidden="true" />
-                  )}
+                  <SourceIcon type={s.type} />
                   <span>{s.title}</span>
                   <small>{sourceLabel(s)}</small>
                 </button>
@@ -138,6 +137,18 @@ export function AnswerText({
       )}
     </div>
   );
+}
+
+const SOURCE_ICONS = {
+  meeting: Video,
+  task: CheckSquare,
+  file: FileText,
+  social: Rocket,
+  campaign: Megaphone,
+};
+function SourceIcon({ type }: { type: AiSource["type"] }) {
+  const Icon = SOURCE_ICONS[type] ?? FileText;
+  return <Icon size={13} aria-hidden="true" />;
 }
 
 /**

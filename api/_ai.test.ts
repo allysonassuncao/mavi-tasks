@@ -502,7 +502,7 @@ describe("pergunta em tempo real (fase 2)", () => {
       (e) => e.type === "step" && e.id === "t1" && e.state === "done",
     );
     expect(tool).toMatchObject({
-      label: "Buscando “verba” nas reuniões e tarefas",
+      label: "Buscando “verba” em tudo que você acessa",
       detail: "1 trecho encontrado",
     });
     const done = events.at(-1) as Extract<AiStreamEvent, { type: "done" }>;
@@ -518,7 +518,7 @@ describe("pergunta em tempo real (fase 2)", () => {
       p_answer: "A verba é 3 mil [S1].",
       p_steps: [
         {
-          label: "Buscando “verba” nas reuniões e tarefas",
+          label: "Buscando “verba” em tudo que você acessa",
           detail: "1 trecho encontrado",
         },
       ],
@@ -716,5 +716,213 @@ describe("adaptador da Claude", () => {
     expect(
       requests[1].messages.at(-1).content.map((r: any) => r.tool_use_id),
     ).toEqual(["a", "b"]);
+  });
+});
+
+describe("fase 3: arquivos, Social Leads e campanhas", () => {
+  it("o worker lê os arquivos pendentes e devolve o texto por parte", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_index_step": 0,
+      "rpc/ai_claim_files": () =>
+        claims++ === 0
+          ? [
+              {
+                file_id: "f1",
+                path: "drive/c/f1",
+                name: "notas.txt",
+                kind: "text",
+                size_bytes: 40,
+              },
+            ]
+          : [],
+      "rpc/ai_store_file_text": null,
+      "rpc/ai_claim_chunks": [],
+    });
+    const download = vi.fn(async () =>
+      new TextEncoder().encode("Reunião de kickoff: verba de 5 mil por mês."),
+    );
+    const stats = await runIndexer(env, {
+      fetch: fetchImpl,
+      llm: vi.fn(),
+      embed: vi.fn(),
+      download,
+    });
+    expect(stats.files).toBe(1);
+    expect(download).toHaveBeenCalledWith("drive/c/f1");
+    const store = calls.find((c) => c.url.includes("ai_store_file_text"))!;
+    expect(store.body).toMatchObject({
+      p_file: "f1",
+      p_status: "done",
+      p_pages: [
+        { label: null, text: "Reunião de kickoff: verba de 5 mil por mês." },
+      ],
+      p_error: null,
+    });
+  });
+
+  it("download que falha vira erro guardado (o banco tenta de novo)", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_index_step": 0,
+      "rpc/ai_claim_files": () =>
+        claims++ === 0
+          ? [
+              {
+                file_id: "f1",
+                path: "p",
+                name: "a.pdf",
+                kind: "pdf",
+                size_bytes: 1,
+              },
+            ]
+          : [],
+      "rpc/ai_store_file_text": null,
+      "rpc/ai_claim_chunks": [],
+    });
+    await runIndexer(env, {
+      fetch: fetchImpl,
+      llm: vi.fn(),
+      embed: vi.fn(),
+      download: async () => {
+        throw new Error("403");
+      },
+    });
+    expect(
+      calls.find((c) => c.url.includes("ai_store_file_text"))!.body,
+    ).toMatchObject({
+      p_status: "error",
+      p_error: "403",
+    });
+  });
+
+  it("arquivo citado com a página; campanhas com números e citação", async () => {
+    const { fetchImpl } = database({
+      "memberships?": [
+        {
+          user_id: me,
+          name: "Ana Admin",
+          email: "ana@x.com",
+          role: "admin",
+          active: true,
+        },
+      ],
+      "clients?": [{ id: client, name: "4282" }],
+      "rpc/ai_check_limits": { blocked: false, warnings: [] },
+      "rpc/ai_search": [
+        {
+          chunk_id: 9,
+          source_type: "drive_file",
+          source_id: "f1",
+          title: "Proposta.pdf",
+          content:
+            '[Arquivo] "Proposta.pdf"\nPágina 3\nInvestimento de R$ 5.000 por mês.',
+          meta: { kind: "file", page: 3, label: "Página 3" },
+          client_id: client,
+          contract_id: null,
+          occurred_at: "2026-09-01T12:00:00Z",
+          task_status: null,
+          task_assignee: null,
+          task_due: null,
+        },
+      ],
+      "rpc/ai_campaign_results": [
+        {
+          campaign: "c1",
+          name: "Leads Setembro",
+          platform: "meta",
+          status: "active",
+          client,
+          cycles: [
+            {
+              start: "2026-09-01",
+              end: "2026-09-30",
+              objective: "lead",
+              goal_results: 100,
+              budget: 3000,
+              spend: 1500,
+              impressions: 50000,
+              clicks: 900,
+              results: 60,
+            },
+          ],
+        },
+        {
+          campaign: "c2",
+          name: "Parada",
+          platform: "google",
+          status: "inactive",
+          client,
+          cycles: [],
+        },
+      ],
+      "rpc/ai_save_turn": "conv",
+      "rpc/ai_log_usage": null,
+    });
+    const outputs: string[] = [];
+    const llm: LlmAdapter = async (request) => {
+      outputs.push(
+        await request.execute("search_knowledge", {
+          query: "investimento",
+          types: ["file"],
+        }),
+      );
+      outputs.push(await request.execute("campaign_results", {}));
+      return {
+        text: "Proposta de 5 mil [S1]; campanha gastou 1.500 [S2].",
+        meter: newMeter("claude-opus-5"),
+        rounds: 1,
+      };
+    };
+    const res = await handleAi(
+      {
+        action: "ai-ask",
+        company,
+        scope: { client },
+        question: "Quanto investe?",
+      },
+      token(me),
+      env,
+      {
+        fetch: fetchImpl,
+        llm,
+        embed: async () => ({
+          vectors: [vec()],
+          tokens: 1,
+          model: "text-embedding-3-small",
+        }),
+        now: () => Date.parse("2026-09-26T12:00:00Z"),
+      },
+    );
+    expect(outputs[0]).toContain('[S1] Arquivo "Proposta.pdf" · Página 3');
+    expect(outputs[0]).toContain("Página 3\nInvestimento de R$ 5.000 por mês.");
+    expect(outputs[1]).toContain(
+      '[S2] Campanha "Leads Setembro" · Meta · ativa',
+    );
+    expect(outputs[1]).toContain(
+      "gasto R$ 1.500,00, 60 resultados · custo por resultado R$ 25,00",
+    );
+    expect(outputs[1]).not.toContain("Parada");
+    expect(outputs[1]).toContain("(Período: 01/09/2026 a 26/09/2026");
+    expect(res.body.sources).toEqual([
+      {
+        ref: "S1",
+        type: "file",
+        id: "f1",
+        title: "Proposta.pdf",
+        date: "2026-09-01T12:00:00Z",
+        client_id: client,
+        page: 3,
+        label: "Página 3",
+      },
+      {
+        ref: "S2",
+        type: "campaign",
+        id: "c1",
+        title: "Leads Setembro",
+        date: null,
+        client_id: client,
+      },
+    ]);
   });
 });

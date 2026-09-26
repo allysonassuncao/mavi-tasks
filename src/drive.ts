@@ -45,6 +45,20 @@ export async function listDriveFiles(
   });
 }
 
+/** One file the person can see (a link from another screen). */
+export async function driveFile(company: string, id: string) {
+  if (!supabase) throw Error("Supabase não configurado");
+  const { data, error } = await supabase
+    .from("drive_files")
+    .select(DRIVE_COLUMNS)
+    .eq("company_id", company)
+    .eq("id", id)
+    .eq("status", "ready")
+    .maybeSingle();
+  if (error) throw error;
+  return data as DriveFile | null;
+}
+
 /** Files the person can see (optionally in one client) whose name contains `text`. */
 export async function searchDriveFiles(
   company: string,
@@ -177,7 +191,9 @@ export function renameDriveFile(id: string, name: string) {
 }
 
 /** Calls the Drive server (api/drive.ts), which checks access and signs GCS URLs. */
-export async function driveServer<T>(body: Record<string, unknown>): Promise<T> {
+export async function driveServer<T>(
+  body: Record<string, unknown>,
+): Promise<T> {
   const token = supabase
     ? (await supabase.auth.getSession()).data.session?.access_token
     : undefined;

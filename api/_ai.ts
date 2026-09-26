@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
-import { callRpc } from "./_drive.js";
+import { callRpc, signGcsUrl, type GcsCredentials } from "./_drive.js";
+import { extractFileText } from "./_ai-extract.js";
 import {
   EmbeddingError,
   embeddingCost,
@@ -45,9 +46,17 @@ export type AiEnv = {
   workerSecret: string;
   /** Quanto o worker trabalha por chamada (ms). */
   workerBudgetMs: number;
+  /** GCS do Drive: o worker baixa os arquivos para ler o texto. */
+  credentials?: GcsCredentials | null;
+  bucket?: string;
 };
 export function aiEnv(
-  base: { supabaseUrl: string; supabaseKey: string },
+  base: {
+    supabaseUrl: string;
+    supabaseKey: string;
+    credentials?: GcsCredentials | null;
+    bucket?: string;
+  },
   env: Record<string, string | undefined> = process.env,
 ): AiEnv {
   return {
@@ -66,6 +75,8 @@ export type AiDeps = {
   llm: LlmAdapter;
   embed: Embedder;
   now?: () => number;
+  /** Baixa um arquivo do Drive (trocado nos testes). */
+  download?: (path: string) => Promise<Uint8Array>;
 };
 export function aiDeps(env: AiEnv): AiDeps {
   return {
@@ -82,12 +93,14 @@ const ROLE_LABELS: Record<string, string> = {
   member: "colaborador",
 };
 
-export const INSTRUCTIONS = `Você é a IA do MAVI, o sistema de gestão de uma agência de marketing (clientes, produtos contratados, projetos, tarefas, reuniões gravadas). Você responde perguntas do time sobre os clientes com base no que está registrado no sistema.
+export const INSTRUCTIONS = `Você é a IA do MAVI, o sistema de gestão de uma agência de marketing (clientes, produtos contratados, projetos, tarefas, reuniões gravadas, arquivos do Drive, Social Leads e campanhas de tráfego pago). Você responde perguntas do time sobre os clientes com base no que está registrado no sistema.
 
 Como trabalhar:
 - Para qualquer pergunta sobre fatos (o que foi dito, combinado, pedido, prometido, decidido, reclamado), busque antes de responder. Nunca responda de memória nem invente.
 - Use search_knowledge com os termos que provavelmente aparecem no texto. Para perguntas amplas, faça 2 a 4 buscas com formulações diferentes na mesma rodada (em paralelo).
 - Use list_meetings e list_tasks para perguntas de lista, contagem ou situação atual ("quais", "quantas", "a última", "o que está atrasado"). Status, responsável e prazo das tarefas vêm atualizados dessas ferramentas.
+- Para desempenho, verba e resultados de anúncios, use campaign_results (os números vêm dos dias sincronizados; nunca calcule de cabeça o que a ferramenta já traz). Anotações e ciclos das campanhas também aparecem na busca.
+- Documentos do cliente (propostas, contratos, briefings, planilhas, apresentações) estão nos arquivos do Drive; o briefing e os planos mensais do Social Leads (com os 8 posts e a decisão do cliente) também entram na busca.
 - Use read_more quando um trecho parecer cortado ou precisar de mais contexto.
 - Pare de buscar assim que tiver o suficiente. Se nada relevante aparecer, diga claramente que não encontrou no sistema e sugira onde procurar.
 
@@ -552,10 +565,68 @@ async function rpcOrThrow<T>(
   return r.data;
 }
 
+/** Baixa um arquivo do Drive por um link assinado de 5 minutos. */
+function gcsDownload(env: AiEnv, fetchImpl: typeof fetch) {
+  return async (path: string) => {
+    if (!env.credentials || !env.bucket)
+      throw new AiError(500, "Credenciais do GCS não configuradas.");
+    const res = await fetchImpl(
+      signGcsUrl(env.credentials, env.bucket, path, "GET", {
+        expiresInSeconds: 300,
+      }),
+    );
+    if (!res.ok)
+      throw new AiError(502, `Download do arquivo falhou (${res.status}).`);
+    return new Uint8Array(await res.arrayBuffer());
+  };
+}
+
+/** Lê o texto de alguns arquivos pendentes do Drive e devolve ao banco. */
+async function readFiles(env: AiEnv, deps: AiDeps) {
+  const files = await rpcOrThrow<
+    {
+      file_id: string;
+      path: string;
+      name: string;
+      kind: string | null;
+      size_bytes: number;
+    }[]
+  >(env, deps, "ai_claim_files", { p_secret: env.workerSecret, p_limit: 3 });
+  const download = deps.download ?? gcsDownload(env, deps.fetch);
+  await Promise.all(
+    files.map(async (f) => {
+      let status: string;
+      let pages: unknown = null;
+      let error: string | null = null;
+      try {
+        const out = await extractFileText(
+          f.kind,
+          await download(f.path),
+          f.name,
+        );
+        status = out.status;
+        pages = out.status === "done" ? out.pages : null;
+        error = out.error ?? null;
+      } catch (e) {
+        status = "error";
+        error = (e as Error).message;
+      }
+      await rpcOrThrow(env, deps, "ai_store_file_text", {
+        p_secret: env.workerSecret,
+        p_file: f.file_id,
+        p_status: status,
+        p_pages: pages,
+        p_error: error,
+      });
+    }),
+  );
+  return files.length;
+}
+
 export async function runIndexer(env: AiEnv, deps: AiDeps) {
   const now = deps.now ?? Date.now;
   const deadline = now() + env.workerBudgetMs;
-  const stats = { built: 0, embedded: 0, tokens: 0, cost: 0 };
+  const stats = { built: 0, embedded: 0, tokens: 0, cost: 0, files: 0 };
   const perCompany = new Map<string, { tokens: number; cost: number }>();
   while (now() < deadline - 5000) {
     const built = await rpcOrThrow<number>(env, deps, "ai_index_step", {
@@ -563,6 +634,9 @@ export async function runIndexer(env: AiEnv, deps: AiDeps) {
       p_limit: 50,
     });
     stats.built += built;
+    // Arquivos do Drive (baixar e ler leva tempo): só com folga no relógio.
+    const read = now() < deadline - 20000 ? await readFiles(env, deps) : 0;
+    stats.files += read;
     const claimed = await rpcOrThrow<
       { id: number; company_id: string; content: string }[]
     >(env, deps, "ai_claim_chunks", {
@@ -570,7 +644,7 @@ export async function runIndexer(env: AiEnv, deps: AiDeps) {
       p_limit: 256,
     });
     if (!claimed.length) {
-      if (!built) break;
+      if (!built && !read) break;
       continue;
     }
     // Lotes de 128 textos, dois de cada vez.

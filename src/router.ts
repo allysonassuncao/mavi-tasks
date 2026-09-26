@@ -34,7 +34,8 @@ function snapshot() {
   return window.location.pathname + window.location.search;
 }
 export function useLocation() {
-  return useSyncExternalStore(subscribe, snapshot);
+  // No servidor (testes que renderizam em texto) não há endereço.
+  return useSyncExternalStore(subscribe, snapshot, () => "");
 }
 function subscribeHash(listener: () => void) {
   window.addEventListener("hashchange", listener);

@@ -21,13 +21,35 @@ export type AiScope = {
 };
 export type AiSource = {
   ref: string;
-  type: "meeting" | "task";
+  type: "meeting" | "task" | "file" | "social" | "campaign";
   id: string;
   title: string;
   date: string | null;
   client_id: string | null;
+  /** Social Leads: o produto contratado (abre a página dele). */
+  contract_id?: string | null;
   /** Reunião: segundo do trecho citado. */
   start?: number;
+  /** Arquivo: a página/slide/planilha citada. */
+  page?: number;
+  label?: string;
+};
+
+/** Os tipos da busca (como a IA pede) e os do banco. */
+const SEARCH_TYPES: Record<string, string[]> = {
+  meeting: ["meeting"],
+  task: ["task"],
+  file: ["drive_file"],
+  social: ["social_plan", "social_briefing"],
+  campaign: ["campaign"],
+};
+const SOURCE_KIND: Record<string, AiSource["type"]> = {
+  meeting: "meeting",
+  task: "task",
+  drive_file: "file",
+  social_plan: "social",
+  social_briefing: "social",
+  campaign: "campaign",
 };
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -69,7 +91,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "search_knowledge",
     description:
-      "Busca por significado e por termos em tudo que a pessoa pode ver no MAVI: transcrições e resumos das reuniões gravadas e tarefas (descrição, campos e comentários). Use para qualquer pergunta sobre o que foi dito, combinado, pedido ou decidido. Faça várias buscas com formulações diferentes (em paralelo) quando a pergunta for ampla. Devolve trechos numerados [S#] para citar.",
+      "Busca por significado e por termos em tudo que a pessoa pode ver no MAVI: transcrições e resumos das reuniões gravadas, tarefas (descrição, campos e comentários), arquivos do Drive (PDF, Word, PowerPoint, Excel, textos), briefing e planos do Social Leads e anotações das campanhas. Use para qualquer pergunta sobre o que foi dito, combinado, pedido ou decidido. Faça várias buscas com formulações diferentes (em paralelo) quando a pergunta for ampla. Devolve trechos numerados [S#] para citar.",
     parameters: obj(
       {
         query: {
@@ -83,8 +105,12 @@ export const TOOLS: ToolSpec[] = [
         },
         types: {
           type: "array",
-          items: { type: "string", enum: ["meeting", "task"] },
-          description: "Limitar a reuniões e/ou tarefas.",
+          items: {
+            type: "string",
+            enum: ["meeting", "task", "file", "social", "campaign"],
+          },
+          description:
+            "Limitar a tipos: meeting (reuniões gravadas), task (tarefas), file (arquivos do Drive), social (briefing e planos do Social Leads), campaign (anotações e ciclos das campanhas; só líderes).",
         },
         from: dateField("Só a partir desta data"),
         to: dateField("Só até esta data"),
@@ -124,6 +150,16 @@ export const TOOLS: ToolSpec[] = [
       from: dateField("A partir de"),
       to: dateField("Até"),
       limit: { type: "integer", minimum: 1, maximum: 30 },
+    }),
+  },
+  {
+    name: "campaign_results",
+    description:
+      "Números das campanhas de tráfego pago no período (gasto, resultados, custo por resultado, impressões, cliques, verba e meta de cada ciclo). Só administradores e gestores veem campanhas. Use para perguntas sobre desempenho, verba ou resultados de anúncios.",
+    parameters: obj({
+      client_id: { type: "string", description: "Cliente (id)." },
+      from: dateField("Início do período (padrão: primeiro dia do mês)"),
+      to: dateField("Fim do período (padrão: hoje)"),
     }),
   },
   {
@@ -205,8 +241,11 @@ function clientOf(ctx: ToolContext, input: Record<string, unknown>) {
 /** Uma referência nova (ou a mesma, se o trecho já foi citado). */
 function cite(ctx: ToolContext, source: Omit<AiSource, "ref">) {
   const same = ctx.sources.find(
-    (s) =>
-      s.type === source.type && s.id === source.id && s.start === source.start,
+    (x) =>
+      x.type === source.type &&
+      x.id === source.id &&
+      x.start === source.start &&
+      x.page === source.page,
   );
   if (same) return same.ref;
   const ref = `S${ctx.sources.length + 1}`;
@@ -224,12 +263,19 @@ async function rest<T>(ctx: ToolContext, path: string): Promise<T[]> {
 
 type SearchRow = {
   chunk_id: number;
-  source_type: "meeting" | "task";
+  source_type: string;
   source_id: string;
   title: string;
   content: string;
-  meta: { start?: number; kind?: string };
+  meta: {
+    start?: number;
+    kind?: string;
+    page?: number;
+    label?: string;
+    post?: number;
+  };
   client_id: string | null;
+  contract_id: string | null;
   occurred_at: string | null;
   task_status: string | null;
   task_assignee: string | null;
@@ -246,7 +292,9 @@ async function searchKnowledge(
   ctx.usage.embeddingTokens += tokens;
   ctx.usage.embeddingModel = model;
   const types = Array.isArray(input.types)
-    ? input.types.filter((t) => t === "meeting" || t === "task")
+    ? input.types.flatMap((t) =>
+        typeof t === "string" ? (SEARCH_TYPES[t] ?? []) : [],
+      )
     : [];
   const filters: Record<string, unknown> = {
     client: clientOf(ctx, input),
@@ -268,20 +316,31 @@ async function searchKnowledge(
   return r.data
     .map((row) => {
       const start = row.meta?.start;
+      const kind = SOURCE_KIND[row.source_type] ?? "task";
       const ref = cite(ctx, {
-        type: row.source_type,
+        type: kind,
         id: row.source_id,
         title: row.title,
         date: row.occurred_at,
         client_id: row.client_id,
+        ...(kind === "social" ? { contract_id: row.contract_id } : {}),
         ...(typeof start === "number" ? { start } : {}),
+        ...(kind === "file" && row.meta?.label
+          ? { page: row.meta.page, label: row.meta.label }
+          : {}),
       });
       ctx.chunks.set(ref, row.chunk_id);
       const client = row.client_id ? ctx.clients.get(row.client_id) : undefined;
       const where =
-        row.source_type === "meeting"
+        kind === "meeting"
           ? `Reunião "${row.title}" · ${brDate(row.occurred_at)}${typeof start === "number" ? ` · a partir de ${clock(start)}` : row.meta?.kind === "summary" ? " · resumo" : ""}`
-          : `Tarefa "${row.title}" · ${STATUS_LABELS[row.task_status ?? ""] ?? row.task_status ?? ""}${row.task_assignee ? ` · responsável ${ctx.members.get(row.task_assignee)?.name ?? "?"}` : ""}${row.task_due ? ` · prazo ${brDate(row.task_due)}` : ""}`;
+          : kind === "file"
+            ? `Arquivo "${row.title}"${row.meta?.label ? ` · ${row.meta.label}` : ""}`
+            : kind === "social"
+              ? `${row.title}${row.meta?.post ? ` · post ${row.meta.post}` : ""}`
+              : kind === "campaign"
+                ? `Campanha "${row.title}"`
+                : `Tarefa "${row.title}" · ${STATUS_LABELS[row.task_status ?? ""] ?? row.task_status ?? ""}${row.task_assignee ? ` · responsável ${ctx.members.get(row.task_assignee)?.name ?? "?"}` : ""}${row.task_due ? ` · prazo ${brDate(row.task_due)}` : ""}`;
       // A primeira linha do trecho é o cabeçalho de contexto; aqui ele vira
       // a linha de referência.
       const body = row.content.split("\n").slice(1).join("\n").trim();
@@ -462,12 +521,17 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
       : "";
   if (name === "search_knowledge") {
     const types = Array.isArray(input.types) ? input.types : [];
+    const names: Record<string, string> = {
+      meeting: "nas reuniões",
+      task: "nas tarefas",
+      file: "nos arquivos do Drive",
+      social: "no Social Leads",
+      campaign: "nas campanhas",
+    };
     const where =
-      types.length === 1
-        ? types[0] === "meeting"
-          ? "nas reuniões"
-          : "nas tarefas"
-        : "nas reuniões e tarefas";
+      types.length === 1 && names[String(types[0])]
+        ? names[String(types[0])]
+        : "em tudo que você acessa";
     return `Buscando “${str(input.query).slice(0, 80)}” ${where}${inClient}${period}`;
   }
   if (name === "read_more")
@@ -484,6 +548,8 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
   }
   if (name === "find_clients")
     return `Procurando o cliente “${str(input.query).slice(0, 40)}”`;
+  if (name === "campaign_results")
+    return `Conferindo os resultados das campanhas${inClient}${period}`;
   return "Consultando o sistema";
 }
 
@@ -502,11 +568,92 @@ export function summarizeStep(name: string, output: string) {
     return refs
       ? `${refs} ${refs === 1 ? "tarefa" : "tarefas"}`
       : "nenhuma tarefa";
+  if (name === "campaign_results")
+    return refs
+      ? `${refs} ${refs === 1 ? "campanha" : "campanhas"}`
+      : "nenhuma campanha";
   if (name === "find_clients") {
     const n = (output.match(/^- Cliente /gm) ?? []).length;
     return n ? `${n} ${n === 1 ? "cliente" : "clientes"}` : "nenhum cliente";
   }
   return "";
+}
+
+const brl = (v: number) =>
+  `R$ ${Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const PLATFORM: Record<string, string> = {
+  meta: "Meta",
+  google: "Google Ads",
+  linkedin: "LinkedIn",
+  tiktok: "TikTok",
+  kwai: "Kwai",
+};
+
+type CampaignRow = {
+  campaign: string;
+  name: string;
+  platform: string;
+  status: string;
+  client: string;
+  cycles: {
+    start: string;
+    end: string;
+    objective: string;
+    goal_results: number;
+    budget: number;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    results: number;
+  }[];
+};
+
+async function campaignResults(
+  ctx: ToolContext,
+  input: Record<string, unknown>,
+) {
+  const from = DATE.test(str(input.from))
+    ? str(input.from)
+    : `${ctx.today.slice(0, 7)}-01`;
+  const to = DATE.test(str(input.to)) ? str(input.to) : ctx.today;
+  const r = await callRpc<CampaignRow[]>(
+    ctx,
+    ctx.fetch,
+    ctx.auth,
+    "ai_campaign_results",
+    {
+      p_company: ctx.company,
+      p_client: clientOf(ctx, input) ?? null,
+      p_from: from,
+      p_to: to,
+    },
+  );
+  if (!r.ok) throw new Error(r.error);
+  const withCycles = r.data.filter((c) => c.cycles.length);
+  if (!withCycles.length)
+    return `Nenhuma campanha com ciclo entre ${brDate(from)} e ${brDate(to)} (campanhas só aparecem para administradores e gestores).`;
+  const body = withCycles
+    .map((c) => {
+      const ref = cite(ctx, {
+        type: "campaign",
+        id: c.campaign,
+        title: c.name,
+        date: null,
+        client_id: c.client,
+      });
+      const cycles = c.cycles
+        .map((y) => {
+          const cpr =
+            y.results > 0
+              ? ` · custo por resultado ${brl(y.spend / y.results)}`
+              : "";
+          return `  - ciclo ${brDate(y.start)} a ${brDate(y.end)} (${y.objective}): verba ${brl(y.budget)}, meta ${y.goal_results} resultados → gasto ${brl(y.spend)}, ${Number(y.results).toLocaleString("pt-BR")} resultados${cpr}, ${Number(y.impressions).toLocaleString("pt-BR")} impressões, ${Number(y.clicks).toLocaleString("pt-BR")} cliques`;
+        })
+        .join("\n");
+      return `[${ref}] Campanha "${c.name}" · ${PLATFORM[c.platform] ?? c.platform} · ${c.status === "active" ? "ativa" : "inativa"}${ctx.scope.client ? "" : ` · cliente ${ctx.clients.get(c.client) ?? "?"}`}\n${cycles}`;
+    })
+    .join("\n\n");
+  return `${body}\n(Período: ${brDate(from)} a ${brDate(to)}; números somados dos dias dentro do período.)`;
 }
 
 /** Executa uma ferramenta pelo nome (entradas conferidas aqui). */
@@ -520,5 +667,6 @@ export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "list_meetings") return listMeetings(ctx, input);
   if (name === "list_tasks") return listTasks(ctx, input);
   if (name === "find_clients") return findClients(ctx, input);
+  if (name === "campaign_results") return campaignResults(ctx, input);
   return `Ferramenta desconhecida: ${name}.`;
 }

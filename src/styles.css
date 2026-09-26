@@ -15594,29 +15594,6 @@ label .sl-money .ui-input,
 .ai-history li:focus-within .ai-history-actions {
   opacity: 1;
 }
-.ai-share ul {
-  list-style: none;
-  margin: 10px 0;
-  padding: 0;
-  max-height: 320px;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.ai-share label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 4px;
-  font-size: 0.82rem;
-}
-.ai-share-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
-}
 @media (max-width: 600px) {
   .ai-drawer {
     inset: 0;

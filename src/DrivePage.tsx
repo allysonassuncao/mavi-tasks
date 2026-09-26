@@ -51,7 +51,7 @@ import { DriveAudit } from "./DriveAudit";
 import { FileViewer } from "./FileViewer";
 import { MeetingRecordings } from "./MeetingRecordings";
 import { countMeetingRecordings, meetingRecording } from "./meetings";
-import { navigate } from "./router";
+import { navigate, useLocation } from "./router";
 import { setAiPlace } from "./ai";
 import type { FormPreset } from "./forms";
 import {
@@ -73,6 +73,7 @@ import {
   uploadDriveFile,
   mySharedFolders,
   shareableFolder,
+  driveFile,
 } from "./drive";
 
 type Upload = { key: string; name: string; progress: number; error?: string };
@@ -304,21 +305,38 @@ function DriveTree({
       alive = false;
     };
   }, [company, at.client, showsProducts]);
+  // Links de outras telas (fontes citadas pela IA, tarefas):
+  // ?gravacao=<id>&t=<s> abre a gravação; ?arquivo=<id> abre o arquivo.
+  const location = useLocation();
   useEffect(() => {
     if (root) return;
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get("gravacao");
-    if (!id) return;
+    const params = new URLSearchParams(location.split("?")[1] ?? "");
+    const recording = params.get("gravacao");
+    const fileId = params.get("arquivo");
+    if (!recording && !fileId) return;
     const start = Number(params.get("t")) || undefined;
     navigate(window.location.pathname, true);
-    meetingRecording(id)
-      .then((r) => {
-        if (!r) throw Error("Gravação não encontrada ou sem acesso.");
-        setAt({ client: r.client_id, recordings: true });
-        setOpenRecording({ recording: r.id, start });
-      })
-      .catch((e) => setError((e as Error).message));
-  }, [root]);
+    if (recording)
+      meetingRecording(recording)
+        .then((r) => {
+          if (!r) throw Error("Gravação não encontrada ou sem acesso.");
+          setAt({ client: r.client_id, recordings: true });
+          setOpenRecording({ recording: r.id, start });
+        })
+        .catch((e) => setError((e as Error).message));
+    else
+      driveFile(company, fileId!)
+        .then((f) => {
+          if (!f) throw Error("Arquivo não encontrado ou sem acesso.");
+          setAt({
+            client: f.client_id ?? undefined,
+            contract: f.contract_id ?? undefined,
+            folder: f.folder_id ?? undefined,
+          });
+          setViewer({ list: [f], index: 0 });
+        })
+        .catch((e) => setError((e as Error).message));
+  }, [root, location, company]);
 
   function go(next: DriveLocation) {
     setOpenRecording(null);

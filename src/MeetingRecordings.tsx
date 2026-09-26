@@ -5,7 +5,7 @@ import { Empty } from "./components";
 import { Paged } from "./Pagination";
 import { fold } from "./task-search";
 import { dateKey } from "./domain";
-import { askAi, openTaskSource } from "./ai";
+import { askAi, openAiSource } from "./ai";
 import type { Snapshot } from "./types";
 import type { FormPreset } from "./forms";
 import { MeetingPlayer } from "./MeetingPlayer";
@@ -472,7 +472,7 @@ function ClientChat({
           text={text}
           sources={sources}
           onSource={(s) =>
-            s.type === "meeting" ? onOpen(s.id, s.start) : openTaskSource(s)
+            s.type === "meeting" ? onOpen(s.id, s.start) : openAiSource(s)
           }
         />
       )}
