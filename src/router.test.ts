@@ -25,13 +25,16 @@ describe("shareable routes", () => {
     expect(resolvePage("/")).toBe("overview");
     expect(resolvePage("/pagina-inexistente")).toBeNull();
   });
-  it("Inteligência artificial em /ia, com o endereço antigo e as abas", () => {
-    expect(pageUrl("aiUsage", "make")).toBe("/agencias/make/ia");
+  it("Painel da MAVI em /mavi, com os endereços antigos e as abas", () => {
+    expect(pageUrl("aiUsage", "make")).toBe("/agencias/make/mavi");
     expect(resolvePage("/agencias/make/consumo-ia")).toBe("aiUsage");
-    expect(aiTab("ia-provedores")).toBe("ia-provedores");
-    expect(aiTab("ia-regras")).toBe("ia-regras");
-    expect(aiTab("")).toBe("ia-consumo");
-    expect(aiTab("config-pessoas")).toBe("ia-consumo");
+    expect(resolvePage("/agencias/make/ia")).toBe("aiUsage");
+    expect(aiTab("provedores")).toBe("provedores");
+    expect(aiTab("regras")).toBe("regras");
+    // Links antigos (#ia-…) continuam abrindo a aba certa.
+    expect(aiTab("ia-provedores")).toBe("provedores");
+    expect(aiTab("")).toBe("consumo");
+    expect(aiTab("config-pessoas")).toBe("consumo");
   });
   it("uses a readable company path and resolves scoped pages", () => {
     const company = { id: "tenant-1", name: "Make Acelerador de Vendas" };

@@ -196,7 +196,7 @@ export function MemberModulesMenu({
           {saveMcp && (
             <label
               className="checkbox-label member-modules-option member-modules-mcp"
-              title="Usar o MAVI no Claude, no ChatGPT e em outros apps de IA, só para consultar"
+              title="Usar a MAVI no Claude, no ChatGPT e em outros apps de IA, só para consultar"
             >
               <Checkbox
                 checked={mcpOn}
@@ -204,7 +204,7 @@ export function MemberModulesMenu({
                 onCheckedChange={(on) => void toggleMcp(on === true)}
               />
               <span>
-                <PlugZap size={13} aria-hidden="true" /> IA externa (MCP)
+                <PlugZap size={13} aria-hidden="true" /> MAVI em apps externos (MCP)
               </span>
               {mcp === "default" && <small>padrão</small>}
             </label>

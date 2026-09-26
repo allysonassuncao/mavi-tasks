@@ -188,7 +188,7 @@ export function MeetingPlayer({
       icon: ListChecks,
       count: steps.length,
     },
-    { id: "ask", label: "Perguntar à IA", icon: Sparkles },
+    { id: "ask", label: "Perguntar à MAVI", icon: Sparkles },
   ];
   const total = duration || recording.duration_seconds || 0;
 
@@ -304,7 +304,7 @@ export function MeetingPlayer({
               <p>
                 {videoError && videoError !== "none"
                   ? videoError
-                  : "O vídeo desta reunião não está mais guardado. A transcrição, o resumo e a IA continuam disponíveis."}
+                  : "O vídeo desta reunião não está mais guardado. A transcrição, o resumo e a MAVI continuam disponíveis."}
               </p>
             </div>
           )}
@@ -884,7 +884,7 @@ function SummaryPanel({
       )}
 
       <p className="meeting-ai-note">
-        Resumo gerado automaticamente pela IA do gravador; confira na
+        Resumo gerado automaticamente pela MAVI; confira na
         transcrição.
       </p>
     </div>
@@ -975,7 +975,7 @@ function AskPanel({
 }) {
   return (
     <AiChat
-      intro="Pergunte qualquer coisa sobre esta reunião. A IA lê a transcrição inteira e mostra o minuto de onde tirou cada resposta."
+      intro="Pergunte qualquer coisa sobre esta reunião. A MAVI lê a transcrição inteira e mostra o minuto de onde tirou cada resposta."
       placeholder="Pergunte sobre esta reunião"
       suggestions={SUGGESTIONS}
       send={(q, history, handlers) =>

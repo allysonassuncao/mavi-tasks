@@ -126,7 +126,7 @@ await check("compartilhar: recusa quem não veria a fonte; aceita quem veria; av
   const [n] = await sql(`select kind, user_id, actor_id, title, body, link, task_id from notifications where kind='ai_share'`);
   assert.deepEqual(
     [n.user_id, n.actor_id, n.title, n.body, n.link, n.task_id],
-    [manager, teamMember, "Bruno Equipe compartilhou uma conversa da IA", "Verba de outubro", `/visao-geral?conversa=${conversation}`, null],
+    [manager, teamMember, "Bruno Equipe compartilhou uma conversa com a MAVI", "Verba de outubro", `/visao-geral?conversa=${conversation}`, null],
   );
   // Quem recebe vê a lista de com quem foi compartilhada, mas não continua.
   assert.equal(await sees(manager, "ai_conversation_shares", "conversation_id=$1", [conversation]), 1);
@@ -185,7 +185,7 @@ await check("limites: só líderes definem; aviso aos 80%, bloqueio aos 100%", a
   await as(teamMember);
   const warn = await rpc("ai_check_limits", [A, client, null, null]);
   assert.equal(warn.blocked, false);
-  assert.deepEqual(warn.warnings, ["O uso de IA deste cliente está em 84% do limite do mês."]);
+  assert.deepEqual(warn.warnings, ["O uso da MAVI deste cliente está em 84% do limite do mês."]);
   // Fora do cliente, o limite dele não vale.
   await as(teamMember);
   assert.deepEqual((await rpc("ai_check_limits", [A, null, null, null])).warnings, []);
@@ -194,7 +194,7 @@ await check("limites: só líderes definem; aviso aos 80%, bloqueio aos 100%", a
   await as(teamMember);
   const block = await rpc("ai_check_limits", [A, client, null, null]);
   assert.equal(block.blocked, true);
-  assert.equal(block.message, "O limite mensal de IA deste cliente (US$ 5,00) foi atingido. Fale com um administrador ou gestor.");
+  assert.equal(block.message, "O limite mensal de uso da MAVI deste cliente (US$ 5,00) foi atingido. Fale com um administrador ou gestor.");
   // Tirar o limite libera.
   await as(manager);
   await rpc("ai_set_limit", [A, "client", client, null]);

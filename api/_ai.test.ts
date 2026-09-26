@@ -687,7 +687,7 @@ describe("adaptador da Claude", () => {
         client,
       )(base),
     ).rejects.toThrow(
-      "A IA não devolveu resposta (motivo: max_tokens; veio: thinking). Tente de novo.",
+      "A MAVI não devolveu resposta (motivo: max_tokens; veio: thinking). Tente de novo.",
     );
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();

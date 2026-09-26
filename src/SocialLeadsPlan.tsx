@@ -70,6 +70,7 @@ import {
   type SlTask,
   type SlPostEvent,
   describeEvent,
+  maviText,
 } from "./social-leads";
 import { MediaInput, type Uploading } from "./SocialLeadsFields";
 
@@ -240,7 +241,7 @@ export function PlanView({
         mode,
         mode === "current" ? plan?.id : undefined,
       );
-      notify("A IA começou a escrever o plano. Leva de 1 a 3 minutos.");
+      notify("A MAVI começou a escrever o plano. Leva de 1 a 3 minutos.");
       setModal(null);
       onChanged();
       if (mode === "new") onMonth(0);
@@ -256,7 +257,7 @@ export function PlanView({
       <RefreshCw size={16} className="spin" />
       <div>
         <strong>
-          A IA está escrevendo{" "}
+          A MAVI está escrevendo{" "}
           {job?.kind === "current"
             ? `de novo o ${plan?.label}`
             : "o plano do próximo mês"}
@@ -299,7 +300,7 @@ export function PlanView({
             body={
               briefing
                 ? "Revise o briefing e gere o plano do Mês 1."
-                : "Preencha o briefing: com ele a IA escreve o plano do Mês 1."
+                : "Preencha o briefing: com ele a MAVI escreve o plano do Mês 1."
             }
             action={
               <Button className="btn primary" onClick={onOpenBriefing}>
@@ -378,7 +379,7 @@ export function PlanView({
                   ? `salvo ${relativeDays(briefing.updated_at)}`
                   : "sem briefing"
                 : i === 1
-                  ? `${bundle.plan.source === "artifact" ? "importado do artefato" : bundle.plan.source === "ai" ? "gerado pela IA" : "editado"} · ${bundle.revisions.length} ${bundle.revisions.length === 1 ? "versão anterior" : "versões anteriores"}`
+                  ? `${bundle.plan.source === "artifact" ? "importado do artefato" : bundle.plan.source === "ai" ? "gerado pela MAVI" : "editado"} · ${bundle.revisions.length} ${bundle.revisions.length === 1 ? "versão anterior" : "versões anteriores"}`
                   : i === 2
                     ? bundle.plan.share_enabled
                       ? `${approved + rejected} de 8 · link enviado ${relativeDays(bundle.plan.shared_at)}`
@@ -402,7 +403,7 @@ export function PlanView({
       <div className="sl-plan-bar">
         <p>
           {bundle.plan.label} · criado em {date(bundle.plan.created_at)}
-          {bundle.plan.summary ? ` · ${bundle.plan.summary}` : ""}
+          {bundle.plan.summary ? ` · ${maviText(bundle.plan.summary)}` : ""}
           {cost.total > 0 && (
             <span
               className="sl-cost"
@@ -418,7 +419,7 @@ export function PlanView({
                 .filter(Boolean)
                 .join(" · ")}
             >
-              <Sparkles size={12} /> IA {formatUsd(cost.total)}
+              <Sparkles size={12} /> MAVI {formatUsd(cost.total)}
             </span>
           )}
         </p>
@@ -484,7 +485,7 @@ export function PlanView({
               disabled={allApproved || running}
               title={
                 allApproved
-                  ? 'Plano aprovado. Para mudar um post, use "Alterar" nele ou "Pedir ajuste à IA".'
+                  ? 'Plano aprovado. Para mudar um post, use "Alterar" nele ou "Pedir ajuste à MAVI".'
                   : "Escrever de novo os 8 posts deste mês"
               }
               onClick={() => setModal("regenerate")}
@@ -828,7 +829,7 @@ export function PlanView({
         >
           <div className="entity-form">
             <p>
-              A IA escreve de novo os 8 posts com o briefing atual. O plano de
+              A MAVI escreve de novo os 8 posts com o briefing atual. O plano de
               agora fica guardado em Versões.
             </p>
             {approved + rejected > 0 && (
@@ -841,7 +842,7 @@ export function PlanView({
                 : {approved} {approved === 1 ? "aprovada" : "aprovadas"} e{" "}
                 {rejected}{" "}
                 {rejected === 1 ? "com ajuste pedido" : "com ajuste pedido"}.
-                Para mudar só alguns posts, use “Pedir ajuste à IA”.
+                Para mudar só alguns posts, use “Pedir ajuste à MAVI”.
               </p>
             )}
             <div className="form-footer">
@@ -867,7 +868,7 @@ export function PlanView({
         >
           <div className="entity-form">
             <p>
-              A IA usa o briefing atual e o que o cliente aprovou e pediu para
+              A MAVI usa o briefing atual e o que o cliente aprovou e pediu para
               ajustar no {plans.at(-1)?.label}, sem repetir ganchos.
             </p>
             <div className="form-footer">
@@ -1712,7 +1713,7 @@ function AdjustBox({
           <Sparkles size={18} />
         </span>
         <div>
-          <strong>Pedir ajuste à IA</strong>
+          <strong>Pedir ajuste à MAVI</strong>
           <small>
             Diga o que mudar. Você vê o antes e depois antes de aplicar, e a
             versão atual fica guardada.
@@ -1733,7 +1734,7 @@ function AdjustBox({
             }
           }}
           placeholder='Ex.: "deixe o post 6 mais leve e troque o CTA por WhatsApp"'
-          aria-label="Pedir ajuste à IA"
+          aria-label="Pedir ajuste à MAVI"
         />
         <Button
           type="submit"
@@ -1763,7 +1764,7 @@ function AdjustBox({
       </div>
       {busy && (
         <p className="sl-ai-note" role="status">
-          <Sparkles size={14} /> A IA está preparando as mudanças…
+          <Sparkles size={14} /> A MAVI está preparando as mudanças…
         </p>
       )}
     </form>
@@ -2421,7 +2422,7 @@ function Alerts({
     return (
       <Empty
         title="Sem alertas"
-        body="A IA não apontou bloqueios nem riscos neste plano."
+        body="A MAVI não apontou bloqueios nem riscos neste plano."
       />
     );
   return (
@@ -2492,7 +2493,7 @@ function Revisions({
               <History size={16} />
               <div>
                 <strong>
-                  Versão {r.number} · {r.reason}
+                  Versão {r.number} · {maviText(r.reason)}
                 </strong>
                 <small>
                   {dateTime(r.created_at)}

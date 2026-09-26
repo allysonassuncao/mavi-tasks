@@ -210,7 +210,7 @@ async function server<T>(body: Record<string, unknown>): Promise<T> {
   const token = supabase
     ? (await supabase.auth.getSession()).data.session?.access_token
     : undefined;
-  if (!token) throw new Error("Entre novamente para usar a IA.");
+  if (!token) throw new Error("Entre novamente para usar a MAVI.");
   const res = await fetch("/api/social-leads", {
     method: "POST",
     headers: {
@@ -221,7 +221,7 @@ async function server<T>(body: Record<string, unknown>): Promise<T> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok)
-    throw new Error(data.error ?? "Não foi possível falar com a IA.");
+    throw new Error(data.error ?? "Não foi possível falar com a MAVI.");
   return data as T;
 }
 function db() {
@@ -1136,7 +1136,7 @@ export function demoSocialLeads(
           notes: "prazo de obra a gente nunca promete",
         },
         missing: ["competitors", "socialProof", "mediaBudget"],
-        summary: "Demonstração: campos de exemplo, sem chamar a IA.",
+        summary: "Demonstração: campos de exemplo, sem chamar a MAVI.",
         source: from.recording ? "Onboarding com o cliente" : "Texto colado",
         cost_usd: 0.06,
       };

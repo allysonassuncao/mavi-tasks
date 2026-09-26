@@ -228,7 +228,7 @@ export function ColorsInput({
             disabled={disabled}
             loading={search.state === "searching"}
             onClick={onSearch}
-            title="A IA lê as cores do site e do Instagram informados"
+            title="A MAVI lê as cores do site e do Instagram informados"
           >
             <Sparkles size={15} /> Buscar no site/Instagram
           </Button>
@@ -236,7 +236,7 @@ export function ColorsInput({
       </div>
       {search.state === "searching" && (
         <p className="sl-ai-note" role="status">
-          <Sparkles size={14} /> A IA está lendo o site e o Instagram para achar
+          <Sparkles size={14} /> A MAVI está lendo o site e o Instagram para achar
           as cores…
         </p>
       )}
@@ -249,7 +249,7 @@ export function ColorsInput({
           <div>
             {search.applied !== undefined && search.applied !== null ? (
               <span>
-                Cores preenchidas pela IA. {search.note}{" "}
+                Cores preenchidas pela MAVI. {search.note}{" "}
                 <button
                   type="button"
                   className="sl-link"
@@ -281,7 +281,7 @@ export function ColorsInput({
               </>
             )}
             {!!search.cost && (
-              <small>Custo da IA: {formatUsd(search.cost)}</small>
+              <small>Custo da MAVI: {formatUsd(search.cost)}</small>
             )}
           </div>
         </div>

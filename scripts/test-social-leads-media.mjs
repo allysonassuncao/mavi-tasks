@@ -188,7 +188,7 @@ await check(
     );
     assert.equal(
       inbox[0].excerpt,
-      "Revise os posts e envie para o cliente aprovar. Custo da IA: US$ 0,29.",
+      "Revise os posts e envie para o cliente aprovar. Custo da MAVI: US$ 0,29.",
     );
     assert.equal(
       inbox[0].link,

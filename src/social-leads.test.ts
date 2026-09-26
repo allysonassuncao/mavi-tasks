@@ -649,3 +649,17 @@ A gente faz interiores.`;
     );
   });
 });
+
+describe("textos antigos dizem MAVI na tela", () => {
+  it("troca IA por MAVI mantendo a frase", async () => {
+    const { maviText } = await import("./social-leads");
+    expect(maviText("ajuste pedido à IA")).toBe("ajuste pedido à MAVI");
+    expect(maviText("Gerado pela IA")).toBe("Gerado pela MAVI");
+    expect(maviText("Mês regenerado pela IA · custo da IA")).toBe(
+      "Mês regenerado pela MAVI · custo da MAVI",
+    );
+    // Só a palavra solta: nomes e siglas não mudam.
+    expect(maviText("IARA pediu mídia")).toBe("IARA pediu mídia");
+    expect(maviText(null)).toBe("");
+  });
+});

@@ -389,7 +389,7 @@ describe("qual IA responde", () => {
       { fetch: fetchImpl, llm, embed: vi.fn() },
     );
     expect(res.status).toBe(403);
-    expect(res.body.error).toContain("assistente de IA está desligado");
+    expect(res.body.error).toContain("A MAVI está desligada para você");
     expect(llm).not.toHaveBeenCalled();
     const meetings = await handleAi(
       { action: "ai-ask", company, scope: { client, module: "meetings" }, question: "Oi, tudo?" },

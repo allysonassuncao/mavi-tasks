@@ -91,7 +91,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "search_knowledge",
     description:
-      "Busca por significado e por termos em tudo que a pessoa pode ver no MAVI: transcrições e resumos das reuniões gravadas, tarefas (descrição, campos e comentários), arquivos do Drive (PDF, Word, PowerPoint, Excel, textos), briefing e planos do Social Leads e anotações das campanhas. Use para qualquer pergunta sobre o que foi dito, combinado, pedido ou decidido. Faça várias buscas com formulações diferentes (em paralelo) quando a pergunta for ampla. Devolve trechos numerados [S#] para citar.",
+      "Busca por significado e por termos em tudo que a pessoa pode ver na MAVI: transcrições e resumos das reuniões gravadas, tarefas (descrição, campos e comentários), arquivos do Drive (PDF, Word, PowerPoint, Excel, textos), briefing e planos do Social Leads e anotações das campanhas. Use para qualquer pergunta sobre o que foi dito, combinado, pedido ou decidido. Faça várias buscas com formulações diferentes (em paralelo) quando a pergunta for ampla. Devolve trechos numerados [S#] para citar.",
     parameters: obj(
       {
         query: {

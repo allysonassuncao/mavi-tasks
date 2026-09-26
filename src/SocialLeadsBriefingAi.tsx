@@ -142,7 +142,7 @@ export function BriefingAiModal({
 
   return (
     <Modal
-      title="Preencher o briefing com a IA"
+      title="Preencher o briefing com a MAVI"
       onClose={() => !busy && onClose()}
       busy={busy}
       className="sl-ai-dialog"
@@ -150,7 +150,7 @@ export function BriefingAiModal({
       {!result ? (
         <div className="sl-ai-fill-modal">
           <p className="sl-muted">
-            A IA lê o que o cliente disse e sugere os campos. Você escolhe o que
+            A MAVI lê o que o cliente disse e sugere os campos. Você escolhe o que
             entra; nada é salvo sem a sua revisão.
           </p>
           <div className="sl-ai-tabs" role="tablist">
@@ -279,7 +279,7 @@ export function BriefingAiModal({
               disabled={tab === "meeting" ? !recording : !text.trim()}
               onClick={read}
             >
-              <Sparkles size={15} /> {busy ? "Lendo…" : "Ler com a IA"}
+              <Sparkles size={15} /> {busy ? "Lendo…" : "Ler com a MAVI"}
             </Button>
           </div>
         </div>
@@ -290,7 +290,7 @@ export function BriefingAiModal({
             <span>
               <strong>{result.source}</strong>
               {result.summary && ` · ${result.summary}`}
-              <small>Custo da IA: {formatUsd(result.cost_usd)}</small>
+              <small>Custo da MAVI: {formatUsd(result.cost_usd)}</small>
             </span>
           </p>
           {rows.length || objectiveChanges ? (
@@ -357,13 +357,13 @@ export function BriefingAiModal({
             </ul>
           ) : (
             <p className="sl-alert info-soft">
-              A IA não encontrou nada novo para o briefing neste material.
+              A MAVI não encontrou nada novo para o briefing neste material.
             </p>
           )}
           {same > 0 && (
             <p className="sl-muted">
               {same} {same === 1 ? "campo já estava" : "campos já estavam"}{" "}
-              igual ao que a IA leu.
+              igual ao que a MAVI leu.
             </p>
           )}
           {!!result.missing.length && (

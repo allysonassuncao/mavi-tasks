@@ -471,12 +471,12 @@ export async function claudeComplete(
     if (message.stop_reason === "refusal")
       throw new SocialLeadsError(
         422,
-        "A IA se recusou a escrever este plano. Revise o briefing (principalmente as observações e a oferta) e tente de novo.",
+        "A MAVI se recusou a escrever este plano. Revise o briefing (principalmente as observações e a oferta) e tente de novo.",
       );
     if (message.stop_reason === "max_tokens")
       throw new SocialLeadsError(
         502,
-        "A resposta da IA ficou incompleta. Tente de novo.",
+        "A resposta da MAVI ficou incompleta. Tente de novo.",
       );
     const text = message.content
       .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
@@ -486,13 +486,13 @@ export async function claudeComplete(
     if (!text)
       throw new SocialLeadsError(
         502,
-        "A IA não devolveu o plano. Tente de novo.",
+        "A MAVI não devolveu o plano. Tente de novo.",
       );
     return text;
   }
   throw new SocialLeadsError(
     502,
-    "A IA demorou demais lendo o site. Tente de novo.",
+    "A MAVI demorou demais lendo o site. Tente de novo.",
   );
 }
 
@@ -557,7 +557,7 @@ export async function handleSocialLeads(
       status: 503,
       body: {
         error:
-          "A IA não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY. Depois de salvar, faça um Redeploy.",
+          "A MAVI não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY. Depois de salvar, faça um Redeploy.",
       },
     };
   if (!UUID.test(body?.company ?? "") || !UUID.test(body?.contract ?? ""))
@@ -670,8 +670,8 @@ async function run(
           p_source: "ai",
           p_summary:
             body.mode === "current"
-              ? "Mês regenerado pela IA"
-              : "Gerado pela IA",
+              ? "Mês regenerado pela MAVI"
+              : "Gerado pela MAVI",
         },
       );
       if (saved.ok) {
@@ -693,7 +693,7 @@ async function run(
     }
     throw new SocialLeadsError(
       422,
-      `O plano da IA não passou na validação: ${lastError}`,
+      `O plano da MAVI não passou na validação: ${lastError}`,
     );
   } catch (err) {
     // What the failed attempts cost still counts (on the plan being redone).
@@ -866,7 +866,7 @@ async function colors(
     if (!palette.length)
       return {
         status: 422,
-        body: { error: "A IA não encontrou cores de marca. Adicione à mão." },
+        body: { error: "A MAVI não encontrou cores de marca. Adicione à mão." },
       };
     return {
       status: 200,

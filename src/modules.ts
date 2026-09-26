@@ -50,8 +50,8 @@ export const MODULES = [
   { id: "projects", label: "Projetos" },
   { id: "hours", label: "Controle de horas" },
   { id: "storage", label: "Armazenamento" },
-  { id: "aiUsage", label: "Painel de IA" },
-  { id: "assistant", label: "Assistente de IA" },
+  { id: "aiUsage", label: "Painel da MAVI" },
+  { id: "assistant", label: "Assistente MAVI" },
 ] as const satisfies readonly { id: Page | WidgetModule; label: string }[];
 export type ModuleId = (typeof MODULES)[number]["id"];
 

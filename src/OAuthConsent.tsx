@@ -22,7 +22,7 @@ export function OAuthConsent() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"approve" | "deny" | "">("");
   useEffect(() => {
-    document.title = "Conectar ao MAVI";
+    document.title = "Conectar à MAVI";
     if (!supabase) return setError("O login não está configurado.");
     if (!/^[\w-]{1,200}$/.test(id))
       return setError("O pedido de conexão está incompleto.");
@@ -104,7 +104,7 @@ export function OAuthConsent() {
               )}
               <div>
                 <small>PEDIDO DE CONEXÃO</small>
-                <h1>{app} quer acessar o MAVI</h1>
+                <h1>{app} quer acessar a MAVI</h1>
               </div>
             </div>
             <p>
@@ -141,7 +141,7 @@ export function OAuthConsent() {
               <div className="oauth-warning">
                 <ShieldAlert size={16} />
                 <span>
-                  A IA externa ainda não foi liberada para você. Dá para
+                  A MAVI em apps externos ainda não foi liberada para você. Dá para
                   conectar agora, mas as consultas só funcionam depois que um
                   administrador liberar em Equipe e configurações.
                 </span>

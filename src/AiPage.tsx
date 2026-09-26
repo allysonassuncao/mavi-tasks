@@ -5,15 +5,15 @@ import { AiUsagePage } from "./AiUsagePage";
 import { AiProvidersPanel, AiRoutesPanel, useAiLibrary } from "./AiProviders";
 
 const TABS: { id: AiTab; label: string; icon: typeof BarChart3; admin: boolean }[] = [
-  { id: "ia-consumo", label: "Consumo e limites", icon: BarChart3, admin: false },
-  { id: "ia-provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
-  { id: "ia-regras", label: "Quem usa qual IA", icon: Route, admin: true },
+  { id: "consumo", label: "Consumo e limites", icon: BarChart3, admin: false },
+  { id: "provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
+  { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: true },
 ];
 
 /**
  * Painel de IA (líderes): o consumo e os limites de gasto; para
  * administradores, também a biblioteca de provedores e as regras de quem usa
- * qual provedor e modelo. Cada aba tem o seu endereço (#ia-…).
+ * qual provedor e modelo. Cada aba tem o seu endereço (#consumo, #provedores, #regras).
  */
 export function AiPage({
   company,
@@ -30,12 +30,12 @@ export function AiPage({
   notify: (message: string) => void;
 }) {
   const hash = aiTab(useHash());
-  const tab = isAdmin ? hash : "ia-consumo";
+  const tab = isAdmin ? hash : "consumo";
   const tabs = TABS.filter((t) => isAdmin || !t.admin);
   return (
     <div className="ai-page">
       {tabs.length > 1 && (
-        <nav className="drive-view ai-page-tabs" aria-label="Seções da IA">
+        <nav className="drive-view ai-page-tabs" aria-label="Seções do Painel da MAVI">
           {tabs.map((t) => (
             <a
               key={t.id}
@@ -49,10 +49,10 @@ export function AiPage({
           ))}
         </nav>
       )}
-      {tab === "ia-consumo" ? (
+      {tab === "consumo" ? (
         demo ? (
           <p className="panel ai-route-empty">
-            No ambiente demonstrativo não há consumo de IA para mostrar. Veja
+            No ambiente demonstrativo não há consumo da MAVI para mostrar. Veja
             as abas de provedores e de regras.
           </p>
         ) : (
@@ -85,7 +85,7 @@ function AdminTabs({
   notify: (message: string) => void;
 }) {
   const { library, error, reload, api } = useAiLibrary(company, demo);
-  return tab === "ia-provedores" ? (
+  return tab === "provedores" ? (
     <AiProvidersPanel
       api={api}
       library={library}

@@ -264,7 +264,7 @@ function Steps({
   return (
     <details className="ai-work done">
       <summary>
-        <ChevronRight size={13} aria-hidden="true" /> Como a IA chegou à
+        <ChevronRight size={13} aria-hidden="true" /> Como a MAVI chegou à
         resposta · {tools} {tools === 1 ? "passo" : "passos"}
       </summary>
       {list}

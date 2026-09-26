@@ -203,15 +203,15 @@ export function AiAssistant({
         type="button"
         className="ai-fab"
         onClick={show}
-        title="IA do MAVI (Ctrl/⌘+J)"
-        aria-label="Abrir a IA do MAVI"
+        title="MAVI (Ctrl/⌘+J)"
+        aria-label="Abrir a MAVI"
       >
         <Sparkles size={20} />
       </button>
     );
 
   return (
-    <aside className="ai-drawer" aria-label="IA do MAVI">
+    <aside className="ai-drawer" aria-label="MAVI">
       <header className="ai-drawer-head">
         {view === "history" ? (
           <button
@@ -226,7 +226,7 @@ export function AiAssistant({
           <Sparkles size={17} className="ai-drawer-logo" aria-hidden="true" />
         )}
         <strong title={conv?.title}>
-          {view === "history" ? "Conversas" : (conv?.title ?? "IA do MAVI")}
+          {view === "history" ? "Conversas" : (conv?.title ?? "MAVI")}
         </strong>
         <span className="ai-drawer-actions">
           {view === "chat" && conv && !readOnly && (
@@ -261,7 +261,7 @@ export function AiAssistant({
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar a IA"
+            aria-label="Fechar a MAVI"
             onClick={() => setOpen(false)}
           >
             <X size={17} />
@@ -366,8 +366,8 @@ export function AiAssistant({
             initial={chat.entries}
             intro={
               client
-                ? `Pergunte sobre o cliente ${clientName(client)}: a IA busca nas reuniões gravadas e nas tarefas e mostra de onde tirou cada informação.`
-                : "Pergunte sobre qualquer cliente que você acessa: a IA busca nas reuniões gravadas e nas tarefas e mostra de onde tirou cada informação."
+                ? `Pergunte sobre o cliente ${clientName(client)}: a MAVI busca nas reuniões gravadas e nas tarefas e mostra de onde tirou cada informação.`
+                : "Pergunte sobre qualquer cliente que você acessa: a MAVI busca nas reuniões gravadas e nas tarefas e mostra de onde tirou cada informação."
             }
             placeholder={
               client

@@ -221,7 +221,7 @@ export async function claudeAsk(
   if (message.stop_reason === "refusal")
     throw new MeetingsError(
       422,
-      "A IA não respondeu a esta pergunta. Tente reformular.",
+      "A MAVI não respondeu a esta pergunta. Tente reformular.",
     );
   const text = message.content
     .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
@@ -238,7 +238,7 @@ export async function claudeAsk(
     });
     throw new MeetingsError(
       502,
-      `A IA não devolveu resposta (motivo: ${message.stop_reason ?? "desconhecido"}; veio: ${kinds}). Tente de novo.`,
+      `A MAVI não devolveu resposta (motivo: ${message.stop_reason ?? "desconhecido"}; veio: ${kinds}). Tente de novo.`,
     );
   }
   if (message.stop_reason === "max_tokens")
@@ -395,7 +395,7 @@ async function meetingAsk(
   if (!env.anthropicKey)
     throw new MeetingsError(
       503,
-      "A IA não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY. Depois de salvar, faça um Redeploy.",
+      "A MAVI não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY. Depois de salvar, faça um Redeploy.",
     );
   const messages = conversation(req.question, req.history);
   if (!UUID.test(String(req.recording ?? "")))

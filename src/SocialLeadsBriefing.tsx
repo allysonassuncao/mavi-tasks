@@ -295,7 +295,7 @@ export function BriefingWizard({
     try {
       await save();
       await backend.generate(company, item.contract_id, "new");
-      notify("A IA começou a escrever o plano. Leva de 1 a 3 minutos.");
+      notify("A MAVI começou a escrever o plano. Leva de 1 a 3 minutos.");
       onGenerated();
     } catch (e) {
       notify((e as Error).message);
@@ -312,12 +312,12 @@ export function BriefingWizard({
           <span>
             <strong>Tem as notas ou a gravação da reunião?</strong>
             <small>
-              A IA lê a transcrição (ou uma reunião em Gravações da MAVI) e
+              A MAVI lê a transcrição (ou uma reunião em Gravações da MAVI) e
               sugere os campos. Você revisa antes de entrar.
             </small>
           </span>
           <Button className="btn secondary" onClick={() => setAiFill(true)}>
-            <Sparkles size={15} /> Preencher com a IA
+            <Sparkles size={15} /> Preencher com a MAVI
           </Button>
         </div>
       )}
@@ -335,7 +335,7 @@ export function BriefingWizard({
             touch();
             setAiFill(false);
             notify(
-              `${count} ${count === 1 ? "campo preenchido" : "campos preenchidos"} pela IA. Revise os passos e ajuste o que precisar.`,
+              `${count} ${count === 1 ? "campo preenchido" : "campos preenchidos"} pela MAVI. Revise os passos e ajuste o que precisar.`,
             );
           }}
         />
@@ -501,7 +501,7 @@ export function BriefingWizard({
 
       <aside className="panel sl-ready">
         <div className="sl-ready-head">
-          <strong>Pronto para a IA</strong>
+          <strong>Pronto para a MAVI</strong>
           <span>
             {readiness.filled} de {readiness.total}
           </span>

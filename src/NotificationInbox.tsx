@@ -114,7 +114,7 @@ export function NotificationInbox({
           <p className="inbox-empty">
             <AtSign size={18} />
             Quando criarem uma tarefa para você, mencionarem você com @,
-            responderem um comentário seu ou a IA terminar um plano do Social
+            responderem um comentário seu ou a MAVI terminar um plano do Social
             Leads, o aviso aparece aqui.
           </p>
         )}

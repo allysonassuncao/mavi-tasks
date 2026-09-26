@@ -292,9 +292,9 @@ export function AiProvidersPanel({
         <div>
           <strong>Biblioteca de provedores</strong>
           <p>
-            Cadastre as contas de IA da agência — Claude, OpenAI, Gemini,
+            Cadastre as contas dos provedores de IA da agência — Claude, OpenAI, Gemini,
             OpenRouter e outras compatíveis — com a API Key e os modelos
-            liberados. Depois, em <a href="#ia-regras">Quem usa qual IA</a>,
+            liberados. Depois, em <a href="#regras">Quem usa qual modelo</a>,
             escolha o provedor e o modelo de cada pessoa, cliente, produto ou
             projeto.
           </p>
@@ -640,7 +640,7 @@ function ProviderDialog({
       <div className="entity-form">
         {!entry ? (
           <>
-            <small className="muted">Escolha de onde vem a IA.</small>
+            <small className="muted">Escolha o provedor do modelo.</small>
             <div className="ai-catalog" role="list">
               {CATALOG.map((c) => (
                 <button
@@ -780,7 +780,7 @@ function ProviderDialog({
                 </span>
               </div>
               <small className="ai-field-help">
-                Preços em US$ por milhão de tokens, usados no Consumo de IA e
+                Preços em US$ por milhão de tokens, usados no consumo da MAVI e
                 nos limites.
                 {entry.pricingUrl && (
                   <>
@@ -1009,7 +1009,7 @@ export function AiRoutesPanel({
   return (
     <div className="ai-admin">
       <section className="panel ai-route-order">
-        <strong>Qual IA responde</strong>
+        <strong>Qual modelo responde</strong>
         <p>
           Vale a regra mais específica para quem pergunta e onde a pergunta é
           feita. Provedores desligados são pulados.
@@ -1030,7 +1030,7 @@ export function AiRoutesPanel({
       {!providers.length && (
         <p className="panel ai-route-empty">
           Nenhum provedor na biblioteca ainda: tudo usa o padrão do servidor.{" "}
-          <a href="#ia-provedores">Adicionar um provedor</a>
+          <a href="#provedores">Adicionar um provedor</a>
         </p>
       )}
 
@@ -1040,7 +1040,7 @@ export function AiRoutesPanel({
           <small>Para todo mundo, quando não há regra mais específica.</small>
         </div>
         <Select
-          aria-label="IA padrão da empresa"
+          aria-label="Modelo padrão da empresa"
           value={companyRoute ? `${companyRoute.provider_id}|${companyRoute.model}` : SERVER}
           onValueChange={(v) => void set("company", null, v)}
         >
@@ -1088,7 +1088,7 @@ export function AiRoutesPanel({
                     </td>
                     <td>
                       <Select
-                        aria-label={`IA de ${name}`}
+                        aria-label={`Modelo de ${name}`}
                         value={`${r.provider_id}|${r.model}`}
                         onValueChange={(v) => void set(tab, r.scope_id, v)}
                       >

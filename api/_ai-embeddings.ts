@@ -44,7 +44,7 @@ export function openAiEmbedder(
     if (!env.openaiKey)
       throw new EmbeddingError(
         503,
-        "A busca da IA não está configurada no servidor. Falta na Vercel: OPENAI_API_KEY.",
+        "A busca da MAVI não está configurada no servidor. Falta na Vercel: OPENAI_API_KEY.",
       );
     if (!texts.length)
       return { vectors: [], tokens: 0, model: env.embeddingModel };

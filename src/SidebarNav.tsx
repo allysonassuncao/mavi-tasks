@@ -287,7 +287,7 @@ export function SidebarNav({
         },
         {
           key: "aiUsage",
-          label: "Painel de IA",
+          label: "Painel da MAVI",
           icon: Sparkles,
           to: { page: "aiUsage" },
           // Gestores veem só o consumo; o resto é dos administradores.
@@ -296,17 +296,17 @@ export function SidebarNav({
                 {
                   key: "ai-usage",
                   label: "Consumo e limites",
-                  to: { page: "aiUsage", hash: "ia-consumo" },
+                  to: { page: "aiUsage", hash: "consumo" },
                 },
                 {
                   key: "ai-providers",
                   label: "Provedores e modelos",
-                  to: { page: "aiUsage", hash: "ia-provedores" },
+                  to: { page: "aiUsage", hash: "provedores" },
                 },
                 {
                   key: "ai-routes",
-                  label: "Quem usa qual IA",
-                  to: { page: "aiUsage", hash: "ia-regras" },
+                  label: "Quem usa qual modelo",
+                  to: { page: "aiUsage", hash: "regras" },
                 },
               ]
             : undefined,

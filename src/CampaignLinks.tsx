@@ -900,7 +900,7 @@ export function MetaAccountChooser({
             <p className="cell-note">
               O perfil <strong>{offer.profile || "do Facebook"}</strong> enxerga{" "}
               {offer.accounts.length === 1 ? "esta conta" : "estas contas"}.
-              Marque as de <strong>{offer.client}</strong>: o MAVI guarda o
+              Marque as de <strong>{offer.client}</strong>: a MAVI guarda o
               acesso delas com este perfil e usa nas campanhas do cliente.
             </p>
             <ul className="campaign-pick-list" aria-label="Contas do perfil">
@@ -1271,7 +1271,7 @@ export function AdConnections({
           <header>
             <h3>Sincronização diária</h3>
             <p className="cell-note">
-              Todos os dias, das 06:00 às 09:40, o MAVI busca no Meta e no
+              Todos os dias, das 06:00 às 09:40, a MAVI busca no Meta e no
               Google os números do ciclo inteiro até ontem (refazendo cada dia)
               dos ciclos em andamento com contas vinculadas, com as regras de
               conversão do MASO.

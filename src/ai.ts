@@ -84,7 +84,7 @@ export async function streamAnswer(
   });
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => ({}));
-    throw Error(data.error ?? "Não foi possível falar com a IA.");
+    throw Error(data.error ?? "Não foi possível falar com a MAVI.");
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -124,7 +124,7 @@ export async function streamAnswer(
     }
   }
   handle(buffer);
-  if (!final) throw Error("A resposta da IA foi interrompida. Tente de novo.");
+  if (!final) throw Error("A resposta da MAVI foi interrompida. Tente de novo.");
   return final;
 }
 

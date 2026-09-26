@@ -105,7 +105,7 @@ await check("arquivos: entram pelo nome já; o que não dá para ler fica marcad
   assert.equal(docs.length, 3);
   const logo = docs.find((d) => d.title === "Logo.png");
   assert.match(logo.content, /^\[Arquivo\] "Logo.png" · cliente 4282 · produto Social Leads · pasta Propostas/);
-  assert.match(logo.content, /não é lido pela IA/);
+  assert.match(logo.content, /não é lido pela MAVI/);
   assert.match(docs.find((d) => d.title === "Video.pptx").content, /Grande demais/);
   assert.match(docs.find((d) => d.title === "Proposta 2026.pdf").content, /ainda está sendo lido/);
   assert.ok(docs.every((d) => d.access === "client" && d.client_id === client));

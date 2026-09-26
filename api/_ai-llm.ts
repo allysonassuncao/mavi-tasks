@@ -94,7 +94,7 @@ export function anthropicAdapter(
     if (!env.anthropicKey && !client)
       throw new LlmError(
         503,
-        "A IA não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY.",
+        "A MAVI não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY.",
       );
     const api: Client =
       client ??
@@ -168,7 +168,7 @@ export function anthropicAdapter(
       if (message.stop_reason === "refusal")
         throw new LlmError(
           422,
-          "A IA não respondeu a esta pergunta. Tente reformular.",
+          "A MAVI não respondeu a esta pergunta. Tente reformular.",
         );
       if (message.stop_reason === "pause_turn") {
         messages.push({ role: "assistant", content: message.content });
@@ -227,7 +227,7 @@ export function anthropicAdapter(
         });
         throw new LlmError(
           502,
-          `A IA não devolveu resposta (motivo: ${message.stop_reason ?? "desconhecido"}; veio: ${kinds}). Tente de novo.`,
+          `A MAVI não devolveu resposta (motivo: ${message.stop_reason ?? "desconhecido"}; veio: ${kinds}). Tente de novo.`,
         );
       }
       return {

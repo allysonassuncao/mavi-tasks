@@ -157,7 +157,7 @@ async function providerError(res: Response, name: string) {
   if (res.status === 401 || res.status === 403)
     return new LlmError(
       502,
-      `A API Key do provedor "${name}" foi recusada. Confira em Painel de IA › Provedores e modelos.`,
+      `A API Key do provedor "${name}" foi recusada. Confira em Painel da MAVI › Provedores e modelos.`,
     );
   if (res.status === 404)
     return new LlmError(
@@ -328,7 +328,7 @@ export function openAiChatAdapter(
       if (finish === "content_filter")
         throw new LlmError(
           422,
-          "A IA não respondeu a esta pergunta. Tente reformular.",
+          "A MAVI não respondeu a esta pergunta. Tente reformular.",
         );
       return {
         text:
@@ -364,7 +364,7 @@ export function anthropicProviderAdapter(
       if (e instanceof Anthropic.AuthenticationError)
         throw new LlmError(
           502,
-          `A API Key do provedor "${config.name}" foi recusada. Confira em Painel de IA › Provedores e modelos.`,
+          `A API Key do provedor "${config.name}" foi recusada. Confira em Painel da MAVI › Provedores e modelos.`,
         );
       if (e instanceof Anthropic.NotFoundError)
         throw new LlmError(
@@ -403,7 +403,7 @@ export function routeConfig(
   } catch {
     throw new LlmError(
       503,
-      `Não foi possível abrir a API Key do provedor "${route.provider}" (a AI_PROVIDER_KEY mudou?). Salve a chave de novo em Painel de IA › Provedores e modelos.`,
+      `Não foi possível abrir a API Key do provedor "${route.provider}" (a AI_PROVIDER_KEY mudou?). Salve a chave de novo em Painel da MAVI › Provedores e modelos.`,
     );
   }
   return {

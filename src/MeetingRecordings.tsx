@@ -277,11 +277,11 @@ export function MeetingRecordings({
       {asking && (
         <section
           className="panel meetings-ask"
-          aria-label="Perguntar à IA sobre todas as reuniões"
+          aria-label="Perguntar à MAVI sobre todas as reuniões"
         >
           <header>
             <strong>
-              <Sparkles size={15} /> IA sobre o histórico de {clientName}
+              <Sparkles size={15} /> Perguntar à MAVI sobre o histórico de {clientName}
             </strong>
             <button
               type="button"
@@ -454,7 +454,7 @@ function ClientChat({
   const conversation = useRef<string | null>(null);
   return (
     <AiChat
-      intro="A IA busca nas transcrições e nos resumos de todas as reuniões deste cliente (e nas tarefas dele) e mostra de onde tirou cada informação. Clique na fonte para abrir a gravação no minuto ou a tarefa."
+      intro="A MAVI busca nas transcrições e nos resumos de todas as reuniões deste cliente (e nas tarefas dele) e mostra de onde tirou cada informação. Clique na fonte para abrir a gravação no minuto ou a tarefa."
       placeholder="Pergunte sobre o histórico deste cliente"
       suggestions={CLIENT_SUGGESTIONS}
       send={(q, _history, handlers) =>

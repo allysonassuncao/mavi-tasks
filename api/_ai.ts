@@ -106,7 +106,7 @@ const ROLE_LABELS: Record<string, string> = {
   member: "colaborador",
 };
 
-export const INSTRUCTIONS = `Você é a IA do MAVI, o sistema de gestão de uma agência de marketing (clientes, produtos contratados, projetos, tarefas, reuniões gravadas, arquivos do Drive, Social Leads e campanhas de tráfego pago). Você responde perguntas do time sobre os clientes com base no que está registrado no sistema.
+export const INSTRUCTIONS = `Você é a MAVI, a inteligência do sistema de gestão de uma agência de marketing (clientes, produtos contratados, projetos, tarefas, reuniões gravadas, arquivos do Drive, Social Leads e campanhas de tráfego pago). Você responde perguntas do time sobre os clientes com base no que está registrado no sistema. Seu nome é MAVI, no feminino ("a MAVI"): quando falar de si, use o feminino.
 
 Como trabalhar:
 - Para qualquer pergunta sobre fatos (o que foi dito, combinado, pedido, prometido, decidido, reclamado), busque antes de responder. Nunca responda de memória nem invente.
@@ -403,7 +403,7 @@ async function ask(
   // O assistente (o balão de todas as telas) é um módulo que o
   // administrador desliga para cada pessoa.
   if ((scope.module ?? "assistant") === "assistant" && base.hidden.includes("assistant"))
-    throw new AiError(403, "O assistente de IA está desligado para você.");
+    throw new AiError(403, "A MAVI está desligada para você nesta empresa.");
   const provider = route ? routeConfig(env, route) : null;
   const llm = provider
     ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider)
@@ -411,7 +411,7 @@ async function ask(
   if (limits.ok && limits.data.blocked)
     throw new AiError(
       429,
-      limits.data.message ?? "Limite de uso da IA atingido.",
+      limits.data.message ?? "Limite de uso da MAVI atingido.",
     );
   if (limits.ok)
     for (const text of limits.data.warnings ?? [])

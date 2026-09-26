@@ -193,6 +193,15 @@ export function usageSummary(rows: SlUsage[]) {
   };
 }
 /** "US$ 0,42" (and "menos de US$ 0,01" for a tiny, non-zero cost). */
+/**
+ * Textos guardados antes de a inteligência se chamar MAVI ("ajuste pedido à
+ * IA", "Gerado pela IA"): na tela, dizem MAVI. O valor guardado não muda,
+ * porque o código e o banco comparam por ele.
+ */
+export function maviText(text: string | null | undefined) {
+  return (text ?? "").replace(/(^|\s)(à|a|da|pela) IA\b/gi, "$1$2 MAVI");
+}
+
 export function formatUsd(value: number) {
   if (value > 0 && value < 0.005) return "menos de US$ 0,01";
   return `US$ ${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -508,7 +517,7 @@ export const briefingSteps: BriefingStep[] = [
       {
         key: "socialProof",
         label: "Prova social",
-        help: "Depoimentos e casos reais. Sem isso, a IA não inventa nenhum.",
+        help: "Depoimentos e casos reais. Sem isso, a MAVI não inventa nenhum.",
         long: true,
         media: "socialProof",
         mediaWhat: "imagem, vídeo ou áudio",
@@ -540,7 +549,7 @@ export const briefingSteps: BriefingStep[] = [
       {
         key: "brandColors",
         label: "Cores da marca",
-        help: "Obrigatório quando não há Instagram, Facebook nem site. A IA busca no site ou Instagram informados.",
+        help: "Obrigatório quando não há Instagram, Facebook nem site. A MAVI busca no site ou Instagram informados.",
         kind: "colors",
       },
       {
@@ -650,7 +659,7 @@ export function briefingReadiness(
   const noPresence = hasNoDigitalPresence(fields);
   if (noPresence && !has("brandColors"))
     blockers.push(
-      "Sem Instagram, Facebook ou site, informe as cores da marca: a IA não inventa identidade visual.",
+      "Sem Instagram, Facebook ou site, informe as cores da marca: a MAVI não inventa identidade visual.",
     );
   if (noPresence)
     warnings.push(
@@ -663,7 +672,7 @@ export function briefingReadiness(
     );
   if (sensitiveVertical(fields))
     warnings.push(
-      "Vertical sensível no Meta: a IA eleva o rigor e evita promessa de ganho.",
+      "Vertical sensível no Meta: a MAVI eleva o rigor e evita promessa de ganho.",
     );
   return {
     filled: byStep.reduce((s, x) => s + x.filled, 0),
@@ -740,7 +749,7 @@ export function nextActions(
       out.push({
         ...base,
         tone: "info",
-        title: `${i.client_name}: a IA está gerando o plano`,
+        title: `${i.client_name}: a MAVI está gerando o plano`,
         detail: "Leva de 1 a 3 minutos. A tela atualiza sozinha.",
         action: "open-plan",
         label: "Acompanhar",
@@ -1377,7 +1386,7 @@ export function describeEvent(e: SlPostEvent): {
             ? "Post importado"
             : d.source === "manual"
               ? `Post criado por ${who}`
-              : "Post criado pela IA",
+              : "Post criado pela MAVI",
         tone: "neutral",
         changes: [],
         lines,
@@ -1409,7 +1418,7 @@ export function describeEvent(e: SlPostEvent): {
         lines,
       };
     case "edited":
-      if (d.summary) lines.push(d.summary);
+      if (d.summary) lines.push(maviText(d.summary));
       if (d.reset)
         lines.push(
           "Voltou para pendente: a decisão anterior valia para o texto antigo.",
@@ -1417,9 +1426,9 @@ export function describeEvent(e: SlPostEvent): {
       return {
         title:
           d.reason === "ajuste pedido à IA"
-            ? `Ajustado pela IA, a pedido de ${who}`
+            ? `Ajustado pela MAVI, a pedido de ${who}`
             : d.reason === "regeneração do mês"
-              ? `Refeito pela IA na regeneração, a pedido de ${who}`
+              ? `Refeito pela MAVI na regeneração, a pedido de ${who}`
               : restored
                 ? `${who} restaurou a versão ${restored}`
                 : d.reason === "importação da conversa no chat"

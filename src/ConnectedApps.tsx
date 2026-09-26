@@ -13,7 +13,7 @@ const CLIENTS = [
     steps: [
       "Em claude.ai, abra Configurações › Conectores.",
       "Clique em Adicionar conector personalizado, dê o nome MAVI e cole o endereço acima.",
-      "Clique em Conectar e permita o acesso na tela do MAVI.",
+      "Clique em Conectar e permita o acesso na tela da MAVI.",
     ],
   },
   {
@@ -22,7 +22,7 @@ const CLIENTS = [
     steps: [
       "Em chatgpt.com, abra Configurações › Apps e conectores › Avançado e ligue o modo desenvolvedor.",
       "Volte em Apps e conectores, clique em Criar, dê o nome MAVI, cole o endereço acima e escolha OAuth.",
-      "Clique em Conectar e permita o acesso na tela do MAVI.",
+      "Clique em Conectar e permita o acesso na tela da MAVI.",
     ],
   },
   {
@@ -98,10 +98,10 @@ export function ConnectedApps({ notify }: { notify: (m: string) => void }) {
       <div className="panel-heading">
         <div>
           <h2>
-            <PlugZap size={18} /> Apps de IA conectados
+            <PlugZap size={18} /> Apps conectados à MAVI
           </h2>
           <p>
-            Use o MAVI dentro do Claude, do ChatGPT e de outros apps de IA. Eles
+            Use a MAVI dentro do Claude, do ChatGPT e de outros apps de IA. Eles
             só consultam o que você já pode ver aqui — nada é criado, alterado
             ou apagado.
           </p>
@@ -116,7 +116,7 @@ export function ConnectedApps({ notify }: { notify: (m: string) => void }) {
         <div className="oauth-warning">
           <ShieldAlert size={16} />
           <span>
-            A IA externa ainda não foi liberada para você. Peça a um
+            A MAVI em apps externos ainda não foi liberada para você. Peça a um
             administrador para liberar em Equipe e configurações.
           </span>
         </div>
@@ -178,7 +178,7 @@ export function ConnectedApps({ notify }: { notify: (m: string) => void }) {
         <h3>Conectados</h3>
         {disabled ? (
           <p className="connected-note">
-            A conexão com apps de IA ainda está sendo ativada no MAVI.
+            A conexão com apps de IA ainda está sendo ativada na MAVI.
           </p>
         ) : grants === null ? (
           <p className="connected-note">Carregando…</p>

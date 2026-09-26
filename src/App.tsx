@@ -225,7 +225,7 @@ const navigation = [
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
   { id: "storage", label: "Armazenamento", icon: Database },
-  { id: "aiUsage", label: "Painel de IA", icon: Sparkles },
+  { id: "aiUsage", label: "Painel da MAVI", icon: Sparkles },
   { id: "dashboards", label: "Dashboards", icon: PanelsTopLeft },
 ] as const;
 // Mutations that return the affected row (see the RPCs in
@@ -2029,15 +2029,15 @@ export default function App() {
                       campaigns:
                         "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
                       onboarding:
-                        "Onboarding: briefing, plano do mês com IA e aprovação do cliente pelo link.",
+                        "Onboarding: briefing, plano do mês com a MAVI e aprovação do cliente pelo link.",
                       hours: "Seu tempo, registrado com clareza.",
                       drive:
                         "Arquivos da equipe, privados ou compartilhados por link.",
                       storage:
                         "Quanto espaço os arquivos enviados ocupam, na agência, por pessoa e por cliente.",
                       aiUsage: isAdmin
-                        ? "Consumo e limites de gasto, a biblioteca de provedores e modelos, e qual IA cada pessoa, cliente, produto e projeto usa."
-                        : "Quanto a IA custou, por pessoa, cliente, produto e projeto, e os limites de gasto de cada um.",
+                        ? "Consumo e limites de gasto, a biblioteca de provedores e modelos, e qual modelo cada pessoa, cliente, produto e projeto usa."
+                        : "Quanto a MAVI custou, por pessoa, cliente, produto e projeto, e os limites de gasto de cada um.",
                       dashboards:
                         "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
                       profile: "Seu nome, sua foto e sua senha.",

@@ -38,17 +38,17 @@ export type McpResponse = {
   headers?: Record<string, string>;
 };
 
-const INSTRUCTIONS = `MAVI é o sistema de gestão da agência: clientes, produtos contratados, projetos, tarefas, reuniões gravadas (com transcrição), arquivos do Drive, Social Leads e campanhas de tráfego pago. Estas ferramentas consultam o que a pessoa conectada pode ver no MAVI.
+const INSTRUCTIONS = `A MAVI é o sistema de gestão da agência: clientes, produtos contratados, projetos, tarefas, reuniões gravadas (com transcrição), arquivos do Drive, Social Leads e campanhas de tráfego pago. Estas ferramentas consultam o que a pessoa conectada pode ver no MAVI.
 - Para fatos (o que foi dito, combinado, pedido), use search_knowledge com termos que provavelmente aparecem no texto; faça várias buscas quando a pergunta for ampla.
 - Para listas e situação atual, use list_meetings, list_tasks e campaign_results; para achar o id de um cliente pelo código, find_clients.
-- Os resultados vêm numerados ([S1], [S2]…) e cada referência tem um link para abrir no MAVI: cite as fontes com esses links.
+- Os resultados vêm numerados ([S1], [S2]…) e cada referência tem um link para abrir na MAVI: cite as fontes com esses links.
 - Se a pessoa estiver em mais de uma empresa, use list_workspaces e passe "workspace".`;
 
 const workspaceField = {
   workspace: {
     type: "string",
     description:
-      "Empresa no MAVI (nome ou id), só se a pessoa estiver em mais de uma (veja list_workspaces).",
+      "Empresa na MAVI (nome ou id), só se a pessoa estiver em mais de uma (veja list_workspaces).",
   },
 };
 
@@ -56,7 +56,7 @@ const workspaceField = {
 export function mcpTools() {
   const title: Record<string, string> = {
     find_clients: "Achar cliente",
-    search_knowledge: "Buscar no MAVI",
+    search_knowledge: "Buscar na MAVI",
     read_more: "Ler mais de um trecho",
     list_meetings: "Listar reuniões gravadas",
     campaign_results: "Resultados das campanhas",
@@ -65,9 +65,9 @@ export function mcpTools() {
   return [
     {
       name: "list_workspaces",
-      title: "Empresas no MAVI",
+      title: "Empresas na MAVI",
       description:
-        "Lista as empresas em que a pessoa conectada está no MAVI e se pode usar o MCP em cada uma.",
+        "Lista as empresas em que a pessoa conectada está na MAVI e se pode usar o MCP em cada uma.",
       inputSchema: {
         type: "object",
         properties: {},
@@ -149,8 +149,8 @@ function pickWorkspace(list: Workspace[], wanted: unknown) {
   if (!allowed.length)
     return {
       error: list.length
-        ? "O MCP está desativado para você no MAVI. Peça a um administrador para liberar."
-        : "Sua conta não está ativa em nenhuma empresa do MAVI.",
+        ? "O MCP está desativado para você na MAVI. Peça a um administrador para liberar."
+        : "Sua conta não está ativa em nenhuma empresa da MAVI.",
     };
   return {
     error: `Você está em mais de uma empresa: ${allowed.map((x) => x.name).join(", ")}. Passe "workspace" com uma delas.`,
@@ -227,7 +227,7 @@ async function callTool(
       [
         out,
         links.length
-          ? `Links das fontes (abrir no MAVI):\n${links.join("\n")}`
+          ? `Links das fontes (abrir na MAVI):\n${links.join("\n")}`
           : "",
         chunkRefs.length
           ? `Para ler mais de um trecho, chame read_more com ref igual ao número do trecho (ex.: "${chunkRefs[0].split(" trecho ")[1]}"): ${chunkRefs.join("; ")}.`
@@ -238,7 +238,7 @@ async function callTool(
     );
   } catch (e) {
     return text(
-      (e as Error).message || "Não foi possível consultar o MAVI.",
+      (e as Error).message || "Não foi possível consultar a MAVI.",
       true,
     );
   } finally {
@@ -282,7 +282,7 @@ export function unauthorized(env: McpEnv): McpResponse {
     status: 401,
     body: {
       error: "invalid_token",
-      error_description: "Entre com a sua conta do MAVI.",
+      error_description: "Entre com a sua conta da MAVI.",
     },
     headers: {
       "WWW-Authenticate": `Bearer resource_metadata="${env.appOrigin}/.well-known/oauth-protected-resource"`,

@@ -30,10 +30,10 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "model", label: "Modelos" },
 ];
 const MODULE_LABELS: Record<string, string> = {
-  assistant: "Assistente (IA geral)",
+  assistant: "Assistente (MAVI)",
   meetings: "Gravações da MAVI",
   index: "Indexação da base",
-  mcp: "IA externa (MCP)",
+  mcp: "MAVI em apps externos (MCP)",
 };
 
 const money = (v: number) => {
@@ -225,7 +225,7 @@ export function AiUsagePage({
             </article>
             <article className="stat-card blue">
               <div>
-                Perguntas à IA <MessageSquare size={17} />
+                Perguntas à MAVI <MessageSquare size={17} />
               </div>
               <strong>{count(total!.asks)}</strong>
               <footer>no assistente e nas Gravações</footer>
@@ -339,7 +339,7 @@ export function AiUsagePage({
                 ) : (
                   <tr>
                     <td colSpan={5} className="muted centered">
-                      Nenhum uso de IA no período.
+                      Nenhum uso da MAVI no período.
                     </td>
                   </tr>
                 )}
