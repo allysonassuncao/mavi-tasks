@@ -327,6 +327,21 @@ describe("pedido para a IA", () => {
 });
 
 describe("custo da IA", () => {
+  it("Opus 5.5: US$ 4 / 20 e leitura de cache a US$ 0,20 (0,05x)", () => {
+    const m = newMeter();
+    addUsage(m, "claude-opus-5-5", {
+      input_tokens: 10_000,
+      output_tokens: 8_000,
+      cache_creation_input_tokens: 2_000,
+      cache_read_input_tokens: 4_000,
+    });
+    // 10k×4 + 2k×4×1.25 + 4k×0.2 + 8k×20, por milhão.
+    expect(m.cost).toBeCloseTo(0.2108, 6);
+    // Modelo desconhecido: pelo preço do padrão (Opus 5.5).
+    const u = newMeter();
+    addUsage(u, "claude-desconhecido", { input_tokens: 1_000_000 });
+    expect(u.cost).toBeCloseTo(4, 6);
+  });
   it("soma entradas, saídas e cache pelo preço do modelo", () => {
     const m = newMeter();
     addUsage(m, "claude-opus-5", {

@@ -53,6 +53,13 @@ export const CATALOG: CatalogEntry[] = [
     keysUrl: "https://console.anthropic.com/settings/keys",
     pricingUrl: "https://docs.claude.com/en/docs/about-claude/pricing",
     models: [
+      {
+        id: "claude-opus-5-5",
+        label: "Claude Opus 5.5",
+        input: 4,
+        output: 20,
+        cached: 0.2,
+      },
       { id: "claude-opus-5", label: "Claude Opus 5", input: 5, output: 25 },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5", input: 2, output: 10 },
       {

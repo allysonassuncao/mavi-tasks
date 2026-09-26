@@ -58,7 +58,7 @@ export function socialLeadsEnv(
     supabaseKey:
       env.VITE_SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY || "",
     anthropicKey: env.ANTHROPIC_API_KEY ?? "",
-    model: env.SOCIAL_LEADS_MODEL || "claude-opus-5",
+    model: env.SOCIAL_LEADS_MODEL || "claude-opus-5-5",
     // The function may run for 300 s (vercel.json); stop a little before.
     deadlineMs: Number(env.SOCIAL_LEADS_DEADLINE_MS) || 280_000,
   };
@@ -148,6 +148,13 @@ const PRICES: Record<string, [number, number]> = {
   "claude-opus-4-8": [5, 25],
   "claude-haiku-4-5": [1, 5],
 };
+/**
+ * Leitura do cache, US$ por milhão, quando não é 0,1x a entrada (o Opus 5.5
+ * cobra 0,05x).
+ */
+const CACHE_READ_PRICES: Record<string, number> = {
+  "claude-opus-5-5": 0.2,
+};
 export type Meter = {
   model: string;
   input: number;
@@ -179,8 +186,11 @@ export function addUsage(
 ) {
   const [inPrice, outPrice] = price
     ? [price.input, price.output]
-    : (PRICES[model] ?? PRICES["claude-opus-5"]);
-  const readPrice = price?.cached ?? inPrice * 0.1;
+    : (PRICES[model] ?? PRICES["claude-opus-5-5"]);
+  const readPrice =
+    price?.cached ??
+    (price ? undefined : CACHE_READ_PRICES[model]) ??
+    inPrice * 0.1;
   const input = usage.input_tokens ?? 0;
   const output = usage.output_tokens ?? 0;
   const read = usage.cache_read_input_tokens ?? 0;
@@ -447,7 +457,7 @@ export async function claudeComplete(
           fallbacks: "default",
           thinking: { type: "adaptive" },
           output_config: {
-            effort: request.effort ?? "high",
+            effort: request.effort ?? "medium",
             format: { type: "json_schema", schema: request.schema },
           },
           system: [
@@ -840,8 +850,8 @@ async function colors(
     schema: COLORS_SCHEMA,
     domains: [],
     images: found.images,
-    effort: "low",
-    maxTokens: 4000,
+    // O raciocínio (medium) conta no limite: espaço para ele e a paleta.
+    maxTokens: 16000,
   };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60_000);
@@ -1020,8 +1030,8 @@ async function briefing(
     ].join("\n\n"),
     schema: BRIEFING_SCHEMA,
     domains: [],
-    effort: "low",
-    maxTokens: 12000,
+    // O raciocínio (medium) conta no limite: espaço para ele e o briefing.
+    maxTokens: 32000,
   };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 120_000);

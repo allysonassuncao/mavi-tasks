@@ -72,7 +72,7 @@ export function aiEnv(
   return {
     ...base,
     anthropicKey: env.ANTHROPIC_API_KEY ?? "",
-    model: env.AI_MODEL || "claude-opus-5",
+    model: env.AI_MODEL || "claude-opus-5-5",
     openaiKey: env.OPENAI_API_KEY ?? "",
     embeddingModel: env.AI_EMBEDDING_MODEL || "text-embedding-3-small",
     workerSecret: env.AI_WORKER_SECRET ?? "",

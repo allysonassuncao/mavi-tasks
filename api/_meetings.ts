@@ -38,7 +38,7 @@ export function meetingsEnv(
   return {
     ...base,
     anthropicKey: env.ANTHROPIC_API_KEY ?? "",
-    model: env.MEETINGS_MODEL || "claude-opus-5",
+    model: env.MEETINGS_MODEL || "claude-opus-5-5",
     buckets: (env.MEETING_BUCKETS || "meet_recording,makecrm_meet")
       .split(",")
       .map((b) => b.trim())

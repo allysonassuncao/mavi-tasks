@@ -112,10 +112,11 @@ Antes do primeiro deploy, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLIS
 | `ADS_REDIRECT_URI`                                 | Opcional. Padrão: `<APP_ORIGIN>/api/ads-callback`; em desenvolvimento, `http://localhost:5173/api/ads-callback`                                                       |
 | `ADS_SYNC_SECRET`                                  | Segredo aleatório (32+ caracteres) com que o banco chama `/api/ads-sync` (sincronização diária de Campanhas)                                                          |
 | `ANTHROPIC_API_KEY`                                | Chave da API da Claude (console.anthropic.com), usada pelo Social Leads para escrever e ajustar o plano do mês (`/api/social-leads`). Cobrada por uso                 |
-| `SOCIAL_LEADS_MODEL`                               | Opcional. Padrão: `claude-opus-5`                                                                                                                                     |
+| `SOCIAL_LEADS_MODEL`                               | Opcional. Padrão: `claude-opus-5-5`                                                                                                                                     |
+| `MEETINGS_MODEL`                                   | Opcional (pergunta sobre uma reunião, no player). Padrão: `claude-opus-5-5`                                                                                                                                     |
 | `OPENAI_API_KEY`                                   | Chave da OpenAI, usada só para os vetores (embeddings) da IA do MAVI: indexação e busca. Cobrada por uso                                                              |
 | `AI_WORKER_SECRET`                                 | Segredo aleatório (32+ caracteres) com que o banco chama `/api/ai` para indexar; o mesmo valor vai em `mavi_private.ai_config`                                        |
-| `AI_MODEL`, `AI_EMBEDDING_MODEL`                   | Opcionais. Padrões: `claude-opus-5` (respostas) e `text-embedding-3-small` (vetores; trocar exige reindexar)                                                          |
+| `AI_MODEL`, `AI_EMBEDDING_MODEL`                   | Opcionais. Padrões: `claude-opus-5-5` (respostas) e `text-embedding-3-small` (vetores; trocar exige reindexar)                                                          |
 | `AI_PROVIDER_KEY`                                  | 32 bytes em base64 (`openssl rand -base64 32`) que selam as API Keys da biblioteca de provedores do Painel da MAVI. Trocar invalida as chaves salvas (é preciso salvá-las de novo) |
 
 ### IA do MAVI (base de conhecimento)

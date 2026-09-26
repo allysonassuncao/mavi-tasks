@@ -273,6 +273,11 @@ describe("recursos da Claude por modelo", () => {
       fallbacks: true,
     });
     expect(claudeFeatures("claude-fable-5-1").fallbacks).toBe(true);
+    // O padrão do servidor: raciocínio adaptativo e fallback.
+    expect(claudeFeatures("claude-opus-5-5")).toEqual({
+      adaptive: true,
+      fallbacks: true,
+    });
   });
 });
 

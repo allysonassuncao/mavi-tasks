@@ -737,7 +737,7 @@ export function demoSocialLeads(
     s.usage.push({
       plan_id: plan,
       kind,
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
       input_tokens: Math.round(cost * 90_000),
       output_tokens: Math.round(cost * 22_000),
       cache_read_tokens: 0,
