@@ -56,7 +56,6 @@ export function useHash() {
 export const SETTINGS_TABS = [
   "config-pessoas",
   "config-equipes",
-  "config-produtos",
   "config-templates",
   "config-sugestoes",
 ] as const;

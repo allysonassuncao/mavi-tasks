@@ -263,11 +263,6 @@ export function SidebarNav({
               to: { page: "settings", hash: "config-equipes" },
             },
             {
-              key: "settings-products",
-              label: "Catálogo de produtos",
-              to: { page: "settings", hash: "config-produtos" },
-            },
-            {
               key: "settings-templates",
               label: "Templates de tarefa",
               to: { page: "settings", hash: "config-templates" },

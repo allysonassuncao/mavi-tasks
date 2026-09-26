@@ -805,6 +805,12 @@ export function TaskDetail({
   }, [tab, panelOpen, loading, extras.comments.length]);
   const running = currentRunning;
   const isRunning = running?.task_id === task.id;
+  // No play (and no description blur) while the task waits on validation or
+  // was returned, or for its creator — unless the creator is also doing it.
+  const canPlay =
+    task.status !== "review" &&
+    task.status !== "returned" &&
+    (task.creator_id !== user || task.assignee_id === user);
   const totalSeconds = useTaskSeconds({
     company: task.company_id,
     taskId: task.id,
@@ -1281,7 +1287,7 @@ export function TaskDetail({
             <Button
               className={`timer-play${isRunning ? " timer-stop" : ""}`}
               loading={busy}
-              disabled={busy || editorUploading}
+              disabled={busy || editorUploading || (!isRunning && !canPlay)}
               onClick={() =>
                 void mutate(
                   isRunning ? "stop_timer" : "start_timer",
@@ -1340,11 +1346,15 @@ export function TaskDetail({
                   ? timeRatio > 1
                     ? "Seu tempo está sendo registrado — a estimativa já foi ultrapassada."
                     : "Seu tempo está sendo registrado nesta tarefa."
-                  : running
-                    ? "Ao iniciar, sua outra tarefa em andamento é pausada automaticamente."
-                    : totalSeconds > 0
-                      ? "Clique em Iniciar para continuar registrando."
-                      : "Inicie para ver a descrição e registrar seu tempo."}
+                  : !canPlay
+                    ? task.creator_id === user
+                      ? "Você criou esta tarefa; o tempo é registrado por quem a executa."
+                      : "Sem registro de tempo enquanto a tarefa está nesta etapa."
+                    : running
+                      ? "Ao iniciar, sua outra tarefa em andamento é pausada automaticamente."
+                      : totalSeconds > 0
+                        ? "Clique em Iniciar para continuar registrando."
+                        : "Inicie para ver a descrição e registrar seu tempo."}
               </p>
             </div>
           </section>
@@ -1436,7 +1446,7 @@ export function TaskDetail({
                 </Button>
               </div>
             </form>
-          ) : !isRunning ? (
+          ) : !isRunning && canPlay ? (
             <section
               className="description-locked"
               aria-label="Descrição bloqueada até iniciar"

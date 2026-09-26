@@ -3087,11 +3087,6 @@ export default function App() {
                         ["config-pessoas", "Pessoas", data.members.length],
                         ["config-equipes", "Equipes", data.teams.length],
                         [
-                          "config-produtos",
-                          "Catálogo de produtos",
-                          data.products.length,
-                        ],
-                        [
                           "config-templates",
                           "Templates de tarefa",
                           data.taskTemplates?.length ?? 0,
@@ -3259,32 +3254,6 @@ export default function App() {
                             acesso.
                           </small>
                         </div>
-                      </section>
-                    )}
-                    {settingsView === "config-produtos" && (
-                      <section className="panel" id="config-produtos">
-                        <div className="panel-heading">
-                          <h2>Catálogo de produtos</h2>
-                          {isLeader && (
-                            <Button
-                              className="btn secondary"
-
-                              aria-label="Novo produto"
-                              onClick={() => openForm("product")}
-                            >
-                              <Plus size={17} /> Novo produto
-                            </Button>
-                          )}
-                        </div>
-                        {data.products.map((p) => (
-                          <div className="product-row" key={p.id}>
-                            <span
-                              className="product-dot"
-                              style={{ background: p.color }}
-                            />
-                            {p.name}
-                          </div>
-                        ))}
                       </section>
                     )}
                     {settingsView === "config-equipes" && (
