@@ -889,6 +889,23 @@ export default function App() {
       alive = false;
     };
   }, [demo, company, session, period, refresh, reportRefresh]);
+  // Sidebar badge on Tarefas: the person's own open tasks ("Para você").
+  const [myOpenTasks, setMyOpenTasks] = useState<number | undefined>();
+  useEffect(() => {
+    if (demo || !company || !session) return;
+    let alive = true;
+    api
+      .myOpenTaskCount(company, user, refresh > 0)
+      .then((n) => {
+        if (alive) setMyOpenTasks(n);
+      })
+      .catch(() => {
+        if (alive) setMyOpenTasks(undefined);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [demo, company, session, user, refresh, liveTick]);
 
   // Latest values for the long-lived realtime subscription below.
   // Inbox: who mentioned the person, and where.
@@ -1805,7 +1822,13 @@ export default function App() {
             isLeader={isLeader}
             isAdmin={isAdmin}
             allowed={allowed}
-            taskCount={stats?.total}
+            taskCount={
+              demo
+                ? data.tasks.filter(
+                    (t) => t.assignee_id === user && t.status !== "done",
+                  ).length
+                : myOpenTasks
+            }
             products={data.products.filter(
               (p) =>
                 isLeader ||

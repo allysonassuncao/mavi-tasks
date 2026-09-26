@@ -491,6 +491,32 @@ export async function taskScopeCounts(
   );
 }
 
+/** Open tasks the person is responsible for (the sidebar's "Para você"). */
+export async function myOpenTaskCount(
+  company: string,
+  user: string,
+  forceRefresh = false,
+): Promise<number> {
+  if (!supabase) throw Error("Supabase não configurado");
+  // Under task_scopes: so it is dropped together with the tab counts.
+  const cacheKey = `task_scopes:${company}:mine-open:${user}`;
+  return cache.fetchWithCache(
+    cacheKey,
+    async () => {
+      const { count, error } = await supabase!
+        .from("tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", company)
+        .eq("archived", false)
+        .eq("assignee_id", user)
+        .neq("status", "done");
+      if (error) throw error;
+      return count ?? 0;
+    },
+    { ttlMs: CACHE_TTL.TASKS, forceRefresh },
+  );
+}
+
 export async function companyHours(
   company: string,
   forceRefresh = false,
