@@ -82,6 +82,7 @@ import {
   accountLabel,
 } from "./CampaignLinks";
 import { CampaignDayToDay } from "./CampaignDayToDay";
+import { GoogleConversions } from "./CampaignConversions";
 
 type Props = {
   demo: boolean;
@@ -777,6 +778,9 @@ function CampaignDetail({
   const [events, setEvents] = useState<AdCampaignEvent[] | null>(null);
   // Editing a record of the Linha do tempo adds to the history.
   const [editsTick, setEditsTick] = useState(0);
+  // "Conversões do Google que contam" of a cycle, and the numbers' reload.
+  const [conversions, setConversions] = useState<AdCycle | null>(null);
+  const [metricsTick, setMetricsTick] = useState(0);
   useEffect(() => {
     let live = true;
     backend
@@ -902,6 +906,8 @@ function CampaignDetail({
         describeEvent={(e) => describeEvent(e, state)}
         notify={notify}
         onRecordEdited={() => setEditsTick((t) => t + 1)}
+        onConversions={setConversions}
+        metricsTick={metricsTick}
         cyclesTab={
           <>
             <section className="panel">
@@ -1067,6 +1073,27 @@ function CampaignDetail({
           </>
         }
       />
+      {conversions && (
+        <GoogleConversions
+          ads={backend.ads}
+          backend={backend}
+          company={company}
+          cycle={conversions}
+          onClose={() => setConversions(null)}
+          onSaved={async (message) => {
+            // The whole cycle again, with the new choice.
+            const result = await backend.metrics.sync(company, campaign.id);
+            setConversions(null);
+            setMetricsTick((t) => t + 1);
+            setEditsTick((t) => t + 1);
+            notify(
+              result.errors.length
+                ? `Escolha salva, mas a sincronização deu erro: ${result.errors[0].message}`
+                : message,
+            );
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1135,6 +1162,10 @@ function describeEvent(e: AdCampaignEvent, state: CampaignData) {
         .join("; ");
       return `${e.action === "updated" ? "alterou a campanha" : `alterou o ciclo de ${period(e.cycle_id)}`}${changes ? ` — ${changes}` : ""}.`;
     }
+    case "conversion_actions":
+      return d.to
+        ? `escolheu as conversões do Google que contam no ciclo de ${period(e.cycle_id)} (${(d.to as string[]).length} ${(d.to as string[]).length === 1 ? "ação" : "ações"}).`
+        : `voltou as conversões do Google do ciclo de ${period(e.cycle_id)} para as categorias do objetivo.`;
     case "daily_edited":
     case "snapshot_edited": {
       const changes = Object.entries(

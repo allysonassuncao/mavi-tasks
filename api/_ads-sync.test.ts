@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
-  googleActionTotals,
   googleTotals,
   handleAdsSync,
   metaResults,
@@ -182,89 +181,75 @@ describe("o que conta como resultado (regras dos crons do MASO)", () => {
   });
 
   const googleActions = [
-    { name: "Clique no WhatsApp", conversions: 3.4 },
-    { name: "Ligações de anúncios (phone)", conversions: 1 },
-    { name: "Lead - Formulário", conversions: 2.6 },
-    { name: "Compra", conversions: 2 },
-    { name: "Inscrição newsletter", conversions: 1 },
-    { name: "Visualização de página", conversions: 50 },
-    { name: "Adição ao carrinho", conversions: 9 },
-    { name: "Finalização de compra", conversions: 4 },
-    { name: "Iniciar checkout", conversions: 3 },
-    { name: "Tempo no site", conversions: 30 },
+    {
+      id: "1",
+      name: "Clique no WhatsApp",
+      category: "CONTACT",
+      conversions: 3.4,
+    },
+    {
+      id: "2",
+      name: "Formulário site",
+      category: "SUBMIT_LEAD_FORM",
+      conversions: 2.6,
+    },
+    {
+      id: "3",
+      name: "Ligação do site",
+      category: "PHONE_CALL_LEAD",
+      conversions: 1,
+    },
+    { id: "4", name: "Compra", category: "PURCHASE", conversions: 2 },
+    { id: "5", name: "Tempo no site", category: "DEFAULT", conversions: 30 },
+    { id: "6", name: "Página vista", category: "PAGE_VIEW", conversions: 50 },
+    { id: "7", name: "Carrinho", category: "ADD_TO_CART", conversions: 9 },
+    { id: "8", name: "Checkout", category: "BEGIN_CHECKOUT", conversions: 4 },
   ];
-  it("Google: todas as conversões, menos as micro (visualização/carrinho/checkout)", () => {
-    expect(googleActionTotals("external_page", googleActions)).toEqual({
-      // WhatsApp 3 + phone 1 + lead 3 + compra 2 + inscricao 1 + tempo no
-      // site 30; never the view/cart/checkout ones ("Finalização de compra"
-      // has "compra", but "finali" rules it out).
-      counted: 40,
-      view_content: 50,
-      add_to_cart: 9,
-      initiate_checkout: 7,
-    });
-    // An action named outside the MASO's list still counts (the MASO gave
-    // 0 and its analyst typed the number by hand).
-    expect(
-      googleActionTotals("external_page", [
-        { name: "Formulário site", conversions: 33 },
-      ]).counted,
-    ).toBe(33);
-    // Make page: only WhatsApp, phone, local and purchase (the MASO's list).
-    expect(googleActionTotals("make_landing_page", googleActions).counted).toBe(
-      6,
+  const metrics = {
+    costMicros: "12500000",
+    impressions: "1000",
+    clicks: "50",
+    phoneCalls: "2",
+    videoTrueviewViews: "30",
+  };
+  const g = (
+    objective: SyncTarget["objective"],
+    destination: SyncTarget["destination"] = "external_page",
+    conversion_actions: string[] | null = null,
+  ) =>
+    googleTotals(
+      { objective, destination, conversion_actions },
+      { metrics },
+      googleActions,
     );
-    expect(
-      googleActionTotals("make_landing_page", [
-        { name: "Formulário site", conversions: 33 },
-      ]).counted,
-    ).toBe(0);
-  });
-  it("Google: por objetivo, com as ligações dos anúncios", () => {
-    const metrics = {
-      costMicros: "12500000",
-      impressions: "1000",
-      clicks: "50",
-      phoneCalls: "2",
-      videoTrueviewViews: "30",
-    };
-    expect(
-      googleTotals("lead", "external_page", { metrics }, googleActions),
-    ).toMatchObject({
+  it("Google, sem escolha: as categorias do objetivo", () => {
+    // Lead: WhatsApp 3 + form 3 + call 1 (not "Outro", views, cart, purchase).
+    expect(g("lead")).toMatchObject({
       spend: 12.5,
-      conversions: 42,
+      conversions: 7,
       clicks: 50,
       reach: 0,
-      view_content: 0,
     });
-    expect(
-      googleTotals("sale", "external_page", { metrics }, googleActions),
-    ).toMatchObject({
-      conversions: 42,
+    expect(g("message").conversions).toBe(7);
+    // Sale: purchases, and the funnel by category.
+    expect(g("sale")).toMatchObject({
+      conversions: 2,
       view_content: 50,
       add_to_cart: 9,
-      initiate_checkout: 7,
+      initiate_checkout: 4,
     });
-    expect(
-      googleTotals("message", "external_page", { metrics }, googleActions)
-        .conversions,
-    ).toBe(42);
-    expect(
-      googleTotals("lead", "make_landing_page", { metrics }, googleActions)
-        .conversions,
-    ).toBe(8);
-    expect(
-      googleTotals("traffic", "external_page", { metrics }, googleActions)
-        .conversions,
-    ).toBe(50);
-    expect(
-      googleTotals("engagement", "external_page", { metrics }, googleActions)
-        .conversions,
-    ).toBe(1000);
-    expect(
-      googleTotals("video", "external_page", { metrics }, googleActions)
-        .conversions,
-    ).toBe(30);
+    // Make page: contact, call, purchase (the form's leads come from the Make).
+    expect(g("lead", "make_landing_page").conversions).toBe(6);
+    expect(g("traffic").conversions).toBe(50);
+    expect(g("engagement").conversions).toBe(1000);
+    expect(g("video").conversions).toBe(30);
+  });
+  it("Google, com a escolha do ciclo: só as ações marcadas (e as ligações, se marcadas)", () => {
+    expect(g("lead", "external_page", ["2"]).conversions).toBe(3);
+    expect(g("lead", "external_page", ["2", "5"]).conversions).toBe(33);
+    expect(g("lead", "external_page", ["2", "phone_calls"]).conversions).toBe(
+      5,
+    );
   });
 });
 
@@ -379,7 +364,10 @@ describe("POST /api/ads-sync", () => {
                     {
                       segments: {
                         ...segments,
+                        conversionAction:
+                          "customers/2223334444/conversionActions/11",
                         conversionActionName: "Lead site",
+                        conversionActionCategory: "SUBMIT_LEAD_FORM",
                       },
                       campaign: { id: "9" },
                       metrics: { conversions: 2 },
@@ -387,7 +375,10 @@ describe("POST /api/ads-sync", () => {
                     {
                       segments: {
                         ...segments,
+                        conversionAction:
+                          "customers/2223334444/conversionActions/12",
                         conversionActionName: "Visualização",
+                        conversionActionCategory: "PAGE_VIEW",
                       },
                       campaign: { id: "9" },
                       metrics: { conversions: 40 },
@@ -426,8 +417,8 @@ describe("POST /api/ads-sync", () => {
     );
     expect(
       stored.p_days.find((d: { day: string }) => d.day === "2026-09-22"),
-    ).toMatchObject({ spend: 5, conversions: 3 });
-    expect(stored.p_snapshot).toMatchObject({ spend: 5, conversions: 3 });
+    ).toMatchObject({ spend: 5, conversions: 2 });
+    expect(stored.p_snapshot).toMatchObject({ spend: 5, conversions: 2 });
     // Four queries: metrics and conversion actions, per day and for the cycle.
     expect(search).toHaveLength(4);
   });

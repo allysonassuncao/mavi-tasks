@@ -470,6 +470,8 @@ export interface CampaignsBackend {
     reason: string,
   ): Promise<void>;
   setCurrentCycle(campaign: AdCampaign, cycle: string): Promise<void>;
+  /** Google: which conversion actions count (null: by category). */
+  setConversionActions(cycle: AdCycle, actions: string[] | null): Promise<void>;
   createCycle(
     campaign: AdCampaign,
     input: CycleInput,
@@ -574,10 +576,36 @@ export interface AdsBackend {
   ): Promise<{ page: FacebookPage; forms: LeadForm[] }>;
   /** Links a form to a Make capture page (subscribes the Page's leads). */
   linkForm(company: string, input: LeadFormInput): Promise<void>;
+  /** Google: the cycle's conversion actions and which of them count. */
+  conversionActions(
+    company: string,
+    cycle: string,
+  ): Promise<ConversionActionsView>;
   /** The forms linked (a client's, or all). */
   leadForms(company: string, client?: string | null): Promise<LinkedLeadForm[]>;
   unlinkForm(id: string): Promise<void>;
 }
+/** "Conversões do Google que contam" (api/_conversions.ts). */
+export const PHONE_CALLS = "phone_calls";
+export type ConversionActionRow = {
+  id: string;
+  name: string;
+  category: string;
+  category_label: string;
+  conversions: number;
+  counted: boolean;
+  counted_by_default: boolean;
+};
+export type ConversionActionsView = {
+  /** The cycle's period read (null: nothing to read yet). */
+  period: { since: string; until: string } | null;
+  /** The cycle's choice (null: Google's categories decide). */
+  selection: string[] | null;
+  actions: ConversionActionRow[];
+  phone_calls: number;
+  calls_counted: boolean;
+  counted: number;
+};
 /** Campaign objectives that collect leads with Facebook forms (MASO rule). */
 export const LEAD_OBJECTIVES = ["OUTCOME_LEADS", "LEAD_GENERATION"];
 export const isLeadObjective = (kind: string) =>
@@ -773,6 +801,13 @@ export const serverAds: AdsBackend = {
   },
   forms: (company, account, page) =>
     adsServer({ action: "forms", company, provider: "meta", account, page }),
+  conversionActions: (company, cycle) =>
+    adsServer({
+      action: "conversion-actions",
+      company,
+      provider: "google",
+      cycle,
+    }),
   async linkForm(company, input) {
     await adsServer({
       action: "link-form",
@@ -972,6 +1007,12 @@ export const supabaseCampaigns: CampaignsBackend = {
     await rpc("set_ad_campaign_current_cycle", {
       p_campaign: campaign.id,
       p_cycle: cycle,
+    });
+  },
+  async setConversionActions(cycle, actions) {
+    await rpc("set_ad_cycle_conversion_actions", {
+      p_cycle: cycle.id,
+      p_actions: actions,
     });
   },
   async createCycle(campaign, input, makeCurrent) {

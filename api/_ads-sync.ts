@@ -10,6 +10,11 @@ import {
   type AdsEnv,
   type Fetch,
 } from "./_ads.js";
+import {
+  actionId,
+  classifyActions,
+  type ConversionAction,
+} from "./_conversions.js";
 
 /**
  * Campanhas: the daily sync of each cycle's numbers (migration
@@ -59,6 +64,8 @@ export type SyncTarget = {
   end_date: string;
   /** The Make capture pages (destination make_landing_page). */
   landing_pages?: string[];
+  /** Google: the conversion actions chosen for the cycle (null: by category). */
+  conversion_actions?: string[] | null;
   today: string;
   last_day: string | null;
   links: { account_id: string; campaign_id: string; manager_id: string }[];
@@ -138,17 +145,14 @@ export function syncWindow(t: SyncTarget) {
  *    onsite_conversion.messaging_first_reply (the MASO's since 19/07/2023);
  *    VIDEO video_view; LEAD and the rest offsite_conversion.fb_pixel_lead.
  *
- * Google (conversion actions by name, accents removed; each action's
- * count rounded, as the MASO did):
+ * Google:
  *  - TRÁFEGO: clicks; ENGAJAMENTO: impressions; VIDEO: TrueView views;
- *  - otherwise every action of Google's "Conversões" (metrics.conversions:
- *    the primary ones), never the micro-conversions "view/cart/checkout",
- *    plus the calls from ads (phone_calls). The MASO also required the name
- *    to be in a list (lead, contato, whats…) and an action named otherwise
- *    counted as zero — its analysts then typed the number by hand;
- *  - for the Make capture page only WhatsApp/phone/local/purchase actions,
- *    the MASO's list (the page's leads come from the Make server, and its
- *    form's conversion would count them twice); VENDA splits the funnel.
+ *  - otherwise the conversion actions the cycle chose or, by default, the
+ *    ones of the objective's categories (api/_conversions.ts): the MASO's
+ *    name list counted an action named outside it as zero, and its
+ *    analysts then typed the number by hand;
+ *  - on the Make capture page the leads come from the Make server; VENDA
+ *    splits the funnel by category.
  */
 type MetaAction = { action_type: string; value: string };
 type MetaRow = {
@@ -338,57 +342,25 @@ async function googleAccess(env: AdsEnv, fetchImpl: Fetch, t: SyncTarget) {
 }
 
 type GoogleRow = {
-  segments?: { date?: string; conversionActionName?: string };
+  segments?: {
+    date?: string;
+    conversionAction?: string;
+    conversionActionName?: string;
+    conversionActionCategory?: string;
+  };
   campaign?: { id?: string };
   metrics?: Record<string, string | number | undefined>;
 };
-export type GoogleAction = { name: string; conversions: number };
-
-// The MASO's lists (InsightsReportConversionV3), on names without accents.
-const GOOGLE_NEVER = /visualiza|viu|finali|checkout|cart|content|carri/i;
-const GOOGLE_COUNTS_MAKE_PAGE = /whats|phone|local|compra|purch/i;
-const GOOGLE_VIEW = /visualiza|visualizacao|content|viu/i;
-const GOOGLE_CART = /cart|carri/i;
-const GOOGLE_CHECKOUT = /iniciate|initiate|finalizacao|iniciar/i;
-const plain = (name: string) => name.normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 /**
- * A campaign's conversion actions: each action's conversions rounded (as
- * the MASO), every one but the "view/cart/checkout" micro-conversions (on
- * the Make page, only the MASO's WhatsApp/phone/local/purchase list), and
- * the sales funnel by name.
+ * One campaign's (or the sum's) totals on Google, by objective and
+ * destination; the conversion actions that count come from
+ * api/_conversions.ts (the cycle's choice, or Google's categories).
  */
-export function googleActionTotals(
-  destination: Destination,
-  actions: GoogleAction[],
-) {
-  const counts = (name: string) =>
-    destination === "make_landing_page"
-      ? GOOGLE_COUNTS_MAKE_PAGE.test(name)
-      : true;
-  const out = {
-    counted: 0,
-    view_content: 0,
-    add_to_cart: 0,
-    initiate_checkout: 0,
-  };
-  for (const a of actions) {
-    const name = plain(a.name);
-    const n = Math.round(a.conversions);
-    if (!GOOGLE_NEVER.test(name) && counts(name)) out.counted += n;
-    if (GOOGLE_VIEW.test(name)) out.view_content += n;
-    if (GOOGLE_CART.test(name)) out.add_to_cart += n;
-    if (GOOGLE_CHECKOUT.test(name)) out.initiate_checkout += n;
-  }
-  return out;
-}
-
-/** One campaign's (or the sum's) totals on Google, by objective and destination. */
 export function googleTotals(
-  objective: Objective,
-  destination: Destination,
+  t: Pick<SyncTarget, "objective" | "destination" | "conversion_actions">,
   row: GoogleRow,
-  actions: GoogleAction[] = [],
+  actions: ConversionAction[] = [],
 ): Totals {
   const m = row.metrics ?? {};
   const impressions = num(m.impressions);
@@ -399,16 +371,23 @@ export function googleTotals(
     impressions,
     clicks,
   };
-  if (objective === "traffic") return { ...base, conversions: clicks };
-  if (objective === "engagement") return { ...base, conversions: impressions };
-  if (objective === "video")
+  if (t.objective === "traffic") return { ...base, conversions: clicks };
+  if (t.objective === "engagement")
+    return { ...base, conversions: impressions };
+  if (t.objective === "video")
     return { ...base, conversions: num(m.videoTrueviewViews) };
-  const a = googleActionTotals(destination, actions);
-  const sale = objective === "sale" && destination !== "make_landing_page";
+  const a = classifyActions(
+    t.objective,
+    t.destination,
+    actions,
+    num(m.phoneCalls),
+    t.conversion_actions,
+  );
+  const sale = t.objective === "sale" && t.destination !== "make_landing_page";
   return {
     ...base,
     // The Make page's leads are added from the Make server.
-    conversions: a.counted + num(m.phoneCalls),
+    conversions: a.counted,
     view_content: sale ? a.view_content : 0,
     add_to_cart: sale ? a.add_to_cart : 0,
     initiate_checkout: sale ? a.initiate_checkout : 0,
@@ -490,27 +469,27 @@ async function readGoogle(
       search(
         account,
         manager,
-        `SELECT ${date}campaign.id, segments.conversion_action_name, metrics.conversions FROM campaign WHERE ${period}${filter}`,
+        `SELECT ${date}campaign.id, segments.conversion_action, segments.conversion_action_name, segments.conversion_action_category, metrics.conversions FROM campaign WHERE ${period}${filter}`,
       ),
     ]);
     const key = (r: GoogleRow) =>
       `${daily ? (r.segments?.date ?? "") : ""}|${r.campaign?.id ?? ""}`;
-    const actions = new Map<string, GoogleAction[]>();
+    const actions = new Map<string, ConversionAction[]>();
     for (const r of actionRows) {
-      const name = r.segments?.conversionActionName;
-      if (!name) continue;
+      const id = actionId(r.segments?.conversionAction);
+      if (!id) continue;
       const list = actions.get(key(r)) ?? [];
-      list.push({ name, conversions: num(r.metrics?.conversions) });
+      list.push({
+        id,
+        name: r.segments?.conversionActionName ?? id,
+        category: r.segments?.conversionActionCategory ?? "",
+        conversions: num(r.metrics?.conversions),
+      });
       actions.set(key(r), list);
     }
     return rows.map((r) => ({
       day: r.segments?.date ?? "",
-      totals: googleTotals(
-        t.objective,
-        t.destination,
-        r,
-        actions.get(key(r)) ?? [],
-      ),
+      totals: googleTotals(t, r, actions.get(key(r)) ?? []),
     }));
   };
   for (const [account, { manager, campaigns }] of accounts) {

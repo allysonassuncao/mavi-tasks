@@ -11786,3 +11786,14 @@ tr:hover .campaign-edit-record,
   font-size: 0.72rem;
   white-space: nowrap;
 }
+/* Campanhas: "Conversões do Google que contam". */
+.campaign-conversions .campaign-conversion-list {
+  max-height: 420px;
+}
+.campaign-conversion-list li > strong {
+  font-variant-numeric: tabular-nums;
+}
+.campaign-conversion-total {
+  margin: 0;
+  font-size: 0.85rem;
+}

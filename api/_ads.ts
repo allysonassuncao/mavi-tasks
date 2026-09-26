@@ -2,6 +2,15 @@ import crypto from "node:crypto";
 import { callRpc } from "./_drive.js";
 import { seal, unseal } from "./_google.js";
 import { appOrigin } from "./_origin.js";
+import {
+  CATEGORY_LABELS,
+  actionId,
+  classifyActions,
+  countsByDefault,
+  type ConversionAction,
+  type Destination,
+  type Objective,
+} from "./_conversions.js";
 
 /**
  * Campanhas: the ad accounts and campaigns of Meta and Google Ads, read live
@@ -680,6 +689,132 @@ async function googleCampaigns(
   }));
 }
 
+/**
+ * "Conversões do Google que contam": every conversion action of the
+ * cycle's campaigns in the cycle (up to yesterday), with what it counted,
+ * and whether it counts — the cycle's choice or, without one, the
+ * categories of its objective (api/_conversions.ts, the same rule as the
+ * daily sync).
+ */
+async function googleConversionActions(
+  env: AdsEnv,
+  fetchImpl: Fetch,
+  authorization: string,
+  company: string,
+  cycle: string,
+) {
+  const ctx = await rpc<{
+    company_id: string;
+    platform: string;
+    objective: Objective;
+    destination: Destination;
+    start_date: string;
+    end_date: string;
+    today: string;
+    conversion_actions: string[] | null;
+    links: { account_id: string; campaign_id: string; manager_id: string }[];
+  }>(env, fetchImpl, authorization, "ad_cycle_conversion_context", {
+    p_cycle: cycle,
+  });
+  if (ctx.company_id !== company || ctx.platform !== "google")
+    throw new AdsError(400, "Este ciclo não é de uma campanha do Google Ads.");
+  const yesterday = new Date(`${ctx.today}T12:00:00Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const until = [ctx.end_date, yesterday.toISOString().slice(0, 10)].sort()[0];
+  const since = ctx.start_date;
+  const empty = {
+    period: null,
+    selection: ctx.conversion_actions,
+    actions: [],
+    phone_calls: 0,
+    calls_counted: false,
+    counted: 0,
+  };
+  if (since > until || !ctx.links.length) return empty;
+  const accounts = new Map<string, { manager: string; campaigns: string[] }>();
+  for (const l of ctx.links) {
+    const id = accountId("google", l.account_id);
+    if (!id) continue;
+    const entry = accounts.get(id) ?? {
+      manager: accountId("google", l.manager_id) ?? "",
+      campaigns: [],
+    };
+    if (/^[0-9]+$/.test(l.campaign_id)) entry.campaigns.push(l.campaign_id);
+    accounts.set(id, entry);
+  }
+  const ads = googleAds(env, fetchImpl, authorization, company);
+  const byId = new Map<string, ConversionAction>();
+  let phoneCalls = 0;
+  const period = `segments.date BETWEEN '${since}' AND '${until}'`;
+  for (const [account, { manager, campaigns }] of accounts) {
+    const filter = campaigns.length
+      ? ` AND campaign.id IN (${campaigns.join(",")})`
+      : "";
+    const [actionRows, metricRows] = await Promise.all([
+      ads.search(
+        account,
+        `SELECT campaign.id, segments.conversion_action, segments.conversion_action_name, segments.conversion_action_category, metrics.conversions FROM campaign WHERE ${period}${filter}`,
+        manager || account,
+      ),
+      ads.search(
+        account,
+        `SELECT campaign.id, metrics.phone_calls FROM campaign WHERE ${period}${filter}`,
+        manager || account,
+      ),
+    ]);
+    for (const r of actionRows as {
+      segments?: {
+        conversionAction?: string;
+        conversionActionName?: string;
+        conversionActionCategory?: string;
+      };
+      metrics?: { conversions?: number | string };
+    }[]) {
+      const id = actionId(r.segments?.conversionAction);
+      if (!id) continue;
+      const prev = byId.get(id);
+      // Rounded per campaign, as the sync does.
+      const n = Math.round(Number(r.metrics?.conversions ?? 0) || 0);
+      byId.set(id, {
+        id,
+        name: r.segments?.conversionActionName ?? prev?.name ?? id,
+        category: r.segments?.conversionActionCategory ?? prev?.category ?? "",
+        conversions: (prev?.conversions ?? 0) + n,
+      });
+    }
+    for (const r of metricRows as {
+      metrics?: { phoneCalls?: number | string };
+    }[])
+      phoneCalls += Number(r.metrics?.phoneCalls ?? 0) || 0;
+  }
+  const actions = [...byId.values()];
+  const result = classifyActions(
+    ctx.objective,
+    ctx.destination,
+    actions,
+    phoneCalls,
+    ctx.conversion_actions,
+  );
+  return {
+    period: { since, until },
+    selection: ctx.conversion_actions,
+    actions: result.rows
+      .map((r) => ({
+        ...r,
+        category_label: CATEGORY_LABELS[r.category] ?? r.category,
+        counted_by_default: countsByDefault(
+          ctx.objective,
+          ctx.destination,
+          r.category,
+        ),
+      }))
+      .sort((a, b) => b.conversions - a.conversions),
+    phone_calls: phoneCalls,
+    calls_counted: result.callsCounted,
+    counted: result.counted,
+  };
+}
+
 // ------------------------------------------------------------ handlers
 export type AdsRequest =
   | { action: "status"; company: string }
@@ -714,6 +849,13 @@ export type AdsRequest =
       provider: AdsProvider;
       account: string;
       manager?: string;
+    }
+  /** Google: the cycle's conversion actions and which of them count. */
+  | {
+      action: "conversion-actions";
+      company: string;
+      provider: "google";
+      cycle: string;
     }
   /** Meta: the Pages the account's profile manages. */
   | { action: "pages"; company: string; provider: "meta"; account: string }
@@ -986,6 +1128,22 @@ export async function handleAds(
         },
       );
       return { status: 200, body: { form: saved } };
+    }
+
+    if (req.action === "conversion-actions") {
+      if (provider !== "google") return fail(400, "Só no Google Ads.");
+      if (!UUID.test(String(req.cycle ?? "")))
+        return fail(400, "Ciclo inválido.");
+      return {
+        status: 200,
+        body: await googleConversionActions(
+          env,
+          fetchImpl,
+          authorization,
+          company,
+          String(req.cycle),
+        ),
+      };
     }
 
     if (req.action === "campaigns") {

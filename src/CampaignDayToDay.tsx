@@ -9,6 +9,7 @@ import {
 import {
   CalendarClock,
   ExternalLink,
+  ListChecks,
   Megaphone,
   Pencil,
   RefreshCw,
@@ -114,6 +115,8 @@ export function CampaignDayToDay({
   connection,
   cyclesTab,
   onRecordEdited,
+  onConversions,
+  metricsTick = 0,
 }: {
   campaign: AdCampaign;
   /** Oldest first. */
@@ -136,6 +139,10 @@ export function CampaignDayToDay({
   cyclesTab: ReactNode;
   /** A record was edited: the history (events) changed too. */
   onRecordEdited: () => void;
+  /** Google: opens "Conversões do Google que contam" for the cycle. */
+  onConversions?: (cycle: AdCycle) => void;
+  /** Bumped after the numbers changed elsewhere (read them again). */
+  metricsTick?: number;
 }) {
   const [tab, setTab] = useUrlState<string>("aba", "dia");
   const [cycleId, setCycleId] = useUrlState<string>("ciclo", "");
@@ -158,7 +165,7 @@ export function CampaignDayToDay({
     return () => {
       live = false;
     };
-  }, [metricsBackend, company, campaign.id, tick]);
+  }, [metricsBackend, company, campaign.id, tick, metricsTick]);
 
   const cycle =
     cycles.find((y) => y.id === cycleId) ??
@@ -216,6 +223,7 @@ export function CampaignDayToDay({
         tags={tags}
         actions={actions}
         connection={connection}
+        onConversions={onConversions}
       />
       {banner}
       {k?.overPace && running && (
@@ -324,6 +332,7 @@ function CampaignSummary({
   tags,
   actions,
   connection,
+  onConversions,
 }: {
   campaign: AdCampaign;
   cycles: AdCycle[];
@@ -341,6 +350,7 @@ function CampaignSummary({
   tags: ReactNode;
   actions: ReactNode;
   connection?: ReactNode;
+  onConversions?: (cycle: AdCycle) => void;
 }) {
   const parts = contractParts(data, campaign.contract_id);
   const lastRun = cycle
@@ -632,6 +642,15 @@ function CampaignSummary({
                 />{" "}
                 {syncing ? "Sincronizando…" : "Sincronizar"}
               </Button>
+              {campaign.platform === "google" && cycle && onConversions && (
+                <Button
+                  className="text-btn"
+                  onClick={() => onConversions(cycle)}
+                  title="Quais ações de conversão do Google contam como resultado deste ciclo"
+                >
+                  <ListChecks size={13} /> Conversões que contam
+                </Button>
+              )}
             </span>
           ) : (
             <span className="muted">Automáticos só para Meta e Google Ads</span>

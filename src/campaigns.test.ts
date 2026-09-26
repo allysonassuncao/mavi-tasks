@@ -14,6 +14,7 @@ import {
   monthlyEnd,
   nextCycleDraft,
   parseAmount,
+  PHONE_CALLS,
   type AdCampaign,
   type AdCycle,
   type CampaignData,
@@ -575,5 +576,45 @@ describe("formulários do Facebook (demonstração)", () => {
     await expect(ads.forms(company, account.id, "1")).rejects.toMatchObject({
       code: "no_page_access",
     });
+  });
+});
+
+describe("conversões do Google que contam (demonstração)", () => {
+  it("padrão pelas categorias, escolha do ciclo e volta ao padrão", async () => {
+    const data = demoSnapshot();
+    const company = data.companies[0].id;
+    const backend = demoCampaigns(() => data, demoUser);
+    const { ads } = backend;
+    const google = (
+      await backend.page(company, {
+        scope: "active",
+        search: "",
+        platform: "google",
+        attention: false,
+        limit: 50,
+        offset: 0,
+      })
+    ).rows[0];
+    const { cycles } = await backend.campaign(company, google.campaign.id);
+    const cycle = cycles.find(
+      (y) => y.id === google.campaign.current_cycle_id,
+    )!;
+    const byDefault = await ads.conversionActions(company, cycle.id);
+    expect(byDefault.selection).toBeNull();
+    // Form and call count by default; WhatsApp ("Outro") and page view don't.
+    expect(byDefault.counted).toBe(42);
+    expect(byDefault.calls_counted).toBe(false);
+    await expect(backend.setConversionActions(cycle, ["abc"])).rejects.toThrow(
+      /Ação de conversão inválida/,
+    );
+    await backend.setConversionActions(cycle, ["7002", "7001", PHONE_CALLS]);
+    const chosen = await ads.conversionActions(company, cycle.id);
+    expect(chosen.selection).toEqual(["7001", "7002", PHONE_CALLS]);
+    expect(chosen.counted).toBe(33 + 71 + 6);
+    expect(chosen.calls_counted).toBe(true);
+    const events = await backend.events(company, google.campaign.id);
+    expect(events[0].action).toBe("conversion_actions");
+    await backend.setConversionActions(cycle, []);
+    expect((await ads.conversionActions(company, cycle.id)).counted).toBe(42);
   });
 });

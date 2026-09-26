@@ -818,6 +818,8 @@ await check(
     assert.equal(t.last_day, null);
     // The Make capture pages go along (destination make_landing_page).
     assert.deepEqual(t.landing_pages, []);
+    // Google's chosen conversion actions go along too (none: by category).
+    assert.equal(t.conversion_actions, null);
     // Future cycles and cycles without links are left out.
     assert.ok(all.every((x) => x.start_date < today));
   },
@@ -1543,6 +1545,73 @@ await check(
         day: { impressions: 0, reach: 306 },
       });
     }
+  },
+);
+
+await check(
+  "ações de conversão do Google por ciclo: escolha, histórico e sincronização",
+  async () => {
+    const google = await campaign(admin, {
+      name: "Google conversões",
+      platform: "google",
+    });
+    const y = await cycle(admin, google, {
+      start: "2026-04-01",
+      end: "2026-04-30",
+      links: [{ account_id: "3329986472", campaign_id: "g-conv" }],
+    });
+    const set = (who, actions) =>
+      as(who).then(() => rpc("set_ad_cycle_conversion_actions", [y, actions]));
+    await assert.rejects(set(trafego, ["11"]), /Sem permissão/);
+    await assert.rejects(set(admin, ["abc"]), /Ação de conversão inválida/);
+    await set(manager, ["12", "11", "phone_calls", "11"]);
+    const [row] = await sql(
+      "select conversion_actions from ad_cycles where id=$1",
+      [y],
+    );
+    assert.deepEqual(row.conversion_actions, ["11", "12", "phone_calls"]);
+    const events = await sql(
+      "select detail from ad_campaign_events where cycle_id=$1 and action='conversion_actions'",
+      [y],
+    );
+    assert.equal(events.length, 1);
+    assert.deepEqual(events[0].detail.to, ["11", "12", "phone_calls"]);
+    // The same again: nothing logged. Empty: back to the categories (null).
+    await set(admin, ["phone_calls", "12", "11"]);
+    await set(admin, []);
+    const [back] = await sql(
+      "select conversion_actions from ad_cycles where id=$1",
+      [y],
+    );
+    assert.equal(back.conversion_actions, null);
+    assert.equal(
+      (
+        await sql(
+          "select count(*)::int as n from ad_campaign_events where cycle_id=$1 and action='conversion_actions'",
+          [y],
+        )
+      )[0].n,
+      2,
+    );
+    // The window's context and the sync get the choice.
+    await set(admin, ["11"]);
+    await as(manager);
+    const ctx = await rpc("ad_cycle_conversion_context", [y]);
+    assert.deepEqual(
+      [
+        ctx.platform,
+        ctx.objective,
+        ctx.conversion_actions,
+        ctx.links[0].account_id,
+      ],
+      ["google", "message", ["11"], "3329986472"],
+    );
+    await as(trafego);
+    await assert.rejects(rpc("ad_cycle_conversion_context", [y]), /exclusivo/);
+    await as(admin);
+    const targets = await rpc("ad_sync_targets", [null, google, 15]);
+    // An April cycle is out of the sync's window; the column is there for the running ones.
+    assert.ok(Array.isArray(targets));
   },
 );
 

@@ -974,3 +974,139 @@ describe("Meta: formulários de cadastro (Lead Ads)", () => {
     expect(calls.some((c) => c.url.includes("ad_save_lead_form"))).toBe(false);
   });
 });
+
+describe("Google: ações de conversão do ciclo", () => {
+  const cycle = "00000000-0000-4000-8000-0000000000c1";
+  const context = (extra: Record<string, unknown> = {}) =>
+    [
+      /rpc\/ad_cycle_conversion_context/,
+      () =>
+        json({
+          company_id: company,
+          platform: "google",
+          objective: "lead",
+          destination: "external_page",
+          start_date: "2026-09-04",
+          end_date: "2026-10-04",
+          today: "2026-09-25",
+          conversion_actions: null,
+          links: [
+            {
+              account_id: "3329986472",
+              campaign_id: "9",
+              manager_id: "1238619048",
+            },
+          ],
+          ...extra,
+        }),
+    ] as [RegExp, () => Response];
+  const google = (actionRows: unknown[], calls = "4") =>
+    [
+      [
+        /rpc\/ad_google_tokens/,
+        () =>
+          json([
+            {
+              refresh_token_cipher: seal(key, "refresh"),
+              access_token_cipher: seal(key, "access"),
+              access_expires_at: "2099-01-01T00:00:00Z",
+            },
+          ]),
+      ],
+      [
+        /googleAds:searchStream/,
+        (call: { body?: string }) =>
+          json([
+            {
+              results: JSON.parse(call.body!).query.includes(
+                "conversion_action",
+              )
+                ? actionRows
+                : [{ campaign: { id: "9" }, metrics: { phoneCalls: calls } }],
+            },
+          ]),
+      ],
+    ] as [RegExp, (call: { body?: string }) => Response][];
+  const row = (
+    id: string,
+    name: string,
+    category: string,
+    conversions: number,
+  ) => ({
+    campaign: { id: "9" },
+    segments: {
+      conversionAction: `customers/3329986472/conversionActions/${id}`,
+      conversionActionName: name,
+      conversionActionCategory: category,
+    },
+    metrics: { conversions },
+  });
+
+  it("lista as ações do ciclo e diz quais contam (padrão: categorias de cadastro)", async () => {
+    const { fetch, calls } = network([
+      context(),
+      ...google([
+        row("11", "Formulário site", "SUBMIT_LEAD_FORM", 33.2),
+        row("12", "Clique WhatsApp", "DEFAULT", 90),
+        row("13", "Página vista", "PAGE_VIEW", 400),
+      ]),
+    ]);
+    const result = await handleAds(
+      { action: "conversion-actions", company, provider: "google", cycle },
+      auth,
+      env,
+      fetch,
+    );
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      period: { since: "2026-09-04", until: "2026-09-24" },
+      selection: null,
+      phone_calls: 4,
+      calls_counted: false,
+      counted: 33,
+    });
+    const actions = result.body.actions as {
+      id: string;
+      counted: boolean;
+      category_label: string;
+    }[];
+    expect(actions.map((a) => [a.id, a.counted, a.category_label])).toEqual([
+      ["13", false, "Visualização de página"],
+      ["12", false, "Outro"],
+      ["11", true, "Envio de formulário"],
+    ]);
+    const search = calls.filter((c) => c.url.includes("searchStream"));
+    expect(search[0].headers["login-customer-id"]).toBe("1238619048");
+    expect(JSON.parse(search[0].body!).query).toContain(
+      "segments.date BETWEEN '2026-09-04' AND '2026-09-24'",
+    );
+  });
+
+  it("com a escolha do ciclo, contam só as marcadas", async () => {
+    const { fetch } = network([
+      context({ conversion_actions: ["12", "phone_calls"] }),
+      ...google([
+        row("11", "Formulário site", "SUBMIT_LEAD_FORM", 33),
+        row("12", "Clique WhatsApp", "DEFAULT", 90),
+      ]),
+    ]);
+    const result = await handleAds(
+      { action: "conversion-actions", company, provider: "google", cycle },
+      auth,
+      env,
+      fetch,
+    );
+    expect(result.body).toMatchObject({ counted: 94, calls_counted: true });
+  });
+
+  it("só para ciclos do Google", async () => {
+    const { fetch } = network([context({ platform: "meta" })]);
+    const result = await handleAds(
+      { action: "conversion-actions", company, provider: "google", cycle },
+      auth,
+      env,
+      fetch,
+    );
+    expect(result.status).toBe(400);
+  });
+});

@@ -282,6 +282,20 @@ export function demoCampaigns(
         reason: reason.trim(),
       });
     },
+    async setConversionActions(cycle, actions) {
+      const y = store.cycles.find((c) => c.id === cycle.id);
+      if (!y) throw Error("Sem permissão");
+      const v = actions?.length ? [...new Set(actions)].sort() : null;
+      if (v?.some((x) => !/^([0-9]{1,30}|phone_calls)$/.test(x)))
+        throw Error("Ação de conversão inválida");
+      const from = demoConversionChoice.get(y.id) ?? null;
+      if (JSON.stringify(from) === JSON.stringify(v)) return;
+      demoConversionChoice.set(y.id, v);
+      log(campaignOf(y.campaign_id), y.id, "conversion_actions", {
+        from,
+        to: v,
+      });
+    },
     async setCurrentCycle(campaign, cycle) {
       const a = campaignOf(campaign.id);
       if (!store.cycles.some((y) => y.id === cycle && y.campaign_id === a.id))
@@ -719,6 +733,45 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
         }),
       );
     },
+    async conversionActions(_company, cycle) {
+      await wait();
+      const y = store.cycles.find((c) => c.id === cycle);
+      const a = store.campaigns.find((c) => c.id === y?.campaign_id);
+      if (!y || !a || a.platform !== "google")
+        throw new AdsApiError(
+          "Este ciclo não é de uma campanha do Google Ads.",
+        );
+      const choice = demoConversionChoice.get(y.id) ?? null;
+      const lead = new Set([
+        "SUBMIT_LEAD_FORM",
+        "CONTACT",
+        "PHONE_CALL_LEAD",
+        "SIGNUP",
+        "REQUEST_QUOTE",
+        "BOOK_APPOINTMENT",
+      ]);
+      const byDefault = (category: string) =>
+        y.objective === "sale" ? category === "PURCHASE" : lead.has(category);
+      const actions = DEMO_CONVERSION_ACTIONS.map((x) => ({
+        ...x,
+        counted: choice ? choice.includes(x.id) : byDefault(x.category),
+        counted_by_default: byDefault(x.category),
+      }));
+      const phone_calls = 6;
+      const calls_counted = !!choice?.includes("phone_calls");
+      return {
+        period: { since: y.start_date, until: addDays(dateKey(), -1) },
+        selection: choice,
+        actions,
+        phone_calls,
+        calls_counted,
+        counted:
+          actions
+            .filter((x) => x.counted)
+            .reduce((n, x) => n + x.conversions, 0) +
+          (calls_counted ? phone_calls : 0),
+      };
+    },
     async pages(_company, account) {
       await wait();
       need("meta");
@@ -782,6 +835,39 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
     },
   };
 }
+
+/** Google conversion actions of the demonstration (any Google cycle). */
+const DEMO_CONVERSION_ACTIONS = [
+  {
+    id: "7001",
+    name: "Formulário do site",
+    category: "SUBMIT_LEAD_FORM",
+    category_label: "Envio de formulário",
+    conversions: 33,
+  },
+  {
+    id: "7002",
+    name: "Clique no WhatsApp",
+    category: "DEFAULT",
+    category_label: "Outro",
+    conversions: 71,
+  },
+  {
+    id: "7003",
+    name: "Ligação pelo site",
+    category: "PHONE_CALL_LEAD",
+    category_label: "Ligação",
+    conversions: 9,
+  },
+  {
+    id: "7004",
+    name: "Página de obrigado vista",
+    category: "PAGE_VIEW",
+    category_label: "Visualização de página",
+    conversions: 120,
+  },
+];
+const demoConversionChoice = new Map<string, string[] | null>();
 
 /** Facebook Pages of the demonstration, with their lead forms. */
 const DEMO_PAGES: { id: string; name: string; forms: LeadForm[] }[] = [
