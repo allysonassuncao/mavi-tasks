@@ -33,6 +33,7 @@
     "test:db:import-social-leads": "node scripts/test-import-social-leads.mjs",
     "test:db:social-leads-media": "node scripts/test-social-leads-media.mjs",
     "test:db:social-leads-production": "node scripts/test-social-leads-production.mjs",
+    "test:db:social-leads-task-description": "node --experimental-strip-types --no-warnings scripts/test-social-leads-task-description.mjs",
     "benchmark:rls": "node scripts/benchmark-rls.mjs",
     "benchmark:dashboards": "node scripts/benchmark-dashboards.mjs",
     "format": "prettier --write src scripts supabase/functions *.json *.ts *.html *.md",

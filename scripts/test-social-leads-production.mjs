@@ -160,10 +160,8 @@ await check(
       new Set(tasks.map((t) => t.assignee_id)),
       new Set([designer, designer2]),
     );
-    assert.match(
-      tasks[0].description,
-      /Gancho: Gancho 1\nDireção de copy: Copy/,
-    );
+    // Formatted text (details in test-social-leads-task-description).
+    assert.match(tasks[0].description, /^mavi:richtext:v1:.*"Gancho 1"/);
     // The creative team now serves the client.
     assert.ok(
       await one(

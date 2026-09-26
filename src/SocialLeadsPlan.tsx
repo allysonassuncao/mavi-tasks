@@ -34,7 +34,7 @@ import {
   Textarea,
 } from "./ui";
 import { statuses, type Snapshot, type Status } from "./types";
-import { navigate, routeParts } from "./router";
+import { navigate, routeParts, useUrlState } from "./router";
 import {
   monthFolder,
   serverLink,
@@ -145,6 +145,8 @@ export function PlanView({
     "posts" | "estrategia" | "campanha" | "alertas" | "versoes"
   >("posts");
   const [openPost, setOpenPost] = useState<number | null>(null);
+  // ?post=N (the "Abrir o post no plano" of an art task) opens that post once.
+  const [linkedPost, setLinkedPost] = useUrlState<number>("post", 0);
   const [modal, setModal] = useState<
     | null
     | "share"
@@ -195,6 +197,14 @@ export function PlanView({
   }, [backend, plan?.id, plan?.version]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(load, [load]);
   useLiveSocialLeads(item.contract_id, load);
+  useEffect(() => {
+    if (!linkedPost || !bundle || bundle.plan.id !== plan?.id) return;
+    if (bundle.posts.some((p) => p.number === linkedPost)) {
+      setSection("posts");
+      setOpenPost(linkedPost);
+    }
+    setLinkedPost(0);
+  }, [linkedPost, bundle, plan?.id, setLinkedPost]);
 
   useEffect(() => {
     if (!intent) return;

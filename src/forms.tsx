@@ -46,6 +46,7 @@ import {
   CircleX,
   Pencil,
   X,
+  ArrowUpRight,
 } from "lucide-react";
 import { Modal, Avatar, Empty, Loading } from "./components";
 import {
@@ -99,6 +100,9 @@ import { attachmentType } from "./upload-types";
 import { FileViewer } from "./FileViewer";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
 import { TaskCustomFieldsPanel } from "./CustomFieldsForm";
+import { postOfTask, taskPostPath, type TaskPost } from "./social-leads-task";
+import { navigate, routeParts } from "./router";
+import { canOpenPage } from "./modules";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
 export type FormPreset = {
@@ -723,6 +727,19 @@ export function TaskDetail({
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
   const composer = useRef<HTMLFormElement>(null);
   const [viewing, setViewing] = useState<number | null>(null);
+  // An art task from Social Leads ("Liberar produção") opens its post.
+  const [slPost, setSlPost] = useState<TaskPost | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setSlPost(null);
+    if (!demo && task.contract_id)
+      void postOfTask(task.id).then((p) => {
+        if (alive) setSlPost(p);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [task.id, task.contract_id, demo]);
   const n = names(data, task),
     member = data.members.find((m) => m.user_id === user),
     isAdmin = member?.role === "admin",
@@ -1442,6 +1459,32 @@ export function TaskDetail({
                 <h3>Descrição</h3>
               </div>
               <RichTextContent value={task.description} />
+              {slPost &&
+                (canOpenPage(
+                  "onboarding",
+                  member?.role,
+                  member?.hidden_pages,
+                ) ? (
+                  <Button
+                    className="btn primary detail-post-link"
+                    onClick={() => {
+                      const company = routeParts(
+                        window.location.pathname,
+                      ).company;
+                      navigate(
+                        (company ? `/agencias/${company}` : "") +
+                          taskPostPath(slPost),
+                      );
+                    }}
+                  >
+                    <ArrowUpRight size={16} /> Abrir o post no plano
+                  </Button>
+                ) : (
+                  <p className="detail-post-hint">
+                    Para subir as artes no post, peça acesso ao módulo
+                    Onboarding a um administrador.
+                  </p>
+                ))}
             </section>
           )}
           <div className="approval-state">

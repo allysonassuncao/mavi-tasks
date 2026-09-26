@@ -1985,6 +1985,13 @@ textarea::placeholder {
 .detail-description h3 {
   font-size: 0.85rem;
 }
+/* Art task from Social Leads: straight to its post in the plan. */
+.detail-description .detail-post-link {
+  margin-top: 16px;
+}
+.detail-description .detail-post-hint {
+  font-style: italic;
+}
 .detail-description p {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
