@@ -72,6 +72,9 @@ const dueShortcuts = [
 export function TaskCreateForm({
   initialContract,
   initialProject,
+  initialTitle,
+  initialDescription,
+  initialDue,
   demo,
   data,
   company,
@@ -82,6 +85,12 @@ export function TaskCreateForm({
 }: {
   initialContract?: string;
   initialProject?: string;
+  /** Prefilled from elsewhere (a recording's next step). */
+  initialTitle?: string;
+  /** HTML for the description editor. */
+  initialDescription?: string;
+  /** yyyy-mm-dd. */
+  initialDue?: string;
   demo: boolean;
   data: Snapshot;
   company: string;
@@ -109,11 +118,11 @@ export function TaskCreateForm({
       ? (initialProject ?? "")
       : "",
   );
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(initialTitle ?? "");
   const [assignee, setAssignee] = useState(user);
   const [assignMode, setAssignMode] = useState<"person" | "team">("person");
   const [assignTeam, setAssignTeam] = useState("");
-  const [due, setDue] = useState(dateKey());
+  const [due, setDue] = useState(initialDue || dateKey());
   const [repeat, setRepeat] = useState<RecurrenceFrequency | "">("");
   const [showDetails, setShowDetails] = useState(false);
   const [detailsMounted, setDetailsMounted] = useState(false);
@@ -466,6 +475,7 @@ export function TaskCreateForm({
           <Suspense fallback={<Loading compact />}>
             <RichTextEditor
               key={formKey}
+              defaultValue={formKey === 0 ? (initialDescription ?? "") : ""}
               company={company}
               demo={demo}
               onUploading={setEditorUploading}

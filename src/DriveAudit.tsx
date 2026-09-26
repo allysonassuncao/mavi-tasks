@@ -22,6 +22,7 @@ export const auditActions: Record<string, string> = {
   folder_deleted: "Pasta excluída",
   folder_shared: "Compartilhamento da pasta alterado",
   public_folder_opened: "Pasta aberta pelo link público",
+  recording_view: "Gravação da MAVI assistida",
 };
 const visibilityLabel = (v: unknown) =>
   v === "public" ? "Público" : v === "private" ? "Privado" : String(v ?? "");

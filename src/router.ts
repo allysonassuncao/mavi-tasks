@@ -129,6 +129,8 @@ export function safeReturnPath(value: string | null) {
     "aba",
     "mes",
     "post",
+    "gravacao",
+    "t",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);

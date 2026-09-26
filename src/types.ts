@@ -356,6 +356,8 @@ export interface DriveLocation {
   client?: string;
   contract?: string;
   folder?: string;
+  /** The client's "Gravações da MAVI" (virtual, next to the products). */
+  recordings?: boolean;
 }
 export interface DriveAuditEntry {
   id: number;

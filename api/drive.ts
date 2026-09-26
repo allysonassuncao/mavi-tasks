@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleDrive, type DriveEnv, type GcsCredentials } from "./_drive.js";
+import { claudeAsk, handleMeetings, meetingsEnv } from "./_meetings.js";
 
 function credentials(): GcsCredentials | null {
   if (process.env.GCS_CREDENTIALS)
@@ -59,13 +60,27 @@ export default async function handler(
     for await (const chunk of req) raw += chunk;
   }
   try {
-    const result = await handleDrive(
-      JSON.parse(raw || "{}"),
-      (req.headers["authorization"] as string | undefined) ?? null,
-      driveEnv(),
-      fetch,
-      requestOrigin(req),
-    );
+    const body = JSON.parse(raw || "{}");
+    const authorization =
+      (req.headers["authorization"] as string | undefined) ?? null;
+    // Drive › Gravações da MAVI (vídeo e IA) vive na mesma função: o plano
+    // Hobby da Vercel limita o número de funções.
+    const result =
+      typeof body?.action === "string" && body.action.startsWith("meeting-")
+        ? await handleMeetings(
+            body,
+            authorization,
+            meetingsEnv(driveEnv()),
+            { fetch, ask: claudeAsk },
+            requestOrigin(req),
+          )
+        : await handleDrive(
+            body,
+            authorization,
+            driveEnv(),
+            fetch,
+            requestOrigin(req),
+          );
     res.statusCode = result.status;
     res.end(JSON.stringify(result.body));
   } catch (err) {

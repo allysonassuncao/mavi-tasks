@@ -18,3 +18,5 @@ gcs-credentials.json
 /*.sql
 # Exportação do banco do artefato Social Leads (dados de clientes).
 .social-leads-export/
+# SQL gerado por scripts/import-meeting-recordings.mjs (transcrições de clientes).
+/meeting-recordings-import/

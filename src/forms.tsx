@@ -111,6 +111,10 @@ export type FormPreset = {
   contract?: string;
   project?: string;
   team?: string;
+  /** New task only: prefilled from a recording's next steps. */
+  title?: string;
+  description?: string;
+  due?: string;
 };
 export function CreateForm({
   kind,

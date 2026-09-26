@@ -177,7 +177,7 @@ export function renameDriveFile(id: string, name: string) {
 }
 
 /** Calls the Drive server (api/drive.ts), which checks access and signs GCS URLs. */
-async function driveServer<T>(body: Record<string, unknown>): Promise<T> {
+export async function driveServer<T>(body: Record<string, unknown>): Promise<T> {
   const token = supabase
     ? (await supabase.auth.getSession()).data.session?.access_token
     : undefined;

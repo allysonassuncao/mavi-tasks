@@ -1002,6 +1002,7 @@ export default function App() {
       window.dispatchEvent(
         new CustomEvent("mavi:social-leads", { detail: {} }),
       );
+      window.dispatchEvent(new CustomEvent("mavi:meetings", { detail: {} }));
       schedule();
     };
     const unsubscribe = api.subscribeToCompanyChanges(company, {
@@ -1062,6 +1063,13 @@ export default function App() {
         if (change.kind === "social_leads") {
           window.dispatchEvent(
             new CustomEvent("mavi:social-leads", { detail: change }),
+          );
+          return;
+        }
+        // Drive › Gravações da MAVI listens for its own notices.
+        if (change.kind === "meeting") {
+          window.dispatchEvent(
+            new CustomEvent("mavi:meetings", { detail: change }),
           );
           return;
         }
@@ -2981,6 +2989,7 @@ export default function App() {
                   user={user}
                   isLeader={isLeader}
                   notify={notify}
+                  onNewTask={(preset) => openForm("task", preset)}
                 />
               )}
               {page === "agenda" && (
@@ -3393,6 +3402,9 @@ export default function App() {
         <TaskCreateForm
           initialContract={formPreset.contract}
           initialProject={formPreset.project}
+          initialTitle={formPreset.title}
+          initialDescription={formPreset.description}
+          initialDue={formPreset.due}
           demo={demo}
           data={data}
           company={company}

@@ -31,6 +31,7 @@ import {
   Pencil,
   Search,
   Trash2,
+  Video,
   X,
 } from "lucide-react";
 import { Button, Input, Select, SelectOption, Loading } from "./ui";
@@ -48,6 +49,10 @@ import type {
 import { canCreateTaskIn, contractProductLabel } from "./domain";
 import { DriveAudit } from "./DriveAudit";
 import { FileViewer } from "./FileViewer";
+import { MeetingRecordings } from "./MeetingRecordings";
+import { countMeetingRecordings, meetingRecording } from "./meetings";
+import { navigate } from "./router";
+import type { FormPreset } from "./forms";
 import {
   createDriveFolder,
   deleteDriveFile,
@@ -103,6 +108,8 @@ type DriveProps = {
   notify: (message: string) => void;
   /** Limits the tree to one client's folder (the Drive tab of a task). */
   root?: { client: string };
+  /** Opens the new-task form (a recording's next steps). */
+  onNewTask?: (preset: FormPreset) => void;
 };
 
 /**
@@ -181,6 +188,7 @@ function DriveTree({
   isLeader,
   notify,
   root,
+  onNewTask,
 }: DriveProps) {
   // Rooted trees start at (and never leave) the client's folder.
   const base: DriveLocation = root ? { client: root.client } : {};
@@ -225,8 +233,9 @@ function DriveTree({
       }
     : at;
   const canWrite =
-    isLeader ||
-    (!!place.contract && canCreateTaskIn(data, place.contract, user));
+    !at.recordings &&
+    (isLeader ||
+      (!!place.contract && canCreateTaskIn(data, place.contract, user)));
 
   const loadFolders = useCallback(
     () =>
@@ -236,6 +245,8 @@ function DriveTree({
     [company],
   );
   const loadFiles = useCallback(() => {
+    // Gravações da MAVI has no files of its own.
+    if (at.recordings) return setFiles([]);
     setFiles(null);
     listDriveFiles(company, at)
       .then(setFiles)
@@ -260,7 +271,44 @@ function DriveTree({
     return () => clearTimeout(id);
   }, [company, query, root?.client]);
 
+  // Gravações da MAVI: how many the client has (its card), and the link of a
+  // moment (?gravacao=<id>&t=<s>) opening the recording right there.
+  const [recordingCount, setRecordingCount] = useState(0);
+  const [openRecording, setOpenRecording] = useState<{
+    recording: string;
+    start?: number;
+  } | null>(null);
+  const showsProducts =
+    !!at.client && !at.contract && !at.folder && !at.recordings;
+  useEffect(() => {
+    setRecordingCount(0);
+    if (!showsProducts || !at.client) return;
+    let alive = true;
+    countMeetingRecordings(company, at.client)
+      .then((n) => alive && setRecordingCount(n))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [company, at.client, showsProducts]);
+  useEffect(() => {
+    if (root) return;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("gravacao");
+    if (!id) return;
+    const start = Number(params.get("t")) || undefined;
+    navigate(window.location.pathname, true);
+    meetingRecording(id)
+      .then((r) => {
+        if (!r) throw Error("Gravação não encontrada ou sem acesso.");
+        setAt({ client: r.client_id, recordings: true });
+        setOpenRecording({ recording: r.id, start });
+      })
+      .catch((e) => setError((e as Error).message));
+  }, [root]);
+
   function go(next: DriveLocation) {
+    setOpenRecording(null);
     setAt(root && !next.client ? base : next);
     setEditing(null);
     setQuery("");
@@ -317,24 +365,27 @@ function DriveTree({
   }
 
   // What is shown inside the current location.
-  const locationKey = [at.client, at.contract, at.folder].join("|");
+  const locationKey = [at.client, at.contract, at.folder, at.recordings].join(
+    "|",
+  );
   const clients =
     !at.client && !at.folder
       ? data.clients
           .filter((c) => !c.archived)
           .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
       : [];
-  const products =
-    at.client && !at.contract && !at.folder
-      ? data.contracts.filter((k) => k.client_id === at.client && !k.archived)
-      : [];
-  const subfolders = folders.filter((f) =>
-    at.folder
-      ? f.parent_id === at.folder
-      : !f.parent_id &&
-        (f.client_id ?? undefined) === at.client &&
-        (f.contract_id ?? undefined) === at.contract,
-  );
+  const products = showsProducts
+    ? data.contracts.filter((k) => k.client_id === at.client && !k.archived)
+    : [];
+  const subfolders = at.recordings
+    ? []
+    : folders.filter((f) =>
+        at.folder
+          ? f.parent_id === at.folder
+          : !f.parent_id &&
+            (f.client_id ?? undefined) === at.client &&
+            (f.contract_id ?? undefined) === at.contract,
+      );
 
   async function run(id: string, action: () => Promise<unknown>) {
     setBusyId(id);
@@ -636,7 +687,7 @@ function DriveTree({
   const folderCard = (
     key: string,
     title: string,
-    icon: "client" | "product" | "folder",
+    icon: "client" | "product" | "folder" | "recordings",
     open: () => void,
     color?: string,
     actions?: {
@@ -648,7 +699,13 @@ function DriveTree({
     where = "",
   ) => {
     const Icon =
-      icon === "client" ? Building2 : icon === "product" ? Package : Folder;
+      icon === "client"
+        ? Building2
+        : icon === "product"
+          ? Package
+          : icon === "recordings"
+            ? Video
+            : Folder;
     return (
       <div className="drive-folder-card" key={key}>
         <button type="button" className="drive-folder" onClick={open}>
@@ -665,7 +722,9 @@ function DriveTree({
                 ? "Cliente"
                 : icon === "product"
                   ? "Produto"
-                  : "Pasta"}
+                  : icon === "recordings"
+                    ? `${recordingCount} ${recordingCount === 1 ? "reunião gravada" : "reuniões gravadas"}`
+                    : "Pasta"}
               {isPublic && (
                 <span className="drive-folder-badge" title="Link público ativo">
                   {" · "}
@@ -726,6 +785,7 @@ function DriveTree({
     !(!at.client && !at.folder && sharedWithMe.length) &&
     !clients.length &&
     !products.length &&
+    !recordingCount &&
     !subfolders.length &&
     files !== null &&
     !files.length &&
@@ -736,60 +796,62 @@ function DriveTree({
       className={`drive-page ${drop.active ? "dragging" : ""}`}
       {...drop.handlers}
     >
-      <div className="drive-toolbar">
-        <span className="drive-search">
-          <Input
-            type="search"
-            aria-label={
-              root
-                ? "Buscar arquivos e pastas deste cliente"
-                : "Buscar arquivos e pastas"
-            }
-            placeholder={
-              root
-                ? "Buscar arquivos e pastas deste cliente"
-                : "Buscar arquivos e pastas"
-            }
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            icon={Search}
-          />
-        </span>
-        {canWrite && !searching && (
-          <div className="drive-upload-controls">
-            <Button
-              className="btn secondary"
-              onClick={() => startEdit({ kind: "new-folder" })}
-            >
-              <FolderPlus size={16} /> Nova pasta
-            </Button>
-            <Select
-              aria-label="Visibilidade dos novos arquivos"
-              value={newVisibility}
-              onValueChange={(v) => setNewVisibility(v as DriveVisibility)}
-            >
-              <SelectOption value="private">Enviar como privado</SelectOption>
-              <SelectOption value="public">Enviar como público</SelectOption>
-            </Select>
-            <Button
-              className="btn primary"
-              onClick={() => input.current?.click()}
-            >
-              <CloudUpload size={17} /> Enviar arquivos
-            </Button>
-            <input
-              ref={input}
-              type="file"
-              multiple
-              hidden
-              onChange={(e) => {
-                if (e.target.files?.length) void upload(e.target.files);
-                e.target.value = "";
-              }}
+      {!at.recordings && (
+        <div className="drive-toolbar">
+          <span className="drive-search">
+            <Input
+              type="search"
+              aria-label={
+                root
+                  ? "Buscar arquivos e pastas deste cliente"
+                  : "Buscar arquivos e pastas"
+              }
+              placeholder={
+                root
+                  ? "Buscar arquivos e pastas deste cliente"
+                  : "Buscar arquivos e pastas"
+              }
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              icon={Search}
             />
-          </div>
-        )}
-      </div>
+          </span>
+          {canWrite && !searching && (
+            <div className="drive-upload-controls">
+              <Button
+                className="btn secondary"
+                onClick={() => startEdit({ kind: "new-folder" })}
+              >
+                <FolderPlus size={16} /> Nova pasta
+              </Button>
+              <Select
+                aria-label="Visibilidade dos novos arquivos"
+                value={newVisibility}
+                onValueChange={(v) => setNewVisibility(v as DriveVisibility)}
+              >
+                <SelectOption value="private">Enviar como privado</SelectOption>
+                <SelectOption value="public">Enviar como público</SelectOption>
+              </Select>
+              <Button
+                className="btn primary"
+                onClick={() => input.current?.click()}
+              >
+                <CloudUpload size={17} /> Enviar arquivos
+              </Button>
+              <input
+                ref={input}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  if (e.target.files?.length) void upload(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       <nav className="drive-breadcrumb" aria-label="Pasta atual">
         {!root && (
@@ -842,6 +904,12 @@ function DriveTree({
               </button>
             </span>
           ))}
+        {!searching && at.recordings && (
+          <>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>Gravações da MAVI</span>
+          </>
+        )}
         {searching && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
@@ -850,7 +918,7 @@ function DriveTree({
         )}
       </nav>
 
-      {!canWrite && !searching && (
+      {!canWrite && !searching && !at.recordings && (
         <p className="drive-readonly" role="note">
           <Lock size={13} />
           {place.client
@@ -892,7 +960,20 @@ function DriveTree({
         </div>
       )}
 
-      {searching ? (
+      {at.recordings && at.client ? (
+        <MeetingRecordings
+          key={at.client}
+          company={company}
+          client={at.client}
+          clientName={clientName(at.client)}
+          data={data}
+          user={user}
+          isLeader={isLeader}
+          notify={notify}
+          onNewTask={onNewTask}
+          initial={openRecording}
+        />
+      ) : searching ? (
         <>
           {folderMatches.length > 0 && (
             <Paged
@@ -949,6 +1030,7 @@ function DriveTree({
         <>
           {(clients.length > 0 ||
             products.length > 0 ||
+            recordingCount > 0 ||
             subfolders.length > 0 ||
             editing?.kind === "new-folder") && (
             <Paged
@@ -964,6 +1046,18 @@ function DriveTree({
                         c.color,
                       ),
                   ),
+                  ...(showsProducts && recordingCount > 0
+                    ? [
+                        () =>
+                          folderCard(
+                            "recordings",
+                            "Gravações da MAVI",
+                            "recordings",
+                            () => go({ client: at.client, recordings: true }),
+                            "#2d5a8c",
+                          ),
+                      ]
+                    : []),
                   ...products.map(
                     (k) => () =>
                       folderCard(

@@ -1105,7 +1105,9 @@ export type LiveChange =
     }
   | { kind: "lookup"; table: string }
   /** Onboarding › Social Leads: something of this contracted product changed. */
-  | { kind: "social_leads"; contract: string; table: string };
+  | { kind: "social_leads"; contract: string; table: string }
+  /** Drive › Gravações da MAVI: a comment on a recording, or new recordings of a client. */
+  | { kind: "meeting"; table: string; recording?: string; client?: string };
 
 /**
  * Whether a task notice concerns the person: always for leaders (they see
