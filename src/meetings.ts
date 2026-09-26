@@ -2,6 +2,7 @@ import { supabase } from "./supabase";
 import { fetchAllRows, rpc } from "./api";
 import { driveServer } from "./drive";
 import { routeParts, pageUrl } from "./router";
+import { serializeDescription, type RichNode } from "./rich-text";
 
 /**
  * Drive › cliente › "Gravações da MAVI": reuniões gravadas e transcritas
@@ -43,14 +44,6 @@ export interface MeetingTranscript {
   speakers: string[];
   segments: MeetingSegment[];
   timed: boolean;
-}
-export interface MeetingComment {
-  id: string;
-  recording_id: string;
-  at_seconds: number;
-  body: string;
-  author_id: string;
-  created_at: string;
 }
 export interface MeetingHit {
   recording_id: string;
@@ -115,32 +108,6 @@ export async function meetingTranscript(id: string) {
   return data as MeetingTranscript | null;
 }
 
-export async function meetingComments(id: string) {
-  if (!supabase) throw Error("Supabase não configurado");
-  const { data, error } = await supabase
-    .from("meeting_comments")
-    .select("id,recording_id,at_seconds,body,author_id,created_at")
-    .eq("recording_id", id)
-    .order("at_seconds")
-    .order("created_at");
-  if (error) throw error;
-  return (data ?? []).map((c) => ({
-    ...c,
-    at_seconds: Number(c.at_seconds),
-  })) as MeetingComment[];
-}
-
-export function addMeetingComment(recording: string, at: number, body: string) {
-  return rpc("add_meeting_comment", {
-    p_recording: recording,
-    p_at: at,
-    p_body: body,
-  });
-}
-export function deleteMeetingComment(id: string) {
-  return rpc("delete_meeting_comment", { p_comment: id });
-}
-
 export async function searchMeetingSegments(
   company: string,
   client: string,
@@ -177,18 +144,6 @@ export async function askMeeting(
     history,
   });
   return answer;
-}
-export async function askClientMeetings(
-  client: string,
-  question: string,
-  history: ChatTurn[],
-) {
-  return driveServer<{ answer: string; refs: string[] }>({
-    action: "meeting-ask-client",
-    client,
-    question,
-    history,
-  });
 }
 
 // ------------------------------------------------------------ apresentação
@@ -270,14 +225,14 @@ export function recordingLink(recording: string, seconds?: number) {
 export type AnswerPiece =
   | { kind: "text"; text: string; bold?: boolean }
   | { kind: "time"; seconds: number; label: string }
-  | { kind: "ref"; index: number; label: string };
+  | { kind: "source"; ref: string };
 /**
  * Uma linha da resposta da IA em pedaços: texto, **negrito**, momentos
- * [12:34] e reuniões [R3] (clicáveis).
+ * [12:34] e fontes [S3] (clicáveis).
  */
 export function answerPieces(line: string): AnswerPiece[] {
   const pieces: AnswerPiece[] = [];
-  const re = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]|\[R(\d{1,3})\]|\*\*([^*]+)\*\*/g;
+  const re = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]|\[(S\d{1,3})\]|\*\*([^*]+)\*\*/g;
   let last = 0;
   for (let m = re.exec(line); m; m = re.exec(line)) {
     if (m.index > last)
@@ -289,8 +244,7 @@ export function answerPieces(line: string): AnswerPiece[] {
           ? { kind: "text", text: m[0] }
           : { kind: "time", seconds, label: m[1] },
       );
-    } else if (m[2])
-      pieces.push({ kind: "ref", index: Number(m[2]), label: `R${m[2]}` });
+    } else if (m[2]) pieces.push({ kind: "source", ref: m[2] });
     else pieces.push({ kind: "text", text: m[3], bold: true });
     last = m.index + m[0].length;
   }
@@ -313,4 +267,40 @@ export function segmentAt(segments: MeetingSegment[], time: number) {
     } else hi = mid - 1;
   }
   return found;
+}
+
+/**
+ * A descrição da tarefa no formato do editor (texto com negrito), não HTML:
+ * o editor mostraria as tags como texto.
+ */
+export function stepDescription(
+  step: { description: string; owner: string; deadline: string },
+  meeting: { title: string; clientName: string; date: string; link: string },
+) {
+  const text = (t: string, bold = false): RichNode => ({
+    type: "text",
+    text: t,
+    marks: bold ? [{ type: "bold" }] : [],
+  });
+  const paragraph = (...content: RichNode[]): RichNode => ({
+    type: "paragraph",
+    content,
+  });
+  return serializeDescription({
+    type: "doc",
+    content: [
+      paragraph(text(step.description)),
+      ...(step.owner
+        ? [paragraph(text("Responsável na reunião: ", true), text(step.owner))]
+        : []),
+      ...(step.deadline
+        ? [paragraph(text("Prazo combinado: ", true), text(step.deadline))]
+        : []),
+      paragraph(
+        text("Reunião: ", true),
+        text(`${meeting.title} com ${meeting.clientName} em ${meeting.date}`),
+      ),
+      paragraph(text("Gravação: ", true), text(meeting.link)),
+    ],
+  });
 }

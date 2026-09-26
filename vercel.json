@@ -18,6 +18,10 @@
       "destination": "/api/edge-function?fn=user-admin"
     },
     {
+      "source": "/api/ai",
+      "destination": "/api/drive"
+    },
+    {
       "source": "/((?!assets/|icons/|favicon.svg|manifest.webmanifest|sw.js).*)",
       "destination": "/index.html"
     }

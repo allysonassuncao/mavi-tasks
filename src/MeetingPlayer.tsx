@@ -12,15 +12,19 @@ import { createPortal } from "react-dom";
 import {
   ChevronDown,
   ChevronUp,
+  CheckSquare,
+  Clock,
   Link2,
   ListChecks,
-  MessageSquare,
   Plus,
   Search,
   Send,
+  Share2,
   Sparkles,
-  Trash2,
+  Tags,
   Undo2,
+  Users,
+  Video,
   VideoOff,
   X,
   FileText,
@@ -30,18 +34,16 @@ import {
 } from "lucide-react";
 import { Loading } from "./ui";
 import { canCreateTaskIn } from "./domain";
+import { sourceLabel, type AiSource } from "./ai";
 import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import type { FormPreset } from "./forms";
 import {
-  addMeetingComment,
   answerPieces,
   askMeeting,
   clock,
   deadlineDate,
-  deleteMeetingComment,
   durationLabel,
-  meetingComments,
   meetingKind,
   meetingTitle,
   meetingTranscript,
@@ -49,14 +51,14 @@ import {
   nextSteps,
   recordingLink,
   segmentAt,
+  stepDescription,
   type ChatTurn,
-  type MeetingComment,
   type MeetingRecording,
   type MeetingSegment,
   type MeetingTranscript,
 } from "./meetings";
 
-type Tab = "transcript" | "summary" | "steps" | "ask" | "comments";
+type Tab = "transcript" | "summary" | "steps" | "ask";
 const SPEEDS = [1, 1.25, 1.5, 2];
 const SPEAKER_COLORS = [
   "#2d5a8c",
@@ -81,7 +83,6 @@ type Props = {
   start?: number;
   data: Snapshot;
   user: string;
-  isLeader: boolean;
   clientName: string;
   notify: (message: string) => void;
   onNewTask?: (preset: FormPreset) => void;
@@ -90,14 +91,13 @@ type Props = {
 
 /**
  * Uma reunião gravada: vídeo com a transcrição acompanhando a fala, resumo,
- * próximos passos (viram tarefas), perguntas à IA e comentários no tempo.
+ * próximos passos (viram tarefas) e perguntas à IA.
  */
 export function MeetingPlayer({
   recording,
   start,
   data,
   user,
-  isLeader,
   clientName,
   notify,
   onNewTask,
@@ -112,7 +112,6 @@ export function MeetingPlayer({
   const [transcript, setTranscript] = useState<
     MeetingTranscript | null | undefined
   >(undefined);
-  const [comments, setComments] = useState<MeetingComment[]>([]);
   const [tab, setTab] = useState<Tab>("transcript");
   const [time, setTime] = useState(start ?? 0);
   const [duration, setDuration] = useState(recording.duration_seconds ?? 0);
@@ -141,29 +140,6 @@ export function MeetingPlayer({
     };
   }, [recording.id, recording.video_type]);
 
-  const loadComments = useCallback(
-    () =>
-      meetingComments(recording.id)
-        .then(setComments)
-        .catch(() => {}),
-    [recording.id],
-  );
-  useEffect(() => {
-    void loadComments();
-    // Comentários de outras pessoas chegam ao vivo (Realtime), sem consultar
-    // o banco de tempos em tempos.
-    const onNotice = (e: Event) => {
-      const d = (e as CustomEvent).detail ?? {};
-      if (
-        !d.table ||
-        (d.table === "meeting_comments" && d.recording === recording.id)
-      )
-        void loadComments();
-    };
-    window.addEventListener("mavi:meetings", onNotice);
-    return () => window.removeEventListener("mavi:meetings", onNotice);
-  }, [loadComments, recording.id]);
-
   const hasVideo = !!videoUrl && !videoError;
   const seek = useCallback(
     (seconds: number, play = true) => {
@@ -179,14 +155,15 @@ export function MeetingPlayer({
     setRate(r);
     if (video.current) video.current.playbackRate = r;
   }
-  async function copyMoment() {
-    const link = recordingLink(recording.id, time);
+  /** O link da reunião (do início) ou do momento atual. */
+  async function copyLink(atMoment: boolean) {
+    const link = recordingLink(recording.id, atMoment ? time : undefined);
     try {
       await navigator.clipboard.writeText(link);
       notify(
-        time > 0
-          ? `Link copiado: abre em ${clock(time)}.`
-          : "Link da gravação copiado.",
+        atMoment
+          ? `Link copiado: abre a gravação em ${clock(time)}.`
+          : "Link da gravação copiado. Quem tem acesso a este cliente consegue abrir.",
       );
     } catch {
       setError(`Copie o link: ${link}`);
@@ -218,12 +195,6 @@ export function MeetingPlayer({
       count: steps.length,
     },
     { id: "ask", label: "Perguntar à IA", icon: Sparkles },
-    {
-      id: "comments",
-      label: "Comentários",
-      icon: MessageSquare,
-      count: comments.length,
-    },
   ];
   const total = duration || recording.duration_seconds || 0;
 
@@ -275,11 +246,21 @@ export function MeetingPlayer({
           <button
             type="button"
             className="btn secondary"
-            onClick={() => void copyMoment()}
-            title="Copiar link que abre a gravação neste momento"
+            onClick={() => void copyLink(false)}
+            title="Copiar o link desta reunião para enviar a outra pessoa"
           >
-            <Link2 size={15} /> Link {time > 0 ? `em ${clock(time)}` : ""}
+            <Share2 size={15} /> Copiar link
           </button>
+          {time > 0 && (
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => void copyLink(true)}
+              title="Copiar o link que abre a gravação neste momento"
+            >
+              <Link2 size={15} /> Link em {clock(time)}
+            </button>
+          )}
           <button
             type="button"
             className="icon-btn"
@@ -378,30 +359,6 @@ export function MeetingPlayer({
               </span>
             </div>
           )}
-          {total > 0 && (comments.length > 0 || steps.length > 0) && (
-            <div
-              className="meeting-markers"
-              aria-label="Comentários na linha do tempo"
-            >
-              <span
-                className="meeting-markers-progress"
-                style={{ width: `${Math.min(100, (time / total) * 100)}%` }}
-              />
-              {comments.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className="meeting-marker"
-                  style={{
-                    left: `${Math.min(100, (c.at_seconds / total) * 100)}%`,
-                  }}
-                  title={`${clock(c.at_seconds)} · ${c.body}`}
-                  aria-label={`Comentário em ${clock(c.at_seconds)}`}
-                  onClick={() => seek(c.at_seconds)}
-                />
-              ))}
-            </div>
-          )}
           <p className="meeting-shortcuts">
             Espaço pausa · ← → 5 s · clique numa frase para ir até ela
           </p>
@@ -435,7 +392,13 @@ export function MeetingPlayer({
               />
             )}
             {tab === "summary" && (
-              <SummaryPanel recording={recording} transcript={transcript} />
+              <SummaryPanel
+                recording={recording}
+                transcript={transcript}
+                duration={total}
+                steps={steps.length}
+                onSteps={() => setTab("steps")}
+              />
             )}
             {tab === "steps" && (
               <StepsPanel
@@ -448,18 +411,6 @@ export function MeetingPlayer({
               />
             )}
             {tab === "ask" && <AskPanel recording={recording} onSeek={seek} />}
-            {tab === "comments" && (
-              <CommentsPanel
-                recording={recording}
-                comments={comments}
-                time={time}
-                data={data}
-                user={user}
-                isLeader={isLeader}
-                onSeek={seek}
-                onChanged={loadComments}
-              />
-            )}
           </div>
         </section>
       </div>
@@ -703,14 +654,33 @@ function TranscriptPanel({
 }
 
 // ------------------------------------------------------------ resumo
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+
 function SummaryPanel({
   recording,
   transcript,
+  duration,
+  steps,
+  onSteps,
 }: {
   recording: MeetingRecording;
   transcript: MeetingTranscript | null | undefined;
+  duration: number;
+  steps: number;
+  onSteps: () => void;
 }) {
   const s = recording.summary;
+  const notes = s.notes ?? [];
+  const tags = [...(s.tone ?? []), ...(s.keywords ?? [])];
+  const [open, setOpen] = useState<Set<number>>(() => new Set([0]));
+  const [allTags, setAllTags] = useState(false);
+  const [fullOverview, setFullOverview] = useState(false);
   // Quanto cada pessoa falou (pela soma das frases com tempo).
   const talk = useMemo(() => {
     if (!transcript?.timed) return [];
@@ -731,41 +701,142 @@ function SummaryPanel({
         share: sum ? seconds / sum : 0,
       }));
   }, [transcript]);
-  if (!s.overview && !s.notes?.length && !talk.length)
+  const people = [...new Set(recording.speakers)];
+  if (!s.overview && !notes.length && !talk.length)
     return <p className="muted centered">Esta reunião não tem resumo.</p>;
+  const longOverview = (s.overview?.length ?? 0) > 420;
+  const allOpen = notes.length > 0 && open.size === notes.length;
+  const toggle = (i: number) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
   return (
     <div className="meeting-summary">
-      {s.overview && <p className="meeting-overview">{s.overview}</p>}
-      {(s.keywords?.length || s.tone?.length) && (
-        <div className="meeting-chips">
-          {s.tone?.map((t) => (
-            <span key={`t-${t}`} className="meeting-chip tone">
-              {t}
-            </span>
-          ))}
-          {s.keywords?.map((k) => (
-            <span key={`k-${k}`} className="meeting-chip">
-              {k}
-            </span>
-          ))}
-        </div>
+      {s.overview && (
+        <section className="summary-card summary-overview">
+          <h4>
+            <Sparkles size={14} aria-hidden="true" /> Em resumo
+          </h4>
+          <p className={longOverview && !fullOverview ? "clamped" : ""}>
+            {s.overview}
+          </p>
+          {longOverview && (
+            <button
+              type="button"
+              className="text-btn"
+              onClick={() => setFullOverview((v) => !v)}
+            >
+              {fullOverview ? "Mostrar menos" : "Ler tudo"}
+            </button>
+          )}
+        </section>
       )}
-      {!!s.notes?.length && (
-        <>
-          <h4>Assuntos</h4>
-          <ul className="meeting-notes">
-            {s.notes.map((n, i) => (
-              <li key={i}>
-                <strong>{n.title}</strong>
-                <p>{n.description}</p>
+
+      <div className="summary-facts">
+        {duration > 0 && (
+          <div>
+            <Clock size={15} aria-hidden="true" />
+            <strong>{durationLabel(duration)}</strong>
+            <small>de reunião</small>
+          </div>
+        )}
+        {people.length > 0 && (
+          <div>
+            <Users size={15} aria-hidden="true" />
+            <strong>{people.length}</strong>
+            <small>
+              {people.length === 1 ? "participante" : "participantes"}
+            </small>
+          </div>
+        )}
+        {notes.length > 0 && (
+          <div>
+            <AlignLeft size={15} aria-hidden="true" />
+            <strong>{notes.length}</strong>
+            <small>{notes.length === 1 ? "assunto" : "assuntos"}</small>
+          </div>
+        )}
+        {steps > 0 && (
+          <button type="button" onClick={onSteps}>
+            <ListChecks size={15} aria-hidden="true" />
+            <strong>{steps}</strong>
+            <small>{steps === 1 ? "próximo passo" : "próximos passos"}</small>
+          </button>
+        )}
+      </div>
+
+      {notes.length > 0 && (
+        <section className="summary-section">
+          <header>
+            <h4>Assuntos discutidos</h4>
+            {notes.length > 1 && (
+              <button
+                type="button"
+                className="text-btn"
+                onClick={() =>
+                  setOpen(allOpen ? new Set() : new Set(notes.map((_, i) => i)))
+                }
+              >
+                {allOpen ? "Recolher todos" : "Abrir todos"}
+              </button>
+            )}
+          </header>
+          <ol className="summary-topics">
+            {notes.map((n, i) => (
+              <li key={i} className={open.has(i) ? "open" : ""}>
+                <button
+                  type="button"
+                  aria-expanded={open.has(i)}
+                  onClick={() => toggle(i)}
+                >
+                  <span className="summary-topic-n">{i + 1}</span>
+                  <strong>{n.title || `Assunto ${i + 1}`}</strong>
+                  <ChevronDown size={15} aria-hidden="true" />
+                </button>
+                {open.has(i) && n.description && <p>{n.description}</p>}
               </li>
             ))}
-          </ul>
-        </>
+          </ol>
+        </section>
       )}
+
+      {tags.length > 0 && (
+        <section className="summary-section">
+          <header>
+            <h4>
+              <Tags size={13} aria-hidden="true" /> Temas
+            </h4>
+          </header>
+          <div className="meeting-chips">
+            {(allTags ? tags : tags.slice(0, 8)).map((t, i) => (
+              <span
+                key={`${t}-${i}`}
+                className={`meeting-chip ${i < (s.tone?.length ?? 0) ? "tone" : ""}`}
+              >
+                {t}
+              </span>
+            ))}
+            {tags.length > 8 && (
+              <button
+                type="button"
+                className="meeting-chip more"
+                onClick={() => setAllTags((v) => !v)}
+              >
+                {allTags ? "menos" : `+${tags.length - 8}`}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
       {talk.length > 1 && (
-        <>
-          <h4>Tempo de fala</h4>
+        <section className="summary-section">
+          <header>
+            <h4>Quem mais falou</h4>
+          </header>
           <ul className="meeting-talk">
             {talk.map((t) => (
               <li key={t.speaker}>
@@ -786,16 +857,38 @@ function SummaryPanel({
               </li>
             ))}
           </ul>
-        </>
+        </section>
       )}
-      {(recording.speakers.length > 0 || recording.attendees.length > 0) && (
-        <>
-          <h4>Participantes</h4>
-          <p className="meeting-people">
-            {[...recording.speakers, ...recording.attendees].join(" · ")}
-          </p>
-        </>
+
+      {people.length > 0 && (
+        <section className="summary-section">
+          <header>
+            <h4>Participantes</h4>
+          </header>
+          <ul className="summary-people">
+            {people.map((p, i) => (
+              <li key={p}>
+                <span
+                  className="summary-avatar"
+                  style={{
+                    background: SPEAKER_COLORS[i % SPEAKER_COLORS.length],
+                  }}
+                  aria-hidden="true"
+                >
+                  {initials(p)}
+                </span>
+                {p}
+              </li>
+            ))}
+          </ul>
+          {recording.attendees.length > 0 && (
+            <p className="summary-invited">
+              Convidados da agência: {recording.attendees.join(", ")}
+            </p>
+          )}
+        </section>
       )}
+
       <p className="meeting-ai-note">
         Resumo gerado automaticamente pela IA do gravador; confira na
         transcrição.
@@ -805,15 +898,6 @@ function SummaryPanel({
 }
 
 // ------------------------------------------------------------ próximos passos
-const escapeHtml = (s: string) =>
-  s.replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        c
-      ]!,
-  );
-
 function StepsPanel({
   recording,
   steps,
@@ -848,15 +932,12 @@ function StepsPanel({
       contract: contract?.id,
       title: step.description.slice(0, 240),
       due: deadlineDate(step.deadline),
-      description:
-        `<p>${escapeHtml(step.description)}</p>` +
-        (step.owner
-          ? `<p><strong>Responsável na reunião:</strong> ${escapeHtml(step.owner)}</p>`
-          : "") +
-        (step.deadline
-          ? `<p><strong>Prazo combinado:</strong> ${escapeHtml(step.deadline)}</p>`
-          : "") +
-        `<p>Da reunião <a href="${escapeHtml(link)}">${escapeHtml(meetingTitle(recording))}</a> com ${escapeHtml(clientName)} em ${date}.</p>`,
+      description: stepDescription(step, {
+        title: meetingTitle(recording),
+        clientName,
+        date,
+        link,
+      }),
     });
   }
   return (
@@ -891,16 +972,22 @@ function StepsPanel({
 }
 
 // ------------------------------------------------------------ IA
-/** Resposta da IA com momentos [12:34] e reuniões [R3] clicáveis. */
+/**
+ * Resposta da IA com momentos [12:34] e fontes [S3] clicáveis, e a lista
+ * das fontes citadas no fim.
+ */
 export function AnswerText({
   text,
   onTime,
-  onRef,
+  sources = [],
+  onSource,
 }: {
   text: string;
   onTime?: (seconds: number) => void;
-  onRef?: (index: number) => void;
+  sources?: AiSource[];
+  onSource?: (source: AiSource) => void;
 }) {
+  const byRef = new Map(sources.map((s) => [s.ref, s]));
   const lines = text.split("\n");
   const render = (line: string) =>
     answerPieces(line).map((p, i) =>
@@ -920,17 +1007,18 @@ export function AnswerText({
         >
           {p.label}
         </button>
-      ) : (
+      ) : byRef.has(p.ref) ? (
         <button
           key={i}
           type="button"
-          className="answer-cite ref"
-          onClick={() => onRef?.(p.index)}
-          disabled={!onRef}
+          className={`answer-cite ${byRef.get(p.ref)!.type}`}
+          title={byRef.get(p.ref)!.title}
+          onClick={() => onSource?.(byRef.get(p.ref)!)}
+          disabled={!onSource}
         >
-          {p.label}
+          {sourceLabel(byRef.get(p.ref)!)}
         </button>
-      ),
+      ) : null,
     );
   const out: ReactNode[] = [];
   let list: ReactNode[] = [];
@@ -948,8 +1036,39 @@ export function AnswerText({
     }
   });
   flush();
-  return <div className="answer-text">{out}</div>;
+  return (
+    <div className="answer-text">
+      {out}
+      {sources.length > 0 && (
+        <div className="answer-sources">
+          <small>Fontes</small>
+          <ul>
+            {sources.map((s) => (
+              <li key={s.ref}>
+                <button
+                  type="button"
+                  onClick={() => onSource?.(s)}
+                  disabled={!onSource}
+                  title={sourceLabel(s)}
+                >
+                  {s.type === "meeting" ? (
+                    <Video size={13} aria-hidden="true" />
+                  ) : (
+                    <CheckSquare size={13} aria-hidden="true" />
+                  )}
+                  <span>{s.title}</span>
+                  <small>{sourceLabel(s)}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
+
+type ChatEntry = ChatTurn & { sources?: AiSource[] };
 
 export function ChatBox({
   placeholder,
@@ -957,14 +1076,20 @@ export function ChatBox({
   ask,
   renderAnswer,
   intro,
+  thinking = "Lendo e respondendo…",
 }: {
   placeholder: string;
   suggestions: string[];
-  ask: (question: string, history: ChatTurn[]) => Promise<string>;
-  renderAnswer: (text: string) => ReactNode;
+  /** A resposta (texto) ou a resposta com as fontes citadas. */
+  ask: (
+    question: string,
+    history: ChatTurn[],
+  ) => Promise<string | { answer: string; sources: AiSource[] }>;
+  renderAnswer: (text: string, sources: AiSource[]) => ReactNode;
   intro: string;
+  thinking?: string;
 }) {
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [turns, setTurns] = useState<ChatEntry[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -981,8 +1106,19 @@ export function ChatBox({
     const history = turns;
     setTurns([...history, { role: "user", content: q }]);
     try {
-      const answer = await ask(q, history);
-      setTurns((t) => [...t, { role: "assistant", content: answer }]);
+      const reply = await ask(
+        q,
+        history.map(({ role, content }) => ({ role, content })),
+      );
+      const entry: ChatEntry =
+        typeof reply === "string"
+          ? { role: "assistant", content: reply }
+          : {
+              role: "assistant",
+              content: reply.answer,
+              sources: reply.sources,
+            };
+      setTurns((t) => [...t, entry]);
     } catch (e) {
       setError((e as Error).message);
       setTurns(history);
@@ -1014,13 +1150,13 @@ export function ChatBox({
             </p>
           ) : (
             <div key={i} className="chat-a">
-              {renderAnswer(t.content)}
+              {renderAnswer(t.content, t.sources ?? [])}
             </div>
           ),
         )}
         {busy && (
           <div className="chat-a chat-thinking" role="status">
-            <Sparkles size={14} /> Lendo e respondendo…
+            <Sparkles size={14} /> {thinking}
           </div>
         )}
         {error && (
@@ -1079,142 +1215,5 @@ function AskPanel({
       ask={(q, history) => askMeeting(recording.id, q, history)}
       renderAnswer={(text) => <AnswerText text={text} onTime={onSeek} />}
     />
-  );
-}
-
-// ------------------------------------------------------------ comentários
-function CommentsPanel({
-  recording,
-  comments,
-  time,
-  data,
-  user,
-  isLeader,
-  onSeek,
-  onChanged,
-}: {
-  recording: MeetingRecording;
-  comments: MeetingComment[];
-  time: number;
-  data: Snapshot;
-  user: string;
-  isLeader: boolean;
-  onSeek: (s: number) => void;
-  onChanged: () => Promise<unknown>;
-}) {
-  const [draft, setDraft] = useState("");
-  const [at, setAt] = useState<number | null>(null);
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const moment = at ?? time;
-  const name = (id: string) =>
-    data.members.find((m) => m.user_id === id)?.name ?? "Alguém";
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    if (!draft.trim()) return;
-    setBusy("new");
-    setError("");
-    try {
-      await addMeetingComment(recording.id, moment, draft.trim());
-      setDraft("");
-      setAt(null);
-      await onChanged();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy("");
-    }
-  }
-  async function remove(c: MeetingComment) {
-    if (!window.confirm("Excluir este comentário?")) return;
-    setBusy(c.id);
-    try {
-      await deleteMeetingComment(c.id);
-      await onChanged();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy("");
-    }
-  }
-  return (
-    <div className="meeting-comments">
-      <form className="meeting-comment-form" onSubmit={save}>
-        <textarea
-          rows={2}
-          value={draft}
-          maxLength={4000}
-          placeholder={`Comentar em ${clock(moment)}`}
-          aria-label="Novo comentário"
-          // O momento fica preso enquanto a pessoa escreve.
-          onFocus={() => at === null && setAt(time)}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <div>
-          <small>
-            No momento <strong>{clock(moment)}</strong>
-            {at !== null && (
-              <button
-                type="button"
-                className="text-btn"
-                onClick={() => setAt(time)}
-              >
-                usar o momento atual
-              </button>
-            )}
-          </small>
-          <button
-            type="submit"
-            className="btn primary"
-            disabled={!draft.trim() || busy === "new"}
-          >
-            Comentar
-          </button>
-        </div>
-      </form>
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
-      {comments.length ? (
-        <ul>
-          {comments.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                className="transcript-time"
-                onClick={() => onSeek(c.at_seconds)}
-              >
-                {clock(c.at_seconds)}
-              </button>
-              <div>
-                <small>
-                  <strong>{name(c.author_id)}</strong> ·{" "}
-                  {new Date(c.created_at).toLocaleDateString("pt-BR")}
-                </small>
-                <p>{c.body}</p>
-              </div>
-              {(c.author_id === user || isLeader) && (
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label="Excluir comentário"
-                  disabled={busy === c.id}
-                  onClick={() => void remove(c)}
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="muted centered">
-          Nenhum comentário ainda. Pause no ponto que importa e comente para o
-          time.
-        </p>
-      )}
-    </div>
   );
 }

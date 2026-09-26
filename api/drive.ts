@@ -3,6 +3,7 @@ import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleDrive, type DriveEnv, type GcsCredentials } from "./_drive.js";
 import { claudeAsk, handleMeetings, meetingsEnv } from "./_meetings.js";
+import { aiDeps, aiEnv, handleAi } from "./_ai.js";
 
 function credentials(): GcsCredentials | null {
   if (process.env.GCS_CREDENTIALS)
@@ -63,24 +64,29 @@ export default async function handler(
     const body = JSON.parse(raw || "{}");
     const authorization =
       (req.headers["authorization"] as string | undefined) ?? null;
-    // Drive › Gravações da MAVI (vídeo e IA) vive na mesma função: o plano
-    // Hobby da Vercel limita o número de funções.
-    const result =
-      typeof body?.action === "string" && body.action.startsWith("meeting-")
-        ? await handleMeetings(
-            body,
-            authorization,
-            meetingsEnv(driveEnv()),
-            { fetch, ask: claudeAsk },
-            requestOrigin(req),
-          )
-        : await handleDrive(
-            body,
-            authorization,
-            driveEnv(),
-            fetch,
-            requestOrigin(req),
-          );
+    const action = typeof body?.action === "string" ? body.action : "";
+    // Gravações da MAVI e a IA (/api/ai é reescrito para cá) vivem na mesma
+    // função: o plano Hobby da Vercel limita o número de funções.
+    let result: { status: number; body: unknown };
+    if (action.startsWith("meeting-"))
+      result = await handleMeetings(
+        body,
+        authorization,
+        meetingsEnv(driveEnv()),
+        { fetch, ask: claudeAsk },
+        requestOrigin(req),
+      );
+    else if (action.startsWith("ai-")) {
+      const env = aiEnv(driveEnv());
+      result = await handleAi(body, authorization, env, aiDeps(env));
+    } else
+      result = await handleDrive(
+        body,
+        authorization,
+        driveEnv(),
+        fetch,
+        requestOrigin(req),
+      );
     res.statusCode = result.status;
     res.end(JSON.stringify(result.body));
   } catch (err) {

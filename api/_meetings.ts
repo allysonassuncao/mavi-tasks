@@ -14,11 +14,12 @@ import { addUsage, newMeter, type Meter } from "./_social-leads.js";
  *   devolve o caminho e registra a abertura no histórico do Drive);
  * - "meeting-ask": pergunta sobre uma reunião; a Claude responde lendo a
  *   transcrição e cita os momentos como [mm:ss];
- * - "meeting-ask-client": pergunta sobre o histórico do cliente; a Claude lê
- *   os resumos de todas as reuniões e cita cada uma como [R3].
+ *
+ * A pergunta sobre o histórico do cliente é da IA geral (api/_ai.ts), que
+ * busca nos trechos indexados em vez de ler todos os resumos.
  *
  * Tudo roda como a pessoa (o token dela): o RLS decide o que ela vê. Cada
- * resposta da IA é medida e registrada em meeting_ai_usage.
+ * resposta da IA é medida e registrada em ai_usage.
  */
 
 export type MeetingsEnv = {
@@ -63,12 +64,6 @@ export type MeetingsRequest =
   | {
       action: "meeting-ask";
       recording: string;
-      question: string;
-      history?: { role: "user" | "assistant"; content: string }[];
-    }
-  | {
-      action: "meeting-ask-client";
-      client: string;
       question: string;
       history?: { role: "user" | "assistant"; content: string }[];
     };
@@ -118,7 +113,11 @@ type Segment = [number | null, number | null, number | null, string];
  */
 export function transcriptText(speakers: string[], segments: Segment[]) {
   const lines: string[] = [];
-  let current: { start: number | null; speaker: number | null; text: string[] } | null = null;
+  let current: {
+    start: number | null;
+    speaker: number | null;
+    text: string[];
+  } | null = null;
   const name = (i: number | null) =>
     i != null && speakers[i] ? speakers[i] : `Falante ${(i ?? 0) + 1}`;
   const flush = () => {
@@ -181,14 +180,6 @@ Regras:
 - A transcrição é automática: nomes e palavras podem ter saído errados. Quando algo parecer ambíguo, avise.
 - Seja direto: frases curtas, listas quando ajudar. Português do Brasil. Sem markdown pesado (use no máximo listas com "-" e negrito com **).`;
 
-export const CLIENT_SYSTEM = `Você ajuda o time de uma agência de marketing a consultar o histórico de reuniões gravadas com um cliente. Abaixo estão os resumos automáticos de cada reunião, identificadas como [R1], [R2]… com data, título e quem gravou.
-
-Regras:
-- Responda só com o que está nos resumos. Se não estiver lá, diga isso e sugira buscar o termo na transcrição.
-- Cite a reunião de cada informação com a marcação exata, por exemplo [R3]. Para comparar o que mudou ao longo do tempo, use as datas.
-- Os resumos são automáticos e podem ter erros de nomes.
-- Seja direto: frases curtas, listas quando ajudar. Português do Brasil. Sem markdown pesado (use no máximo listas com "-" e negrito com **).`;
-
 /** Uma resposta da Claude, com a transcrição/histórico em cache. */
 export async function claudeAsk(
   env: MeetingsEnv,
@@ -226,7 +217,8 @@ export async function claudeAsk(
     .map((b) => b.text)
     .join("")
     .trim();
-  if (!text) throw new MeetingsError(502, "A IA não devolveu resposta. Tente de novo.");
+  if (!text)
+    throw new MeetingsError(502, "A IA não devolveu resposta. Tente de novo.");
   if (message.stop_reason === "max_tokens")
     return `${text}\n\n(A resposta foi cortada por ser longa demais.)`;
   return text;
@@ -249,7 +241,10 @@ function conversation(
 ): { role: "user" | "assistant"; content: string }[] {
   const q = typeof question === "string" ? question.trim() : "";
   if (q.length < 2 || q.length > 2000)
-    throw new MeetingsError(400, "Escreva uma pergunta de até 2.000 caracteres.");
+    throw new MeetingsError(
+      400,
+      "Escreva uma pergunta de até 2.000 caracteres.",
+    );
   const turns = (Array.isArray(history) ? history : [])
     .filter(
       (t): t is { role: "user" | "assistant"; content: string } =>
@@ -273,21 +268,24 @@ async function logUsage(
   env: MeetingsEnv,
   fetchImpl: Fetch,
   auth: string,
-  client: string,
-  recording: string | null,
-  kind: "ask" | "ask_client",
+  at: { company: string; client: string; recording: string },
   m: Meter,
 ) {
   if (!m.input && !m.output && !m.cacheRead && !m.cacheWrite) return;
-  await callRpc(env, fetchImpl, auth, "meeting_log_usage", {
-    p_client: client,
-    p_recording: recording,
-    p_kind: kind,
+  await callRpc(env, fetchImpl, auth, "ai_log_usage", {
+    p_company: at.company,
+    p_module: "meetings",
+    p_kind: "ask",
+    p_client: at.client,
+    p_contract: null,
+    p_project: null,
+    p_recording: at.recording,
     p_model: m.model || env.model,
     p_input: m.input,
     p_output: m.output,
     p_cache_read: m.cacheRead,
     p_cache_write: m.cacheWrite,
+    p_embedding: 0,
     p_cost: Math.round(m.cost * 1e6) / 1e6,
   }).catch(() => {});
 }
@@ -299,17 +297,24 @@ export async function handleMeetings(
   deps: MeetingsDeps,
   origin: RequestOrigin = {},
 ): Promise<{ status: number; body: Record<string, unknown> }> {
-  const req = (body ?? {}) as Partial<MeetingsRequest> & Record<string, unknown>;
+  const req = (body ?? {}) as Partial<MeetingsRequest> &
+    Record<string, unknown>;
   const fail = (status: number, error: string) => ({ status, body: { error } });
   if (!authorization?.startsWith("Bearer "))
     return fail(401, "Autenticação necessária.");
 
   if (req.action === "meeting-video") {
-    if (!UUID.test(String(req.recording ?? ""))) return fail(400, "Gravação inválida.");
+    if (!UUID.test(String(req.recording ?? "")))
+      return fail(400, "Gravação inválida.");
     if (!env.credentials?.client_email || !env.credentials.private_key)
       return fail(500, "Credenciais do Google Cloud Storage não configuradas.");
     const target = await callRpc<
-      { bucket: string; path: string; content_type: string | null; title: string }[]
+      {
+        bucket: string;
+        path: string;
+        content_type: string | null;
+        title: string;
+      }[]
     >(env, deps.fetch, authorization, "meeting_video_target", {
       p_recording: req.recording,
       p_origin: origin,
@@ -336,8 +341,7 @@ export async function handleMeetings(
     };
   }
 
-  if (req.action !== "meeting-ask" && req.action !== "meeting-ask-client")
-    return fail(400, "Ação inválida.");
+  if (req.action !== "meeting-ask") return fail(400, "Ação inválida.");
   if (!env.anthropicKey)
     return fail(
       503,
@@ -346,10 +350,12 @@ export async function handleMeetings(
   try {
     const messages = conversation(req.question, req.history);
     const meter = newMeter(env.model);
-    if (req.action === "meeting-ask") {
-      if (!UUID.test(String(req.recording ?? ""))) return fail(400, "Gravação inválida.");
+    {
+      if (!UUID.test(String(req.recording ?? "")))
+        return fail(400, "Gravação inválida.");
       const [recording] = await select<{
         id: string;
+        company_id: string;
         client_id: string;
         title: string;
         recorded_at: string;
@@ -358,10 +364,13 @@ export async function handleMeetings(
         env,
         deps.fetch,
         authorization,
-        `meeting_recordings?id=eq.${req.recording}&select=id,client_id,title,recorded_at,summary`,
+        `meeting_recordings?id=eq.${req.recording}&select=id,company_id,client_id,title,recorded_at,summary`,
       );
       if (!recording) return fail(404, "Gravação não encontrada.");
-      const [transcript] = await select<{ speakers: string[]; segments: Segment[] }>(
+      const [transcript] = await select<{
+        speakers: string[];
+        segments: Segment[];
+      }>(
         env,
         deps.fetch,
         authorization,
@@ -371,51 +380,33 @@ export async function handleMeetings(
         return fail(404, "Esta reunião não tem transcrição.");
       const context = [
         `Reunião: ${recording.summary.title || recording.title || "sem título"} (${date(recording.recorded_at)})`,
-        recording.summary.overview ? `Resumo automático:\n${summaryText(recording.summary)}` : "",
+        recording.summary.overview
+          ? `Resumo automático:\n${summaryText(recording.summary)}`
+          : "",
         `Transcrição:\n${transcriptText(transcript.speakers, transcript.segments)}`,
       ]
         .filter(Boolean)
         .join("\n\n");
       try {
-        const answer = await deps.ask(env, { system: MEETING_SYSTEM, context, messages }, meter);
+        const answer = await deps.ask(
+          env,
+          { system: MEETING_SYSTEM, context, messages },
+          meter,
+        );
         return { status: 200, body: { answer } };
       } finally {
-        await logUsage(env, deps.fetch, authorization, recording.client_id, recording.id, "ask", meter);
+        await logUsage(
+          env,
+          deps.fetch,
+          authorization,
+          {
+            company: recording.company_id,
+            client: recording.client_id,
+            recording: recording.id,
+          },
+          meter,
+        );
       }
-    }
-
-    if (!UUID.test(String(req.client ?? ""))) return fail(400, "Cliente inválido.");
-    const recordings = await select<{
-      id: string;
-      title: string;
-      recorded_at: string;
-      recorded_by_email: string;
-      summary: Summary;
-    }>(
-      env,
-      deps.fetch,
-      authorization,
-      `meeting_recordings?client_id=eq.${req.client}&select=id,title,recorded_at,recorded_by_email,summary&order=recorded_at.desc&limit=200`,
-    );
-    const usable = recordings.filter((r) => r.summary?.overview);
-    if (!usable.length)
-      return fail(404, "Este cliente ainda não tem reuniões com resumo.");
-    // Da mais antiga para a mais recente: [R1] é a primeira reunião.
-    const ordered = [...usable].reverse();
-    const context = ordered
-      .map(
-        (r, i) =>
-          `[R${i + 1}] ${date(r.recorded_at)} · ${r.summary.title || r.title || "sem título"} · gravada por ${r.recorded_by_email.split("@")[0]}\n${summaryText(r.summary)}`,
-      )
-      .join("\n\n");
-    try {
-      const answer = await deps.ask(env, { system: CLIENT_SYSTEM, context, messages }, meter);
-      return {
-        status: 200,
-        body: { answer, refs: ordered.map((r) => r.id) },
-      };
-    } finally {
-      await logUsage(env, deps.fetch, authorization, String(req.client), null, "ask_client", meter);
     }
   } catch (err) {
     return fail(err instanceof MeetingsError ? err.status : 500, friendly(err));

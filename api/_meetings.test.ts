@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
-  CLIENT_SYSTEM,
   MEETING_SYSTEM,
   clock,
   handleMeetings,
@@ -30,7 +29,10 @@ const client = "00000000-0000-4000-8000-000000000002";
 function database(routes: Record<string, unknown>) {
   const calls: { url: string; body: any }[] = [];
   const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
-    calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+    calls.push({
+      url,
+      body: init?.body ? JSON.parse(String(init.body)) : null,
+    });
     const key = Object.keys(routes).find((k) => url.includes(k));
     if (!key) return new Response("{}", { status: 404 });
     const value = routes[key];
@@ -68,7 +70,12 @@ describe("meeting-video", () => {
   it("assina o vídeo com o tipo certo, por 6 horas, depois do banco liberar", async () => {
     const { fetchImpl, calls } = database({
       "rpc/meeting_video_target": [
-        { bucket: "meet_recording", path: "k@x.com/R2 #mav.mp4", content_type: "video/mp4", title: "R2" },
+        {
+          bucket: "meet_recording",
+          path: "k@x.com/R2 #mav.mp4",
+          content_type: "video/mp4",
+          title: "R2",
+        },
       ],
     });
     const res = await handleMeetings(
@@ -83,23 +90,51 @@ describe("meeting-video", () => {
     expect(url.pathname).toBe("/meet_recording/k%40x.com/R2%20%23mav.mp4");
     expect(url.searchParams.get("X-Goog-Expires")).toBe("21600");
     expect(url.searchParams.get("response-content-type")).toBe("video/mp4");
-    expect(calls[0].body).toEqual({ p_recording: recording, p_origin: { ip: "1.2.3.4" } });
+    expect(calls[0].body).toEqual({
+      p_recording: recording,
+      p_origin: { ip: "1.2.3.4" },
+    });
   });
   it("não assina bucket fora da lista nem sem acesso", async () => {
     const other = database({
-      "rpc/meeting_video_target": [{ bucket: "outro", path: "a.mp4", content_type: null, title: "" }],
+      "rpc/meeting_video_target": [
+        { bucket: "outro", path: "a.mp4", content_type: null, title: "" },
+      ],
     });
     expect(
-      (await handleMeetings({ action: "meeting-video", recording }, "Bearer t", env, { fetch: other.fetchImpl, ask: vi.fn() })).status,
+      (
+        await handleMeetings(
+          { action: "meeting-video", recording },
+          "Bearer t",
+          env,
+          { fetch: other.fetchImpl, ask: vi.fn() },
+        )
+      ).status,
     ).toBe(404);
     const denied = database({
-      "rpc/meeting_video_target": new Response(JSON.stringify({ message: "Sem acesso a esta gravação." }), { status: 403 }),
+      "rpc/meeting_video_target": new Response(
+        JSON.stringify({ message: "Sem acesso a esta gravação." }),
+        { status: 403 },
+      ),
     });
-    const res = await handleMeetings({ action: "meeting-video", recording }, "Bearer t", env, { fetch: denied.fetchImpl, ask: vi.fn() });
-    expect(res).toEqual({ status: 403, body: { error: "Sem acesso a esta gravação." } });
+    const res = await handleMeetings(
+      { action: "meeting-video", recording },
+      "Bearer t",
+      env,
+      { fetch: denied.fetchImpl, ask: vi.fn() },
+    );
+    expect(res).toEqual({
+      status: 403,
+      body: { error: "Sem acesso a esta gravação." },
+    });
   });
   it("exige login", async () => {
-    const res = await handleMeetings({ action: "meeting-video", recording }, null, env, { fetch: vi.fn() as any, ask: vi.fn() });
+    const res = await handleMeetings(
+      { action: "meeting-video", recording },
+      null,
+      env,
+      { fetch: vi.fn() as any, ask: vi.fn() },
+    );
     expect(res.status).toBe(401);
   });
 });
@@ -107,10 +142,19 @@ describe("meeting-video", () => {
 describe("meeting-ask", () => {
   const routes = () => ({
     "meeting_recordings?id=eq.": [
-      { id: recording, client_id: client, title: "R2 4282", recorded_at: "2026-09-01T13:00:00Z", summary: { title: "Alinhamento", overview: "Verba." } },
+      {
+        id: recording,
+        company_id: "00000000-0000-4000-8000-0000000000aa",
+        client_id: client,
+        title: "R2 4282",
+        recorded_at: "2026-09-01T13:00:00Z",
+        summary: { title: "Alinhamento", overview: "Verba." },
+      },
     ],
-    "meeting_transcripts?recording_id=eq.": [{ speakers: ["Ana"], segments: [[65, 70, 0, "O orçamento é 10 mil."]] }],
-    "rpc/meeting_log_usage": null,
+    "meeting_transcripts?recording_id=eq.": [
+      { speakers: ["Ana"], segments: [[65, 70, 0, "O orçamento é 10 mil."]] },
+    ],
+    "rpc/ai_log_usage": null,
   });
   it("responde com a transcrição em contexto e registra o custo", async () => {
     const { fetchImpl, calls } = database(routes());
@@ -146,9 +190,20 @@ describe("meeting-ask", () => {
       env,
       { fetch: fetchImpl, ask },
     );
-    expect(res).toEqual({ status: 200, body: { answer: "Não foi falado prazo." } });
-    const usage = calls.find((c) => c.url.includes("meeting_log_usage"));
-    expect(usage?.body).toMatchObject({ p_client: client, p_recording: recording, p_kind: "ask", p_input: 1000, p_cost: 0.006 });
+    expect(res).toEqual({
+      status: 200,
+      body: { answer: "Não foi falado prazo." },
+    });
+    const usage = calls.find((c) => c.url.includes("ai_log_usage"));
+    expect(usage?.body).toMatchObject({
+      p_company: "00000000-0000-4000-8000-0000000000aa",
+      p_module: "meetings",
+      p_client: client,
+      p_recording: recording,
+      p_kind: "ask",
+      p_input: 1000,
+      p_cost: 0.006,
+    });
   });
   it("sem chave da API, avisa o que falta", async () => {
     const res = await handleMeetings(
@@ -162,33 +217,22 @@ describe("meeting-ask", () => {
   it("gravação que a pessoa não vê: não encontrada, sem chamar a IA", async () => {
     const { fetchImpl } = database({ "meeting_recordings?id=eq.": [] });
     const ask = vi.fn();
-    const res = await handleMeetings({ action: "meeting-ask", recording, question: "oi?" }, "Bearer t", env, { fetch: fetchImpl, ask });
+    const res = await handleMeetings(
+      { action: "meeting-ask", recording, question: "oi?" },
+      "Bearer t",
+      env,
+      { fetch: fetchImpl, ask },
+    );
     expect(res.status).toBe(404);
     expect(ask).not.toHaveBeenCalled();
   });
   it("pergunta vazia ou longa demais é recusada", async () => {
-    const res = await handleMeetings({ action: "meeting-ask", recording, question: " " }, "Bearer t", env, { fetch: vi.fn() as any, ask: vi.fn() });
+    const res = await handleMeetings(
+      { action: "meeting-ask", recording, question: " " },
+      "Bearer t",
+      env,
+      { fetch: vi.fn() as any, ask: vi.fn() },
+    );
     expect(res.status).toBe(400);
-  });
-});
-
-describe("meeting-ask-client", () => {
-  it("numera as reuniões da mais antiga para a mais recente e devolve os ids", async () => {
-    const { fetchImpl } = database({
-      "meeting_recordings?client_id=eq.": [
-        { id: "b", title: "R2", recorded_at: "2026-09-10T13:00:00Z", recorded_by_email: "ana@x.com", summary: { title: "Segunda", overview: "Depois." } },
-        { id: "sem", title: "", recorded_at: "2026-09-05T13:00:00Z", recorded_by_email: "ana@x.com", summary: {} },
-        { id: "a", title: "R1", recorded_at: "2026-09-01T13:00:00Z", recorded_by_email: "ana@x.com", summary: { title: "Primeira", overview: "Antes.", action_items: [{ owner: "Ana", description: "Enviar", deadline: "05/09" }] } },
-      ],
-      "rpc/meeting_log_usage": null,
-    });
-    const ask: MeetingsDeps["ask"] = vi.fn(async (_env, request) => {
-      expect(request.system).toBe(CLIENT_SYSTEM);
-      expect(request.context).toMatch(/^\[R1\] 01\/09\/2026 · Primeira · gravada por ana\nAntes\.\nPróximos passos:\n- Ana: Enviar \(05\/09\)/);
-      expect(request.context).toContain("[R2] 10/09/2026 · Segunda");
-      return "Na [R1] ficou combinado…";
-    });
-    const res = await handleMeetings({ action: "meeting-ask-client", client, question: "O que foi combinado?" }, "Bearer t", env, { fetch: fetchImpl, ask });
-    expect(res).toEqual({ status: 200, body: { answer: "Na [R1] ficou combinado…", refs: ["a", "b"] } });
   });
 });

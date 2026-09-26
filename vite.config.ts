@@ -45,8 +45,12 @@ function gcsDevPlugin() {
           await socialLeads(req, res);
           return;
         }
-        if (req.url?.startsWith("/api/drive")) {
-          // Same handler as the Vercel function (api/drive.ts).
+        if (
+          req.url?.startsWith("/api/drive") ||
+          req.url?.startsWith("/api/ai")
+        ) {
+          // Same handler as the Vercel function (api/drive.ts); /api/ai is
+          // rewritten to it on Vercel too.
           const { default: drive } =
             await server.ssrLoadModule("/api/drive.ts");
           await drive(req, res);

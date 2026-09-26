@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Clock, Search, Sparkles, Video, VideoOff, X } from "lucide-react";
+import { Clock, Search, Sparkles, X } from "lucide-react";
 import { Input, Loading, Select, SelectOption } from "./ui";
 import { Empty } from "./components";
 import { Paged } from "./Pagination";
 import { fold } from "./task-search";
+import { dateKey } from "./domain";
+import { askAi, openTaskSource } from "./ai";
 import type { Snapshot } from "./types";
 import type { FormPreset } from "./forms";
 import { AnswerText, ChatBox, MeetingPlayer } from "./MeetingPlayer";
 import {
-  askClientMeetings,
   clock,
   durationLabel,
   listMeetingRecordings,
@@ -19,12 +20,6 @@ import {
   type MeetingRecording,
 } from "./meetings";
 
-const PERIODS = [
-  { value: "all", label: "Todo o período" },
-  { value: "30", label: "Últimos 30 dias" },
-  { value: "90", label: "Últimos 90 dias" },
-  { value: "365", label: "Último ano" },
-];
 const CLIENT_SUGGESTIONS = [
   "O que já foi prometido ou combinado com este cliente?",
   "Quais problemas e reclamações apareceram ao longo das reuniões?",
@@ -65,7 +60,9 @@ export function MeetingRecordings({
   const [query, setQuery] = useState("");
   const [who, setWho] = useState("all");
   const [kind, setKind] = useState("all");
-  const [period, setPeriod] = useState("all");
+  // Período escolhido pela pessoa (aaaa-mm-dd; vazio: sem limite).
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [hits, setHits] = useState<MeetingHit[] | null>(null);
   const [asking, setAsking] = useState(false);
   const [open, setOpen] = useState<{
@@ -136,12 +133,12 @@ export function MeetingRecordings({
   );
   const folded = fold(text);
   const shown = useMemo(() => {
-    const since = period === "all" ? 0 : Date.now() - Number(period) * 86400000;
     return (list ?? []).filter(
       (r) =>
         (who === "all" || r.recorded_by_email === who) &&
         (kind === "all" || meetingKind(r.title) === kind) &&
-        (!since || new Date(r.recorded_at).getTime() >= since) &&
+        (!from || dateKey(new Date(r.recorded_at)) >= from) &&
+        (!to || dateKey(new Date(r.recorded_at)) <= to) &&
         (!folded ||
           fold(
             [
@@ -152,7 +149,7 @@ export function MeetingRecordings({
             ].join(" "),
           ).includes(folded)),
     );
-  }, [list, who, kind, period, folded]);
+  }, [list, who, kind, from, to, folded]);
   const byId = useMemo(
     () => new Map((list ?? []).map((r) => [r.id, r])),
     [list],
@@ -166,7 +163,7 @@ export function MeetingRecordings({
     return [...groups];
   }, [hits, byId]);
 
-  const filtering = who !== "all" || kind !== "all" || period !== "all";
+  const filtering = who !== "all" || kind !== "all" || !!from || !!to;
   const date = (iso: string) =>
     new Date(iso).toLocaleDateString("pt-BR", {
       day: "2-digit",
@@ -224,13 +221,44 @@ export function MeetingRecordings({
             </SelectOption>
           ))}
         </Select>
-        <Select aria-label="Período" value={period} onValueChange={setPeriod}>
-          {PERIODS.map((p) => (
-            <SelectOption key={p.value} value={p.value}>
-              {p.label}
-            </SelectOption>
-          ))}
-        </Select>
+        <div className="meetings-period" role="group" aria-label="Período">
+          <label>
+            De
+            <Input
+              type="date"
+              aria-label="Gravadas a partir de"
+              placeholder="dd/mm/aaaa"
+              value={from}
+              max={to || undefined}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </label>
+          <label>
+            Até
+            <Input
+              type="date"
+              aria-label="Gravadas até"
+              placeholder="dd/mm/aaaa"
+              value={to}
+              min={from || undefined}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </label>
+          {(from || to) && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Limpar período"
+              title="Limpar período"
+              onClick={() => {
+                setFrom("");
+                setTo("");
+              }}
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
         <button
           type="button"
           className={`btn ${asking ? "primary" : "secondary"}`}
@@ -252,8 +280,7 @@ export function MeetingRecordings({
         >
           <header>
             <strong>
-              <Sparkles size={15} /> IA sobre as {list.length} reuniões de{" "}
-              {clientName}
+              <Sparkles size={15} /> IA sobre o histórico de {clientName}
             </strong>
             <button
               type="button"
@@ -265,10 +292,11 @@ export function MeetingRecordings({
             </button>
           </header>
           <ClientChat
+            company={company}
             client={client}
-            onOpen={(id) => {
+            onOpen={(id, start) => {
               const r = byId.get(id);
-              if (r) setOpen({ recording: r });
+              if (r) setOpen({ recording: r, start });
             }}
           />
         </section>
@@ -339,7 +367,7 @@ export function MeetingRecordings({
           items={shown}
           pageSize={30}
           noun="gravações"
-          resetKey={[query, who, kind, period].join("|")}
+          resetKey={[query, who, kind, from, to].join("|")}
         >
           {(page) => (
             <ul className="meetings-list">
@@ -350,16 +378,7 @@ export function MeetingRecordings({
                     className="panel meeting-row"
                     onClick={() => setOpen({ recording: r })}
                   >
-                    <span
-                      className={`meeting-row-icon ${r.video_type ? "" : "off"}`}
-                      aria-hidden="true"
-                    >
-                      {r.video_type ? (
-                        <Video size={18} />
-                      ) : (
-                        <VideoOff size={18} />
-                      )}
-                    </span>
+                    <DateBadge iso={r.recorded_at} />
                     <span className="meeting-row-main">
                       <span className="meeting-row-top">
                         <strong>{meetingTitle(r)}</strong>
@@ -373,7 +392,7 @@ export function MeetingRecordings({
                         </span>
                       )}
                       <small>
-                        {date(r.recorded_at)} ·{" "}
+                        {weekdayTime(r.recorded_at)} ·{" "}
                         {memberName(r.recorded_by_email)}
                         {r.duration_seconds ? (
                           <>
@@ -411,7 +430,6 @@ export function MeetingRecordings({
           start={open.start}
           data={data}
           user={user}
-          isLeader={isLeader}
           clientName={clientName}
           notify={notify}
           onNewTask={onNewTask}
@@ -423,33 +441,65 @@ export function MeetingRecordings({
 }
 
 function ClientChat({
+  company,
   client,
   onOpen,
 }: {
+  company: string;
   client: string;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, start?: number) => void;
 }) {
-  // Cada resposta traz a lista de ids na ordem de [R1], [R2]…
-  const [refs, setRefs] = useState<string[]>([]);
   return (
     <ChatBox
-      intro="A IA lê os resumos de todas as reuniões deste cliente e cita de qual reunião veio cada informação. Clique na citação para abrir a gravação."
+      intro="A IA busca nas transcrições e nos resumos de todas as reuniões deste cliente (e nas tarefas dele) e mostra de onde tirou cada informação. Clique na fonte para abrir a gravação no minuto ou a tarefa."
       placeholder="Pergunte sobre o histórico deste cliente"
       suggestions={CLIENT_SUGGESTIONS}
-      ask={async (q, history) => {
-        const { answer, refs } = await askClientMeetings(client, q, history);
-        setRefs(refs);
-        return answer;
-      }}
-      renderAnswer={(text) => (
+      thinking="Buscando nas reuniões e tarefas…"
+      ask={(q, history) =>
+        askAi(company, { client, module: "meetings" }, q, history)
+      }
+      renderAnswer={(text, sources) => (
         <AnswerText
           text={text}
-          onRef={(n) => {
-            const id = refs[n - 1];
-            if (id) onOpen(id);
-          }}
+          sources={sources}
+          onSource={(s) =>
+            s.type === "meeting" ? onOpen(s.id, s.start) : openTaskSource(s)
+          }
         />
       )}
     />
   );
+}
+
+/** Dia e mês da gravação (o ano só quando não é o atual). */
+function DateBadge({ iso }: { iso: string }) {
+  const d = new Date(iso);
+  const part = (o: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      ...o,
+    }).format(d);
+  const year = part({ year: "numeric" });
+  return (
+    <span
+      className="meeting-date"
+      aria-label={part({ day: "numeric", month: "long", year: "numeric" })}
+    >
+      <strong>{part({ day: "2-digit" })}</strong>
+      <span>{part({ month: "short" }).replace(".", "")}</span>
+      {year !== String(new Date().getFullYear()) && <small>{year}</small>}
+    </span>
+  );
+}
+
+/** "ter, 14:00". */
+function weekdayTime(iso: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+    .format(new Date(iso))
+    .replace(".", "");
 }

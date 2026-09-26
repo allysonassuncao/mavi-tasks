@@ -113,6 +113,20 @@ Antes do primeiro deploy, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLIS
 | `ADS_SYNC_SECRET`                                  | Segredo aleatório (32+ caracteres) com que o banco chama `/api/ads-sync` (sincronização diária de Campanhas)                                                          |
 | `ANTHROPIC_API_KEY`                                | Chave da API da Claude (console.anthropic.com), usada pelo Social Leads para escrever e ajustar o plano do mês (`/api/social-leads`). Cobrada por uso                 |
 | `SOCIAL_LEADS_MODEL`                               | Opcional. Padrão: `claude-opus-5`                                                                                                                                     |
+| `OPENAI_API_KEY`                                   | Chave da OpenAI, usada só para os vetores (embeddings) da IA do MAVI: indexação e busca. Cobrada por uso                                                              |
+| `AI_WORKER_SECRET`                                 | Segredo aleatório (32+ caracteres) com que o banco chama `/api/ai` para indexar; o mesmo valor vai em `mavi_private.ai_config`                                        |
+| `AI_MODEL`, `AI_EMBEDDING_MODEL`                   | Opcionais. Padrões: `claude-opus-5` (respostas) e `text-embedding-3-small` (vetores; trocar exige reindexar)                                                          |
+
+### IA do MAVI (base de conhecimento)
+
+A IA responde sobre os clientes buscando no que está no sistema, em vez de ler tudo (migração `20261021090000_ai_knowledge`):
+
+- **Base**: cada reunião gravada e cada tarefa (descrição, campos e comentários) vira trechos com cabeçalho de contexto, índice de texto completo e vetor (`halfvec(1536)`, índice HNSW). A busca `ai_search` é híbrida (vetor + texto, fundidos por RRF) e já sai filtrada pelas permissões de quem pergunta (regra do Drive para reuniões, visibilidade de tarefas para tarefas).
+- **Indexação sem polling**: triggers por instrução colocam o item mudado numa fila; a cada minuto o pg_cron (`mavi_private.ai_kick`) acorda o worker (`/api/ai`, ação `ai-index`) só se houver trabalho. O worker refaz os trechos no banco apenas quando o texto mudou (hash) e gera os vetores em lotes; vários workers não repetem trabalho. Status, responsável e prazo de tarefas vêm ao vivo na busca, então mudar o status não gera custo.
+- **Agente**: `/api/ai` (ação `ai-ask`) dá ao modelo o contexto (quem pergunta, cliente, produtos, projetos, data) e ferramentas neutras em JSON Schema (`search_knowledge`, `read_more`, `list_meetings`, `list_tasks`, em `api/_ai-tools.ts`). O modelo fica atrás de um adaptador (`api/_ai-llm.ts`, hoje Claude); os vetores, em `api/_ai-embeddings.ts` (hoje OpenAI). As respostas citam fontes `[S#]` que abrem a reunião no minuto ou a tarefa.
+- **Custo**: toda pergunta e toda indexação entram em `ai_usage` (empresa, pessoa, módulo, cliente, produto, projeto, tokens e dólares).
+
+Para ligar: aplicar a migração (ela já coloca todo o histórico na fila), configurar `OPENAI_API_KEY` e `AI_WORKER_SECRET` na Vercel e fazer redeploy; depois, no banco, `insert into mavi_private.ai_config(url, secret) values ('https://<domínio>/api/ai', '<AI_WORKER_SECRET>')` e rodar `supabase/operations/schedule-ai-index.sql`. Testes: `npm run test:db:ai` e `npx vitest run api/_ai.test.ts`.
 
 ### Agenda (Google Agenda)
 

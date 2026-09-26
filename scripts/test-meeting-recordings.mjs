@@ -528,42 +528,50 @@ await check("gravações novas: um aviso por cliente em cada envio", async () =>
 });
 
 await check(
-  "custo da IA: só registra para quem vê o cliente; só líderes leem",
+  "custo da IA (tabela geral ai_usage): só registra para quem vê o cliente; só líderes leem",
   async () => {
     await as(teamMember);
-    await rpc("meeting_log_usage", [
-      client,
-      recording,
+    await rpc("ai_log_usage", [
+      A,
+      "meetings",
       "ask",
-      "claude-sonnet-5",
+      client,
+      null,
+      null,
+      recording,
+      "claude-opus-5",
       1000,
       200,
+      0,
       0,
       0,
       0.004,
     ]);
     await assert.rejects(
       () =>
-        rpc("meeting_log_usage", [
+        rpc("ai_log_usage", [
+          A,
+          "meetings",
+          "ask",
           other,
           null,
-          "ask_client",
+          null,
+          null,
           "m",
           1,
           1,
+          0,
           0,
           0,
           0.1,
         ]),
       /Sem permissão/,
     );
-    assert.equal(
-      (await db.query(`select 1 from meeting_ai_usage`)).rows.length,
-      0,
-    );
+    assert.equal((await db.query(`select 1 from ai_usage`)).rows.length, 0);
     await as(admin);
     assert.equal(
-      (await db.query(`select 1 from meeting_ai_usage`)).rows.length,
+      (await db.query(`select 1 from ai_usage where recording_id is not null`))
+        .rows.length,
       1,
     );
   },

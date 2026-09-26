@@ -37,6 +37,7 @@ export function DateInput({
   "aria-label": ariaLabel,
   min,
   max,
+  placeholder,
 }: ComponentProps<"input">) {
   const [internal, setInternal] = useState(String(defaultValue ?? ""));
   const [open, setOpen] = useState(false);
@@ -72,7 +73,7 @@ export function DateInput({
             })
           : validDate.toLocaleDateString("pt-BR")) +
         (type === "datetime-local" ? ` às ${current.slice(11, 16)}` : "")
-      : "Selecionar data";
+      : (placeholder ?? "Selecionar data");
   return (
     <span className="date-control">
       <input
@@ -111,6 +112,7 @@ export function DateInput({
             type="button"
             disabled={disabled}
             className="ui-date"
+            data-empty={!current || undefined}
             aria-label={
               ariaLabel ??
               `${({ due: "Prazo", start_date: "Início planejado", start: "Início do período", end: "Fim do período" } as Record<string, string>)[name ?? ""] ?? "Data"}: ${label}`
