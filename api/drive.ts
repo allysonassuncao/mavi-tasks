@@ -2,8 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleDrive, type DriveEnv, type GcsCredentials } from "./_drive.js";
-import { claudeAsk, handleMeetings, meetingsEnv } from "./_meetings.js";
-import { aiDeps, aiEnv, handleAi } from "./_ai.js";
+import {
+  claudeAsk,
+  handleMeetings,
+  meetingsEnv,
+  streamMeetingAsk,
+} from "./_meetings.js";
+import { aiDeps, aiEnv, handleAi, streamAi } from "./_ai.js";
 
 function credentials(): GcsCredentials | null {
   if (process.env.GCS_CREDENTIALS)
@@ -65,6 +70,27 @@ export default async function handler(
     const authorization =
       (req.headers["authorization"] as string | undefined) ?? null;
     const action = typeof body?.action === "string" ? body.action : "";
+    // Perguntas à IA em tempo real: uma linha JSON por evento (passos,
+    // raciocínio, texto) até "done" ou "error".
+    if (body?.stream && (action === "ai-ask" || action === "meeting-ask")) {
+      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.statusCode = 200;
+      const write = (event: unknown) => res.write(`${JSON.stringify(event)}\n`);
+      if (action === "ai-ask") {
+        const env = aiEnv(driveEnv());
+        await streamAi(body, authorization, env, aiDeps(env), write);
+      } else
+        await streamMeetingAsk(
+          body,
+          authorization,
+          meetingsEnv(driveEnv()),
+          { fetch, ask: claudeAsk },
+          write,
+        );
+      res.end();
+      return;
+    }
     // Gravações da MAVI e a IA (/api/ai é reescrito para cá) vivem na mesma
     // função: o plano Hobby da Vercel limita o número de funções.
     let result: { status: number; body: unknown };

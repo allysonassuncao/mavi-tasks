@@ -37,6 +37,7 @@ import {
   Clock3,
   ChartNoAxesCombined,
   Database,
+  Sparkles,
   HardDrive,
   PanelsTopLeft,
   Megaphone,
@@ -155,6 +156,8 @@ import { ClientPortfolio } from "./ClientPortfolio";
 import { ProjectsBrowser } from "./ProjectsBrowser";
 import { TeamForm } from "./TeamForm";
 import { Drive } from "./DrivePage";
+import { AiAssistant } from "./AiAssistant";
+import { AiUsagePage } from "./AiUsagePage";
 import { CampaignsPage } from "./CampaignsPage";
 import { StoragePage } from "./StoragePage";
 import { CompanyLogoDialog, WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -220,6 +223,7 @@ const navigation = [
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
   { id: "storage", label: "Armazenamento", icon: Database },
+  { id: "aiUsage", label: "Consumo de IA", icon: Sparkles },
   { id: "dashboards", label: "Dashboards", icon: PanelsTopLeft },
 ] as const;
 // Mutations that return the affected row (see the RPCs in
@@ -2028,6 +2032,8 @@ export default function App() {
                         "Arquivos da equipe, privados ou compartilhados por link.",
                       storage:
                         "Quanto espaço os arquivos enviados ocupam, na agência, por pessoa e por cliente.",
+                      aiUsage:
+                        "Quanto a IA custou, por pessoa, cliente, produto e projeto, e os limites de gasto de cada um.",
                       dashboards:
                         "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
                       profile: "Seu nome, sua foto e sua senha.",
@@ -2057,6 +2063,7 @@ export default function App() {
                   page !== "campaigns" &&
                   page !== "onboarding" &&
                   page !== "storage" &&
+                  page !== "aiUsage" &&
                   page !== "dashboards" &&
                   page !== "settings" &&
                   (!["products", "contracts", "clients", "projects"].includes(
@@ -3027,6 +3034,14 @@ export default function App() {
                   />
                 </Suspense>
               )}
+              {page === "aiUsage" && isLeader && (
+                <AiUsagePage
+                  key={company}
+                  company={company}
+                  data={catalogData}
+                  notify={notify}
+                />
+              )}
               {page === "storage" && isLeader && (
                 <StoragePage
                   key={company}
@@ -3360,6 +3375,16 @@ export default function App() {
           </footer>
         </main>
       </div>
+      {!demo && company && member && (
+        <AiAssistant
+          key={company}
+          company={company}
+          data={catalogData}
+          user={user}
+          location={location}
+          notify={notify}
+        />
+      )}
       {toast && (
         <div className="toast" role="status">
           <Check size={17} />

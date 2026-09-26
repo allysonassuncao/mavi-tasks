@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDescription, richTextPlain } from "./rich-text";
+import { hidePartial } from "./AiChat";
 import {
   answerPieces,
   deadlineDate,
@@ -91,5 +92,17 @@ describe("apresentação das gravações", () => {
       { kind: "source", ref: "S2" },
       { kind: "text", text: "." },
     ]);
+  });
+});
+
+describe("resposta digitando", () => {
+  it("esconde citação, negrito e asterisco pela metade", () => {
+    expect(hidePartial("o **Andrey** fez [S")).toBe("o **Andrey** fez ");
+    expect(hidePartial("até **sexta-feira (19/09)** [S")).toBe(
+      "até **sexta-feira (19/09)** ",
+    );
+    expect(hidePartial("até **sexta")).toBe("até ");
+    expect(hidePartial("até *")).toBe("até ");
+    expect(hidePartial("pronto [S1].")).toBe("pronto [S1].");
   });
 });

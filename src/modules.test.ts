@@ -38,6 +38,7 @@ describe("módulos visíveis por pessoa", () => {
       "reports",
       "drive",
       "storage",
+      "aiUsage",
       "dashboards",
     ];
     expect(canOpenPage("profile", "member", all)).toBe(true);

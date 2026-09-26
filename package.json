@@ -15,6 +15,7 @@
     "test:db:drive": "node scripts/test-drive-sharing.mjs",
     "test:db:meetings": "node scripts/test-meeting-recordings.mjs",
     "test:db:ai": "node scripts/test-ai-knowledge.mjs",
+    "test:db:ai-assistant": "node scripts/test-ai-assistant.mjs",
     "test:db:templates": "node scripts/test-task-templates.mjs",
     "test:db:assign-team": "node scripts/test-assign-to-team.mjs",
     "test:db:recurrence": "node scripts/test-task-recurrence.mjs",

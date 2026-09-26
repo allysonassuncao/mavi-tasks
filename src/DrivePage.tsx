@@ -52,6 +52,7 @@ import { FileViewer } from "./FileViewer";
 import { MeetingRecordings } from "./MeetingRecordings";
 import { countMeetingRecordings, meetingRecording } from "./meetings";
 import { navigate } from "./router";
+import { setAiPlace } from "./ai";
 import type { FormPreset } from "./forms";
 import {
   createDriveFolder,
@@ -280,6 +281,18 @@ function DriveTree({
   } | null>(null);
   const showsProducts =
     !!at.client && !at.contract && !at.folder && !at.recordings;
+  // O assistente de IA começa no cliente aberto aqui.
+  const placeName = at.client
+    ? (data.clients.find((c) => c.id === at.client)?.name ?? "")
+    : "";
+  useEffect(() => {
+    if (!at.client) {
+      setAiPlace(null);
+      return;
+    }
+    setAiPlace({ client: at.client, label: placeName });
+    return () => setAiPlace(null);
+  }, [at.client, placeName]);
   useEffect(() => {
     setRecordingCount(0);
     if (!showsProducts || !at.client) return;

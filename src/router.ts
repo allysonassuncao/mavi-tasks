@@ -15,6 +15,7 @@ export const pagePaths = {
   reports: "/relatorios",
   drive: "/drive",
   storage: "/armazenamento",
+  aiUsage: "/consumo-ia",
   dashboards: "/dashboards",
   profile: "/perfil",
   settings: "/configuracoes",

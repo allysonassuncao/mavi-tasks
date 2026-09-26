@@ -3,6 +3,7 @@ import { fetchAllRows, rpc } from "./api";
 import { driveServer } from "./drive";
 import { routeParts, pageUrl } from "./router";
 import { serializeDescription, type RichNode } from "./rich-text";
+import { streamAnswer, type AiStreamHandlers } from "./ai";
 
 /**
  * Drive › cliente › "Gravações da MAVI": reuniões gravadas e transcritas
@@ -132,18 +133,18 @@ export async function meetingVideoUrl(recording: string) {
   });
   return url;
 }
-export async function askMeeting(
+/** Pergunta sobre uma reunião (a transcrição inteira), em tempo real. */
+export function askMeeting(
   recording: string,
   question: string,
   history: ChatTurn[],
+  handlers: AiStreamHandlers = {},
 ) {
-  const { answer } = await driveServer<{ answer: string }>({
-    action: "meeting-ask",
-    recording,
-    question,
-    history,
-  });
-  return answer;
+  return streamAnswer(
+    "/api/drive",
+    { action: "meeting-ask", recording, question, history },
+    handlers,
+  );
 }
 
 // ------------------------------------------------------------ apresentação

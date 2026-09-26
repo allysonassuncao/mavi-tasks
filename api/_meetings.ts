@@ -56,7 +56,12 @@ export type AskRequest = {
 export type MeetingsDeps = {
   fetch: Fetch;
   /** A chamada à Claude, trocada nos testes. */
-  ask: (env: MeetingsEnv, request: AskRequest, meter: Meter) => Promise<string>;
+  ask: (
+    env: MeetingsEnv,
+    request: AskRequest,
+    meter: Meter,
+    onEvent?: (e: { type: "thinking" | "text"; text: string }) => void,
+  ) => Promise<string>;
 };
 
 export type MeetingsRequest =
@@ -185,27 +190,33 @@ export async function claudeAsk(
   env: MeetingsEnv,
   request: AskRequest,
   meter: Meter,
+  onEvent?: (e: { type: "thinking" | "text"; text: string }) => void,
 ): Promise<string> {
   const client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2 });
-  const message = await client.beta.messages
-    .stream({
-      model: env.model,
-      max_tokens: 16000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      thinking: { type: "adaptive" },
-      output_config: { effort: "medium" },
-      system: [
-        { type: "text", text: request.system },
-        {
-          type: "text",
-          text: request.context,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: request.messages,
-    })
-    .finalMessage();
+  const stream = client.beta.messages.stream({
+    model: env.model,
+    max_tokens: 16000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    thinking: { type: "adaptive", display: "summarized" },
+    output_config: { effort: "medium" },
+    system: [
+      { type: "text", text: request.system },
+      {
+        type: "text",
+        text: request.context,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: request.messages,
+  });
+  if (onEvent) {
+    stream.on("thinking", (delta) =>
+      onEvent({ type: "thinking", text: delta }),
+    );
+    stream.on("text", (delta) => onEvent({ type: "text", text: delta }));
+  }
+  const message = await stream.finalMessage();
   addUsage(meter, message.model, message.usage);
   if (message.stop_reason === "refusal")
     throw new MeetingsError(
@@ -342,73 +353,138 @@ export async function handleMeetings(
   }
 
   if (req.action !== "meeting-ask") return fail(400, "Ação inválida.");
+  try {
+    const answer = await meetingAsk(req, authorization, env, deps, () => {});
+    return { status: 200, body: { answer } };
+  } catch (err) {
+    return fail(err instanceof MeetingsError ? err.status : 500, friendly(err));
+  }
+}
+
+type MeetingEvent =
+  | {
+      type: "step";
+      id: string;
+      label: string;
+      state: "running" | "done";
+      detail?: string;
+    }
+  | { type: "thinking" | "text"; text: string }
+  | { type: "done"; answer: string; sources: []; conversation: null }
+  | { type: "error"; error: string; status: number };
+
+/** Pergunta sobre uma reunião: a transcrição inteira em contexto (em cache). */
+async function meetingAsk(
+  req: Record<string, unknown>,
+  authorization: string,
+  env: MeetingsEnv,
+  deps: MeetingsDeps,
+  emit: (e: MeetingEvent) => void,
+): Promise<string> {
   if (!env.anthropicKey)
-    return fail(
+    throw new MeetingsError(
       503,
       "A IA não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY. Depois de salvar, faça um Redeploy.",
     );
+  const messages = conversation(req.question, req.history);
+  if (!UUID.test(String(req.recording ?? "")))
+    throw new MeetingsError(400, "Gravação inválida.");
+  emit({
+    type: "step",
+    id: "read",
+    label: "Lendo a transcrição da reunião",
+    state: "running",
+  });
+  const [recording] = await select<{
+    id: string;
+    company_id: string;
+    client_id: string;
+    title: string;
+    recorded_at: string;
+    summary: Summary;
+  }>(
+    env,
+    deps.fetch,
+    authorization,
+    `meeting_recordings?id=eq.${req.recording}&select=id,company_id,client_id,title,recorded_at,summary`,
+  );
+  if (!recording) throw new MeetingsError(404, "Gravação não encontrada.");
+  const [transcript] = await select<{
+    speakers: string[];
+    segments: Segment[];
+  }>(
+    env,
+    deps.fetch,
+    authorization,
+    `meeting_transcripts?recording_id=eq.${req.recording}&select=speakers,segments`,
+  );
+  if (!transcript?.segments.length)
+    throw new MeetingsError(404, "Esta reunião não tem transcrição.");
+  emit({
+    type: "step",
+    id: "read",
+    label: "Transcrição lida",
+    state: "done",
+    detail: `${transcript.segments.length} falas`,
+  });
+  const context = [
+    `Reunião: ${recording.summary.title || recording.title || "sem título"} (${date(recording.recorded_at)})`,
+    recording.summary.overview
+      ? `Resumo automático:\n${summaryText(recording.summary)}`
+      : "",
+    `Transcrição:\n${transcriptText(transcript.speakers, transcript.segments)}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const meter = newMeter(env.model);
   try {
-    const messages = conversation(req.question, req.history);
-    const meter = newMeter(env.model);
-    {
-      if (!UUID.test(String(req.recording ?? "")))
-        return fail(400, "Gravação inválida.");
-      const [recording] = await select<{
-        id: string;
-        company_id: string;
-        client_id: string;
-        title: string;
-        recorded_at: string;
-        summary: Summary;
-      }>(
-        env,
-        deps.fetch,
-        authorization,
-        `meeting_recordings?id=eq.${req.recording}&select=id,company_id,client_id,title,recorded_at,summary`,
-      );
-      if (!recording) return fail(404, "Gravação não encontrada.");
-      const [transcript] = await select<{
-        speakers: string[];
-        segments: Segment[];
-      }>(
-        env,
-        deps.fetch,
-        authorization,
-        `meeting_transcripts?recording_id=eq.${req.recording}&select=speakers,segments`,
-      );
-      if (!transcript?.segments.length)
-        return fail(404, "Esta reunião não tem transcrição.");
-      const context = [
-        `Reunião: ${recording.summary.title || recording.title || "sem título"} (${date(recording.recorded_at)})`,
-        recording.summary.overview
-          ? `Resumo automático:\n${summaryText(recording.summary)}`
-          : "",
-        `Transcrição:\n${transcriptText(transcript.speakers, transcript.segments)}`,
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-      try {
-        const answer = await deps.ask(
-          env,
-          { system: MEETING_SYSTEM, context, messages },
-          meter,
-        );
-        return { status: 200, body: { answer } };
-      } finally {
-        await logUsage(
-          env,
-          deps.fetch,
-          authorization,
-          {
-            company: recording.company_id,
-            client: recording.client_id,
-            recording: recording.id,
-          },
-          meter,
-        );
-      }
-    }
+    return await deps.ask(
+      env,
+      { system: MEETING_SYSTEM, context, messages },
+      meter,
+      emit,
+    );
+  } finally {
+    await logUsage(
+      env,
+      deps.fetch,
+      authorization,
+      {
+        company: recording.company_id,
+        client: recording.client_id,
+        recording: recording.id,
+      },
+      meter,
+    );
+  }
+}
+
+/** A pergunta sobre a reunião em tempo real (uma linha JSON por evento). */
+export async function streamMeetingAsk(
+  body: unknown,
+  authorization: string | null,
+  env: MeetingsEnv,
+  deps: MeetingsDeps,
+  write: (e: MeetingEvent) => void,
+) {
+  if (!authorization?.startsWith("Bearer ")) {
+    write({ type: "error", error: "Autenticação necessária.", status: 401 });
+    return;
+  }
+  try {
+    const answer = await meetingAsk(
+      (body ?? {}) as Record<string, unknown>,
+      authorization,
+      env,
+      deps,
+      write,
+    );
+    write({ type: "done", answer, sources: [], conversation: null });
   } catch (err) {
-    return fail(err instanceof MeetingsError ? err.status : 500, friendly(err));
+    write({
+      type: "error",
+      error: friendly(err),
+      status: err instanceof MeetingsError ? err.status : 500,
+    });
   }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clock, Search, Sparkles, X } from "lucide-react";
 import { Input, Loading, Select, SelectOption } from "./ui";
 import { Empty } from "./components";
@@ -8,7 +8,8 @@ import { dateKey } from "./domain";
 import { askAi, openTaskSource } from "./ai";
 import type { Snapshot } from "./types";
 import type { FormPreset } from "./forms";
-import { AnswerText, ChatBox, MeetingPlayer } from "./MeetingPlayer";
+import { MeetingPlayer } from "./MeetingPlayer";
+import { AiChat, AnswerText } from "./AiChat";
 import {
   clock,
   durationLabel,
@@ -449,15 +450,23 @@ function ClientChat({
   client: string;
   onOpen: (id: string, start?: number) => void;
 }) {
+  // A conversa fica salva (aparece também no histórico do assistente).
+  const conversation = useRef<string | null>(null);
   return (
-    <ChatBox
+    <AiChat
       intro="A IA busca nas transcrições e nos resumos de todas as reuniões deste cliente (e nas tarefas dele) e mostra de onde tirou cada informação. Clique na fonte para abrir a gravação no minuto ou a tarefa."
       placeholder="Pergunte sobre o histórico deste cliente"
       suggestions={CLIENT_SUGGESTIONS}
-      thinking="Buscando nas reuniões e tarefas…"
-      ask={(q, history) =>
-        askAi(company, { client, module: "meetings" }, q, history)
+      send={(q, _history, handlers) =>
+        askAi(
+          company,
+          { client, module: "meetings" },
+          q,
+          conversation.current,
+          handlers,
+        )
       }
+      onAnswer={(a) => (conversation.current = a.conversation)}
       renderAnswer={(text, sources) => (
         <AnswerText
           text={text}

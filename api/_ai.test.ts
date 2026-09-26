@@ -3,8 +3,9 @@ import {
   citedSources,
   handleAi,
   runIndexer,
-  type AiDeps,
+  streamAi,
   type AiEnv,
+  type AiStreamEvent,
 } from "./_ai";
 import { openAiEmbedder, vectorLiteral } from "./_ai-embeddings";
 import type { AgentRequest, LlmAdapter } from "./_ai-llm";
@@ -404,3 +405,201 @@ describe("embeddings da OpenAI", () => {
     ).rejects.toThrow(/OPENAI_API_KEY/);
   });
 });
+
+describe("pergunta em tempo real (fase 2)", () => {
+  const base = () => ({
+    "memberships?": [
+      {
+        user_id: me,
+        name: "Ana Admin",
+        email: "ana@x.com",
+        role: "admin",
+        active: true,
+      },
+    ],
+    "clients?": [{ id: client, name: "4282" }],
+    "contracts?select=id,name,archived,products": [],
+    "rpc/ai_check_limits": {
+      blocked: false,
+      message: null,
+      warnings: ["O uso de IA deste cliente está em 85% do limite do mês."],
+    },
+    "rpc/ai_search": [
+      {
+        chunk_id: 1,
+        source_type: "meeting",
+        source_id: "m1",
+        title: "Alinhamento",
+        content: "[Reunião]\n[01:00] Ana: verba de 3 mil",
+        meta: { start: 60 },
+        client_id: client,
+        occurred_at: "2026-09-10T13:00:00Z",
+        task_status: null,
+        task_assignee: null,
+        task_due: null,
+      },
+    ],
+    "rpc/ai_save_turn": "00000000-0000-4000-8000-0000000000c1",
+    "rpc/ai_log_usage": null,
+  });
+  const llm: LlmAdapter = async (request) => {
+    request.onEvent?.({ type: "thinking", text: "Vou procurar a verba." });
+    request.onEvent?.({ type: "text", text: "Vou buscar." });
+    request.onEvent?.({ type: "round_end", tools: 1 });
+    await request.execute("search_knowledge", { query: "verba" });
+    request.onEvent?.({ type: "text", text: "A verba é 3 mil [S1]." });
+    return {
+      text: "A verba é 3 mil [S1].",
+      meter: newMeter("claude-opus-5"),
+      rounds: 1,
+    };
+  };
+
+  it("mostra cada passo, repassa raciocínio e texto, avisa o limite e salva a conversa", async () => {
+    const { fetchImpl, calls } = database(base());
+    const events: AiStreamEvent[] = [];
+    await streamAi(
+      {
+        action: "ai-ask",
+        company,
+        scope: { client, module: "assistant" },
+        question: "Qual a verba?",
+      },
+      token(me),
+      env,
+      {
+        fetch: fetchImpl,
+        llm,
+        embed: async () => ({
+          vectors: [vec()],
+          tokens: 3,
+          model: "text-embedding-3-small",
+        }),
+      },
+      (e) => events.push(e),
+    );
+    const kinds = events.map((e) =>
+      e.type === "step" ? `step:${e.id}:${e.state}` : e.type,
+    );
+    expect(kinds).toEqual([
+      "step:ctx:running",
+      "warning",
+      "step:ctx:done",
+      "thinking",
+      "text",
+      "round_end",
+      "step:t1:running",
+      "step:t1:done",
+      "text",
+      "done",
+    ]);
+    const tool = events.find(
+      (e) => e.type === "step" && e.id === "t1" && e.state === "done",
+    );
+    expect(tool).toMatchObject({
+      label: "Buscando “verba” nas reuniões e tarefas",
+      detail: "1 trecho encontrado",
+    });
+    const done = events.at(-1) as Extract<AiStreamEvent, { type: "done" }>;
+    expect(done.conversation).toBe("00000000-0000-4000-8000-0000000000c1");
+    expect(done.sources.map((x) => x.ref)).toEqual(["S1"]);
+    const save = calls.find((c) => c.url.includes("ai_save_turn"))!;
+    expect(save.body).toMatchObject({
+      p_company: company,
+      p_conversation: null,
+      p_scope: { client },
+      p_module: "assistant",
+      p_question: "Qual a verba?",
+      p_answer: "A verba é 3 mil [S1].",
+      p_steps: [
+        {
+          label: "Buscando “verba” nas reuniões e tarefas",
+          detail: "1 trecho encontrado",
+        },
+      ],
+    });
+  });
+
+  it("limite atingido: para antes de chamar a IA", async () => {
+    const { fetchImpl } = database({
+      ...base(),
+      "rpc/ai_check_limits": {
+        blocked: true,
+        message: "O limite mensal de IA da empresa (US$ 10,00) foi atingido.",
+        warnings: [],
+      },
+    });
+    const events: AiStreamEvent[] = [];
+    const spy = vi.fn(llm);
+    await streamAi(
+      { action: "ai-ask", company, scope: {}, question: "Oi?" },
+      token(me),
+      env,
+      { fetch: fetchImpl, llm: spy, embed: vi.fn() },
+      (e) => events.push(e),
+    );
+    expect(spy).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual({
+      type: "error",
+      error: "O limite mensal de IA da empresa (US$ 10,00) foi atingido.",
+      status: 429,
+    });
+  });
+
+  it("continua uma conversa salva com o histórico do banco; só quem começou continua", async () => {
+    const conversation = "00000000-0000-4000-8000-0000000000c1";
+    const { fetchImpl } = database({
+      ...base(),
+      "ai_conversations?": [{ owner_id: me }],
+      "ai_messages?": [
+        { role: "assistant", content: "A verba é 3 mil [S1]." },
+        { role: "user", content: "Qual a verba?" },
+      ],
+    });
+    let seen: ChatTurnLike[] = [];
+    const capture: LlmAdapter = async (request) => {
+      seen = request.messages;
+      return { text: "Sim.", meter: newMeter("claude-opus-5"), rounds: 0 };
+    };
+    await handleAi(
+      {
+        action: "ai-ask",
+        company,
+        scope: {},
+        question: "E em outubro?",
+        conversation,
+      },
+      token(me),
+      env,
+      { fetch: fetchImpl, llm: capture, embed: vi.fn() },
+    );
+    expect(seen).toEqual([
+      { role: "user", content: "Qual a verba?" },
+      { role: "assistant", content: "A verba é 3 mil ." },
+      { role: "user", content: "E em outubro?" },
+    ]);
+    const other = database({
+      ...base(),
+      "ai_conversations?": [{ owner_id: "someone-else" }],
+      "ai_messages?": [],
+    });
+    const res = await handleAi(
+      {
+        action: "ai-ask",
+        company,
+        scope: {},
+        question: "E em outubro?",
+        conversation,
+      },
+      token(me),
+      env,
+      { fetch: other.fetchImpl, llm: capture, embed: vi.fn() },
+    );
+    expect(res).toEqual({
+      status: 403,
+      body: { error: "Só quem começou a conversa continua nela." },
+    });
+  });
+});
+
+type ChatTurnLike = { role: "user" | "assistant"; content: string };

@@ -18,6 +18,17 @@ export type ToolSpec = {
   parameters: Record<string, unknown>;
 };
 export type ChatTurn = { role: "user" | "assistant"; content: string };
+/**
+ * O que o modelo está fazendo, em tempo real (para a tela mostrar):
+ * - thinking: um pedaço do resumo do raciocínio;
+ * - text: um pedaço do texto desta rodada;
+ * - round_end: a rodada terminou chamando ferramentas — o texto dela era
+ *   um comentário de trabalho, não a resposta.
+ */
+export type AgentEvent =
+  | { type: "thinking"; text: string }
+  | { type: "text"; text: string }
+  | { type: "round_end"; tools: number };
 export type AgentRequest = {
   /** Instruções fixas (ficam em cache). */
   instructions: string;
@@ -30,6 +41,7 @@ export type AgentRequest = {
   /** Rodadas de ferramentas antes de exigir a resposta. */
   maxRounds?: number;
   signal?: AbortSignal;
+  onEvent?: (event: AgentEvent) => void;
 };
 export type AgentResult = { text: string; meter: Meter; rounds: number };
 export type LlmAdapter = (request: AgentRequest) => Promise<AgentResult>;
@@ -68,31 +80,38 @@ export function anthropicAdapter(env: AnthropicEnv): LlmAdapter {
     const maxRounds = request.maxRounds ?? 6;
     for (let round = 0; ; round++) {
       const last = round >= maxRounds;
-      const message = await client.beta.messages
-        .stream(
-          {
-            model: env.model,
-            max_tokens: 16000,
-            betas: ["server-side-fallback-2026-07-01"],
-            fallbacks: "default",
-            thinking: { type: "adaptive" },
-            output_config: { effort: "medium" },
-            system: [
-              {
-                type: "text",
-                text: request.instructions,
-                cache_control: { type: "ephemeral" },
-              },
-              { type: "text", text: request.context },
-            ],
-            tools,
-            // Depois do limite de rodadas, só a resposta.
-            ...(last ? { tool_choice: { type: "none" as const } } : {}),
-            messages,
-          },
-          { signal: request.signal },
-        )
-        .finalMessage();
+      const stream = client.beta.messages.stream(
+        {
+          model: env.model,
+          max_tokens: 16000,
+          betas: ["server-side-fallback-2026-07-01"],
+          fallbacks: "default",
+          // O resumo do raciocínio aparece para a pessoa enquanto a IA trabalha.
+          thinking: { type: "adaptive", display: "summarized" },
+          output_config: { effort: "medium" },
+          system: [
+            {
+              type: "text",
+              text: request.instructions,
+              cache_control: { type: "ephemeral" },
+            },
+            { type: "text", text: request.context },
+          ],
+          tools,
+          // Depois do limite de rodadas, só a resposta.
+          ...(last ? { tool_choice: { type: "none" as const } } : {}),
+          messages,
+        },
+        { signal: request.signal },
+      );
+      if (request.onEvent) {
+        const emit = request.onEvent;
+        stream.on("thinking", (delta) =>
+          emit({ type: "thinking", text: delta }),
+        );
+        stream.on("text", (delta) => emit({ type: "text", text: delta }));
+      }
+      const message = await stream.finalMessage();
       addUsage(meter, message.model, message.usage);
       if (message.stop_reason === "refusal")
         throw new LlmError(
@@ -107,6 +126,7 @@ export function anthropicAdapter(env: AnthropicEnv): LlmAdapter {
         (b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use",
       );
       if (message.stop_reason === "tool_use" && calls.length && !last) {
+        request.onEvent?.({ type: "round_end", tools: calls.length });
         messages.push({ role: "assistant", content: message.content });
         const results = await Promise.all(
           calls.map(async (call) => {

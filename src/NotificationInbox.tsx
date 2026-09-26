@@ -75,7 +75,7 @@ export function NotificationInbox({
                       onOpen(n);
                     }}
                   >
-                    {n.kind === "social_leads" ? (
+                    {n.kind === "social_leads" || n.kind === "ai_share" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <Sparkles size={15} />
                       </span>
@@ -87,7 +87,7 @@ export function NotificationInbox({
                       />
                     )}
                     <span>
-                      {n.kind === "social_leads" ? (
+                      {n.kind === "social_leads" || n.kind === "ai_share" ? (
                         <span className="inbox-line">
                           <strong>{n.task_title}</strong>
                         </span>

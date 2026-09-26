@@ -15,7 +15,9 @@ import {
 } from "./_ai-llm.js";
 import {
   TOOLS,
+  describeStep,
   runTool,
+  summarizeStep,
   type AiScope,
   type AiSource,
   type ToolContext,
@@ -260,7 +262,7 @@ async function buildContext(
     );
   } else {
     lines.push(
-      "A pergunta pode envolver qualquer cliente que a pessoa acessa.",
+      "A pergunta pode envolver qualquer cliente que a pessoa acessa. Quando ela citar um cliente, use find_clients para achar o id e depois filtre as buscas por ele.",
     );
   }
   if (scope.module === "meetings")
@@ -285,15 +287,37 @@ export function citedSources(answer: string, sources: AiSource[]) {
     .filter((s): s is AiSource => !!s);
 }
 
+/** O que a tela recebe enquanto a IA trabalha (uma linha JSON por evento). */
+export type AiStreamEvent =
+  | {
+      type: "step";
+      id: string;
+      label: string;
+      state: "running" | "done" | "error";
+      detail?: string;
+    }
+  | { type: "thinking"; text: string }
+  | { type: "text"; text: string }
+  | { type: "round_end" }
+  | { type: "warning"; text: string }
+  | {
+      type: "done";
+      answer: string;
+      sources: AiSource[];
+      conversation: string | null;
+    }
+  | { type: "error"; error: string; status: number };
+type Emit = (event: AiStreamEvent) => void;
+
 async function ask(
   body: Row,
   auth: string,
   env: AiEnv,
   deps: AiDeps,
-): Promise<{ status: number; body: Row }> {
+  emit: Emit,
+): Promise<Extract<AiStreamEvent, { type: "done" }>> {
   const company = String(body.company ?? "");
-  if (!UUID.test(company))
-    return { status: 400, body: { error: "Empresa inválida." } };
+  if (!UUID.test(company)) throw new AiError(400, "Empresa inválida.");
   const raw = (body.scope ?? {}) as Row;
   const id = (v: unknown) =>
     typeof v === "string" && UUID.test(v) ? v : undefined;
@@ -304,9 +328,73 @@ async function ask(
     module:
       typeof raw.module === "string" ? raw.module.slice(0, 40) : undefined,
   };
-  const messages = conversation(body.question, body.history);
+  const conversationId = id(body.conversation) ?? null;
+  const question = typeof body.question === "string" ? body.question : "";
+  conversation(question, []); // confere a pergunta antes de gastar qualquer coisa
+  emit({
+    type: "step",
+    id: "ctx",
+    label: "Entendendo a pergunta",
+    state: "running",
+  });
   const now = (deps.now ?? Date.now)();
-  const base = await buildContext(env, deps, auth, company, scope, now);
+  const [base, limits, history] = await Promise.all([
+    buildContext(env, deps, auth, company, scope, now),
+    callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
+      env,
+      deps.fetch,
+      auth,
+      "ai_check_limits",
+      {
+        p_company: company,
+        p_client: scope.client ?? null,
+        p_contract: scope.contract ?? null,
+        p_project: scope.project ?? null,
+      },
+    ),
+    conversationId
+      ? Promise.all([
+          rest<{ owner_id: string }>(
+            env,
+            deps,
+            auth,
+            `ai_conversations?select=owner_id&id=eq.${conversationId}`,
+          ),
+          rest<ChatTurn>(
+            env,
+            deps,
+            auth,
+            `ai_messages?select=role,content&conversation_id=eq.${conversationId}&order=id.desc&limit=12`,
+          ),
+        ])
+      : Promise.resolve(null),
+  ]);
+  if (limits.ok && limits.data.blocked)
+    throw new AiError(
+      429,
+      limits.data.message ?? "Limite de uso da IA atingido.",
+    );
+  if (limits.ok)
+    for (const text of limits.data.warnings ?? [])
+      emit({ type: "warning", text });
+  if (history) {
+    const [owner] = history[0];
+    if (!owner) throw new AiError(404, "Conversa não encontrada.");
+    if (owner.owner_id !== userIdFrom(auth))
+      throw new AiError(403, "Só quem começou a conversa continua nela.");
+  }
+  const messages = conversation(
+    question,
+    history ? [...history[1]].reverse() : body.history,
+  );
+  emit({
+    type: "step",
+    id: "ctx",
+    label: scope.client
+      ? `Contexto do cliente ${base.clients.get(scope.client) ?? ""} carregado`
+      : "Contexto carregado",
+    state: "done",
+  });
   const ctx: ToolContext = {
     supabaseUrl: env.supabaseUrl,
     supabaseKey: env.supabaseKey,
@@ -322,6 +410,29 @@ async function ask(
     sources: [],
     chunks: new Map(),
   };
+  const steps: { label: string; detail?: string }[] = [];
+  let n = 0;
+  const execute = async (name: string, input: unknown) => {
+    const stepId = `t${++n}`;
+    const label = describeStep(ctx, name, input);
+    emit({ type: "step", id: stepId, label, state: "running" });
+    try {
+      const out = await runTool(ctx, name, input);
+      const detail = summarizeStep(name, out);
+      steps.push({ label, detail });
+      emit({ type: "step", id: stepId, label, state: "done", detail });
+      return out;
+    } catch (e) {
+      emit({
+        type: "step",
+        id: stepId,
+        label,
+        state: "error",
+        detail: "falhou",
+      });
+      throw e;
+    }
+  };
   let result: Awaited<ReturnType<LlmAdapter>> | undefined;
   try {
     result = await deps.llm({
@@ -329,8 +440,10 @@ async function ask(
       context: base.context,
       messages,
       tools: TOOLS,
-      execute: (name, input) => runTool(ctx, name, input),
+      execute,
       maxRounds: 6,
+      onEvent: (e) =>
+        e.type === "round_end" ? emit({ type: "round_end" }) : emit(e),
     });
   } finally {
     // O custo entra mesmo quando a resposta falha no meio.
@@ -357,13 +470,67 @@ async function ask(
         p_cost: Math.round(((m?.cost ?? 0) + embedCost) * 1e6) / 1e6,
       }).catch(() => {});
   }
-  return {
-    status: 200,
-    body: {
-      answer: result!.text,
-      sources: citedSources(result!.text, ctx.sources),
+  const answer = result!.text;
+  const sources = citedSources(answer, ctx.sources);
+  // A conversa fica salva; se não der, a resposta chega mesmo assim.
+  const saved = await callRpc<string>(env, deps.fetch, auth, "ai_save_turn", {
+    p_company: company,
+    p_conversation: conversationId,
+    p_scope: {
+      ...(scope.client ? { client: scope.client } : {}),
+      ...(scope.contract ? { contract: scope.contract } : {}),
+      ...(scope.project ? { project: scope.project } : {}),
     },
+    p_module: scope.module ?? "assistant",
+    p_question: question.trim(),
+    p_answer: answer,
+    p_sources: sources,
+    p_steps: steps,
+  }).catch(() => null);
+  if (!saved?.ok)
+    emit({ type: "warning", text: "Não foi possível salvar esta conversa." });
+  return {
+    type: "done",
+    answer,
+    sources,
+    conversation: saved?.ok ? saved.data : conversationId,
   };
+}
+
+function errorEvent(err: unknown): Extract<AiStreamEvent, { type: "error" }> {
+  const status =
+    err instanceof AiError || err instanceof EmbeddingError
+      ? err.status
+      : typeof (err as { status?: unknown })?.status === "number"
+        ? (err as { status: number }).status
+        : 500;
+  const error =
+    err instanceof AiError || err instanceof EmbeddingError
+      ? err.message
+      : llmFriendlyError(err);
+  return { type: "error", error, status };
+}
+
+/**
+ * A pergunta em tempo real: cada evento vai para `write` assim que acontece
+ * (passos, raciocínio, texto), e termina em "done" ou "error".
+ */
+export async function streamAi(
+  body: unknown,
+  authorization: string | null,
+  env: AiEnv,
+  deps: AiDeps,
+  write: Emit,
+) {
+  if (!authorization?.startsWith("Bearer ")) {
+    write({ type: "error", error: "Entre na sua conta.", status: 401 });
+    return;
+  }
+  try {
+    write(await ask((body ?? {}) as Row, authorization, env, deps, write));
+  } catch (err) {
+    write(errorEvent(err));
+  }
 }
 
 // ------------------------------------------------------------ worker
@@ -479,20 +646,19 @@ export async function handleAi(
     if (req.action === "ai-ask") {
       if (!authorization?.startsWith("Bearer "))
         return { status: 401, body: { error: "Entre na sua conta." } };
-      return await ask(req, authorization, env, deps);
+      const done = await ask(req, authorization, env, deps, () => {});
+      return {
+        status: 200,
+        body: {
+          answer: done.answer,
+          sources: done.sources,
+          conversation: done.conversation,
+        },
+      };
     }
     return { status: 400, body: { error: "Ação inválida." } };
   } catch (err) {
-    const status =
-      err instanceof AiError || err instanceof EmbeddingError
-        ? err.status
-        : typeof (err as { status?: unknown })?.status === "number"
-          ? (err as { status: number }).status
-          : 500;
-    const message =
-      err instanceof AiError || err instanceof EmbeddingError
-        ? err.message
-        : llmFriendlyError(err);
-    return { status, body: { error: message } };
+    const e = errorEvent(err);
+    return { status: e.status, body: { error: e.error } };
   }
 }

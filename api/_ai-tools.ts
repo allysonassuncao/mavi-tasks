@@ -53,6 +53,20 @@ const dateField = (description: string) => ({
 
 export const TOOLS: ToolSpec[] = [
   {
+    name: "find_clients",
+    description:
+      "Acha clientes pelo código ou nome (no sistema, o nome do cliente costuma ser o código dele, ex.: '4282') e mostra os produtos contratados. Use antes de filtrar por cliente quando a pessoa citar um cliente e você não tiver o id.",
+    parameters: obj(
+      {
+        query: {
+          type: "string",
+          description: "Código ou parte do nome do cliente.",
+        },
+      },
+      ["query"],
+    ),
+  },
+  {
     name: "search_knowledge",
     description:
       "Busca por significado e por termos em tudo que a pessoa pode ver no MAVI: transcrições e resumos das reuniões gravadas e tarefas (descrição, campos e comentários). Use para qualquer pergunta sobre o que foi dito, combinado, pedido ou decidido. Faça várias buscas com formulações diferentes (em paralelo) quando a pergunta for ampla. Devolve trechos numerados [S#] para citar.",
@@ -399,6 +413,102 @@ async function listTasks(ctx: ToolContext, input: Record<string, unknown>) {
     .join("\n");
 }
 
+async function findClients(ctx: ToolContext, input: Record<string, unknown>) {
+  const q = str(input.query)
+    .replace(/[,()*%]/g, " ")
+    .trim()
+    .slice(0, 60);
+  if (!q && !ctx.scope.client) return "Informe o código ou nome do cliente.";
+  const rows = await rest<{
+    id: string;
+    name: string;
+    contracts: {
+      name: string;
+      archived: boolean;
+      products: { name: string } | null;
+    }[];
+  }>(
+    ctx,
+    `clients?select=id,name,contracts(name,archived,products(name))&company_id=eq.${ctx.company}&archived=is.false` +
+      (ctx.scope.client
+        ? `&id=eq.${ctx.scope.client}`
+        : `&name=ilike.*${encodeURIComponent(q)}*`) +
+      "&order=name&limit=10",
+  );
+  if (!rows.length)
+    return `Nenhum cliente com "${q}" entre os que a pessoa acessa.`;
+  return rows
+    .map((c) => {
+      const products = c.contracts
+        .filter((k) => !k.archived)
+        .map((k) => k.products?.name ?? k.name);
+      return `- Cliente ${c.name} (id ${c.id})${products.length ? ` · produtos: ${[...new Set(products)].join(", ")}` : ""}`;
+    })
+    .join("\n");
+}
+
+/** O passo, em linguagem de gente, enquanto a ferramenta roda. */
+export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
+  const input =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const client =
+    !ctx.scope.client && UUID.test(str(input.client_id))
+      ? ctx.clients.get(str(input.client_id))
+      : undefined;
+  const inClient = client ? ` do cliente ${client}` : "";
+  const period =
+    DATE.test(str(input.from)) || DATE.test(str(input.to))
+      ? ` (${[str(input.from) && `de ${brDate(str(input.from))}`, str(input.to) && `até ${brDate(str(input.to))}`].filter(Boolean).join(" ")})`
+      : "";
+  if (name === "search_knowledge") {
+    const types = Array.isArray(input.types) ? input.types : [];
+    const where =
+      types.length === 1
+        ? types[0] === "meeting"
+          ? "nas reuniões"
+          : "nas tarefas"
+        : "nas reuniões e tarefas";
+    return `Buscando “${str(input.query).slice(0, 80)}” ${where}${inClient}${period}`;
+  }
+  if (name === "read_more")
+    return `Lendo o trecho ${str(input.ref).toUpperCase()} com mais contexto`;
+  if (name === "list_meetings")
+    return `Listando as reuniões${inClient}${period}`;
+  if (name === "list_tasks") {
+    const what = input.overdue_only
+      ? "as tarefas atrasadas"
+      : input.open_only
+        ? "as tarefas em aberto"
+        : "as tarefas";
+    return `Conferindo ${what}${inClient}${str(input.assignee) ? ` de ${str(input.assignee)}` : ""}`;
+  }
+  if (name === "find_clients")
+    return `Procurando o cliente “${str(input.query).slice(0, 40)}”`;
+  return "Consultando o sistema";
+}
+
+/** O resultado do passo, curto. */
+export function summarizeStep(name: string, output: string) {
+  const refs = new Set(output.match(/^\[S\d+\]/gm) ?? []).size;
+  if (name === "search_knowledge")
+    return refs
+      ? `${refs} ${refs === 1 ? "trecho encontrado" : "trechos encontrados"}`
+      : "nada encontrado";
+  if (name === "list_meetings")
+    return refs
+      ? `${refs} ${refs === 1 ? "reunião" : "reuniões"}`
+      : "nenhuma reunião";
+  if (name === "list_tasks")
+    return refs
+      ? `${refs} ${refs === 1 ? "tarefa" : "tarefas"}`
+      : "nenhuma tarefa";
+  if (name === "find_clients") {
+    const n = (output.match(/^- Cliente /gm) ?? []).length;
+    return n ? `${n} ${n === 1 ? "cliente" : "clientes"}` : "nenhum cliente";
+  }
+  return "";
+}
+
 /** Executa uma ferramenta pelo nome (entradas conferidas aqui). */
 export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   const input =
@@ -409,5 +519,6 @@ export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "read_more") return readMore(ctx, input);
   if (name === "list_meetings") return listMeetings(ctx, input);
   if (name === "list_tasks") return listTasks(ctx, input);
+  if (name === "find_clients") return findClients(ctx, input);
   return `Ferramenta desconhecida: ${name}.`;
 }

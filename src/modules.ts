@@ -44,6 +44,7 @@ export const MODULES = [
   { id: "projects", label: "Projetos" },
   { id: "hours", label: "Controle de horas" },
   { id: "storage", label: "Armazenamento" },
+  { id: "aiUsage", label: "Consumo de IA" },
 ] as const satisfies readonly { id: Page; label: string }[];
 export type ModuleId = (typeof MODULES)[number]["id"];
 

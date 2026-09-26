@@ -126,7 +126,11 @@ A IA responde sobre os clientes buscando no que está no sistema, em vez de ler 
 - **Agente**: `/api/ai` (ação `ai-ask`) dá ao modelo o contexto (quem pergunta, cliente, produtos, projetos, data) e ferramentas neutras em JSON Schema (`search_knowledge`, `read_more`, `list_meetings`, `list_tasks`, em `api/_ai-tools.ts`). O modelo fica atrás de um adaptador (`api/_ai-llm.ts`, hoje Claude); os vetores, em `api/_ai-embeddings.ts` (hoje OpenAI). As respostas citam fontes `[S#]` que abrem a reunião no minuto ou a tarefa.
 - **Custo**: toda pergunta e toda indexação entram em `ai_usage` (empresa, pessoa, módulo, cliente, produto, projeto, tokens e dólares).
 
-Para ligar: aplicar a migração (ela já coloca todo o histórico na fila), configurar `OPENAI_API_KEY` e `AI_WORKER_SECRET` na Vercel e fazer redeploy; depois, no banco, `insert into mavi_private.ai_config(url, secret) values ('https://<domínio>/api/ai', '<AI_WORKER_SECRET>')` e rodar `supabase/operations/schedule-ai-index.sql`. Testes: `npm run test:db:ai` e `npx vitest run api/_ai.test.ts`.
+- **Em tempo real**: `/api/ai` responde em NDJSON (uma linha por evento) quando o navegador pede `stream`: passos (buscando…, lendo…, 8 trechos), resumo do raciocínio, texto da resposta e o final com as fontes. A tela mostra os passos e a resposta digitando (`src/AiChat.tsx`).
+- **Assistente global** (fase 2, migração `20261022090000_ai_assistant`): botão flutuante ou Ctrl/⌘+J em qualquer tela, sobre todos os clientes ou um só (começa no cliente aberto no Drive). As conversas ficam salvas (`ai_conversations`, `ai_messages`); só quem começou continua. Compartilhar só vale para quem já veria todas as fontes citadas, e quem recebe ganha um aviso na caixa de entrada.
+- **Consumo de IA** (líderes, `/consumo-ia`): gasto no período por pessoa, cliente, produto, projeto e módulo, e limites mensais (empresa, pessoa, cliente, produto, projeto) conferidos antes de cada pergunta, com aviso a partir de 80%.
+
+Para ligar: aplicar a migração (ela já coloca todo o histórico na fila), configurar `OPENAI_API_KEY` e `AI_WORKER_SECRET` na Vercel e fazer redeploy; depois, no banco, `insert into mavi_private.ai_config(url, secret) values ('https://<domínio>/api/ai', '<AI_WORKER_SECRET>')` e rodar `supabase/operations/schedule-ai-index.sql`. Testes: `npm run test:db:ai`, `npm run test:db:ai-assistant` e `npx vitest run api/_ai.test.ts`.
 
 ### Agenda (Google Agenda)
 

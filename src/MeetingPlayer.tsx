@@ -5,26 +5,22 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronDown,
   ChevronUp,
-  CheckSquare,
   Clock,
   Link2,
   ListChecks,
   Plus,
   Search,
-  Send,
   Share2,
   Sparkles,
   Tags,
   Undo2,
   Users,
-  Video,
   VideoOff,
   X,
   FileText,
@@ -34,12 +30,11 @@ import {
 } from "lucide-react";
 import { Loading } from "./ui";
 import { canCreateTaskIn } from "./domain";
-import { sourceLabel, type AiSource } from "./ai";
+import { AiChat, AnswerText } from "./AiChat";
 import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import type { FormPreset } from "./forms";
 import {
-  answerPieces,
   askMeeting,
   clock,
   deadlineDate,
@@ -52,7 +47,6 @@ import {
   recordingLink,
   segmentAt,
   stepDescription,
-  type ChatTurn,
   type MeetingRecording,
   type MeetingSegment,
   type MeetingTranscript,
@@ -972,234 +966,6 @@ function StepsPanel({
 }
 
 // ------------------------------------------------------------ IA
-/**
- * Resposta da IA com momentos [12:34] e fontes [S3] clicáveis, e a lista
- * das fontes citadas no fim.
- */
-export function AnswerText({
-  text,
-  onTime,
-  sources = [],
-  onSource,
-}: {
-  text: string;
-  onTime?: (seconds: number) => void;
-  sources?: AiSource[];
-  onSource?: (source: AiSource) => void;
-}) {
-  const byRef = new Map(sources.map((s) => [s.ref, s]));
-  const lines = text.split("\n");
-  const render = (line: string) =>
-    answerPieces(line).map((p, i) =>
-      p.kind === "text" ? (
-        p.bold ? (
-          <strong key={i}>{p.text}</strong>
-        ) : (
-          <span key={i}>{p.text}</span>
-        )
-      ) : p.kind === "time" ? (
-        <button
-          key={i}
-          type="button"
-          className="answer-cite"
-          onClick={() => onTime?.(p.seconds)}
-          disabled={!onTime}
-        >
-          {p.label}
-        </button>
-      ) : byRef.has(p.ref) ? (
-        <button
-          key={i}
-          type="button"
-          className={`answer-cite ${byRef.get(p.ref)!.type}`}
-          title={byRef.get(p.ref)!.title}
-          onClick={() => onSource?.(byRef.get(p.ref)!)}
-          disabled={!onSource}
-        >
-          {sourceLabel(byRef.get(p.ref)!)}
-        </button>
-      ) : null,
-    );
-  const out: ReactNode[] = [];
-  let list: ReactNode[] = [];
-  const flush = () => {
-    if (list.length) out.push(<ul key={`l${out.length}`}>{list}</ul>);
-    list = [];
-  };
-  lines.forEach((line, i) => {
-    const item = line.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/);
-    if (item) list.push(<li key={i}>{render(item[1])}</li>);
-    else {
-      flush();
-      if (line.trim())
-        out.push(<p key={i}>{render(line.replace(/^#+\s*/, ""))}</p>);
-    }
-  });
-  flush();
-  return (
-    <div className="answer-text">
-      {out}
-      {sources.length > 0 && (
-        <div className="answer-sources">
-          <small>Fontes</small>
-          <ul>
-            {sources.map((s) => (
-              <li key={s.ref}>
-                <button
-                  type="button"
-                  onClick={() => onSource?.(s)}
-                  disabled={!onSource}
-                  title={sourceLabel(s)}
-                >
-                  {s.type === "meeting" ? (
-                    <Video size={13} aria-hidden="true" />
-                  ) : (
-                    <CheckSquare size={13} aria-hidden="true" />
-                  )}
-                  <span>{s.title}</span>
-                  <small>{sourceLabel(s)}</small>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-type ChatEntry = ChatTurn & { sources?: AiSource[] };
-
-export function ChatBox({
-  placeholder,
-  suggestions,
-  ask,
-  renderAnswer,
-  intro,
-  thinking = "Lendo e respondendo…",
-}: {
-  placeholder: string;
-  suggestions: string[];
-  /** A resposta (texto) ou a resposta com as fontes citadas. */
-  ask: (
-    question: string,
-    history: ChatTurn[],
-  ) => Promise<string | { answer: string; sources: AiSource[] }>;
-  renderAnswer: (text: string, sources: AiSource[]) => ReactNode;
-  intro: string;
-  thinking?: string;
-}) {
-  const [turns, setTurns] = useState<ChatEntry[]>([]);
-  const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const end = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [turns, busy]);
-  async function send(question: string) {
-    const q = question.trim();
-    if (!q || busy) return;
-    setError("");
-    setBusy(true);
-    setDraft("");
-    const history = turns;
-    setTurns([...history, { role: "user", content: q }]);
-    try {
-      const reply = await ask(
-        q,
-        history.map(({ role, content }) => ({ role, content })),
-      );
-      const entry: ChatEntry =
-        typeof reply === "string"
-          ? { role: "assistant", content: reply }
-          : {
-              role: "assistant",
-              content: reply.answer,
-              sources: reply.sources,
-            };
-      setTurns((t) => [...t, entry]);
-    } catch (e) {
-      setError((e as Error).message);
-      setTurns(history);
-      setDraft(q);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="meeting-chat">
-      <div className="meeting-chat-log">
-        {!turns.length && (
-          <div className="meeting-chat-intro">
-            <Sparkles size={18} aria-hidden="true" />
-            <p>{intro}</p>
-            <div className="meeting-chat-suggestions">
-              {suggestions.map((s) => (
-                <button key={s} type="button" onClick={() => void send(s)}>
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {turns.map((t, i) =>
-          t.role === "user" ? (
-            <p key={i} className="chat-q">
-              {t.content}
-            </p>
-          ) : (
-            <div key={i} className="chat-a">
-              {renderAnswer(t.content, t.sources ?? [])}
-            </div>
-          ),
-        )}
-        {busy && (
-          <div className="chat-a chat-thinking" role="status">
-            <Sparkles size={14} /> {thinking}
-          </div>
-        )}
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        )}
-        <div ref={end} />
-      </div>
-      <form
-        className="meeting-chat-form"
-        onSubmit={(e: FormEvent) => {
-          e.preventDefault();
-          void send(draft);
-        }}
-      >
-        <textarea
-          rows={2}
-          value={draft}
-          maxLength={2000}
-          placeholder={placeholder}
-          aria-label={placeholder}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send(draft);
-            }
-          }}
-        />
-        <button
-          type="submit"
-          className="btn primary"
-          disabled={busy || draft.trim().length < 2}
-          aria-label="Perguntar"
-        >
-          <Send size={15} />
-        </button>
-      </form>
-    </div>
-  );
-}
-
 function AskPanel({
   recording,
   onSeek,
@@ -1208,11 +974,13 @@ function AskPanel({
   onSeek: (s: number) => void;
 }) {
   return (
-    <ChatBox
+    <AiChat
       intro="Pergunte qualquer coisa sobre esta reunião. A IA lê a transcrição inteira e mostra o minuto de onde tirou cada resposta."
       placeholder="Pergunte sobre esta reunião"
       suggestions={SUGGESTIONS}
-      ask={(q, history) => askMeeting(recording.id, q, history)}
+      send={(q, history, handlers) =>
+        askMeeting(recording.id, q, history, handlers)
+      }
       renderAnswer={(text) => <AnswerText text={text} onTime={onSeek} />}
     />
   );
