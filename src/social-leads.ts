@@ -133,6 +133,8 @@ export interface SlBriefing {
   updated_by?: string | null;
   /** Files in the client's Drive (migration 20261015090000). */
   media?: BriefingMedia;
+  /** The client's cycle tasks, once the first release opened it. */
+  cycle?: { followup?: string; meeting?: string; started_at?: string } | null;
 }
 /** Briefing fields that take files as well as text. */
 export type MediaKey = "socialProof" | "brandLogo" | "brandVisualElements";

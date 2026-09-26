@@ -45,6 +45,8 @@ export interface PlanBundle {
 /** Who receives each post's art task: a team (distributed) or a person. */
 export type ReleaseTarget = { team: string } | { user: string };
 export type ReleaseAssign = Record<number, ReleaseTarget>;
+/** Who gets the client's cycle tasks (only on the release that opens it). */
+export type ReleaseCycle = { followup: string; meeting: string };
 /** The palette the AI read from the site or Instagram. */
 export interface BrandColorsFound {
   colors: { hex: string; name: string }[];
@@ -81,11 +83,13 @@ export interface SocialLeadsBackend {
   ): Promise<void>;
   /**
    * One art task per approved post without one, for the team or person
-   * chosen per post (none: the creative team); opens the client's cycle once.
+   * chosen per post (none: the creative team); opens the client's cycle once,
+   * for the people in `cycle` (none: whoever releases).
    */
   release(
     plan: string,
     assign: ReleaseAssign,
+    cycle?: ReleaseCycle,
   ): Promise<{ created: number; cycle: boolean }>;
   setArts(
     plan: string,
@@ -236,10 +240,10 @@ export const serverSocialLeads: SocialLeadsBackend = {
       p_art_days: artDays,
     });
   },
-  async release(plan, assign) {
+  async release(plan, assign, cycle) {
     return (await rpc("social_leads_release", {
       p_plan: plan,
-      p_assign: assign,
+      p_assign: cycle ? { ...assign, cycle } : assign,
     })) as {
       created: number;
       cycle: boolean;
@@ -882,6 +886,9 @@ export function demoSocialLeads(
       });
       const cycle = !s.cycles[plan.contract_id];
       s.cycles[plan.contract_id] = true;
+      const b = s.briefings[plan.contract_id];
+      // The demo only marks the cycle as open (its tasks aren't shown).
+      if (cycle && b) b.cycle = { started_at: now() };
       emit();
       return { created: todo.length, cycle };
     },

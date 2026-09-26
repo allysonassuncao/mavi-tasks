@@ -8,7 +8,7 @@ begin;
 -- app mostra para as tarefas ligadas a um post (social_leads_posts.task_id).
 
 -- Um texto com quebras de linha vira texto e quebras (hardBreak).
-create function mavi_private.social_leads_rich_lines(p_text text, p_marks jsonb default '[]') returns jsonb
+create or replace function mavi_private.social_leads_rich_lines(p_text text, p_marks jsonb default '[]') returns jsonb
 language sql immutable set search_path = '' as $$
  select coalesce(jsonb_agg(node order by n, k), '[]'::jsonb)
  from unnest(string_to_array(trim(p_text), E'\n')) with ordinality as l(line, n)
@@ -20,7 +20,7 @@ language sql immutable set search_path = '' as $$
 $$;
 
 -- Um tópico: título em negrito e, na linha de baixo, o texto.
-create function mavi_private.social_leads_rich_topic(p_label text, p_text text) returns jsonb
+create or replace function mavi_private.social_leads_rich_topic(p_label text, p_text text) returns jsonb
 language sql immutable set search_path = '' as $$
  select case when nullif(trim(p_text), '') is not null then jsonb_build_object('type', 'paragraph', 'content',
   jsonb_build_array(
@@ -30,7 +30,7 @@ language sql immutable set search_path = '' as $$
 $$;
 
 -- Um item de lista: "Rótulo: texto", com o rótulo em negrito.
-create function mavi_private.social_leads_rich_item(p_label text, p_text text) returns jsonb
+create or replace function mavi_private.social_leads_rich_item(p_label text, p_text text) returns jsonb
 language sql immutable set search_path = '' as $$
  select case when nullif(trim(p_text), '') is not null then jsonb_build_object('type', 'listItem', 'content',
   jsonb_build_array(jsonb_build_object('type', 'paragraph', 'content',
@@ -38,20 +38,20 @@ language sql immutable set search_path = '' as $$
    || mavi_private.social_leads_rich_lines(p_text)))) end
 $$;
 
-create function mavi_private.social_leads_rich_paragraph(p_text text, p_marks jsonb default '[]') returns jsonb
+create or replace function mavi_private.social_leads_rich_paragraph(p_text text, p_marks jsonb default '[]') returns jsonb
 language sql immutable set search_path = '' as $$
  select jsonb_build_object('type', 'paragraph', 'content', mavi_private.social_leads_rich_lines(p_text, p_marks))
 $$;
 
 -- A lista (com ou sem número) só com os itens que existem.
-create function mavi_private.social_leads_rich_list(p_type text, p_items jsonb[]) returns jsonb
+create or replace function mavi_private.social_leads_rich_list(p_type text, p_items jsonb[]) returns jsonb
 language sql immutable set search_path = '' as $$
  select case when count(i) > 0 then jsonb_build_object('type', p_type, 'content', jsonb_agg(i order by n)) end
  from unnest(p_items) with ordinality as u(i, n) where i is not null
 $$;
 
 -- A descrição texto de antes (para achar as tarefas que ninguém editou).
-create function mavi_private.social_leads_task_text_v1(x public.social_leads_posts, p_label text) returns text
+create or replace function mavi_private.social_leads_task_text_v1(x public.social_leads_posts, p_label text) returns text
 language sql immutable set search_path = '' as $$
  select concat_ws(E'\n',
   'Gancho: ' || x.hook,
@@ -102,7 +102,7 @@ revoke all on function mavi_private.social_leads_task_text(public.social_leads_p
 update public.tasks t set description = mavi_private.social_leads_task_text(x, p.label)
 from public.social_leads_posts x join public.social_leads_plans p on p.id = x.plan_id
 where t.id = x.task_id and t.description = mavi_private.social_leads_task_text_v1(x, p.label);
-drop function mavi_private.social_leads_task_text_v1(public.social_leads_posts, text);
+drop function if exists mavi_private.social_leads_task_text_v1(public.social_leads_posts, text);
 
 -- O botão da tarefa procura o post por ela.
 create index if not exists social_leads_posts_task on public.social_leads_posts(task_id) where task_id is not null;

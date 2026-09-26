@@ -39,6 +39,7 @@ import {
   monthFolder,
   serverLink,
   type ReleaseAssign,
+  type ReleaseCycle,
   shareUrl,
   useLiveSocialLeads,
   type PlanBundle,
@@ -111,6 +112,7 @@ export function PlanView({
   plan,
   job,
   company,
+  user,
   data,
   backend,
   intent,
@@ -721,13 +723,14 @@ export function PlanView({
           label={bundle.plan.label}
           posts={posts.filter((p) => p.decision === "approved" && !p.task_id)}
           waiting={8 - withTask - toRelease}
-          firstRelease={withTask === 0}
+          startsCycle={!briefing?.cycle}
+          user={user}
           production={production}
           clientId={item.client_id}
           data={data}
           onClose={() => setModal(null)}
-          onRelease={async (assign) => {
-            const r = await backend.release(plan.id, assign);
+          onRelease={async (assign, cycle) => {
+            const r = await backend.release(plan.id, assign, cycle);
             notify(
               `${r.created} ${r.created === 1 ? "tarefa de arte criada" : "tarefas de arte criadas"}${r.cycle ? " e ciclo do cliente iniciado" : ""}.`,
             );
@@ -1630,7 +1633,8 @@ function ReleaseModal({
   label,
   posts,
   waiting,
-  firstRelease,
+  startsCycle,
+  user,
   production,
   clientId,
   data,
@@ -1641,18 +1645,25 @@ function ReleaseModal({
   posts: SlPost[];
   /** Posts not approved yet (they stay for a next release). */
   waiting: number;
-  firstRelease: boolean;
+  /** This release opens the client's cycle (first one for the client). */
+  startsCycle: boolean;
+  /** Who is releasing: the recommended owner of the cycle tasks. */
+  user: string;
   production: Production;
   clientId: string;
   data: Snapshot;
   onClose: () => void;
-  onRelease: (assign: ReleaseAssign) => Promise<void>;
+  onRelease: (assign: ReleaseAssign, cycle?: ReleaseCycle) => Promise<void>;
 }) {
   const initial = production.teamId ? `team:${production.teamId}` : "";
   const [all, setAll] = useState(initial);
   const [each, setEach] = useState<Record<number, string>>(() =>
     Object.fromEntries(posts.map((p) => [p.number, initial])),
   );
+  const [cycle, setCycle] = useState<ReleaseCycle>({
+    followup: user,
+    meeting: user,
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -1683,6 +1694,11 @@ function ReleaseModal({
   const outside = Object.values(each).some(
     (v) => v.startsWith("user:") && !serves(v.slice(5)),
   );
+  // The cycle's owner is a person; the one releasing comes first.
+  const owners = [
+    ...people.filter((m) => m.user_id === user),
+    ...people.filter((m) => m.user_id !== user),
+  ];
   const missing = posts.filter((p) => !each[p.number]).map((p) => p.number);
   const perPost = new Set(Object.values(each)).size > 1;
 
@@ -1705,7 +1721,7 @@ function ReleaseModal({
           }
           setBusy(true);
           setError("");
-          onRelease(assign)
+          onRelease(assign, startsCycle ? cycle : undefined)
             .catch((err) => setError((err as Error).message))
             .finally(() => setBusy(false));
         }}
@@ -1718,6 +1734,52 @@ function ReleaseModal({
           gancho, a copy, a direção visual, o formato e o CTA do post. Para uma
           equipe, a tarefa vai para quem tem menos tarefas em aberto.
         </p>
+        {startsCycle && (
+          <section className="sl-release-cycle" aria-label="Ciclo do cliente">
+            <header>
+              <CalendarClock size={18} />
+              <span>
+                <strong>O ciclo do cliente começa nesta liberação</strong>
+                <small>
+                  Duas tarefas que se repetem até alguém parar. Escolha quem
+                  cuida de cada uma.
+                </small>
+              </span>
+            </header>
+            {(
+              [
+                ["followup", "Acompanhamento quinzenal", "A cada 14 dias"],
+                [
+                  "meeting",
+                  "Reunião de resultados e novo plano",
+                  "Todo mês, com o plano do mês seguinte",
+                ],
+              ] as const
+            ).map(([key, title, when]) => (
+              <label key={key}>
+                <span className="sl-label">
+                  {title}
+                  <em>{when}</em>
+                </span>
+                <Select
+                  value={cycle[key]}
+                  aria-label={`Responsável: ${title}`}
+                  onValueChange={(v) =>
+                    v && setCycle((c) => ({ ...c, [key]: v }))
+                  }
+                >
+                  {owners.map((m) => (
+                    <SelectOption key={m.user_id} value={m.user_id}>
+                      {m.user_id === user
+                        ? `${m.name} (você · recomendado)`
+                        : m.name}
+                    </SelectOption>
+                  ))}
+                </Select>
+              </label>
+            ))}
+          </section>
+        )}
         <label className="sl-release-all">
           <span className="sl-label">
             Para todos os posts
@@ -1780,14 +1842,6 @@ function ReleaseModal({
             Quem está fora das equipes do cliente recebe a tarefa, mas não
             consegue subir as artes no post. Escolha a equipe dele ou adicione a
             equipe ao cliente.
-          </p>
-        )}
-        {firstRelease && (
-          <p className="sl-alert info-soft">
-            <CalendarClock size={15} />
-            Na primeira liberação, o ciclo do cliente começa: acompanhamento
-            quinzenal e reunião mensal de resultados, tarefas que se repetem
-            para o responsável.
           </p>
         )}
         {waiting > 0 && (
