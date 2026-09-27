@@ -927,3 +927,100 @@ describe("fase 3: arquivos, Social Leads e campanhas", () => {
     ]);
   });
 });
+
+describe("Whatsapp dos clientes na busca", () => {
+  it("o trecho cita a primeira mensagem, com o grupo e o horário", async () => {
+    const group = "00000000-0000-4000-8000-0000000000aa";
+    const message = "00000000-0000-4000-8000-0000000000bb";
+    const { fetchImpl, calls } = database({
+      "memberships?": [
+        {
+          user_id: me,
+          name: "Ana Admin",
+          email: "ana@x.com",
+          role: "admin",
+          active: true,
+        },
+      ],
+      "clients?": [{ id: client, name: "4282" }],
+      "rpc/ai_check_limits": { blocked: false, warnings: [] },
+      "rpc/ai_search": [
+        {
+          chunk_id: 11,
+          source_type: "whatsapp",
+          source_id: "00000000-0000-4000-8000-0000000000cc",
+          title: "Whatsapp · 4282 - Loja & Make · 20/09/2026",
+          content:
+            '[Whatsapp] grupo "4282 - Loja & Make" · cliente 4282 · 20/09/2026\n10:01 Kamilli: [áudio 00:23] Precisamos aumentar a verba em outubro',
+          meta: {
+            kind: "whatsapp",
+            group,
+            message,
+            at: "2026-09-20T13:01:00Z",
+          },
+          client_id: client,
+          contract_id: null,
+          occurred_at: "2026-09-20T03:00:00Z",
+          task_status: null,
+          task_assignee: null,
+          task_due: null,
+        },
+      ],
+      "rpc/ai_save_turn": "conv",
+      "rpc/ai_log_usage": null,
+    });
+    const outputs: string[] = [];
+    const llm: LlmAdapter = async (request) => {
+      outputs.push(
+        await request.execute("search_knowledge", {
+          query: "verba",
+          types: ["whatsapp"],
+        }),
+      );
+      return {
+        text: "Pediram mais verba [S1].",
+        meter: newMeter("claude-opus-5"),
+        rounds: 1,
+      };
+    };
+    const res = await handleAi(
+      {
+        action: "ai-ask",
+        company,
+        scope: { client },
+        question: "O que pediram no grupo?",
+      },
+      token(me),
+      env,
+      {
+        fetch: fetchImpl,
+        llm,
+        embed: async () => ({
+          vectors: [vec()],
+          tokens: 1,
+          model: "text-embedding-3-small",
+        }),
+        now: () => Date.parse("2026-09-26T12:00:00Z"),
+      },
+    );
+    const search = calls.find((c) => c.url.includes("rpc/ai_search"))!;
+    expect(search.body.p_filters.types).toEqual(["whatsapp"]);
+    expect(outputs[0]).toContain(
+      "[S1] Whatsapp · 4282 - Loja & Make · 20/09/2026 10:01",
+    );
+    expect(outputs[0]).toContain(
+      "10:01 Kamilli: [áudio 00:23] Precisamos aumentar a verba em outubro",
+    );
+    expect(res.body.sources).toEqual([
+      {
+        ref: "S1",
+        type: "whatsapp",
+        id: message,
+        group,
+        title: "Whatsapp · 4282 - Loja & Make · 20/09/2026",
+        date: "2026-09-20T13:01:00Z",
+        client_id: client,
+      },
+    ]);
+  });
+});

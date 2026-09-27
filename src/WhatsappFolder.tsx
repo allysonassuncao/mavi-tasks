@@ -937,6 +937,14 @@ function MessageBody({
       return (
         <>
           {stored ? <AudioMessage m={m} /> : <MediaState m={m} />}
+          {m.content_status === "done" && m.content_text ? (
+            <details className="wa-transcript">
+              <summary>Transcrição</summary>
+              <p>{m.content_text}</p>
+            </details>
+          ) : m.content_status === "pending" ? (
+            <small className="wa-media-note">Transcrição a caminho…</small>
+          ) : null}
           {caption}
         </>
       );

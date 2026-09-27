@@ -21,8 +21,11 @@ export type AiScope = {
 };
 export type AiSource = {
   ref: string;
-  type: "meeting" | "task" | "file" | "social" | "campaign" | "case";
+  type:
+    "meeting" | "task" | "file" | "social" | "campaign" | "case" | "whatsapp";
+  /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
   id: string;
+  group?: string;
   title: string;
   date: string | null;
   client_id: string | null;
@@ -124,7 +127,8 @@ export async function streamAnswer(
     }
   }
   handle(buffer);
-  if (!final) throw Error("A resposta da MAVI foi interrompida. Tente de novo.");
+  if (!final)
+    throw Error("A resposta da MAVI foi interrompida. Tente de novo.");
   return final;
 }
 
@@ -317,7 +321,8 @@ async function providerAction<T>(body: Record<string, unknown>): Promise<T> {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Error(data.error ?? "Não foi possível falar com o servidor.");
+  if (!res.ok)
+    throw Error(data.error ?? "Não foi possível falar com o servidor.");
   return data as T;
 }
 export type ProviderDraft = {
@@ -345,7 +350,12 @@ export type ListedModel = {
 /** Os modelos que a chave enxerga (a informada ou a salva do provedor). */
 export const fetchProviderModels = (
   company: string,
-  args: { id?: string; kind: ProviderKind; base_url?: string; api_key?: string },
+  args: {
+    id?: string;
+    kind: ProviderKind;
+    base_url?: string;
+    api_key?: string;
+  },
 ) =>
   providerAction<{ models: ListedModel[] }>({
     action: "ai-provider-models",
@@ -415,6 +425,19 @@ export function sourceLabel(s: AiSource) {
   if (s.type === "social") return "Social Leads";
   if (s.type === "campaign") return "Campanha";
   if (s.type === "case") return "Case de sucesso";
+  if (s.type === "whatsapp")
+    return [
+      `Whatsapp ${shortDate(s.date)}`,
+      s.date
+        ? new Date(s.date).toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: "America/Sao_Paulo",
+          })
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
   return "Tarefa";
 }
 
@@ -431,6 +454,9 @@ export function sourceUrl(s: AiSource) {
   else if (s.type === "social") {
     page = "onboarding";
     if (s.contract_id) q.set("contrato", s.contract_id);
+  } else if (s.type === "whatsapp") {
+    if (s.group) q.set("whatsapp", s.group);
+    q.set("msg", s.id);
   } else if (s.type === "case") {
     page = "cases";
     q.set("caso", s.id);

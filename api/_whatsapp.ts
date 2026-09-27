@@ -5,6 +5,7 @@ import {
   type DriveEnv,
   type GcsCredentials,
 } from "./_drive.js";
+import { extractFileText } from "./_ai-extract.js";
 
 /**
  * Drive › cliente › "Whatsapp": a coleta dos grupos na Uazapi
@@ -37,6 +38,11 @@ export type WhatsappEnv = Pick<
   workerBudgetMs: number;
   /** Mídias maiores que isso não são copiadas (ficam como "grande demais"). */
   mediaMaxBytes: number;
+  /** Transcrição dos áudios (OpenAI, a mesma chave dos vetores da MAVI). */
+  openaiKey: string;
+  transcribeModel: string;
+  /** Preço da transcrição por minuto (US$), para o painel de consumo. */
+  transcribeUsdPerMinute: number;
 };
 
 export function whatsappEnv(
@@ -53,6 +59,10 @@ export function whatsappEnv(
     workerSecret: env.WHATSAPP_WORKER_SECRET || "",
     workerBudgetMs: Number(env.WHATSAPP_WORKER_BUDGET_MS) || 80_000,
     mediaMaxBytes: (Number(env.WHATSAPP_MEDIA_MAX_MB) || 300) * 1024 * 1024,
+    openaiKey: env.OPENAI_API_KEY || "",
+    transcribeModel: env.WHATSAPP_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe",
+    transcribeUsdPerMinute:
+      Number(env.WHATSAPP_TRANSCRIBE_USD_PER_MIN) || 0.003,
   };
 }
 
@@ -486,6 +496,120 @@ async function copyMedia(
   }
 }
 
+type ClaimedContent = {
+  id: string;
+  kind: "audio" | "document";
+  /** "audio" ou o tipo de documento que o extrator lê (pdf, docx…). */
+  content_kind: string | null;
+  bucket: string;
+  path: string;
+  media_mime: string | null;
+  media_name: string | null;
+  media_bytes: number | null;
+  media_seconds: number | null;
+  client_id: string | null;
+};
+
+/** O texto de um áudio, pela OpenAI (uma nova tentativa em 429 e 5xx). */
+export async function transcribe(
+  env: WhatsappEnv,
+  deps: WhatsappDeps,
+  bytes: Uint8Array,
+  mime: string,
+  name: string,
+) {
+  if (!env.openaiKey)
+    throw new Error(
+      "Transcrição não configurada: falta OPENAI_API_KEY na Vercel.",
+    );
+  let last = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const form = new FormData();
+    form.append("file", new Blob([bytes], { type: mime }), name);
+    form.append("model", env.transcribeModel);
+    form.append("language", "pt");
+    form.append("response_format", "json");
+    const res = await deps.fetch(
+      "https://api.openai.com/v1/audio/transcriptions",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.openaiKey}` },
+        body: form,
+        signal: AbortSignal.timeout(60_000),
+      },
+    );
+    const text = await res.text();
+    if (res.ok) return str(JSON.parse(text)?.text).trim();
+    last = `Transcrição (${res.status}): ${text.slice(0, 200)}`;
+    if (res.status !== 429 && res.status < 500) break;
+  }
+  throw new Error(last);
+}
+
+/**
+ * Lê uma mídia guardada: transcreve o áudio ou extrai o texto do documento
+ * e devolve ao banco. Retorna o custo (US$) da transcrição.
+ */
+async function readContent(
+  env: WhatsappEnv,
+  deps: WhatsappDeps,
+  item: ClaimedContent,
+  creds: GcsCredentials,
+) {
+  const report = (
+    status: string,
+    text: string | null,
+    error: string | null = null,
+  ) =>
+    rpc(env, deps, "whatsapp_store_content", {
+      p_message: item.id,
+      p_status: status,
+      p_text: text,
+      p_error: error,
+    });
+  if (!item.content_kind || item.bucket !== env.bucket) {
+    await report("skipped", null);
+    return 0;
+  }
+  try {
+    const file = await deps.fetch(
+      signGcsUrl(creds, item.bucket, item.path, "GET", {
+        expiresInSeconds: 300,
+      }),
+      { signal: AbortSignal.timeout(60_000) },
+    );
+    if (!file.ok) throw new Error(`Download do GCS falhou (${file.status}).`);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const name = item.media_name || item.path.split("/").pop() || "arquivo";
+    if (item.content_kind === "audio") {
+      const text = await transcribe(
+        env,
+        deps,
+        bytes,
+        item.media_mime || "audio/mpeg",
+        item.path.split("/").pop() || "audio.mp3",
+      );
+      await report(text ? "done" : "empty", text || null);
+      // Sem a duração, estima pelo tamanho do MP3 (~16 KB por segundo).
+      const seconds = item.media_seconds || bytes.byteLength / 16_000;
+      return (seconds / 60) * env.transcribeUsdPerMinute;
+    }
+    const out = await extractFileText(item.content_kind, bytes, name);
+    const text = out.pages
+      .map((p) => [p.label, p.text].filter(Boolean).join("\n"))
+      .join("\n\n")
+      .trim();
+    if (out.status === "done" && text) await report("done", text);
+    else if (out.status === "error")
+      await report("error", null, out.error ?? "falha ao ler");
+    else await report(out.status === "unsupported" ? "skipped" : "empty", null);
+    return 0;
+  } catch (e) {
+    await report("error", null, (e as Error).message);
+    return 0;
+  }
+}
+
 /** Faz em paralelo, no máximo `limit` de cada vez. */
 async function pool<T>(
   items: T[],
@@ -509,6 +633,7 @@ export async function runWhatsappSync(env: WhatsappEnv, deps: WhatsappDeps) {
     groupsRead: 0,
     messages: 0,
     media: 0,
+    contents: 0,
     errors: [] as string[],
   };
   const state = await rpc<{ company: string; sweep_due: boolean }>(
@@ -536,12 +661,18 @@ export async function runWhatsappSync(env: WhatsappEnv, deps: WhatsappDeps) {
   }
   let groupsDone = false;
   let mediaDone = !env.credentials;
+  let contentDone = !env.credentials;
+  const costs = new Map<string, number>();
   if (!env.credentials)
     stats.errors.push(
       "Credenciais do GCS não configuradas: mídias ficam na fila.",
     );
-  // Grupos e mídias se alternam: as mídias vencem em 2 dias na Uazapi.
-  while (!(groupsDone && mediaDone) && now() < deadline - 5_000) {
+  // Grupos e mídias se alternam: as mídias vencem em 2 dias na Uazapi. Ler
+  // o conteúdo (transcrever, extrair texto) vem depois, sem pressa.
+  while (
+    !(groupsDone && mediaDone && contentDone) &&
+    now() < deadline - 5_000
+  ) {
     if (!groupsDone) {
       const claimed = await rpc<ClaimedGroup[]>(
         env,
@@ -571,7 +702,30 @@ export async function runWhatsappSync(env: WhatsappEnv, deps: WhatsappDeps) {
         stats.media++;
       });
     } else mediaDone = true;
+    if (!contentDone && mediaDone && now() < deadline - 30_000) {
+      const claimed = await rpc<ClaimedContent[]>(
+        env,
+        deps,
+        "whatsapp_claim_content",
+        { p_limit: 4 },
+      );
+      if (!claimed.length) contentDone = true;
+      await pool(claimed, 2, async (item) => {
+        const cost = await readContent(env, deps, item, env.credentials!);
+        stats.contents++;
+        if (cost > 0 && item.client_id)
+          costs.set(item.client_id, (costs.get(item.client_id) ?? 0) + cost);
+      });
+    } else if (mediaDone) contentDone = true;
   }
+  if (costs.size)
+    await rpc(env, deps, "whatsapp_log_usage", {
+      p_model: env.transcribeModel,
+      p_items: [...costs].map(([client, cost]) => ({
+        client,
+        cost: Math.round(cost * 1e6) / 1e6,
+      })),
+    }).catch(() => {});
   return stats;
 }
 

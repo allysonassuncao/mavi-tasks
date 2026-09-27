@@ -147,6 +147,7 @@ const SOURCE_ICONS = {
   social: Rocket,
   campaign: Megaphone,
   case: Trophy,
+  whatsapp: MessageCircle,
 };
 function SourceIcon({ type }: { type: AiSource["type"] }) {
   const Icon = SOURCE_ICONS[type] ?? FileText;

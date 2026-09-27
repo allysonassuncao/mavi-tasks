@@ -18735,3 +18735,17 @@ p.case-note {
     flex-basis: 100%;
   }
 }
+.wa-transcript {
+  margin-top: 4px;
+  font-size: 0.8rem;
+}
+.wa-transcript summary {
+  color: #4e7038;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.wa-transcript p {
+  margin: 4px 0 0;
+  color: #3f4b4b;
+  white-space: pre-wrap;
+}

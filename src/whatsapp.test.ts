@@ -88,6 +88,8 @@ const msg = (over: Partial<WhatsappMessage>): WhatsappMessage => ({
   media_bytes: null,
   media_seconds: null,
   media_status: "none",
+  content_text: null,
+  content_status: "none",
   ...over,
 });
 

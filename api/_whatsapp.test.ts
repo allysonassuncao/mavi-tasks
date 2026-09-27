@@ -24,6 +24,9 @@ const env: WhatsappEnv = {
   workerSecret: "w".repeat(40),
   workerBudgetMs: 80_000,
   mediaMaxBytes: 1000,
+  openaiKey: "sk-test",
+  transcribeModel: "gpt-4o-mini-transcribe",
+  transcribeUsdPerMinute: 0.003,
 };
 const HOUR = 3600_000;
 const NOW = Date.UTC(2026, 8, 26, 12);
@@ -218,6 +221,9 @@ function world(opts: {
   groups?: { id: string; jid: string; since: string }[];
   pages?: Record<string, any[][]>;
   media?: any[];
+  content?: any[];
+  gcsBody?: Uint8Array;
+  transcript?: string;
   fileBytes?: number;
   contentLength?: number;
   clock?: () => number;
@@ -225,6 +231,7 @@ function world(opts: {
   const calls: Call[] = [];
   let groupsClaimed = false;
   let mediaClaimed = false;
+  let contentClaimed = false;
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status });
   const fetchImpl = (async (input: any, init: any = {}) => {
@@ -255,6 +262,13 @@ function world(opts: {
         return json(out);
       }
       if (rpc === "whatsapp_store_media") return json(null);
+      if (rpc === "whatsapp_claim_content") {
+        const out = contentClaimed ? [] : (opts.content ?? []);
+        contentClaimed = true;
+        return json(out);
+      }
+      if (rpc === "whatsapp_store_content" || rpc === "whatsapp_log_usage")
+        return json(null);
       throw new Error(`rpc inesperada ${rpc}`);
     }
     if (url === "https://uaz.example.com/chat/find") {
@@ -299,6 +313,13 @@ function world(opts: {
         headers["content-length"] = String(opts.contentLength);
       return new Response(new Uint8Array(opts.fileBytes ?? 10), { headers });
     }
+    if (url === "https://api.openai.com/v1/audio/transcriptions")
+      return json({ text: opts.transcript ?? "" });
+    if (
+      url.startsWith("https://storage.googleapis.com/") &&
+      (init.method ?? "GET") === "GET"
+    )
+      return new Response(opts.gcsBody ?? new Uint8Array(32000));
     if (url.startsWith("https://storage.googleapis.com/"))
       return new Response("", { status: 200 });
     throw new Error(`fetch inesperado ${url}`);
@@ -669,5 +690,93 @@ describe("miniatura", () => {
       }),
     );
     expect(doc?.extra.thumb).toBeUndefined();
+  });
+});
+
+describe("leitura das mídias para a MAVI", () => {
+  const audio = {
+    id: "a1",
+    kind: "audio",
+    content_kind: "audio",
+    bucket: "drive-bucket",
+    path: "whatsapp/c1/1/2026/09/a1.mp3",
+    media_mime: "audio/mpeg",
+    media_name: null,
+    media_bytes: 32000,
+    media_seconds: 40,
+    client_id: "cl1",
+  };
+  it("transcreve o áudio em português e registra o custo por cliente", async () => {
+    const w = world({
+      content: [audio],
+      transcript: "  Precisamos aumentar a verba  ",
+    });
+    const stats = await runWhatsappSync(env, w.deps);
+    expect(stats.contents).toBe(1);
+    const call = w.calls.find((c) => c.url.endsWith("/audio/transcriptions"))!;
+    expect(call.method).toBe("POST");
+    const form = call.body as FormData;
+    expect(form.get("model")).toBe("gpt-4o-mini-transcribe");
+    expect(form.get("language")).toBe("pt");
+    expect((form.get("file") as File).name).toBe("a1.mp3");
+    expect(rpcCalls(w.calls, "whatsapp_store_content")).toEqual([
+      {
+        p_secret: env.workerSecret,
+        p_message: "a1",
+        p_status: "done",
+        p_text: "Precisamos aumentar a verba",
+        p_error: null,
+      },
+    ]);
+    // 40 s a US$ 0,003 por minuto.
+    expect(rpcCalls(w.calls, "whatsapp_log_usage")[0]).toMatchObject({
+      p_model: "gpt-4o-mini-transcribe",
+      p_items: [{ client: "cl1", cost: 0.002 }],
+    });
+  });
+  it("áudio sem fala fica vazio; sem chave da OpenAI, erro (volta para a fila)", async () => {
+    const w = world({ content: [audio], transcript: "" });
+    await runWhatsappSync(env, w.deps);
+    expect(rpcCalls(w.calls, "whatsapp_store_content")[0].p_status).toBe(
+      "empty",
+    );
+    const w2 = world({ content: [audio] });
+    await runWhatsappSync({ ...env, openaiKey: "" }, w2.deps);
+    expect(rpcCalls(w2.calls, "whatsapp_store_content")[0]).toMatchObject({
+      p_status: "error",
+      p_error: "Transcrição não configurada: falta OPENAI_API_KEY na Vercel.",
+    });
+    expect(rpcCalls(w2.calls, "whatsapp_log_usage")).toHaveLength(0);
+  });
+  it("documento: o texto extraído vai para o banco, sem custo", async () => {
+    const doc = {
+      ...audio,
+      id: "d1",
+      kind: "document",
+      content_kind: "text",
+      path: "whatsapp/c1/1/2026/09/d1.txt",
+      media_mime: "text/plain",
+      media_name: "briefing.txt",
+    };
+    const w = world({
+      content: [doc],
+      gcsBody: new TextEncoder().encode("Briefing da campanha de outubro"),
+    });
+    await runWhatsappSync(env, w.deps);
+    expect(w.calls.some((c) => c.url.includes("openai"))).toBe(false);
+    const [stored] = rpcCalls(w.calls, "whatsapp_store_content");
+    expect(stored.p_status).toBe("done");
+    expect(stored.p_text).toContain("Briefing da campanha de outubro");
+    expect(rpcCalls(w.calls, "whatsapp_log_usage")).toHaveLength(0);
+  });
+  it("mídia de outro bucket não é lida", async () => {
+    const w = world({ content: [{ ...audio, bucket: "outro" }] });
+    await runWhatsappSync(env, w.deps);
+    expect(
+      w.calls.some((c) => c.url.startsWith("https://storage.googleapis.com/")),
+    ).toBe(false);
+    expect(rpcCalls(w.calls, "whatsapp_store_content")[0].p_status).toBe(
+      "skipped",
+    );
   });
 });

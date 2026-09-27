@@ -106,6 +106,9 @@ export function sourceLink(origin: string, s: AiSource) {
   else if (s.type === "social") {
     path = "/onboarding/social-leads";
     if (s.contract_id) q.set("contrato", s.contract_id);
+  } else if (s.type === "whatsapp") {
+    if (s.group) q.set("whatsapp", s.group);
+    q.set("msg", s.id);
   } else if (s.type === "case") {
     path = "/cases-de-sucesso";
     q.set("caso", s.id);

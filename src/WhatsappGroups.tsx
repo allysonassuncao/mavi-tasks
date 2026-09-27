@@ -280,6 +280,11 @@ function SyncStatus({ status }: { status: WhatsappStatus }) {
     ["Mensagens guardadas", status.messages.toLocaleString("pt-BR")],
     ["Mídias na fila", status.media_pending.toLocaleString("pt-BR")],
     ["Mídias perdidas", status.media_lost.toLocaleString("pt-BR")],
+    [
+      "Áudios e documentos lidos",
+      (status.content_done ?? 0).toLocaleString("pt-BR"),
+    ],
+    ["Leituras na fila", (status.content_pending ?? 0).toLocaleString("pt-BR")],
   ];
   return (
     <>

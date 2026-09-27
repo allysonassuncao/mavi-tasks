@@ -21,8 +21,11 @@ export type AiScope = {
 };
 export type AiSource = {
   ref: string;
-  type: "meeting" | "task" | "file" | "social" | "campaign" | "case";
+  type:
+    "meeting" | "task" | "file" | "social" | "campaign" | "case" | "whatsapp";
+  /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
   id: string;
+  group?: string;
   title: string;
   date: string | null;
   client_id: string | null;
@@ -43,6 +46,7 @@ const SEARCH_TYPES: Record<string, string[]> = {
   social: ["social_plan", "social_briefing"],
   campaign: ["campaign"],
   case: ["success_case"],
+  whatsapp: ["whatsapp"],
 };
 const SOURCE_KIND: Record<string, AiSource["type"]> = {
   meeting: "meeting",
@@ -52,6 +56,7 @@ const SOURCE_KIND: Record<string, AiSource["type"]> = {
   social_briefing: "social",
   campaign: "campaign",
   success_case: "case",
+  whatsapp: "whatsapp",
 };
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -93,7 +98,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "search_knowledge",
     description:
-      "Busca por significado e por termos em tudo que a pessoa pode ver na MAVI: transcrições e resumos das reuniões gravadas, tarefas (descrição, campos e comentários), arquivos do Drive (PDF, Word, PowerPoint, Excel, textos), briefing e planos do Social Leads e anotações das campanhas. Use para qualquer pergunta sobre o que foi dito, combinado, pedido ou decidido. Faça várias buscas com formulações diferentes (em paralelo) quando a pergunta for ampla. Devolve trechos numerados [S#] para citar.",
+      "Busca por significado e por termos em tudo que a pessoa pode ver na MAVI: transcrições e resumos das reuniões gravadas, tarefas (descrição, campos e comentários), arquivos do Drive (PDF, Word, PowerPoint, Excel, textos), briefing e planos do Social Leads, anotações das campanhas e as conversas dos grupos de WhatsApp dos clientes. Use para qualquer pergunta sobre o que foi dito, combinado, pedido ou decidido. Faça várias buscas com formulações diferentes (em paralelo) quando a pergunta for ampla. Devolve trechos numerados [S#] para citar.",
     parameters: obj(
       {
         query: {
@@ -109,10 +114,18 @@ export const TOOLS: ToolSpec[] = [
           type: "array",
           items: {
             type: "string",
-            enum: ["meeting", "task", "file", "social", "campaign", "case"],
+            enum: [
+              "meeting",
+              "task",
+              "file",
+              "social",
+              "campaign",
+              "case",
+              "whatsapp",
+            ],
           },
           description:
-            "Limitar a tipos: meeting (reuniões gravadas), task (tarefas), file (arquivos do Drive), social (briefing e planos do Social Leads), campaign (anotações e ciclos das campanhas; só líderes), case (cases de sucesso aprovados: resultados, nichos, links e contatos; todos veem).",
+            "Limitar a tipos: meeting (reuniões gravadas), task (tarefas), file (arquivos do Drive), social (briefing e planos do Social Leads), campaign (anotações e ciclos das campanhas; só líderes), case (cases de sucesso aprovados: resultados, nichos, links e contatos; todos veem), whatsapp (conversas dos grupos de WhatsApp com o cliente, com áudios transcritos e o texto dos documentos enviados).",
         },
         from: dateField("Só a partir desta data"),
         to: dateField("Só até esta data"),
@@ -218,6 +231,12 @@ const int = (v: unknown, def: number, min: number, max: number) => {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : def;
 };
+const waTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 const brDate = (iso: string | null) =>
   iso
     ? new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso).toLocaleDateString(
@@ -275,6 +294,10 @@ type SearchRow = {
     page?: number;
     label?: string;
     post?: number;
+    /** Whatsapp: o grupo, a primeira mensagem do trecho e o horário dela. */
+    group?: string;
+    message?: string;
+    at?: string;
   };
   client_id: string | null;
   contract_id: string | null;
@@ -319,11 +342,15 @@ async function searchKnowledge(
     .map((row) => {
       const start = row.meta?.start;
       const kind = SOURCE_KIND[row.source_type] ?? "task";
+      // Whatsapp: a citação aponta a primeira mensagem do trecho.
+      const wa = kind === "whatsapp";
+      const at = wa && typeof row.meta?.at === "string" ? row.meta.at : null;
       const ref = cite(ctx, {
         type: kind,
-        id: row.source_id,
+        id: wa && row.meta?.message ? String(row.meta.message) : row.source_id,
+        ...(wa && row.meta?.group ? { group: String(row.meta.group) } : {}),
         title: row.title,
-        date: row.occurred_at,
+        date: at ?? row.occurred_at,
         client_id: row.client_id,
         ...(kind === "social" ? { contract_id: row.contract_id } : {}),
         ...(typeof start === "number" ? { start } : {}),
@@ -344,7 +371,9 @@ async function searchKnowledge(
                 ? `Campanha "${row.title}"`
                 : kind === "case"
                   ? `Case de sucesso "${row.title}"`
-                  : `Tarefa "${row.title}" · ${STATUS_LABELS[row.task_status ?? ""] ?? row.task_status ?? ""}${row.task_assignee ? ` · responsável ${ctx.members.get(row.task_assignee)?.name ?? "?"}` : ""}${row.task_due ? ` · prazo ${brDate(row.task_due)}` : ""}`;
+                  : wa
+                    ? `${row.title.replace(/ · \d{2}\/\d{2}\/\d{4}$/, "")} · ${brDate(at ?? row.occurred_at)}${at ? ` ${waTime(at)}` : ""}${row.meta?.kind === "whatsapp_document" && row.meta?.label ? ` · documento "${row.meta.label}"` : ""}`
+                    : `Tarefa "${row.title}" · ${STATUS_LABELS[row.task_status ?? ""] ?? row.task_status ?? ""}${row.task_assignee ? ` · responsável ${ctx.members.get(row.task_assignee)?.name ?? "?"}` : ""}${row.task_due ? ` · prazo ${brDate(row.task_due)}` : ""}`;
       // A primeira linha do trecho é o cabeçalho de contexto; aqui ele vira
       // a linha de referência.
       const body = row.content.split("\n").slice(1).join("\n").trim();

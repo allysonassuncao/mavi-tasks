@@ -39,6 +39,9 @@ export interface WhatsappStatus {
   messages: number;
   media_pending: number;
   media_lost: number;
+  /** Áudios e documentos esperando a leitura para a MAVI, e os já lidos. */
+  content_pending?: number;
+  content_done?: number;
 }
 
 const COLUMNS =
@@ -191,9 +194,12 @@ export interface WhatsappMessage {
   media_bytes: number | null;
   media_seconds: number | null;
   media_status: "none" | "pending" | "stored" | "failed" | "lost" | "too_large";
+  /** Transcrição do áudio / texto do documento, lidos para a MAVI. */
+  content_text: string | null;
+  content_status: "none" | "pending" | "done" | "empty" | "skipped" | "error";
 }
 const MESSAGE_COLUMNS =
-  "id,group_id,wa_id,sent_at,sender,sender_phone,sender_name,from_me,kind,body,quoted_wa_id,reaction_to,edited,extra,media_mime,media_name,media_bytes,media_seconds,media_status";
+  "id,group_id,wa_id,sent_at,sender,sender_phone,sender_name,from_me,kind,body,quoted_wa_id,reaction_to,edited,extra,media_mime,media_name,media_bytes,media_seconds,media_status,content_text,content_status";
 
 function db() {
   if (!supabase) throw Error("Supabase não configurado");
