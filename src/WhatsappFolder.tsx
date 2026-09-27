@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   ArrowLeft,
+  Clock,
   BarChart3,
   CheckSquare,
   Contact,
@@ -194,11 +195,19 @@ export function WhatsappFolder({
             <ImageIcon size={15} /> Mídias
           </button>
         </div>
-        <small className="wa-updated">
-          Atualiza a cada 2 horas
-          {lastRead && ` · última leitura ${ago(lastRead)}`}
-        </small>
       </div>
+      {/* As mensagens chegam da Uazapi a cada 2 horas: quem lê precisa
+          saber que a conversa pode estar atrás do WhatsApp. */}
+      <p className="wa-notice" role="note">
+        <Clock size={16} aria-hidden="true" />
+        <span>
+          <strong>Não é em tempo real.</strong> As conversas são atualizadas a
+          cada 2 horas
+          {lastRead ? ` (última atualização ${ago(lastRead)})` : ""}. Mensagens
+          mais recentes podem ainda não aparecer aqui: para o que acabou de
+          acontecer, confira o WhatsApp.
+        </span>
+      </p>
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -587,6 +596,7 @@ function Chat({
             {group.message_count === 1
               ? "mensagem guardada"
               : "mensagens guardadas"}
+            {group.synced_at && ` · atualizado ${ago(group.synced_at)}`}
           </small>
         </div>
         <div className="wa-chat-tools">
@@ -691,6 +701,14 @@ function Chat({
               >
                 Carregar mensagens mais recentes
               </button>
+            )}
+            {!newer && shown.length > 0 && (
+              <p className="wa-start wa-end">
+                {group.synced_at
+                  ? `Conversa atualizada ${ago(group.synced_at)}.`
+                  : "Conversa ainda não atualizada."}{" "}
+                Mensagens novas chegam a cada 2 horas.
+              </p>
             )}
           </>
         )}

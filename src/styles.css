@@ -16958,9 +16958,25 @@ td.ai-empty-cell {
   justify-content: space-between;
   gap: 10px;
 }
-.wa-updated {
-  color: var(--muted);
-  font-size: 0.76rem;
+.wa-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #e6dcb8;
+  border-radius: 10px;
+  background: #fbf7e8;
+  color: #6b5a1f;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.wa-notice svg {
+  flex: none;
+  margin-top: 2px;
+}
+.wa-end {
+  margin: 14px 0 4px;
 }
 .wa-folder {
   display: grid;
