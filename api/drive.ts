@@ -15,6 +15,7 @@ import {
   streamCopilot,
 } from "./_copilot.js";
 import { handleLearningWorker } from "./_copilot-learning.js";
+import { handleTemperatureWorker } from "./_temperature.js";
 import { serverModel } from "../src/ai-providers.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
@@ -261,6 +262,18 @@ export default async function handler(
           : action === "ai-dossier"
             ? await handleDossierWorker(authorization, env, aiDeps(env))
             : await handleLearningWorker(authorization, env, aiDeps(env));
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+    // Termômetro do cliente: o worker do pg_cron (o Jev lê, a MAVI explica
+    // com o modelo da funcionalidade 'client_temperature_text').
+    if (action === "ai-temperature") {
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("client_temperature_text", process.env),
+      };
+      const result = await handleTemperatureWorker(authorization, env, aiDeps(env));
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

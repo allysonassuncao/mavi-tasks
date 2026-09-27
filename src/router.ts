@@ -12,6 +12,7 @@ export const pagePaths = {
   campaigns: "/campanhas",
   onboarding: "/onboarding/social-leads",
   cases: "/cases-de-sucesso",
+  temperature: "/termometro",
   notices: "/mural",
   hours: "/horas",
   reports: "/relatorios",
@@ -64,7 +65,13 @@ export const SETTINGS_TABS = [
 ] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 /** Tabs of "Painel da MAVI", by the URL's hash (the old "#ia-…" still work). */
-export const AI_TABS = ["consumo", "copiloto", "provedores", "regras"] as const;
+export const AI_TABS = [
+  "consumo",
+  "copiloto",
+  "termometro",
+  "provedores",
+  "regras",
+] as const;
 export type AiTab = (typeof AI_TABS)[number];
 export function aiTab(hash: string): AiTab {
   const tab = hash.replace(/^ia-/, "");
@@ -148,6 +155,7 @@ export function safeReturnPath(value: string | null) {
     "nicho",
     "aviso",
     "animacao",
+    "termometro",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);

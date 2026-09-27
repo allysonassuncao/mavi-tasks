@@ -207,7 +207,9 @@ export type AiFeature =
   | "client_dossier"
   | "copilot_learning"
   | "notice_writer"
-  | "notice_animation";
+  | "notice_animation"
+  | "client_temperature"
+  | "client_temperature_text";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -219,7 +221,15 @@ export type FeatureInfo = {
   env: string;
   /** O que muda com um provedor que não é a Claude. */
   note?: string;
+  /**
+   * Responde com decisões, não com texto: só aceita o Jev (TypeSafe) pelo
+   * OpenRouter, e sem escolha usa o primeiro Jev cadastrado.
+   */
+  decisions?: boolean;
 };
+
+/** O Jev (TypeSafe): um modelo de decisão, que não conversa. */
+export const isJevModel = (id: string) => /typesafe\/jev/i.test(id);
 
 export const FEATURES: FeatureInfo[] = [
   {
@@ -319,6 +329,22 @@ export const FEATURES: FeatureInfo[] = [
     env: "NOTICE_ANIMATION_MODEL",
     note: "O modelo escolhido precisa aceitar imagens para ler os prints.",
   },
+  {
+    id: "client_temperature",
+    group: "Termômetro do cliente",
+    label: "Leitura das reuniões e do WhatsApp (Jev)",
+    conversation: false,
+    env: "",
+    decisions: true,
+  },
+  {
+    id: "client_temperature_text",
+    group: "Termômetro do cliente",
+    label: "Explicação da temperatura pela MAVI",
+    conversation: false,
+    env: "CLIENT_TEMPERATURE_TEXT_MODEL",
+    note: "Um parágrafo curto por cliente, só quando a temperatura muda: um modelo rápido basta.",
+  },
 ];
 
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
@@ -350,6 +376,11 @@ export function serverModel(
       return env.NOTICE_WRITER_MODEL || env.AI_MODEL || fallback;
     case "notice_animation":
       return env.NOTICE_ANIMATION_MODEL || env.AI_MODEL || fallback;
+    case "client_temperature":
+      // Não há padrão no servidor: o Jev vem da biblioteca (OpenRouter).
+      return "~typesafe/jev-latest";
+    case "client_temperature_text":
+      return env.CLIENT_TEMPERATURE_TEXT_MODEL || env.AI_MODEL || fallback;
     default:
       return env.SOCIAL_LEADS_MODEL || fallback;
   }

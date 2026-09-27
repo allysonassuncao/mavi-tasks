@@ -51,6 +51,7 @@ import {
   socialLeadsPanels,
   performancePanels,
   noticesPanels,
+  temperaturePanels,
   vizOptions,
   compact,
   type Dashboard,
@@ -67,6 +68,7 @@ import {
   type Source,
 } from "./dashboards";
 import { priorities, statuses, type Snapshot } from "./types";
+import { loadTemperatureConfig } from "./temperature";
 
 type Notify = (message: string) => void;
 
@@ -78,6 +80,7 @@ const sourceOrder: Source[] = [
   "hours",
   "social_leads",
   "notices",
+  "temperature",
 ];
 
 // The demonstration keeps its dashboards in memory for the session.
@@ -378,7 +381,9 @@ function DashboardList({
                       ? performancePanels()
                       : template === "notices"
                         ? noticesPanels()
-                        : [],
+                        : template === "temperature"
+                          ? temperaturePanels()
+                          : [],
               variables: { range: { preset: "30d" as const }, filters: {} },
             };
             const saved = demo
@@ -393,7 +398,8 @@ function DashboardList({
   );
 }
 
-type Template = "operation" | "social_leads" | "performance" | "notices" | null;
+type Template =
+  "operation" | "social_leads" | "performance" | "notices" | "temperature" | null;
 function CreateDashboard({
   onClose,
   onCreate,
@@ -505,6 +511,19 @@ function CreateDashboard({
               leitura por aviso e quem mais deixa avisos pendentes.
             </small>
           </label>
+          <label className={template === "temperature" ? "selected" : ""}>
+            <input
+              type="radio"
+              name="template"
+              checked={template === "temperature"}
+              onChange={() => setTemplate("temperature")}
+            />
+            <strong>Modelo: Termômetro dos clientes</strong>
+            <small>
+              Temperatura média da carteira, clientes em faixa de alerta e com
+              sinal, a evolução, os clientes por faixa, por equipe e por cliente.
+            </small>
+          </label>
           <label className={template === null ? "selected" : ""}>
             <input
               type="radio"
@@ -530,7 +549,11 @@ function CreateDashboard({
 }
 
 // ------------------------------------------------------------ view / edit
-function useLookups(data: Snapshot) {
+/**
+ * The options of each filter and, for the Termômetro's "indicator" metric,
+ * the company's score indicators.
+ */
+function useLookups(data: Snapshot, indicators: PickOption[] = []) {
   return useMemo(() => {
     const byName = (a: PickOption, b: PickOption) =>
       a.label.localeCompare(b.label, "pt-BR");
@@ -573,8 +596,9 @@ function useLookups(data: Snapshot) {
         { value: "manual", label: "Lançamento manual" },
       ],
       late: [],
-    } satisfies Record<FilterField, PickOption[]>;
-  }, [data]);
+      indicators,
+    } satisfies Record<FilterField, PickOption[]> & { indicators: PickOption[] };
+  }, [data, indicators]);
 }
 
 function DashboardView({
@@ -612,7 +636,21 @@ function DashboardView({
   const [editingPanel, setEditingPanel] = useState<Panel | "new" | null>(null);
   const [sharing, setSharing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const lookups = useLookups(data);
+  // The Termômetro's indicators, for the "indicator" metric (leaders edit).
+  const [indicators, setIndicators] = useState<PickOption[]>([]);
+  useEffect(() => {
+    if (!isLeader) return;
+    loadTemperatureConfig(company)
+      .then((c) =>
+        setIndicators(
+          c.indicators
+            .filter((i) => i.kind === "score" && i.key)
+            .map((i) => ({ value: i.key!, label: i.name })),
+        ),
+      )
+      .catch(() => setIndicators([]));
+  }, [company, isLeader]);
+  const lookups = useLookups(data, indicators);
 
   useEffect(() => {
     let current = true;
@@ -1535,6 +1573,22 @@ function QueryEditor({
             ))}
           </Select>
         </label>
+        {query.source === "temperature" && query.metric === "indicator" && (
+          <label>
+            Indicador
+            <Select
+              value={query.indicator ?? ""}
+              onValueChange={(v) => onChange({ indicator: v })}
+            >
+              <SelectOption value="">Escolha o indicador</SelectOption>
+              {lookups.indicators.map((o) => (
+                <SelectOption key={o.value} value={o.value}>
+                  {o.label}
+                </SelectOption>
+              ))}
+            </Select>
+          </label>
+        )}
         <label>
           Período pela data de
           <Select

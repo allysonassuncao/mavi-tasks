@@ -144,6 +144,19 @@ Para ligar a biblioteca de provedores: aplicar a migração `20261025090000_ai_p
 
 Para ligar o MCP, no painel do Supabase, em **Authentication › OAuth Server**: ativar o servidor OAuth 2.1, ativar o cadastro dinâmico de apps (os apps de IA se cadastram sozinhos) e colocar `/oauth/consent` como caminho de autorização. Em **Authentication › URL Configuration**, o Site URL deve ser `https://workspace.maso.app.br` (a tela de permissão abre nele). Aplicar a migração e fazer redeploy. Testes: `npm run test:db:ai-mcp` e `npx vitest run api/_mcp.test.ts`.
 
+### Termômetro do cliente
+
+A temperatura da relação com cada cliente (migração `20261110090000_client_temperature`), lida pelo **Jev** (TypeSafe) pelo OpenRouter. O Jev é um modelo de decisão, não de chat: recebe o material e perguntas de formato fechado (nota numa escala, sim/não, escolha) pela API de decisões (`/api/alpha/decisions`) e devolve as probabilidades; cobra só a entrada.
+
+- **Leituras**: cada reunião gravada e cada dia de grupo de WhatsApp viram uma leitura (`temperature_signals`), refeita quando o documento da MAVI muda (trigger em `ai_documents`). As falas vão marcadas `[time]` (número da agência e telefones do time em Meu perfil/Membros, falantes com nome de membro) ou `[cliente]`; dia sem fala do cliente não vai ao Jev. Cada indicador de nota vira uma pergunta de escala e uma de "o material fala disso?" (a evidência pesa a leitura).
+- **Configuração** (Painel da MAVI › Termômetro, `/mavi#termometro`, administradores e gestores): faixas (nome, cor, se avisam), janela, meia-vida, peso de reunião e de WhatsApp, indicadores de nota e sinais de alerta (descrição e níveis que o Jev lê, peso, fontes), assuntos e o ajuste por produto (desligar, outro peso, indicadores próprios). Mudar uma pergunta sobe a versão e relê o histórico; peso, faixa e janela só recalculam.
+- **Cálculo**: cada indicador é a média das leituras da janela pesada por fonte, idade, confiança e evidência; a temperatura é a média dos indicadores pelos pesos. Um dia por cliente em `temperature_days` (gráfico e a fonte "Temperatura dos clientes" dos Dashboards).
+- **Telas**: Drive › cliente › **Termômetro** (`?termometro=<cliente>`), a carteira em **Termômetro** (`/termometro`, módulo `temperature`), com a regra do Drive.
+- **MAVI**: a ferramenta `client_temperature` (assistente e MCP) e, nas conversas dentro de um cliente, a temperatura no contexto. O parágrafo da MAVI usa a funcionalidade `client_temperature_text` e só é refeito quando a faixa muda, a nota anda 8 pontos ou aparece um sinal.
+- **Aviso**: faixa que avisa ou sinal de alerta novo → caixa de entrada e push dos supervisores das equipes do cliente (sem nenhum, dos administradores). Enquanto o histórico está sendo lido, não avisa.
+
+Para ligar: aplicar a migração (ela põe todo o histórico na fila), ter o modelo `~typesafe/jev-latest` num provedor **OpenRouter** ligado em Provedores e modelos (sem regra em "Por funcionalidade", o worker usa o primeiro Jev cadastrado) e rodar `supabase/operations/schedule-client-temperature.sql` (usa a mesma `mavi_private.ai_config` da indexação). Opcional: `CLIENT_TEMPERATURE_TEXT_MODEL` para o padrão do servidor do texto. Testes: `npm run test:db:temperature` e `npx vitest run api/_temperature.test.ts`.
+
 ### Agenda (Google Agenda)
 
 Cada pessoa conecta o próprio Google Agenda em **Agenda**; os eventos são lidos e gravados ao vivo no Google por `/api/google` (nada da agenda é copiado para o banco). A migração `20260930160000_google_calendar` guarda só a conexão, com os tokens criptografados pelo servidor (AES-256-GCM com `GOOGLE_TOKEN_KEY`).

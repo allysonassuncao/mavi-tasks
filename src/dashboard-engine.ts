@@ -56,7 +56,8 @@ function series(
     q.source === "social_leads" ||
     q.source === "status_history" ||
     q.source === "reviews" ||
-    q.source === "notices"
+    q.source === "notices" ||
+    q.source === "temperature"
   )
     return group === "none" ? [{ k: "total", v: 0 }] : [];
   const today = dateKey(now, tz);

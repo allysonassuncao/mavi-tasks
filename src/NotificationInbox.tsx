@@ -5,6 +5,7 @@ import {
   CheckCheck,
   Inbox,
   Sparkles,
+  Thermometer,
   Trophy,
 } from "lucide-react";
 import { useState } from "react";
@@ -90,6 +91,10 @@ export function NotificationInbox({
                       <span className="inbox-system" aria-hidden="true">
                         <Trophy size={15} />
                       </span>
+                    ) : n.kind === "temperature" ? (
+                      <span className="inbox-system temperature" aria-hidden="true">
+                        <Thermometer size={15} />
+                      </span>
                     ) : n.kind === "social_leads" || n.kind === "ai_share" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <Sparkles size={15} />
@@ -105,6 +110,7 @@ export function NotificationInbox({
                       {n.kind === "social_leads" ||
                       n.kind === "ai_share" ||
                       n.kind === "success_case" ||
+                      n.kind === "temperature" ||
                       n.kind === "notice" ? (
                         <span className="inbox-line">
                           <strong>{n.task_title}</strong>
@@ -132,8 +138,9 @@ export function NotificationInbox({
           <p className="inbox-empty">
             <AtSign size={18} />
             Quando criarem uma tarefa para você, mencionarem você com @,
-            responderem um comentário seu, a agência publicar um aviso no Mural
-            ou a MAVI terminar um plano do Social Leads, o aviso aparece aqui.
+            responderem um comentário seu, a agência publicar um aviso no Mural,
+            a MAVI terminar um plano do Social Leads ou um cliente seu esfriar, o
+            aviso aparece aqui.
           </p>
         )}
       </Popover.Content>

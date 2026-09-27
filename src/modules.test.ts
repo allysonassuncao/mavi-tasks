@@ -41,6 +41,7 @@ describe("módulos visíveis por pessoa", () => {
       "campaigns",
       "onboarding",
       "cases",
+      "temperature",
       "hours",
       "reports",
       "drive",
@@ -63,7 +64,15 @@ describe("módulos visíveis por pessoa", () => {
     );
     expect(
       firstPage("member", ["tasks", "agenda", "onboarding", "cases"]),
+    ).toBe("temperature");
+    expect(
+      firstPage("member", ["tasks", "agenda", "onboarding", "cases", "temperature"]),
     ).toBe("drive");
+  });
+  it("Termômetro dos clientes: de todos os perfis, e o administrador pode esconder", () => {
+    expect(roleAllows("temperature", "member")).toBe(true);
+    expect(canOpenPage("temperature", "member", ["temperature"])).toBe(false);
+    expect(moduleOf("temperature")).toBe("temperature");
   });
   it("o assistente de IA é um módulo de todos, que o administrador desliga", () => {
     expect(moduleOn("assistant", "member")).toBe(true);
@@ -82,6 +91,7 @@ describe("módulos visíveis por pessoa", () => {
       "campaigns",
       "onboarding",
       "cases",
+      "temperature",
       "hours",
       "reports",
       "drive",

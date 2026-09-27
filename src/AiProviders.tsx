@@ -38,6 +38,7 @@ import {
   FEATURES,
   catalogEntry,
   featureInfo,
+  isJevModel,
   keyHint as keyHintOf,
   pickRoute,
   safeBaseUrl,
@@ -1045,15 +1046,24 @@ export function AiRoutesPanel({
 
   const companyRoute = routes.find((r) => r.type === "company") ?? null;
   const shown = routes.filter((r) => r.type === tab);
+  // O Jev (TypeSafe) não conversa: só aparece no termômetro do cliente.
+  const option = (p: AiProvider, m: AiProvider["models"][number]) => (
+    <SelectOption key={`${p.id}|${m.id}`} value={`${p.id}|${m.id}`}>
+      {`${p.name} · ${m.label || m.id}${p.active ? "" : " (desligado)"}`}
+    </SelectOption>
+  );
   const choices = (
     <>
       {providers.map((p) =>
-        p.models.map((m) => (
-          <SelectOption key={`${p.id}|${m.id}`} value={`${p.id}|${m.id}`}>
-            {`${p.name} · ${m.label || m.id}${p.active ? "" : " (desligado)"}`}
-          </SelectOption>
-        )),
+        p.models.filter((m) => !isJevModel(m.id)).map((m) => option(p, m)),
       )}
+    </>
+  );
+  const jevChoices = (
+    <>
+      {providers
+        .filter((p) => p.kind === "openrouter")
+        .map((p) => p.models.filter((m) => isJevModel(m.id)).map((m) => option(p, m)))}
     </>
   );
 
@@ -1121,6 +1131,7 @@ export function AiRoutesPanel({
         }
         serverLabel={serverLabel}
         choices={choices}
+        jevChoices={jevChoices}
         onSet={(feature, choice) => void set("feature", feature, choice)}
       />
 
@@ -1231,6 +1242,7 @@ function FeatureRoutes({
   companyProvider,
   serverLabel,
   choices,
+  jevChoices,
   onSet,
 }: {
   routes: AiRoute[];
@@ -1240,6 +1252,8 @@ function FeatureRoutes({
   companyProvider?: AiProvider;
   serverLabel: (feature?: AiFeature) => string;
   choices: ReactNode;
+  /** Os modelos do Jev nos provedores OpenRouter (funcionalidades de decisão). */
+  jevChoices: ReactNode;
   onSet: (feature: AiFeature, choice: string) => void;
 }) {
   return (
@@ -1267,7 +1281,11 @@ function FeatureRoutes({
                 (x) => x.type === "feature" && x.feature === f.id,
               );
               // Quem responde de fato: a escolha dela ou a da empresa.
-              const provider = r ? byId.get(r.provider_id) : companyProvider;
+              const provider = r
+                ? byId.get(r.provider_id)
+                : f.decisions
+                  ? undefined
+                  : companyProvider;
               const outsideClaude =
                 provider && catalogEntry(provider.kind)?.api !== "anthropic";
               return (
@@ -1288,11 +1306,13 @@ function FeatureRoutes({
                       onValueChange={(v) => onSet(f.id, v)}
                     >
                       <SelectOption value={SERVER}>
-                        {companyLabel
-                          ? `Padrão da empresa · ${companyLabel}`
-                          : serverLabel(f.id)}
+                        {f.decisions
+                          ? "Automático · o Jev cadastrado num provedor OpenRouter"
+                          : companyLabel
+                            ? `Padrão da empresa · ${companyLabel}`
+                            : serverLabel(f.id)}
                       </SelectOption>
-                      {choices}
+                      {f.decisions ? jevChoices : choices}
                     </Select>
                   </td>
                 </tr>

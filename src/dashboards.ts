@@ -11,7 +11,13 @@ import { priorities, statuses, type Status } from "./types";
  */
 
 export type Source =
-  "tasks" | "hours" | "social_leads" | "status_history" | "reviews" | "notices";
+  | "tasks"
+  | "hours"
+  | "social_leads"
+  | "status_history"
+  | "reviews"
+  | "notices"
+  | "temperature";
 export type Viz = "stat" | "line" | "area" | "bar" | "hbar" | "donut" | "table";
 export type GroupBy =
   | "none"
@@ -29,7 +35,8 @@ export type GroupBy =
   | "previous"
   | "validator"
   | "notice"
-  | "level";
+  | "level"
+  | "band";
 export type Interval = "auto" | "day" | "week" | "month";
 /** "money" (R$) is only drawn by Campanhas' charts, not a dashboard metric. */
 export type Unit = "number" | "hours" | "days" | "percent" | "money";
@@ -62,6 +69,8 @@ export type Query = {
   filters: QueryFilter[];
   /** Used only by the formula, not drawn on its own. */
   hidden?: boolean;
+  /** Termômetro, metric "indicator": which indicator (its key). */
+  indicator?: string;
   label?: string;
 };
 export type PanelSpec = {
@@ -479,6 +488,53 @@ export const sources: Record<
     dateFields: [{ key: "delivered_at", label: "Entrega do aviso" }],
     filters: ["level", "person", "team", "creator"],
   },
+  // Termômetro do cliente (migration 20261110090000): one row per client
+  // and day with the day's temperature (0–100). Averages over the
+  // client-days of the period; counts are distinct clients. "Pessoa" and
+  // "Equipe" are the teams that serve the client.
+  temperature: {
+    label: "Temperatura dos clientes",
+    metrics: [
+      {
+        key: "score",
+        label: "Temperatura média (0–100)",
+        unit: "number",
+        additive: false,
+      },
+      {
+        key: "indicator",
+        label: "Um indicador do termômetro (0–100)",
+        unit: "number",
+        additive: false,
+      },
+      {
+        key: "clients",
+        label: "Clientes com temperatura",
+        unit: "number",
+        additive: false,
+      },
+      {
+        key: "alert_clients",
+        label: "Clientes em faixa de alerta",
+        unit: "number",
+        additive: false,
+      },
+      {
+        key: "alert_rate",
+        label: "Clientes em faixa de alerta (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "flag_clients",
+        label: "Clientes com sinal de alerta",
+        unit: "number",
+        additive: false,
+      },
+    ],
+    dateFields: [{ key: "day", label: "Dia da temperatura" }],
+    filters: ["client", "product", "team", "person"],
+  },
 };
 export const metricDef = (q: Pick<Query, "source" | "metric">) =>
   sources[q.source]?.metrics.find((m) => m.key === q.metric);
@@ -515,6 +571,7 @@ export const groupOptions: {
       "status_history",
       "reviews",
       "notices",
+      "temperature",
     ],
   },
   {
@@ -527,17 +584,32 @@ export const groupOptions: {
       "status_history",
       "reviews",
       "notices",
+      "temperature",
     ],
   },
   {
     key: "client",
     label: "Cliente",
-    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
+    sources: [
+      "tasks",
+      "hours",
+      "social_leads",
+      "status_history",
+      "reviews",
+      "temperature",
+    ],
   },
   {
     key: "product",
     label: "Produto",
-    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
+    sources: [
+      "tasks",
+      "hours",
+      "social_leads",
+      "status_history",
+      "reviews",
+      "temperature",
+    ],
   },
   {
     key: "project",
@@ -547,7 +619,14 @@ export const groupOptions: {
   {
     key: "team",
     label: "Equipe",
-    sources: ["tasks", "hours", "status_history", "reviews", "notices"],
+    sources: [
+      "tasks",
+      "hours",
+      "status_history",
+      "reviews",
+      "notices",
+      "temperature",
+    ],
   },
   {
     key: "person",
@@ -574,6 +653,7 @@ export const groupOptions: {
   { key: "validator", label: "Quem validou", sources: ["reviews"] },
   { key: "notice", label: "Aviso", sources: ["notices"] },
   { key: "level", label: "Nível do aviso", sources: ["notices"] },
+  { key: "band", label: "Faixa do termômetro", sources: ["temperature"] },
   {
     key: "creator",
     label: "Criador da tarefa (ou autor do aviso)",
@@ -1708,6 +1788,92 @@ export function performancePanels(): Panel[] {
           q("A", "reviews", "approved", { label: "Aprovadas" }),
           q("B", "reviews", "reproved", { label: "Reprovadas" }),
         ],
+      },
+    },
+  ];
+}
+
+/**
+ * Termômetro do cliente (migration 20261110090000): a temperatura média da
+ * carteira, quantos clientes estão em faixa de alerta ou deram sinal, a
+ * evolução no tempo, os clientes por faixa e por equipe.
+ */
+export function temperaturePanels(): Panel[] {
+  const q = (
+    ref: string,
+    metric: string,
+    extra: Partial<Query> = {},
+  ): Query => ({
+    ref,
+    source: "temperature",
+    metric,
+    dateField: "day",
+    filters: [],
+    ...extra,
+  });
+  const stat = (id: string, title: string, x: number, query: Query): Panel => ({
+    id,
+    title,
+    x,
+    y: 0,
+    w: 3,
+    h: 3,
+    spec: { viz: "stat", groupBy: "none", compare: true, queries: [query] },
+  });
+  return [
+    stat("temperatura", "Temperatura média", 0, q("A", "score")),
+    stat("clientes", "Clientes com temperatura", 3, q("A", "clients")),
+    stat("em-alerta", "Em faixa de alerta", 6, q("A", "alert_rate")),
+    stat("sinais", "Com sinal de alerta", 9, q("A", "flag_clients")),
+    {
+      id: "temperatura-tempo",
+      title: "Temperatura média da carteira",
+      x: 0,
+      y: 3,
+      w: 12,
+      h: 5,
+      spec: {
+        viz: "line",
+        groupBy: "time",
+        interval: "auto",
+        queries: [q("A", "score", { label: "Temperatura" })],
+      },
+    },
+    {
+      id: "por-faixa",
+      title: "Clientes por faixa",
+      x: 0,
+      y: 8,
+      w: 6,
+      h: 6,
+      spec: { viz: "donut", groupBy: "band", queries: [q("A", "clients")] },
+    },
+    {
+      id: "por-equipe",
+      title: "Temperatura por equipe",
+      x: 6,
+      y: 8,
+      w: 6,
+      h: 6,
+      spec: {
+        viz: "hbar",
+        groupBy: "team",
+        limit: 15,
+        queries: [q("A", "score")],
+      },
+    },
+    {
+      id: "por-cliente",
+      title: "Temperatura por cliente",
+      x: 0,
+      y: 14,
+      w: 12,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "client",
+        limit: 30,
+        queries: [q("A", "score", { label: "Temperatura" })],
       },
     },
   ];

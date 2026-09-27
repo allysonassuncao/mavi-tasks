@@ -44,6 +44,7 @@ import {
   Megaphone,
   Rocket,
   Trophy,
+  Thermometer,
   Bell,
   BellOff,
   BellRing,
@@ -214,6 +215,9 @@ const SocialLeadsPage = lazy(() =>
 const CasesPage = lazy(() =>
   import("./CasesPage").then((m) => ({ default: m.CasesPage })),
 );
+const TemperaturePage = lazy(() =>
+  import("./TemperaturePage").then((m) => ({ default: m.TemperaturePage })),
+);
 const NoticesPage = lazy(() =>
   import("./NoticesPage").then((m) => ({ default: m.NoticesPage })),
 );
@@ -233,6 +237,7 @@ const navigation = [
   { id: "campaigns", label: "Campanhas", icon: Megaphone },
   { id: "onboarding", label: "Social Leads", icon: Rocket },
   { id: "cases", label: "Cases de Sucesso", icon: Trophy },
+  { id: "temperature", label: "Termômetro dos clientes", icon: Thermometer },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
@@ -2140,6 +2145,8 @@ export default function App() {
                         "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
                       cases:
                         "Resultados reais de clientes para usar na venda: busque por termo ou nicho e cadastre os seus.",
+                      temperature:
+                        "A temperatura da relação com cada cliente, lida pela MAVI nas reuniões gravadas e nos grupos de WhatsApp.",
                       notices: isLeader
                         ? "Comunicados da agência para pessoas, equipes, clientes e projetos: popup, caixa de entrada, push e faixa no topo."
                         : "Os comunicados da agência para você, guardados em um só lugar.",
@@ -2182,6 +2189,7 @@ export default function App() {
                   page !== "campaigns" &&
                   page !== "onboarding" &&
                   page !== "cases" &&
+                  page !== "temperature" &&
                   page !== "notices" &&
                   page !== "storage" &&
                   page !== "aiUsage" &&
@@ -3077,6 +3085,7 @@ export default function App() {
               )}
               {page === "profile" && (
                 <ProfilePage
+                  company={company}
                   data={data}
                   user={user}
                   email={session?.user.email ?? member?.email ?? ""}
@@ -3118,6 +3127,15 @@ export default function App() {
                     isLeader={isLeader}
                     demo={demo}
                     notify={notify}
+                  />
+                </Suspense>
+              )}
+              {page === "temperature" && (
+                <Suspense fallback={<Loading compact />}>
+                  <TemperaturePage
+                    key={company}
+                    company={company}
+                    data={catalogData}
                   />
                 </Suspense>
               )}

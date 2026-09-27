@@ -15,6 +15,7 @@ import {
   Rocket,
   Settings2,
   Sparkles,
+  Thermometer,
   Trophy,
   BellRing,
   Users,
@@ -238,6 +239,12 @@ export function SidebarNav({
           to: { page: "cases" },
           count: caseCount,
         },
+        {
+          key: "temperature",
+          label: "Termômetro",
+          icon: Thermometer,
+          to: { page: "temperature" },
+        },
         ...(isLeader ? [] : portfolio),
       ],
     },
@@ -318,6 +325,11 @@ export function SidebarNav({
               key: "ai-copilot",
               label: "Copiloto",
               to: { page: "aiUsage", hash: "copiloto" },
+            },
+            {
+              key: "ai-temperature",
+              label: "Termômetro",
+              to: { page: "aiUsage", hash: "termometro" },
             },
             ...(isAdmin
               ? [

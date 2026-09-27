@@ -31,6 +31,7 @@ import {
   Package,
   Pencil,
   Search,
+  Thermometer,
   Trash2,
   Video,
   MessageCircle,
@@ -55,6 +56,7 @@ import { MeetingRecordings } from "./MeetingRecordings";
 import { countMeetingRecordings, meetingRecording } from "./meetings";
 import { WhatsappFolder } from "./WhatsappFolder";
 import { ClientDossier } from "./ClientDossier";
+import { ClientTemperature } from "./ClientTemperature";
 import {
   countClientGroups,
   whatsappGroupById,
@@ -248,9 +250,10 @@ function DriveTree({
         contract: current?.contract_id ?? undefined,
       }
     : at;
-  // Pastas virtuais (Gravações da MAVI, Whatsapp, Dossiê da MAVI): sem
-  // arquivos próprios.
-  const virtual = !!at.recordings || !!at.whatsapp || !!at.dossier;
+  // Pastas virtuais (Gravações da MAVI, Whatsapp, Dossiê da MAVI,
+  // Termômetro): sem arquivos próprios.
+  const virtual =
+    !!at.recordings || !!at.whatsapp || !!at.dossier || !!at.temperature;
   const canWrite =
     !virtual &&
     (isLeader ||
@@ -265,7 +268,8 @@ function DriveTree({
   );
   const loadFiles = useCallback(() => {
     // Gravações da MAVI and Whatsapp have no files of their own.
-    if (at.recordings || at.whatsapp || at.dossier) return setFiles([]);
+    if (at.recordings || at.whatsapp || at.dossier || at.temperature)
+      return setFiles([]);
     setFiles(null);
     listDriveFiles(company, at)
       .then((list) => setFiles(list.sort(byNameDesc)))
@@ -349,10 +353,14 @@ function DriveTree({
     const fileId = params.get("arquivo");
     const group = params.get("whatsapp");
     const message = params.get("msg");
-    if (!recording && !fileId && !group) return;
+    // ?termometro=<cliente>: o aviso de que o cliente esfriou.
+    const thermo = params.get("termometro");
+    if (!recording && !fileId && !group && !thermo) return;
     const start = Number(params.get("t")) || undefined;
     navigate(window.location.pathname, true);
-    if (group)
+    // O acesso é conferido pelo banco, ao abrir o termômetro.
+    if (thermo) setAt({ client: thermo, temperature: true });
+    else if (group)
       Promise.all([
         whatsappGroupById(group),
         message ? whatsappMessageById(message) : null,
@@ -452,6 +460,7 @@ function DriveTree({
     at.recordings,
     at.whatsapp,
     at.dossier,
+    at.temperature,
   ].join("|");
   const clients =
     !at.client && !at.folder
@@ -776,7 +785,13 @@ function DriveTree({
     key: string,
     title: string,
     icon:
-      "client" | "product" | "folder" | "recordings" | "whatsapp" | "dossier",
+      | "client"
+      | "product"
+      | "folder"
+      | "recordings"
+      | "whatsapp"
+      | "dossier"
+      | "temperature",
     open: () => void,
     color?: string,
     actions?: {
@@ -798,7 +813,9 @@ function DriveTree({
               ? MessageCircle
               : icon === "dossier"
                 ? BookMarked
-                : Folder;
+                : icon === "temperature"
+                  ? Thermometer
+                  : Folder;
     return (
       <div className="drive-folder-card" key={key}>
         <button type="button" className="drive-folder" onClick={open}>
@@ -821,7 +838,9 @@ function DriveTree({
                       ? `${groupCount} ${groupCount === 1 ? "grupo" : "grupos"}`
                       : icon === "dossier"
                         ? "Gostos, regras e histórico"
-                        : "Pasta"}
+                        : icon === "temperature"
+                          ? "Temperatura da relação"
+                          : "Pasta"}
               {isPublic && (
                 <span className="drive-folder-badge" title="Link público ativo">
                   {" · "}
@@ -1019,6 +1038,12 @@ function DriveTree({
             <span>Dossiê da MAVI</span>
           </>
         )}
+        {!searching && at.temperature && (
+          <>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>Termômetro</span>
+          </>
+        )}
         {searching && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
@@ -1069,7 +1094,14 @@ function DriveTree({
         </div>
       )}
 
-      {at.dossier && at.client ? (
+      {at.temperature && at.client ? (
+        <ClientTemperature
+          key={at.client}
+          company={company}
+          client={at.client}
+          clientName={clientName(at.client)}
+        />
+      ) : at.dossier && at.client ? (
         <ClientDossier
           key={at.client}
           company={company}
@@ -1199,6 +1231,14 @@ function DriveTree({
                             "dossier",
                             () => go({ client: at.client, dossier: true }),
                             "#6b52b3",
+                          ),
+                        () =>
+                          folderCard(
+                            "temperature",
+                            "Termômetro",
+                            "temperature",
+                            () => go({ client: at.client, temperature: true }),
+                            "#e0673a",
                           ),
                       ]
                     : []),

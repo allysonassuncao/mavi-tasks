@@ -61,6 +61,7 @@ export function mcpTools() {
     list_meetings: "Listar reuniões gravadas",
     campaign_results: "Resultados das campanhas",
     list_tasks: "Listar tarefas",
+    client_temperature: "Termômetro do cliente",
   };
   return [
     {

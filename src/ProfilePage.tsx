@@ -20,6 +20,12 @@ import {
   uploadAvatar,
   type OptimizedAvatar,
 } from "./profile";
+import {
+  loadMemberPhone,
+  phoneDigits,
+  phoneLabel,
+  saveMemberPhone,
+} from "./temperature";
 
 const roleLabel = {
   admin: "Administrador",
@@ -29,6 +35,7 @@ const roleLabel = {
 
 /** "Meu perfil": the signed-in person edits their own name, photo and password. */
 export function ProfilePage({
+  company,
   data,
   user,
   email,
@@ -36,6 +43,7 @@ export function ProfilePage({
   mutate,
   notify,
 }: {
+  company: string;
   data: Snapshot;
   user: string;
   email: string;
@@ -46,6 +54,20 @@ export function ProfilePage({
   const me = data.members.find((m) => m.user_id === user);
   const [name, setName] = useState(me?.name ?? "");
   const [savingName, setSavingName] = useState(false);
+  // O celular: nos grupos de WhatsApp dos clientes, as mensagens dele são do time.
+  const [phone, setPhone] = useState("");
+  const [savedPhone, setSavedPhone] = useState<string | null>(null);
+  useEffect(() => {
+    if (!company) return;
+    loadMemberPhone(company, user)
+      .then((p) => {
+        setSavedPhone(p);
+        setPhone(phoneLabel(p));
+      })
+      .catch(() => {});
+  }, [company, user]);
+  const phoneChanged = phoneDigits(phone) !== (savedPhone ?? "");
+  const nameChanged = name.trim() !== me?.name;
   const [photo, setPhoto] = useState<OptimizedAvatar | null>(null);
   const [savingPhoto, setSavingPhoto] = useState(false);
   const [password, setPassword] = useState("");
@@ -76,8 +98,19 @@ export function ProfilePage({
     setError("");
     setSavingName(true);
     try {
-      await mutate("update_my_profile", { p_name: name.trim() });
-      notify("Nome atualizado.");
+      if (nameChanged) await mutate("update_my_profile", { p_name: name.trim() });
+      if (phoneChanged) {
+        const saved = await saveMemberPhone(company, user, phone);
+        setSavedPhone(saved);
+        setPhone(phoneLabel(saved));
+      }
+      notify(
+        nameChanged && phoneChanged
+          ? "Nome e celular atualizados."
+          : nameChanged
+            ? "Nome atualizado."
+            : "Celular atualizado.",
+      );
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -285,6 +318,21 @@ export function ProfilePage({
                 autoComplete="name"
               />
             </label>
+            <label>
+              Celular com WhatsApp
+              <Input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="(11) 98765-4321"
+                autoComplete="tel"
+                maxLength={24}
+              />
+            </label>
+            <small>
+              Nos grupos de WhatsApp dos clientes, as mensagens deste número
+              contam como do time: o termômetro do cliente avalia só o cliente.
+            </small>
             <div className="form-columns">
               <label>
                 E-mail
@@ -303,9 +351,9 @@ export function ProfilePage({
               <Button
                 className="btn primary"
                 loading={savingName}
-                disabled={name.trim() === me?.name || name.trim().length < 2}
+                disabled={(!nameChanged && !phoneChanged) || name.trim().length < 2}
               >
-                <Check size={16} /> Salvar nome
+                <Check size={16} /> Salvar
               </Button>
             </div>
           </form>

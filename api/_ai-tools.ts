@@ -205,6 +205,23 @@ export const TOOLS: ToolSpec[] = [
       limit: { type: "integer", minimum: 1, maximum: 40 },
     }),
   },
+  {
+    name: "client_temperature",
+    description:
+      "Termômetro do cliente: a temperatura da relação com o cliente (0 a 100 e a faixa, como Frio ou Quente), calculada lendo as reuniões gravadas e os grupos de WhatsApp — os indicadores (satisfação com resultados, risco de cancelamento, relação, engajamento e os que a agência criou), os sinais de alerta (ex.: fala em cancelar), os assuntos que mais mexem com o cliente, a tendência em 7 e 30 dias e a explicação da MAVI. Com client_id: o termômetro do cliente e as leituras recentes que mais pesaram, com citação. Sem client_id: a carteira do cliente mais frio ao mais quente. Use para 'como está o cliente', 'ele está satisfeito?', 'tem risco de cancelar?', 'quais clientes estão frios ou em risco'. Para o que exatamente foi dito, complete com search_knowledge.",
+    parameters: obj({
+      client_id: {
+        type: "string",
+        description: "Cliente (id). Omita para ver a carteira.",
+      },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 40,
+        description: "Na carteira: quantos clientes (padrão 15, os mais frios primeiro).",
+      },
+    }),
+  },
 ];
 
 export type ToolContext = {
@@ -590,6 +607,10 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
     return `Procurando o cliente “${str(input.query).slice(0, 40)}”`;
   if (name === "campaign_results")
     return `Conferindo os resultados das campanhas${inClient}${period}`;
+  if (name === "client_temperature")
+    return ctx.scope.client || client
+      ? `Olhando o termômetro${inClient || " do cliente"}`
+      : "Olhando o termômetro da carteira";
   return "Consultando o sistema";
 }
 
@@ -615,6 +636,12 @@ export function summarizeStep(name: string, output: string) {
   if (name === "find_clients") {
     const n = (output.match(/^- Cliente /gm) ?? []).length;
     return n ? `${n} ${n === 1 ? "cliente" : "clientes"}` : "nenhum cliente";
+  }
+  if (name === "client_temperature") {
+    const n = (output.match(/^- Cliente /gm) ?? []).length;
+    if (n) return `${n} ${n === 1 ? "cliente" : "clientes"}`;
+    const m = /: (\d+)\/100 · ([^·\n]+)/.exec(output);
+    return m ? `${m[1]}/100 · ${m[2].trim()}` : "sem temperatura";
   }
   return "";
 }
@@ -696,6 +723,154 @@ async function campaignResults(
   return `${body}\n(Período: ${brDate(from)} a ${brDate(to)}; números somados dos dias dentro do período.)`;
 }
 
+type TemperatureBand = { name: string; min: number; alert: boolean };
+type TemperatureCurrent = {
+  score: number | null;
+  band: number | null;
+  score_d7: number | null;
+  score_d30: number | null;
+  signals: number;
+  indicators: { key: string; name: string; value: number | null; d30: number | null }[];
+  flags: { key: string; name: string; alert: boolean; at: string | null }[];
+  reasons: { key: string; label: string; share: number }[];
+};
+type TemperatureRow = {
+  settings: { bands: TemperatureBand[]; window_days: number } | null;
+  indicators: { key: string; name: string; kind: string }[];
+  current: TemperatureCurrent | null;
+  summary: { text: string; at: string } | null;
+  refreshed_at: string | null;
+  signals: {
+    type: "meeting" | "whatsapp";
+    source_id: string;
+    group_id: string | null;
+    message_id: string | null;
+    title: string;
+    date: string;
+    status: string;
+    answers: Record<string, { v: number; e?: number }>;
+    flags: Record<string, number>;
+    reason: string | null;
+    excerpt: string;
+  }[];
+  pending: number;
+  jev: boolean;
+};
+type PortfolioRow = {
+  client_id: string;
+  name: string;
+  score: number | null;
+  band: number | null;
+  d7: number | null;
+  d30: number | null;
+  flags: { name: string; alert: boolean }[];
+  reasons: { label: string; share: number }[];
+};
+
+const round = (v: number | null | undefined) =>
+  v === null || v === undefined ? null : Math.round(Number(v));
+const trend = (v: number | null | undefined, days: number) =>
+  v === null || v === undefined
+    ? ""
+    : ` · ${v > 0 ? "+" : ""}${Math.round(v)} em ${days} dias`;
+const bandName = (bands: TemperatureBand[] | undefined, i: number | null) =>
+  i === null || i === undefined ? "sem nota" : (bands?.[i]?.name ?? "?");
+
+/** Uma linha curta com a temperatura de hoje (o contexto das conversas no cliente). */
+export function temperatureLine(t: TemperatureRow | null) {
+  if (!t || Array.isArray(t) || !t.current || t.current.score === null) return "";
+  const c = t.current;
+  return `Termômetro do cliente hoje: ${round(c.score)}/100 (${bandName(t.settings?.bands, c.band)})${trend(c.score_d7, 7)}${c.flags.length ? ` · sinais de alerta: ${c.flags.map((f) => f.name).join(", ")}` : ""}${t.summary ? ` · explicação da MAVI: ${t.summary.text.slice(0, 400)}` : ""}. Para detalhes e fontes, use client_temperature.`;
+}
+
+async function clientTemperature(
+  ctx: ToolContext,
+  input: Record<string, unknown>,
+) {
+  const client = clientOf(ctx, input);
+  if (!client) {
+    const r = await callRpc<{
+      settings: { bands: TemperatureBand[] } | null;
+      jev: boolean;
+      clients: PortfolioRow[];
+    }>(ctx, ctx.fetch, ctx.auth, "clients_temperature", {
+      p_company: ctx.company,
+    });
+    if (!r.ok) throw new Error(r.error);
+    const rows = r.data.clients.filter((c) => c.score !== null);
+    if (!rows.length)
+      return r.data.jev
+        ? "Nenhum cliente com temperatura ainda (o termômetro lê as reuniões e os grupos de WhatsApp aos poucos)."
+        : "O termômetro ainda não está ligado: falta o Jev (TypeSafe) do OpenRouter no Painel da MAVI.";
+    const bands = r.data.settings?.bands;
+    const list = rows
+      .slice(0, int(input.limit, 15, 1, 40))
+      .map(
+        (c) =>
+          `- Cliente ${c.name} (id ${c.client_id}): ${round(c.score)}/100 · ${bandName(bands, c.band)}${trend(c.d7, 7)}${trend(c.d30, 30)}${c.flags.length ? ` · sinais: ${c.flags.map((f) => f.name).join(", ")}` : ""}${c.reasons[0] ? ` · assunto: ${c.reasons[0].label}` : ""}`,
+      );
+    const alertBands = (bands ?? []).filter((b) => b.alert).map((b) => b.name);
+    return `Carteira (do mais frio ao mais quente; ${rows.length} clientes com temperatura):\n${list.join("\n")}${alertBands.length ? `\n(Faixas de alerta: ${alertBands.join(", ")}.)` : ""}`;
+  }
+  const r = await callRpc<TemperatureRow>(
+    ctx,
+    ctx.fetch,
+    ctx.auth,
+    "client_temperature",
+    { p_company: ctx.company, p_client: client, p_days: 0, p_signals: 12 },
+  );
+  if (!r.ok) throw new Error(r.error);
+  const t = r.data;
+  const name = ctx.clients.get(client) ?? "?";
+  if (!t.jev && !t.current)
+    return "O termômetro ainda não está ligado: falta o Jev (TypeSafe) do OpenRouter no Painel da MAVI.";
+  if (!t.current || t.current.score === null)
+    return `O cliente ${name} ainda não tem temperatura${t.pending ? ` (${t.pending} leituras na fila)` : " (nenhuma reunião ou conversa de WhatsApp com fala do cliente na janela)"}.`;
+  const c = t.current;
+  const bands = t.settings?.bands ?? [];
+  const names = new Map(t.indicators.map((i) => [i.key, i.name]));
+  const lines = [
+    `Termômetro do cliente ${name}: ${round(c.score)}/100 · ${bandName(bands, c.band)}${trend(c.score_d7, 7)}${trend(c.score_d30, 30)} · ${c.signals} leituras nos últimos ${t.settings?.window_days ?? 60} dias${t.refreshed_at ? ` · calculado em ${brDate(t.refreshed_at)}` : ""}.`,
+    `Indicadores (0 = pior, 100 = melhor): ${c.indicators
+      .map((i) => `${i.name} ${i.value === null ? "sem dados" : round(i.value)}${trend(i.d30, 30)}`)
+      .join("; ")}.`,
+    c.flags.length
+      ? `Sinais de alerta recentes: ${c.flags.map((f) => `${f.name} (${brDate(f.at)})`).join("; ")}.`
+      : "Sem sinais de alerta recentes.",
+    c.reasons.length
+      ? `Assuntos que mais mexem com o cliente: ${c.reasons.map((x) => `${x.label} (${x.share}%)`).join("; ")}.`
+      : "",
+    t.summary ? `Explicação da MAVI (${brDate(t.summary.at)}): ${t.summary.text}` : "",
+    `Faixas: ${bands.map((b) => `${b.name} a partir de ${b.min}`).join(", ")}.`,
+  ];
+  const reads = t.signals
+    .filter((g) => Object.keys(g.answers).length)
+    .map((g) => {
+      const ref =
+        g.type === "meeting"
+          ? cite(ctx, { type: "meeting", id: g.source_id, title: g.title, date: g.date, client_id: client })
+          : g.message_id
+            ? cite(ctx, {
+                type: "whatsapp",
+                id: g.message_id,
+                ...(g.group_id ? { group: g.group_id } : {}),
+                title: g.title,
+                date: g.date,
+                client_id: client,
+              })
+            : null;
+      const notes = Object.entries(g.answers)
+        .filter(([, a]) => (a.e ?? 1) >= 0.3)
+        .map(([k, a]) => `${names.get(k) ?? k} ${round(a.v)}`)
+        .join(", ");
+      const flags = Object.entries(g.flags)
+        .filter(([, p]) => p >= 0.7)
+        .map(([k]) => names.get(k) ?? k);
+      return `${ref ? `[${ref}] ` : ""}${g.type === "meeting" ? "Reunião" : "WhatsApp"} "${g.title}" · ${brDate(g.date)}${notes ? ` · ${notes}` : ""}${flags.length ? ` · sinais: ${flags.join(", ")}` : ""}${g.excerpt ? `\n${g.excerpt.slice(0, 300)}` : ""}`;
+    });
+  return `${lines.filter(Boolean).join("\n")}${reads.length ? `\n\nLeituras recentes (do Jev, cada reunião ou dia de grupo):\n${reads.join("\n\n")}` : ""}`;
+}
+
 /** Executa uma ferramenta pelo nome (entradas conferidas aqui). */
 export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   const input =
@@ -708,5 +883,6 @@ export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "list_tasks") return listTasks(ctx, input);
   if (name === "find_clients") return findClients(ctx, input);
   if (name === "campaign_results") return campaignResults(ctx, input);
+  if (name === "client_temperature") return clientTemperature(ctx, input);
   return `Ferramenta desconhecida: ${name}.`;
 }

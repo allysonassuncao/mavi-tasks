@@ -19,6 +19,7 @@ import {
   describeStep,
   runTool,
   summarizeStep,
+  temperatureLine,
   type AiScope,
   type AiSource,
   type ToolContext,
@@ -117,6 +118,7 @@ Como trabalhar:
 - Documentos do cliente (propostas, contratos, briefings, planilhas, apresentações) estão nos arquivos do Drive; o briefing e os planos mensais do Social Leads (com os 8 posts e a decisão do cliente) também entram na busca.
 - Cases de sucesso aprovados (resultados em números, nichos, produtos, links e contatos do cliente) entram na busca com o tipo case: use quando pedirem prova social, exemplos de resultado ou "tem case de…". Diga o cliente, o nicho e os números, e cite.
 - As conversas dos grupos de WhatsApp com cada cliente entram na busca com o tipo whatsapp: o que o cliente pediu, reclamou, aprovou ou combinou no dia a dia. Os áudios aparecem transcritos e o texto dos documentos enviados também; imagens e vídeos aparecem só como "[imagem]" e "[vídeo]" (você não vê o conteúdo deles, diga isso se perguntarem). Cada trecho traz a data e o horário das mensagens.
+- Para como está a relação com um cliente (satisfeito, irritado, em risco de cancelar, esfriando), use client_temperature: o termômetro que o sistema calcula lendo as reuniões e os grupos de WhatsApp, com indicadores, sinais de alerta, tendência e as leituras que mais pesaram. Sem cliente, ela lista a carteira do mais frio ao mais quente. Diga a nota e a faixa, o que puxa para cima ou para baixo e cite as leituras; para o que exatamente foi dito, complete com search_knowledge.
 - Use read_more quando um trecho parecer cortado ou precisar de mais contexto.
 - Pare de buscar assim que tiver o suficiente. Se nada relevante aparecer, diga claramente que não encontrou no sistema e sugira onde procurar.
 
@@ -210,7 +212,7 @@ export async function buildContext(
   now: number,
 ) {
   const userId = userIdFrom(auth);
-  const [members, clients, contracts] = await Promise.all([
+  const [members, clients, contracts, temperature] = await Promise.all([
     rest<{
       user_id: string;
       name: string;
@@ -244,6 +246,17 @@ export async function buildContext(
           `contracts?select=id,name,archived,products(name)&company_id=eq.${company}&client_id=eq.${scope.client}`,
         )
       : Promise.resolve([]),
+    // O termômetro do cliente entra no contexto (sem ele, a conversa segue).
+    scope.client
+      ? callRpc<Parameters<typeof temperatureLine>[0]>(env, deps.fetch, auth, "client_temperature", {
+          p_company: company,
+          p_client: scope.client,
+          p_days: 0,
+          p_signals: 0,
+        })
+          .then((r) => (r.ok ? r.data : null))
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
   const open = contracts.filter((k) => !k.archived).map((k) => k.id);
   const projects = open.length
@@ -289,6 +302,7 @@ export async function buildContext(
     lines.push(
       `A pergunta foi feita dentro do cliente "${clientMap.get(scope.client)}" (no sistema, o nome do cliente é o código dele): as ferramentas já buscam só nele.`,
       products.length ? `Produtos contratados: ${products.join("; ")}.` : "",
+      temperatureLine(temperature),
     );
   } else {
     lines.push(
