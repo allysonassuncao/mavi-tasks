@@ -205,7 +205,8 @@ export type AiFeature =
   | "social_leads_colors"
   | "task_copilot"
   | "client_dossier"
-  | "copilot_learning";
+  | "copilot_learning"
+  | "notice_writer";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -300,6 +301,14 @@ export const FEATURES: FeatureInfo[] = [
     conversation: false,
     env: "COPILOT_LEARNING_MODEL",
   },
+  {
+    id: "notice_writer",
+    group: "Mural de avisos",
+    label: "A MAVI escrevendo e revisando avisos",
+    conversation: false,
+    env: "NOTICE_WRITER_MODEL",
+    note: "Uma resposta curta por pedido: um modelo rápido basta.",
+  },
 ];
 
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
@@ -327,6 +336,8 @@ export function serverModel(
       return env.CLIENT_DOSSIER_MODEL || env.AI_MODEL || fallback;
     case "copilot_learning":
       return env.COPILOT_LEARNING_MODEL || env.AI_MODEL || fallback;
+    case "notice_writer":
+      return env.NOTICE_WRITER_MODEL || env.AI_MODEL || fallback;
     default:
       return env.SOCIAL_LEADS_MODEL || fallback;
   }

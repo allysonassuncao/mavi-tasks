@@ -1,5 +1,11 @@
 import { rpc } from "./api";
 import { driveServer } from "./drive";
+import { fold } from "./domain";
+import {
+  DESCRIPTION_PREFIX,
+  parseDescription,
+  type RichNode,
+} from "./rich-text";
 import type { Snapshot } from "./types";
 
 /**
@@ -58,6 +64,8 @@ export interface LiveNotice {
   snoozed_until: string | null;
   banner_closed_at: string | null;
   attachments: number;
+  /** A última cobrança: o popup adiado nesta sessão volta. */
+  reminded_at?: string | null;
 }
 export interface FeedNotice {
   id: string;
@@ -120,6 +128,8 @@ export interface NoticeDetail extends NoticeFormats {
   updated_at: string;
   version: number;
   can_edit: boolean;
+  /** Para quem edita: a última cobrança dos pendentes. */
+  last_reminded_at?: string | null;
   receipt: {
     delivered_at: string;
     seen_at: string | null;
@@ -137,6 +147,43 @@ export type NoticeSaveResult = {
   status: NoticeStatus;
   version: number;
 };
+/** Quem recebeu a rodada atual (só para quem edita). */
+export interface NoticePerson {
+  user_id: string;
+  name: string;
+  teams: string | null;
+  delivered_at: string;
+  seen_at: string | null;
+  acked_at: string | null;
+  snoozed_until: string | null;
+  reminded_at: string | null;
+  reminders: number;
+}
+/** O que um modelo guarda: o aviso sem datas nem anexos. */
+export type TemplateContent = Omit<NoticeContent, "publish_at" | "expires_at">;
+export interface NoticeTemplate {
+  id: string;
+  name: string;
+  content: Partial<TemplateContent>;
+  created_by: string;
+  author_name: string;
+  updated_at: string;
+  can_edit: boolean;
+}
+export type WriterMode = "write" | "improve" | "suggest";
+export type WriterStyle = "clear" | "short" | "formal" | "friendly";
+/** O que a MAVI devolve (api/_notice-writer.ts); nada é aplicado sozinho. */
+export interface WriterResult {
+  title?: string;
+  /** Texto simples: parágrafos e linhas "- " de lista. */
+  body?: string;
+  level?: NoticeLevel;
+  formats?: NoticeFormats;
+  require_ack?: boolean;
+  audience?: { kind: TargetKind; name: string; mode?: TargetMode }[];
+  why?: string;
+  model?: string;
+}
 
 export const NOTICE_PARAM = "aviso";
 export const ATTACHMENT_MAX_BYTES = 524_288_000;
@@ -243,6 +290,11 @@ export function contentOf(d: NoticeDetail): NoticeContent {
   };
 }
 
+/** Uma entrega (rodada e cobrança): o que a pessoa dispensou nesta sessão. */
+export const noticeKey = (
+  n: Pick<LiveNotice, "id" | "round" | "reminded_at">,
+) => `${n.id}:${n.round}:${n.reminded_at ?? ""}`;
+
 const LEVEL_ORDER: Record<NoticeLevel, number> = {
   critical: 0,
   important: 1,
@@ -264,7 +316,7 @@ export function nextPopup(
       .filter(
         (n) =>
           n.popup &&
-          !dismissed.has(`${n.id}:${n.round}`) &&
+          !dismissed.has(noticeKey(n)) &&
           (n.require_ack
             ? !n.acked_at &&
               !(n.snoozed_until && new Date(n.snoozed_until).getTime() > now)
@@ -417,6 +469,163 @@ export function whenLabel(iso: string | null | undefined) {
       });
 }
 
+/** Pendente: ainda não viu ou, quando o aviso pede, ainda não confirmou. */
+export const isPending = (p: NoticePerson, requireAck: boolean) =>
+  !p.seen_at || (requireAck && !p.acked_at);
+
+/** O conteúdo de um modelo ou de um aviso duplicado, pronto para o formulário. */
+export function fromTemplate(t: Partial<TemplateContent>): NoticeContent {
+  const base = emptyNotice();
+  const level: NoticeLevel =
+    t.level === "important" || t.level === "critical" ? t.level : "info";
+  return {
+    ...base,
+    title: typeof t.title === "string" ? t.title : "",
+    body: typeof t.body === "string" ? t.body : "",
+    level,
+    popup: t.popup ?? LEVELS[level].formats.popup,
+    inbox: t.inbox ?? LEVELS[level].formats.inbox,
+    push: t.push ?? LEVELS[level].formats.push,
+    banner: t.banner ?? LEVELS[level].formats.banner,
+    pinned: !!t.pinned,
+    require_ack: !!t.require_ack,
+    repeat: REPEATS.some((r) => r.value === t.repeat)
+      ? (t.repeat as NoticeRepeat)
+      : "",
+    targets: Array.isArray(t.targets) ? t.targets : [],
+    exclude: Array.isArray(t.exclude) ? t.exclude : [],
+  };
+}
+export function templateOf(c: NoticeContent): TemplateContent {
+  const { publish_at: _p, expires_at: _e, ...rest } = c;
+  return rest;
+}
+
+/** O texto de um aviso em linhas simples (listas com "- "), para a MAVI ler. */
+export function noticePlain(body: string) {
+  const text = (n: RichNode): string =>
+    n.type === "text"
+      ? (n.text ?? "")
+      : n.type === "hardBreak"
+        ? "\n"
+        : (n.content ?? []).map(text).join("");
+  const lines: string[] = [];
+  for (const block of parseDescription(body).content ?? []) {
+    if (block.type === "bulletList" || block.type === "orderedList")
+      (block.content ?? []).forEach((item, i) =>
+        lines.push(
+          `${block.type === "bulletList" ? "-" : `${i + 1}.`} ${text(item).trim()}`,
+        ),
+      );
+    else lines.push(text(block));
+  }
+  return lines.join("\n").trim();
+}
+
+/** O texto simples da MAVI como texto rico: parágrafos e listas. */
+export function plainToRich(text: string) {
+  const content: RichNode[] = [];
+  let list: RichNode | null = null;
+  for (const raw of text.replace(/\r/g, "").split("\n")) {
+    const line = raw.trim();
+    const bullet = line.match(/^[-*•]\s+(.*)$/);
+    const ordered = line.match(/^\d+[.)]\s+(.*)$/);
+    const item = bullet?.[1] ?? ordered?.[1];
+    if (item !== undefined) {
+      const type = bullet ? "bulletList" : "orderedList";
+      if (!list || list.type !== type) {
+        list = { type, content: [] };
+        content.push(list);
+      }
+      list.content!.push({
+        type: "listItem",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: item }] },
+        ],
+      });
+      continue;
+    }
+    list = null;
+    if (line)
+      content.push({
+        type: "paragraph",
+        content: [{ type: "text", text: line }],
+      });
+  }
+  return content.length
+    ? DESCRIPTION_PREFIX + JSON.stringify({ type: "doc", content })
+    : "";
+}
+
+/**
+ * O público que a MAVI sugeriu (nomes citados no texto) no que quem escreve
+ * pode avisar. O que não bate com ninguém volta à parte, para a tela dizer.
+ */
+export function matchAudience(
+  suggested: NonNullable<WriterResult["audience"]>,
+  data: Snapshot,
+  scope: ReturnType<typeof noticeScope>,
+) {
+  const targets: NoticeTarget[] = [];
+  const missing: string[] = [];
+  const find = <T extends { id: string }>(
+    list: T[],
+    name: string,
+    label: (x: T) => string,
+  ) => {
+    const key = fold(name);
+    return (
+      list.find((x) => fold(label(x)) === key) ??
+      list.find(
+        (x) => fold(label(x)).includes(key) || key.includes(fold(label(x))),
+      )
+    );
+  };
+  for (const a of suggested) {
+    if (a.kind === "everyone") {
+      if (scope.everyone) targets.push({ kind: "everyone" });
+      else missing.push("todos da agência");
+      continue;
+    }
+    const hit =
+      a.kind === "team"
+        ? find(
+            data.teams.filter((t) => scope.teams.includes(t.id)),
+            a.name,
+            (t) => t.name,
+          )
+        : a.kind === "client"
+          ? find(
+              data.clients.filter((c) => scope.clients.includes(c.id)),
+              a.name,
+              (c) => c.name,
+            )
+          : a.kind === "project"
+            ? find(
+                data.projects.filter((p) => scope.projects.includes(p.id)),
+                a.name,
+                (p) => p.name,
+              )
+            : find(
+                data.members
+                  .filter((m) => scope.users.includes(m.user_id))
+                  .map((m) => ({ ...m, id: m.user_id })),
+                a.name,
+                (m) => m.name,
+              );
+    if (!hit) missing.push(a.name);
+    else if (!targets.some((t) => t.kind === a.kind && t.id === hit.id))
+      targets.push({
+        kind: a.kind,
+        id: hit.id,
+        ...(a.kind === "client" || a.kind === "project"
+          ? { mode: a.mode ?? "both" }
+          : {}),
+      });
+  }
+  return { targets, missing };
+}
+
 // ------------------------------------------------------------ acesso
 export interface NoticesApi {
   live(company: string): Promise<LiveNotice[]>;
@@ -455,6 +664,27 @@ export interface NoticesApi {
     ids: string[],
     inline: boolean,
   ): Promise<Record<string, string>>;
+  people(id: string): Promise<NoticePerson[]>;
+  /** Devolve quantas pessoas foram cobradas. */
+  remind(id: string): Promise<number>;
+  templates(company: string): Promise<NoticeTemplate[]>;
+  saveTemplate(
+    company: string,
+    id: string | null,
+    name: string,
+    content: TemplateContent,
+  ): Promise<string>;
+  deleteTemplate(id: string): Promise<void>;
+  writer(
+    company: string,
+    request: {
+      mode: WriterMode;
+      idea?: string;
+      title?: string;
+      text?: string;
+      style?: WriterStyle;
+    },
+  ): Promise<WriterResult>;
 }
 
 export const serverNotices: NoticesApi = {
@@ -551,6 +781,35 @@ export const serverNotices: NoticesApi = {
       inline,
     });
     return urls;
+  },
+  async people(id) {
+    return ((await rpc("notice_people", { p_notice: id })) ??
+      []) as NoticePerson[];
+  },
+  async remind(id) {
+    return Number(await rpc("remind_notice", { p_notice: id })) || 0;
+  },
+  async templates(company) {
+    return ((await rpc("notice_templates", { p_company: company })) ??
+      []) as NoticeTemplate[];
+  },
+  async saveTemplate(company, id, name, content) {
+    return (await rpc("save_notice_template", {
+      p_company: company,
+      p_template: id,
+      p_name: name,
+      p_content: content,
+    })) as string;
+  },
+  async deleteTemplate(id) {
+    await rpc("delete_notice_template", { p_template: id });
+  },
+  async writer(company, request) {
+    return driveServer<WriterResult>({
+      action: "notice-mavi",
+      company,
+      ...request,
+    });
   },
 };
 
@@ -856,8 +1115,89 @@ export function demoNotices(data: Snapshot, user: string): NoticesApi {
         for (const id of ids) if (n.urls[id]) out[id] = n.urls[id];
       return out;
     },
+    async people(id) {
+      const n = find(id);
+      if (!n || !canEdit(n)) return [];
+      const teams = (u: string) =>
+        data.teamMembers
+          .filter((tm) => tm.user_id === u)
+          .map((tm) => data.teams.find((t) => t.id === tm.team_id)?.name)
+          .filter(Boolean)
+          .join(", ") || null;
+      return Object.entries(n.receipts)
+        .map(([u, r]) => ({
+          user_id: u,
+          name: name(u),
+          teams: teams(u),
+          reminded_at: null,
+          reminders: 0,
+          ...r,
+        }))
+        .sort(
+          (a, b) =>
+            Number(isPending(b, n.require_ack)) -
+              Number(isPending(a, n.require_ack)) ||
+            a.name.localeCompare(b.name, "pt-BR"),
+        );
+    },
+    async remind(id) {
+      const n = find(id);
+      if (!n || !canEdit(n))
+        throw Error("Sem permissão para cobrar este aviso.");
+      if (
+        n.last_reminded_at &&
+        Date.now() - new Date(n.last_reminded_at).getTime() < 3600e3
+      )
+        throw Error("Este aviso já foi cobrado há menos de uma hora.");
+      const pending = Object.values(n.receipts).filter(
+        (r) => !r.seen_at || (n.require_ack && !r.acked_at),
+      );
+      for (const r of pending) r.snoozed_until = r.banner_closed_at = null;
+      if (pending.length) n.last_reminded_at = now();
+      return pending.length;
+    },
+    async templates() {
+      if (!admin && me?.role !== "manager") return [];
+      return demoTemplates.map((t) => ({
+        ...t,
+        author_name: name(t.created_by),
+        can_edit: admin || t.created_by === user,
+      }));
+    },
+    async saveTemplate(_c, id, templateName, content) {
+      const t = id ? demoTemplates.find((x) => x.id === id) : undefined;
+      if (t) {
+        Object.assign(t, { name: templateName, content, updated_at: now() });
+        return t.id;
+      }
+      const nid = `demo-template-${Math.random().toString(36).slice(2)}`;
+      demoTemplates.push({
+        id: nid,
+        name: templateName,
+        content,
+        created_by: user,
+        updated_at: now(),
+      });
+      return nid;
+    },
+    async deleteTemplate(id) {
+      const i = demoTemplates.findIndex((t) => t.id === id);
+      if (i >= 0) demoTemplates.splice(i, 1);
+    },
+    async writer() {
+      throw Error(
+        "Na demonstração a MAVI não escreve avisos. Entre na sua conta para usar.",
+      );
+    },
   };
 }
+const demoTemplates: {
+  id: string;
+  name: string;
+  content: Partial<TemplateContent>;
+  created_by: string;
+  updated_at: string;
+}[] = [];
 
 /** A mesma implementação para a página e para o popup (a demonstração guarda em memória). */
 export function noticesApi(demo: boolean, data: Snapshot, user: string) {

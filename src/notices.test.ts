@@ -3,6 +3,11 @@ import {
   audienceEstimate,
   bannerNotices,
   fromLocalInput,
+  fromTemplate,
+  matchAudience,
+  noticeKey,
+  noticePlain,
+  plainToRich,
   nextPopup,
   noticeScope,
   toLocalInput,
@@ -52,7 +57,7 @@ describe("Mural: o que aparece sobre a tela", () => {
       notice({ id: "sem-popup", level: "critical", popup: false }),
     ];
     expect(nextPopup(list, now)?.id).toBe("critico");
-    expect(nextPopup(list, now, new Set(["critico:1"]))?.id).toBe("info");
+    expect(nextPopup(list, now, new Set(["critico:1:"]))?.id).toBe("info");
   });
 
   it("pedindo confirmação: volta até confirmar, respeitando o adiamento", () => {
@@ -162,5 +167,62 @@ describe("Mural: público", () => {
     expect(toLocalInput(iso)).toBe("2026-10-02T09:30");
     expect(fromLocalInput("")).toBe("");
     expect(toLocalInput("")).toBe("");
+  });
+});
+
+describe("Mural: fase 2", () => {
+  it("uma cobrança faz o popup dispensado voltar", () => {
+    const n = notice({
+      id: "x",
+      require_ack: true,
+      seen_at: "2026-09-27T11:00:00Z",
+    });
+    const dismissed = new Set([noticeKey(n)]);
+    expect(nextPopup([n], Date.now(), dismissed)).toBeNull();
+    expect(
+      nextPopup(
+        [{ ...n, reminded_at: "2026-09-27T16:00:00Z" }],
+        Date.now(),
+        dismissed,
+      )?.id,
+    ).toBe("x");
+  });
+
+  it("o texto da MAVI vira texto rico e volta igual (parágrafos e listas)", () => {
+    const text =
+      "Sexta não teremos expediente.\n\n- Voltamos na segunda\n- Plantão por WhatsApp\n\n1. Salve o trabalho\n2. Desligue o computador";
+    const rich = plainToRich(text);
+    expect(rich.startsWith("mavi:richtext:v1:")).toBe(true);
+    expect(noticePlain(rich)).toBe(
+      "Sexta não teremos expediente.\n- Voltamos na segunda\n- Plantão por WhatsApp\n1. Salve o trabalho\n2. Desligue o computador",
+    );
+    expect(plainToRich("   ")).toBe("");
+  });
+
+  it("o público citado pela MAVI vira alvos só dentro do escopo, sem acento", () => {
+    const scope = noticeScope(data, "ges");
+    const { targets, missing } = matchAudience(
+      [
+        { kind: "client", name: "sorriso", mode: "teams" },
+        { kind: "team", name: "Criacao" },
+        { kind: "client", name: "Luz" },
+        { kind: "everyone", name: "" },
+        { kind: "user", name: "Caio" },
+      ],
+      data,
+      scope,
+    );
+    expect(targets).toEqual([
+      { kind: "client", id: "sorriso", mode: "teams" },
+      { kind: "team", id: "criacao" },
+    ]);
+    expect(missing).toEqual(["Luz", "todos da agência", "Caio"]);
+  });
+
+  it("um modelo incompleto abre com os formatos do nível", () => {
+    const c = fromTemplate({ title: "Novidades", level: "critical" });
+    expect(c.popup && c.push && c.inbox).toBe(true);
+    expect(c.publish_at).toBe("");
+    expect(fromTemplate({ repeat: "hourly" as never }).repeat).toBe("");
   });
 });

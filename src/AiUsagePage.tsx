@@ -35,6 +35,7 @@ const MODULE_LABELS: Record<string, string> = {
   index: "Indexação da base",
   mcp: "MAVI em apps externos (MCP)",
   tasks: "Assistente MAVI nas tarefas",
+  notices: "Mural de avisos",
 };
 
 const money = (v: number) => {

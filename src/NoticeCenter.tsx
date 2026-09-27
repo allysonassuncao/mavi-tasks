@@ -6,6 +6,7 @@ import { LevelChip, LEVEL_ICONS, NoticeAttachments } from "./NoticeParts";
 import {
   bannerNotices,
   nextPopup,
+  noticeKey,
   unseenCount,
   whenLabel,
   type LiveNotice,
@@ -78,7 +79,7 @@ export function NoticeCenter({
   const visible = useMemo(
     () =>
       live.map((n) =>
-        done.has(`${n.id}:${n.round}:seen`)
+        done.has(`${noticeKey(n)}:seen`)
           ? { ...n, seen_at: n.seen_at ?? "now" }
           : n,
       ),
@@ -93,7 +94,7 @@ export function NoticeCenter({
     ),
   );
   const banners = bannerNotices(visible).filter(
-    (n) => !done.has(`${n.id}:${n.round}:banner`),
+    (n) => !done.has(`${noticeKey(n)}:banner`),
   );
 
   // Anexos do popup, só quando ele tem.
@@ -113,7 +114,7 @@ export function NoticeCenter({
   }, [api, popup, attachments]);
 
   const mark = async (n: LiveNotice, action: NoticeAction) => {
-    const key = `${n.id}:${n.round}`;
+    const key = noticeKey(n);
     setDone((s) => {
       const next = new Set(s);
       next.add(`${key}:seen`);
@@ -167,7 +168,7 @@ export function NoticeCenter({
       )}
       {popup && (
         <NoticePopup
-          key={`${popup.id}:${popup.round}`}
+          key={noticeKey(popup)}
           api={api}
           notice={popup}
           attachments={attachments[popup.id] ?? []}

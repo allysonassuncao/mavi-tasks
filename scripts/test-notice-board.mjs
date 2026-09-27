@@ -710,4 +710,251 @@ await check("outra empresa não usa pessoas nem avisos daqui", async () => {
   assert.equal((await rows("sent_notices", [A, "", 20, 0])).length, 0);
 });
 
+// ------------------------------------------------------------ fase 2
+// (migration 20261107090000_notice_board_insights)
+let policy;
+await check(
+  "quem recebeu: só quem edita vê a lista, com equipes e pendentes primeiro",
+  async () => {
+    const r = await save(
+      admin,
+      null,
+      content({
+        title: "Política de home office",
+        level: "critical",
+        popup: true,
+        require_ack: true,
+        push: true,
+        targets: [{ kind: "team", id: criacao }],
+      }),
+    );
+    policy = r.id;
+    await as(ana);
+    await rpc("mark_notice", [policy, "ack"]);
+    await as(bia);
+    await rpc("mark_notice", [policy, "snooze"]);
+    await as(admin);
+    const people = await rows("notice_people", [policy]);
+    assert.deepEqual(
+      people.map((p) => p.name),
+      ["Bia Souza", "Gabi Gestora", "Ana Silva"],
+    );
+    assert.equal(people.find((p) => p.user_id === ana).teams, "Criação");
+    assert.ok(people.find((p) => p.user_id === ana).acked_at);
+    await as(manager);
+    assert.equal((await rows("notice_people", [policy])).length, 0);
+  },
+);
+
+await check(
+  "cobrar pendentes: reenvia só a quem falta, pelos mesmos formatos, uma vez por hora",
+  async () => {
+    await sql(`delete from realtime.messages`);
+    await sql(`delete from net.requests`);
+    await sql(`update notifications set read_at = now() where notice_id=$1`, [
+      policy,
+    ]);
+    await as(admin);
+    assert.equal(await rpc("remind_notice", [policy]), 2);
+    const [bias] = await sql(
+      `select snoozed_until, reminders, seen_at from notice_receipts where notice_id=$1 and user_id=$2`,
+      [policy, bia],
+    );
+    assert.equal(bias.snoozed_until, null);
+    assert.equal(bias.reminders, 1);
+    // O visto continua: o tempo até ver mede a entrega, não a cobrança.
+    assert.ok(bias.seen_at);
+    const inbox = await sql(
+      `select user_id, title, read_at from notifications where notice_id=$1 order by user_id`,
+      [policy],
+    );
+    assert.deepEqual(
+      inbox
+        .filter((n) => !n.read_at)
+        .map((n) => n.user_id)
+        .sort(),
+      [manager, bia].sort(),
+    );
+    assert.match(inbox.find((n) => n.user_id === bia).title, /^Lembrete: /);
+    const [push] = await sql(`select body from net.requests`);
+    assert.match(push.body.message.title, /Lembrete: Política de home office/);
+    const [live] = await sql(
+      `select payload from realtime.messages where payload->>'kind' = 'notice'`,
+    );
+    assert.deepEqual(live.payload.users.sort(), [manager, bia].sort());
+    await rejects(() => rpc("remind_notice", [policy]), /menos de uma hora/);
+    await as(bia);
+    assert.ok(
+      (await rows("my_live_notices", [A])).find((n) => n.id === policy)
+        .reminded_at,
+    );
+    await rejects(() => rpc("remind_notice", [policy]), /Sem permissão/);
+  },
+);
+
+await check(
+  "modelos: de todos os líderes; altera quem criou ou um administrador",
+  async () => {
+    await as(manager);
+    const id = await rpc("save_notice_template", [
+      A,
+      null,
+      "Novidades da semana",
+      {
+        title: "Novidades da semana",
+        level: "info",
+        inbox: true,
+        targets: [{ kind: "team", id: criacao }],
+        hack: "x",
+      },
+    ]);
+    await as(admin);
+    const [t] = await rows("notice_templates", [A]);
+    assert.equal(t.name, "Novidades da semana");
+    assert.equal(t.author_name, "Gabi Gestora");
+    assert.equal(t.content.hack, undefined);
+    assert.equal(t.can_edit, true);
+    await rpc("save_notice_template", [
+      A,
+      id,
+      "Novidades da semana (TI)",
+      t.content,
+    ]);
+    await as(ana);
+    assert.equal((await rows("notice_templates", [A])).length, 0);
+    await rejects(
+      () => rpc("save_notice_template", [A, null, "Meu", {}]),
+      /administradores e gestores/,
+    );
+    await as(manager);
+    await sql(
+      `insert into memberships(company_id,user_id,name,role,active) values($1,$2,'Outro Gestor','manager',true)`,
+      [A, stranger],
+    );
+    await as(stranger);
+    assert.equal((await rows("notice_templates", [A]))[0].can_edit, false);
+    await rejects(() => rpc("delete_notice_template", [id]), /Só quem criou/);
+    await as(manager);
+    await rpc("delete_notice_template", [id]);
+    assert.equal((await rows("notice_templates", [A])).length, 0);
+    await sql(`delete from memberships where company_id=$1 and user_id=$2`, [
+      A,
+      stranger,
+    ]);
+  },
+);
+
+await check(
+  "a MAVI na escrita tem provedor próprio no Painel da MAVI",
+  async () => {
+    const [c] = await sql(
+      `select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'ai_routes_feature_check'`,
+    );
+    assert.match(c.def, /notice_writer/);
+  },
+);
+
+const range = ["2020-01-01", "2030-01-01"];
+const byKey = (list) => Object.fromEntries(list.map((r) => [r.k, Number(r.v)]));
+const preview = async (spec, filters = {}) => {
+  await as(admin);
+  return rpc("dashboard_preview", [A, spec, ...range, filters]);
+};
+const nq = (ref, metric, extra = {}) => ({
+  ref,
+  source: "notices",
+  metric,
+  filters: [],
+  ...extra,
+});
+
+await check(
+  "Dashboards · Avisos: entregas, vistos, pendentes e confirmações por pessoa",
+  async () => {
+    const res = await preview({
+      viz: "table",
+      groupBy: "person",
+      queries: [
+        nq("A", "delivered"),
+        nq("B", "seen"),
+        nq("C", "pending"),
+        nq("D", "acked"),
+        nq("E", "ack_rate"),
+      ],
+      formula: { expr: "" },
+    });
+    const delivered = await sql(
+      `select user_id, count(*)::int as n from notice_receipts group by 1`,
+    );
+    assert.deepEqual(
+      byKey(res.series.A),
+      Object.fromEntries(delivered.map((d) => [d.user_id, d.n])),
+    );
+    assert.equal(byKey(res.series.D)[ana], 1);
+    assert.equal(res.series.A.find((r) => r.k === ana).l, "Ana Silva");
+    const pendingBia = (
+      await sql(
+        `select count(*)::int as n from notice_receipts r join notices n on n.id = r.notice_id
+     where r.user_id=$1 and (r.seen_at is null or (n.require_ack and r.acked_at is null))`,
+        [bia],
+      )
+    )[0].n;
+    assert.equal(byKey(res.series.C)[bia], pendingBia);
+  },
+);
+
+await check(
+  "Dashboards · Avisos: por aviso, nível, equipe e autor; filtros de cliente não quebram",
+  async () => {
+    const byNotice = await preview({
+      viz: "table",
+      groupBy: "notice",
+      queries: [nq("A", "seen_rate")],
+    });
+    assert.ok(byNotice.series.A.some((r) => r.l === "Política de home office"));
+    const byLevel = await preview({
+      viz: "bar",
+      groupBy: "level",
+      queries: [nq("A", "notices")],
+    });
+    assert.ok(byLevel.series.A.some((r) => r.l === "Crítico"));
+    const byTeam = await preview({
+      viz: "bar",
+      groupBy: "team",
+      queries: [nq("A", "delivered")],
+    });
+    assert.ok(byTeam.series.A.some((r) => r.l === "Criação"));
+    const critical = await preview({
+      viz: "stat",
+      groupBy: "none",
+      queries: [
+        nq("A", "notices", {
+          filters: [{ field: "level", op: "in", values: ["critical"] }],
+        }),
+      ],
+    });
+    assert.ok(Number(critical.series.A[0].v) >= 1);
+    const hours = await preview({
+      viz: "stat",
+      groupBy: "none",
+      queries: [nq("A", "hours_to_see")],
+    });
+    assert.ok(Number(hours.series.A[0].v) >= 0);
+    const withClient = await preview(
+      { viz: "stat", groupBy: "none", queries: [nq("A", "delivered")] },
+      { clients: [sorriso], teams: [criacao] },
+    );
+    assert.ok(Number(withClient.series.A[0].v) > 0);
+    await rejects(
+      () =>
+        preview({
+          viz: "bar",
+          groupBy: "client",
+          queries: [nq("A", "delivered")],
+        }),
+      /Agrupamento inválido/,
+    );
+  },
+);
+
 console.log(`\n${passed} verificações do Mural de avisos aprovadas.`);

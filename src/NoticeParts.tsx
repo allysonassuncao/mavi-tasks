@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Button } from "./ui";
 import {
   AlertTriangle,
   BellRing,
@@ -122,6 +123,58 @@ export function NoticeAttachments({
         </ul>
       )}
       {error && <p className="form-error">{error}</p>}
+    </div>
+  );
+}
+
+/** Um nome para o modelo, na própria tela. */
+export function TemplateName({
+  initial,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  initial: string;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (name: string) => void;
+}) {
+  const [name, setName] = useState(initial.slice(0, 80));
+  return (
+    <div className="notice-template-name">
+      <input
+        className="ui-input"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        maxLength={80}
+        placeholder="Nome do modelo (ex.: Novidades da semana)"
+        aria-label="Nome do modelo"
+        autoFocus
+        disabled={busy}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && name.trim().length >= 2) {
+            e.preventDefault();
+            onSave(name.trim());
+          }
+          if (e.key === "Escape") onCancel();
+        }}
+      />
+      <Button
+        type="button"
+        className="btn secondary"
+        onClick={onCancel}
+        disabled={busy}
+      >
+        Cancelar
+      </Button>
+      <Button
+        type="button"
+        className="btn primary"
+        onClick={() => onSave(name.trim())}
+        disabled={busy || name.trim().length < 2}
+      >
+        Salvar modelo
+      </Button>
     </div>
   );
 }

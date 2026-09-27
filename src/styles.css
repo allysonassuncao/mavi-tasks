@@ -20420,7 +20420,277 @@ button.copilot-chip:hover {
   gap: 9px;
 }
 
+/* Mural · fase 2: quem recebeu, cobrança, modelos e a MAVI */
+.notice-view-actions {
+  flex-wrap: wrap;
+}
+.notice-reach-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fbfcfb;
+}
+.notice-reach-box > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.notice-reach-box > header strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
+}
+.notice-reach-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.notice-reach-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.76rem;
+  color: #5f6c6b;
+}
+.notice-reach-tabs button span {
+  font-weight: 700;
+  color: var(--ink);
+}
+.notice-reach-tabs button.selected {
+  border-color: #8fc255;
+  background: #f5faee;
+  color: #3f5f22;
+}
+.notice-people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.notice-people li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 2px;
+  border-bottom: 1px solid #eef1f0;
+  font-size: 0.8rem;
+}
+.notice-people li:last-child {
+  border-bottom: 0;
+}
+.notice-people li > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.notice-people li small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.notice-people li > small {
+  text-align: right;
+  flex-shrink: 0;
+  max-width: 55%;
+}
+.notice-people li.pending > small {
+  color: #9a6a14;
+}
+.notice-people-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.notice-remind {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid #eef1f0;
+}
+.notice-remind small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  flex: 1 1 220px;
+}
+.notice-template-name {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.notice-template-name input {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.notice-template-save {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed #cfdcc0;
+  border-radius: 12px;
+}
+.notice-template-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #4f6a31;
+}
+.notice-save-template {
+  margin-right: auto;
+}
+.notice-templates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.notice-templates li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.notice-templates li > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.notice-templates li small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.notice-mavi {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid #dfe9d2;
+  background: linear-gradient(180deg, #f7fbf1, #ffffff);
+}
+.notice-mavi > header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #3f5f22;
+}
+.notice-mavi > header strong {
+  font-size: 0.84rem;
+  letter-spacing: 0.3px;
+}
+.notice-mavi > header small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.notice-mavi-ask {
+  display: flex;
+  gap: 8px;
+}
+.notice-mavi-ask input {
+  flex: 1;
+  min-width: 0;
+}
+.notice-mavi-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.notice-mavi-tools > span {
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.notice-mavi-note {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.notice-mavi-result {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 40px 12px 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+}
+.notice-mavi-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+.notice-mavi-part {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.notice-mavi-part + .notice-mavi-part {
+  padding-top: 12px;
+  border-top: 1px solid #eef1f0;
+}
+.notice-mavi-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #6e8a4c;
+}
+.notice-mavi-body {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: #3d4a4a;
+}
+.notice-mavi-part > small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.notice-mavi-formats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 @media (max-width: 640px) {
+  .notice-mavi-ask {
+    flex-direction: column;
+  }
+  .notice-people li {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .notice-people li > small {
+    text-align: left;
+    max-width: none;
+  }
   .notice-banner {
     padding: 9px 16px;
   }

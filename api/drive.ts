@@ -20,6 +20,7 @@ import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
 import { handleNotices } from "./_notices.js";
+import { handleNoticeWriter } from "./_notice-writer.js";
 import { appOrigin } from "./_origin.js";
 
 function credentials(): GcsCredentials | null {
@@ -275,7 +276,14 @@ export default async function handler(
       );
     else if (action.startsWith("case-"))
       result = await handleCases(body, authorization, driveEnv(), fetch);
-    else if (action.startsWith("notice-"))
+    else if (action === "notice-mavi") {
+      // A MAVI na escrita de um aviso (funcionalidade 'notice_writer').
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("notice_writer", process.env),
+      };
+      result = await handleNoticeWriter(body, authorization, env, aiDeps(env));
+    } else if (action.startsWith("notice-"))
       result = await handleNotices(body, authorization, driveEnv(), fetch);
     else if (action.startsWith("meeting-"))
       result = await handleMeetings(

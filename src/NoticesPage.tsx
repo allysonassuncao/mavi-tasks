@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BellRing,
+  BellPlus,
   CalendarClock,
   CheckCircle2,
+  Copy,
   Eye,
+  FileStack,
   Inbox,
   Monitor,
   PanelTop,
@@ -11,31 +14,41 @@ import {
   Pencil,
   Pin,
   Plus,
+  RefreshCw,
   Repeat,
   Search,
   Send,
   Smartphone,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import { Empty, Modal } from "./components";
 import { Button, Loading } from "./ui";
 import { RichTextContent } from "./RichTextContent";
-import { LevelChip, NoticeAttachments } from "./NoticeParts";
+import { LevelChip, NoticeAttachments, TemplateName } from "./NoticeParts";
 import { NoticeForm } from "./NoticeForm";
 import {
+  contentOf,
+  fromTemplate,
+  isPending,
   NOTICE_PARAM,
   noticesApi,
   REPEATS,
   STATUS_LABEL,
+  templateOf,
   whenLabel,
   type FeedNotice,
+  type NoticeContent,
   type NoticeDetail,
+  type NoticePerson,
   type NoticesApi,
   type NoticeSaveResult,
+  type NoticeTemplate,
   type SentNotice,
 } from "./notices";
 import { useUrlState } from "./router";
+import { fold } from "./domain";
 import type { Snapshot } from "./types";
 
 const PAGE = 20;
@@ -69,10 +82,14 @@ export function NoticesPage({
   const [sent, setSent] = useState<SentNotice[] | null>(null);
   const [more, setMore] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState<{ detail: NoticeDetail | null } | null>(
-    null,
-  );
+  const [form, setForm] = useState<{
+    detail: NoticeDetail | null;
+    /** Um modelo ou um aviso duplicado: começa preenchido. */
+    preset?: NoticeContent;
+    template?: NoticeTemplate;
+  } | null>(null);
   const sending = isLeader && tab === "enviados";
+  const templatesTab = isLeader && tab === "modelos";
   const request = useRef(0);
 
   useEffect(() => {
@@ -177,8 +194,8 @@ export function NoticesPage({
         <nav className="cases-tabs" aria-label="Mural">
           <button
             type="button"
-            className={!sending ? "active" : ""}
-            aria-current={!sending ? "page" : undefined}
+            className={!sending && !templatesTab ? "active" : ""}
+            aria-current={!sending && !templatesTab ? "page" : undefined}
             onClick={() => setTab("")}
           >
             <Inbox size={16} /> Para mim
@@ -191,11 +208,33 @@ export function NoticesPage({
           >
             <Send size={16} /> Enviados
           </button>
+          <button
+            type="button"
+            className={templatesTab ? "active" : ""}
+            aria-current={templatesTab ? "page" : undefined}
+            onClick={() => setTab("modelos")}
+          >
+            <FileStack size={16} /> Modelos
+          </button>
         </nav>
       )}
 
       {error && <p className="form-error">{error}</p>}
-      {rows === null && !error ? (
+      {templatesTab ? (
+        <TemplateList
+          api={api}
+          company={company}
+          query={term}
+          notify={notify}
+          onUse={(template) =>
+            setForm({
+              detail: null,
+              preset: fromTemplate(template.content),
+              template,
+            })
+          }
+        />
+      ) : rows === null && !error ? (
         <Loading compact />
       ) : rows && rows.length ? (
         <>
@@ -252,10 +291,22 @@ export function NoticesPage({
         <NoticeView
           key={openId}
           api={api}
+          company={company}
           id={openId}
           notify={notify}
           onClose={() => setOpenId("")}
           onEdit={(detail) => setForm({ detail })}
+          onDuplicate={(detail) =>
+            setForm({
+              detail: null,
+              preset: {
+                ...contentOf(detail),
+                title: `${detail.title} (cópia)`.slice(0, 160),
+                publish_at: "",
+                expires_at: "",
+              },
+            })
+          }
           onChanged={refresh}
         />
       )}
@@ -267,6 +318,8 @@ export function NoticesPage({
           user={user}
           demo={demo}
           detail={form.detail}
+          preset={form.preset}
+          template={form.template}
           onClose={() => setForm(null)}
           onSaved={saved}
         />
@@ -385,19 +438,24 @@ function SentRow({ row, onOpen }: { row: SentNotice; onOpen: () => void }) {
 /** Um aviso aberto: quem o recebeu o marca como visto e confirma, quem o criou edita. */
 function NoticeView({
   api,
+  company,
   id,
   notify,
   onClose,
   onEdit,
+  onDuplicate,
   onChanged,
 }: {
   api: NoticesApi;
+  company: string;
   id: string;
   notify: (message: string) => void;
   onClose: () => void;
   onEdit: (detail: NoticeDetail) => void;
+  onDuplicate: (detail: NoticeDetail) => void;
   onChanged: () => void;
 }) {
+  const [naming, setNaming] = useState(false);
   const [detail, setDetail] = useState<NoticeDetail | null | undefined>(
     undefined,
   );
@@ -513,9 +571,56 @@ function NoticeView({
             )}
           </div>
         )}
+        {detail.can_edit &&
+          detail.status !== "draft" &&
+          detail.status !== "scheduled" && (
+            <NoticeReach
+              key={`${detail.round}`}
+              api={api}
+              detail={detail}
+              notify={notify}
+              onReminded={async () => {
+                onChanged();
+                setDetail(await api.detail(id));
+              }}
+            />
+          )}
+        {naming && (
+          <TemplateName
+            initial={detail.title}
+            busy={busy}
+            onCancel={() => setNaming(false)}
+            onSave={(name) =>
+              act(async () => {
+                await api.saveTemplate(
+                  company,
+                  null,
+                  name,
+                  templateOf(contentOf(detail)),
+                );
+                setNaming(false);
+              }, "Modelo salvo. Ele aparece na aba Modelos para todos os líderes.")
+            }
+          />
+        )}
         {error && <p className="form-error">{error}</p>}
         {detail.can_edit && (
           <div className="form-footer notice-view-actions">
+            <Button
+              className="btn secondary"
+              disabled={busy}
+              onClick={() => onDuplicate(detail)}
+              title="Um aviso novo com o mesmo conteúdo, formatos e público (sem os anexos)"
+            >
+              <Copy size={16} /> Duplicar
+            </Button>
+            <Button
+              className="btn secondary"
+              disabled={busy || naming}
+              onClick={() => setNaming(true)}
+            >
+              <FileStack size={16} /> Salvar como modelo
+            </Button>
             <Button
               className="btn secondary danger"
               disabled={busy}
@@ -567,5 +672,259 @@ function NoticeView({
         )}
       </div>
     </Modal>
+  );
+}
+
+type ReachTab = "pending" | "seen" | "acked" | "all";
+
+/**
+ * Quem recebeu a rodada atual: pendentes primeiro, quem viu, quem confirmou.
+ * A lista é lida quando abre e em "Atualizar" (ver não avisa ninguém ao vivo);
+ * "Cobrar pendentes" reenvia a quem falta, uma vez por hora.
+ */
+function NoticeReach({
+  api,
+  detail,
+  notify,
+  onReminded,
+}: {
+  api: NoticesApi;
+  detail: NoticeDetail;
+  notify: (message: string) => void;
+  onReminded: () => void;
+}) {
+  const [people, setPeople] = useState<NoticePerson[] | null>(null);
+  const [tab, setTab] = useState<ReachTab>("pending");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    setError("");
+    api
+      .people(detail.id)
+      .then(setPeople)
+      .catch((e) => setError((e as Error).message));
+  }, [api, detail.id]);
+  useEffect(load, [load]);
+  const ack = detail.require_ack;
+  const list = people ?? [];
+  const pending = list.filter((p) => isPending(p, ack));
+  const seen = list.filter((p) => p.seen_at);
+  const acked = list.filter((p) => p.acked_at);
+  const shown =
+    tab === "pending"
+      ? pending
+      : tab === "seen"
+        ? seen
+        : tab === "acked"
+          ? acked
+          : list;
+  const next = detail.last_reminded_at
+    ? new Date(new Date(detail.last_reminded_at).getTime() + 3600e3)
+    : null;
+  const wait = next && next.getTime() > Date.now();
+  const tabs: [ReachTab, string, number][] = [
+    ["pending", "Pendentes", pending.length],
+    ["seen", "Viram", seen.length],
+    ...(ack
+      ? ([["acked", "Confirmaram", acked.length]] as [
+          ReachTab,
+          string,
+          number,
+        ][])
+      : []),
+    ["all", "Todos", list.length],
+  ];
+  const state = (p: NoticePerson) =>
+    p.acked_at
+      ? `Confirmou ${whenLabel(p.acked_at)}`
+      : p.snoozed_until && new Date(p.snoozed_until).getTime() > Date.now()
+        ? "Adiou para amanhã"
+        : p.seen_at
+          ? `Viu ${whenLabel(p.seen_at)}${ack ? " · falta confirmar" : ""}`
+          : "Ainda não viu";
+  return (
+    <section className="notice-reach-box" aria-label="Quem recebeu">
+      <header>
+        <strong>
+          <Users size={15} aria-hidden="true" /> Quem recebeu
+        </strong>
+        <button
+          type="button"
+          className="text-btn"
+          onClick={load}
+          title="Ler a lista de novo"
+        >
+          <RefreshCw size={13} /> Atualizar
+        </button>
+      </header>
+      {people === null && !error ? (
+        <Loading compact />
+      ) : (
+        <>
+          <div className="notice-reach-tabs" role="tablist">
+            {tabs.map(([key, label, n]) => (
+              <button
+                type="button"
+                role="tab"
+                key={key}
+                aria-selected={tab === key}
+                className={tab === key ? "selected" : ""}
+                onClick={() => setTab(key)}
+              >
+                {label} <span>{n}</span>
+              </button>
+            ))}
+          </div>
+          {shown.length ? (
+            <ul className="notice-people">
+              {shown.map((p) => (
+                <li
+                  key={p.user_id}
+                  className={isPending(p, ack) ? "pending" : ""}
+                >
+                  <span>
+                    <strong>{p.name}</strong>
+                    {p.teams && <small>{p.teams}</small>}
+                  </span>
+                  <small>
+                    {state(p)}
+                    {p.reminders > 0
+                      ? ` · cobrado ${p.reminders === 1 ? "1 vez" : `${p.reminders} vezes`}`
+                      : ""}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="notice-people-empty">
+              {tab === "pending" ? "Ninguém pendente." : "Ninguém por aqui."}
+            </p>
+          )}
+          {detail.status === "live" && (
+            <div className="notice-remind">
+              <small>
+                {wait
+                  ? `Cobrado ${whenLabel(detail.last_reminded_at)}. Dá para cobrar de novo às ${next!.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}.`
+                  : "Reenvia só a quem falta, pelos mesmos formatos do aviso."}
+              </small>
+              <Button
+                className="btn secondary"
+                loading={busy}
+                disabled={!pending.length || !!wait}
+                onClick={async () => {
+                  setBusy(true);
+                  setError("");
+                  try {
+                    const n = await api.remind(detail.id);
+                    notify(
+                      n === 1 ? "1 pessoa cobrada." : `${n} pessoas cobradas.`,
+                    );
+                    load();
+                    onReminded();
+                  } catch (e) {
+                    setError(
+                      (e as Error).message || "Não foi possível cobrar.",
+                    );
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <BellPlus size={16} /> Cobrar pendentes ({pending.length})
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+      {error && <p className="form-error">{error}</p>}
+    </section>
+  );
+}
+
+/** A biblioteca de modelos da agência (todos os líderes usam). */
+function TemplateList({
+  api,
+  company,
+  query,
+  notify,
+  onUse,
+}: {
+  api: NoticesApi;
+  company: string;
+  query: string;
+  notify: (message: string) => void;
+  onUse: (t: NoticeTemplate) => void;
+}) {
+  const [list, setList] = useState<NoticeTemplate[] | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api
+      .templates(company)
+      .then(setList)
+      .catch((e) => setError((e as Error).message));
+  }, [api, company]);
+  useEffect(load, [load]);
+  if (list === null && !error) return <Loading compact />;
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  const shown = (list ?? []).filter((t) => {
+    const text = fold(`${t.name} ${t.content.title ?? ""}`);
+    return words.every((w) => text.includes(w));
+  });
+  if (list?.length && !shown.length)
+    return (
+      <div className="panel">
+        <Empty title="Nenhum modelo encontrado" body="Tente outras palavras." />
+      </div>
+    );
+  if (!list?.length)
+    return (
+      <div className="panel">
+        {error ? (
+          <p className="form-error">{error}</p>
+        ) : (
+          <Empty
+            title="Nenhum modelo ainda"
+            body="Abra um aviso enviado e use “Salvar como modelo”, ou salve um modelo no formulário. Séries como “Novidades da semana” ficam a um clique."
+          />
+        )}
+      </div>
+    );
+  return (
+    <ul className="notice-templates">
+      {shown.map((t) => (
+        <li key={t.id}>
+          <span>
+            <strong>{t.name}</strong>
+            <small>
+              {t.content.title ? `${t.content.title} · ` : ""}
+              {t.author_name} · {whenLabel(t.updated_at)}
+            </small>
+          </span>
+          {t.can_edit && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={`Apagar o modelo ${t.name}`}
+              onClick={async () => {
+                if (!window.confirm(`Apagar o modelo “${t.name}”?`)) return;
+                try {
+                  await api.deleteTemplate(t.id);
+                  notify("Modelo apagado.");
+                  load();
+                } catch (e) {
+                  setError((e as Error).message);
+                }
+              }}
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
+          <Button className="btn primary" onClick={() => onUse(t)}>
+            Usar
+          </Button>
+        </li>
+      ))}
+      {error && <p className="form-error">{error}</p>}
+    </ul>
   );
 }

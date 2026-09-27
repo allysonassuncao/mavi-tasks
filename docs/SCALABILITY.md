@@ -142,4 +142,11 @@ Migração `20261106090000_notice_board`, testada por `npm run test:db:notices` 
 - **Rotina `mavi-notices` (pg_cron, a cada minuto)**: publica os agendados, abre as repetições vencidas (rodada nova, volta como não visto) e entrega a quem entrou no público depois (só avisos publicados nos últimos 90 dias). Sem `pg_cron`, agende `select mavi_private.run_notices()`.
 - **Anexos**: enviados ao bucket do Drive em `notices/<empresa>/<aviso>/<id>` ou arquivos que já estão no Drive; o navegador só recebe links assinados de 15 minutos (`notice-*` em `/api/drive`), e o aviso dá a quem o recebeu o direito de abrir o arquivo do Drive anexado.
 
-Para ativar: aplicar a migração (`npx supabase db push --linked --include-all --skip-vault`), conferir o job com `select jobname, schedule from cron.job where jobname = 'mavi-notices'` e publicar o frontend.
+Fase 2 (migração `20261107090000_notice_board_insights`, mesmo teste, 23 verificações):
+
+- **Quem recebeu e cobrança**: `notice_people` lista a rodada atual (só para quem edita, até 5.000 pessoas); `remind_notice` reenvia só aos pendentes pelos formatos do aviso, no máximo uma vez por hora (`notices.last_reminded_at`), sem apagar o "visto". A lista não é atualizada ao vivo (ver não gera broadcast): a tela tem "Atualizar".
+- **Modelos** (`notice_templates`): biblioteca da agência para os líderes; guarda conteúdo, formatos e público, nunca datas nem anexos.
+- **A MAVI na escrita**: ação `notice-mavi` em `/api/drive`, funcionalidade `notice_writer` no Painel da MAVI (variável `NOTICE_WRITER_MODEL`, senão `AI_MODEL`). Uma chamada curta, sem ferramentas, respeitando os limites de gasto; o custo entra no módulo "Mural de avisos".
+- **Dashboards**: fonte `notices` em `dashboard_sql` (entregas da rodada atual por pessoa, datadas pela entrega). Filtros de cliente, produto e projeto do dashboard são ignorados nessa fonte; equipe é a de quem recebeu.
+
+Para ativar: aplicar as migrações (`npx supabase db push --linked --include-all --skip-vault`), conferir o job com `select jobname, schedule from cron.job where jobname = 'mavi-notices'` e publicar o frontend.

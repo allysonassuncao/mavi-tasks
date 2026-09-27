@@ -11,7 +11,7 @@ import { priorities, statuses, type Status } from "./types";
  */
 
 export type Source =
-  "tasks" | "hours" | "social_leads" | "status_history" | "reviews";
+  "tasks" | "hours" | "social_leads" | "status_history" | "reviews" | "notices";
 export type Viz = "stat" | "line" | "area" | "bar" | "hbar" | "donut" | "table";
 export type GroupBy =
   | "none"
@@ -27,7 +27,9 @@ export type GroupBy =
   | "stage"
   | "executor"
   | "previous"
-  | "validator";
+  | "validator"
+  | "notice"
+  | "level";
 export type Interval = "auto" | "day" | "week" | "month";
 /** "money" (R$) is only drawn by Campanhas' charts, not a dashboard metric. */
 export type Unit = "number" | "hours" | "days" | "percent" | "money";
@@ -44,7 +46,8 @@ export type FilterField =
   | "entry_source"
   | "executor"
   | "previous"
-  | "validator";
+  | "validator"
+  | "level";
 
 export type QueryFilter = {
   field: FilterField;
@@ -417,6 +420,65 @@ export const sources: Record<
       "creator",
     ],
   },
+  // Mural de avisos (migration 20261107090000): one row per person reached
+  // by a notice (its current round). "Pessoa" is who received it; the
+  // dashboard's client and product filters don't apply to notices.
+  notices: {
+    label: "Avisos do Mural",
+    metrics: [
+      {
+        key: "notices",
+        label: "Avisos enviados",
+        unit: "number",
+        additive: false,
+      },
+      {
+        key: "delivered",
+        label: "Entregas (pessoas alcançadas)",
+        unit: "number",
+        additive: true,
+      },
+      { key: "seen", label: "Vistos", unit: "number", additive: true },
+      {
+        key: "pending",
+        label: "Pendentes (sem ver ou sem confirmar)",
+        unit: "number",
+        additive: true,
+      },
+      {
+        key: "seen_rate",
+        label: "Taxa de visto (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "acked",
+        label: "Confirmações (Li e entendi)",
+        unit: "number",
+        additive: true,
+      },
+      {
+        key: "ack_rate",
+        label: "Taxa de confirmação (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "hours_to_see",
+        label: "Tempo até ver (horas)",
+        unit: "hours",
+        additive: false,
+      },
+      {
+        key: "hours_to_ack",
+        label: "Tempo até confirmar (horas)",
+        unit: "hours",
+        additive: false,
+      },
+    ],
+    dateFields: [{ key: "delivered_at", label: "Entrega do aviso" }],
+    filters: ["level", "person", "team", "creator"],
+  },
 };
 export const metricDef = (q: Pick<Query, "source" | "metric">) =>
   sources[q.source]?.metrics.find((m) => m.key === q.metric);
@@ -435,6 +497,7 @@ export const filterLabels: Record<FilterField, string> = {
   executor: "Quem executou",
   previous: "Responsável anterior",
   validator: "Quem validou",
+  level: "Nível do aviso",
 };
 
 export const groupOptions: {
@@ -445,12 +508,26 @@ export const groupOptions: {
   {
     key: "none",
     label: "Total (sem agrupar)",
-    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
+    sources: [
+      "tasks",
+      "hours",
+      "social_leads",
+      "status_history",
+      "reviews",
+      "notices",
+    ],
   },
   {
     key: "time",
     label: "Tempo (dia, semana, mês)",
-    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
+    sources: [
+      "tasks",
+      "hours",
+      "social_leads",
+      "status_history",
+      "reviews",
+      "notices",
+    ],
   },
   {
     key: "client",
@@ -470,12 +547,19 @@ export const groupOptions: {
   {
     key: "team",
     label: "Equipe",
-    sources: ["tasks", "hours", "status_history", "reviews"],
+    sources: ["tasks", "hours", "status_history", "reviews", "notices"],
   },
   {
     key: "person",
-    label: "Pessoa (responsável, quem registrou ou quem enviou)",
-    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
+    label: "Pessoa (responsável, quem registrou, quem enviou ou quem recebeu)",
+    sources: [
+      "tasks",
+      "hours",
+      "social_leads",
+      "status_history",
+      "reviews",
+      "notices",
+    ],
   },
   {
     key: "executor",
@@ -488,10 +572,12 @@ export const groupOptions: {
     sources: ["status_history"],
   },
   { key: "validator", label: "Quem validou", sources: ["reviews"] },
+  { key: "notice", label: "Aviso", sources: ["notices"] },
+  { key: "level", label: "Nível do aviso", sources: ["notices"] },
   {
     key: "creator",
-    label: "Criador da tarefa",
-    sources: ["tasks", "status_history", "reviews"],
+    label: "Criador da tarefa (ou autor do aviso)",
+    sources: ["tasks", "status_history", "reviews", "notices"],
   },
   { key: "status", label: "Status", sources: ["tasks", "status_history"] },
   {
@@ -1621,6 +1707,123 @@ export function performancePanels(): Panel[] {
         queries: [
           q("A", "reviews", "approved", { label: "Aprovadas" }),
           q("B", "reviews", "reproved", { label: "Reprovadas" }),
+        ],
+      },
+    },
+  ];
+}
+
+/**
+ * Mural de avisos (migration 20261107090000): alcance, leitura e
+ * confirmação dos avisos, quem mais deixa pendências e quanto se demora
+ * para ver e confirmar.
+ */
+export function noticesPanels(): Panel[] {
+  const q = (
+    ref: string,
+    metric: string,
+    extra: Partial<Query> = {},
+  ): Query => ({
+    ref,
+    source: "notices",
+    metric,
+    dateField: "delivered_at",
+    filters: [],
+    ...extra,
+  });
+  const stat = (id: string, title: string, x: number, query: Query): Panel => ({
+    id,
+    title,
+    x,
+    y: 0,
+    w: 3,
+    h: 3,
+    spec: { viz: "stat", groupBy: "none", compare: true, queries: [query] },
+  });
+  return [
+    stat("avisos", "Avisos enviados", 0, q("A", "notices")),
+    stat("taxa-visto", "Taxa de visto", 3, q("A", "seen_rate")),
+    stat("taxa-confirmacao", "Taxa de confirmação", 6, q("A", "ack_rate")),
+    stat("tempo-ver", "Tempo até ver", 9, q("A", "hours_to_see")),
+    {
+      id: "leitura-tempo",
+      title: "Entregas × vistos",
+      x: 0,
+      y: 3,
+      w: 12,
+      h: 5,
+      spec: {
+        viz: "line",
+        groupBy: "time",
+        interval: "auto",
+        queries: [
+          q("A", "delivered", { label: "Entregas" }),
+          q("B", "seen", { label: "Vistos" }),
+        ],
+      },
+    },
+    {
+      id: "por-aviso",
+      title: "Leitura por aviso",
+      x: 0,
+      y: 8,
+      w: 12,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "notice",
+        limit: 30,
+        queries: [
+          q("A", "delivered", { label: "Entregas" }),
+          q("B", "seen_rate", { label: "Visto" }),
+          q("C", "ack_rate", { label: "Confirmação" }),
+          q("D", "pending", { label: "Pendentes" }),
+        ],
+      },
+    },
+    {
+      id: "pendencias-pessoa",
+      title: "Quem mais deixa avisos pendentes",
+      x: 0,
+      y: 14,
+      w: 6,
+      h: 6,
+      spec: {
+        viz: "hbar",
+        groupBy: "person",
+        limit: 10,
+        queries: [q("A", "pending")],
+      },
+    },
+    {
+      id: "visto-equipe",
+      title: "Taxa de visto por equipe",
+      x: 6,
+      y: 14,
+      w: 6,
+      h: 6,
+      spec: {
+        viz: "hbar",
+        groupBy: "team",
+        limit: 10,
+        queries: [q("A", "seen_rate")],
+      },
+    },
+    {
+      id: "tempo-pessoa",
+      title: "Tempo até ver e confirmar, por pessoa",
+      x: 0,
+      y: 20,
+      w: 12,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "person",
+        limit: 30,
+        queries: [
+          q("A", "hours_to_see", { label: "Até ver (h)" }),
+          q("B", "hours_to_ack", { label: "Até confirmar (h)" }),
+          q("C", "pending", { label: "Pendentes" }),
         ],
       },
     },

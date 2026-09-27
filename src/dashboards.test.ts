@@ -11,6 +11,7 @@ import {
   starterPanels,
   socialLeadsPanels,
   performancePanels,
+  noticesPanels,
   groupsFor,
   metricDef,
   sources,
@@ -308,6 +309,20 @@ describe("Grade dos painéis", () => {
         expect(metricDef(q)).toBeTruthy();
         for (const f of q.filters)
           expect(sources[q.source].filters).toContain(f.field);
+      }
+      expect(groupsFor(p.spec.queries).map((g) => g.key)).toContain(
+        p.spec.groupBy,
+      );
+    }
+  });
+  it("o modelo do Mural de avisos cabe na grade e só usa a fonte Avisos", () => {
+    const panels = noticesPanels();
+    expect(overlap(panels)).toBe(false);
+    for (const p of panels) {
+      expect(p.x + p.w).toBeLessThanOrEqual(12);
+      for (const q of p.spec.queries) {
+        expect(q.source).toBe("notices");
+        expect(metricDef(q)).toBeTruthy();
       }
       expect(groupsFor(p.spec.queries).map((g) => g.key)).toContain(
         p.spec.groupBy,

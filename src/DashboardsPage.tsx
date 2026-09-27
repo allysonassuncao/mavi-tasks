@@ -50,6 +50,7 @@ import {
   starterPanels,
   socialLeadsPanels,
   performancePanels,
+  noticesPanels,
   vizOptions,
   compact,
   type Dashboard,
@@ -76,6 +77,7 @@ const sourceOrder: Source[] = [
   "reviews",
   "hours",
   "social_leads",
+  "notices",
 ];
 
 // The demonstration keeps its dashboards in memory for the session.
@@ -374,7 +376,9 @@ function DashboardList({
                     ? socialLeadsPanels()
                     : template === "performance"
                       ? performancePanels()
-                      : [],
+                      : template === "notices"
+                        ? noticesPanels()
+                        : [],
               variables: { range: { preset: "30d" as const }, filters: {} },
             };
             const saved = demo
@@ -389,7 +393,7 @@ function DashboardList({
   );
 }
 
-type Template = "operation" | "social_leads" | "performance" | null;
+type Template = "operation" | "social_leads" | "performance" | "notices" | null;
 function CreateDashboard({
   onClose,
   onCreate,
@@ -488,6 +492,19 @@ function CreateDashboard({
               até a aprovação e clientes por etapa.
             </small>
           </label>
+          <label className={template === "notices" ? "selected" : ""}>
+            <input
+              type="radio"
+              name="template"
+              checked={template === "notices"}
+              onChange={() => setTemplate("notices")}
+            />
+            <strong>Modelo: Mural de avisos</strong>
+            <small>
+              Avisos enviados, taxa de visto e de confirmação, tempo até ver,
+              leitura por aviso e quem mais deixa avisos pendentes.
+            </small>
+          </label>
           <label className={template === null ? "selected" : ""}>
             <input
               type="radio"
@@ -546,6 +563,11 @@ function useLookups(data: Snapshot) {
         value: k,
         label: l,
       })),
+      level: [
+        { value: "info", label: "Informativo" },
+        { value: "important", label: "Importante" },
+        { value: "critical", label: "Crítico" },
+      ],
       entry_source: [
         { value: "timer", label: "Cronômetro" },
         { value: "manual", label: "Lançamento manual" },

@@ -14,19 +14,22 @@ import { Modal } from "./components";
 import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
 import { formatBytes, searchDriveFiles } from "./drive";
-import { LEVEL_ICONS } from "./NoticeParts";
+import { LEVEL_ICONS, TemplateName } from "./NoticeParts";
+import { NoticeMavi } from "./NoticeMavi";
 import {
   ATTACHMENT_MAX_BYTES,
   audienceEstimate,
   contentOf,
   emptyNotice,
   FORMATS,
+  fromTemplate,
   fromLocalInput,
   LEVELS,
   MAX_ATTACHMENTS,
   MODES,
   noticeScope,
   REPEATS,
+  templateOf,
   toLocalInput,
   type NoticeContent,
   type NoticeDetail,
@@ -34,6 +37,7 @@ import {
   type NoticeSaveResult,
   type NoticesApi,
   type NoticeTarget,
+  type NoticeTemplate,
   type TargetKind,
   type TargetMode,
 } from "./notices";
@@ -65,6 +69,8 @@ export function NoticeForm({
   user,
   demo,
   detail,
+  preset,
+  template: startTemplate,
   onClose,
   onSaved,
 }: {
@@ -75,12 +81,26 @@ export function NoticeForm({
   demo: boolean;
   /** O aviso em edição (null: um novo). */
   detail: NoticeDetail | null;
+  /** Um aviso novo que já começa preenchido (modelo ou duplicado). */
+  preset?: NoticeContent;
+  /** O modelo de onde veio (quem pode editá-lo também o atualiza daqui). */
+  template?: NoticeTemplate;
   onClose: () => void;
   onSaved: (result: NoticeSaveResult, published: boolean) => void;
 }) {
   const [form, setForm] = useState<NoticeContent>(
-    detail ? contentOf(detail) : emptyNotice(),
+    detail ? contentOf(detail) : (preset ?? emptyNotice()),
   );
+  // O editor não é controlado: trocar o texto por fora o monta de novo.
+  const [editorKey, setEditorKey] = useState(0);
+  const [templates, setTemplates] = useState<NoticeTemplate[]>([]);
+  const [template, setTemplate] = useState<NoticeTemplate | undefined>(
+    startTemplate,
+  );
+  const [naming, setNaming] = useState(false);
+  const [replaceTemplate, setReplaceTemplate] = useState(true);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateNote, setTemplateNote] = useState("");
   const [when, setWhen] = useState<"now" | "later">(
     detail?.status === "scheduled" ? "later" : "now",
   );
@@ -106,6 +126,52 @@ export function NoticeForm({
   const set = <K extends keyof NoticeContent>(k: K, v: NoticeContent[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
   const estimate = audienceEstimate(form, data, detail?.created_by ?? user);
+  const readBody = () =>
+    (formRef.current?.elements.namedItem("body") as HTMLInputElement | null)
+      ?.value ?? form.body;
+  // Um aviso novo pode começar de um modelo da agência.
+  useEffect(() => {
+    if (detail || preset) return;
+    let alive = true;
+    api
+      .templates(company)
+      .then((list) => alive && setTemplates(list))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [api, company, detail, preset]);
+  function startFromTemplate(id: string) {
+    const t = templates.find((x) => x.id === id);
+    if (!t) return;
+    setForm(fromTemplate(t.content));
+    setTemplate(t);
+    setEditorKey((k) => k + 1);
+  }
+  async function saveAsTemplate(name: string) {
+    setSavingTemplate(true);
+    setTemplateNote("");
+    try {
+      const content = templateOf({ ...form, body: readBody() });
+      const replace = !!template?.can_edit && replaceTemplate;
+      await api.saveTemplate(
+        company,
+        replace ? template!.id : null,
+        name,
+        content,
+      );
+      setNaming(false);
+      setTemplateNote(
+        replace ? `Modelo “${name}” atualizado.` : `Modelo “${name}” salvo.`,
+      );
+    } catch (e) {
+      setTemplateNote(
+        (e as Error).message || "Não foi possível salvar o modelo.",
+      );
+    } finally {
+      setSavingTemplate(false);
+    }
+  }
 
   const addFiles = (files: File[]) => {
     const bad = files.filter(
@@ -142,9 +208,7 @@ export function NoticeForm({
 
   async function submit(publish: boolean) {
     setError("");
-    const body =
-      (formRef.current?.elements.namedItem("body") as HTMLInputElement | null)
-        ?.value ?? form.body;
+    const body = readBody();
     const content: NoticeContent = {
       ...form,
       title: form.title.trim(),
@@ -263,6 +327,66 @@ export function NoticeForm({
             hint="Imagens, PDFs, qualquer arquivo"
           />
         )}
+        {!detail && !preset && templates.length > 0 && (
+          <label>
+            Começar de um modelo
+            <Select
+              value={template?.id ?? ""}
+              onValueChange={startFromTemplate}
+              aria-label="Começar de um modelo"
+              disabled={busy}
+            >
+              <SelectOption value="">Aviso em branco</SelectOption>
+              {templates.map((t) => (
+                <SelectOption key={t.id} value={t.id}>
+                  {t.name}
+                </SelectOption>
+              ))}
+            </Select>
+          </label>
+        )}
+        <NoticeMavi
+          api={api}
+          company={company}
+          data={data}
+          scope={scope}
+          demo={demo}
+          title={form.title}
+          readBody={readBody}
+          onText={(title, body) => {
+            setForm((f) => ({
+              ...f,
+              title: title ?? f.title,
+              body: body ?? readBody(),
+            }));
+            if (body !== undefined) setEditorKey((k) => k + 1);
+          }}
+          onFormats={({ level, formats, require_ack }) =>
+            setForm((f) => ({
+              ...f,
+              level: level ?? f.level,
+              ...(formats ?? {}),
+              require_ack: require_ack ?? f.require_ack,
+            }))
+          }
+          onTargets={(targets) =>
+            setForm((f) => {
+              const everyone = targets.some((t) => t.kind === "everyone");
+              const merged = everyone
+                ? [{ kind: "everyone" as const }]
+                : [
+                    ...f.targets.filter((t) => t.kind !== "everyone"),
+                    ...targets.filter(
+                      (t) =>
+                        !f.targets.some(
+                          (x) => x.kind === t.kind && x.id === t.id,
+                        ),
+                    ),
+                  ];
+              return { ...f, body: readBody(), targets: merged };
+            })
+          }
+        />
         <label>
           Título
           <input
@@ -284,6 +408,7 @@ export function NoticeForm({
           }
         >
           <RichTextEditor
+            key={editorKey}
             name="body"
             label="Mensagem"
             company={company}
@@ -597,8 +722,43 @@ export function NoticeForm({
           />
         </fieldset>
 
+        {naming && (
+          <div className="notice-template-save">
+            {template?.can_edit && (
+              <label className="checkbox-label">
+                <Checkbox
+                  checked={replaceTemplate}
+                  onCheckedChange={(v) => setReplaceTemplate(v === true)}
+                  disabled={savingTemplate}
+                />
+                Atualizar o modelo “{template.name}” (senão, cria outro)
+              </label>
+            )}
+            <TemplateName
+              initial={template?.name ?? form.title}
+              busy={savingTemplate}
+              onCancel={() => setNaming(false)}
+              onSave={(name) => void saveAsTemplate(name)}
+            />
+          </div>
+        )}
+        {templateNote && <p className="notice-template-note">{templateNote}</p>}
         {error && <p className="form-error">{error}</p>}
         <div className="form-footer notice-form-footer">
+          {!naming && (
+            <button
+              type="button"
+              className="text-btn notice-save-template"
+              onClick={() => {
+                setTemplateNote("");
+                setNaming(true);
+              }}
+              disabled={busy}
+              title="Guarda o texto, os formatos e o público (sem datas nem anexos) para os líderes reusarem"
+            >
+              Salvar como modelo
+            </button>
+          )}
           {live && (
             <label className="checkbox-label notice-renotify">
               <Checkbox
