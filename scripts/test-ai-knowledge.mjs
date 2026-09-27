@@ -353,6 +353,80 @@ await check("ler mais: trechos vizinhos, com a mesma permissão", async () => {
   await assert.rejects(() => rows("ai_read", [hit.chunk_id, 1]), /Sem acesso/);
 });
 
+await check(
+  "texto mudou em parte: os trechos iguais ficam com o vetor; só o novo vai para a API",
+  async () => {
+    const list = `select id, ord, embedding::text e from ai_chunks where source_type = 'meeting' order by ord`;
+    const before = await sql(list);
+    await sql(
+      `update meeting_recordings set summary = jsonb_set(summary, '{overview}', '"Verba de outubro e novembro."') where id = $1`,
+      [meeting],
+    );
+    await as(null);
+    await rpc("ai_index_step", [SECRET, 10]);
+    const after = await sql(list);
+    assert.equal(after.length, before.length);
+    assert.notEqual(after[0].id, before[0].id);
+    assert.equal(after[0].e, null);
+    assert.deepEqual(after.slice(1), before.slice(1));
+    const claimed = await rows("ai_claim_chunks", [SECRET, 100]);
+    assert.deepEqual(
+      claimed.map((r) => r.id),
+      [after[0].id],
+    );
+    const items = JSON.stringify([{ id: Number(after[0].id), embedding: axis(2) }]);
+    assert.equal(await rpc("ai_store_embeddings", [SECRET, "m", items]), 1);
+    // Reserva vencida e outro worker gravando o mesmo lote: não regrava.
+    assert.equal(await rpc("ai_store_embeddings", [SECRET, "m", items]), 0);
+  },
+);
+
+await check(
+  "trechos que ficam mudam de posição; repetidos são pareados um a um",
+  async () => {
+    const doc = uid(900);
+    const save = (texts) =>
+      sql(
+        `select mavi_private.ai_save_document($1, 'task', $2, 'task', $3, $4, null, $2, 'Teste', now(), 'H', $5)`,
+        [
+          A,
+          doc,
+          client,
+          contract,
+          JSON.stringify(texts.map((text) => ({ text, meta: { kind: "task" } }))),
+        ],
+      );
+    const list = () =>
+      sql(
+        `select c.id, c.ord, c.content, c.embedding is not null as vec from ai_chunks c
+         join ai_documents d on d.id = c.document_id where d.source_id = $1 order by c.ord`,
+        [doc],
+      );
+    await save(["a", "b", "b", "c"]);
+    const first = await list();
+    await sql(
+      `update ai_chunks set embedding = $2::extensions.halfvec(1536), claimed_at = null where id = any($1::bigint[])`,
+      [first.map((c) => c.id), axis(4)],
+    );
+    await save(["novo", "a", "b", "", "c"]);
+    const next = await list();
+    assert.deepEqual(
+      next.map((c) => [c.ord, c.content, c.vec]),
+      [
+        [0, "H\nnovo", false],
+        [1, "H\na", true],
+        [2, "H\nb", true],
+        [4, "H\nc", true],
+      ],
+    );
+    const id = (list, text) => list.find((c) => c.content === `H\n${text}`).id;
+    for (const t of ["a", "b", "c"]) assert.equal(id(next, t), id(first, t));
+    // O segundo "b" saiu: sobra um só.
+    assert.equal(next.filter((c) => c.content === "H\nb").length, 1);
+    await sql(`select mavi_private.ai_forget('task', $1)`, [doc]);
+  },
+);
+
 await check("apagar a reunião apaga os trechos (pela fila)", async () => {
   await sql(`delete from meeting_recordings where id = $1`, [meeting]);
   await as(null);
