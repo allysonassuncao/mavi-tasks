@@ -1,5 +1,12 @@
 import * as Popover from "@radix-ui/react-popover";
-import { AtSign, CheckCheck, Inbox, Sparkles, Trophy } from "lucide-react";
+import {
+  AtSign,
+  BellRing,
+  CheckCheck,
+  Inbox,
+  Sparkles,
+  Trophy,
+} from "lucide-react";
 import { useState } from "react";
 import { Avatar } from "./components";
 import type { AppNotification, Member } from "./types";
@@ -75,7 +82,11 @@ export function NotificationInbox({
                       onOpen(n);
                     }}
                   >
-                    {n.kind === "success_case" ? (
+                    {n.kind === "notice" ? (
+                      <span className="inbox-system notice" aria-hidden="true">
+                        <BellRing size={15} />
+                      </span>
+                    ) : n.kind === "success_case" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <Trophy size={15} />
                       </span>
@@ -93,7 +104,8 @@ export function NotificationInbox({
                     <span>
                       {n.kind === "social_leads" ||
                       n.kind === "ai_share" ||
-                      n.kind === "success_case" ? (
+                      n.kind === "success_case" ||
+                      n.kind === "notice" ? (
                         <span className="inbox-line">
                           <strong>{n.task_title}</strong>
                         </span>
@@ -120,8 +132,8 @@ export function NotificationInbox({
           <p className="inbox-empty">
             <AtSign size={18} />
             Quando criarem uma tarefa para você, mencionarem você com @,
-            responderem um comentário seu ou a MAVI terminar um plano do Social
-            Leads, o aviso aparece aqui.
+            responderem um comentário seu, a agência publicar um aviso no Mural
+            ou a MAVI terminar um plano do Social Leads, o aviso aparece aqui.
           </p>
         )}
       </Popover.Content>

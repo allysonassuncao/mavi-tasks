@@ -131,3 +131,15 @@ Carga medida com `npm run benchmark:dashboards` (150 mil tarefas e 400 mil apont
 Os painéis mais caros são os que cruzam horas com cliente/produto em períodos longos (join com tarefas e contratos). Se o volume crescer muito além disso, o próximo passo é uma tabela de agregados diários (horas por dia, pessoa e produto contratado) mantida por gatilho.
 
 No Supabase, o papel `anon` costuma ter `statement_timeout` de 3 s e `authenticated` de 8 s; os links públicos dependem do cache e dos limites acima para ficar bem abaixo disso. A senha dos links fica em `password_hash` (bcrypt, `pgcrypto` no schema `extensions`), nunca é lida pelo app, e 10 senhas erradas em 15 minutos bloqueiam o link até o fim da janela.
+
+## Mural de avisos
+
+Migração `20261106090000_notice_board`, testada por `npm run test:db:notices` (17 verificações). O público (pessoas, equipes, clientes e projetos, somados, com exclusões) é resolvido no banco por `mavi_private.notice_audience`; o app só lê.
+
+- **Entrega uma vez, leitura por índice**: publicar grava uma linha por pessoa em `notice_receipts` (rodada, visto, confirmado, adiado, faixa fechada). Popup, faixa e página do Mural leem só essas linhas pelo índice `(company_id, user_id, delivered_at)`, sem recalcular o público.
+- **Tempo real sem polling**: cada entrega ou mudança manda um único broadcast `kind: 'notice'` no canal da empresa, com as pessoas alcançadas quando são até 200 (acima disso, `users: null` e cada app espera um instante aleatório de até 3 s antes de recarregar). As linhas da caixa de entrada do Mural não disparam broadcast nem push por pessoa (gatilhos com `when (new.kind <> 'notice')`).
+- **Push em lotes** de 50 navegadores por chamada ao `/api/push` (o limite do handler), usando o mesmo `mavi_private.push_config`.
+- **Rotina `mavi-notices` (pg_cron, a cada minuto)**: publica os agendados, abre as repetições vencidas (rodada nova, volta como não visto) e entrega a quem entrou no público depois (só avisos publicados nos últimos 90 dias). Sem `pg_cron`, agende `select mavi_private.run_notices()`.
+- **Anexos**: enviados ao bucket do Drive em `notices/<empresa>/<aviso>/<id>` ou arquivos que já estão no Drive; o navegador só recebe links assinados de 15 minutos (`notice-*` em `/api/drive`), e o aviso dá a quem o recebeu o direito de abrir o arquivo do Drive anexado.
+
+Para ativar: aplicar a migração (`npx supabase db push --linked --include-all --skip-vault`), conferir o job com `select jobname, schedule from cron.job where jobname = 'mavi-notices'` e publicar o frontend.

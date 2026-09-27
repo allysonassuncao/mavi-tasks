@@ -19,6 +19,7 @@ import { serverModel } from "../src/ai-providers.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
+import { handleNotices } from "./_notices.js";
 import { appOrigin } from "./_origin.js";
 
 function credentials(): GcsCredentials | null {
@@ -260,7 +261,8 @@ export default async function handler(
       return;
     }
     // Gravações da MAVI, a IA (/api/ai é reescrito para cá), a coleta do
-    // Whatsapp (/api/whatsapp) e as mídias dos Cases de Sucesso vivem na
+    // Whatsapp (/api/whatsapp), as mídias dos Cases de Sucesso e os anexos do
+    // Mural de avisos vivem na
     // mesma função: o plano Hobby da Vercel limita o número de funções.
     let result: { status: number; body: unknown };
     if (action.startsWith("whatsapp-"))
@@ -273,6 +275,8 @@ export default async function handler(
       );
     else if (action.startsWith("case-"))
       result = await handleCases(body, authorization, driveEnv(), fetch);
+    else if (action.startsWith("notice-"))
+      result = await handleNotices(body, authorization, driveEnv(), fetch);
     else if (action.startsWith("meeting-"))
       result = await handleMeetings(
         body,

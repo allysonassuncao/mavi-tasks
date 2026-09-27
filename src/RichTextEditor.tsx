@@ -64,6 +64,7 @@ export default function RichTextEditor({
   company,
   demo = false,
   mentions,
+  images = true,
   onUploading,
   onTextChange,
   appendRef,
@@ -76,6 +77,8 @@ export default function RichTextEditor({
   demo?: boolean;
   /** People who can be mentioned with "@" (none: no mentions). */
   mentions?: MentionPerson[];
+  /** Imagens no texto (o Mural anexa arquivos à parte). */
+  images?: boolean;
   onUploading?: (busy: boolean) => void;
   /** O texto puro a cada mudança (o Assistente MAVI lê o rascunho). */
   onTextChange?: (text: string) => void;
@@ -83,6 +86,8 @@ export default function RichTextEditor({
   appendRef?: MutableRefObject<((text: string) => void) | null>;
 }) {
   const people = useRef<MentionPerson[]>(mentions ?? []);
+  const imagesOn = useRef(images);
+  imagesOn.current = images;
   const textListener = useRef(onTextChange);
   textListener.current = onTextChange;
   people.current = mentions ?? [];
@@ -120,6 +125,7 @@ export default function RichTextEditor({
     content: parseDescription(defaultValue),
     editorProps: {
       handlePaste: (_view, event) => {
+        if (!imagesOn.current) return false;
         const files = Array.from(event.clipboardData?.files ?? []).filter((f) =>
           f.type.startsWith("image/"),
         );
@@ -129,6 +135,7 @@ export default function RichTextEditor({
         return true;
       },
       handleDrop: (_view, event) => {
+        if (!imagesOn.current) return false;
         const files = Array.from(event.dataTransfer?.files ?? []).filter((f) =>
           f.type.startsWith("image/"),
         );
@@ -305,30 +312,34 @@ export default function RichTextEditor({
               <a.icon size={17} />
             </button>
           ))}
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label={`Inserir imagem em ${label.toLowerCase()}`}
-            title="Inserir imagem (ou cole/arraste aqui)"
-            disabled={disabled || uploading}
-            onClick={() => fileInput.current?.click()}
-          >
-            <ImagePlus size={17} />
-          </button>
-          <input
-            ref={fileInput}
-            className="sr-only"
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            multiple
-            tabIndex={-1}
-            aria-label={`Arquivo de imagem: ${label}`}
-            disabled={disabled || uploading}
-            onChange={(e) => {
-              void insertImages(Array.from(e.target.files ?? []));
-              e.target.value = "";
-            }}
-          />
+          {images && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={`Inserir imagem em ${label.toLowerCase()}`}
+              title="Inserir imagem (ou cole/arraste aqui)"
+              disabled={disabled || uploading}
+              onClick={() => fileInput.current?.click()}
+            >
+              <ImagePlus size={17} />
+            </button>
+          )}
+          {images && (
+            <input
+              ref={fileInput}
+              className="sr-only"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              tabIndex={-1}
+              aria-label={`Arquivo de imagem: ${label}`}
+              disabled={disabled || uploading}
+              onChange={(e) => {
+                void insertImages(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+          )}
         </div>
         {uploading && <Loading compact />}
         <EditorContent editor={editor} />
@@ -340,8 +351,10 @@ export default function RichTextEditor({
         </p>
       )}
       <small>
-        Formate o texto e insira, cole ou arraste imagens JPG, PNG e WebP (até 5
-        MB).{mentions?.length ? " Digite @ para mencionar alguém." : ""}
+        {images
+          ? "Formate o texto e insira, cole ou arraste imagens JPG, PNG e WebP (até 5 MB)."
+          : "Negrito, itálico, cores, listas e links."}
+        {mentions?.length ? " Digite @ para mencionar alguém." : ""}
       </small>
     </div>
   );

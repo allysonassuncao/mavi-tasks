@@ -18,6 +18,8 @@ export const MEMBER_PAGES: readonly Page[] = [
   "agenda",
   "onboarding",
   "cases",
+  // O Mural de avisos é de todos e não se esconde: é por onde a agência avisa.
+  "notices",
   "search",
   "clients",
   "projects",
@@ -78,7 +80,9 @@ export function roleAllows(page: Page | WidgetModule, role: Role | undefined) {
   if ((WIDGET_MODULES as readonly string[]).includes(page)) return !!role;
   if (ADMIN_PAGES.includes(page as Page)) return role === "admin";
   return (
-    role === "admin" || role === "manager" || MEMBER_PAGES.includes(page as Page)
+    role === "admin" ||
+    role === "manager" ||
+    MEMBER_PAGES.includes(page as Page)
   );
 }
 

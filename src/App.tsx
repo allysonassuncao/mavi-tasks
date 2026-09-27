@@ -171,6 +171,8 @@ import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
 import { useTaskSeconds } from "./useTaskTime";
 import { NotificationInbox } from "./NotificationInbox";
+import { NoticeCenter } from "./NoticeCenter";
+import { noticesApi, onDemoNoticesChange } from "./notices";
 import { useInboxTitle } from "./inbox-title";
 import { authErrorMessage } from "./auth-errors";
 import {
@@ -212,6 +214,9 @@ const SocialLeadsPage = lazy(() =>
 const CasesPage = lazy(() =>
   import("./CasesPage").then((m) => ({ default: m.CasesPage })),
 );
+const NoticesPage = lazy(() =>
+  import("./NoticesPage").then((m) => ({ default: m.NoticesPage })),
+);
 // Leaders only, and heavy (editor, charts): loaded when first opened.
 const DashboardsPage = lazy(() =>
   import("./DashboardsPage").then((m) => ({ default: m.DashboardsPage })),
@@ -219,6 +224,7 @@ const DashboardsPage = lazy(() =>
 
 const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
+  { id: "notices", label: "Mural de avisos", icon: BellRing },
   { id: "tasks", label: "Tarefas", icon: CheckCheck },
   { id: "agenda", label: "Agenda", icon: CalendarDays },
   { id: "clients", label: "Clientes", icon: Users },
@@ -913,6 +919,27 @@ export default function App() {
     };
   }, [demo, company, session, user, refresh, liveTick]);
 
+  // Mural de avisos: popup e faixas sobre qualquer tela, e o contador do
+  // menu (avisos no ar ainda não vistos). Na demonstração, os avisos ficam
+  // em memória e avisam a tela como o tempo real faria.
+  const [noticeCount, setNoticeCount] = useState(0);
+  const notices = useMemo(
+    () => noticesApi(demo, data, user),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [demo, user],
+  );
+  useEffect(
+    () =>
+      demo
+        ? onDemoNoticesChange(() =>
+            window.dispatchEvent(
+              new CustomEvent("mavi:notices", { detail: {} }),
+            ),
+          )
+        : undefined,
+    [demo],
+  );
+
   // Sidebar badge on Cases de Sucesso (leaders): cases and edits waiting
   // for their approval; refreshed by the "cases" live notices.
   const [pendingCases, setPendingCases] = useState<number | undefined>();
@@ -1054,6 +1081,7 @@ export default function App() {
       );
       window.dispatchEvent(new CustomEvent("mavi:meetings", { detail: {} }));
       window.dispatchEvent(new CustomEvent("mavi:cases", { detail: {} }));
+      window.dispatchEvent(new CustomEvent("mavi:notices", { detail: {} }));
       setCasesTick((n) => n + 1);
       schedule();
     };
@@ -1125,9 +1153,21 @@ export default function App() {
           );
           return;
         }
+        // Mural de avisos: o popup, a faixa e a página recarregam os avisos da
+        // pessoa; a caixa de entrada também, quando o aviso chegou para ela.
+        if (change.kind === "notice") {
+          window.dispatchEvent(
+            new CustomEvent("mavi:notices", { detail: change }),
+          );
+          if (!change.users || change.users.includes(live.current.user))
+            live.current.loadInbox();
+          return;
+        }
         // Cases de Sucesso listens for its own notices.
         if (change.kind === "cases") {
-          window.dispatchEvent(new CustomEvent("mavi:cases", { detail: change }));
+          window.dispatchEvent(
+            new CustomEvent("mavi:cases", { detail: change }),
+          );
           setCasesTick((n) => n + 1);
           return;
         }
@@ -1865,6 +1905,7 @@ export default function App() {
                 : myOpenTasks
             }
             caseCount={pendingCases}
+            noticeCount={noticeCount || undefined}
             products={data.products.filter(
               (p) =>
                 isLeader ||
@@ -2045,6 +2086,16 @@ export default function App() {
             )}
           </div>
         )}
+        {company && member && (
+          <NoticeCenter
+            key={company}
+            api={notices}
+            company={company}
+            user={user}
+            onOpen={(id) => navigate(appLink(`/mural?aviso=${id}`))}
+            onCount={setNoticeCount}
+          />
+        )}
         <main>
           {/* The Agenda uses the whole page, like Google Agenda: no heading. */}
           {page !== "agenda" && (
@@ -2089,6 +2140,9 @@ export default function App() {
                         "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
                       cases:
                         "Resultados reais de clientes para usar na venda: busque por termo ou nicho e cadastre os seus.",
+                      notices: isLeader
+                        ? "Comunicados da agência para pessoas, equipes, clientes e projetos: popup, caixa de entrada, push e faixa no topo."
+                        : "Os comunicados da agência para você, guardados em um só lugar.",
                       onboarding:
                         "Onboarding: briefing, plano do mês com a MAVI e aprovação do cliente pelo link.",
                       hours: "Seu tempo, registrado com clareza.",
@@ -2128,6 +2182,7 @@ export default function App() {
                   page !== "campaigns" &&
                   page !== "onboarding" &&
                   page !== "cases" &&
+                  page !== "notices" &&
                   page !== "storage" &&
                   page !== "aiUsage" &&
                   page !== "dashboards" &&
@@ -3053,6 +3108,19 @@ export default function App() {
                   />
                 </Suspense>
               )}
+              {page === "notices" && (
+                <Suspense fallback={<Loading compact />}>
+                  <NoticesPage
+                    key={company}
+                    data={catalogData}
+                    company={company}
+                    user={user}
+                    isLeader={isLeader}
+                    demo={demo}
+                    notify={notify}
+                  />
+                </Suspense>
+              )}
               {page === "cases" && (
                 <Suspense fallback={<Loading compact />}>
                   <CasesPage
@@ -3442,16 +3510,19 @@ export default function App() {
           </footer>
         </main>
       </div>
-      {!demo && company && member && moduleOn("assistant", member.role, hiddenPages) && (
-        <AiAssistant
-          key={company}
-          company={company}
-          data={catalogData}
-          user={user}
-          location={location}
-          notify={notify}
-        />
-      )}
+      {!demo &&
+        company &&
+        member &&
+        moduleOn("assistant", member.role, hiddenPages) && (
+          <AiAssistant
+            key={company}
+            company={company}
+            data={catalogData}
+            user={user}
+            location={location}
+            notify={notify}
+          />
+        )}
       {toast && (
         <div className="toast" role="status">
           <Check size={17} />

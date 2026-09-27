@@ -16,6 +16,7 @@ import {
   Settings2,
   Sparkles,
   Trophy,
+  BellRing,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -69,6 +70,7 @@ export function SidebarNav({
   allowed,
   taskCount,
   caseCount,
+  noticeCount,
   products,
   href,
   onNavigate,
@@ -84,6 +86,8 @@ export function SidebarNav({
   taskCount?: number;
   /** Leaders: cases and edits waiting for their approval. */
   caseCount?: number;
+  /** Avisos do Mural no ar que a pessoa ainda não viu. */
+  noticeCount?: number;
   products: Pick<Product, "id" | "name" | "color">[];
   href: (to: NavTarget) => string;
   onNavigate: (to: NavTarget) => void;
@@ -134,6 +138,13 @@ export function SidebarNav({
           label: "Visão geral",
           icon: LayoutDashboard,
           to: { page: "overview" },
+        },
+        {
+          key: "notices",
+          label: "Mural",
+          icon: BellRing,
+          to: { page: "notices" },
+          count: noticeCount,
         },
       ],
     },

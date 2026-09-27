@@ -1135,7 +1135,12 @@ export type LiveChange =
   /** Drive › Gravações da MAVI: a comment on a recording, or new recordings of a client. */
   | { kind: "meeting"; table: string; recording?: string; client?: string }
   /** Cases de Sucesso: a case, its edit waiting for approval or its media changed. */
-  | { kind: "cases"; table: string; case?: string };
+  | { kind: "cases"; table: string; case?: string }
+  /**
+   * Mural de avisos: um aviso entregue ou mudado. `users`: quem acabou de
+   * recebê-lo, quando são poucos (null: todos recarregam).
+   */
+  | { kind: "notice"; notice: string; users: string[] | null };
 
 /**
  * Whether a task notice concerns the person: always for leaders (they see

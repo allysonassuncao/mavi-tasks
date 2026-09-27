@@ -121,7 +121,9 @@ export interface AppNotification {
     | "social_leads"
     | "ai_share"
     /** Cases de Sucesso: a case to approve, or the author's case approved/returned. */
-    | "success_case";
+    | "success_case"
+    /** Mural de avisos: um aviso para a pessoa (link /mural?aviso=…). */
+    | "notice";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */
