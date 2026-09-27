@@ -31,6 +31,7 @@ import {
   routeConfig,
   type ProviderConfig,
 } from "./_ai-providers.js";
+import { serverModel } from "../src/ai-providers.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -72,7 +73,7 @@ export function aiEnv(
   return {
     ...base,
     anthropicKey: env.ANTHROPIC_API_KEY ?? "",
-    model: env.AI_MODEL || "claude-opus-5-5",
+    model: serverModel("assistant", env),
     openaiKey: env.OPENAI_API_KEY ?? "",
     embeddingModel: env.AI_EMBEDDING_MODEL || "text-embedding-3-small",
     workerSecret: env.AI_WORKER_SECRET ?? "",
@@ -400,7 +401,14 @@ async function ask(
         ])
       : Promise.resolve(null),
     // Qual provedor e modelo respondem (biblioteca de provedores).
-    resolveRoute(env, deps.fetch, auth, company, scope),
+    resolveRoute(
+      env,
+      deps.fetch,
+      auth,
+      company,
+      scope,
+      scope.module === "meetings" ? "meetings_history" : "assistant",
+    ),
   ]);
   // O assistente (o balão de todas as telas) é um módulo que o
   // administrador desliga para cada pessoa.

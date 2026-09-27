@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { seal } from "./_google";
 import {
   handleWhatsapp,
   mediaPath,
@@ -815,6 +816,7 @@ describe("tarefa a partir de mensagens (MAVI)", () => {
         content_text: "E aumentar a verba para 5 mil",
       }),
     ],
+    route: unknown = null,
   ) {
     const calls: { url: string; auth?: string; body?: any }[] = [];
     const json = (b: unknown) =>
@@ -848,17 +850,25 @@ describe("tarefa a partir de mensagens (MAVI)", () => {
       if (url.includes("clients?")) return json([{ name: "4282" }]);
       if (url.includes("products?")) return json([{ name: "Make Ads" }]);
       if (url.endsWith("rpc/ai_log_usage")) return json(null);
+      if (url.endsWith("rpc/ai_resolve_route")) return json(route);
       throw new Error(`fetch inesperado ${url}`);
     }) as typeof fetch;
     const requests: any[] = [];
-    const ask = vi.fn(async (_env: any, request: any, meter: any) => {
+    const envs: any[] = [];
+    const ask = vi.fn(async (used: any, request: any, meter: any) => {
+      envs.push(used);
       requests.push(request);
       meter.input = 900;
       meter.output = 200;
       meter.cost = 0.01;
       return answer;
     });
-    return { calls, requests, deps: { fetch: fetchImpl, ask, now: () => NOW } };
+    return {
+      calls,
+      requests,
+      envs,
+      deps: { fetch: fetchImpl, ask, now: () => NOW },
+    };
   }
   const draftEnv = {
     ...env,
@@ -915,6 +925,42 @@ describe("tarefa a partir de mensagens (MAVI)", () => {
     });
   });
 
+  it("com provedor escolhido no Painel da MAVI, responde por ele (mesmo sem a chave da Vercel)", async () => {
+    const providerKey = crypto.randomBytes(32);
+    const s = server(
+      '{"title": "Trocar o criativo", "summary": "x", "actions": ["y"], "details": [], "due": null}',
+      undefined,
+      {
+        scope: "feature",
+        provider_id: "00000000-0000-4000-8000-0000000000bb",
+        provider: "Gemini",
+        kind: "google",
+        base_url: null,
+        key_cipher: seal(providerKey, "chave-gemini"),
+        model: "gemini-x",
+        price: { id: "gemini-x", input: 1, output: 2 },
+      },
+    );
+    const r = await handleWhatsapp(
+      { action: "whatsapp-task-draft", messages: [M1, M2] },
+      "Bearer user",
+      { ...draftEnv, anthropicKey: "", providerKey },
+      s.deps,
+    );
+    expect(r.status).toBe(200);
+    expect(s.envs[0].provider).toMatchObject({
+      kind: "google",
+      apiKey: "chave-gemini",
+      model: "gemini-x",
+    });
+    const resolve = s.calls.find((c) => c.url.endsWith("rpc/ai_resolve_route"))!;
+    expect(resolve.body).toMatchObject({ p_feature: "whatsapp_task" });
+    const usage = s.calls.find((c) => c.url.endsWith("rpc/ai_log_usage"))!;
+    expect(usage.body).toMatchObject({
+      p_provider: "00000000-0000-4000-8000-0000000000bb",
+    });
+  });
+
   it("rascunho sem título, mensagens de grupos diferentes ou sem configuração", async () => {
     const bad = server('{"summary": "x"}');
     expect(
@@ -946,13 +992,14 @@ describe("tarefa a partir de mensagens (MAVI)", () => {
     expect(
       (
         await handleWhatsapp(
-          { action: "whatsapp-task-draft", messages: [M1] },
+          { action: "whatsapp-task-draft", messages: [M1, M2] },
           "Bearer u",
           { ...draftEnv, anthropicKey: "" },
           s.deps,
         )
       ).status,
     ).toBe(503);
+    expect(s.requests).toHaveLength(0);
     expect(
       (
         await handleWhatsapp(

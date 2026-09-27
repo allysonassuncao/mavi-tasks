@@ -6,11 +6,13 @@ import { claudeFeatures } from "./_ai-llm";
 import {
   handleProviders,
   openAiChatAdapter,
+  openAiJsonComplete,
   priceCost,
   routeConfig,
   type ProviderConfig,
 } from "./_ai-providers";
 import { seal, unseal } from "./_google";
+import { newMeter } from "./_social-leads";
 import { pickRoute, safeBaseUrl, type AiRoute } from "../src/ai-providers";
 
 const company = "00000000-0000-4000-8000-000000000001";
@@ -360,6 +362,7 @@ describe("qual IA responde", () => {
       p_client: client,
       p_contract: null,
       p_project: null,
+      p_feature: "assistant",
     });
     const log = calls.find((c) => c.url.includes("ai_log_usage"))!;
     expect(log.body).toMatchObject({
@@ -608,5 +611,112 @@ describe("regra que vale (a mesma ordem do banco)", () => {
     expect(pickRoute(all, { user: "u1" }, on)?.type).toBe("user");
     expect(pickRoute(all, { user: "u2" }, on)?.type).toBe("company");
     expect(pickRoute([], { user: "u2" }, on)).toBeNull();
+  });
+  it("funcionalidade: vale antes da empresa; pessoa e cliente só nas conversas", () => {
+    const withFeatures: AiRoute[] = [
+      ...all,
+      { id: "f1", type: "feature", scope_id: null, feature: "social_leads_plan", provider_id: "p1", model: "m" },
+      { id: "f2", type: "feature", scope_id: null, feature: "assistant", provider_id: "p1", model: "m" },
+      { id: "f3", type: "feature", scope_id: null, feature: "whatsapp_task", provider_id: "off", model: "m" },
+    ];
+    const pick = (where: Parameters<typeof pickRoute>[1]) => pickRoute(withFeatures, where, on)?.id;
+    expect(pick({ user: "u1", client: "c1", feature: "social_leads_plan" })).toBe("f1");
+    expect(pick({ user: "u1", feature: "assistant" })).toBe(pick({ user: "u1" }));
+    expect(pickRoute(withFeatures, { user: "u2" }, on)?.id).toBe("f2");
+    expect(pickRoute(withFeatures, { user: "u1", client: "c1", feature: "meetings_ask" }, on)?.type).toBe("client");
+    // Provedor desligado: cai na empresa.
+    expect(pickRoute(withFeatures, { feature: "whatsapp_task" }, on)?.type).toBe("company");
+  });
+});
+
+describe("JSON pela API de chat (Social Leads fora da Claude)", () => {
+  const config: ProviderConfig = {
+    kind: "deepseek",
+    name: "DeepSeek",
+    baseUrl: "https://api.deepseek.com/v1",
+    apiKey: "sk-ds",
+    model: "deepseek-x",
+    price: { id: "deepseek-x", input: 1, output: 2 },
+  };
+  it("cai para JSON simples quando o provedor não aceita o schema; mede o custo e tira as cercas", async () => {
+    const bodies: any[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      if (body.response_format?.type === "json_schema")
+        return new Response(
+          JSON.stringify({ error: { message: "response_format json_schema is not supported" } }),
+          { status: 400 },
+        );
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: 'Aqui:\n```json\n{"ok": true}\n```' }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 1000, completion_tokens: 500 },
+        }),
+      );
+    }) as unknown as typeof fetch;
+    const meter = newMeter("x");
+    const text = await openAiJsonComplete(
+      config,
+      {
+        system: "Monte o plano.",
+        user: "Briefing",
+        schema: { type: "object" },
+        images: [{ media_type: "image/png", data: "AAAA" }],
+      },
+      undefined,
+      meter,
+      fetchImpl,
+    );
+    expect(text).toBe('{"ok": true}');
+    expect(bodies.map((b) => b.response_format?.type)).toEqual(["json_schema", "json_object"]);
+    expect(bodies[1].messages[0].content).toContain("JSON Schema");
+    expect(bodies[1].messages[1].content[0]).toEqual({
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,AAAA" },
+    });
+    expect(meter).toMatchObject({ model: "deepseek-x", input: 1000, output: 500 });
+    expect(meter.cost).toBeCloseTo(0.002);
+  });
+  it("resposta cortada ou chave recusada viram mensagens claras", async () => {
+    const cut = vi.fn(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: "{" }, finish_reason: "length" }] })),
+    ) as unknown as typeof fetch;
+    await expect(
+      openAiJsonComplete(config, { system: "", user: "", schema: {} }, undefined, newMeter("x"), cut),
+    ).rejects.toThrow(/incompleta/);
+    const denied = vi.fn(async () => new Response("{}", { status: 401 })) as unknown as typeof fetch;
+    await expect(
+      openAiJsonComplete(config, { system: "", user: "", schema: {} }, undefined, newMeter("x"), denied),
+    ).rejects.toThrow(/API Key do provedor "DeepSeek" foi recusada/);
+  });
+});
+
+describe("padrão do servidor por funcionalidade", () => {
+  it("mostra o modelo de cada variável, sem a chave", async () => {
+    const r = await handleProviders(
+      { action: "ai-provider-defaults" },
+      token,
+      { supabaseUrl: "", supabaseKey: "", providerKey },
+      {
+        fetch: vi.fn() as any,
+        serverEnv: {
+          ANTHROPIC_API_KEY: "sk-secreta",
+          AI_MODEL: "claude-sonnet-5",
+          MEETINGS_MODEL: "claude-haiku-4-5",
+        },
+      },
+    );
+    expect(r.status).toBe(200);
+    expect(JSON.stringify(r.body)).not.toContain("sk-secreta");
+    expect(r.body).toMatchObject({
+      claudeKey: true,
+      features: {
+        assistant: { model: "claude-sonnet-5", env: "AI_MODEL" },
+        meetings_ask: { model: "claude-haiku-4-5", env: "MEETINGS_MODEL" },
+        whatsapp_task: { model: "claude-haiku-4-5", env: "WHATSAPP_TASK_MODEL" },
+        social_leads_plan: { model: "claude-opus-5-5", env: "SOCIAL_LEADS_MODEL" },
+      },
+    });
   });
 });

@@ -8,6 +8,7 @@ import {
   type MeetingsDeps,
   type MeetingsEnv,
 } from "./_meetings";
+import { seal } from "./_google";
 
 const { privateKey } = crypto.generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -205,14 +206,62 @@ describe("meeting-ask", () => {
       p_cost: 0.006,
     });
   });
-  it("sem chave da API, avisa o que falta", async () => {
+  it("sem chave da API nem provedor no Painel da MAVI, avisa o que falta", async () => {
+    const { fetchImpl } = database(routes());
+    const ask = vi.fn();
     const res = await handleMeetings(
       { action: "meeting-ask", recording, question: "oi?" },
       "Bearer t",
       { ...env, anthropicKey: "" },
-      { fetch: vi.fn() as any, ask: vi.fn() },
+      { fetch: fetchImpl, ask },
     );
     expect(res.status).toBe(503);
+    expect(res.body.error).toContain("ANTHROPIC_API_KEY");
+    expect(ask).not.toHaveBeenCalled();
+  });
+  it("com provedor escolhido para a funcionalidade, responde por ele (mesmo sem a chave da Vercel)", async () => {
+    const providerKey = crypto.randomBytes(32);
+    const { fetchImpl, calls } = database({
+      ...routes(),
+      "rpc/ai_resolve_route": {
+        scope: "feature",
+        provider_id: "00000000-0000-4000-8000-0000000000bb",
+        provider: "OpenAI da agência",
+        kind: "openai",
+        base_url: null,
+        key_cipher: seal(providerKey, "sk-da-agencia"),
+        model: "gpt-x",
+        price: { id: "gpt-x", input: 1, output: 2 },
+      },
+    });
+    const ask: MeetingsDeps["ask"] = vi.fn(async (used, _request, meter) => {
+      expect(used.provider).toMatchObject({
+        kind: "openai",
+        apiKey: "sk-da-agencia",
+        model: "gpt-x",
+        baseUrl: "https://api.openai.com/v1",
+      });
+      meter.input = 10;
+      meter.cost = 0.001;
+      return "Ok.";
+    });
+    const res = await handleMeetings(
+      { action: "meeting-ask", recording, question: "oi?" },
+      "Bearer t",
+      { ...env, anthropicKey: "", providerKey },
+      { fetch: fetchImpl, ask },
+    );
+    expect(res).toEqual({ status: 200, body: { answer: "Ok." } });
+    const resolve = calls.find((c) => c.url.includes("ai_resolve_route"));
+    expect(resolve?.body).toMatchObject({
+      p_client: client,
+      p_feature: "meetings_ask",
+    });
+    const usage = calls.find((c) => c.url.includes("ai_log_usage"));
+    expect(usage?.body).toMatchObject({
+      p_model: "gpt-x",
+      p_provider: "00000000-0000-4000-8000-0000000000bb",
+    });
   });
   it("gravação que a pessoa não vê: não encontrada, sem chamar a IA", async () => {
     const { fetchImpl } = database({ "meeting_recordings?id=eq.": [] });

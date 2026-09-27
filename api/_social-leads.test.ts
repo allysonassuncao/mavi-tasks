@@ -1,4 +1,6 @@
+import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { seal } from "./_google";
 import {
   SYSTEM_PROMPT,
   addUsage,
@@ -42,14 +44,17 @@ function fakeDb(
   answers: Record<string, (args: any) => { status?: number; body: unknown }>,
 ) {
   const calls: { name: string; args: any; auth: string | null }[] = [];
+  // Which model answers (the MAVI panel) is kept apart from the rest.
+  const resolves: any[] = [];
   const fetchImpl = (async (url: string, init: RequestInit) => {
     const name = String(url).split("/rpc/")[1];
     const args = JSON.parse(String(init.body));
-    calls.push({ name, args, auth: (init.headers as any).Authorization });
+    if (name === "ai_resolve_route") resolves.push(args);
+    else calls.push({ name, args, auth: (init.headers as any).Authorization });
     const a = answers[name]?.(args) ?? { body: null };
     return new Response(JSON.stringify(a.body), { status: a.status ?? 200 });
   }) as unknown as typeof fetch;
-  return { fetchImpl, calls };
+  return { fetchImpl, calls, resolves };
 }
 function deps(
   fetchImpl: typeof fetch,
@@ -69,6 +74,78 @@ function deps(
     work,
   };
 }
+
+describe("provedor e modelo do Painel da MAVI", () => {
+  const providerKey = crypto.randomBytes(32);
+  const route = {
+    scope: "feature",
+    provider_id: "00000000-0000-4000-8000-0000000000bb",
+    provider: "OpenAI da agência",
+    kind: "openai",
+    base_url: null,
+    key_cipher: seal(providerKey, "sk-da-agencia"),
+    model: "gpt-x",
+    price: { id: "gpt-x", input: 1, output: 2 },
+  };
+  it("cada ação pergunta pela sua funcionalidade e usa o provedor escolhido", async () => {
+    const { fetchImpl, calls, resolves } = fakeDb({
+      ai_resolve_route: () => ({ body: route }),
+      social_leads_adjust_context: () => ({
+        body: {
+          client_name: "ACME",
+          briefing: {},
+          campaign_objective: null,
+          plan: { label: "Mês 1", posts: [] },
+        },
+      }),
+    });
+    const used: any[] = [];
+    const r = await handleSocialLeads(
+      { action: "adjust", company, contract, plan: planId, instruction: "Troque o gancho do post 2." },
+      "Bearer t",
+      { ...env, anthropicKey: "", providerKey },
+      {
+        fetch: fetchImpl,
+        complete: async (e, _request, _signal, meter) => {
+          used.push(e);
+          meter.input = 10;
+          return '{"resumo":"ok","alteracoes":{}}';
+        },
+        background: () => {},
+      },
+    );
+    expect(r.status).toBe(200);
+    expect(resolves).toEqual([
+      {
+        p_company: company,
+        p_client: null,
+        p_contract: contract,
+        p_project: null,
+        p_feature: "social_leads_adjust",
+      },
+    ]);
+    expect(used[0].provider).toMatchObject({
+      kind: "openai",
+      apiKey: "sk-da-agencia",
+      model: "gpt-x",
+    });
+    expect(used[0].model).toBe("gpt-x");
+    const log = calls.find((c) => c.name === "social_leads_log_usage");
+    expect(log?.args).toMatchObject({ p_kind: "adjust", p_model: "gpt-x" });
+  });
+  it("sem regra e sem a chave da Vercel, avisa o que falta", async () => {
+    const { fetchImpl, calls } = fakeDb({});
+    const r = await handleSocialLeads(
+      { action: "generate", company, contract, mode: "new" },
+      "Bearer t",
+      { ...env, anthropicKey: "" },
+      deps(fetchImpl, []),
+    );
+    expect(r.status).toBe(503);
+    expect((r.body as any).error).toContain("Painel da MAVI");
+    expect(calls).toEqual([]);
+  });
+});
 
 describe("geração do plano", () => {
   it("abre a geração, responde na hora e grava o plano como a pessoa", async () => {

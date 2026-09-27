@@ -23,6 +23,7 @@ import {
   fetchProviderModels,
   providerLibrary,
   saveProvider,
+  serverDefaults,
   setAiRoute,
   setProviderActive,
   testProvider,
@@ -30,13 +31,17 @@ import {
   type AiProvider,
   type ListedModel,
   type ProviderDraft,
+  type ServerDefaults,
 } from "./ai";
 import {
   CATALOG,
+  FEATURES,
   catalogEntry,
+  featureInfo,
   keyHint as keyHintOf,
   pickRoute,
   safeBaseUrl,
+  type AiFeature,
   type AiRoute,
   type ProviderKind,
   type ProviderModel,
@@ -47,8 +52,8 @@ import {
  * Painel de IA › Provedores e modelos / Quem usa qual IA
  * (administradores). A biblioteca guarda os provedores com a API Key (selada
  * no servidor; aqui só aparece o final) e os modelos com os preços; as
- * regras dizem qual provedor e modelo respondem para a empresa, cada pessoa,
- * cliente, produto e projeto.
+ * regras dizem qual provedor e modelo respondem para a empresa, cada
+ * funcionalidade, pessoa, cliente, produto e projeto.
  */
 
 const money = (v: number | undefined) =>
@@ -81,6 +86,16 @@ export function useAiLibrary(company: string, demo = false) {
     demo ? demoLibrary() : null,
   );
   const [error, setError] = useState("");
+  // O padrão do servidor de cada funcionalidade (os modelos da Vercel).
+  const [defaults, setDefaults] = useState<ServerDefaults | null>(() =>
+    demo ? DEMO_DEFAULTS : null,
+  );
+  useEffect(() => {
+    if (!demo)
+      serverDefaults()
+        .then(setDefaults)
+        .catch(() => setDefaults(null));
+  }, [demo]);
   const reload = useCallback(
     () =>
       demo
@@ -111,11 +126,17 @@ export function useAiLibrary(company: string, demo = false) {
           },
     [company, demo],
   );
-  return { library, error, reload, api };
+  return { library, error, reload, api, defaults };
 }
 
 // ------------------------------------------------------------ demonstração
 const DEMO_OPENAI = "demo-openai";
+const DEMO_DEFAULTS: ServerDefaults = {
+  claudeKey: true,
+  features: Object.fromEntries(
+    FEATURES.map((f) => [f.id, { model: "claude-opus-5-5", env: f.env }]),
+  ),
+};
 function demoLibrary(): AiLibrary {
   const now = new Date().toISOString();
   return {
@@ -143,7 +164,7 @@ function demoLibrary(): AiLibrary {
         ],
         active: true,
         updated_at: now,
-        routes: 0,
+        routes: 1,
       },
     ],
     routes: [
@@ -153,6 +174,14 @@ function demoLibrary(): AiLibrary {
         scope_id: null,
         provider_id: "demo-claude",
         model: "claude-sonnet-5",
+      },
+      {
+        id: "demo-route-feature",
+        type: "feature",
+        scope_id: null,
+        feature: "whatsapp_task",
+        provider_id: DEMO_OPENAI,
+        model: "gpt-exemplo-mini",
       },
     ],
   };
@@ -182,8 +211,15 @@ function demoApi(
       })),
     setRoute: (type, id, provider, model) =>
       change((l) => {
+        const feature = type === "feature" ? (id as AiFeature) : null;
+        const scope = type === "company" || type === "feature" ? null : id;
         const others = l.routes.filter(
-          (r) => !(r.type === type && r.scope_id === (type === "company" ? null : id)),
+          (r) =>
+            !(
+              r.type === type &&
+              r.scope_id === scope &&
+              (r.feature ?? null) === feature
+            ),
         );
         return {
           ...l,
@@ -193,7 +229,8 @@ function demoApi(
                 {
                   id: `demo-${type}-${id}`,
                   type,
-                  scope_id: type === "company" ? null : id,
+                  scope_id: scope,
+                  feature,
                   provider_id: provider,
                   model: model!,
                 },
@@ -295,8 +332,8 @@ export function AiProvidersPanel({
             Cadastre as contas dos provedores de IA da agência — Claude, OpenAI, Gemini,
             OpenRouter e outras compatíveis — com a API Key e os modelos
             liberados. Depois, em <a href="#regras">Quem usa qual modelo</a>,
-            escolha o provedor e o modelo de cada pessoa, cliente, produto ou
-            projeto.
+            escolha o provedor e o modelo de cada funcionalidade, pessoa,
+            cliente, produto ou projeto.
           </p>
         </div>
         <Button className="btn primary" onClick={() => setEditing("new")}>
@@ -323,7 +360,9 @@ export function AiProvidersPanel({
               </div>
             </header>
             <p className="muted">
-              Responde quando nenhuma regra vale. O modelo é o de AI_MODEL.
+              Responde quando nenhuma regra vale, com o modelo da variável de
+              cada funcionalidade (AI_MODEL, MEETINGS_MODEL,
+              WHATSAPP_TASK_MODEL e SOCIAL_LEADS_MODEL).
             </p>
           </article>
           {library.providers.map((p) => (
@@ -906,7 +945,8 @@ function ProviderDialog({
 }
 
 // ------------------------------------------------------------ regras
-const SCOPES: { id: Exclude<RouteScope, "company">; label: string; one: string }[] = [
+type PersonScope = Exclude<RouteScope, "company" | "feature">;
+const SCOPES: { id: PersonScope; label: string; one: string }[] = [
   { id: "user", label: "Pessoas", one: "Pessoa" },
   { id: "client", label: "Clientes", one: "Cliente" },
   { id: "contract", label: "Produtos", one: "Produto" },
@@ -918,6 +958,7 @@ export function AiRoutesPanel({
   api,
   data,
   library,
+  defaults,
   error,
   reload,
   notify,
@@ -925,11 +966,13 @@ export function AiRoutesPanel({
   api: LibraryApi;
   data: Snapshot;
   library: AiLibrary | null;
+  /** O padrão do servidor de cada funcionalidade (nulo: ainda não veio). */
+  defaults: ServerDefaults | null;
   error: string;
   reload: () => Promise<void>;
   notify: (message: string) => void;
 }) {
-  const [tab, setTab] = useState<Exclude<RouteScope, "company">>("user");
+  const [tab, setTab] = useState<PersonScope>("user");
   const [problem, setProblem] = useState("");
   const providers = library?.providers ?? [];
   const routes = library?.routes ?? [];
@@ -937,6 +980,7 @@ export function AiRoutesPanel({
 
   const nameOf = useCallback(
     (type: RouteScope, id: string | null) => {
+      if (type === "feature") return featureInfo(id ?? "")?.label ?? "Funcionalidade";
       if (type === "company" || !id) return "Empresa toda";
       if (type === "user")
         return data.members.find((m) => m.user_id === id)?.name ?? "Pessoa removida";
@@ -953,8 +997,15 @@ export function AiRoutesPanel({
     },
     [data],
   );
-  const choiceLabel = (r: Pick<AiRoute, "provider_id" | "model"> | null) => {
-    if (!r) return "Padrão do servidor";
+  const serverLabel = (feature?: AiFeature) => {
+    const d = feature ? defaults?.features[feature] : undefined;
+    return d ? `Padrão do servidor · ${d.model}` : "Padrão do servidor";
+  };
+  const choiceLabel = (
+    r: Pick<AiRoute, "provider_id" | "model"> | null,
+    feature?: AiFeature,
+  ) => {
+    if (!r) return serverLabel(feature);
     const p = byId.get(r.provider_id);
     const m = p?.models.find((x) => x.id === r.model);
     return `${p?.name ?? "?"} · ${m?.label || r.model}${p && !p.active ? " (desligado)" : ""}`;
@@ -1011,15 +1062,24 @@ export function AiRoutesPanel({
       <section className="panel ai-route-order">
         <strong>Qual modelo responde</strong>
         <p>
-          Vale a regra mais específica para quem pergunta e onde a pergunta é
-          feita. Provedores desligados são pulados.
+          Vale a regra mais específica para quem pede, onde e em qual
+          funcionalidade. As regras de projeto, produto, cliente e pessoa
+          valem nas conversas com a MAVI (assistente e gravações); nas outras
+          funcionalidades, vale a da funcionalidade e depois a da empresa.
+          Provedores desligados são pulados.
         </p>
         <ol aria-label="Ordem das regras">
-          {["Projeto", "Produto", "Cliente", "Pessoa", "Empresa", "Padrão do servidor"].map(
-            (s) => (
-              <li key={s}>{s}</li>
-            ),
-          )}
+          {[
+            "Projeto",
+            "Produto",
+            "Cliente",
+            "Pessoa",
+            "Funcionalidade",
+            "Empresa",
+            "Padrão do servidor",
+          ].map((s) => (
+            <li key={s}>{s}</li>
+          ))}
         </ol>
       </section>
       {(error || problem) && (
@@ -1037,7 +1097,10 @@ export function AiRoutesPanel({
       <section className="panel ai-usage-company">
         <div>
           <strong>Padrão da empresa</strong>
-          <small>Para todo mundo, quando não há regra mais específica.</small>
+          <small>
+            Para todo mundo e todas as funcionalidades, quando não há regra mais
+            específica.
+          </small>
         </div>
         <Select
           aria-label="Modelo padrão da empresa"
@@ -1048,6 +1111,18 @@ export function AiRoutesPanel({
           {choices}
         </Select>
       </section>
+
+      <FeatureRoutes
+        routes={routes}
+        byId={byId}
+        companyLabel={companyRoute ? choiceLabel(companyRoute) : null}
+        companyProvider={
+          companyRoute ? byId.get(companyRoute.provider_id) : undefined
+        }
+        serverLabel={serverLabel}
+        choices={choices}
+        onSet={(feature, choice) => void set("feature", feature, choice)}
+      />
 
       <div className="drive-view drive-tabs" role="tablist">
         {SCOPES.map((s) => {
@@ -1136,6 +1211,7 @@ export function AiRoutesPanel({
       <RouteSimulator
         data={data}
         routes={routes}
+        serverLabel={serverLabel}
         active={new Set(providers.filter((p) => p.active).map((p) => p.id))}
         nameOf={nameOf}
         choiceLabel={choiceLabel}
@@ -1144,8 +1220,93 @@ export function AiRoutesPanel({
   );
 }
 
+/**
+ * Por funcionalidade: o provedor e o modelo de cada uma (sem escolha, a da
+ * empresa ou o padrão do servidor, com o modelo da variável da Vercel).
+ */
+function FeatureRoutes({
+  routes,
+  byId,
+  companyLabel,
+  companyProvider,
+  serverLabel,
+  choices,
+  onSet,
+}: {
+  routes: AiRoute[];
+  byId: ReadonlyMap<string, AiProvider>;
+  /** A regra da empresa (nulo: não há). */
+  companyLabel: string | null;
+  companyProvider?: AiProvider;
+  serverLabel: (feature?: AiFeature) => string;
+  choices: ReactNode;
+  onSet: (feature: AiFeature, choice: string) => void;
+}) {
+  return (
+    <section className="panel ai-features" aria-label="Por funcionalidade">
+      <header>
+        <strong>Por funcionalidade</strong>
+        <small>
+          O provedor e o modelo de cada funcionalidade com a MAVI. Sem escolha,
+          vale o padrão da empresa (ou o do servidor). Nas conversas
+          (assistente e gravações), as regras de pessoa, cliente, produto e
+          projeto vencem a da funcionalidade.
+        </small>
+      </header>
+      <div className="drive-table-wrap">
+        <table className="drive-table ai-usage-table ai-feature-table">
+          <thead>
+            <tr>
+              <th>Funcionalidade</th>
+              <th>Provedor e modelo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {FEATURES.map((f) => {
+              const r = routes.find(
+                (x) => x.type === "feature" && x.feature === f.id,
+              );
+              // Quem responde de fato: a escolha dela ou a da empresa.
+              const provider = r ? byId.get(r.provider_id) : companyProvider;
+              const outsideClaude =
+                provider && catalogEntry(provider.kind)?.api !== "anthropic";
+              return (
+                <tr key={f.id}>
+                  <td>
+                    <div className="ai-feature-name">
+                      <span className="ai-feature-group">{f.group}</span>
+                      <span className="ai-usage-name">{f.label}</span>
+                      {outsideClaude && f.note && (
+                        <small className="ai-feature-note">{f.note}</small>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    <Select
+                      aria-label={`Modelo de ${f.label}`}
+                      value={r ? `${r.provider_id}|${r.model}` : SERVER}
+                      onValueChange={(v) => onSet(f.id, v)}
+                    >
+                      <SelectOption value={SERVER}>
+                        {companyLabel
+                          ? `Padrão da empresa · ${companyLabel}`
+                          : serverLabel(f.id)}
+                      </SelectOption>
+                      {choices}
+                    </Select>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function scopeOptions(
-  tab: Exclude<RouteScope, "company">,
+  tab: PersonScope,
   data: Snapshot,
   nameOf: (type: RouteScope, id: string) => string,
 ) {
@@ -1170,7 +1331,7 @@ function NewRoute({
   choices,
   onSave,
 }: {
-  tab: Exclude<RouteScope, "company">;
+  tab: PersonScope;
   data: Snapshot;
   taken: Set<string>;
   nameOf: (type: RouteScope, id: string) => string;
@@ -1227,16 +1388,20 @@ function NewRoute({
 function RouteSimulator({
   data,
   routes,
+  serverLabel,
   active,
   nameOf,
   choiceLabel,
 }: {
   data: Snapshot;
   routes: AiRoute[];
+  serverLabel: (feature?: AiFeature) => string;
   active: ReadonlySet<string>;
   nameOf: (type: RouteScope, id: string | null) => string;
-  choiceLabel: (r: AiRoute | null) => string;
+  choiceLabel: (r: AiRoute | null, feature?: AiFeature) => string;
 }) {
+  const [feature, setFeature] = useState<AiFeature>("assistant");
+  const talk = featureInfo(feature)?.conversation ?? true;
   const [user, setUser] = useState("");
   const [client, setClient] = useState("");
   const [contract, setContract] = useState("");
@@ -1249,18 +1414,23 @@ function RouteSimulator({
   );
   const hit = pickRoute(
     routes,
-    {
-      user: user || undefined,
-      client: client || undefined,
-      contract: contract || undefined,
-      project: project || undefined,
-    },
+    talk
+      ? {
+          feature,
+          user: user || undefined,
+          client: client || undefined,
+          contract: contract || undefined,
+          project: project || undefined,
+        }
+      : { feature },
     active,
   );
   const why = hit
     ? hit.type === "company"
       ? "pela regra da empresa"
-      : `pela regra de ${nameOf(hit.type, hit.scope_id)}`
+      : hit.type === "feature"
+        ? "pela regra da funcionalidade"
+        : `pela regra de ${nameOf(hit.type, hit.scope_id)}`
     : "nenhuma regra vale";
   const none = (label: string) => <SelectOption value="none">{label}</SelectOption>;
   return (
@@ -1268,72 +1438,95 @@ function RouteSimulator({
       <strong>Quem responde?</strong>
       <div className="ai-simulator-fields">
         <Select
-          aria-label="Pessoa"
-          value={user || "none"}
-          onValueChange={(v) => setUser(v === "none" ? "" : v)}
+          aria-label="Funcionalidade"
+          value={feature}
+          onValueChange={(v) => setFeature(v as AiFeature)}
         >
-          {none("Qualquer pessoa")}
-          {scopeOptions("user", data, nameOf).map((o) => (
-            <SelectOption key={o.id} value={o.id}>
-              {o.name}
+          {FEATURES.map((f) => (
+            <SelectOption key={f.id} value={f.id}>
+              {`${f.group} · ${f.label}`}
             </SelectOption>
           ))}
         </Select>
-        <Select
-          aria-label="Cliente"
-          value={client || "none"}
-          onValueChange={(v) => {
-            setClient(v === "none" ? "" : v);
-            setContract("");
-            setProject("");
-          }}
-        >
-          {none("Sem cliente (assistente geral)")}
-          {scopeOptions("client", data, nameOf).map((o) => (
-            <SelectOption key={o.id} value={o.id}>
-              {o.name}
-            </SelectOption>
-          ))}
-        </Select>
-        {client && contracts.length > 0 && (
+        {talk && (
+          <>
           <Select
-            aria-label="Produto"
-            value={contract || "none"}
+            aria-label="Pessoa"
+            value={user || "none"}
+            onValueChange={(v) => setUser(v === "none" ? "" : v)}
+          >
+            {none("Qualquer pessoa")}
+            {scopeOptions("user", data, nameOf).map((o) => (
+              <SelectOption key={o.id} value={o.id}>
+                {o.name}
+              </SelectOption>
+            ))}
+          </Select>
+          <Select
+            aria-label="Cliente"
+            value={client || "none"}
             onValueChange={(v) => {
-              setContract(v === "none" ? "" : v);
+              setClient(v === "none" ? "" : v);
+              setContract("");
               setProject("");
             }}
           >
-            {none("Qualquer produto")}
-            {contracts.map((k) => (
-              <SelectOption key={k.id} value={k.id}>
-                {contractProductLabel(data, k.id)}
+            {none("Sem cliente (assistente geral)")}
+            {scopeOptions("client", data, nameOf).map((o) => (
+              <SelectOption key={o.id} value={o.id}>
+                {o.name}
               </SelectOption>
             ))}
           </Select>
-        )}
-        {contract && projects.length > 0 && (
-          <Select
-            aria-label="Projeto"
-            value={project || "none"}
-            onValueChange={(v) => setProject(v === "none" ? "" : v)}
-          >
-            {none("Qualquer projeto")}
-            {projects.map((p) => (
-              <SelectOption key={p.id} value={p.id}>
-                {p.name}
-              </SelectOption>
-            ))}
-          </Select>
+          {client && contracts.length > 0 && (
+            <Select
+              aria-label="Produto"
+              value={contract || "none"}
+              onValueChange={(v) => {
+                setContract(v === "none" ? "" : v);
+                setProject("");
+              }}
+            >
+              {none("Qualquer produto")}
+              {contracts.map((k) => (
+                <SelectOption key={k.id} value={k.id}>
+                  {contractProductLabel(data, k.id)}
+                </SelectOption>
+              ))}
+            </Select>
+          )}
+          {contract && projects.length > 0 && (
+            <Select
+              aria-label="Projeto"
+              value={project || "none"}
+              onValueChange={(v) => setProject(v === "none" ? "" : v)}
+            >
+              {none("Qualquer projeto")}
+              {projects.map((p) => (
+                <SelectOption key={p.id} value={p.id}>
+                  {p.name}
+                </SelectOption>
+              ))}
+            </Select>
+          )}
+          </>
         )}
       </div>
       <p className="ai-simulator-result" role="status">
-        Responde <strong>{choiceLabel(hit)}</strong>, {why}.
+        Responde <strong>{hit ? choiceLabel(hit) : serverLabel(feature)}</strong>,{" "}
+        {why}.
       </p>
-      {client && (
+      {!talk ? (
         <small className="muted">
-          As regras do cliente valem só para quem tem acesso a ele.
+          Nesta funcionalidade, as regras de pessoa, cliente, produto e projeto
+          não valem.
         </small>
+      ) : (
+        client && (
+          <small className="muted">
+            As regras do cliente valem só para quem tem acesso a ele.
+          </small>
+        )
       )}
     </section>
   );

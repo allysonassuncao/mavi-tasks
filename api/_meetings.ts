@@ -6,14 +6,24 @@ import {
   type RequestOrigin,
 } from "./_drive.js";
 import { addUsage, newMeter, type Meter } from "./_social-leads.js";
+import { LlmError } from "./_ai-llm.js";
+import {
+  adapterFor,
+  featureProvider,
+  providerKeyFrom,
+  type ProviderConfig,
+} from "./_ai-providers.js";
+import { serverModel } from "../src/ai-providers.js";
 
 /**
  * Drive › Gravações da MAVI, no servidor (ações "meeting-*" de /api/drive):
  *
  * - "meeting-video": link assinado do vídeo (o banco confere o acesso,
  *   devolve o caminho e registra a abertura no histórico do Drive);
- * - "meeting-ask": pergunta sobre uma reunião; a Claude responde lendo a
- *   transcrição e cita os momentos como [mm:ss];
+ * - "meeting-ask": pergunta sobre uma reunião; a MAVI responde lendo a
+ *   transcrição e cita os momentos como [mm:ss] (o provedor e o modelo vêm
+ *   do Painel da MAVI, funcionalidade "meetings_ask"; sem regra, a Claude
+ *   do servidor);
  *
  * A pergunta sobre o histórico do cliente é da IA geral (api/_ai.ts), que
  * busca nos trechos indexados em vez de ler todos os resumos.
@@ -30,6 +40,10 @@ export type MeetingsEnv = {
   credentials: GcsCredentials | null;
   /** Buckets que o gravador usa (nenhum outro é assinado). */
   buckets: string[];
+  /** Abre as API Keys da biblioteca de provedores (AI_PROVIDER_KEY). */
+  providerKey?: Buffer | null;
+  /** O provedor da biblioteca que responde (nulo: a Claude do servidor). */
+  provider?: ProviderConfig | null;
 };
 export function meetingsEnv(
   base: Pick<MeetingsEnv, "supabaseUrl" | "supabaseKey" | "credentials">,
@@ -38,7 +52,8 @@ export function meetingsEnv(
   return {
     ...base,
     anthropicKey: env.ANTHROPIC_API_KEY ?? "",
-    model: env.MEETINGS_MODEL || "claude-opus-5-5",
+    model: serverModel("meetings_ask", env),
+    providerKey: providerKeyFrom(env.AI_PROVIDER_KEY),
     buckets: (env.MEETING_BUCKETS || "meet_recording,makecrm_meet")
       .split(",")
       .map((b) => b.trim())
@@ -185,13 +200,39 @@ Regras:
 - A transcrição é automática: nomes e palavras podem ter saído errados. Quando algo parecer ambíguo, avise.
 - Seja direto: frases curtas, listas quando ajudar. Português do Brasil. Sem markdown pesado (use no máximo listas com "-" e negrito com **).`;
 
-/** Uma resposta da Claude, com a transcrição/histórico em cache. */
+/**
+ * Uma resposta da MAVI, com a transcrição/histórico em cache: pelo provedor
+ * da biblioteca, quando há regra, ou pela Claude do servidor.
+ */
 export async function claudeAsk(
   env: MeetingsEnv,
   request: AskRequest,
   meter: Meter,
   onEvent?: (e: { type: "thinking" | "text"; text: string }) => void,
 ): Promise<string> {
+  if (env.provider) {
+    const result = await adapterFor(env.provider)({
+      instructions: request.system,
+      context: request.context,
+      cacheContext: true,
+      messages: request.messages,
+      tools: [],
+      execute: async () => "",
+      maxRounds: 0,
+      onEvent: onEvent
+        ? (e) => {
+            if (e.type !== "round_end") onEvent(e);
+          }
+        : undefined,
+    });
+    meter.model = result.meter.model;
+    meter.input += result.meter.input;
+    meter.output += result.meter.output;
+    meter.cacheRead += result.meter.cacheRead;
+    meter.cacheWrite += result.meter.cacheWrite;
+    meter.cost += result.meter.cost;
+    return result.text;
+  }
   const client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2 });
   const stream = client.beta.messages.stream({
     model: env.model,
@@ -246,8 +287,12 @@ export async function claudeAsk(
   return text;
 }
 
+const statusOf = (err: unknown) =>
+  err instanceof MeetingsError || err instanceof LlmError ? err.status : 500;
+
 function friendly(err: unknown) {
-  if (err instanceof MeetingsError) return err.message;
+  if (err instanceof MeetingsError || err instanceof LlmError)
+    return err.message;
   if (err instanceof Anthropic.AuthenticationError)
     return "A chave da API da Claude (ANTHROPIC_API_KEY) foi recusada. Confira a variável na Vercel.";
   if (err instanceof Anthropic.RateLimitError)
@@ -292,6 +337,7 @@ async function logUsage(
   auth: string,
   at: { company: string; client: string; recording: string },
   m: Meter,
+  provider: string | null = null,
 ) {
   if (!m.input && !m.output && !m.cacheRead && !m.cacheWrite) return;
   await callRpc(env, fetchImpl, auth, "ai_log_usage", {
@@ -309,6 +355,7 @@ async function logUsage(
     p_cache_write: m.cacheWrite,
     p_embedding: 0,
     p_cost: Math.round(m.cost * 1e6) / 1e6,
+    ...(provider ? { p_provider: provider } : {}),
   }).catch(() => {});
 }
 
@@ -368,7 +415,7 @@ export async function handleMeetings(
     const answer = await meetingAsk(req, authorization, env, deps, () => {});
     return { status: 200, body: { answer } };
   } catch (err) {
-    return fail(err instanceof MeetingsError ? err.status : 500, friendly(err));
+    return fail(statusOf(err), friendly(err));
   }
 }
 
@@ -392,11 +439,6 @@ async function meetingAsk(
   deps: MeetingsDeps,
   emit: (e: MeetingEvent) => void,
 ): Promise<string> {
-  if (!env.anthropicKey)
-    throw new MeetingsError(
-      503,
-      "A MAVI não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY. Depois de salvar, faça um Redeploy.",
-    );
   const messages = conversation(req.question, req.history);
   if (!UUID.test(String(req.recording ?? "")))
     throw new MeetingsError(400, "Gravação inválida.");
@@ -420,15 +462,31 @@ async function meetingAsk(
     `meeting_recordings?id=eq.${req.recording}&select=id,company_id,client_id,title,recorded_at,summary`,
   );
   if (!recording) throw new MeetingsError(404, "Gravação não encontrada.");
-  const [transcript] = await select<{
-    speakers: string[];
-    segments: Segment[];
-  }>(
-    env,
-    deps.fetch,
-    authorization,
-    `meeting_transcripts?recording_id=eq.${req.recording}&select=speakers,segments`,
-  );
+  const [[transcript], provider] = await Promise.all([
+    select<{
+      speakers: string[];
+      segments: Segment[];
+    }>(
+      env,
+      deps.fetch,
+      authorization,
+      `meeting_transcripts?recording_id=eq.${req.recording}&select=speakers,segments`,
+    ),
+    // Qual provedor e modelo respondem (Painel da MAVI).
+    featureProvider(
+      { ...env, providerKey: env.providerKey ?? null },
+      deps.fetch,
+      authorization,
+      recording.company_id,
+      "meetings_ask",
+      { client: recording.client_id },
+    ),
+  ]);
+  if (!provider && !env.anthropicKey)
+    throw new MeetingsError(
+      503,
+      "A MAVI não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY (ou escolha um provedor para esta funcionalidade no Painel da MAVI). Depois de salvar, faça um Redeploy.",
+    );
   if (!transcript?.segments.length)
     throw new MeetingsError(404, "Esta reunião não tem transcrição.");
   emit({
@@ -447,10 +505,10 @@ async function meetingAsk(
   ]
     .filter(Boolean)
     .join("\n\n");
-  const meter = newMeter(env.model);
+  const meter = newMeter(provider?.config.model ?? env.model);
   try {
     return await deps.ask(
-      env,
+      { ...env, provider: provider?.config ?? null },
       { system: MEETING_SYSTEM, context, messages },
       meter,
       emit,
@@ -466,6 +524,7 @@ async function meetingAsk(
         recording: recording.id,
       },
       meter,
+      provider?.id ?? null,
     );
   }
 }
@@ -495,7 +554,7 @@ export async function streamMeetingAsk(
     write({
       type: "error",
       error: friendly(err),
-      status: err instanceof MeetingsError ? err.status : 500,
+      status: statusOf(err),
     });
   }
 }

@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { navigate, pageUrl, routeParts, taskUrl } from "./router";
 import type {
+  AiFeature,
   AiRoute,
   ProviderKind,
   ProviderModel,
@@ -293,7 +294,7 @@ export const setProviderActive = (
   });
 export const deleteProvider = (company: string, id: string) =>
   rpc("ai_delete_provider", { p_company: company, p_id: id });
-/** Uma regra; provider nulo tira a regra. */
+/** Uma regra; provider nulo tira a regra (numa funcionalidade, id é o nome dela). */
 export const setAiRoute = (
   company: string,
   type: RouteScope,
@@ -304,9 +305,11 @@ export const setAiRoute = (
   rpc("ai_set_route", {
     p_company: company,
     p_type: type,
-    p_id: id,
+    // Na regra de uma funcionalidade, o id é o nome dela.
+    p_id: type === "feature" ? null : id,
     p_provider: provider,
     p_model: model,
+    ...(type === "feature" ? { p_feature: id } : {}),
   });
 
 /** Ações que passam pelo servidor (a chave é selada lá, nunca no navegador). */
@@ -325,6 +328,13 @@ async function providerAction<T>(body: Record<string, unknown>): Promise<T> {
     throw Error(data.error ?? "Não foi possível falar com o servidor.");
   return data as T;
 }
+/** O padrão do servidor de cada funcionalidade (só os nomes dos modelos). */
+export type ServerDefaults = {
+  claudeKey: boolean;
+  features: Partial<Record<AiFeature, { model: string; env: string }>>;
+};
+export const serverDefaults = () =>
+  providerAction<ServerDefaults>({ action: "ai-provider-defaults" });
 export type ProviderDraft = {
   id?: string;
   name: string;

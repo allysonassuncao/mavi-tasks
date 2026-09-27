@@ -13,7 +13,8 @@ const TABS: { id: AiTab; label: string; icon: typeof BarChart3; admin: boolean }
 /**
  * Painel de IA (líderes): o consumo e os limites de gasto; para
  * administradores, também a biblioteca de provedores e as regras de quem usa
- * qual provedor e modelo. Cada aba tem o seu endereço (#consumo, #provedores, #regras).
+ * qual provedor e modelo (por funcionalidade, pessoa, cliente, produto e
+ * projeto). Cada aba tem o seu endereço (#consumo, #provedores, #regras).
  */
 export function AiPage({
   company,
@@ -84,7 +85,7 @@ function AdminTabs({
   demo: boolean;
   notify: (message: string) => void;
 }) {
-  const { library, error, reload, api } = useAiLibrary(company, demo);
+  const { library, error, reload, api, defaults } = useAiLibrary(company, demo);
   return tab === "provedores" ? (
     <AiProvidersPanel
       api={api}
@@ -98,6 +99,7 @@ function AdminTabs({
       api={api}
       data={data}
       library={library}
+      defaults={defaults}
       error={error}
       reload={reload}
       notify={notify}

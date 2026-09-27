@@ -16486,6 +16486,48 @@ td.ai-empty-cell {
   flex-direction: column;
   gap: 10px;
 }
+/* Por funcionalidade. */
+.ai-features {
+  padding: 16px 18px 6px;
+}
+.ai-features > header {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.ai-features > header strong {
+  font-size: 0.86rem;
+}
+.ai-features > header small {
+  font-size: 0.74rem;
+  color: #6b7775;
+}
+.ai-feature-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ai-feature-name small {
+  font-size: 0.72rem;
+}
+.ai-feature-group {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7775;
+}
+.ai-feature-note {
+  color: #9a5b00;
+}
+.ai-feature-table td:last-child {
+  width: 1%;
+  white-space: nowrap;
+}
+.ai-feature-table .ui-select {
+  min-width: 280px;
+}
 .ai-simulator-fields {
   display: flex;
   flex-wrap: wrap;
@@ -16521,9 +16563,34 @@ td.ai-empty-cell {
   }
   .ai-usage-company .ui-select,
   .ai-simulator-fields .ui-select,
-  .ai-new-limit .ui-select {
+  .ai-new-limit .ui-select,
+  .ai-feature-table .ui-select {
     width: 100%;
     min-width: 0;
+  }
+  .ai-feature-table thead {
+    display: none;
+  }
+  .ai-feature-table,
+  .ai-feature-table tbody {
+    display: block;
+    width: 100%;
+  }
+  .ai-feature-table td {
+    display: block;
+    min-width: 0;
+  }
+  .ai-feature-table tr {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 0;
+  }
+  .ai-feature-table td,
+  .ai-feature-table td:last-child {
+    width: auto;
+    white-space: normal;
+    padding: 0;
   }
 }
 

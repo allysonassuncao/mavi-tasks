@@ -41,6 +41,8 @@ export type AgentRequest = {
   execute: (name: string, input: unknown) => Promise<string>;
   /** Rodadas de ferramentas antes de exigir a resposta. */
   maxRounds?: number;
+  /** O contexto é longo e se repete (a transcrição de uma reunião): fica em cache. */
+  cacheContext?: boolean;
   signal?: AbortSignal;
   onEvent?: (event: AgentEvent) => void;
 };
@@ -147,11 +149,19 @@ export function anthropicAdapter(
               text: request.instructions,
               cache_control: { type: "ephemeral" },
             },
-            { type: "text", text: request.context },
+            {
+              type: "text",
+              text: request.context,
+              ...(request.cacheContext
+                ? { cache_control: { type: "ephemeral" as const } }
+                : {}),
+            },
           ],
-          tools,
+          ...(tools.length ? { tools } : {}),
           // Depois do limite de rodadas, só a resposta.
-          ...(last ? { tool_choice: { type: "none" as const } } : {}),
+          ...(last && tools.length
+            ? { tool_choice: { type: "none" as const } }
+            : {}),
           messages,
         },
         { signal: request.signal },

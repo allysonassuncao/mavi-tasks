@@ -10,10 +10,13 @@ import {
 } from "./_ai-llm.js";
 import {
   CATALOG,
+  FEATURES,
   catalogEntry,
   keyHint,
   providerBaseUrl,
   safeBaseUrl,
+  serverModel,
+  type AiFeature,
   type ProviderModel,
 } from "../src/ai-providers.js";
 
@@ -21,10 +24,12 @@ import {
  * IA do MAVI · biblioteca de provedores (migration 20261025090000_ai_providers).
  *
  * - Qual IA responde: ai_resolve_route devolve a regra mais específica para
- *   quem pergunta e onde (projeto › produto › cliente › pessoa › empresa),
- *   com a API Key selada; aqui ela é aberta com AI_PROVIDER_KEY e vira um
- *   adaptador (a mesma interface neutra de _ai-llm.ts). Sem regra, fica o
- *   padrão do servidor (ANTHROPIC_API_KEY e AI_MODEL).
+ *   quem pede, onde e em qual funcionalidade (nas conversas: projeto ›
+ *   produto › cliente › pessoa › funcionalidade › empresa; nas demais:
+ *   funcionalidade › empresa), com a API Key selada; aqui ela é aberta com
+ *   AI_PROVIDER_KEY e vira um adaptador (a mesma interface neutra de
+ *   _ai-llm.ts). Sem regra, fica o padrão do servidor (ANTHROPIC_API_KEY e
+ *   o modelo da variável de cada funcionalidade, serverModel).
  * - Administração (ações "ai-provider-*" de /api/ai): salvar um provedor
  *   (a chave é selada aqui, nunca vai em texto ao banco), buscar os modelos
  *   na API do provedor e testar a conexão. O banco confere que quem chama é
@@ -175,6 +180,22 @@ async function providerError(res: Response, name: string) {
   );
 }
 
+/** O uso de uma resposta de chat no medidor, pelos preços cadastrados. */
+function addChatUsage(
+  meter: Meter,
+  config: ProviderConfig,
+  usage: NonNullable<ChatChunk["usage"]>,
+) {
+  const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+  const input = Math.max((usage.prompt_tokens ?? 0) - cached, 0);
+  const output = usage.completion_tokens ?? 0;
+  meter.model = config.model;
+  meter.input += input;
+  meter.cacheRead += cached;
+  meter.output += output;
+  meter.cost += priceCost(config.price, { input, output, cached });
+}
+
 const authHeaders = (apiKey: string) => ({
   Authorization: `Bearer ${apiKey}`,
   "Content-Type": "application/json",
@@ -254,15 +275,7 @@ export function openAiChatAdapter(
             502,
             `O provedor "${config.name}" interrompeu a resposta: ${chunk.error.message ?? "erro"}`,
           );
-        if (chunk.usage) {
-          const cached = chunk.usage.prompt_tokens_details?.cached_tokens ?? 0;
-          const input = Math.max((chunk.usage.prompt_tokens ?? 0) - cached, 0);
-          const output = chunk.usage.completion_tokens ?? 0;
-          meter.input += input;
-          meter.cacheRead += cached;
-          meter.output += output;
-          meter.cost += priceCost(config.price, { input, output, cached });
-        }
+        if (chunk.usage) addChatUsage(meter, config, chunk.usage);
         const choice = chunk.choices?.[0];
         if (!choice) continue;
         const delta = choice.delta ?? {};
@@ -342,6 +355,97 @@ export function openAiChatAdapter(
   };
 }
 
+/**
+ * Uma resposta em JSON pela API de chat da OpenAI (e das compatíveis), para
+ * as funcionalidades que pedem um objeto estruturado (Social Leads). Tenta o
+ * JSON Schema; o provedor que não aceita cai para JSON simples e, por fim,
+ * para texto — o schema vai também nas instruções. Imagens vão como data
+ * URL (o modelo precisa aceitar imagens).
+ */
+export async function openAiJsonComplete(
+  config: ProviderConfig,
+  request: {
+    system: string;
+    user: string;
+    schema: Record<string, unknown>;
+    images?: { media_type: string; data: string }[];
+  },
+  signal: AbortSignal | undefined,
+  meter: Meter,
+  fetchImpl: Fetch = fetch,
+): Promise<string> {
+  const content = request.images?.length
+    ? [
+        ...request.images.map((i) => ({
+          type: "image_url" as const,
+          image_url: { url: `data:${i.media_type};base64,${i.data}` },
+        })),
+        { type: "text" as const, text: request.user },
+      ]
+    : request.user;
+  const system = `${request.system}\n\nResponda somente com um objeto JSON válido que siga este JSON Schema, sem texto antes ou depois e sem cercas de código:\n${JSON.stringify(request.schema)}`;
+  const formats = [
+    {
+      type: "json_schema",
+      json_schema: { name: "resposta", schema: request.schema, strict: false },
+    },
+    { type: "json_object" },
+    null,
+  ];
+  for (let i = 0; ; i++) {
+    const format = formats[i];
+    const res = await fetchImpl(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: authHeaders(config.apiKey),
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content },
+        ],
+        ...(format ? { response_format: format } : {}),
+      }),
+      signal,
+    });
+    if (!res.ok) {
+      if (res.status === 400 && i < formats.length - 1) {
+        const text = await res.clone().text().catch(() => "");
+        if (/response_format|json_schema|json_object|structured/i.test(text))
+          continue;
+      }
+      throw await providerError(res, config.name);
+    }
+    const body = (await res.json().catch(() => ({}))) as {
+      choices?: {
+        message?: { content?: string | null; refusal?: string | null };
+        finish_reason?: string | null;
+      }[];
+      usage?: ChatChunk["usage"];
+    };
+    if (body.usage) addChatUsage(meter, config, body.usage);
+    const choice = body.choices?.[0];
+    if (choice?.message?.refusal || choice?.finish_reason === "content_filter")
+      throw new LlmError(
+        422,
+        "A MAVI não respondeu a este pedido. Revise o texto e tente de novo.",
+      );
+    if (choice?.finish_reason === "length")
+      throw new LlmError(
+        502,
+        "A resposta da MAVI ficou incompleta. Tente de novo.",
+      );
+    const text = (choice?.message?.content ?? "").trim();
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start)
+      throw new LlmError(
+        502,
+        `O provedor "${config.name}" não devolveu um JSON. Tente de novo ou escolha outro modelo.`,
+      );
+    return text.slice(start, end + 1);
+  }
+}
+
 // ------------------------------------------------------------ Claude
 /** A Claude com a chave e o modelo da biblioteca; erros com o nome do provedor. */
 export function anthropicProviderAdapter(
@@ -381,8 +485,11 @@ export function anthropicProviderAdapter(
   };
 }
 
+export const isClaude = (config: Pick<ProviderConfig, "kind">) =>
+  catalogEntry(config.kind)?.api === "anthropic";
+
 export function adapterFor(config: ProviderConfig, fetchImpl: Fetch = fetch) {
-  return catalogEntry(config.kind)?.api === "anthropic"
+  return isClaude(config)
     ? anthropicProviderAdapter(config)
     : openAiChatAdapter(config, fetchImpl);
 }
@@ -417,15 +524,16 @@ export function routeConfig(
 }
 
 /**
- * Qual IA responde (null: o padrão do servidor). Se o banco ainda não tem a
- * biblioteca (migration não aplicada), segue no padrão.
+ * Qual IA responde nesta funcionalidade (null: o padrão do servidor). Se o
+ * banco ainda não tem a biblioteca (migration não aplicada), segue no padrão.
  */
 export async function resolveRoute(
-  env: ProviderEnv,
+  env: Pick<ProviderEnv, "supabaseUrl" | "supabaseKey">,
   fetchImpl: Fetch,
   auth: string,
   company: string,
   scope: { client?: string; contract?: string; project?: string },
+  feature: AiFeature = "assistant",
 ): Promise<ResolvedRoute | null> {
   const r = await callRpc<ResolvedRoute | null>(
     env,
@@ -437,6 +545,7 @@ export async function resolveRoute(
       p_client: scope.client ?? null,
       p_contract: scope.contract ?? null,
       p_project: scope.project ?? null,
+      p_feature: feature,
     },
   );
   if (!r.ok) {
@@ -444,6 +553,23 @@ export async function resolveRoute(
     return null;
   }
   return r.data && r.data.key_cipher ? r.data : null;
+}
+
+/**
+ * O provedor da biblioteca que responde nesta funcionalidade, com a chave
+ * aberta (null: o padrão do servidor). Para as funcionalidades fora do
+ * /api/ai (Gravações, WhatsApp, Social Leads).
+ */
+export async function featureProvider(
+  env: Pick<ProviderEnv, "supabaseUrl" | "supabaseKey" | "providerKey">,
+  fetchImpl: Fetch,
+  auth: string,
+  company: string,
+  feature: AiFeature,
+  scope: { client?: string; contract?: string; project?: string } = {},
+): Promise<{ id: string; config: ProviderConfig } | null> {
+  const route = await resolveRoute(env, fetchImpl, auth, company, scope, feature);
+  return route ? { id: route.provider_id, config: routeConfig(env, route) } : null;
 }
 
 // ------------------------------------------------------------ administração
@@ -722,11 +848,26 @@ async function testProvider(
   return { ok: true, ms: now() - started, reply: reply.slice(0, 120) };
 }
 
+/**
+ * O padrão do servidor de cada funcionalidade, para a tela mostrar: só o
+ * nome do modelo e se a chave da Vercel existe (nunca a chave).
+ */
+export function serverDefaults(env: Record<string, string | undefined>) {
+  return {
+    claudeKey: !!env.ANTHROPIC_API_KEY,
+    features: Object.fromEntries(
+      FEATURES.map((f) => [f.id, { model: serverModel(f.id, env), env: f.env }]),
+    ),
+  };
+}
+
 export type ProviderDeps = {
   fetch: Fetch;
   now?: () => number;
   /** Trocado nos testes. */
   anthropic?: (apiKey: string, baseUrl: string) => Pick<Anthropic, "models" | "messages">;
+  /** As variáveis da Vercel (o padrão do servidor); trocadas nos testes. */
+  serverEnv?: Record<string, string | undefined>;
 };
 
 export async function handleProviders(
@@ -748,6 +889,11 @@ export async function handleProviders(
       return {
         status: 200,
         body: await listModels(env, deps.fetch, authorization, req, deps.anthropic),
+      };
+    if (req.action === "ai-provider-defaults")
+      return {
+        status: 200,
+        body: serverDefaults(deps.serverEnv ?? process.env),
       };
     if (req.action === "ai-provider-test")
       return {

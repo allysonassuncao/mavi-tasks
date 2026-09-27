@@ -663,7 +663,9 @@ describe("adaptador da Claude", () => {
     });
     expect(out.text).toBe("A verba é 3 mil [S1].");
     expect(requests).toHaveLength(2);
-    expect(requests[1].tool_choice).toEqual({ type: "none" });
+    // Sem ferramentas na conversa: nem a lista nem a escolha vão.
+    expect(requests[1].tools).toBeUndefined();
+    expect(requests[1].tool_choice).toBeUndefined();
     expect(requests[1].messages.at(-1)).toEqual({
       role: "user",
       content: ANSWER_NUDGE,

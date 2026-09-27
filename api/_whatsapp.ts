@@ -8,6 +8,8 @@ import {
 import { extractFileText } from "./_ai-extract.js";
 import type { AskRequest, MeetingsEnv } from "./_meetings.js";
 import { newMeter, type Meter } from "./_social-leads.js";
+import { featureProvider, providerKeyFrom } from "./_ai-providers.js";
+import { serverModel } from "../src/ai-providers.js";
 
 /**
  * Drive › cliente › "Whatsapp": a coleta dos grupos na Uazapi
@@ -51,6 +53,8 @@ export type WhatsappEnv = Pick<
   /** A MAVI que monta a tarefa a partir das mensagens (Claude). */
   anthropicKey: string;
   taskModel: string;
+  /** Abre as API Keys da biblioteca de provedores (AI_PROVIDER_KEY). */
+  providerKey?: Buffer | null;
 };
 
 export function whatsappEnv(
@@ -72,8 +76,8 @@ export function whatsappEnv(
     transcribeUsdPerMinute:
       Number(env.WHATSAPP_TRANSCRIBE_USD_PER_MIN) || 0.003,
     anthropicKey: env.ANTHROPIC_API_KEY || "",
-    taskModel:
-      env.WHATSAPP_TASK_MODEL || env.MEETINGS_MODEL || "claude-opus-5-5",
+    taskModel: serverModel("whatsapp_task", env),
+    providerKey: providerKeyFrom(env.AI_PROVIDER_KEY),
   };
 }
 
@@ -968,12 +972,10 @@ async function taskDraft(
     : [];
   if (!ids.length || ids.length !== req.messages.length || ids.length > 40)
     return { status: 400, body: { error: "Escolha de 1 a 40 mensagens." } };
-  if (!env.anthropicKey || !deps.ask)
+  if (!deps.ask)
     return {
       status: 503,
-      body: {
-        error: "A MAVI não está configurada no servidor (ANTHROPIC_API_KEY).",
-      },
+      body: { error: "A MAVI não está configurada no servidor." },
     };
   // Tudo como a pessoa: o banco só devolve o que ela vê.
   const picked = await selectAs<DraftMessage>(
@@ -1024,6 +1026,27 @@ async function taskDraft(
       status: 404,
       body: { error: "Grupo não encontrado ou sem acesso." },
     };
+  // Qual provedor e modelo respondem (Painel da MAVI).
+  let provider: Awaited<ReturnType<typeof featureProvider>>;
+  try {
+    provider = await featureProvider(
+      { ...env, providerKey: env.providerKey ?? null },
+      deps.fetch,
+      authorization,
+      company,
+      "whatsapp_task",
+    );
+  } catch (e) {
+    return { status: 503, body: { error: (e as Error).message } };
+  }
+  if (!provider && !env.anthropicKey)
+    return {
+      status: 503,
+      body: {
+        error:
+          "A MAVI não está configurada no servidor (ANTHROPIC_API_KEY). Escolha um provedor para esta funcionalidade no Painel da MAVI ou configure a chave na Vercel.",
+      },
+    };
   const [clients, products] = await Promise.all([
     selectAs<{ name: string }>(
       env,
@@ -1062,7 +1085,7 @@ async function taskDraft(
     "Mensagens (as marcadas com >> foram escolhidas):",
     ...lines,
   ].join("\n");
-  const meter = newMeter(env.taskModel);
+  const meter = newMeter(provider?.config.model ?? env.taskModel);
   let text: string;
   try {
     text = await deps.ask(
@@ -1073,6 +1096,7 @@ async function taskDraft(
         model: env.taskModel,
         credentials: env.credentials,
         buckets: [],
+        provider: provider?.config ?? null,
       },
       {
         system: TASK_SYSTEM,
@@ -1105,6 +1129,7 @@ async function taskDraft(
         p_cache_write: meter.cacheWrite,
         p_embedding: 0,
         p_cost: Math.round(meter.cost * 1e6) / 1e6,
+        ...(provider ? { p_provider: provider.id } : {}),
       }).catch(() => {});
   }
   const draft = parseDraft(text);

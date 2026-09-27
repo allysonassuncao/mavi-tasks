@@ -1,5 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { callRpc } from "./_drive.js";
+import { LlmError, claudeFeatures } from "./_ai-llm.js";
+import {
+  featureProvider,
+  isClaude,
+  openAiJsonComplete,
+  providerKeyFrom,
+  type ProviderConfig,
+} from "./_ai-providers.js";
+import { serverModel, type AiFeature } from "../src/ai-providers.js";
 import { defaultLookup, gatherBrand, type Lookup } from "./_brand-colors.js";
 import {
   briefingAiKeys,
@@ -48,6 +57,13 @@ export type SocialLeadsEnv = {
   model: string;
   /** How long a generation may take before it is given up (ms). */
   deadlineMs: number;
+  /** Opens the provider library's API keys (AI_PROVIDER_KEY). */
+  providerKey?: Buffer | null;
+  /**
+   * The library provider chosen for this feature in the MAVI panel (null:
+   * the server's Claude with ANTHROPIC_API_KEY and the model above).
+   */
+  provider?: ProviderConfig | null;
 };
 export function socialLeadsEnv(
   env: Record<string, string | undefined> = process.env,
@@ -58,7 +74,8 @@ export function socialLeadsEnv(
     supabaseKey:
       env.VITE_SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY || "",
     anthropicKey: env.ANTHROPIC_API_KEY ?? "",
-    model: env.SOCIAL_LEADS_MODEL || "claude-opus-5-5",
+    model: serverModel("social_leads_plan", env),
+    providerKey: providerKeyFrom(env.AI_PROVIDER_KEY),
     // The function may run for 300 s (vercel.json); stop a little before.
     deadlineMs: Number(env.SOCIAL_LEADS_DEADLINE_MS) || 280_000,
   };
@@ -408,24 +425,56 @@ function summaryOf(p: PlanContent) {
   };
 }
 
-// ------------------------------------------------------------ Claude
-/** One structured answer from Claude, reading the client's site if needed. */
+// ------------------------------------------------------------ the model
+/**
+ * One structured answer from the model chosen for the feature: Claude (the
+ * server's, or one from the library) reads the client's site if needed; the
+ * other providers answer through the OpenAI-compatible chat API, without the
+ * site.
+ */
 export async function claudeComplete(
   env: SocialLeadsEnv,
   request: ModelRequest,
   signal: AbortSignal,
   meter: Meter,
 ): Promise<string> {
-  const client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2 });
+  const provider = env.provider ?? null;
+  if (provider && !isClaude(provider))
+    return openAiJsonComplete(
+      provider,
+      {
+        ...request,
+        user: request.domains.length
+          ? `${request.user}\n\n(Nesta resposta não é possível abrir o site do cliente: siga o briefing.)`
+          : request.user,
+      },
+      signal,
+      meter,
+    );
+  const model = provider?.model ?? env.model;
+  const features = claudeFeatures(model);
+  const client = new Anthropic({
+    apiKey: provider?.apiKey ?? env.anthropicKey,
+    maxRetries: 2,
+    ...(provider?.baseUrl ? { baseURL: provider.baseUrl } : {}),
+  });
   const tools: Anthropic.Beta.BetaToolUnion[] = request.domains.length
     ? [
-        {
-          type: "web_fetch_20260209",
-          name: "web_fetch",
-          max_uses: 4,
-          allowed_domains: request.domains,
-          max_content_tokens: 20000,
-        },
+        features.adaptive
+          ? {
+              type: "web_fetch_20260209",
+              name: "web_fetch",
+              max_uses: 4,
+              allowed_domains: request.domains,
+              max_content_tokens: 20000,
+            }
+          : {
+              type: "web_fetch_20250910",
+              name: "web_fetch",
+              max_uses: 4,
+              allowed_domains: request.domains,
+              max_content_tokens: 20000,
+            },
       ]
     : [];
   const messages: Anthropic.Beta.BetaMessageParam[] = [
@@ -451,13 +500,21 @@ export async function claudeComplete(
     const message = await client.beta.messages
       .stream(
         {
-          model: env.model,
+          model,
           max_tokens: request.maxTokens ?? 64000,
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
-          thinking: { type: "adaptive" },
+          ...(features.fallbacks
+            ? {
+                betas: ["server-side-fallback-2026-07-01"],
+                fallbacks: "default" as const,
+              }
+            : {}),
+          ...(features.adaptive
+            ? { thinking: { type: "adaptive" as const } }
+            : {}),
           output_config: {
-            effort: request.effort ?? "medium",
+            ...(features.adaptive
+              ? { effort: request.effort ?? "medium" }
+              : {}),
             format: { type: "json_schema", schema: request.schema },
           },
           system: [
@@ -473,7 +530,7 @@ export async function claudeComplete(
         { signal },
       )
       .finalMessage();
-    addUsage(meter, message.model, message.usage);
+    addUsage(meter, message.model, message.usage, provider?.price);
     if (message.stop_reason === "pause_turn") {
       messages.push({ role: "assistant", content: message.content });
       continue;
@@ -508,7 +565,8 @@ export async function claudeComplete(
 
 /** A message fit for the screen, whatever failed. */
 export function friendlyError(err: unknown): string {
-  if (err instanceof SocialLeadsError) return err.message;
+  if (err instanceof SocialLeadsError || err instanceof LlmError)
+    return err.message;
   if (err instanceof Anthropic.AuthenticationError)
     return "A chave da API da Claude (ANTHROPIC_API_KEY) foi recusada. Confira a variável na Vercel.";
   if (err instanceof Anthropic.RateLimitError)
@@ -562,17 +620,31 @@ export async function handleSocialLeads(
 ): Promise<{ status: number; body: unknown }> {
   if (!authorization)
     return { status: 401, body: { error: "Entre na sua conta." } };
-  if (!env.anthropicKey)
-    return {
-      status: 503,
-      body: {
-        error:
-          "A MAVI não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY. Depois de salvar, faça um Redeploy.",
-      },
-    };
   if (!UUID.test(body?.company ?? "") || !UUID.test(body?.contract ?? ""))
     return { status: 400, body: { error: "Pedido inválido." } };
   try {
+    // Which provider and model answer (the MAVI panel, per feature).
+    const feature = FEATURE_OF[body.action];
+    if (feature) {
+      const chosen = await featureProvider(
+        { ...env, providerKey: env.providerKey ?? null },
+        deps.fetch,
+        authorization,
+        body.company,
+        feature,
+        { contract: body.contract },
+      );
+      if (chosen)
+        env = { ...env, provider: chosen.config, model: chosen.config.model };
+    }
+    if (!env.provider && !env.anthropicKey)
+      return {
+        status: 503,
+        body: {
+          error:
+            "A MAVI não está configurada no servidor. Falta na Vercel: ANTHROPIC_API_KEY (ou escolha um provedor para esta funcionalidade no Painel da MAVI). Depois de salvar, faça um Redeploy.",
+        },
+      };
     if (body.action === "generate")
       return await generate(body, authorization, env, deps);
     if (body.action === "adjust")
@@ -584,11 +656,22 @@ export async function handleSocialLeads(
     return { status: 400, body: { error: "Ação desconhecida." } };
   } catch (err) {
     return {
-      status: err instanceof SocialLeadsError ? err.status : 500,
+      status:
+        err instanceof SocialLeadsError || err instanceof LlmError
+          ? err.status
+          : 500,
       body: { error: friendlyError(err) },
     };
   }
 }
+
+/** The MAVI panel feature of each action. */
+const FEATURE_OF: Record<string, AiFeature> = {
+  generate: "social_leads_plan",
+  adjust: "social_leads_adjust",
+  colors: "social_leads_colors",
+  briefing: "social_leads_briefing",
+};
 
 async function generate(
   body: Extract<SocialLeadsRequest, { action: "generate" }>,

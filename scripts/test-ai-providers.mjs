@@ -3,6 +3,7 @@
 // para o navegador, a regra mais específica vale (projeto › produto ›
 // cliente › pessoa › empresa), provedores desligados não respondem, o
 // consumo guarda o provedor e o assistente vira um módulo que se esconde.
+// Com a 20261031090000_ai_feature_routes, cada funcionalidade tem a sua regra.
 import assert from "node:assert/strict";
 import { applyMigration, createTestDatabase } from "./database-fixture.mjs";
 
@@ -158,6 +159,52 @@ await check("o consumo guarda o provedor e o painel divide por modelo", async ()
     report.by_model.map((m) => `${m.provider || "servidor"}:${m.model}:${m.asks}`).sort(),
     ["Claude:claude-haiku-4-5:1", "servidor:claude-opus-5:1"],
   );
+});
+
+await check("cada funcionalidade tem o seu modelo; pessoa e cliente só valem nas conversas", async () => {
+  const gpt = await save(admin, "GPT", "openai", models("gpt-c"));
+  const feat = async (user, feature, c = null) => {
+    const r = await one(user, "select public.ai_resolve_route($1,$2,null,null,$3)", [A, c, feature]);
+    return r ? `${r.scope}:${r.provider}:${r.model}` : null;
+  };
+  const setFeature = (user, feature, provider, model) =>
+    q(user, "select public.ai_set_route($1,'feature',null,$2,$3,$4)", [A, provider, model, feature]);
+  await assert.rejects(() => setFeature(manager, "social_leads_plan", gpt, "gpt-c"), /Só administradores/);
+  await assert.rejects(() => setFeature(admin, "inventada", gpt, "gpt-c"), /Funcionalidade inválida/);
+  await assert.rejects(() => setFeature(admin, null, gpt, "gpt-c"), /Funcionalidade inválida/);
+  await assert.rejects(() => setFeature(admin, "social_leads_plan", gpt, "claude-sonnet-5"), /modelo cadastrado/);
+  // Sem regra da funcionalidade nem da empresa: o servidor.
+  assert.equal(await feat(manager, "social_leads_plan"), null);
+  await setFeature(admin, "social_leads_plan", gpt, "gpt-c");
+  await setFeature(admin, "assistant", claude, "claude-sonnet-5");
+  // A regra de Bruno (pessoa) não vale fora das conversas.
+  assert.equal(await feat(member, "social_leads_plan"), "feature:GPT:gpt-c");
+  assert.equal(await feat(member, "assistant"), "user:Claude:claude-haiku-4-5");
+  assert.equal(await feat(manager, "assistant"), "feature:Claude:claude-sonnet-5");
+  // Sem funcionalidade, é o assistente (a chamada de antes, com 4 argumentos).
+  assert.equal(await resolve(manager), "feature:Claude:claude-sonnet-5");
+  // O cliente vale na pergunta a uma reunião, não no Social Leads.
+  assert.equal(await feat(manager, "meetings_ask", other), "client:Claude:claude-haiku-4-5");
+  assert.equal(await feat(manager, "social_leads_plan", other), "feature:GPT:gpt-c");
+  // Sem regra da funcionalidade, vale a da empresa.
+  await route(admin, "company", null, claude, "claude-haiku-4-5");
+  assert.equal(await feat(manager, "whatsapp_task"), "company:Claude:claude-haiku-4-5");
+  // Trocar substitui; tirar volta para a da empresa.
+  await setFeature(admin, "social_leads_plan", claude, "claude-sonnet-5");
+  assert.equal(await feat(manager, "social_leads_plan"), "feature:Claude:claude-sonnet-5");
+  await setFeature(admin, "social_leads_plan", null, null);
+  assert.equal(await feat(manager, "social_leads_plan"), "company:Claude:claude-haiku-4-5");
+  const list = await one(admin, "select public.ai_provider_list($1)", [A]);
+  assert.deepEqual(
+    list.routes.filter((r) => r.type === "feature").map((r) => `${r.feature}:${r.model}`),
+    ["assistant:claude-sonnet-5"],
+  );
+  assert.ok(list.routes.filter((r) => r.type !== "feature").every((r) => r.feature === null));
+  // Provedor desligado é pulado.
+  await setFeature(admin, "whatsapp_task", gpt, "gpt-c");
+  assert.equal(await feat(manager, "whatsapp_task"), "feature:GPT:gpt-c");
+  await q(admin, "select public.ai_set_provider_active($1,$2,false)", [A, gpt]);
+  assert.equal(await feat(manager, "whatsapp_task"), "company:Claude:claude-haiku-4-5");
 });
 
 await check("o assistente entra nos módulos que o administrador esconde", async () => {

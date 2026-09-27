@@ -192,12 +192,124 @@ export function safeBaseUrl(value: string): string | null {
   return null;
 }
 
+// ------------------------------------------------------------ funcionalidades
+/** As funcionalidades com IA que escolhem o seu provedor e modelo. */
+export type AiFeature =
+  | "assistant"
+  | "meetings_history"
+  | "meetings_ask"
+  | "whatsapp_task"
+  | "social_leads_plan"
+  | "social_leads_adjust"
+  | "social_leads_briefing"
+  | "social_leads_colors";
+
+export type FeatureInfo = {
+  id: AiFeature;
+  group: string;
+  label: string;
+  /** Conversa: as regras de pessoa, cliente, produto e projeto também valem. */
+  conversation: boolean;
+  /** A variável da Vercel com o modelo do padrão do servidor. */
+  env: string;
+  /** O que muda com um provedor que não é a Claude. */
+  note?: string;
+};
+
+export const FEATURES: FeatureInfo[] = [
+  {
+    id: "assistant",
+    group: "Assistente",
+    label: "Assistente da MAVI (balão em todas as telas)",
+    conversation: true,
+    env: "AI_MODEL",
+  },
+  {
+    id: "meetings_history",
+    group: "Gravações",
+    label: "Perguntar ao histórico de reuniões",
+    conversation: true,
+    env: "AI_MODEL",
+  },
+  {
+    id: "meetings_ask",
+    group: "Gravações",
+    label: "Perguntar a uma reunião",
+    conversation: true,
+    env: "MEETINGS_MODEL",
+  },
+  {
+    id: "whatsapp_task",
+    group: "WhatsApp",
+    label: "Tarefa a partir das mensagens",
+    conversation: false,
+    env: "WHATSAPP_TASK_MODEL",
+  },
+  {
+    id: "social_leads_plan",
+    group: "Social Leads",
+    label: "Gerar e refazer o plano do mês",
+    conversation: false,
+    env: "SOCIAL_LEADS_MODEL",
+    note: "Fora da Claude, a MAVI não abre o site do cliente: segue só o briefing.",
+  },
+  {
+    id: "social_leads_adjust",
+    group: "Social Leads",
+    label: "Ajuste pedido à MAVI",
+    conversation: false,
+    env: "SOCIAL_LEADS_MODEL",
+  },
+  {
+    id: "social_leads_briefing",
+    group: "Social Leads",
+    label: "Briefing pela MAVI",
+    conversation: false,
+    env: "SOCIAL_LEADS_MODEL",
+  },
+  {
+    id: "social_leads_colors",
+    group: "Social Leads",
+    label: "Cores da marca (lê o logo e as imagens)",
+    conversation: false,
+    env: "SOCIAL_LEADS_MODEL",
+    note: "O modelo escolhido precisa aceitar imagens.",
+  },
+];
+
+export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
+
+/**
+ * O modelo do padrão do servidor para cada funcionalidade (as variáveis da
+ * Vercel vencem o código).
+ */
+export function serverModel(
+  feature: AiFeature,
+  env: Record<string, string | undefined>,
+) {
+  const fallback = "claude-opus-5-5";
+  switch (feature) {
+    case "assistant":
+    case "meetings_history":
+      return env.AI_MODEL || fallback;
+    case "meetings_ask":
+      return env.MEETINGS_MODEL || fallback;
+    case "whatsapp_task":
+      return env.WHATSAPP_TASK_MODEL || env.MEETINGS_MODEL || fallback;
+    default:
+      return env.SOCIAL_LEADS_MODEL || fallback;
+  }
+}
+
 // ------------------------------------------------------------ regras
-export type RouteScope = "company" | "user" | "client" | "contract" | "project";
+export type RouteScope =
+  "company" | "user" | "client" | "contract" | "project" | "feature";
 export type AiRoute = {
   id: string;
   type: RouteScope;
   scope_id: string | null;
+  /** Só nas regras de funcionalidade. */
+  feature?: AiFeature | null;
   provider_id: string;
   model: string;
   updated_at?: string;
@@ -209,13 +321,15 @@ export const ROUTE_ORDER: RouteScope[] = [
   "contract",
   "client",
   "user",
+  "feature",
   "company",
 ];
 
 /**
- * A regra que vale para uma pessoa num lugar (a mesma ordem do banco,
- * ai_resolve_route): projeto › produto › cliente › pessoa › empresa. Só
- * provedores ativos contam. Nulo: o padrão do servidor.
+ * A regra que vale para uma pessoa num lugar e numa funcionalidade (a mesma
+ * ordem do banco, ai_resolve_route): projeto › produto › cliente › pessoa ›
+ * funcionalidade › empresa. Pessoa, cliente, produto e projeto só valem nas
+ * conversas. Só provedores ativos contam. Nulo: o padrão do servidor.
  */
 export function pickRoute(
   routes: AiRoute[],
@@ -224,22 +338,31 @@ export function pickRoute(
     client?: string;
     contract?: string;
     project?: string;
+    /** Sem funcionalidade: o assistente. */
+    feature?: AiFeature;
   },
   activeProviders: ReadonlySet<string>,
 ): AiRoute | null {
+  const feature = where.feature ?? "assistant";
+  const talk = featureInfo(feature)?.conversation ?? true;
   const id: Record<RouteScope, string | null | undefined> = {
     project: where.project,
     contract: where.contract,
     client: where.client,
     user: where.user,
+    feature: null,
     company: null,
   };
   for (const type of ROUTE_ORDER) {
-    if (type !== "company" && !id[type]) continue;
+    const general = type === "company" || type === "feature";
+    if (!general && (!talk || !id[type])) continue;
     const r = routes.find(
       (x) =>
         x.type === type &&
-        (type === "company" || x.scope_id === id[type]) &&
+        (type === "company" ||
+          (type === "feature"
+            ? x.feature === feature
+            : x.scope_id === id[type])) &&
         activeProviders.has(x.provider_id),
     );
     if (r) return r;
