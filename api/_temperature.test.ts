@@ -217,20 +217,35 @@ describe("worker do termômetro", () => {
     let claims = 0;
     let refreshes = 0;
     let summaries = 0;
-    const signal = (id: string, conversa: string) => ({
+    const signalC = "00000000-0000-4000-8000-0000000000c9";
+    // A reserva é leve; o material vem uma leitura por chamada.
+    const signal = (id: string) => ({
       id,
       company_id: company,
       client_id: client,
       source_type: "whatsapp",
       version: 3,
-      state: { cliente: "4282", conversa },
-      excerpt: "Não gostei",
-      message_id: "00000000-0000-4000-8000-0000000000c1",
-      client_lines: 2,
     });
+    const material: Record<string, unknown> = {
+      [signalA]: {
+        state: { cliente: "4282", conversa: "tudo certo" },
+        excerpt: "Não gostei",
+        message_id: "00000000-0000-4000-8000-0000000000c1",
+        client_lines: 2,
+      },
+      [signalB]: {
+        state: { cliente: "4282", conversa: "QUEBRA" },
+        excerpt: "",
+        message_id: null,
+        client_lines: 1,
+      },
+      // Sem fala do cliente: o banco pula e devolve nulo.
+      [signalC]: null,
+    };
     const { fetchImpl, calls } = database({
       "rpc/ai_temperature_claim": () =>
-        claims++ === 0 ? [signal(signalA, "tudo certo"), signal(signalB, "QUEBRA")] : [],
+        claims++ === 0 ? [signal(signalA), signal(signalB), signal(signalC)] : [],
+      "rpc/ai_temperature_material": (b: any) => material[b.p_id],
       "rpc/ai_temperature_config": {
         version: 3,
         questions,
@@ -315,7 +330,12 @@ describe("worker do termômetro", () => {
       embed,
     });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ signals: 1, failed: 1, clients: 1, summaries: 1 });
+    expect(res.body).toEqual({ signals: 1, failed: 1, skipped: 1, clients: 1, summaries: 1 });
+    expect(
+      calls.filter((c) => c.url.includes("rpc/ai_temperature_material")).map((c) => c.body.p_id).sort(),
+    ).toEqual([signalA, signalB, signalC].sort());
+    expect(calls.find((c) => c.url.includes("rpc/ai_temperature_refresh"))!.body.p_limit).toBe(2);
+    expect(calls.filter((c) => c.url.includes("alpha/decisions"))).toHaveLength(2);
 
     const jev = calls.find((c) => c.url.includes("alpha/decisions"))!;
     expect(jev.auth).toBe("Bearer sk-or");
@@ -363,10 +383,6 @@ describe("worker do termômetro", () => {
           client_id: client,
           source_type: "meeting",
           version: 1,
-          state: {},
-          excerpt: "",
-          message_id: null,
-          client_lines: 1,
         },
       ],
       "rpc/ai_temperature_config": {

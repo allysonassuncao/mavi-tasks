@@ -62,10 +62,18 @@ const index = async () => {
 };
 const due = () =>
   sql(`update temperature_signals set dirty_at = now() - interval '1 hour' where status = 'pending'`);
+/** Reserva e busca o material de cada uma (como o worker); puladas saem. */
 const claim = async () => {
   await due();
   await as(null);
-  return rpc("ai_temperature_claim", [SECRET, 30]);
+  const list = await rpc("ai_temperature_claim", [SECRET, 30]);
+  const out = [];
+  for (const c of list) {
+    await as(null);
+    const m = await rpc("ai_temperature_material", [SECRET, c.id]);
+    if (m) out.push({ ...c, ...m });
+  }
+  return out;
 };
 const refresh = async () => {
   await as(null);
@@ -488,6 +496,48 @@ await check("o telefone novo do time faz o grupo ser lido de novo", async () => 
   // Agora o Carlos é do time: o dia fica sem fala do cliente e sai sem ir ao Jev.
   const claimed = await claim();
   assert.equal(claimed.filter((c) => c.source_type === "whatsapp").length, 0);
+});
+
+await check("reservar é leve e o material de uma reunião grande cabe no tempo da API", async () => {
+  // 80 pessoas na empresa e uma reunião de 3.000 falas com 12 falantes.
+  const people = Array.from({ length: 80 }, (_, i) => uid(2000 + i));
+  await sql(`insert into auth.users select unnest($1::uuid[])`, [people]);
+  await sql(
+    `insert into memberships(company_id,user_id,name,email,role,active)
+     select $1, u, 'Pessoa ' || n || ' Silva', 'p' || n || '@make.com', 'member', true
+     from unnest($2::uuid[]) with ordinality x(u, n)`,
+    [A, people],
+  );
+  const BIG = uid(950);
+  await sql(
+    `insert into meeting_recordings(id, company_id, client_id, source_id, title, recorded_at, recorded_by_email, summary)
+     values ($1,$2,$3,'big','Grande',now(),'gabi@make.com','{"overview":"Longa."}')`,
+    [BIG, A, client],
+  );
+  await sql(
+    `insert into meeting_transcripts(recording_id, company_id, speakers, segments)
+     select $1, $2, array(select 'Falante Nome ' || i from generate_series(1, 12) i),
+      jsonb_agg(jsonb_build_array(n, n + 1, n % 12, 'Uma fala qualquer sobre a campanha e os leads do mês ' || n))
+     from generate_series(1, 3000) n`,
+    [BIG, A],
+  );
+  await index();
+  await due();
+  await as(null);
+  let t = performance.now();
+  const list = await rpc("ai_temperature_claim", [SECRET, 60]);
+  const claimMs = performance.now() - t;
+  const big = list.find((c) => c.source_type === "meeting");
+  assert.ok(big && !("state" in big), "a reserva não traz material");
+  await as(null);
+  t = performance.now();
+  const m = await rpc("ai_temperature_material", [SECRET, big.id]);
+  const materialMs = performance.now() - t;
+  assert.ok(m.state.transcricao.length > 50000);
+  console.log(`   reserva ${Math.round(claimMs)} ms · material da reunião grande ${Math.round(materialMs)} ms (PGlite)`);
+  assert.ok(claimMs < 1500 && materialMs < 2500, `${claimMs} / ${materialMs}`);
+  await sql(`delete from meeting_recordings where id = $1`, [BIG]);
+  await index();
 });
 
 await check("o pg_cron só acorda o worker quando há trabalho", async () => {

@@ -365,12 +365,15 @@ export function summaryMessage(s: SummaryItem) {
 }
 
 // ------------------------------------------------------------ worker
+/** Uma leitura reservada (o material vem à parte, uma por chamada). */
 type Claimed = {
   id: string;
   company_id: string;
   client_id: string;
   source_type: "meeting" | "whatsapp";
   version: number;
+};
+type Material = {
   state: Row;
   excerpt: string;
   message_id: string | null;
@@ -410,7 +413,7 @@ async function evaluate(
   env: TemperatureEnv,
   deps: AiDeps,
   claimed: Claimed[],
-  stats: { signals: number; failed: number },
+  stats: { signals: number; failed: number; skipped: number },
 ) {
   const configs = new Map<string, CompanyConfig & { provider: ProviderConfig | null }>();
   for (const company of new Set(claimed.map((c) => c.company_id))) {
@@ -431,9 +434,17 @@ async function evaluate(
       const questions = buildQuestions(cfg.questions, c.source_type);
       if (!Object.keys(questions).length)
         throw new TemperatureError(400, "Nenhum indicador para esta fonte.");
+      // O material de uma leitura por chamada: cabe no tempo do banco.
+      const m = await workerRpc<Material | null>(env, deps, "ai_temperature_material", {
+        p_id: c.id,
+      });
+      if (!m) {
+        stats.skipped++;
+        return;
+      }
       const res = await askJev(
         cfg.provider,
-        c.state,
+        m.state,
         questions,
         deps.fetch,
         AbortSignal.timeout(30000),
@@ -443,9 +454,9 @@ async function evaluate(
         id: c.id,
         version: c.version,
         ...ev,
-        excerpt: c.excerpt,
-        message_id: c.message_id,
-        client_lines: c.client_lines,
+        excerpt: m.excerpt,
+        message_id: m.message_id,
+        client_lines: m.client_lines,
         cost: Math.round(res.cost * 1e6) / 1e6,
         input: res.tokens,
         model: res.model || cfg.provider.model,
@@ -510,7 +521,7 @@ async function writeSummary(env: TemperatureEnv, deps: AiDeps, s: SummaryItem) {
 export async function runTemperature(env: TemperatureEnv, deps: AiDeps) {
   const now = deps.now ?? Date.now;
   const deadline = now() + env.workerBudgetMs;
-  const stats = { signals: 0, failed: 0, clients: 0, summaries: 0 };
+  const stats = { signals: 0, failed: 0, skipped: 0, clients: 0, summaries: 0 };
   // Uma rodada do Jev leva poucos segundos (8 leituras ao mesmo tempo).
   while (now() < deadline - 15000) {
     const claimed = await workerRpc<Claimed[]>(env, deps, "ai_temperature_claim", {
@@ -520,8 +531,9 @@ export async function runTemperature(env: TemperatureEnv, deps: AiDeps) {
     await evaluate(env, deps, claimed, stats);
   }
   while (now() < deadline - 5000) {
+    // Poucos clientes por chamada: cada recálculo refaz dias de histórico.
     const n = await workerRpc<number>(env, deps, "ai_temperature_refresh", {
-      p_limit: 20,
+      p_limit: 2,
     });
     stats.clients += n;
     if (!n) break;
