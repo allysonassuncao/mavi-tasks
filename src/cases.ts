@@ -1,4 +1,4 @@
-import { rpc } from "./api";
+import { fetchAllRows, rpc } from "./api";
 import { supabase } from "./supabase";
 import { fold } from "./domain";
 import type { Snapshot } from "./types";
@@ -498,8 +498,21 @@ export const serverCases: CasesApi = {
       []) as NicheCount[];
   },
   async clients(company) {
-    return ((await rpc("success_case_clients", { p_company: company })) ??
-      []) as CaseClient[];
+    // Uma agência passa de mil clientes, o teto de linhas de cada resposta do
+    // Supabase: a lista vem em páginas, na ordem de um id único.
+    if (!supabase) throw Error("Supabase não configurado");
+    const db = supabase;
+    return fetchAllRows<CaseClient>((count) =>
+      db
+        .rpc(
+          "success_case_clients",
+          { p_company: company },
+          count ? { count } : undefined,
+        )
+        .order("archived")
+        .order("name")
+        .order("id"),
+    );
   },
   async reviewCount(company) {
     return ((await rpc("success_case_review_count", { p_company: company })) ??
