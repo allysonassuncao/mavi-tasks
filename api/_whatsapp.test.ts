@@ -1,9 +1,10 @@
 import crypto from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   handleWhatsapp,
   mediaPath,
   normalizeMessage,
+  parseDraft,
   runWhatsappSync,
   type WhatsappEnv,
 } from "./_whatsapp";
@@ -778,5 +779,214 @@ describe("leitura das mídias para a MAVI", () => {
     expect(rpcCalls(w.calls, "whatsapp_store_content")[0].p_status).toBe(
       "skipped",
     );
+  });
+});
+
+describe("tarefa a partir de mensagens (MAVI)", () => {
+  const G = "00000000-0000-4000-8000-00000000000a";
+  const C = "00000000-0000-4000-8000-00000000000c";
+  const M1 = "00000000-0000-4000-8000-000000000011";
+  const M2 = "00000000-0000-4000-8000-000000000012";
+  const row = (id: string, t: string, over: Record<string, unknown> = {}) => ({
+    id,
+    group_id: G,
+    company_id: "co",
+    sent_at: t,
+    sender_name: "Rauzer",
+    sender_phone: "553182916886",
+    from_me: false,
+    kind: "text",
+    body: "",
+    media_name: null,
+    media_seconds: null,
+    content_text: null,
+    quoted_wa_id: null,
+    wa_id: id,
+    ...over,
+  });
+  function server(
+    answer: string,
+    picked = [
+      row(M1, "2026-09-26T13:00:00Z", {
+        body: "Podemos trocar o criativo da campanha de outubro até sexta?",
+      }),
+      row(M2, "2026-09-26T13:05:00Z", {
+        kind: "audio",
+        content_text: "E aumentar a verba para 5 mil",
+      }),
+    ],
+  ) {
+    const calls: { url: string; auth?: string; body?: any }[] = [];
+    const json = (b: unknown) =>
+      new Response(JSON.stringify(b), { status: 200 });
+    const fetchImpl = (async (input: any, init: any = {}) => {
+      const url = String(input);
+      calls.push({
+        url,
+        auth: init.headers?.Authorization,
+        body: init.body ? JSON.parse(init.body) : undefined,
+      });
+      if (url.includes("whatsapp_messages?") && url.includes("id=in."))
+        return json(picked);
+      if (url.includes("whatsapp_messages?") && url.includes("sent_at=lt."))
+        return json([
+          row("b1", "2026-09-26T12:50:00Z", {
+            body: "Oi pessoal, tudo certo com a campanha?",
+            from_me: true,
+            sender_name: "Kamilli",
+          }),
+        ]);
+      if (url.includes("whatsapp_messages?")) return json([]);
+      if (url.includes("whatsapp_groups?"))
+        return json([
+          {
+            title: "4282 - Loja & Make (Make Ads)",
+            client_id: C,
+            product_ids: ["p1"],
+          },
+        ]);
+      if (url.includes("clients?")) return json([{ name: "4282" }]);
+      if (url.includes("products?")) return json([{ name: "Make Ads" }]);
+      if (url.endsWith("rpc/ai_log_usage")) return json(null);
+      throw new Error(`fetch inesperado ${url}`);
+    }) as typeof fetch;
+    const requests: any[] = [];
+    const ask = vi.fn(async (_env: any, request: any, meter: any) => {
+      requests.push(request);
+      meter.input = 900;
+      meter.output = 200;
+      meter.cost = 0.01;
+      return answer;
+    });
+    return { calls, requests, deps: { fetch: fetchImpl, ask, now: () => NOW } };
+  }
+  const draftEnv = {
+    ...env,
+    anthropicKey: "sk-ant",
+    taskModel: "claude-opus-5-5",
+  };
+
+  it("a MAVI lê as mensagens escolhidas e o contexto e devolve o rascunho", async () => {
+    const s = server(
+      'Aqui está:\n```json\n{"title": "Trocar o criativo da campanha de outubro", "summary": "Rauzer pediu para trocar o criativo e aumentar a verba.", "actions": ["Criar 3 opções de criativo", "Ajustar a verba para R$ 5 mil"], "details": ["Prazo: sexta"], "due": "2026-10-02"}\n```',
+    );
+    const r = await handleWhatsapp(
+      { action: "whatsapp-task-draft", messages: [M1, M2] },
+      "Bearer user",
+      draftEnv,
+      s.deps,
+    );
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({
+      title: "Trocar o criativo da campanha de outubro",
+      summary: "Rauzer pediu para trocar o criativo e aumentar a verba.",
+      actions: ["Criar 3 opções de criativo", "Ajustar a verba para R$ 5 mil"],
+      details: ["Prazo: sexta"],
+      due: "2026-10-02",
+    });
+    // Tudo lido como a pessoa.
+    expect(
+      s.calls
+        .filter((c) => c.url.includes("/rest/v1/"))
+        .every((c) => c.auth === "Bearer user"),
+    ).toBe(true);
+    const context: string = s.requests[0].context;
+    expect(context).toContain(
+      'Grupo de WhatsApp: "4282 - Loja & Make (Make Ads)"',
+    );
+    expect(context).toContain("Cliente: 4282 · produtos: Make Ads");
+    expect(context).toContain(
+      "   26/09/2026, 09:50 · Kamilli (número da agência): Oi pessoal",
+    );
+    expect(context).toContain(
+      ">> 26/09/2026, 10:00 · Rauzer: Podemos trocar o criativo",
+    );
+    expect(context).toContain(
+      ">> 26/09/2026, 10:05 · Rauzer: [áudio] E aumentar a verba para 5 mil",
+    );
+    expect(context.indexOf("Kamilli")).toBeLessThan(context.indexOf("Podemos"));
+    const usage = s.calls.find((c) => c.url.endsWith("rpc/ai_log_usage"))!;
+    expect(usage.body).toMatchObject({
+      p_module: "whatsapp",
+      p_kind: "task",
+      p_client: C,
+      p_input: 900,
+      p_cost: 0.01,
+    });
+  });
+
+  it("rascunho sem título, mensagens de grupos diferentes ou sem configuração", async () => {
+    const bad = server('{"summary": "x"}');
+    expect(
+      (
+        await handleWhatsapp(
+          { action: "whatsapp-task-draft", messages: [M1, M2] },
+          "Bearer u",
+          draftEnv,
+          bad.deps,
+        )
+      ).status,
+    ).toBe(502);
+    const mixed = server("{}", [
+      row(M1, "2026-09-26T13:00:00Z"),
+      { ...row(M2, "2026-09-26T13:05:00Z"), group_id: "outro" },
+    ]);
+    expect(
+      (
+        await handleWhatsapp(
+          { action: "whatsapp-task-draft", messages: [M1, M2] },
+          "Bearer u",
+          draftEnv,
+          mixed.deps,
+        )
+      ).status,
+    ).toBe(404);
+    expect(mixed.requests).toHaveLength(0);
+    const s = server("{}");
+    expect(
+      (
+        await handleWhatsapp(
+          { action: "whatsapp-task-draft", messages: [M1] },
+          "Bearer u",
+          { ...draftEnv, anthropicKey: "" },
+          s.deps,
+        )
+      ).status,
+    ).toBe(503);
+    expect(
+      (
+        await handleWhatsapp(
+          { action: "whatsapp-task-draft", messages: ["x"] },
+          "Bearer u",
+          draftEnv,
+          s.deps,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handleWhatsapp(
+          { action: "whatsapp-task-draft", messages: [M1] },
+          null,
+          draftEnv,
+          s.deps,
+        )
+      ).status,
+    ).toBe(401);
+  });
+
+  it("valida e limpa o JSON", () => {
+    expect(
+      parseDraft(
+        '{"title": "  Revisar   o site ", "actions": ["a", 3, ""], "due": "sexta"}',
+      ),
+    ).toEqual({
+      title: "Revisar o site",
+      summary: "",
+      actions: ["a"],
+      details: [],
+      due: null,
+    });
+    expect(parseDraft("sem json")).toBeNull();
   });
 });

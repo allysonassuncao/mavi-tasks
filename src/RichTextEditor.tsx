@@ -24,7 +24,7 @@ import {
   Redo2,
   ImagePlus,
 } from "lucide-react";
-import { parseDescription, serializeDescription } from "./rich-text";
+import { parseDescription, safeHref, serializeDescription } from "./rich-text";
 import { mentionExtension, type MentionPerson } from "./mentions";
 import { Loading } from "./ui";
 function ImageNodeView({ node }: NodeViewProps) {
@@ -93,7 +93,15 @@ export default function RichTextEditor({
         code: false,
         codeBlock: false,
         horizontalRule: false,
-        link: false,
+        // Links: só endereços web e caminhos do app (os mesmos que se guardam).
+        link: {
+          openOnClick: false,
+          autolink: true,
+          linkOnPaste: true,
+          defaultProtocol: "https",
+          isAllowedUri: (url) => !!safeHref(url),
+          HTMLAttributes: { rel: "noopener noreferrer", target: null },
+        },
         underline: false,
       }),
       // Text color and highlight (any color): kept as "#rrggbb" when saved.

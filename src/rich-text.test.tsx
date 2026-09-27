@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   DESCRIPTION_PREFIX,
   parseDescription,
+  safeHref,
   serializeDescription,
 } from "./rich-text";
 import { RichTextContent } from "./RichTextContent";
@@ -157,5 +158,69 @@ describe("cor do texto e destaque", () => {
     expect(html).toContain(
       '<mark class="rt-highlight" style="background-color:#bbf7d0">',
     );
+  });
+});
+
+describe("links", () => {
+  const withLink = (href: string) =>
+    serializeDescription({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "abrir",
+              marks: [
+                {
+                  type: "link",
+                  attrs: { href, target: "_self", onclick: "x" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  it("guarda só endereços web e caminhos do app", () => {
+    expect(safeHref("https://make.com.br/a?b=1")).toBe(
+      "https://make.com.br/a?b=1",
+    );
+    expect(safeHref("/agencias/make/drive?whatsapp=g&msg=m")).toBe(
+      "/agencias/make/drive?whatsapp=g&msg=m",
+    );
+    for (const bad of [
+      "javascript:alert(1)",
+      "//evil.com",
+      "/\\evil.com",
+      "data:text/html,x",
+      "https://",
+      "/a b",
+      3,
+    ])
+      expect(safeHref(bad)).toBeNull();
+    expect(
+      parseDescription(withLink("javascript:alert(1)")).content?.[0]
+        .content?.[0].marks,
+    ).toEqual([]);
+    expect(
+      parseDescription(withLink("/agencias/make/drive")).content?.[0]
+        .content?.[0].marks,
+    ).toEqual([{ type: "link", attrs: { href: "/agencias/make/drive" } }]);
+  });
+  it("link do app fica no app; link de fora abre em nova aba", () => {
+    const inside = renderToStaticMarkup(
+      <RichTextContent value={withLink("/agencias/make/drive?msg=1")} />,
+    );
+    expect(inside).toContain(
+      '<a href="/agencias/make/drive?msg=1" class="rt-link">abrir</a>',
+    );
+    const outside = renderToStaticMarkup(
+      <RichTextContent value={withLink("https://site.com")} />,
+    );
+    expect(outside).toContain('href="https://site.com"');
+    expect(outside).toContain('target="_blank"');
+    expect(outside).toContain('rel="noopener noreferrer"');
   });
 });

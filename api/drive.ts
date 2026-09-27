@@ -201,7 +201,7 @@ export default async function handler(
         body,
         authorization,
         whatsappEnv(driveEnv()),
-        { fetch },
+        { fetch, ask: claudeAsk },
         requestOrigin(req),
       );
     else if (action.startsWith("case-"))

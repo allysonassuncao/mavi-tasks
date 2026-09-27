@@ -6,6 +6,8 @@ import {
   type GcsCredentials,
 } from "./_drive.js";
 import { extractFileText } from "./_ai-extract.js";
+import type { AskRequest, MeetingsEnv } from "./_meetings.js";
+import { newMeter, type Meter } from "./_social-leads.js";
 
 /**
  * Drive › cliente › "Whatsapp": a coleta dos grupos na Uazapi
@@ -19,6 +21,9 @@ import { extractFileText } from "./_ai-extract.js";
  *
  * - "whatsapp-media": links assinados das mídias para a pasta Whatsapp do
  *   Drive, como a pessoa (o banco confere o acesso pela regra do Drive).
+ * - "whatsapp-task-draft": a MAVI lê as mensagens escolhidas (e um pouco da
+ *   conversa em volta) e propõe título, resumo, próximos passos e prazo da
+ *   tarefa, para quem nunca viu o grupo entender.
  *
  * A Uazapi guarda as mensagens por 7 dias e as mídias por 2: por isso as
  * mídias mais antigas da fila vão primeiro. O servidor fala com o banco como
@@ -43,6 +48,9 @@ export type WhatsappEnv = Pick<
   transcribeModel: string;
   /** Preço da transcrição por minuto (US$), para o painel de consumo. */
   transcribeUsdPerMinute: number;
+  /** A MAVI que monta a tarefa a partir das mensagens (Claude). */
+  anthropicKey: string;
+  taskModel: string;
 };
 
 export function whatsappEnv(
@@ -63,10 +71,22 @@ export function whatsappEnv(
     transcribeModel: env.WHATSAPP_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe",
     transcribeUsdPerMinute:
       Number(env.WHATSAPP_TRANSCRIBE_USD_PER_MIN) || 0.003,
+    anthropicKey: env.ANTHROPIC_API_KEY || "",
+    taskModel:
+      env.WHATSAPP_TASK_MODEL || env.MEETINGS_MODEL || "claude-opus-5-5",
   };
 }
 
-export type WhatsappDeps = { fetch: typeof fetch; now?: () => number };
+export type WhatsappDeps = {
+  fetch: typeof fetch;
+  now?: () => number;
+  /** A chamada à Claude (a mesma das Gravações), trocada nos testes. */
+  ask?: (
+    env: MeetingsEnv,
+    request: AskRequest,
+    meter: Meter,
+  ) => Promise<string>;
+};
 
 class WhatsappError extends Error {
   constructor(
@@ -803,6 +823,299 @@ async function mediaLinks(
   return { status: 200, body: { urls } };
 }
 
+// ------------------------------------------------------------ tarefa a partir de mensagens
+type DraftMessage = {
+  id: string;
+  group_id: string;
+  company_id: string;
+  sent_at: string;
+  sender_name: string;
+  sender_phone: string;
+  from_me: boolean;
+  kind: string;
+  body: string;
+  media_name: string | null;
+  media_seconds: number | null;
+  content_text: string | null;
+  quoted_wa_id: string | null;
+  wa_id: string;
+};
+export type TaskDraft = {
+  title: string;
+  summary: string;
+  actions: string[];
+  details: string[];
+  due: string | null;
+};
+const DRAFT_COLUMNS =
+  "id,group_id,company_id,sent_at,sender_name,sender_phone,from_me,kind,body,media_name,media_seconds,content_text,quoted_wa_id,wa_id";
+
+const TASK_SYSTEM = `Você é a MAVI, a inteligência do sistema de gestão de uma agência de marketing. Seu nome é MAVI, no feminino. Alguém da equipe selecionou mensagens de um grupo de WhatsApp entre a agência e um cliente para virar uma tarefa. Quem vai executar a tarefa talvez nunca tenha visto esse grupo: escreva para que a pessoa entenda o pedido sem ler a conversa.
+
+Responda SOMENTE com um objeto JSON, sem texto antes ou depois e sem cercas de código, neste formato:
+{"title": "...", "summary": "...", "actions": ["..."], "details": ["..."], "due": "AAAA-MM-DD" ou null}
+
+Regras:
+- title: o que precisa ser feito, com verbo no infinitivo e o assunto concreto (ex.: "Trocar o criativo da campanha de outubro do painel de LED"). Até 80 caracteres, sem emoji, sem o código do cliente, sem "tarefa" nem "WhatsApp".
+- summary: 2 a 4 frases. Quem pediu (nome como aparece), o que foi pedido, por quê ou em que contexto, e o que já foi respondido ou combinado no grupo.
+- actions: de 1 a 5 passos concretos e verificáveis para cumprir o pedido, na ordem.
+- details: fatos úteis que aparecem nas mensagens: datas, prazos, valores, quantidades, links, nomes de arquivos, referências. Lista vazia se não houver.
+- due: só se as mensagens disserem uma data ou prazo explícito ("até sexta", "dia 10"); converta para data a partir da data da mensagem. Senão, null.
+- As mensagens marcadas com ">>" são as escolhidas: a tarefa é sobre elas. As outras são só contexto.
+- "[áudio]" traz a transcrição automática (pode ter erros); "[imagem]" e "[vídeo]" você não vê, só sabe que foram enviados.
+- Use só o que está nas mensagens. Não invente nomes, datas, valores nem compromissos.
+- Português do Brasil, frases curtas e diretas.`;
+
+const brTime = (iso: string) =>
+  new Date(iso).toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+/** Uma mensagem como linha para a MAVI ler. */
+export function draftLine(m: DraftMessage, picked: boolean) {
+  const who =
+    m.sender_name.trim() ||
+    (m.from_me
+      ? "Agência"
+      : m.sender_phone
+        ? `+${m.sender_phone}`
+        : "Participante");
+  const body = m.body.trim();
+  const content =
+    m.kind === "audio"
+      ? `[áudio] ${m.content_text?.trim() || "(sem transcrição)"}`
+      : m.kind === "image"
+        ? `[imagem]${body ? ` ${body}` : ""}`
+        : m.kind === "video"
+          ? `[vídeo]${body ? ` ${body}` : ""}`
+          : m.kind === "document"
+            ? `[documento "${m.media_name ?? "arquivo"}"]${body ? ` ${body}` : ""}${m.content_text ? `\n   Conteúdo do documento: ${m.content_text.slice(0, 1500)}` : ""}`
+            : m.kind === "sticker"
+              ? "[figurinha]"
+              : body || `[${m.kind}]`;
+  return `${picked ? ">> " : "   "}${brTime(m.sent_at)} · ${who}${m.from_me ? " (número da agência)" : ""}: ${content.slice(0, 4000)}`;
+}
+
+/** O JSON da MAVI, validado (campos faltando viram vazios). */
+export function parseDraft(text: string): TaskDraft | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  let raw: Row;
+  try {
+    raw = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+  const line = (v: unknown, max: number) =>
+    typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "";
+  const list = (v: unknown) =>
+    (Array.isArray(v) ? v : [])
+      .map((x) => line(x, 400))
+      .filter(Boolean)
+      .slice(0, 8);
+  const title = line(raw.title, 120);
+  if (!title) return null;
+  return {
+    title,
+    summary:
+      typeof raw.summary === "string" ? raw.summary.trim().slice(0, 1500) : "",
+    actions: list(raw.actions),
+    details: list(raw.details),
+    due:
+      typeof raw.due === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.due)
+        ? raw.due
+        : null,
+  };
+}
+
+async function selectAs<T>(
+  env: WhatsappEnv,
+  deps: WhatsappDeps,
+  auth: string,
+  path: string,
+) {
+  const res = await deps.fetch(`${env.supabaseUrl}/rest/v1/${path}`, {
+    headers: { apikey: env.supabaseKey, Authorization: auth },
+  });
+  if (!res.ok)
+    throw new WhatsappError(
+      res.status === 401 ? 401 : 502,
+      "Não foi possível ler as mensagens.",
+    );
+  return (await res.json()) as T[];
+}
+
+async function taskDraft(
+  req: Row,
+  authorization: string,
+  env: WhatsappEnv,
+  deps: WhatsappDeps,
+) {
+  const ids: string[] = Array.isArray(req.messages)
+    ? ([
+        ...new Set(
+          req.messages.filter(
+            (id: unknown) => typeof id === "string" && UUID.test(id),
+          ),
+        ),
+      ] as string[])
+    : [];
+  if (!ids.length || ids.length !== req.messages.length || ids.length > 40)
+    return { status: 400, body: { error: "Escolha de 1 a 40 mensagens." } };
+  if (!env.anthropicKey || !deps.ask)
+    return {
+      status: 503,
+      body: {
+        error: "A MAVI não está configurada no servidor (ANTHROPIC_API_KEY).",
+      },
+    };
+  // Tudo como a pessoa: o banco só devolve o que ela vê.
+  const picked = await selectAs<DraftMessage>(
+    env,
+    deps,
+    authorization,
+    `whatsapp_messages?select=${DRAFT_COLUMNS}&id=in.(${ids.join(",")})&order=sent_at.asc,id.asc`,
+  );
+  if (
+    picked.length !== ids.length ||
+    new Set(picked.map((m) => m.group_id)).size !== 1
+  )
+    return {
+      status: 404,
+      body: { error: "Mensagens não encontradas ou de grupos diferentes." },
+    };
+  const { group_id: groupId, company_id: company } = picked[0];
+  const first = picked[0];
+  const last = picked[picked.length - 1];
+  const [groups, before, after] = await Promise.all([
+    selectAs<{
+      title: string;
+      client_id: string | null;
+      product_ids: string[];
+    }>(
+      env,
+      deps,
+      authorization,
+      `whatsapp_groups?select=title,client_id,product_ids&id=eq.${groupId}`,
+    ),
+    // Um pouco da conversa antes e depois, para a MAVI entender o contexto.
+    selectAs<DraftMessage>(
+      env,
+      deps,
+      authorization,
+      `whatsapp_messages?select=${DRAFT_COLUMNS}&group_id=eq.${groupId}&kind=not.in.(reaction,album)&sent_at=lt.${encodeURIComponent(new Date(first.sent_at).toISOString())}&order=sent_at.desc&limit=12`,
+    ),
+    selectAs<DraftMessage>(
+      env,
+      deps,
+      authorization,
+      `whatsapp_messages?select=${DRAFT_COLUMNS}&group_id=eq.${groupId}&kind=not.in.(reaction,album)&sent_at=gt.${encodeURIComponent(new Date(last.sent_at).toISOString())}&order=sent_at.asc&limit=6`,
+    ),
+  ]);
+  const group = groups[0];
+  if (!group?.client_id)
+    return {
+      status: 404,
+      body: { error: "Grupo não encontrado ou sem acesso." },
+    };
+  const [clients, products] = await Promise.all([
+    selectAs<{ name: string }>(
+      env,
+      deps,
+      authorization,
+      `clients?select=name&id=eq.${group.client_id}`,
+    ),
+    group.product_ids.length
+      ? selectAs<{ name: string }>(
+          env,
+          deps,
+          authorization,
+          `products?select=name&id=in.(${group.product_ids.join(",")})`,
+        )
+      : Promise.resolve([] as { name: string }[]),
+  ]);
+  const pickedIds = new Set(ids);
+  const lines = [
+    ...before.reverse(),
+    ...picked.filter((m) => m.kind !== "reaction"),
+    ...after,
+  ]
+    .filter((m, i, all) => all.findIndex((x) => x.id === m.id) === i)
+    .map((m) => draftLine(m, pickedIds.has(m.id)));
+  const today = new Date(deps.now?.() ?? Date.now()).toLocaleDateString(
+    "pt-BR",
+    {
+      timeZone: "America/Sao_Paulo",
+    },
+  );
+  const context = [
+    `Grupo de WhatsApp: "${group.title}"`,
+    `Cliente: ${clients[0]?.name ?? "?"}${products.length ? ` · produtos: ${products.map((p) => p.name).join(", ")}` : ""}`,
+    `Hoje: ${today}`,
+    "",
+    "Mensagens (as marcadas com >> foram escolhidas):",
+    ...lines,
+  ].join("\n");
+  const meter = newMeter(env.taskModel);
+  let text: string;
+  try {
+    text = await deps.ask(
+      {
+        supabaseUrl: env.supabaseUrl,
+        supabaseKey: env.supabaseKey,
+        anthropicKey: env.anthropicKey,
+        model: env.taskModel,
+        credentials: env.credentials,
+        buckets: [],
+      },
+      {
+        system: TASK_SYSTEM,
+        context,
+        messages: [{ role: "user", content: "Monte a tarefa em JSON." }],
+      },
+      meter,
+    );
+  } catch (e) {
+    return {
+      status: 502,
+      body: {
+        error: `A MAVI não conseguiu montar a tarefa: ${(e as Error).message}`,
+      },
+    };
+  } finally {
+    if (meter.input || meter.output)
+      await callRpc(env, deps.fetch, authorization, "ai_log_usage", {
+        p_company: company,
+        p_module: "whatsapp",
+        p_kind: "task",
+        p_client: group.client_id,
+        p_contract: null,
+        p_project: null,
+        p_recording: null,
+        p_model: meter.model || env.taskModel,
+        p_input: meter.input,
+        p_output: meter.output,
+        p_cache_read: meter.cacheRead,
+        p_cache_write: meter.cacheWrite,
+        p_embedding: 0,
+        p_cost: Math.round(meter.cost * 1e6) / 1e6,
+      }).catch(() => {});
+  }
+  const draft = parseDraft(text);
+  if (!draft)
+    return {
+      status: 502,
+      body: { error: "A MAVI devolveu um rascunho inválido." },
+    };
+  return { status: 200, body: draft };
+}
+
 export async function handleWhatsapp(
   body: unknown,
   authorization: string | null,
@@ -816,6 +1129,11 @@ export async function handleWhatsapp(
       if (!authorization?.startsWith("Bearer "))
         return { status: 401, body: { error: "Entre na sua conta." } };
       return await mediaLinks(req, authorization, env, deps, origin);
+    }
+    if (req.action === "whatsapp-task-draft") {
+      if (!authorization?.startsWith("Bearer "))
+        return { status: 401, body: { error: "Entre na sua conta." } };
+      return await taskDraft(req, authorization, env, deps);
     }
     if (req.action === "whatsapp-sync") {
       const token = authorization?.replace(/^Bearer\s+/, "") ?? "";

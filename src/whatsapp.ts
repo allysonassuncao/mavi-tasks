@@ -634,51 +634,153 @@ export function taskContract(
   return (open.find((k) => products.includes(k.product_id)) ?? open[0])?.id;
 }
 
-/** Título e descrição (rich text) da tarefa feita a partir de mensagens. */
+/** O caminho (dentro do app) que abre a conversa numa mensagem. */
+export function whatsappPath(group: string, message?: string) {
+  const company = routeParts(window.location.pathname).company;
+  const q = new URLSearchParams({ whatsapp: group });
+  if (message) q.set("msg", message);
+  return `${pageUrl("drive", company)}?${q.toString()}`;
+}
+
+/** O rascunho que a MAVI devolve (/api/drive, ação "whatsapp-task-draft"). */
+export type TaskDraft = {
+  title: string;
+  summary: string;
+  actions: string[];
+  details: string[];
+  due: string | null;
+};
+export async function draftWhatsappTask(messages: string[]) {
+  return driveServer<TaskDraft>({ action: "whatsapp-task-draft", messages });
+}
+
+const byTime = (a: WhatsappMessage, b: WhatsappMessage) =>
+  a.sent_at === b.sent_at
+    ? a.id.localeCompare(b.id)
+    : a.sent_at < b.sent_at
+      ? -1
+      : 1;
+
+/** A mensagem em texto para a tarefa: áudio com a transcrição, documento com o nome. */
+function taskLine(m: WhatsappMessage) {
+  const body = plainText(m.body.trim());
+  if (m.kind === "audio") {
+    const len = secondsLabel(m.media_seconds);
+    const said = m.content_text?.trim();
+    return `Áudio${len ? ` (${len})` : ""}${said ? `: “${said}”` : " (sem transcrição)"}`;
+  }
+  return messagePreview(m) || body || "(sem texto)";
+}
+
+const GREETING =
+  /^(?:(?:bom dia|boa tarde|boa noite|oi+|ol[aá]|opa|e a[ií]|pessoal|galera|gente|time|tudo bem|tudo certo)[\s,!.?…-]*)+/i;
+/**
+ * Um título quando a MAVI não responde: a primeira mensagem com conteúdo,
+ * sem saudação, sem links e sem formatação, cortada numa palavra.
+ */
+export function fallbackTitle(messages: WhatsappMessage[]) {
+  const sorted = [...messages].sort(byTime);
+  for (const m of sorted) {
+    const raw = m.kind === "audio" ? (m.content_text ?? "") : plainText(m.body);
+    const clean = raw
+      .replace(URL_RE, "")
+      .replace(/\s+/g, " ")
+      .replace(GREETING, "")
+      .replace(/^[\s,.;:!?-]+/, "")
+      .trim();
+    if (clean.length < 8) continue;
+    const cut =
+      clean.length <= 80
+        ? clean
+        : `${clean.slice(0, 80).replace(/\s+\S*$/, "")}…`;
+    return cut.charAt(0).toUpperCase() + cut.slice(1);
+  }
+  const first = sorted[0];
+  const what = first ? KIND_LABELS[first.kind] : "Mensagem";
+  return `Ver ${what.toLowerCase()} de ${first ? senderLabel(first) : "participante"} no grupo`;
+}
+
+/**
+ * Título e descrição (rich text) da tarefa feita a partir de mensagens. Com o
+ * rascunho da MAVI: resumo, o que fazer e detalhes; sempre, as mensagens com
+ * o horário como link para a conversa, e o grupo.
+ */
 export function messagesTask(
   messages: WhatsappMessage[],
   context: { group: string; groupTitle: string; clientName: string },
+  draft?: TaskDraft | null,
 ) {
-  const sorted = [...messages].sort((a, b) =>
-    a.sent_at === b.sent_at
-      ? a.id.localeCompare(b.id)
-      : a.sent_at < b.sent_at
-        ? -1
-        : 1,
-  );
-  const first = sorted.find((m) => messagePreview(m)) ?? sorted[0];
-  const text = (t: string, bold = false): RichNode => ({
+  const sorted = [...messages].sort(byTime);
+  const text = (t: string, ...marks: RichNode["marks"][]): RichNode => ({
     type: "text",
     text: t,
-    marks: bold ? [{ type: "bold" }] : [],
+    marks: marks.flat().filter(Boolean) as NonNullable<RichNode["marks"]>,
   });
+  const bold = [{ type: "bold" }];
+  const link = (href: string) => [{ type: "link", attrs: { href } }];
   const paragraph = (...content: RichNode[]): RichNode => ({
     type: "paragraph",
     content,
   });
+  const list = (items: RichNode[][]): RichNode => ({
+    type: "bulletList",
+    content: items.map((content) => ({
+      type: "listItem",
+      content: [paragraph(...content)],
+    })),
+  });
+  const section = (title: string, ...body: RichNode[]) => [
+    paragraph(text(title, bold)),
+    ...body,
+  ];
+  const people = [...new Set(sorted.map(senderLabel))];
+  const first = sorted[0];
+  const content: RichNode[] = [];
+  if (draft?.summary)
+    content.push(...section("Resumo", paragraph(text(draft.summary))));
+  else
+    content.push(
+      paragraph(
+        text(
+          `Pedido feito no grupo do cliente ${context.clientName} por ${people.join(", ")}, em ${shortDate(first.sent_at)}. Leia as mensagens abaixo e abra a conversa para ver o contexto.`,
+        ),
+      ),
+    );
+  if (draft?.actions.length)
+    content.push(
+      ...section("O que fazer", list(draft.actions.map((a) => [text(a)]))),
+    );
+  if (draft?.details.length)
+    content.push(
+      ...section("Detalhes", list(draft.details.map((d) => [text(d)]))),
+    );
+  content.push(
+    ...section(
+      sorted.length === 1 ? "Mensagem do grupo" : "Mensagens do grupo",
+      paragraph(
+        text("Clique no horário para abrir a conversa naquela mensagem.", [
+          { type: "italic" },
+        ]),
+      ),
+      list(
+        sorted.map((m) => [
+          text(shortDate(m.sent_at), link(whatsappPath(context.group, m.id))),
+          text(" · "),
+          text(`${senderLabel(m)}: `, bold),
+          text(taskLine(m).slice(0, 600)),
+        ]),
+      ),
+    ),
+    paragraph(
+      text("Grupo: ", bold),
+      text(`${context.groupTitle} (cliente ${context.clientName}) · `),
+      text("abrir a conversa", link(whatsappPath(context.group, first.id))),
+    ),
+  );
   return {
-    title: (messagePreview(first) || `Mensagem de ${senderLabel(first)}`)
-      .replace(/\s+/g, " ")
-      .slice(0, 240),
-    description: serializeDescription({
-      type: "doc",
-      content: [
-        paragraph(
-          text("Grupo: ", true),
-          text(`${context.groupTitle} (${context.clientName})`),
-        ),
-        ...sorted.map((m) =>
-          paragraph(
-            text(`${senderLabel(m)} · ${shortDate(m.sent_at)}: `, true),
-            text(messagePreview(m) || "(sem texto)"),
-          ),
-        ),
-        paragraph(
-          text("Conversa: ", true),
-          text(whatsappLink(context.group, sorted[0].id)),
-        ),
-      ],
-    }),
+    title: (draft?.title || fallbackTitle(sorted)).slice(0, 240),
+    description: serializeDescription({ type: "doc", content }),
+    ...(draft?.due ? { due: draft.due } : {}),
   };
 }
 

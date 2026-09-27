@@ -22,6 +22,7 @@ import {
   Play,
   Plus,
   Search,
+  Sparkles,
 } from "lucide-react";
 import { Button, Input, Loading } from "./ui";
 import { Empty } from "./components";
@@ -55,6 +56,8 @@ import {
   whatsappDay,
   whatsappLink,
   viewerFile,
+  draftWhatsappTask,
+  type TaskDraft,
   type Reaction,
   type WhatsappGroup,
   type WhatsappMessage,
@@ -529,22 +532,36 @@ function Chat({
   const contract = taskContract(data, client, group.product_ids, (k) =>
     canCreateTaskIn(data, k, user),
   );
-  function createTask() {
+  const [drafting, setDrafting] = useState(false);
+  // A MAVI lê as mensagens (e a conversa em volta) e propõe título, resumo,
+  // o que fazer e prazo; se não der, a tarefa sai só com as mensagens.
+  async function createTask() {
     const picked = shown.filter((m) => selected.has(m.id));
-    if (!picked.length || !onNewTask) return;
+    if (!picked.length || !onNewTask || drafting) return;
     if (!contract) {
       notify(
         "Para criar tarefas, você precisa ter acesso a um produto contratado deste cliente.",
       );
       return;
     }
+    setDrafting(true);
+    let draft: TaskDraft | null = null;
+    try {
+      draft = await draftWhatsappTask(picked.map((m) => m.id));
+    } catch (e) {
+      notify(
+        `A MAVI não conseguiu resumir agora (${(e as Error).message}). A tarefa foi montada com as mensagens.`,
+      );
+    } finally {
+      setDrafting(false);
+    }
     onNewTask({
       contract,
-      ...messagesTask(picked, {
-        group: group.id,
-        groupTitle: group.title,
-        clientName,
-      }),
+      ...messagesTask(
+        picked,
+        { group: group.id, groupTitle: group.title, clientName },
+        draft,
+      ),
     });
     setSelecting(false);
     setSelected(new Set());
@@ -691,10 +708,19 @@ function Chat({
           </span>
           <Button
             className="btn"
-            disabled={!selected.size}
-            onClick={createTask}
+            disabled={!selected.size || drafting}
+            aria-busy={drafting}
+            onClick={() => void createTask()}
           >
-            <Plus size={15} /> Criar tarefa
+            {drafting ? (
+              <>
+                <Sparkles size={15} /> A MAVI está preparando a tarefa…
+              </>
+            ) : (
+              <>
+                <Plus size={15} /> Criar tarefa
+              </>
+            )}
           </Button>
         </div>
       )}

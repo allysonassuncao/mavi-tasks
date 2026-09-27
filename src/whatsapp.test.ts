@@ -59,6 +59,7 @@ import {
   linksIn,
   messagePreview,
   messagesTask,
+  fallbackTitle,
   reactionsOf,
   senderLabel,
   taskContract,
@@ -262,8 +263,117 @@ describe("tarefa a partir de mensagens", () => {
     expect(task.title).toBe("Precisamos trocar o criativo da campanha");
     const doc = JSON.stringify(task.description);
     expect(doc.indexOf("Kamilli")).toBeLessThan(doc.indexOf("Rauzer"));
-    expect(doc).toContain("2745 - Facilita (2745)");
+    expect(doc).toContain("2745 - Facilita (cliente 2745)");
     expect(doc).toContain("whatsapp=g1");
     expect(doc).toContain("msg=a");
+  });
+});
+
+describe("tarefa inteligente a partir de mensagens", () => {
+  const ctx = {
+    group: "g1",
+    groupTitle: "2745 - Facilita & Make",
+    clientName: "2745",
+  };
+  const picked = [
+    msg({
+      id: "a",
+      body: "Bom dia pessoal! Podemos trocar o *criativo* da campanha de outubro até sexta?",
+      sent_at: "2026-09-26T13:00:00Z",
+      sender_name: "Rauzer",
+    }),
+    msg({
+      id: "b",
+      kind: "audio",
+      media_seconds: 23,
+      content_text: "E aumentar a verba para 5 mil",
+      sent_at: "2026-09-26T13:05:00Z",
+      sender_name: "Rauzer",
+    }),
+  ];
+  const nodes = (description: string) =>
+    JSON.parse(description.replace(/^mavi:richtext:v1:/, "")).content as any[];
+  const textOf = (n: any): string =>
+    n.text ??
+    (n.content ?? []).map(textOf).join(n.type === "bulletList" ? "\n" : "");
+  it("com a MAVI: resumo, o que fazer, detalhes, mensagens com link e prazo", () => {
+    vi.stubGlobal("window", {
+      location: {
+        pathname: "/agencias/make/drive",
+        origin: "https://app.test",
+      },
+    });
+    const task = messagesTask(picked, ctx, {
+      title: "Trocar o criativo da campanha de outubro",
+      summary: "Rauzer pediu novo criativo e mais verba.",
+      actions: ["Criar 3 opções", "Ajustar a verba"],
+      details: ["Prazo: sexta"],
+      due: "2026-10-02",
+    });
+    expect(task.title).toBe("Trocar o criativo da campanha de outubro");
+    expect(task.due).toBe("2026-10-02");
+    const doc = nodes(task.description);
+    expect(doc.map(textOf)).toEqual([
+      "Resumo",
+      "Rauzer pediu novo criativo e mais verba.",
+      "O que fazer",
+      "Criar 3 opções\nAjustar a verba",
+      "Detalhes",
+      "Prazo: sexta",
+      "Mensagens do grupo",
+      "Clique no horário para abrir a conversa naquela mensagem.",
+      "26/09/26, 10:00 · Rauzer: Bom dia pessoal! Podemos trocar o criativo da campanha de outubro até sexta?\n26/09/26, 10:05 · Rauzer: Áudio (0:23): “E aumentar a verba para 5 mil”",
+      "Grupo: 2745 - Facilita & Make (cliente 2745) · abrir a conversa",
+    ]);
+    const firstItem = doc[8].content[0].content[0].content[0];
+    expect(firstItem.marks).toEqual([
+      {
+        type: "link",
+        attrs: { href: "/agencias/make/drive?whatsapp=g1&msg=a" },
+      },
+    ]);
+    const open = doc[9].content.at(-1);
+    expect(open.marks[0].attrs.href).toBe(
+      "/agencias/make/drive?whatsapp=g1&msg=a",
+    );
+  });
+  it("sem a MAVI: contexto em uma frase e título limpo", () => {
+    vi.stubGlobal("window", {
+      location: {
+        pathname: "/agencias/make/drive",
+        origin: "https://app.test",
+      },
+    });
+    const task = messagesTask(picked, ctx, null);
+    expect(task.title).toBe(
+      "Podemos trocar o criativo da campanha de outubro até sexta?",
+    );
+    expect(task).not.toHaveProperty("due");
+    expect(textOf(nodes(task.description)[0])).toBe(
+      "Pedido feito no grupo do cliente 2745 por Rauzer, em 26/09/26, 10:00. Leia as mensagens abaixo e abra a conversa para ver o contexto.",
+    );
+  });
+  it("título de reserva: sem saudação, sem link, cortado na palavra", () => {
+    expect(
+      fallbackTitle([
+        msg({ body: "Oi, bom dia! https://x.com" }),
+        msg({ id: "z", body: "Oi" }),
+      ]),
+    ).toBe("Ver mensagem de Kamilli no grupo");
+    expect(
+      fallbackTitle([
+        msg({ body: "olá time, " + "revisar a landing page nova ".repeat(5) }),
+      ]),
+    ).toBe(
+      "Revisar a landing page nova revisar a landing page nova revisar a landing page…",
+    );
+    expect(
+      fallbackTitle([
+        msg({ kind: "audio", content_text: "precisamos aprovar a arte hoje" }),
+      ]),
+    ).toBe("Precisamos aprovar a arte hoje");
+    expect(fallbackTitle([msg({ kind: "image" })])).toBe(
+      "Ver imagem de Kamilli no grupo",
+    );
   });
 });

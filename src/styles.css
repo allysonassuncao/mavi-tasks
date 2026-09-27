@@ -18749,3 +18749,14 @@ p.case-note {
   color: #3f4b4b;
   white-space: pre-wrap;
 }
+
+/* Links nas descrições e comentários (os do app abrem sem recarregar). */
+.rich-text-content a.rt-link,
+.rich-text-editor .ProseMirror a {
+  color: #2d5a8c;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rich-text-content a.rt-link:hover {
+  color: #1f4470;
+}

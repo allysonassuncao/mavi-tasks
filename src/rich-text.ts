@@ -9,7 +9,24 @@ export type RichNode = {
   attrs?: { imageId?: string; alt?: string; id?: string; label?: string };
 };
 /** Text formatting; colored ones carry `attrs.color` as "#rrggbb". */
-export type RichMark = { type: string; attrs?: { color?: string } };
+export type RichMark = {
+  type: string;
+  attrs?: { color?: string; href?: string };
+};
+/**
+ * A link that can be stored: a web address (http/https) or a path inside
+ * the app ("/agencias/…"). Anything else (javascript:, data:, "//host")
+ * is dropped, so a description can never carry a script into the page.
+ */
+export function safeHref(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  // Sem espaços nem barra invertida: o navegador lê "/\site" como "//site".
+  if (!v || v.length > 2000 || /[\s\\]/.test(v)) return null;
+  if (/^https?:\/\/[^/\s]+/i.test(v)) return v;
+  if (/^\/(?!\/)/.test(v)) return v;
+  return null;
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const blocks = new Set([
   "doc",
@@ -49,6 +66,10 @@ export function normalizeColor(value: unknown): string | null {
 function cleanMark(m: RichMark | null | undefined): RichMark | null {
   if (!m || typeof m !== "object") return null;
   if (marks.has(m.type)) return { type: m.type };
+  if (m.type === "link") {
+    const href = safeHref(m.attrs?.href);
+    return href ? { type: "link", attrs: { href } } : null;
+  }
   if (colorMarks.has(m.type)) {
     const color = normalizeColor(m.attrs?.color);
     // A highlight without a color is the default yellow; a text style
