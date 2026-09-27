@@ -331,6 +331,14 @@ await check("esfriou: os supervisores do cliente recebem o aviso (e o sinal de a
   assert.match(notes.find((n) => /esfriou/.test(n.title)).body, /^Antes: Quente/);
   assert.equal(notes.find((n) => /Fala em cancelar/.test(n.title)).title, "Cliente 4282: Fala em cancelar");
   assert.equal(notes[0].link, `/drive?termometro=${client}`);
+  // Com o módulo escondido, a supervisora não receberia; sem supervisor com
+  // o módulo, vão os administradores (que o têm).
+  await as(admin);
+  await rpc("set_member_pages", [A, manager, ["temperature"]]);
+  const [{ r }] = await sql(`select mavi_private.temperature_recipients($1, $2) as r`, [A, client]);
+  assert.deepEqual(r, [admin]);
+  await as(admin);
+  await rpc("set_member_pages", [A, manager, []]);
   // A mesma situação no dia seguinte não avisa de novo.
   await sql(`update mavi_private.temperature_state set refresh_from = current_date`);
   await refresh();

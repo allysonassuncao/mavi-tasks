@@ -302,6 +302,10 @@ function DriveTree({
     start?: number;
   } | null>(null);
   const showsProducts = !!at.client && !at.contract && !at.folder && !virtual;
+  // O Termômetro é um módulo: escondido da pessoa, o cartão também some.
+  const showsTemperature = !data.members
+    .find((m) => m.user_id === user)
+    ?.hidden_pages?.includes("temperature");
   // Whatsapp: quantos grupos o cliente tem (o cartão) e o link de uma
   // mensagem (?whatsapp=<grupo>&msg=<mensagem>).
   const [groupCount, setGroupCount] = useState(0);
@@ -1232,6 +1236,10 @@ function DriveTree({
                             () => go({ client: at.client, dossier: true }),
                             "#6b52b3",
                           ),
+                      ]
+                    : []),
+                  ...(showsProducts && showsTemperature
+                    ? [
                         () =>
                           folderCard(
                             "temperature",
