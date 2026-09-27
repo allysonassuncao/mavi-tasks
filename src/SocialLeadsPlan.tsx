@@ -13,7 +13,17 @@ import {
   Image as ImageIcon,
   Lock,
   Megaphone,
+  MapPin,
+  MessageCircle,
   MessageSquare,
+  Target,
+  Users,
+  Wallet,
+  Eye,
+  ShieldAlert,
+  TrendingUp,
+  TrendingDown,
+  Lightbulb,
   Presentation,
   Pencil,
   RefreshCw,
@@ -71,6 +81,10 @@ import {
   type SlPostEvent,
   describeEvent,
   maviText,
+  campaignFacts,
+  leadOf,
+  pointsOf,
+  type CampaignObjective,
 } from "./social-leads";
 import { MediaInput, type Uploading } from "./SocialLeadsFields";
 
@@ -634,6 +648,7 @@ export function PlanView({
         <Campaign
           content={content}
           objective={briefing?.campaign_objective ?? null}
+          notify={notify}
         />
       )}
       {section === "alertas" && <Alerts content={content} flags={flags} />}
@@ -2307,107 +2322,310 @@ function PreviewModal({
 }
 
 // ------------------------------------------------------------ sections
+/**
+ * A paragraph read in layers: the first sentence stands out, the rest follows
+ * and, when long, folds under "Ler mais" (nothing the AI wrote is cut).
+ */
+function Layered({
+  text,
+  className = "",
+}: {
+  text: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  // "Ler mais" only when the folded text is really cut (width decides).
+  const [cut, setCut] = useState(false);
+  const restRef = useRef<HTMLParagraphElement>(null);
+  const { lead, rest } = leadOf(text);
+  useEffect(() => {
+    const el = restRef.current;
+    if (!el) return;
+    const check = () =>
+      setCut((c) => (open ? c : el.scrollHeight > el.clientHeight + 1));
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [rest, open]);
+  if (!lead) return <p className="sl-muted">—</p>;
+  return (
+    <div className={`sl-layered ${className}`}>
+      <p className="sl-lead">{lead}</p>
+      {rest && (
+        <p ref={restRef} className={open ? "sl-rest" : "sl-rest folded"}>
+          {rest}
+        </p>
+      )}
+      {cut && (
+        <button
+          type="button"
+          className="sl-link"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? "Mostrar menos" : "Ler mais"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const swotParts = [
+  { key: "forcas", title: "Forças", tone: "good", icon: TrendingUp },
+  { key: "fraquezas", title: "Fraquezas", tone: "bad", icon: TrendingDown },
+  {
+    key: "oportunidades",
+    title: "Oportunidades",
+    tone: "info",
+    icon: Lightbulb,
+  },
+  { key: "ameacas", title: "Ameaças", tone: "warn", icon: ShieldAlert },
+] as const;
+
+/**
+ * The strategy of the month, from the whole picture to the details: who the
+ * client is, how they want to be seen and for whom, the four content pillars
+ * and the SWOT as a matrix of short items.
+ */
 function Strategy({ content }: { content: PlanContent }) {
-  const swot = [
-    ["Forças", content.swot.forcas],
-    ["Fraquezas", content.swot.fraquezas],
-    ["Oportunidades", content.swot.oportunidades],
-    ["Ameaças", content.swot.ameacas],
-  ];
   return (
     <div className="sl-strategy">
-      <section className="panel">
-        <h3>Diagnóstico</h3>
-        <p>{content.diagnostico.negocio}</p>
-        <h4>Como quer ser vista</h4>
-        <p>{content.diagnostico.comoQuerSerVista}</p>
-        <h4>Público</h4>
-        <p>{content.publico}</p>
+      <section className="panel sl-st-hero">
+        <span className="sl-eyebrow">Diagnóstico do negócio</span>
+        <Layered text={content.diagnostico.negocio} />
       </section>
-      <section className="panel">
-        <h3>Pilares</h3>
-        <ol className="sl-pillars">
-          {content.pilares.map((p) => (
-            <li key={p.titulo}>
+      <div className="sl-st-duo">
+        <section className="panel sl-st-card">
+          <h3>
+            <Eye size={16} /> Como quer ser vista
+          </h3>
+          <Layered text={content.diagnostico.comoQuerSerVista} />
+        </section>
+        <section className="panel sl-st-card">
+          <h3>
+            <Users size={16} /> Para quem falamos
+          </h3>
+          <Layered text={content.publico} />
+        </section>
+      </div>
+      <section className="sl-st-block">
+        <header>
+          <h3>Pilares de conteúdo</h3>
+          <small>Os temas que os posts do mês alternam</small>
+        </header>
+        <ol className="sl-st-pillars">
+          {content.pilares.map((p, i) => (
+            <li key={p.titulo} className="panel">
+              <span className="sl-st-num">{i + 1}</span>
               <strong>{p.titulo}</strong>
-              <span>{p.descricao}</span>
+              <p>{p.descricao}</p>
             </li>
           ))}
         </ol>
       </section>
-      <section className="panel sl-swot">
-        <h3>SWOT</h3>
-        <div>
-          {swot.map(([k, v]) => (
-            <div key={k}>
-              <strong>{k}</strong>
-              <p>{v || "—"}</p>
-            </div>
-          ))}
+      <section className="sl-st-block">
+        <header>
+          <h3>SWOT</h3>
+          <small>
+            Forças e fraquezas: o negócio hoje. Oportunidades e ameaças: o
+            mercado.
+          </small>
+        </header>
+        <div className="sl-st-swot">
+          {swotParts.map(({ key, title, tone, icon: Icon }) => {
+            const { note, label, points } = pointsOf(content.swot[key]);
+            return (
+              <section key={key} className={`sl-st-quad ${tone}`}>
+                <h4>
+                  <Icon size={15} /> {title}
+                  {!!points.length && <small>{points.length}</small>}
+                </h4>
+                {note && <p className="sl-st-note">{note}</p>}
+                {label && <p className="sl-st-label">{label}:</p>}
+                {points.length ? (
+                  <ul>
+                    {points.map((x) => (
+                      <li key={x}>{x}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  !note && <p className="sl-muted">—</p>
+                )}
+              </section>
+            );
+          })}
         </div>
       </section>
     </div>
   );
 }
+
+/** One field of the campaign: the lead sentence, then its points or text. */
+function CampaignDetail({ label, text }: { label: string; text: string }) {
+  const { lead, rest } = leadOf(text);
+  const { points } = pointsOf(rest);
+  return (
+    <div className="sl-cp-detail">
+      <dt>{label}</dt>
+      <dd>
+        {lead ? (
+          <p className="sl-lead">{lead}</p>
+        ) : (
+          <p className="sl-muted">—</p>
+        )}
+        {points.length >= 2 ? (
+          <ul>
+            {points.map((x) => (
+              <li key={x}>{x}</li>
+            ))}
+          </ul>
+        ) : (
+          rest && <p className="sl-rest">{rest}</p>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * The Meta campaign: the figures first (objective, budget, age, region),
+ * then the path of a lead in three steps — who sees the ad, the ad itself,
+ * and what happens when the lead arrives (the questions, ready to copy).
+ */
 function Campaign({
   content,
   objective,
+  notify,
 }: {
   content: PlanContent;
-  objective: string | null;
+  objective: CampaignObjective | null;
+  notify: (m: string) => void;
 }) {
   const c = content.campanha;
-  const rows: [string, string][] = [
-    ["Objetivo", c.objetivo],
-    ["Região", c.regiao],
-    ["Idade e gênero", c.idadeGenero],
-    ["Segmentação", c.segmentacao],
-    ["Posicionamentos", c.posicionamentos],
-    ["Orçamento", c.orcamento],
-    ["Como o lead chega", c.roteamentoLead],
-  ];
   const ad = content.posts.find((p) => p.ehAnuncio);
+  const facts = campaignFacts(c, objective);
+  const icons = {
+    objetivo: Target,
+    verba: Wallet,
+    publico: Users,
+    regiao: MapPin,
+  };
+  // A CTWA plan puts the suggested first message among the questions.
+  const opening = c.perguntasFormulario.find((q) =>
+    /^mensagem inicial/i.test(q),
+  );
+  const questions = c.perguntasFormulario.filter((q) => q !== opening);
+  const openingText = opening
+    ?.replace(/^mensagem inicial[^:]*:\s*/i, "")
+    .replace(/^['"“]|['"”]$/g, "");
+  const whatsapp = objective === "ctwa" || !!opening;
+  const copy = () =>
+    navigator.clipboard
+      .writeText(
+        [
+          openingText ? `Mensagem inicial: ${openingText}` : "",
+          ...questions.map((q, i) => `${i + 1}. ${q}`),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      )
+      .then(
+        () => notify("Perguntas copiadas."),
+        () => notify("Não foi possível copiar. Selecione e copie à mão."),
+      );
   return (
     <div className="sl-campaign">
-      <section className="panel">
-        <h3>Campanha no Meta</h3>
-        <dl>
-          {rows.map(([k, v]) => (
-            <div key={k}>
-              <dt>{k}</dt>
-              <dd>{v || "—"}</dd>
+      <div className="sl-cp-facts">
+        {facts.map((f) => {
+          const Icon = icons[f.key as keyof typeof icons];
+          return (
+            <div key={f.key} className="panel sl-cp-fact">
+              <span>
+                <Icon size={14} /> {f.label}
+              </span>
+              <strong>{f.value}</strong>
+              {f.hint && <small>{f.hint}</small>}
             </div>
-          ))}
-          {objective === "form_nativo" || c.perguntasFormulario.length ? (
-            <div>
-              <dt>Perguntas do formulário</dt>
-              <dd>
-                {c.perguntasFormulario.length ? (
-                  <ol>
-                    {c.perguntasFormulario.map((q) => (
-                      <li key={q}>{q}</li>
-                    ))}
-                  </ol>
-                ) : (
-                  "—"
-                )}
-              </dd>
-            </div>
-          ) : null}
+          );
+        })}
+      </div>
+
+      <section className="panel sl-cp-step">
+        <header>
+          <span className="sl-st-num">1</span>
+          <h3>Quem vê o anúncio</h3>
+        </header>
+        <dl className="sl-cp-grid">
+          <CampaignDetail label="Região" text={c.regiao} />
+          <CampaignDetail label="Idade e gênero" text={c.idadeGenero} />
+          <CampaignDetail label="Segmentação" text={c.segmentacao} />
+          <CampaignDetail label="Posicionamentos" text={c.posicionamentos} />
         </dl>
       </section>
-      {ad && (
-        <section className="panel sl-ad">
-          <h3>
-            <Megaphone size={16} /> Post {ad.numero} vira o anúncio
-          </h3>
-          <strong>{ad.gancho}</strong>
-          <p>{ad.direcaoCopy}</p>
-          <small>
-            {ad.formato} · {ad.cta}
-          </small>
-        </section>
-      )}
+
+      <section className="panel sl-cp-step">
+        <header>
+          <span className="sl-st-num">2</span>
+          <h3>O anúncio</h3>
+        </header>
+        {ad && (
+          <div className="sl-cp-ad">
+            <span className="sl-pill ad">
+              <Megaphone size={11} /> Post {ad.numero} vira o anúncio
+            </span>
+            <strong>{ad.gancho}</strong>
+            <p>{ad.direcaoCopy}</p>
+            <small>
+              {ad.formato} · CTA: {ad.cta}
+            </small>
+          </div>
+        )}
+        <dl className="sl-cp-grid">
+          <CampaignDetail label="Objetivo" text={c.objetivo} />
+          <CampaignDetail label="Orçamento" text={c.orcamento} />
+        </dl>
+      </section>
+
+      <section className="panel sl-cp-step">
+        <header>
+          <span className="sl-st-num">3</span>
+          <h3>Quando o lead chega</h3>
+        </header>
+        {(openingText || questions.length > 0) && (
+          <div className="sl-cp-questions">
+            <div className="sl-cp-questions-head">
+              <h4>
+                <MessageCircle size={15} />{" "}
+                {whatsapp
+                  ? "Roteiro de qualificação no WhatsApp"
+                  : "Perguntas do formulário"}
+              </h4>
+              <Button className="btn secondary" onClick={copy}>
+                <Copy size={14} /> Copiar
+              </Button>
+            </div>
+            {openingText && (
+              <blockquote>
+                <small>Mensagem inicial sugerida</small>“{openingText}”
+              </blockquote>
+            )}
+            {questions.length > 0 && (
+              <ol>
+                {questions.map((q) => (
+                  <li key={q}>{q}</li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+        <dl className="sl-cp-grid one">
+          <CampaignDetail
+            label="Como o lead é atendido"
+            text={c.roteamentoLead}
+          />
+        </dl>
+      </section>
     </div>
   );
 }

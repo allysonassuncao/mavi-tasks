@@ -1584,3 +1584,123 @@ export function transcriptFromFile(name: string, text: string) {
   }
   return lines.join("\n");
 }
+
+// ------------------------------------------------------------ reading the plan
+// The AI writes the strategy and the campaign as paragraphs. These helpers
+// turn them into what the eye reads first (the lead sentence, the list items,
+// the short fact) without changing a word.
+const SENTENCE_END = /(?<=[.!?])\s+(?=[A-ZÀ-Ý"“'(])/u;
+
+/** The sentences of a text ("R$ 1.000,00" and "Sr." stay whole). */
+export function sentencesOf(text: string | null | undefined): string[] {
+  return (text ?? "")
+    .trim()
+    .split(SENTENCE_END)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** The first sentence, and the rest of the text. */
+export function leadOf(text: string | null | undefined) {
+  const [lead = "", ...rest] = sentencesOf(text);
+  return { lead, rest: rest.join(" ") };
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * A text written as a list ("a; b; c", or several sentences) as its items.
+ * A leading "Não foram apontadas … no briefing." (the AI saying the briefing
+ * had nothing) and a "Pontos …:" label come apart from the items.
+ */
+export function pointsOf(text: string | null | undefined): {
+  note: string | null;
+  label: string | null;
+  points: string[];
+} {
+  let rest = (text ?? "").trim();
+  let note: string | null = null;
+  let label: string | null = null;
+  const empty = rest.match(/^(não (?:foram|foi) apontad[oa]s?[^.]*\.)\s*/i);
+  if (empty) {
+    note = empty[1];
+    rest = rest.slice(empty[0].length);
+  }
+  const labelled = rest.match(/^([^:;.]{3,80}):\s+(.*)$/s);
+  if (labelled && /^pontos?\b/i.test(labelled[1])) {
+    label = labelled[1].trim();
+    rest = labelled[2];
+  }
+  const parts =
+    (rest.match(/;/g) ?? []).length >= 1
+      ? rest.split(/;\s*/)
+      : sentencesOf(rest);
+  const points = parts
+    .map((p) => p.trim().replace(/[.;]+$/, ""))
+    .filter(Boolean)
+    .map(capitalize);
+  return { note, label, points };
+}
+
+/** The first clause of a text, short enough for a tile. */
+export function shortFact(text: string | null | undefined, max = 48) {
+  const t = (text ?? "").trim();
+  const cut = t.search(/[,;.(—–]|\s-\s/);
+  let s = (cut > 3 ? t.slice(0, cut) : t).trim();
+  if (s.length > max) s = `${s.slice(0, max).replace(/\s+\S*$/, "")}…`;
+  return s;
+}
+
+/** The campaign at a glance: objective, budget, age range and region. */
+export function campaignFacts(
+  c: PlanContent["campanha"],
+  objective: CampaignObjective | null,
+): { key: string; label: string; value: string; hint: string }[] {
+  const money = c.orcamento.match(
+    /R\$\s?[\d.]+(?:,\d{2})?(?:\s*\/\s*m[eê]s)?/i,
+  )?.[0];
+  const daily = c.orcamento.match(/R\$\s?[\d.]+(?:,\d{2})?\s*\/\s*dia/i)?.[0];
+  const age = c.idadeGenero.match(
+    /\d{2}\s*(?:a|-|–|até)\s*\d{2}\+?\s*anos/i,
+  )?.[0];
+  const radius = c.regiao.match(/raio de [^,.;]*?km/i)?.[0];
+  return [
+    {
+      key: "objetivo",
+      label: "Objetivo",
+      value: objective
+        ? objective === "ctwa"
+          ? "Conversa no WhatsApp"
+          : "Formulário no Meta"
+        : shortFact(c.objetivo) || "—",
+      hint: shortFact(c.objetivo, 90),
+    },
+    {
+      key: "verba",
+      label: "Verba de mídia",
+      value: money
+        ? money.replace(/\s*\/\s*/, "/")
+        : shortFact(c.orcamento) || "—",
+      hint: daily ? `≈ ${daily.replace(/\s*\/\s*/, "/")}` : "",
+    },
+    {
+      key: "publico",
+      label: "Idade",
+      value: age ?? (shortFact(c.idadeGenero) || "—"),
+      hint: /todos os g[eê]neros/i.test(c.idadeGenero)
+        ? "Todos os gêneros"
+        : "",
+    },
+    {
+      key: "regiao",
+      label: "Região",
+      value: radius ? capitalize(radius) : shortFact(c.regiao) || "—",
+      hint: radius
+        ? shortFact(
+            c.regiao.slice(c.regiao.indexOf(radius) + radius.length),
+            60,
+          )
+        : "",
+    },
+  ];
+}

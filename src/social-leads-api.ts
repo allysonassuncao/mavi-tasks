@@ -657,39 +657,66 @@ export function samplePlan(client: string, month: number): PlanContent {
   ];
   return {
     diagnostico: {
-      negocio: `${client} atende o público local com atendimento próximo e quer ser lembrada como referência no bairro.`,
-      comoQuerSerVista: "Próxima, confiável e especialista no que faz.",
+      negocio: `${client} é um estúdio de design de interiores que atende apartamentos e pequenos comércios da região, do conceito à entrega da obra. O trabalho se apoia em projetos acolhedores e funcionais, acompanhamento próximo de cada etapa e uma equipe que resolve a obra junto com o cliente. O ticket médio é de R$ 4.500,00 e a oferta em destaque é a consultoria de 2 horas. A maior parte dos clientes chega por indicação, o que mostra confiança, mas deixa o volume de contatos dependente do boca a boca.`,
+      comoQuerSerVista:
+        "Quer ser vista como a referência em projetos que cabem na vida real: bonitos, práticos e dentro do orçamento combinado. A comunicação orgânica deve ensinar e mostrar bastidores de obra, sem cara de propaganda. Todo o discurso comercial fica concentrado no anúncio pago.",
     },
     swot: {
-      forcas: "Atendimento próximo, equipe experiente.",
-      fraquezas: "Pouca presença digital até agora.",
-      oportunidades: "Concorrentes quase não publicam conteúdo educativo.",
-      ameacas: "Preço mais alto que a média da região.",
+      forcas:
+        "Projetos autorais e funcionais; acompanhamento de obra do começo ao fim; clientes que indicam; equipe experiente em reformas pequenas.",
+      fraquezas:
+        "Pouca presença digital até agora; ausência de depoimentos registrados; percepção de que projeto de interiores é caro.",
+      oportunidades:
+        "Não foram apontadas oportunidades no briefing. Pontos observáveis a validar com a cliente: concorrentes quase não publicam conteúdo educativo; a consultoria de 2 horas é uma porta de entrada pouco explorada na região.",
+      ameacas:
+        "Sensibilidade a preço na região; concorrência de lojas de móveis planejados que oferecem projeto gratuito.",
     },
     pilares: [
-      { titulo: "Bastidores", descricao: "Mostrar quem faz e como faz." },
       {
-        titulo: "Educação",
-        descricao: "Responder as dúvidas reais do público.",
-      },
-      {
-        titulo: "Prova",
+        titulo: "Bastidores da obra",
         descricao:
-          "Situações verídicas do dia a dia, sem depoimento inventado.",
+          "Mostrar quem faz e como faz: medição, escolha de materiais, instalação. Traduz cada etapa em cuidado com o cliente.",
       },
-      { titulo: "Convite", descricao: "Chamar para conhecer a oferta do mês." },
+      {
+        titulo: "Dúvidas reais",
+        descricao:
+          "Responder o que o público pergunta antes de contratar: quanto custa, quanto tempo leva, o que dá para aproveitar.",
+      },
+      {
+        titulo: "Antes e depois",
+        descricao:
+          "Situações verídicas do dia a dia dos projetos, sem depoimento inventado. Mostra resultado sem prometer.",
+      },
+      {
+        titulo: "Convite",
+        descricao:
+          "Chamar para conhecer a consultoria do mês, só no anúncio, sem apelo comercial no feed.",
+      },
     ],
     publico:
-      "Moradores da região, 25 a 55 anos, que valorizam atendimento próximo.",
+      "Casais de 28 a 45 anos reformando o primeiro apartamento ou abrindo um pequeno comércio na região. Buscam um resultado bonito sem estourar o orçamento e querem alguém que resolva a obra junto. Costumam pesquisar no Instagram antes de chamar no WhatsApp e comparam com lojas de planejados, o que exige mostrar o valor do projeto antes de falar de preço.",
     campanha: {
-      objetivo: "Conversas no WhatsApp",
-      regiao: "Raio de 5 km do endereço",
-      idadeGenero: "25 a 55 anos, todos os gêneros",
-      segmentacao: "Interesses ligados ao serviço, sem atributos sensíveis",
-      posicionamentos: "Advantage+ (Feeds, Stories, Reels)",
-      orcamento: "R$ 500/mês",
-      perguntasFormulario: [],
-      roteamentoLead: "WhatsApp do atendimento",
+      objetivo:
+        "Tráfego para conversas no WhatsApp (Click to WhatsApp), otimizando para início de conversa. O post 4 leva direto para o atendimento, onde acontece a qualificação e o agendamento da consultoria.",
+      regiao:
+        "Raio de 5 km a partir do endereço do estúdio, priorizando os bairros vizinhos. Ajustar o raio nas primeiras semanas conforme a origem dos contatos.",
+      idadeGenero:
+        "28 a 45 anos, todos os gêneros, com maior peso para mulheres se o custo por conversa for melhor nesse recorte.",
+      segmentacao:
+        "Iniciar com segmentação aberta dentro da região e da faixa etária, deixando a entrega do Meta encontrar o público. Se precisar refinar, testar interesses ligados a decoração, reforma e imóveis, sempre em conjunto amplo.",
+      posicionamentos:
+        "Automáticos (Advantage+), acompanhando Feed e Stories do Instagram e Feed do Facebook. Entregar criativo em 4:5 e 9:16.",
+      orcamento:
+        "R$ 500,00/mês, aproximadamente R$ 16,50/dia, em uma única campanha e um único conjunto para concentrar o aprendizado. Sem previsão de volume de contatos: o primeiro mês serve como referência de custo por conversa.",
+      perguntasFormulario: [
+        "Mensagem inicial sugerida no WhatsApp: 'Olá! Vi o anúncio e quero saber mais sobre a consultoria.'",
+        "Qual é o ambiente que você quer transformar?",
+        "É apartamento, casa ou comércio?",
+        "Em qual bairro fica?",
+        "Para quando você gostaria de começar?",
+      ],
+      roteamentoLead:
+        "Todas as conversas caem no WhatsApp do atendimento. Responder em até 30 minutos no horário comercial. Usar as perguntas acima como roteiro de qualificação. Ter uma mensagem pronta para fora do horário. Registrar em planilha: data, nome, ambiente, bairro e se agendou a consultoria.",
     },
     alertas: [
       "Sem depoimentos reais ainda: captar autorizações de clientes neste mês.",

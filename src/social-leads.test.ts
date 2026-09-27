@@ -24,6 +24,11 @@ import {
   applyBriefingSuggestion,
   defaultBriefingChoice,
   transcriptFromFile,
+  sentencesOf,
+  leadOf,
+  pointsOf,
+  shortFact,
+  campaignFacts,
   type SlPost,
   type SlPostEvent,
   type PlanContent,
@@ -661,5 +666,86 @@ describe("textos antigos dizem MAVI na tela", () => {
     // Só a palavra solta: nomes e siglas não mudam.
     expect(maviText("IARA pediu mídia")).toBe("IARA pediu mídia");
     expect(maviText(null)).toBe("");
+  });
+});
+
+describe("leitura do plano", () => {
+  it("separa as frases sem quebrar dinheiro nem números", () => {
+    expect(
+      sentencesOf(
+        "O ticket médio é de R$ 1.000,00 e a oferta é a matrícula. É a única escola do bairro.",
+      ),
+    ).toEqual([
+      "O ticket médio é de R$ 1.000,00 e a oferta é a matrícula.",
+      "É a única escola do bairro.",
+    ]);
+    expect(leadOf("Uma. Duas. Três.")).toEqual({
+      lead: "Uma.",
+      rest: "Duas. Três.",
+    });
+  });
+
+  it("transforma a SWOT em itens e separa o aviso do briefing", () => {
+    expect(
+      pointsOf(
+        "Pré-alfabetização estruturada; acolhimento individualizado; única escola particular do bairro.",
+      ),
+    ).toEqual({
+      note: null,
+      label: null,
+      points: [
+        "Pré-alfabetização estruturada",
+        "Acolhimento individualizado",
+        "Única escola particular do bairro",
+      ],
+    });
+    expect(
+      pointsOf(
+        "Não foram apontadas ameaças no briefing. Pontos de atenção estruturais: sensibilidade a preço na região; dependência de indicação boca a boca.",
+      ),
+    ).toEqual({
+      note: "Não foram apontadas ameaças no briefing.",
+      label: "Pontos de atenção estruturais",
+      points: [
+        "Sensibilidade a preço na região",
+        "Dependência de indicação boca a boca",
+      ],
+    });
+    expect(pointsOf("")).toEqual({ note: null, label: null, points: [] });
+  });
+
+  it("resume a campanha em números", () => {
+    const facts = campaignFacts(
+      {
+        objetivo:
+          "Tráfego para conversas no WhatsApp (Click to WhatsApp), otimizando para início de conversa.",
+        regiao:
+          "Raio de 4 a 6 km a partir do endereço da escola no Jardim Silvínia, São Bernardo do Campo (SP).",
+        idadeGenero:
+          "25 a 45 anos, todos os gêneros, com maior peso para mulheres.",
+        segmentacao: "Aberta.",
+        posicionamentos: "Automáticos.",
+        orcamento:
+          "R$ 500,00/mês, aproximadamente R$ 16,50/dia, em uma única campanha.",
+        perguntasFormulario: [],
+        roteamentoLead: "WhatsApp.",
+      },
+      "ctwa",
+    );
+    expect(facts.map((f) => [f.label, f.value, f.hint])).toEqual([
+      [
+        "Objetivo",
+        "Conversa no WhatsApp",
+        "Tráfego para conversas no WhatsApp",
+      ],
+      ["Verba de mídia", "R$ 500,00/mês", "≈ R$ 16,50/dia"],
+      ["Idade", "25 a 45 anos", "Todos os gêneros"],
+      [
+        "Região",
+        "Raio de 4 a 6 km",
+        "a partir do endereço da escola no Jardim Silvínia",
+      ],
+    ]);
+    expect(shortFact("Advantage+ (Feeds, Stories)")).toBe("Advantage+");
   });
 });
