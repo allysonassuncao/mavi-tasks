@@ -91,6 +91,10 @@ type Editing =
   | { kind: "file"; id: string }
   | null;
 
+/** Folder listings go by name, Z → A. */
+const byNameDesc = (a: { name: string }, b: { name: string }) =>
+  b.name.localeCompare(a.name, "pt-BR");
+
 function iconFor(type: string, name: string) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
   if (type.startsWith("image/")) return FileImage;
@@ -261,7 +265,7 @@ function DriveTree({
     if (at.recordings || at.whatsapp) return setFiles([]);
     setFiles(null);
     listDriveFiles(company, at)
-      .then(setFiles)
+      .then((list) => setFiles(list.sort(byNameDesc)))
       .catch((e) => setError((e as Error).message));
   }, [company, at]);
   useEffect(() => {
@@ -449,20 +453,25 @@ function DriveTree({
     !at.client && !at.folder
       ? data.clients
           .filter((c) => !c.archived)
-          .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+          .sort(byNameDesc)
       : [];
   const products = showsProducts
-    ? data.contracts.filter((k) => k.client_id === at.client && !k.archived)
+    ? data.contracts
+        .filter((k) => k.client_id === at.client && !k.archived)
+        .map((k) => ({ ...k, name: contractProductLabel(data, k.id) }))
+        .sort(byNameDesc)
     : [];
   const subfolders = virtual
     ? []
-    : folders.filter((f) =>
-        at.folder
-          ? f.parent_id === at.folder
-          : !f.parent_id &&
-            (f.client_id ?? undefined) === at.client &&
-            (f.contract_id ?? undefined) === at.contract,
-      );
+    : folders
+        .filter((f) =>
+          at.folder
+            ? f.parent_id === at.folder
+            : !f.parent_id &&
+              (f.client_id ?? undefined) === at.client &&
+              (f.contract_id ?? undefined) === at.contract,
+        )
+        .sort(byNameDesc);
 
   async function run(id: string, action: () => Promise<unknown>) {
     setBusyId(id);
@@ -1174,7 +1183,7 @@ function DriveTree({
                     (k) => () =>
                       folderCard(
                         k.id,
-                        contractProductLabel(data, k.id),
+                        k.name,
                         "product",
                         () => go({ client: k.client_id, contract: k.id }),
                         data.products.find((p) => p.id === k.product_id)?.color,
