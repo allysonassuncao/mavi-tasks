@@ -175,18 +175,24 @@ await check("escrita direta não permite elevar papel", () =>
     db.query(`update memberships set role='admin' where user_id=$1`, [member]),
   ),
 );
-await check("executor pode iniciar e enviar para validação", async () => {
-  await rpc("transition_task", [task, 1, "start", ""]);
-  await rpc("transition_task", [task, 2, "submit", ""]);
-});
+await check("tarefa nova começa Em andamento", async () =>
+  assert.equal(
+    (await db.query("select status from tasks where id=$1", [task])).rows[0]
+      .status,
+    "progress",
+  ),
+);
+await check("executor envia para validação", () =>
+  rpc("transition_task", [task, 1, "submit", ""]),
+);
 await check("executor não aprova internamente", () =>
   denied(() =>
-    rpc("transition_task", [task, 3, "approve_internal", "Tudo certo"]),
+    rpc("transition_task", [task, 2, "approve_internal", "Tudo certo"]),
   ),
 );
 await as(manager);
 await check("gestor da equipe aprova mas aguarda cliente", async () => {
-  await rpc("transition_task", [task, 3, "approve_internal", "Tudo certo"]);
+  await rpc("transition_task", [task, 2, "approve_internal", "Tudo certo"]);
   assert.equal(
     (await db.query("select status from tasks where id=$1", [task])).rows[0]
       .status,
@@ -194,12 +200,12 @@ await check("gestor da equipe aprova mas aguarda cliente", async () => {
   );
 });
 await check("evidência do cliente é obrigatória", () =>
-  denied(() => rpc("transition_task", [task, 4, "approve_client", ""])),
+  denied(() => rpc("transition_task", [task, 3, "approve_client", ""])),
 );
 await check("duas aprovações permitem entregar", async () => {
   await rpc("transition_task", [
     task,
-    4,
+    3,
     "approve_client",
     "Aprovado por Ana em reunião",
   ]);
@@ -210,10 +216,10 @@ await check("duas aprovações permitem entregar", async () => {
   );
 });
 await check("versão antiga é rejeitada", () =>
-  denied(() => rpc("transition_task", [task, 4, "reopen", "Ajustes"])),
+  denied(() => rpc("transition_task", [task, 3, "reopen", "Ajustes"])),
 );
 await check("reabrir invalida aprovações", async () => {
-  await rpc("transition_task", [task, 5, "reopen", "Ajustes solicitados"]);
+  await rpc("transition_task", [task, 4, "reopen", "Ajustes solicitados"]);
   const t = (await db.query("select * from tasks where id=$1", [task])).rows[0];
   assert.equal(t.internal_approved_by, null);
   assert.equal(t.client_approved_by, null);
@@ -245,8 +251,7 @@ async function projectTask(requiresReview, approver, creator) {
 await check("projeto sem validação conclui ao enviar", async () => {
   const id = await projectTask(false, "creator", admin);
   await as(member);
-  await rpc("transition_task", [id, 1, "start", ""]);
-  await rpc("transition_task", [id, 2, "submit", ""]);
+  await rpc("transition_task", [id, 1, "submit", ""]);
   assert.equal(await statusOf(id), "done");
 });
 await check(
@@ -254,26 +259,24 @@ await check(
   async () => {
     const id = await projectTask(true, "supervisor", member);
     await as(member);
-    await rpc("transition_task", [id, 1, "start", ""]);
-    await rpc("transition_task", [id, 2, "submit", ""]);
+    await rpc("transition_task", [id, 1, "submit", ""]);
     await denied(() =>
-      rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]),
+      rpc("transition_task", [id, 2, "approve_internal", "Tudo certo"]),
     );
     await as(manager);
-    await rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]);
+    await rpc("transition_task", [id, 2, "approve_internal", "Tudo certo"]);
     assert.equal(await statusOf(id), "done");
   },
 );
 await check("supervisores são escolhidos na equipe", async () => {
   const id = await projectTask(true, "supervisor", member);
   await as(member);
-  await rpc("transition_task", [id, 1, "start", ""]);
-  await rpc("transition_task", [id, 2, "submit", ""]);
+  await rpc("transition_task", [id, 1, "submit", ""]);
   await as(admin);
   await rpc("update_team", [team, "Equipe A", [manager, member], []]);
   await as(manager);
   await denied(() =>
-    rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]),
+    rpc("transition_task", [id, 2, "approve_internal", "Tudo certo"]),
   );
   await as(admin);
   await rpc("update_team", [team, "Equipe A", [member], [manager]]);
@@ -287,7 +290,7 @@ await check("supervisores são escolhidos na equipe", async () => {
   assert.equal(people.find((p) => p.user_id === manager)?.supervisor, true);
   assert.equal(people.find((p) => p.user_id === member)?.supervisor, false);
   await as(manager);
-  await rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]);
+  await rpc("transition_task", [id, 2, "approve_internal", "Tudo certo"]);
   assert.equal(await statusOf(id), "done");
 });
 await check("colaborador também pode ser supervisor", async () => {
@@ -300,14 +303,13 @@ await check(
   async () => {
     const id = await projectTask(true, "creator", member);
     await as(member);
-    await rpc("transition_task", [id, 1, "start", ""]);
-    await rpc("transition_task", [id, 2, "submit", ""]);
+    await rpc("transition_task", [id, 1, "submit", ""]);
     await as(manager);
     await denied(() =>
-      rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]),
+      rpc("transition_task", [id, 2, "approve_internal", "Tudo certo"]),
     );
     await as(member);
-    await rpc("transition_task", [id, 3, "approve_internal", "Tudo certo"]);
+    await rpc("transition_task", [id, 2, "approve_internal", "Tudo certo"]);
     assert.equal(await statusOf(id), "done");
   },
 );
@@ -370,7 +372,7 @@ await check("status vai e volta sem ordem fixa", async () => {
   const id = await projectTask(true, "creator", admin);
   await as(member);
   await moveTo(id, "review");
-  await moveTo(id, "open");
+  await moveTo(id, "returned", "Falta o briefing");
   await moveTo(id, "progress");
   await as(admin);
   const t = await taskRow(id);
@@ -1085,12 +1087,18 @@ await check("responsável não pode editar conteúdo da tarefa", () =>
   ),
 );
 await as(manager);
-await check("gestor não criador não pode editar tarefa", () =>
-  denied(() =>
-    rpc("update_task", [task2, 1, "Alterado", "", "2026-10-15", 60, "normal"]),
-  ),
+await check("gestor edita tarefa que não criou", () =>
+  rpc("update_task", [task2, 1, "Alterado", "", "2026-10-15", 60, "normal"]),
 );
-await check("gestor não executa cadastros administrativos", async () => {
+await check("gestor também mantém os cadastros", async () => {
+  await rpc("create_project", [A, contract, "Projeto do gestor", null]);
+  await rpc("update_product", [product, "Produto do gestor"]);
+  await rpc("update_client", [client, "Cliente do gestor", ""]);
+  await rpc("update_contract", [contract, "Serviço do gestor", client, product]);
+  await rpc("update_project", [project, "Projeto editado pelo gestor", null]);
+});
+await as(member);
+await check("membro não executa cadastros administrativos", async () => {
   await denied(() =>
     rpc("create_project", [A, contract, "Sem permissão", null]),
   );
@@ -1127,7 +1135,7 @@ await check(
   async () => {
     await rpc("update_task", [
       task2,
-      1,
+      2,
       "Segunda tarefa revisada",
       "Descrição",
       "2026-10-15",
@@ -1149,7 +1157,7 @@ await check("início posterior ao prazo é rejeitado", () =>
   denied(() =>
     rpc("update_task", [
       task2,
-      2,
+      3,
       "Inválida",
       "",
       "2026-10-15",
@@ -1295,14 +1303,8 @@ await check("imagem vinculada é isolada por empresa", async () => {
   await denied(() => rpc("update_client", [client, "Intruso", ""]));
 });
 await as(admin);
-const incomplete = await rpc("prepare_inline_image", [
-  A,
-  "incompleta.png",
-  100,
-]);
-await check("imagem sem upload impede salvar conteúdo quebrado", () =>
-  denied(() => rpc("add_comment", [task2, imageBody(incomplete.id)])),
-);
+// Images live in GCS (20260922190000_gcs_storage_support), which the database
+// cannot see: the app only inserts an image once its upload has finished.
 await check("imagem pode ser incluída ao criar tarefa", async () => {
   const image = await rpc("prepare_inline_image", [A, "nova.png", 100]);
   await db.query(
@@ -1341,7 +1343,7 @@ await check(
     await db.exec("reset role");
     await db.query(
       `insert into comments(company_id,task_id,author_id,body,created_at)
-    select $1,$2,$3,'Comentário '||n,now()-n*interval '1 second' from generate_series(1,105) n`,
+    select $1,$2,$3,'Comentário '||n,now()+interval '1 hour'-n*interval '1 second' from generate_series(1,105) n`,
       [A, task, admin],
     );
     await as(admin);
