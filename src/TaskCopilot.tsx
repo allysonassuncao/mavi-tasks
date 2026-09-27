@@ -1,0 +1,440 @@
+import { useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Ban,
+  CheckSquare,
+  Copy,
+  FileText,
+  Heart,
+  Info,
+  Lightbulb,
+  Megaphone,
+  MessageCircle,
+  RefreshCw,
+  Rocket,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  Trophy,
+  Video,
+  X,
+  BookMarked,
+  CornerDownLeft,
+} from "lucide-react";
+import { sourceLabel, sourceUrl, type AiSource } from "./ai";
+import {
+  ALERT_LABELS,
+  MIN_REVIEW,
+  sendCopilotFeedback,
+  type AlertKind,
+  type CopilotAction,
+  type CopilotAlert,
+  type CopilotState,
+} from "./copilot";
+import { statuses, type Status } from "./types";
+import { routeParts, taskUrl, pageUrl } from "./router";
+
+/**
+ * Assistente MAVI ao lado do formulário da tarefa: os alertas da análise
+ * (com as fontes, que abrem em outra aba para o rascunho não se perder) e
+ * os Relacionados (tarefas parecidas do cliente e cases de sucesso).
+ * Nunca trava a criação: só avisa.
+ */
+
+const KIND_ICONS: Record<AlertKind, typeof Info> = {
+  error: AlertTriangle,
+  avoids: Ban,
+  prefers: Heart,
+  duplicate: Copy,
+  missing: Info,
+  suggestion: Lightbulb,
+  case: Trophy,
+};
+const SOURCE_ICONS = {
+  meeting: Video,
+  task: CheckSquare,
+  file: FileText,
+  social: Rocket,
+  campaign: Megaphone,
+  case: Trophy,
+  whatsapp: MessageCircle,
+};
+const DOSSIER_KINDS: Record<string, string> = {
+  prefers: "Prefere",
+  avoids: "Não gosta",
+  rule: "Regra",
+  style: "Tom e identidade",
+  context: "Contexto",
+  history: "Histórico",
+};
+
+const openInNewTab = (url: string) =>
+  window.open(url, "_blank", "noopener,noreferrer");
+const company = () => routeParts(window.location.pathname).company;
+
+/** Registra o que a pessoa fez com cada alerta e envia ao salvar a tarefa. */
+export function useCopilotFeedback(state: CopilotState) {
+  const actions = useRef(
+    new Map<string, { alert: CopilotAlert; action: CopilotAction }>(),
+  );
+  const seen = useRef(new Map<string, CopilotAlert>());
+  const keyOf = (a: CopilotAlert) => `${a.kind}:${a.title}`;
+  for (const a of state.alerts) seen.current.set(keyOf(a), a);
+  return {
+    record(alert: CopilotAlert, action: CopilotAction) {
+      actions.current.set(keyOf(alert), { alert, action });
+    },
+    actionOf: (alert: CopilotAlert) =>
+      actions.current.get(keyOf(alert))?.action,
+    /** Alertas graves sem nenhuma ação contam como ignorados. */
+    flush(companyId: string, client: string | null, task: string | null) {
+      const events = [...seen.current.entries()].flatMap(([key, alert]) => {
+        const done = actions.current.get(key);
+        if (done)
+          return [
+            {
+              kind: alert.kind,
+              severity: alert.severity,
+              action: done.action,
+              title: alert.title,
+            },
+          ];
+        return alert.severity === "high"
+          ? [
+              {
+                kind: alert.kind,
+                severity: alert.severity,
+                action: "ignored" as const,
+                title: alert.title,
+              },
+            ]
+          : [];
+      });
+      seen.current.clear();
+      actions.current.clear();
+      void sendCopilotFeedback(companyId, client, task, events).catch(() => {});
+    },
+  };
+}
+export type CopilotFeedback = ReturnType<typeof useCopilotFeedback>;
+
+export function TaskCopilot({
+  state,
+  feedback,
+  members,
+  onApplyFix,
+  typedEnough,
+}: {
+  state: CopilotState;
+  feedback: CopilotFeedback;
+  members: { user_id: string; name: string }[];
+  /** Acrescenta o texto à descrição da tarefa. */
+  onApplyFix?: (text: string) => void;
+  /** Já há texto suficiente para a MAVI opinar. */
+  typedEnough: boolean;
+}) {
+  const [, redraw] = useState(0);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const act = (a: CopilotAlert, action: CopilotAction) => {
+    feedback.record(a, action);
+    if (action === "dismissed")
+      setHidden((h) => new Set(h).add(`${a.kind}:${a.title}`));
+    redraw((v) => v + 1);
+  };
+  const alerts = state.alerts.filter(
+    (a) => !hidden.has(`${a.kind}:${a.title}`),
+  );
+  const similar = state.related?.similar ?? [];
+  const cases = state.related?.cases ?? [];
+  const nothing =
+    !alerts.length && !similar.length && !cases.length && !state.reviewing;
+  return (
+    <aside className="copilot" aria-label="Assistente MAVI" aria-live="polite">
+      <header className="copilot-head">
+        <Sparkles size={16} aria-hidden="true" />
+        <strong>Assistente MAVI</strong>
+        <button
+          type="button"
+          className="copilot-refresh"
+          onClick={state.reviewNow}
+          disabled={state.reviewing || !typedEnough}
+          title="Revisar agora"
+          aria-label="Revisar agora"
+        >
+          <RefreshCw
+            size={14}
+            className={state.reviewing ? "spin" : undefined}
+          />
+        </button>
+      </header>
+
+      {state.reviewing && (
+        <p className="copilot-status">
+          <span className="copilot-dot" aria-hidden="true" />
+          {state.status || "A MAVI está conferindo"}
+        </p>
+      )}
+      {state.stale && alerts.length > 0 && (
+        <p className="copilot-note">
+          O texto mudou: a MAVI revisa de novo quando você parar de digitar.
+        </p>
+      )}
+      {state.throttled && (
+        <p className="copilot-note">
+          Muitas análises seguidas. A MAVI volta em instantes.
+        </p>
+      )}
+      {state.error && (
+        <p className="copilot-error">
+          {state.error}{" "}
+          <button type="button" onClick={state.reviewNow}>
+            Tentar de novo
+          </button>
+        </p>
+      )}
+
+      {nothing && !state.error && (
+        <p className="copilot-empty">
+          {typedEnough
+            ? "Nada a apontar por enquanto. A MAVI continua conferindo enquanto você escreve."
+            : `Escreva o título e a descrição: a MAVI confere com o histórico do cliente (o que ele gosta, não gosta, já pediu) e aponta o que pode melhorar.`}
+        </p>
+      )}
+
+      {alerts.length > 0 && (
+        <ul className="copilot-alerts">
+          {alerts.map((a) => (
+            <AlertCard
+              key={`${a.kind}:${a.title}`}
+              alert={a}
+              action={feedback.actionOf(a)}
+              onAct={(action) => act(a, action)}
+              onApplyFix={
+                onApplyFix && a.fix
+                  ? () => {
+                      onApplyFix(a.fix!);
+                      act(a, "applied");
+                    }
+                  : undefined
+              }
+            />
+          ))}
+        </ul>
+      )}
+
+      {(similar.length > 0 || cases.length > 0) && (
+        <section className="copilot-related" aria-label="Relacionados">
+          {similar.length > 0 && (
+            <>
+              <h3>Tarefas parecidas do cliente</h3>
+              <ul>
+                {similar.map((t) => {
+                  const st = statuses[t.status as Status];
+                  const who = members.find(
+                    (m) => m.user_id === t.assignee,
+                  )?.name;
+                  const inner = (
+                    <>
+                      <CheckSquare size={13} aria-hidden="true" />
+                      <span className="copilot-related-title">{t.title}</span>
+                      {t.duplicate && (
+                        <em className="copilot-dup">possível duplicada</em>
+                      )}
+                      <small>
+                        {st && (
+                          <span
+                            className="copilot-status-pill"
+                            style={{ color: st.color }}
+                          >
+                            {st.label}
+                          </span>
+                        )}
+                        {t.restricted
+                          ? " · de um colega"
+                          : who
+                            ? ` · ${who}`
+                            : ""}
+                      </small>
+                    </>
+                  );
+                  return (
+                    <li key={t.id}>
+                      {t.restricted ? (
+                        // Tarefa que a pessoa não abre: só título e status.
+                        <div
+                          className="copilot-related-item"
+                          title="Tarefa de um colega da equipe que você não acessa"
+                        >
+                          {inner}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openInNewTab(
+                              taskUrl({ id: t.id, title: t.title }, company()),
+                            )
+                          }
+                          title="Abrir em outra aba"
+                        >
+                          {inner}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+          {cases.length > 0 && (
+            <>
+              <h3>Cases de sucesso</h3>
+              <ul>
+                {cases.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openInNewTab(
+                          `${pageUrl("cases", company())}?caso=${c.id}`,
+                        )
+                      }
+                      title="Abrir em outra aba"
+                    >
+                      <Trophy size={13} aria-hidden="true" />
+                      <span className="copilot-related-title">{c.title}</span>
+                      {c.snippet && <small>{c.snippet}</small>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
+      {!typedEnough && alerts.length === 0 && (
+        <small className="copilot-hint">
+          A análise começa com uns {MIN_REVIEW} caracteres.
+        </small>
+      )}
+    </aside>
+  );
+}
+
+function AlertCard({
+  alert: a,
+  action,
+  onAct,
+  onApplyFix,
+}: {
+  alert: CopilotAlert;
+  action?: CopilotAction;
+  onAct: (action: CopilotAction) => void;
+  onApplyFix?: () => void;
+}) {
+  const Icon = KIND_ICONS[a.kind] ?? Info;
+  return (
+    <li className={`copilot-alert kind-${a.kind} sev-${a.severity}`}>
+      <div className="copilot-alert-head">
+        <Icon size={14} aria-hidden="true" />
+        <span className="copilot-kind">{ALERT_LABELS[a.kind]}</span>
+        <button
+          type="button"
+          className="copilot-dismiss"
+          onClick={() => onAct("dismissed")}
+          aria-label="Dispensar"
+          title="Dispensar"
+        >
+          <X size={13} />
+        </button>
+      </div>
+      <strong>{a.title}</strong>
+      {a.text && <p>{a.text}</p>}
+      {(a.sources.length > 0 || a.dossier.length > 0) && (
+        <div className="copilot-sources">
+          {a.dossier.map((d) => (
+            <span key={d.id} className="copilot-chip dossier" title={d.text}>
+              <BookMarked size={12} aria-hidden="true" /> Dossiê ·{" "}
+              {DOSSIER_KINDS[d.kind] ?? d.kind}
+            </span>
+          ))}
+          {a.sources.map((s) => (
+            <SourceChip
+              key={`${s.type}:${s.id}:${s.start ?? ""}`}
+              source={s}
+              onOpen={() => onAct("opened")}
+            />
+          ))}
+        </div>
+      )}
+      <div className="copilot-actions">
+        {onApplyFix &&
+          (action === "applied" ? (
+            <span className="copilot-applied">Adicionado à descrição</span>
+          ) : (
+            <button
+              type="button"
+              className="copilot-apply"
+              onClick={onApplyFix}
+              title={a.fix}
+            >
+              <CornerDownLeft size={13} aria-hidden="true" /> Aplicar na
+              descrição
+            </button>
+          ))}
+        <span className="copilot-vote">
+          <button
+            type="button"
+            aria-pressed={action === "useful"}
+            onClick={() => onAct("useful")}
+            aria-label="Útil"
+            title="Útil"
+          >
+            <ThumbsUp size={13} />
+          </button>
+          <button
+            type="button"
+            aria-pressed={action === "not_useful"}
+            onClick={() => onAct("not_useful")}
+            aria-label="Não ajudou"
+            title="Não ajudou"
+          >
+            <ThumbsDown size={13} />
+          </button>
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function SourceChip({
+  source: s,
+  onOpen,
+}: {
+  source: AiSource;
+  onOpen: () => void;
+}) {
+  const Icon = SOURCE_ICONS[s.type] ?? FileText;
+  if (s.restricted)
+    return (
+      <span
+        className="copilot-chip locked"
+        title={`${s.title} (tarefa de um colega que você não acessa)`}
+      >
+        <Icon size={12} aria-hidden="true" /> Tarefa de um colega
+      </span>
+    );
+  return (
+    <button
+      type="button"
+      className="copilot-chip"
+      onClick={() => {
+        onOpen();
+        openInNewTab(sourceUrl(s));
+      }}
+      title={`${s.title} (abre em outra aba)`}
+    >
+      <Icon size={12} aria-hidden="true" /> {sourceLabel(s)}
+    </button>
+  );
+}

@@ -37,6 +37,8 @@ export type AiSource = {
   /** Arquivo: página, slide ou planilha citada. */
   page?: number;
   label?: string;
+  /** Tarefa que a pessoa não abre (Assistente MAVI: só título e status). */
+  restricted?: boolean;
 };
 
 /** Um passo do trabalho da IA, como a tela mostra. */

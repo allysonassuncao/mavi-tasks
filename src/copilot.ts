@@ -1,0 +1,485 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "./supabase";
+import type { AiSource } from "./ai";
+
+/**
+ * Assistente MAVI nas tarefas, no navegador. Duas camadas, só quando a
+ * pessoa para de digitar (nada roda em intervalos):
+ * - Relacionados (~1 s parado): tarefas parecidas e cases, sem modelo;
+ * - análise da MAVI (~3 s parado e o texto mudou de verdade): os alertas
+ *   chegam um a um. O mesmo rascunho nunca é analisado duas vezes (cache
+ *   nesta aba) e a análise anterior é cancelada quando outra começa.
+ */
+
+export type CopilotDraft = {
+  company: string;
+  contract: string | null;
+  /** Edição: a tarefa (fica de fora das parecidas). */
+  task?: string | null;
+  title: string;
+  /** Descrição em texto (sem HTML). */
+  description: string;
+  due?: string;
+  /** Campos do modelo, como "Campo: valor". */
+  extra?: string;
+};
+export type SimilarTask = {
+  id: string;
+  title: string;
+  status: string | null;
+  /** Tarefa de um colega que a pessoa não abre: só título e status. */
+  restricted?: boolean;
+  assignee?: string | null;
+  due?: string | null;
+  date?: string | null;
+  snippet?: string;
+  similarity: number | null;
+  duplicate: boolean;
+};
+export type RelatedCase = {
+  id: string;
+  title: string;
+  date: string | null;
+  snippet: string;
+  similarity: number | null;
+};
+export type Related = {
+  client: { id: string; name: string } | null;
+  similar: SimilarTask[];
+  cases: RelatedCase[];
+};
+export type AlertKind =
+  | "error"
+  | "avoids"
+  | "prefers"
+  | "duplicate"
+  | "missing"
+  | "suggestion"
+  | "case";
+export type CopilotAlert = {
+  id: string;
+  kind: AlertKind;
+  severity: "high" | "medium" | "low";
+  title: string;
+  text: string;
+  fix?: string;
+  sources: AiSource[];
+  dossier: { id: string; kind: string; text: string }[];
+};
+export type CopilotAction =
+  "applied" | "useful" | "not_useful" | "dismissed" | "ignored" | "opened";
+
+export const ALERT_LABELS: Record<AlertKind, string> = {
+  error: "Possível erro",
+  avoids: "O cliente não gosta",
+  prefers: "O cliente prefere",
+  duplicate: "Já foi pedido",
+  missing: "Falta informação",
+  suggestion: "Sugestão",
+  case: "Case que ajuda",
+};
+
+/** Quanto texto a MAVI precisa para opinar. */
+export const MIN_RELATED = 12;
+export const MIN_REVIEW = 25;
+const RELATED_DELAY = 900;
+const REVIEW_DELAY = 3000;
+
+const clean = (s: string) => s.replace(/\s+/g, " ").trim();
+export const draftKey = (d: CopilotDraft) =>
+  [
+    d.contract,
+    d.task,
+    clean(d.title),
+    clean(d.description),
+    d.due,
+    clean(d.extra ?? ""),
+  ]
+    .map((x) => x ?? "")
+    .join("|");
+const draftText = (d: CopilotDraft) => clean(`${d.title} ${d.description}`);
+
+/**
+ * Mudou o bastante para outra análise? Palavras novas ou removidas somando
+ * pelo menos 15% (ou 6 palavras), ou o cliente/prazo mudou.
+ */
+export function meaningfulChange(
+  prev: CopilotDraft | null,
+  next: CopilotDraft,
+) {
+  if (!prev) return true;
+  if (prev.contract !== next.contract || prev.due !== next.due) return true;
+  const words = (d: CopilotDraft) =>
+    new Set(
+      draftText(d)
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter((w) => w.length > 2),
+    );
+  const a = words(prev);
+  const b = words(next);
+  let diff = 0;
+  for (const w of a) if (!b.has(w)) diff++;
+  for (const w of b) if (!a.has(w)) diff++;
+  return diff >= 6 || diff / Math.max(a.size, b.size, 1) >= 0.15;
+}
+
+// Cache desta aba (o mesmo rascunho não vai ao servidor de novo).
+const relatedCache = new Map<string, Related>();
+const reviewCache = new Map<
+  string,
+  { alerts: CopilotAlert[]; version: number }
+>();
+function remember<T>(cache: Map<string, T>, key: string, value: T) {
+  cache.set(key, value);
+  if (cache.size > 40) cache.delete(cache.keys().next().value!);
+}
+
+async function token() {
+  return supabase
+    ? (await supabase.auth.getSession()).data.session?.access_token
+    : undefined;
+}
+async function post(body: Record<string, unknown>, signal: AbortSignal) {
+  const t = await token();
+  return fetch("/api/ai", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(t ? { Authorization: `Bearer ${t}` } : {}),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+export async function fetchRelated(d: CopilotDraft, signal: AbortSignal) {
+  const res = await post({ action: "ai-copilot", ...d }, signal);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Error(data.error ?? "A MAVI não respondeu.");
+  return data as Related;
+}
+
+type ReviewHandlers = {
+  onRelated: (r: Related) => void;
+  onAlert: (a: CopilotAlert) => void;
+  onStatus: (text: string) => void;
+};
+/** A análise em tempo real (linhas JSON); devolve os alertas e a versão do dossiê. */
+export async function streamReview(
+  d: CopilotDraft,
+  handlers: ReviewHandlers,
+  signal: AbortSignal,
+): Promise<{ alerts: CopilotAlert[]; version: number } | "throttled"> {
+  const res = await post({ action: "ai-copilot-review", ...d }, signal);
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => ({}));
+    throw Error(data.error ?? "A MAVI não respondeu.");
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let final: { alerts: CopilotAlert[]; version: number } | "throttled" | null =
+    null;
+  const handle = (line: string) => {
+    if (!line.trim()) return;
+    const e = JSON.parse(line);
+    if (e.type === "related") handlers.onRelated(e);
+    else if (e.type === "alert") handlers.onAlert(e.alert);
+    else if (e.type === "status") handlers.onStatus(e.text);
+    else if (e.type === "throttled") final = "throttled";
+    else if (e.type === "done")
+      final = { alerts: e.alerts ?? [], version: e.version ?? 0 };
+    else if (e.type === "error")
+      throw Error(e.error ?? "A MAVI não respondeu.");
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      handle(buffer.slice(0, nl));
+      buffer = buffer.slice(nl + 1);
+    }
+  }
+  handle(buffer);
+  if (!final) throw Error("A análise da MAVI foi interrompida.");
+  return final;
+}
+
+/** O que a pessoa fez com cada alerta (mede a qualidade do copiloto). */
+export async function sendCopilotFeedback(
+  company: string,
+  client: string | null,
+  task: string | null,
+  events: {
+    kind: string;
+    severity: string;
+    action: CopilotAction;
+    title: string;
+  }[],
+) {
+  if (!supabase || !events.length) return;
+  await supabase.rpc("task_copilot_feedback", {
+    p_company: company,
+    p_client: client,
+    p_task: task,
+    p_events: events.slice(0, 30),
+  });
+}
+
+// ------------------------------------------------------------ demonstração
+function demoResult(d: CopilotDraft): {
+  related: Related;
+  alerts: CopilotAlert[];
+} {
+  const src = (
+    type: AiSource["type"],
+    title: string,
+    date: string,
+  ): AiSource => ({
+    ref: "S1",
+    type,
+    id: "demo",
+    title,
+    date,
+    client_id: null,
+  });
+  return {
+    related: {
+      client: { id: "demo", name: "Cliente demo" },
+      similar: [
+        {
+          id: "demo-task",
+          title: "Carrossel com a oferta do mês",
+          status: "progress",
+          assignee: null,
+          due: null,
+          date: "2026-09-20",
+          snippet: "Carrossel de 5 cards com a oferta de setembro",
+          similarity: 0.78,
+          duplicate: true,
+        },
+      ],
+      cases: [
+        {
+          id: "demo-case",
+          title:
+            "Loja de móveis dobrou os leads com carrossel de antes e depois",
+          date: null,
+          snippet: "CPL caiu 42% em 30 dias",
+          similarity: 0.5,
+        },
+      ],
+    },
+    alerts: [
+      {
+        id: "a1",
+        kind: "avoids",
+        severity: "high",
+        title: "O cliente pediu para não usar vermelho",
+        text: "Na reunião de alinhamento ele disse que vermelho lembra a concorrente.",
+        fix: "Evitar vermelho nas artes (pedido do cliente).",
+        sources: [src("meeting", "Alinhamento mensal", "2026-09-10T13:00:00Z")],
+        dossier: [],
+      },
+      {
+        id: "a2",
+        kind: "duplicate",
+        severity: "medium",
+        title: "Há uma tarefa parecida em andamento",
+        text: `"Carrossel com a oferta do mês" está em andamento. Confira se "${d.title.slice(0, 40)}" não é o mesmo pedido.`,
+        sources: [src("task", "Carrossel com a oferta do mês", "2026-09-20")],
+        dossier: [],
+      },
+      {
+        id: "a3",
+        kind: "missing",
+        severity: "low",
+        title: "Diga quem aprova e até quando",
+        text: "As aprovações deste cliente passam pela gerente de marketing; um prazo de aprovação evita atraso.",
+        fix: "Aprovação: gerente de marketing, até 2 dias antes da publicação.",
+        sources: [],
+        dossier: [],
+      },
+    ],
+  };
+}
+
+// ------------------------------------------------------------ hook
+export type CopilotState = {
+  related: Related | null;
+  alerts: CopilotAlert[];
+  /** A análise está rodando (os alertas ainda podem chegar). */
+  reviewing: boolean;
+  status: string;
+  error: string;
+  throttled: boolean;
+  /** Os alertas vieram de um texto que já mudou. */
+  stale: boolean;
+  /** Pede a análise agora (sem esperar a pausa nem a mudança mínima). */
+  reviewNow: () => void;
+};
+
+export function useTaskCopilot(
+  draft: CopilotDraft,
+  enabled: boolean,
+  demo = false,
+  /** Edição: o texto que já existe não é analisado, só o que mudar. */
+  onlyChanges = false,
+): CopilotState {
+  const [related, setRelated] = useState<Related | null>(null);
+  const [alerts, setAlerts] = useState<CopilotAlert[]>([]);
+  const [reviewing, setReviewing] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [throttled, setThrottled] = useState(false);
+  const [reviewedKey, setReviewedKey] = useState("");
+  const [force, setForce] = useState(0);
+  const lastReviewed = useRef<CopilotDraft | null>(null);
+  // Edição: o texto de quando a MAVI foi ligada conta como já conferido.
+  const baselined = useRef(false);
+  if (!enabled) baselined.current = false;
+  else if (onlyChanges && !baselined.current) {
+    baselined.current = true;
+    lastReviewed.current = draft;
+  }
+  const reviewAbort = useRef<AbortController | null>(null);
+  const key = draftKey(draft);
+  const text = draftText(draft);
+  const ready = enabled && (!!draft.contract || !!draft.task);
+  const current = useRef(draft);
+  current.current = draft;
+
+  // Relacionados.
+  useEffect(() => {
+    if (!enabled || !ready || text.length < MIN_RELATED) return;
+    const cached = relatedCache.get(key);
+    if (cached) {
+      setRelated(cached);
+      return;
+    }
+    const abort = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const r = demo
+          ? demoResult(current.current).related
+          : await fetchRelated(current.current, abort.signal);
+        remember(relatedCache, key, r);
+        setRelated(r);
+      } catch {
+        // Os Relacionados são um atalho: sem eles, a análise continua.
+      }
+    }, RELATED_DELAY);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [key, enabled, ready, demo]);
+
+  // Análise da MAVI.
+  useEffect(() => {
+    if (!enabled || !ready || text.length < MIN_REVIEW) return;
+    const forced = force > 0;
+    const cached = reviewCache.get(key);
+    if (cached) {
+      setAlerts(cached.alerts);
+      setReviewedKey(key);
+      return;
+    }
+    if (!forced && !meaningfulChange(lastReviewed.current, draft)) return;
+    const timer = setTimeout(
+      async () => {
+        reviewAbort.current?.abort();
+        const abort = new AbortController();
+        reviewAbort.current = abort;
+        const snapshot = current.current;
+        lastReviewed.current = snapshot;
+        setReviewing(true);
+        setError("");
+        setThrottled(false);
+        setStatus("A MAVI está lendo o rascunho");
+        const incoming: CopilotAlert[] = [];
+        try {
+          if (demo) {
+            const r = demoResult(snapshot);
+            await new Promise((ok) => setTimeout(ok, 600));
+            setRelated(r.related);
+            setAlerts(r.alerts);
+            remember(reviewCache, key, { alerts: r.alerts, version: 0 });
+            setReviewedKey(key);
+            return;
+          }
+          const result = await streamReview(
+            snapshot,
+            {
+              onRelated: (r) => {
+                remember(relatedCache, key, r);
+                setRelated(r);
+              },
+              onAlert: (a) => {
+                incoming.push(a);
+                setAlerts([...incoming]);
+              },
+              onStatus: setStatus,
+            },
+            abort.signal,
+          );
+          if (result === "throttled") {
+            setThrottled(true);
+            lastReviewed.current = null;
+            return;
+          }
+          remember(reviewCache, key, result);
+          setAlerts(result.alerts);
+          setReviewedKey(key);
+        } catch (e) {
+          if (abort.signal.aborted) return;
+          lastReviewed.current = null;
+          setError((e as Error).message);
+        } finally {
+          if (reviewAbort.current === abort) {
+            setReviewing(false);
+            setStatus("");
+          }
+        }
+      },
+      forced ? 0 : REVIEW_DELAY,
+    );
+    return () => clearTimeout(timer);
+  }, [key, enabled, ready, force, demo]);
+
+  // Fechou o formulário: a análise em curso para.
+  useEffect(() => () => reviewAbort.current?.abort(), []);
+  useEffect(() => {
+    if (force) setForce(0);
+  }, [key]);
+
+  return useMemo(
+    () => ({
+      related: text.length >= MIN_RELATED ? related : null,
+      alerts,
+      reviewing,
+      status,
+      error,
+      throttled,
+      stale: !!reviewedKey && reviewedKey !== key && !reviewing,
+      reviewNow: () => {
+        lastReviewed.current = null;
+        setForce((v) => v + 1);
+      },
+    }),
+    [
+      related,
+      alerts,
+      reviewing,
+      status,
+      error,
+      throttled,
+      reviewedKey,
+      key,
+      text.length,
+    ],
+  );
+}

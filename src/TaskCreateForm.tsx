@@ -14,6 +14,8 @@ import { Modal, Loading } from "./components";
 import { ContractPicker } from "./ContractPicker";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
 import { CustomFieldsForm } from "./CustomFieldsForm";
+import { TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
+import { MIN_REVIEW, useTaskCopilot } from "./copilot";
 import {
   customFieldsError,
   teamTemplateFields,
@@ -188,6 +190,26 @@ export function TaskCreateForm({
   );
   const [customValues, setCustomValues] = useState<Record<string, unknown>>({});
   const me = activeMembers.find((m) => m.user_id === user);
+  // Assistente MAVI: lê o rascunho enquanto a pessoa escreve (desligado junto
+  // com o módulo "Assistente MAVI" da pessoa).
+  const [descriptionText, setDescriptionText] = useState("");
+  const appendToDescription = useRef<((text: string) => void) | null>(null);
+  const copilotOn = !data.members
+    .find((m) => m.user_id === user)
+    ?.hidden_pages?.includes("assistant");
+  const copilot = useTaskCopilot(
+    {
+      company,
+      contract: contract || null,
+      title,
+      description: descriptionText,
+      due,
+      extra: fieldsText(customFields, customValues),
+    },
+    copilotOn && !locked,
+    demo,
+  );
+  const copilotFeedback = useCopilotFeedback(copilot);
 
   // Modal opens the dialog in its own (later) effect, which steals focus.
   useEffect(() => {
@@ -291,6 +313,11 @@ export function TaskCreateForm({
         redrawUploads,
       );
       rememberContract(contract);
+      copilotFeedback.flush(
+        company,
+        contractClient ?? null,
+        uploads.current.taskId ?? null,
+      );
       if (createAnother) resetForNext();
       else onClose();
     } catch (e) {
@@ -313,375 +340,422 @@ export function TaskCreateForm({
     }
   }
   return (
-    <Modal title="Nova tarefa" onClose={close} busy={saving || editorUploading}>
-      <form
-        className="entity-form quick-task"
-        onSubmit={submit}
-        onKeyDown={submitShortcut}
-        {...drop.handlers}
-      >
-        {drop.active && (
-          <DropOverlay
-            label="Solte para anexar à nova tarefa"
-            hint="Os arquivos são enviados ao criar a tarefa"
-          />
-        )}
-        <fieldset className="create-fields" disabled={locked}>
-          <Input
-            ref={titleRef}
-            className="quick-task-title"
-            aria-label="Nome da tarefa"
-            placeholder="O que precisa ser feito?"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-            minLength={2}
-            maxLength={240}
-          />
-          {created > 0 && (
-            <small className="quick-task-created" role="status">
-              <Check size={14} />
-              {created === 1
-                ? "Tarefa criada. Pode escrever a próxima."
-                : `${created} tarefas criadas. Pode escrever a próxima.`}
-            </small>
-          )}
-          {contract ? (
-            <ContractPicker
-              data={data}
-              contract={contract}
-              onContractChange={setContract}
-              // Shown only when the product has projects.
-              project={project}
-              onProjectChange={setProject}
-              allowed={(id) => canCreateTaskIn(data, id, user)}
+    <Modal
+      title="Nova tarefa"
+      onClose={close}
+      busy={saving || editorUploading}
+      className={copilotOn ? "with-copilot" : ""}
+    >
+      <div className="copilot-layout">
+        <form
+          className="entity-form quick-task"
+          onSubmit={submit}
+          onKeyDown={submitShortcut}
+          {...drop.handlers}
+        >
+          {drop.active && (
+            <DropOverlay
+              label="Solte para anexar à nova tarefa"
+              hint="Os arquivos são enviados ao criar a tarefa"
             />
-          ) : (
-            <p className="form-error" role="alert">
-              {data.contracts.some((c) => !c.archived)
-                ? "Você ainda não faz parte de uma equipe que atende um cliente. Peça a um gestor para incluí-lo em uma equipe."
-                : "Adicione um produto a um cliente (em Clientes) antes de criar tarefas."}
-            </p>
           )}
-          <div className="form-columns">
-            <div className="quick-task-due">
-              {byTeam ? (
-                <label>
-                  Equipe responsável
-                  <Select required value={team} onValueChange={setAssignTeam}>
-                    <SelectOption value="">
-                      {clientTeams.length
-                        ? "Escolha a equipe"
-                        : "Nenhuma equipe atende este cliente"}
-                    </SelectOption>
-                    {clientTeams.map(({ team: t, unavailable }) => (
-                      <SelectOption
-                        key={t.id}
-                        value={t.id}
-                        disabled={!!unavailable}
-                      >
-                        {unavailable ? `${t.name} · ${unavailable}` : t.name}
+          <fieldset className="create-fields" disabled={locked}>
+            <Input
+              ref={titleRef}
+              className="quick-task-title"
+              aria-label="Nome da tarefa"
+              placeholder="O que precisa ser feito?"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+              minLength={2}
+              maxLength={240}
+            />
+            {created > 0 && (
+              <small className="quick-task-created" role="status">
+                <Check size={14} />
+                {created === 1
+                  ? "Tarefa criada. Pode escrever a próxima."
+                  : `${created} tarefas criadas. Pode escrever a próxima.`}
+              </small>
+            )}
+            {contract ? (
+              <ContractPicker
+                data={data}
+                contract={contract}
+                onContractChange={setContract}
+                // Shown only when the product has projects.
+                project={project}
+                onProjectChange={setProject}
+                allowed={(id) => canCreateTaskIn(data, id, user)}
+              />
+            ) : (
+              <p className="form-error" role="alert">
+                {data.contracts.some((c) => !c.archived)
+                  ? "Você ainda não faz parte de uma equipe que atende um cliente. Peça a um gestor para incluí-lo em uma equipe."
+                  : "Adicione um produto a um cliente (em Clientes) antes de criar tarefas."}
+              </p>
+            )}
+            <div className="form-columns">
+              <div className="quick-task-due">
+                {byTeam ? (
+                  <label>
+                    Equipe responsável
+                    <Select required value={team} onValueChange={setAssignTeam}>
+                      <SelectOption value="">
+                        {clientTeams.length
+                          ? "Escolha a equipe"
+                          : "Nenhuma equipe atende este cliente"}
                       </SelectOption>
-                    ))}
-                  </Select>
-                </label>
-              ) : (
-                <label>
-                  Responsável
-                  <Select required value={assignee} onValueChange={setAssignee}>
-                    {me && (
-                      <SelectOption value={me.user_id}>
-                        Eu ({me.name})
-                      </SelectOption>
-                    )}
-                    {activeMembers
-                      .filter((m) => m.user_id !== user)
-                      .map((m) => (
-                        <SelectOption key={m.user_id} value={m.user_id}>
-                          {m.name}
+                      {clientTeams.map(({ team: t, unavailable }) => (
+                        <SelectOption
+                          key={t.id}
+                          value={t.id}
+                          disabled={!!unavailable}
+                        >
+                          {unavailable ? `${t.name} · ${unavailable}` : t.name}
                         </SelectOption>
                       ))}
-                  </Select>
-                </label>
-              )}
-              <div
-                className="due-shortcuts"
-                role="radiogroup"
-                aria-label="Enviar para"
-              >
-                {(
-                  [
-                    ["person", "Pessoa"],
-                    ["team", "Equipe"],
-                  ] as const
-                ).map(([mode, label]) => (
-                  <button
-                    type="button"
-                    key={mode}
-                    role="radio"
-                    aria-checked={assignMode === mode}
-                    className={assignMode === mode ? "selected" : ""}
-                    onClick={() => setAssignMode(mode)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {byTeam && (
-                <small className="assign-team-hint">
-                  Vai para quem da equipe tem menos tarefas em aberto.
-                  Supervisores só recebem quando a equipe não tem mais ninguém.
-                </small>
-              )}
-            </div>
-            <div className="quick-task-due">
-              <label>
-                Prazo
-                <Input
-                  name="due"
-                  type="date"
-                  value={due}
-                  onChange={(e) => setDue(e.target.value)}
-                  required
-                />
-              </label>
-              <div
-                className="due-shortcuts"
-                role="group"
-                aria-label="Atalhos de prazo"
-              >
-                {dueShortcuts.map((option) => {
-                  const value = inDays(option.days);
-                  return (
-                    <button
-                      type="button"
-                      key={option.label}
-                      className={due === value ? "selected" : ""}
-                      aria-pressed={due === value}
-                      onClick={() => setDue(value)}
-                    >
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          <CustomFieldsForm
-            fields={customFields}
-            values={customValues}
-            onChange={setCustomValues}
-          />
-          <Suspense fallback={<Loading compact />}>
-            <RichTextEditor
-              key={formKey}
-              defaultValue={formKey === 0 ? (initialDescription ?? "") : ""}
-              company={company}
-              demo={demo}
-              onUploading={setEditorUploading}
-              disabled={locked}
-            />
-          </Suspense>
-        </fieldset>
-        <section
-          className="creation-attachments"
-          aria-label="Anexos da nova tarefa"
-        >
-          <label
-            className={`upload-zone creation-upload ${saving || demo ? "disabled" : ""}`}
-          >
-            <Paperclip size={17} /> Adicionar anexos{" "}
-            <span className="upload-zone-hint">ou arraste para cá</span>
-            <Input
-              type="file"
-              multiple
-              accept={attachmentAccept}
-              disabled={saving || demo}
-              onChange={(e) => {
-                addFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <small>
-            {demo
-              ? "Envio de arquivos disponível no ambiente conectado. O modo demonstração não armazena arquivos."
-              : "Até 20 MB por arquivo. PDF, imagens, TXT, CSV, ZIP, DOCX, XLSX e PPTX."}
-          </small>
-          {uploads.current.pending.map((file, index) => (
-            <div
-              className="pending-file"
-              key={`${file.name}-${file.size}-${file.lastModified}`}
-            >
-              <Paperclip size={15} />
-              <span>
-                {file.name}
-                <small>{(file.size / 1024).toFixed(1)} KB</small>
-              </span>
-              <Button
-                type="button"
-                className="icon-btn"
-                aria-label={`Remover ${file.name}`}
-                disabled={saving}
-                onClick={() => {
-                  uploads.current.pending.splice(index, 1);
-                  redrawUploads();
-                }}
-              >
-                <X size={16} />
-              </Button>
-            </div>
-          ))}
-          {saving && uploads.current.taskId && (
-            <div role="status" aria-label="Enviando anexos">
-              <Skeleton className="skeleton-title" />
-            </div>
-          )}
-          {uploads.current.taskId && (
-            <small role="status">
-              Tarefa criada. {uploads.current.pending.length} anexo(s)
-              pendente(s).
-            </small>
-          )}
-        </section>
-        <fieldset className="create-fields" disabled={locked}>
-          <button
-            type="button"
-            className="details-toggle"
-            aria-expanded={showDetails}
-            aria-controls="task-details"
-            onClick={toggleDetails}
-          >
-            <ChevronDown size={16} className={showDetails ? "open" : ""} />
-            {showDetails ? "Ocultar detalhes" : "Adicionar detalhes"}
-            {!showDetails && <small>prioridade, estimativa, repetição…</small>}
-          </button>
-          {detailsMounted && (
-            <div
-              id="task-details"
-              className="quick-task-details"
-              hidden={!showDetails}
-              key={formKey}
-            >
-              {/* Fields fill a two-column grid; a lone last one spans it. */}
-              <section className="details-section" aria-label="Organização">
-                <h4>Organização</h4>
-                <div className="details-grid">
+                    </Select>
+                  </label>
+                ) : (
                   <label>
-                    Tarefa principal
-                    <Select name="parent" key={contract}>
-                      <SelectOption value="">Nenhuma</SelectOption>
-                      {data.tasks
-                        .filter((t) => t.contract_id === contract)
-                        .map((t) => (
-                          <SelectOption key={t.id} value={t.id}>
-                            {t.title}
+                    Responsável
+                    <Select
+                      required
+                      value={assignee}
+                      onValueChange={setAssignee}
+                    >
+                      {me && (
+                        <SelectOption value={me.user_id}>
+                          Eu ({me.name})
+                        </SelectOption>
+                      )}
+                      {activeMembers
+                        .filter((m) => m.user_id !== user)
+                        .map((m) => (
+                          <SelectOption key={m.user_id} value={m.user_id}>
+                            {m.name}
                           </SelectOption>
                         ))}
                     </Select>
                   </label>
-                </div>
-              </section>
-              <section className="details-section" aria-label="Planejamento">
-                <h4>Planejamento</h4>
-                <div className="details-grid">
-                  <label>
-                    Prioridade
-                    <Select name="priority" defaultValue="normal">
-                      {Object.entries(priorities).map(([id, label]) => (
-                        <SelectOption key={id} value={id}>
-                          {label}
-                        </SelectOption>
-                      ))}
-                    </Select>
-                  </label>
-                  <label>
-                    Estimativa em horas
-                    <Input
-                      type="number"
-                      name="estimated"
-                      min="0"
-                      max="10000"
-                      step="0.25"
-                      placeholder="0"
-                    />
-                  </label>
-                  <label>
-                    Início planejado
-                    <Input name="start_date" type="date" />
-                  </label>
-                  <label>
-                    Programar repetição
-                    <Select
-                      value={repeat}
-                      onValueChange={(v) =>
-                        setRepeat(v as RecurrenceFrequency | "")
-                      }
+                )}
+                <div
+                  className="due-shortcuts"
+                  role="radiogroup"
+                  aria-label="Enviar para"
+                >
+                  {(
+                    [
+                      ["person", "Pessoa"],
+                      ["team", "Equipe"],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      type="button"
+                      key={mode}
+                      role="radio"
+                      aria-checked={assignMode === mode}
+                      className={assignMode === mode ? "selected" : ""}
+                      onClick={() => setAssignMode(mode)}
                     >
-                      <SelectOption value="">Não repetir</SelectOption>
-                      {Object.entries(recurrenceFrequencies).map(
-                        ([id, label]) => (
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {byTeam && (
+                  <small className="assign-team-hint">
+                    Vai para quem da equipe tem menos tarefas em aberto.
+                    Supervisores só recebem quando a equipe não tem mais
+                    ninguém.
+                  </small>
+                )}
+              </div>
+              <div className="quick-task-due">
+                <label>
+                  Prazo
+                  <Input
+                    name="due"
+                    type="date"
+                    value={due}
+                    onChange={(e) => setDue(e.target.value)}
+                    required
+                  />
+                </label>
+                <div
+                  className="due-shortcuts"
+                  role="group"
+                  aria-label="Atalhos de prazo"
+                >
+                  {dueShortcuts.map((option) => {
+                    const value = inDays(option.days);
+                    return (
+                      <button
+                        type="button"
+                        key={option.label}
+                        className={due === value ? "selected" : ""}
+                        aria-pressed={due === value}
+                        onClick={() => setDue(value)}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <CustomFieldsForm
+              fields={customFields}
+              values={customValues}
+              onChange={setCustomValues}
+            />
+            <Suspense fallback={<Loading compact />}>
+              <RichTextEditor
+                key={formKey}
+                defaultValue={formKey === 0 ? (initialDescription ?? "") : ""}
+                company={company}
+                demo={demo}
+                onUploading={setEditorUploading}
+                disabled={locked}
+                onTextChange={setDescriptionText}
+                appendRef={appendToDescription}
+              />
+            </Suspense>
+          </fieldset>
+          <section
+            className="creation-attachments"
+            aria-label="Anexos da nova tarefa"
+          >
+            <label
+              className={`upload-zone creation-upload ${saving || demo ? "disabled" : ""}`}
+            >
+              <Paperclip size={17} /> Adicionar anexos{" "}
+              <span className="upload-zone-hint">ou arraste para cá</span>
+              <Input
+                type="file"
+                multiple
+                accept={attachmentAccept}
+                disabled={saving || demo}
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <small>
+              {demo
+                ? "Envio de arquivos disponível no ambiente conectado. O modo demonstração não armazena arquivos."
+                : "Até 20 MB por arquivo. PDF, imagens, TXT, CSV, ZIP, DOCX, XLSX e PPTX."}
+            </small>
+            {uploads.current.pending.map((file, index) => (
+              <div
+                className="pending-file"
+                key={`${file.name}-${file.size}-${file.lastModified}`}
+              >
+                <Paperclip size={15} />
+                <span>
+                  {file.name}
+                  <small>{(file.size / 1024).toFixed(1)} KB</small>
+                </span>
+                <Button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`Remover ${file.name}`}
+                  disabled={saving}
+                  onClick={() => {
+                    uploads.current.pending.splice(index, 1);
+                    redrawUploads();
+                  }}
+                >
+                  <X size={16} />
+                </Button>
+              </div>
+            ))}
+            {saving && uploads.current.taskId && (
+              <div role="status" aria-label="Enviando anexos">
+                <Skeleton className="skeleton-title" />
+              </div>
+            )}
+            {uploads.current.taskId && (
+              <small role="status">
+                Tarefa criada. {uploads.current.pending.length} anexo(s)
+                pendente(s).
+              </small>
+            )}
+          </section>
+          <fieldset className="create-fields" disabled={locked}>
+            <button
+              type="button"
+              className="details-toggle"
+              aria-expanded={showDetails}
+              aria-controls="task-details"
+              onClick={toggleDetails}
+            >
+              <ChevronDown size={16} className={showDetails ? "open" : ""} />
+              {showDetails ? "Ocultar detalhes" : "Adicionar detalhes"}
+              {!showDetails && (
+                <small>prioridade, estimativa, repetição…</small>
+              )}
+            </button>
+            {detailsMounted && (
+              <div
+                id="task-details"
+                className="quick-task-details"
+                hidden={!showDetails}
+                key={formKey}
+              >
+                {/* Fields fill a two-column grid; a lone last one spans it. */}
+                <section className="details-section" aria-label="Organização">
+                  <h4>Organização</h4>
+                  <div className="details-grid">
+                    <label>
+                      Tarefa principal
+                      <Select name="parent" key={contract}>
+                        <SelectOption value="">Nenhuma</SelectOption>
+                        {data.tasks
+                          .filter((t) => t.contract_id === contract)
+                          .map((t) => (
+                            <SelectOption key={t.id} value={t.id}>
+                              {t.title}
+                            </SelectOption>
+                          ))}
+                      </Select>
+                    </label>
+                  </div>
+                </section>
+                <section className="details-section" aria-label="Planejamento">
+                  <h4>Planejamento</h4>
+                  <div className="details-grid">
+                    <label>
+                      Prioridade
+                      <Select name="priority" defaultValue="normal">
+                        {Object.entries(priorities).map(([id, label]) => (
                           <SelectOption key={id} value={id}>
                             {label}
                           </SelectOption>
-                        ),
-                      )}
-                    </Select>
+                        ))}
+                      </Select>
+                    </label>
+                    <label>
+                      Estimativa em horas
+                      <Input
+                        type="number"
+                        name="estimated"
+                        min="0"
+                        max="10000"
+                        step="0.25"
+                        placeholder="0"
+                      />
+                    </label>
+                    <label>
+                      Início planejado
+                      <Input name="start_date" type="date" />
+                    </label>
+                    <label>
+                      Programar repetição
+                      <Select
+                        value={repeat}
+                        onValueChange={(v) =>
+                          setRepeat(v as RecurrenceFrequency | "")
+                        }
+                      >
+                        <SelectOption value="">Não repetir</SelectOption>
+                        {Object.entries(recurrenceFrequencies).map(
+                          ([id, label]) => (
+                            <SelectOption key={id} value={id}>
+                              {label}
+                            </SelectOption>
+                          ),
+                        )}
+                      </Select>
+                    </label>
+                  </div>
+                  {repeat && <RepeatHint frequency={repeat} due={due} />}
+                </section>
+                <section className="details-section" aria-label="Aprovação">
+                  <h4>Aprovação</h4>
+                  <label className="checkbox-label">
+                    <Checkbox name="client_approval" /> Exigir aprovação do
+                    cliente além da aprovação interna
                   </label>
-                </div>
-                {repeat && <RepeatHint frequency={repeat} due={due} />}
-              </section>
-              <section className="details-section" aria-label="Aprovação">
-                <h4>Aprovação</h4>
-                <label className="checkbox-label">
-                  <Checkbox name="client_approval" /> Exigir aprovação do
-                  cliente além da aprovação interna
-                </label>
-              </section>
-            </div>
+                </section>
+              </div>
+            )}
+          </fieldset>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
           )}
-        </fieldset>
-        {error && (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
+          <div className="form-footer quick-task-footer">
+            {!uploads.current.taskId && (
+              <label className="checkbox-label create-another">
+                <Checkbox
+                  checked={createAnother}
+                  onCheckedChange={(v) => setCreateAnother(v === true)}
+                  disabled={saving}
+                />
+                Criar outra em seguida
+              </label>
+            )}
+            <Button
+              type="button"
+              className="btn secondary"
+              disabled={working}
+              onClick={close}
+            >
+              {created > 0 ? "Fechar" : "Cancelar"}
+            </Button>
+            <Button
+              className="btn primary"
+              disabled={working || !contract}
+              loading={working}
+              title="Enter no título ou Ctrl/⌘ + Enter"
+            >
+              {uploads.current.taskId
+                ? uploads.current.pending.length
+                  ? "Reenviar anexos"
+                  : "Concluir"
+                : "Criar tarefa"}
+              <Check size={17} />
+            </Button>
+          </div>
+        </form>
+        {copilotOn && (
+          <TaskCopilot
+            state={copilot}
+            feedback={copilotFeedback}
+            members={data.members}
+            onApplyFix={(text) => appendToDescription.current?.(text)}
+            typedEnough={
+              `${title} ${descriptionText}`.trim().length >= MIN_REVIEW
+            }
+          />
         )}
-        <div className="form-footer quick-task-footer">
-          {!uploads.current.taskId && (
-            <label className="checkbox-label create-another">
-              <Checkbox
-                checked={createAnother}
-                onCheckedChange={(v) => setCreateAnother(v === true)}
-                disabled={saving}
-              />
-              Criar outra em seguida
-            </label>
-          )}
-          <Button
-            type="button"
-            className="btn secondary"
-            disabled={working}
-            onClick={close}
-          >
-            {created > 0 ? "Fechar" : "Cancelar"}
-          </Button>
-          <Button
-            className="btn primary"
-            disabled={working || !contract}
-            loading={working}
-            title="Enter no título ou Ctrl/⌘ + Enter"
-          >
-            {uploads.current.taskId
-              ? uploads.current.pending.length
-                ? "Reenviar anexos"
-                : "Concluir"
-              : "Criar tarefa"}
-            <Check size={17} />
-          </Button>
-        </div>
-      </form>
+      </div>
     </Modal>
   );
+}
+
+/** Os campos do modelo preenchidos, como texto para a MAVI ("Campo: valor"). */
+export function fieldsText(
+  fields: { template_id: string; id: string; label: string }[],
+  values: Record<string, unknown>,
+) {
+  return fields
+    .flatMap((f) => {
+      const v = values[`${f.template_id}.${f.id}`];
+      if (v == null || v === "" || v === false) return [];
+      if (Array.isArray(v) && !v.length) return [];
+      const text = Array.isArray(v)
+        ? v.join(", ")
+        : v === true
+          ? "sim"
+          : String(v);
+      return [`${f.label}: ${text}`];
+    })
+    .join("\n");
 }
 
 /**

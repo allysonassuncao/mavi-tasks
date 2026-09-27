@@ -21,6 +21,7 @@
     "test:db:ai-providers": "node scripts/test-ai-providers.mjs",
     "test:db:whatsapp": "node scripts/test-whatsapp-groups.mjs",
     "test:db:cases": "node scripts/test-success-cases.mjs",
+    "test:db:copilot": "node scripts/test-task-copilot.mjs",
     "test:db:templates": "node scripts/test-task-templates.mjs",
     "test:db:assign-team": "node scripts/test-assign-to-team.mjs",
     "test:db:recurrence": "node scripts/test-task-recurrence.mjs",

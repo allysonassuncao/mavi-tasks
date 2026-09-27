@@ -1,6 +1,6 @@
 import { Node } from "@tiptap/core";
 import { InlineImage, uploadInlineImage } from "./inline-images";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import {
   EditorContent,
   useEditor,
@@ -65,6 +65,8 @@ export default function RichTextEditor({
   demo = false,
   mentions,
   onUploading,
+  onTextChange,
+  appendRef,
 }: {
   name?: string;
   defaultValue?: string;
@@ -75,8 +77,14 @@ export default function RichTextEditor({
   /** People who can be mentioned with "@" (none: no mentions). */
   mentions?: MentionPerson[];
   onUploading?: (busy: boolean) => void;
+  /** O texto puro a cada mudança (o Assistente MAVI lê o rascunho). */
+  onTextChange?: (text: string) => void;
+  /** Recebe a função que acrescenta um parágrafo no fim ("Aplicar na descrição"). */
+  appendRef?: MutableRefObject<((text: string) => void) | null>;
 }) {
   const people = useRef<MentionPerson[]>(mentions ?? []);
+  const textListener = useRef(onTextChange);
+  textListener.current = onTextChange;
   people.current = mentions ?? [];
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -136,8 +144,26 @@ export default function RichTextEditor({
         class: "rich-text-content rich-text-input",
       },
     },
-    onUpdate: ({ editor }) => setValue(serializeDescription(editor.getJSON())),
+    onCreate: ({ editor }) => textListener.current?.(editor.getText()),
+    onUpdate: ({ editor }) => {
+      setValue(serializeDescription(editor.getJSON()));
+      textListener.current?.(editor.getText());
+    },
   });
+  useEffect(() => {
+    if (!appendRef) return;
+    appendRef.current = (text: string) => {
+      if (!editor || editor.isDestroyed) return;
+      editor
+        .chain()
+        .focus("end")
+        .insertContent({ type: "paragraph", content: [{ type: "text", text }] })
+        .run();
+    };
+    return () => {
+      appendRef.current = null;
+    };
+  }, [editor, appendRef]);
   useEffect(() => {
     editor?.setEditable(!disabled && !uploading);
   }, [editor, disabled, uploading]);

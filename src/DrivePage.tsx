@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  BookMarked,
   Building2,
   ChevronRight,
   CloudUpload,
@@ -53,6 +54,7 @@ import { FileViewer } from "./FileViewer";
 import { MeetingRecordings } from "./MeetingRecordings";
 import { countMeetingRecordings, meetingRecording } from "./meetings";
 import { WhatsappFolder } from "./WhatsappFolder";
+import { ClientDossier } from "./ClientDossier";
 import {
   countClientGroups,
   whatsappGroupById,
@@ -246,8 +248,9 @@ function DriveTree({
         contract: current?.contract_id ?? undefined,
       }
     : at;
-  // Pastas virtuais (Gravações da MAVI, Whatsapp): sem arquivos próprios.
-  const virtual = !!at.recordings || !!at.whatsapp;
+  // Pastas virtuais (Gravações da MAVI, Whatsapp, Dossiê da MAVI): sem
+  // arquivos próprios.
+  const virtual = !!at.recordings || !!at.whatsapp || !!at.dossier;
   const canWrite =
     !virtual &&
     (isLeader ||
@@ -262,7 +265,7 @@ function DriveTree({
   );
   const loadFiles = useCallback(() => {
     // Gravações da MAVI and Whatsapp have no files of their own.
-    if (at.recordings || at.whatsapp) return setFiles([]);
+    if (at.recordings || at.whatsapp || at.dossier) return setFiles([]);
     setFiles(null);
     listDriveFiles(company, at)
       .then((list) => setFiles(list.sort(byNameDesc)))
@@ -448,12 +451,11 @@ function DriveTree({
     at.folder,
     at.recordings,
     at.whatsapp,
+    at.dossier,
   ].join("|");
   const clients =
     !at.client && !at.folder
-      ? data.clients
-          .filter((c) => !c.archived)
-          .sort(byNameDesc)
+      ? data.clients.filter((c) => !c.archived).sort(byNameDesc)
       : [];
   const products = showsProducts
     ? data.contracts
@@ -773,7 +775,8 @@ function DriveTree({
   const folderCard = (
     key: string,
     title: string,
-    icon: "client" | "product" | "folder" | "recordings" | "whatsapp",
+    icon:
+      "client" | "product" | "folder" | "recordings" | "whatsapp" | "dossier",
     open: () => void,
     color?: string,
     actions?: {
@@ -793,7 +796,9 @@ function DriveTree({
             ? Video
             : icon === "whatsapp"
               ? MessageCircle
-              : Folder;
+              : icon === "dossier"
+                ? BookMarked
+                : Folder;
     return (
       <div className="drive-folder-card" key={key}>
         <button type="button" className="drive-folder" onClick={open}>
@@ -814,7 +819,9 @@ function DriveTree({
                     ? `${recordingCount} ${recordingCount === 1 ? "reunião gravada" : "reuniões gravadas"}`
                     : icon === "whatsapp"
                       ? `${groupCount} ${groupCount === 1 ? "grupo" : "grupos"}`
-                      : "Pasta"}
+                      : icon === "dossier"
+                        ? "Gostos, regras e histórico"
+                        : "Pasta"}
               {isPublic && (
                 <span className="drive-folder-badge" title="Link público ativo">
                   {" · "}
@@ -1006,6 +1013,12 @@ function DriveTree({
             <span>Whatsapp</span>
           </>
         )}
+        {!searching && at.dossier && (
+          <>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>Dossiê da MAVI</span>
+          </>
+        )}
         {searching && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
@@ -1056,7 +1069,16 @@ function DriveTree({
         </div>
       )}
 
-      {at.whatsapp && at.client ? (
+      {at.dossier && at.client ? (
+        <ClientDossier
+          key={at.client}
+          company={company}
+          client={at.client}
+          clientName={clientName(at.client)}
+          data={data}
+          notify={notify}
+        />
+      ) : at.whatsapp && at.client ? (
         <WhatsappFolder
           key={at.client}
           company={company}
@@ -1137,6 +1159,7 @@ function DriveTree({
       ) : (
         <>
           {(clients.length > 0 ||
+            showsProducts ||
             products.length > 0 ||
             recordingCount > 0 ||
             groupCount > 0 ||
@@ -1164,6 +1187,18 @@ function DriveTree({
                             "recordings",
                             () => go({ client: at.client, recordings: true }),
                             "#2d5a8c",
+                          ),
+                      ]
+                    : []),
+                  ...(showsProducts
+                    ? [
+                        () =>
+                          folderCard(
+                            "dossier",
+                            "Dossiê da MAVI",
+                            "dossier",
+                            () => go({ client: at.client, dossier: true }),
+                            "#6b52b3",
                           ),
                       ]
                     : []),

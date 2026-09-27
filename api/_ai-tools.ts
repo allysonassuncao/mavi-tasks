@@ -36,6 +36,8 @@ export type AiSource = {
   /** Arquivo: a página/slide/planilha citada. */
   page?: number;
   label?: string;
+  /** Tarefa que quem pergunta não abre (Assistente MAVI: só título e status). */
+  restricted?: boolean;
 };
 
 /** Os tipos da busca (como a IA pede) e os do banco. */
@@ -282,7 +284,7 @@ async function rest<T>(ctx: ToolContext, path: string): Promise<T[]> {
   return (await res.json()) as T[];
 }
 
-type SearchRow = {
+export type SearchRow = {
   chunk_id: number;
   source_type: string;
   source_id: string;
@@ -306,6 +308,51 @@ type SearchRow = {
   task_assignee: string | null;
   task_due: string | null;
 };
+
+/**
+ * Um trecho da busca como o modelo lê: a referência nova ([S#], que vira
+ * atalho na tela) e o cabeçalho de onde veio, seguido do texto.
+ */
+export function citeRow(ctx: ToolContext, row: SearchRow) {
+  const start = row.meta?.start;
+  const kind = SOURCE_KIND[row.source_type] ?? "task";
+  // Whatsapp: a citação aponta a primeira mensagem do trecho.
+  const wa = kind === "whatsapp";
+  const at = wa && typeof row.meta?.at === "string" ? row.meta.at : null;
+  const ref = cite(ctx, {
+    type: kind,
+    id: wa && row.meta?.message ? String(row.meta.message) : row.source_id,
+    ...(wa && row.meta?.group ? { group: String(row.meta.group) } : {}),
+    title: row.title,
+    date: at ?? row.occurred_at,
+    client_id: row.client_id,
+    ...(kind === "social" ? { contract_id: row.contract_id } : {}),
+    ...(typeof start === "number" ? { start } : {}),
+    ...(kind === "file" && row.meta?.label
+      ? { page: row.meta.page, label: row.meta.label }
+      : {}),
+  });
+  ctx.chunks.set(ref, row.chunk_id);
+  const client = row.client_id ? ctx.clients.get(row.client_id) : undefined;
+  const where =
+    kind === "meeting"
+      ? `Reunião "${row.title}" · ${brDate(row.occurred_at)}${typeof start === "number" ? ` · a partir de ${clock(start)}` : row.meta?.kind === "summary" ? " · resumo" : ""}`
+      : kind === "file"
+        ? `Arquivo "${row.title}"${row.meta?.label ? ` · ${row.meta.label}` : ""}`
+        : kind === "social"
+          ? `${row.title}${row.meta?.post ? ` · post ${row.meta.post}` : ""}`
+          : kind === "campaign"
+            ? `Campanha "${row.title}"`
+            : kind === "case"
+              ? `Case de sucesso "${row.title}"`
+              : wa
+                ? `${row.title.replace(/ · \d{2}\/\d{2}\/\d{4}$/, "")} · ${brDate(at ?? row.occurred_at)}${at ? ` ${waTime(at)}` : ""}${row.meta?.kind === "whatsapp_document" && row.meta?.label ? ` · documento "${row.meta.label}"` : ""}`
+                : `Tarefa "${row.title}" · ${STATUS_LABELS[row.task_status ?? ""] ?? row.task_status ?? ""}${row.task_assignee ? ` · responsável ${ctx.members.get(row.task_assignee)?.name ?? "?"}` : ""}${row.task_due ? ` · prazo ${brDate(row.task_due)}` : ""}`;
+  // A primeira linha do trecho é o cabeçalho de contexto; aqui ele vira
+  // a linha de referência.
+  const body = row.content.split("\n").slice(1).join("\n").trim();
+  return `[${ref}] ${where}${client ? ` · cliente ${client}` : ""}\n${body}`;
+}
 
 async function searchKnowledge(
   ctx: ToolContext,
@@ -338,48 +385,7 @@ async function searchKnowledge(
   });
   if (!r.ok) throw new Error(r.error);
   if (!r.data.length) return "Nenhum trecho encontrado para essa busca.";
-  return r.data
-    .map((row) => {
-      const start = row.meta?.start;
-      const kind = SOURCE_KIND[row.source_type] ?? "task";
-      // Whatsapp: a citação aponta a primeira mensagem do trecho.
-      const wa = kind === "whatsapp";
-      const at = wa && typeof row.meta?.at === "string" ? row.meta.at : null;
-      const ref = cite(ctx, {
-        type: kind,
-        id: wa && row.meta?.message ? String(row.meta.message) : row.source_id,
-        ...(wa && row.meta?.group ? { group: String(row.meta.group) } : {}),
-        title: row.title,
-        date: at ?? row.occurred_at,
-        client_id: row.client_id,
-        ...(kind === "social" ? { contract_id: row.contract_id } : {}),
-        ...(typeof start === "number" ? { start } : {}),
-        ...(kind === "file" && row.meta?.label
-          ? { page: row.meta.page, label: row.meta.label }
-          : {}),
-      });
-      ctx.chunks.set(ref, row.chunk_id);
-      const client = row.client_id ? ctx.clients.get(row.client_id) : undefined;
-      const where =
-        kind === "meeting"
-          ? `Reunião "${row.title}" · ${brDate(row.occurred_at)}${typeof start === "number" ? ` · a partir de ${clock(start)}` : row.meta?.kind === "summary" ? " · resumo" : ""}`
-          : kind === "file"
-            ? `Arquivo "${row.title}"${row.meta?.label ? ` · ${row.meta.label}` : ""}`
-            : kind === "social"
-              ? `${row.title}${row.meta?.post ? ` · post ${row.meta.post}` : ""}`
-              : kind === "campaign"
-                ? `Campanha "${row.title}"`
-                : kind === "case"
-                  ? `Case de sucesso "${row.title}"`
-                  : wa
-                    ? `${row.title.replace(/ · \d{2}\/\d{2}\/\d{4}$/, "")} · ${brDate(at ?? row.occurred_at)}${at ? ` ${waTime(at)}` : ""}${row.meta?.kind === "whatsapp_document" && row.meta?.label ? ` · documento "${row.meta.label}"` : ""}`
-                    : `Tarefa "${row.title}" · ${STATUS_LABELS[row.task_status ?? ""] ?? row.task_status ?? ""}${row.task_assignee ? ` · responsável ${ctx.members.get(row.task_assignee)?.name ?? "?"}` : ""}${row.task_due ? ` · prazo ${brDate(row.task_due)}` : ""}`;
-      // A primeira linha do trecho é o cabeçalho de contexto; aqui ele vira
-      // a linha de referência.
-      const body = row.content.split("\n").slice(1).join("\n").trim();
-      return `[${ref}] ${where}${client ? ` · cliente ${client}` : ""}\n${body}`;
-    })
-    .join("\n\n");
+  return r.data.map((row) => citeRow(ctx, row)).join("\n\n");
 }
 
 async function readMore(ctx: ToolContext, input: Record<string, unknown>) {

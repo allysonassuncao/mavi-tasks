@@ -9,6 +9,12 @@ import {
   streamMeetingAsk,
 } from "./_meetings.js";
 import { aiDeps, aiEnv, handleAi, streamAi } from "./_ai.js";
+import {
+  copilotRelated,
+  handleDossierWorker,
+  streamCopilot,
+} from "./_copilot.js";
+import { serverModel } from "../src/ai-providers.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
@@ -35,6 +41,19 @@ export function driveEnv(
     bucket: env.GCS_DRIVE_BUCKET || env.GCS_BUCKET || "maso_storage_main",
     credentials: credentials(),
   };
+}
+
+/**
+ * A MAVI do Assistente das tarefas (ou do dossiê, no worker): o modelo do
+ * padrão do servidor é o da funcionalidade (o Painel da MAVI vence).
+ */
+function copilotEnv(dossier = false) {
+  const env = aiEnv(driveEnv());
+  const model = serverModel(
+    dossier ? "client_dossier" : "task_copilot",
+    process.env,
+  );
+  return { ...env, model, dossierModel: model };
 }
 
 /** Browser IP and user agent, for the Drive audit trail (Vercel sets x-forwarded-for). */
@@ -190,6 +209,40 @@ export default async function handler(
           write,
         );
       res.end();
+      return;
+    }
+    // Assistente MAVI nas tarefas: a análise chega aos poucos e para quando
+    // a pessoa volta a digitar (o navegador cancela a requisição).
+    if (action === "ai-copilot-review") {
+      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.statusCode = 200;
+      const abort = new AbortController();
+      res.on("close", () => {
+        if (!res.writableFinished) abort.abort();
+      });
+      const env = copilotEnv();
+      await streamCopilot(
+        body,
+        authorization,
+        env,
+        aiDeps(env),
+        (event) => {
+          if (!abort.signal.aborted) res.write(`${JSON.stringify(event)}\n`);
+        },
+        abort.signal,
+      );
+      res.end();
+      return;
+    }
+    if (action === "ai-copilot" || action === "ai-dossier") {
+      const env = copilotEnv(action === "ai-dossier");
+      const result =
+        action === "ai-copilot"
+          ? await copilotRelated(body, authorization, env, aiDeps(env))
+          : await handleDossierWorker(authorization, env, aiDeps(env));
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
       return;
     }
     // Gravações da MAVI, a IA (/api/ai é reescrito para cá), a coleta do

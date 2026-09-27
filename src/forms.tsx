@@ -103,6 +103,8 @@ import { TaskCustomFieldsPanel } from "./CustomFieldsForm";
 import { postOfTask, taskPostPath, type TaskPost } from "./social-leads-task";
 import { navigate, routeParts } from "./router";
 import { canOpenPage } from "./modules";
+import { TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
+import { MIN_REVIEW, useTaskCopilot } from "./copilot";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
 export type FormPreset = {
@@ -727,6 +729,29 @@ export function TaskDetail({
     [uploadProgress, setUploadProgress] = useState("");
   const [editorUploading, setEditorUploading] = useState(false);
   const [commentRevision, setCommentRevision] = useState(0);
+  // Assistente MAVI na edição: confere só o que a pessoa mudar.
+  const [editTitle, setEditTitle] = useState(task.title);
+  const [editText, setEditText] = useState<string | null>(null);
+  const appendToDescription = useRef<((text: string) => void) | null>(null);
+  const copilotOn =
+    editing &&
+    editText !== null &&
+    !data.members
+      .find((m) => m.user_id === user)
+      ?.hidden_pages?.includes("assistant");
+  const copilot = useTaskCopilot(
+    {
+      company: task.company_id,
+      contract: task.contract_id,
+      task: task.id,
+      title: editTitle,
+      description: editText ?? "",
+    },
+    copilotOn,
+    demo,
+    true,
+  );
+  const copilotFeedback = useCopilotFeedback(copilot);
   // The comment being answered from the composer.
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
   const composer = useRef<HTMLFormElement>(null);
@@ -1034,6 +1059,12 @@ export function TaskDetail({
         p_priority: fd.get("priority"),
       });
       setEditing(false);
+      copilotFeedback.flush(
+        task.company_id,
+        data.contracts.find((c) => c.id === task.contract_id)?.client_id ??
+          null,
+        task.id,
+      );
       invalidateTaskExtras(task.id);
       setLocalRefresh((v) => v + 1);
     } catch (e) {
@@ -1123,7 +1154,11 @@ export function TaskDetail({
                   type="button"
                   className="share-task edit-task"
                   title="Editar tarefa"
-                  onClick={() => setEditing(true)}
+                  onClick={() => {
+                    setEditTitle(task.title);
+                    setEditText(null);
+                    setEditing(true);
+                  }}
                 >
                   <Pencil size={15} /> <span>Editar</span>
                 </button>
@@ -1359,93 +1394,109 @@ export function TaskDetail({
             </div>
           </section>
           {editing ? (
-            <form className="entity-form inline-edit" onSubmit={edit}>
-              <label>
-                Título
-                <Input
-                  name="title"
-                  defaultValue={task.title}
-                  minLength={2}
-                  maxLength={240}
-                  required
-                />
-              </label>
-              <Suspense
-                fallback={
-                  <>
-                    <input
-                      type="hidden"
-                      name="description"
-                      value={task.description}
-                    />
-                    <Loading compact />
-                  </>
-                }
-              >
-                <RichTextEditor
-                  company={task.company_id}
-                  demo={demo}
-                  defaultValue={task.description}
-                  disabled={busy}
-                  onUploading={setEditorUploading}
-                />
-              </Suspense>
-              <label>
-                Início planejado (opcional)
-                <Input
-                  type="date"
-                  name="start_date"
-                  defaultValue={task.start_date ?? ""}
-                />
-              </label>
-              <div className="form-columns">
+            <>
+              <form className="entity-form inline-edit" onSubmit={edit}>
                 <label>
-                  Prazo
+                  Título
                   <Input
-                    type="date"
-                    name="due"
-                    defaultValue={task.due_date}
+                    name="title"
+                    defaultValue={task.title}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    minLength={2}
+                    maxLength={240}
                     required
                   />
                 </label>
+                <Suspense
+                  fallback={
+                    <>
+                      <input
+                        type="hidden"
+                        name="description"
+                        value={task.description}
+                      />
+                      <Loading compact />
+                    </>
+                  }
+                >
+                  <RichTextEditor
+                    company={task.company_id}
+                    demo={demo}
+                    defaultValue={task.description}
+                    disabled={busy}
+                    onUploading={setEditorUploading}
+                    onTextChange={setEditText}
+                    appendRef={appendToDescription}
+                  />
+                </Suspense>
                 <label>
-                  Estimativa em horas
+                  Início planejado (opcional)
                   <Input
-                    type="number"
-                    name="estimated"
-                    defaultValue={task.estimated_minutes / 60}
-                    min="0"
-                    step="0.25"
+                    type="date"
+                    name="start_date"
+                    defaultValue={task.start_date ?? ""}
                   />
                 </label>
-              </div>
-              <label>
-                Prioridade
-                <Select name="priority" defaultValue={task.priority}>
-                  {Object.entries(priorities).map(([k, v]) => (
-                    <SelectOption value={k} key={k}>
-                      {v}
-                    </SelectOption>
-                  ))}
-                </Select>
-              </label>
-              <div className="form-footer">
-                <Button
-                  type="button"
-                  className="btn secondary"
-                  onClick={() => setEditing(false)}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  className="btn primary"
-                  disabled={busy || editorUploading}
-                  loading={busy || editorUploading}
-                >
-                  <Save size={16} /> Salvar alterações
-                </Button>
-              </div>
-            </form>
+                <div className="form-columns">
+                  <label>
+                    Prazo
+                    <Input
+                      type="date"
+                      name="due"
+                      defaultValue={task.due_date}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Estimativa em horas
+                    <Input
+                      type="number"
+                      name="estimated"
+                      defaultValue={task.estimated_minutes / 60}
+                      min="0"
+                      step="0.25"
+                    />
+                  </label>
+                </div>
+                <label>
+                  Prioridade
+                  <Select name="priority" defaultValue={task.priority}>
+                    {Object.entries(priorities).map(([k, v]) => (
+                      <SelectOption value={k} key={k}>
+                        {v}
+                      </SelectOption>
+                    ))}
+                  </Select>
+                </label>
+                <div className="form-footer">
+                  <Button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => setEditing(false)}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    className="btn primary"
+                    disabled={busy || editorUploading}
+                    loading={busy || editorUploading}
+                  >
+                    <Save size={16} /> Salvar alterações
+                  </Button>
+                </div>
+              </form>
+              {copilotOn && (
+                <TaskCopilot
+                  state={copilot}
+                  feedback={copilotFeedback}
+                  members={data.members}
+                  onApplyFix={(text) => appendToDescription.current?.(text)}
+                  typedEnough={
+                    `${editTitle} ${editText ?? ""}`.trim().length >= MIN_REVIEW
+                  }
+                />
+              )}
+            </>
           ) : !isRunning && canPlay ? (
             <section
               className="description-locked"

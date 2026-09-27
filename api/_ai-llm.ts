@@ -43,6 +43,10 @@ export type AgentRequest = {
   maxRounds?: number;
   /** O contexto é longo e se repete (a transcrição de uma reunião): fica em cache. */
   cacheContext?: boolean;
+  /** Quanto raciocinar (padrão "medium"); o copiloto usa "low" para responder rápido. */
+  effort?: "low" | "medium" | "high";
+  /** Teto da resposta (padrão 32.000). */
+  maxTokens?: number;
   signal?: AbortSignal;
   onEvent?: (event: AgentEvent) => void;
 };
@@ -126,7 +130,7 @@ export function anthropicAdapter(
         {
           model: env.model,
           // Espaço para raciocinar sobre muitos trechos e ainda responder.
-          max_tokens: 32000,
+          max_tokens: request.maxTokens ?? 32000,
           ...(features.fallbacks
             ? {
                 betas: ["server-side-fallback-2026-07-01"],
@@ -140,7 +144,7 @@ export function anthropicAdapter(
                   type: "adaptive" as const,
                   display: "summarized" as const,
                 },
-                output_config: { effort: "medium" as const },
+                output_config: { effort: request.effort ?? "medium" },
               }
             : {}),
           system: [

@@ -202,7 +202,9 @@ export type AiFeature =
   | "social_leads_plan"
   | "social_leads_adjust"
   | "social_leads_briefing"
-  | "social_leads_colors";
+  | "social_leads_colors"
+  | "task_copilot"
+  | "client_dossier";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -275,6 +277,21 @@ export const FEATURES: FeatureInfo[] = [
     env: "SOCIAL_LEADS_MODEL",
     note: "O modelo escolhido precisa aceitar imagens.",
   },
+  {
+    id: "task_copilot",
+    group: "Tarefas",
+    label: "Assistente MAVI na criação e edição de tarefas",
+    conversation: false,
+    env: "TASK_COPILOT_MODEL",
+    note: "Roda a cada pausa na digitação: prefira um modelo rápido.",
+  },
+  {
+    id: "client_dossier",
+    group: "Tarefas",
+    label: "Dossiê do cliente (atualizado em segundo plano)",
+    conversation: false,
+    env: "CLIENT_DOSSIER_MODEL",
+  },
 ];
 
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
@@ -296,6 +313,10 @@ export function serverModel(
       return env.MEETINGS_MODEL || fallback;
     case "whatsapp_task":
       return env.WHATSAPP_TASK_MODEL || env.MEETINGS_MODEL || fallback;
+    case "task_copilot":
+      return env.TASK_COPILOT_MODEL || env.AI_MODEL || fallback;
+    case "client_dossier":
+      return env.CLIENT_DOSSIER_MODEL || env.AI_MODEL || fallback;
     default:
       return env.SOCIAL_LEADS_MODEL || fallback;
   }
