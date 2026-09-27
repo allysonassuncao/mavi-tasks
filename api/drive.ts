@@ -201,6 +201,7 @@ export default async function handler(
         authorization,
         whatsappEnv(driveEnv()),
         { fetch },
+        requestOrigin(req),
       );
     else if (action.startsWith("meeting-"))
       result = await handleMeetings(

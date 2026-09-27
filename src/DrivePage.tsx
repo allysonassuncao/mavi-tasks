@@ -32,6 +32,7 @@ import {
   Search,
   Trash2,
   Video,
+  MessageCircle,
   X,
 } from "lucide-react";
 import { Button, Input, Select, SelectOption, Loading } from "./ui";
@@ -51,6 +52,13 @@ import { DriveAudit } from "./DriveAudit";
 import { FileViewer } from "./FileViewer";
 import { MeetingRecordings } from "./MeetingRecordings";
 import { countMeetingRecordings, meetingRecording } from "./meetings";
+import { WhatsappFolder } from "./WhatsappFolder";
+import {
+  countClientGroups,
+  whatsappGroupById,
+  whatsappMessageById,
+  type WhatsappMessage,
+} from "./whatsapp";
 import { navigate, useLocation } from "./router";
 import { setAiPlace } from "./ai";
 import type { FormPreset } from "./forms";
@@ -234,8 +242,10 @@ function DriveTree({
         contract: current?.contract_id ?? undefined,
       }
     : at;
+  // Pastas virtuais (Gravações da MAVI, Whatsapp): sem arquivos próprios.
+  const virtual = !!at.recordings || !!at.whatsapp;
   const canWrite =
-    !at.recordings &&
+    !virtual &&
     (isLeader ||
       (!!place.contract && canCreateTaskIn(data, place.contract, user)));
 
@@ -247,8 +257,8 @@ function DriveTree({
     [company],
   );
   const loadFiles = useCallback(() => {
-    // Gravações da MAVI has no files of its own.
-    if (at.recordings) return setFiles([]);
+    // Gravações da MAVI and Whatsapp have no files of their own.
+    if (at.recordings || at.whatsapp) return setFiles([]);
     setFiles(null);
     listDriveFiles(company, at)
       .then(setFiles)
@@ -280,8 +290,14 @@ function DriveTree({
     recording: string;
     start?: number;
   } | null>(null);
-  const showsProducts =
-    !!at.client && !at.contract && !at.folder && !at.recordings;
+  const showsProducts = !!at.client && !at.contract && !at.folder && !virtual;
+  // Whatsapp: quantos grupos o cliente tem (o cartão) e o link de uma
+  // mensagem (?whatsapp=<grupo>&msg=<mensagem>).
+  const [groupCount, setGroupCount] = useState(0);
+  const [openWhatsapp, setOpenWhatsapp] = useState<{
+    group: string;
+    message?: WhatsappMessage;
+  } | null>(null);
   // O assistente de IA começa no cliente aberto aqui.
   const placeName = at.client
     ? (data.clients.find((c) => c.id === at.client)?.name ?? "")
@@ -305,6 +321,17 @@ function DriveTree({
       alive = false;
     };
   }, [company, at.client, showsProducts]);
+  useEffect(() => {
+    setGroupCount(0);
+    if (!showsProducts || !at.client) return;
+    let alive = true;
+    countClientGroups(company, at.client)
+      .then((n) => alive && setGroupCount(n))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [company, at.client, showsProducts]);
   // Links de outras telas (fontes citadas pela IA, tarefas):
   // ?gravacao=<id>&t=<s> abre a gravação; ?arquivo=<id> abre o arquivo.
   const location = useLocation();
@@ -313,10 +340,24 @@ function DriveTree({
     const params = new URLSearchParams(location.split("?")[1] ?? "");
     const recording = params.get("gravacao");
     const fileId = params.get("arquivo");
-    if (!recording && !fileId) return;
+    const group = params.get("whatsapp");
+    const message = params.get("msg");
+    if (!recording && !fileId && !group) return;
     const start = Number(params.get("t")) || undefined;
     navigate(window.location.pathname, true);
-    if (recording)
+    if (group)
+      Promise.all([
+        whatsappGroupById(group),
+        message ? whatsappMessageById(message) : null,
+      ])
+        .then(([g, m]) => {
+          if (!g?.client_id)
+            throw Error("Grupo do Whatsapp não encontrado ou sem acesso.");
+          setAt({ client: g.client_id, whatsapp: true });
+          setOpenWhatsapp({ group: g.id, message: m ?? undefined });
+        })
+        .catch((e) => setError((e as Error).message));
+    else if (recording)
       meetingRecording(recording)
         .then((r) => {
           if (!r) throw Error("Gravação não encontrada ou sem acesso.");
@@ -340,6 +381,7 @@ function DriveTree({
 
   function go(next: DriveLocation) {
     setOpenRecording(null);
+    setOpenWhatsapp(null);
     setAt(root && !next.client ? base : next);
     setEditing(null);
     setQuery("");
@@ -396,9 +438,13 @@ function DriveTree({
   }
 
   // What is shown inside the current location.
-  const locationKey = [at.client, at.contract, at.folder, at.recordings].join(
-    "|",
-  );
+  const locationKey = [
+    at.client,
+    at.contract,
+    at.folder,
+    at.recordings,
+    at.whatsapp,
+  ].join("|");
   const clients =
     !at.client && !at.folder
       ? data.clients
@@ -408,7 +454,7 @@ function DriveTree({
   const products = showsProducts
     ? data.contracts.filter((k) => k.client_id === at.client && !k.archived)
     : [];
-  const subfolders = at.recordings
+  const subfolders = virtual
     ? []
     : folders.filter((f) =>
         at.folder
@@ -718,7 +764,7 @@ function DriveTree({
   const folderCard = (
     key: string,
     title: string,
-    icon: "client" | "product" | "folder" | "recordings",
+    icon: "client" | "product" | "folder" | "recordings" | "whatsapp",
     open: () => void,
     color?: string,
     actions?: {
@@ -736,7 +782,9 @@ function DriveTree({
           ? Package
           : icon === "recordings"
             ? Video
-            : Folder;
+            : icon === "whatsapp"
+              ? MessageCircle
+              : Folder;
     return (
       <div className="drive-folder-card" key={key}>
         <button type="button" className="drive-folder" onClick={open}>
@@ -755,7 +803,9 @@ function DriveTree({
                   ? "Produto"
                   : icon === "recordings"
                     ? `${recordingCount} ${recordingCount === 1 ? "reunião gravada" : "reuniões gravadas"}`
-                    : "Pasta"}
+                    : icon === "whatsapp"
+                      ? `${groupCount} ${groupCount === 1 ? "grupo" : "grupos"}`
+                      : "Pasta"}
               {isPublic && (
                 <span className="drive-folder-badge" title="Link público ativo">
                   {" · "}
@@ -827,7 +877,7 @@ function DriveTree({
       className={`drive-page ${drop.active ? "dragging" : ""}`}
       {...drop.handlers}
     >
-      {!at.recordings && (
+      {!virtual && (
         <div className="drive-toolbar">
           <span className="drive-search">
             <Input
@@ -941,6 +991,12 @@ function DriveTree({
             <span>Gravações da MAVI</span>
           </>
         )}
+        {!searching && at.whatsapp && (
+          <>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>Whatsapp</span>
+          </>
+        )}
         {searching && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
@@ -949,7 +1005,7 @@ function DriveTree({
         )}
       </nav>
 
-      {!canWrite && !searching && !at.recordings && (
+      {!canWrite && !searching && !virtual && (
         <p className="drive-readonly" role="note">
           <Lock size={13} />
           {place.client
@@ -991,7 +1047,19 @@ function DriveTree({
         </div>
       )}
 
-      {at.recordings && at.client ? (
+      {at.whatsapp && at.client ? (
+        <WhatsappFolder
+          key={at.client}
+          company={company}
+          client={at.client}
+          clientName={clientName(at.client)}
+          data={data}
+          user={user}
+          notify={notify}
+          onNewTask={onNewTask}
+          initial={openWhatsapp}
+        />
+      ) : at.recordings && at.client ? (
         <MeetingRecordings
           key={at.client}
           company={company}
@@ -1062,6 +1130,7 @@ function DriveTree({
           {(clients.length > 0 ||
             products.length > 0 ||
             recordingCount > 0 ||
+            groupCount > 0 ||
             subfolders.length > 0 ||
             editing?.kind === "new-folder") && (
             <Paged
@@ -1086,6 +1155,18 @@ function DriveTree({
                             "recordings",
                             () => go({ client: at.client, recordings: true }),
                             "#2d5a8c",
+                          ),
+                      ]
+                    : []),
+                  ...(showsProducts && groupCount > 0
+                    ? [
+                        () =>
+                          folderCard(
+                            "whatsapp",
+                            "Whatsapp",
+                            "whatsapp",
+                            () => go({ client: at.client, whatsapp: true }),
+                            "#2f8f57",
                           ),
                       ]
                     : []),

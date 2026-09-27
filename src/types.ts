@@ -360,6 +360,8 @@ export interface DriveLocation {
   folder?: string;
   /** The client's "Gravações da MAVI" (virtual, next to the products). */
   recordings?: boolean;
+  /** The client's "Whatsapp" (virtual, next to the products). */
+  whatsapp?: boolean;
 }
 export interface DriveAuditEntry {
   id: number;

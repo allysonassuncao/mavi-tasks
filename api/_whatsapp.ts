@@ -16,6 +16,9 @@ import {
  *   grupos com mensagem nova desde onde parou e copia as mídias para o GCS,
  *   enquanto houver tempo. O que não couber fica para a próxima chamada.
  *
+ * - "whatsapp-media": links assinados das mídias para a pasta Whatsapp do
+ *   Drive, como a pessoa (o banco confere o acesso pela regra do Drive).
+ *
  * A Uazapi guarda as mensagens por 7 dias e as mídias por 2: por isso as
  * mídias mais antigas da fila vão primeiro. O servidor fala com o banco como
  * anon + segredo (sem service key) e o token da Uazapi só existe aqui.
@@ -190,6 +193,11 @@ export function normalizeMessage(raw: Row): WhatsappMessage | null {
     body = "";
     if (/view_once/i.test(text)) extra.view_once = true;
   }
+  // A miniatura que o WhatsApp manda junto (poucos KB): prévia na conversa
+  // e na galeria sem baixar a mídia.
+  const thumb = str(content.JPEGThumbnail);
+  if ((kind === "image" || kind === "video") && thumb && thumb.length <= 12_000)
+    extra.thumb = thumb;
   const phone =
     str(raw.sender_pn).replace(/@.*$/, "") ||
     (str(raw.sender).endsWith("@s.whatsapp.net")
@@ -574,14 +582,87 @@ const sameSecret = (a: string, b: string) => {
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Links assinados das mídias, como a pessoa (o banco confere o acesso). Até
+ * 100 de uma vez (a conversa e a galeria pedem a página toda); "download"
+ * abre uma só, como anexo, e entra no histórico do Drive.
+ */
+async function mediaLinks(
+  req: Row,
+  authorization: string,
+  env: WhatsappEnv,
+  deps: WhatsappDeps,
+  origin: Row,
+) {
+  const ids: string[] = Array.isArray(req.ids)
+    ? ([
+        ...new Set(
+          req.ids.filter(
+            (id: unknown) => typeof id === "string" && UUID.test(id),
+          ),
+        ),
+      ] as string[])
+    : [];
+  if (!ids.length || ids.length !== req.ids.length || ids.length > 100)
+    return { status: 400, body: { error: "Mídias inválidas." } };
+  const download = req.download === true && ids.length === 1;
+  if (!env.credentials?.client_email || !env.credentials.private_key)
+    return {
+      status: 500,
+      body: { error: "Credenciais do Google Cloud Storage não configuradas." },
+    };
+  const r = await callRpc<
+    {
+      id: string;
+      bucket: string;
+      path: string;
+      content_type: string | null;
+      name: string | null;
+      kind: string;
+    }[]
+  >(env, deps.fetch, authorization, "whatsapp_media_targets", {
+    p_ids: ids,
+    p_download: download,
+    p_origin: origin,
+  });
+  if (!r.ok) return { status: r.status, body: { error: r.error } };
+  const urls: Record<string, string> = {};
+  for (const t of r.data) {
+    // Só o bucket das mídias do Whatsapp é assinado.
+    if (t.bucket !== env.bucket) continue;
+    const type = t.content_type || "application/octet-stream";
+    const name = t.name || t.path.split("/").pop() || "arquivo";
+    const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
+    urls[t.id] = signGcsUrl(env.credentials, t.bucket, t.path, "GET", {
+      // A conversa fica aberta por horas; o link acompanha.
+      expiresInSeconds: 6 * 3600,
+      query: {
+        "response-content-type": type,
+        "response-content-disposition": download
+          ? `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`
+          : "inline",
+      },
+    });
+  }
+  return { status: 200, body: { urls } };
+}
+
 export async function handleWhatsapp(
   body: unknown,
   authorization: string | null,
   env: WhatsappEnv,
   deps: WhatsappDeps,
+  origin: Row = {},
 ): Promise<{ status: number; body: Row }> {
   const req = (body ?? {}) as Row;
   try {
+    if (req.action === "whatsapp-media") {
+      if (!authorization?.startsWith("Bearer "))
+        return { status: 401, body: { error: "Entre na sua conta." } };
+      return await mediaLinks(req, authorization, env, deps, origin);
+    }
     if (req.action === "whatsapp-sync") {
       const token = authorization?.replace(/^Bearer\s+/, "") ?? "";
       if (!env.workerSecret || !token || !sameSecret(token, env.workerSecret))

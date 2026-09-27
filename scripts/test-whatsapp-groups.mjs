@@ -331,6 +331,32 @@ await check("o admin liga, ignora e devolve o grupo ao automático", async () =>
   await rejects(() => rpc("whatsapp_set_group", [A, g1.id, client, [uid(98)], false, false]), /Produto não encontrado/);
 });
 
+await check("mídias: só as copiadas, só para quem vê, e abrir entra no histórico", async () => {
+  const stored = (await sql(`select id from whatsapp_messages where media_status = 'stored'`))[0].id;
+  const lost = (await sql(`select id from whatsapp_messages where media_status = 'lost'`))[0].id;
+  await as(teamMember);
+  const seen = await rows("whatsapp_media_targets", [[stored, lost], false, null]);
+  assert.deepEqual(seen.map((r) => [r.id, r.path, r.kind]), [[stored, "whatsapp/a.mp3", "audio"]]);
+  assert.equal((await sql(`select count(*)::int as n from drive_audit where action = 'whatsapp_media_opened'`))[0].n, 0);
+  await as(teamMember);
+  await rows("whatsapp_media_targets", [[stored], true, JSON.stringify({ ip: "1.2.3.4" })]);
+  const [log] = await sql(`select * from drive_audit where action = 'whatsapp_media_opened'`);
+  assert.equal(log.actor_id, teamMember);
+  assert.equal(log.client_id, client);
+  assert.match(log.item_name, /^Áudio · /);
+  assert.equal(log.details.message, stored);
+  await as(outsider);
+  assert.equal((await rows("whatsapp_media_targets", [[stored], true, null])).length, 0);
+  assert.equal((await sql(`select count(*)::int as n from drive_audit where action = 'whatsapp_media_opened'`))[0].n, 1);
+  await as(teamMember);
+  await rejects(
+    () => rows("whatsapp_media_targets", [Array.from({ length: 101 }, (_, i) => uid(1000 + i)), false, null]),
+    /No máximo 100/,
+  );
+  await as(null);
+  await rejects(() => rows("whatsapp_media_targets", [[stored], false, null]), /permission denied/);
+});
+
 await check("outra empresa não mexe nos grupos", async () => {
   await sql(
     `insert into memberships(company_id,user_id,name,role,active) values($1,$2,'Ana Admin','admin',true)`,

@@ -530,3 +530,144 @@ describe("handleWhatsapp", () => {
     ).toBe(400);
   });
 });
+
+describe("whatsapp-media", () => {
+  const ID = "00000000-0000-4000-8000-000000000001";
+  const ID2 = "00000000-0000-4000-8000-000000000002";
+  function media(rows: any[]) {
+    const calls: Call[] = [];
+    const fetchImpl = (async (input: any, init: any = {}) => {
+      calls.push({
+        url: String(input),
+        method: init.method ?? "GET",
+        body: JSON.parse(init.body),
+        headers: init.headers,
+      } as any);
+      return new Response(JSON.stringify(rows), { status: 200 });
+    }) as typeof fetch;
+    return { calls, deps: { fetch: fetchImpl } };
+  }
+  const row = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    bucket: "drive-bucket",
+    path: `whatsapp/c1/1/2026/09/${id}.pdf`,
+    content_type: "application/pdf",
+    name: "Proposta Ção.pdf",
+    kind: "document",
+    ...over,
+  });
+
+  it("assina como a pessoa, só o bucket das mídias", async () => {
+    const m = media([row(ID), row(ID2, { bucket: "outro" })]);
+    const r = await handleWhatsapp(
+      { action: "whatsapp-media", ids: [ID, ID2] },
+      "Bearer user-token",
+      env,
+      m.deps,
+      { ip: "1.2.3.4" },
+    );
+    expect(r.status).toBe(200);
+    expect(Object.keys(r.body.urls)).toEqual([ID]);
+    expect(r.body.urls[ID]).toContain("/drive-bucket/whatsapp/c1/1/2026/09/");
+    expect(r.body.urls[ID]).toContain("response-content-disposition=inline");
+    const call = m.calls[0] as any;
+    expect(call.url).toBe(
+      "https://db.example.com/rest/v1/rpc/whatsapp_media_targets",
+    );
+    expect(call.headers.Authorization).toBe("Bearer user-token");
+    expect(call.body).toEqual({
+      p_ids: [ID, ID2],
+      p_download: false,
+      p_origin: { ip: "1.2.3.4" },
+    });
+  });
+  it("baixar: uma mídia, como anexo com o nome", async () => {
+    const m = media([row(ID)]);
+    const r = await handleWhatsapp(
+      { action: "whatsapp-media", ids: [ID], download: true },
+      "Bearer u",
+      env,
+      m.deps,
+    );
+    expect((m.calls[0] as any).body.p_download).toBe(true);
+    expect(decodeURIComponent(r.body.urls[ID])).toContain(
+      'attachment; filename="Proposta __o.pdf"',
+    );
+  });
+  it("pedido inválido ou sem conta", async () => {
+    const m = media([]);
+    expect(
+      (
+        await handleWhatsapp(
+          { action: "whatsapp-media", ids: [ID] },
+          null,
+          env,
+          m.deps,
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await handleWhatsapp(
+          { action: "whatsapp-media", ids: ["x"] },
+          "Bearer u",
+          env,
+          m.deps,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await handleWhatsapp(
+          { action: "whatsapp-media", ids: [] },
+          "Bearer u",
+          env,
+          m.deps,
+        )
+      ).status,
+    ).toBe(400);
+    const many = Array.from(
+      { length: 101 },
+      (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+    );
+    expect(
+      (
+        await handleWhatsapp(
+          { action: "whatsapp-media", ids: many },
+          "Bearer u",
+          env,
+          m.deps,
+        )
+      ).status,
+    ).toBe(400);
+    expect(m.calls).toHaveLength(0);
+  });
+});
+
+describe("miniatura", () => {
+  it("imagem e vídeo guardam a miniatura pequena; grande demais, não", () => {
+    const image = normalizeMessage(
+      raw("I1", NOW, {
+        messageType: "ImageMessage",
+        text: "",
+        content: { JPEGThumbnail: "abc", mimetype: "image/jpeg" },
+      }),
+    );
+    expect(image?.extra.thumb).toBe("abc");
+    const big = normalizeMessage(
+      raw("I2", NOW, {
+        messageType: "ImageMessage",
+        text: "",
+        content: { JPEGThumbnail: "x".repeat(20_000) },
+      }),
+    );
+    expect(big?.extra.thumb).toBeUndefined();
+    const doc = normalizeMessage(
+      raw("D1", NOW, {
+        messageType: "DocumentMessage",
+        content: { JPEGThumbnail: "abc" },
+      }),
+    );
+    expect(doc?.extra.thumb).toBeUndefined();
+  });
+});
