@@ -751,7 +751,13 @@ export function TaskDetail({
     demo,
     true,
   );
-  const copilotFeedback = useCopilotFeedback(copilot);
+  const copilotFeedback = useCopilotFeedback(copilot, {
+    company: task.company_id,
+    contract: task.contract_id,
+    task: task.id,
+    title: editTitle,
+    demo,
+  });
   // The comment being answered from the composer.
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
   const composer = useRef<HTMLFormElement>(null);

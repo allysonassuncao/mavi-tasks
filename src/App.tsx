@@ -2097,8 +2097,8 @@ export default function App() {
                       storage:
                         "Quanto espaço os arquivos enviados ocupam, na agência, por pessoa e por cliente.",
                       aiUsage: isAdmin
-                        ? "Consumo e limites de gasto, a biblioteca de provedores e modelos, e qual modelo cada funcionalidade, pessoa, cliente, produto e projeto usa."
-                        : "Quanto a MAVI custou, por pessoa, cliente, produto e projeto, e os limites de gasto de cada um.",
+                        ? "Consumo e limites de gasto, o aprendizado do Assistente MAVI, a biblioteca de provedores e modelos, e qual modelo cada funcionalidade, pessoa, cliente, produto e projeto usa."
+                        : "Quanto a MAVI custou, os limites de gasto e o que o Assistente MAVI aprendeu com o feedback do time.",
                       dashboards:
                         "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
                       profile: "Seu nome, sua foto e sua senha.",

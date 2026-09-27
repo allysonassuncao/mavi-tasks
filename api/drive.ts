@@ -14,6 +14,7 @@ import {
   handleDossierWorker,
   streamCopilot,
 } from "./_copilot.js";
+import { handleLearningWorker } from "./_copilot-learning.js";
 import { serverModel } from "../src/ai-providers.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
@@ -44,16 +45,17 @@ export function driveEnv(
 }
 
 /**
- * A MAVI do Assistente das tarefas (ou do dossiê, no worker): o modelo do
- * padrão do servidor é o da funcionalidade (o Painel da MAVI vence).
+ * A MAVI do Assistente das tarefas (ou do dossiê e do aprendizado, nos
+ * workers): o modelo do padrão do servidor é o da funcionalidade (o Painel
+ * da MAVI vence).
  */
-function copilotEnv(dossier = false) {
+function copilotEnv(
+  feature:
+    "task_copilot" | "client_dossier" | "copilot_learning" = "task_copilot",
+) {
   const env = aiEnv(driveEnv());
-  const model = serverModel(
-    dossier ? "client_dossier" : "task_copilot",
-    process.env,
-  );
-  return { ...env, model, dossierModel: model };
+  const model = serverModel(feature, process.env);
+  return { ...env, model, dossierModel: model, learningModel: model };
 }
 
 /** Browser IP and user agent, for the Drive audit trail (Vercel sets x-forwarded-for). */
@@ -235,12 +237,24 @@ export default async function handler(
       res.end();
       return;
     }
-    if (action === "ai-copilot" || action === "ai-dossier") {
-      const env = copilotEnv(action === "ai-dossier");
+    if (
+      action === "ai-copilot" ||
+      action === "ai-dossier" ||
+      action === "ai-learning"
+    ) {
+      const env = copilotEnv(
+        action === "ai-dossier"
+          ? "client_dossier"
+          : action === "ai-learning"
+            ? "copilot_learning"
+            : "task_copilot",
+      );
       const result =
         action === "ai-copilot"
           ? await copilotRelated(body, authorization, env, aiDeps(env))
-          : await handleDossierWorker(authorization, env, aiDeps(env));
+          : action === "ai-dossier"
+            ? await handleDossierWorker(authorization, env, aiDeps(env))
+            : await handleLearningWorker(authorization, env, aiDeps(env));
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

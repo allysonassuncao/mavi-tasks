@@ -722,4 +722,62 @@ await check("tabelas do dossiê só por funções", async () => {
   await rejects(() => rpc("client_dossier", [A, client]), /permission denied/);
 });
 
+await check(
+  "contexto sem busca por palavra e rápido com milhares de trechos no cliente",
+  async () => {
+    // Tarefa só com a palavra (sem vetor ainda): não aparece como parecida.
+    const plain = await task("Criativos Meta Ads Black Friday", member);
+    await doc({
+      type: "task",
+      source: plain,
+      access: "task",
+      task: plain,
+      title: "Criativos Meta Ads Black Friday",
+      at: "2026-09-25",
+      chunks: [{ text: "Tarefa\nCriativos Meta Ads Black Friday" }],
+    });
+    // Muito histórico: 3.000 trechos de WhatsApp e 1.500 de tarefas no cliente.
+    const [{ id: bulk }] = await sql(
+      `insert into ai_documents(company_id, source_type, source_id, access, client_id, title, occurred_at, content_hash)
+     values ($1,'whatsapp',$2,'client',$3,'Grupo cheio','2026-09-01',md5('x')) returning id`,
+      [A, uid(950), client],
+    );
+    const [{ id: bulkTask }] = await sql(
+      `select id from ai_documents where source_type = 'task' and source_id = $1`,
+      [report],
+    );
+    await sql(
+      `insert into ai_chunks(company_id, document_id, ord, content, source_type, access, client_id, task_id, occurred_at,
+      embedding)
+     select $1::uuid, case when g <= 3000 then $2::uuid else $3::uuid end, g,
+      'cabeçalho\nmensagem sobre campanha meta ads criativos promoção número ' || g,
+      case when g <= 3000 then 'whatsapp' else 'task' end, case when g <= 3000 then 'client' else 'task' end,
+      $4::uuid, case when g <= 3000 then null else $5::uuid end, now() - g * interval '1 minute',
+      ('[' || (select string_agg(case when k = 1 + (g % 1500) then '1' else '0.001' end, ',')
+        from generate_series(1, 1536) k) || ']')::extensions.halfvec(1536)
+     from generate_series(1, 4500) g`,
+      [A, bulk, bulkTask, client, report],
+    );
+    await as(member);
+    const started = Date.now();
+    const ctx = await rpc("task_copilot_context", [
+      A,
+      contract,
+      null,
+      vec(1),
+      "campanha meta ads criativos promoção",
+      true,
+    ]);
+    const ms = Date.now() - started;
+    assert.ok(!ctx.similar.some((t) => t.id === plain));
+    assert.ok(ctx.similar.every((t) => typeof t.similarity === "number"));
+    assert.ok(ctx.cases.every((c) => typeof c.similarity === "number"));
+    assert.equal(ctx.evidence.length, 10);
+    assert.ok(ms < 3000, `contexto levou ${ms} ms`);
+    console.log(
+      `  (análise completa com 4.500 trechos no cliente: ${ms} ms no PGlite)`,
+    );
+  },
+);
+
 console.log(`\n${passed} verificações passaram.`);

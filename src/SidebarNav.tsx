@@ -296,26 +296,33 @@ export function SidebarNav({
           label: "Painel da MAVI",
           icon: Sparkles,
           to: { page: "aiUsage" },
-          // Gestores veem só o consumo; o resto é dos administradores.
-          children: isAdmin
-            ? [
-                {
-                  key: "ai-usage",
-                  label: "Consumo e limites",
-                  to: { page: "aiUsage", hash: "consumo" },
-                },
-                {
-                  key: "ai-providers",
-                  label: "Provedores e modelos",
-                  to: { page: "aiUsage", hash: "provedores" },
-                },
-                {
-                  key: "ai-routes",
-                  label: "Quem usa qual modelo",
-                  to: { page: "aiUsage", hash: "regras" },
-                },
-              ]
-            : undefined,
+          // Gestores veem o consumo e o Copiloto; o resto é dos administradores.
+          children: [
+            {
+              key: "ai-usage",
+              label: "Consumo e limites",
+              to: { page: "aiUsage", hash: "consumo" },
+            },
+            {
+              key: "ai-copilot",
+              label: "Copiloto",
+              to: { page: "aiUsage", hash: "copiloto" },
+            },
+            ...(isAdmin
+              ? [
+                  {
+                    key: "ai-providers",
+                    label: "Provedores e modelos",
+                    to: { page: "aiUsage" as const, hash: "provedores" },
+                  },
+                  {
+                    key: "ai-routes",
+                    label: "Quem usa qual modelo",
+                    to: { page: "aiUsage" as const, hash: "regras" },
+                  },
+                ]
+              : []),
+          ],
         },
       ],
     },

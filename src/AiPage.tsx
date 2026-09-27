@@ -1,20 +1,28 @@
-import { BarChart3, Boxes, Route } from "lucide-react";
+import { BarChart3, Boxes, GraduationCap, Route } from "lucide-react";
 import { aiTab, useHash, type AiTab } from "./router";
 import type { Snapshot } from "./types";
 import { AiUsagePage } from "./AiUsagePage";
 import { AiProvidersPanel, AiRoutesPanel, useAiLibrary } from "./AiProviders";
+import { CopilotLearning } from "./CopilotLearning";
 
-const TABS: { id: AiTab; label: string; icon: typeof BarChart3; admin: boolean }[] = [
+const TABS: {
+  id: AiTab;
+  label: string;
+  icon: typeof BarChart3;
+  admin: boolean;
+}[] = [
   { id: "consumo", label: "Consumo e limites", icon: BarChart3, admin: false },
+  { id: "copiloto", label: "Copiloto", icon: GraduationCap, admin: false },
   { id: "provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
   { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: true },
 ];
 
 /**
- * Painel de IA (líderes): o consumo e os limites de gasto; para
+ * Painel de IA (líderes): o consumo e os limites de gasto, o aprendizado
+ * do Assistente MAVI nas tarefas (#copiloto); para
  * administradores, também a biblioteca de provedores e as regras de quem usa
  * qual provedor e modelo (por funcionalidade, pessoa, cliente, produto e
- * projeto). Cada aba tem o seu endereço (#consumo, #provedores, #regras).
+ * projeto). Cada aba tem o seu endereço (#consumo, #copiloto, #provedores, #regras).
  */
 export function AiPage({
   company,
@@ -31,12 +39,15 @@ export function AiPage({
   notify: (message: string) => void;
 }) {
   const hash = aiTab(useHash());
-  const tab = isAdmin ? hash : "consumo";
+  const tab = isAdmin || hash === "copiloto" ? hash : "consumo";
   const tabs = TABS.filter((t) => isAdmin || !t.admin);
   return (
     <div className="ai-page">
       {tabs.length > 1 && (
-        <nav className="drive-view ai-page-tabs" aria-label="Seções do Painel da MAVI">
+        <nav
+          className="drive-view ai-page-tabs"
+          aria-label="Seções do Painel da MAVI"
+        >
           {tabs.map((t) => (
             <a
               key={t.id}
@@ -50,7 +61,14 @@ export function AiPage({
           ))}
         </nav>
       )}
-      {tab === "consumo" ? (
+      {tab === "copiloto" ? (
+        <CopilotLearning
+          company={company}
+          data={data}
+          demo={demo}
+          notify={notify}
+        />
+      ) : tab === "consumo" ? (
         demo ? (
           <p className="panel ai-route-empty">
             No ambiente demonstrativo não há consumo da MAVI para mostrar. Veja

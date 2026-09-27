@@ -34,6 +34,7 @@ const MODULE_LABELS: Record<string, string> = {
   meetings: "Gravações da MAVI",
   index: "Indexação da base",
   mcp: "MAVI em apps externos (MCP)",
+  tasks: "Assistente MAVI nas tarefas",
 };
 
 const money = (v: number) => {
@@ -299,10 +300,9 @@ export function AiUsagePage({
               <tbody>
                 {rows.length ? (
                   rows.map((r) => {
-                    const limit =
-                      !NO_LIMIT.has(tab)
-                        ? limitOf(tab as UsageLimit["type"], r.id)
-                        : undefined;
+                    const limit = !NO_LIMIT.has(tab)
+                      ? limitOf(tab as UsageLimit["type"], r.id)
+                      : undefined;
                     return (
                       <tr key={r.id}>
                         <td>

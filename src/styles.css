@@ -19422,3 +19422,331 @@ button.copilot-chip:hover {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* Assistente MAVI: o "por quê" do 👎. */
+.copilot-why {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  margin-top: 2px;
+  background: #f7f8f8;
+  border-radius: 8px;
+}
+.copilot-why small {
+  color: var(--muted);
+}
+.copilot-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.copilot-reasons button,
+.copilot-why-actions button:not(.copilot-apply) {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: #4c5a5b;
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.copilot-reasons button[aria-pressed="true"] {
+  border-color: #c7dcae;
+  background: #e7f2da;
+  color: #3f5f2a;
+  font-weight: 600;
+}
+.copilot-why textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.78rem;
+  background: #fff;
+}
+.copilot-why-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.copilot-why-actions button:not(.copilot-apply) {
+  border: 0;
+  background: none;
+}
+.copilot-apply:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.copilot-thanks {
+  font-size: 0.76rem;
+  color: #56793a;
+}
+
+/* Painel da MAVI › Copiloto. */
+.learning {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.learning h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 1rem;
+  margin: 0;
+}
+.learning-kinds,
+.learning-lessons,
+.learning-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+}
+.learning-kinds table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+.learning-kinds th,
+.learning-kinds td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.learning-kinds th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.76rem;
+}
+.learning-kinds td:first-child {
+  font-weight: 600;
+}
+.learning-kinds {
+  overflow-x: auto;
+}
+.learning-rate {
+  display: inline-block;
+  width: 48px;
+  height: 6px;
+  margin-right: 8px;
+  vertical-align: middle;
+  border-radius: 999px;
+  background: #f0e3e3;
+  overflow: hidden;
+}
+.learning-rate span {
+  display: block;
+  height: 100%;
+  background: #83a657;
+}
+.learning-empty {
+  margin: 0;
+  color: var(--muted);
+}
+.learning-lessons > header,
+.learning-feedback > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.learning-lessons > header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  max-width: 62ch;
+}
+.learning-list,
+.learning-feedback-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.learning-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid #83a657;
+  border-radius: 10px;
+  background: #fff;
+}
+.learning-item.status-candidate {
+  border-left-color: #c28a1e;
+}
+.learning-item.status-paused,
+.learning-item.status-dismissed {
+  border-left-color: #b8c0c0;
+  opacity: 0.8;
+}
+.learning-item p {
+  margin: 0;
+  line-height: 1.45;
+}
+.learning-item-head,
+.learning-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 0.74rem;
+}
+.learning-scope {
+  font-weight: 600;
+  color: #4b3a8a;
+}
+.learning-kind {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f3f6f7;
+  color: #4c5a5b;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.learning-status {
+  color: var(--muted);
+}
+.learning-status.active {
+  color: #56793a;
+  font-weight: 600;
+}
+.learning-status.candidate {
+  color: #b07c17;
+}
+.learning-new {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #4b3a8a;
+  color: #fff;
+  font-weight: 600;
+}
+.learning-meta {
+  color: var(--muted);
+}
+.learning-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.learning-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.learning-actions > button:not(.btn) {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.learning-actions > button:not(.btn):hover {
+  background: #f0f2f3;
+  color: var(--ink);
+}
+.learning-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e4def5;
+  border-radius: 10px;
+  background: #faf8ff;
+}
+.learning-editor-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.learning-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.learning-editor-actions small {
+  margin-right: auto;
+  color: var(--muted);
+}
+.learning-feedback-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f2f3;
+}
+.learning-feedback-list li:last-child {
+  border-bottom: 0;
+}
+.learning-vote {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #eef5e6;
+  color: #56793a;
+}
+.vote-down .learning-vote {
+  background: #fcefee;
+  color: #c8514f;
+}
+.learning-feedback-list strong {
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+.learning-feedback-list p {
+  margin: 3px 0;
+  font-size: 0.84rem;
+  color: #4c5a5b;
+}
+.learning-feedback-list small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.learning-feedback-list a {
+  font-size: 0.78rem;
+  white-space: nowrap;
+  color: #3f5f2a;
+}
+.learning-pages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .learning-feedback-list li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .learning-feedback-list a {
+    grid-column: 2;
+  }
+}
+
+.copilot-checked {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: #56793a;
+}

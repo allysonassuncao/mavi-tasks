@@ -26,6 +26,11 @@ import {
   ALERT_LABELS,
   MIN_REVIEW,
   sendCopilotFeedback,
+  voteCopilot,
+  attachCopilotFeedback,
+  DOWN_REASONS,
+  type CopilotVote,
+  type DownReason,
   type AlertKind,
   type CopilotAction,
   type CopilotAlert,
@@ -72,10 +77,33 @@ const openInNewTab = (url: string) =>
   window.open(url, "_blank", "noopener,noreferrer");
 const company = () => routeParts(window.location.pathname).company;
 
-/** Registra o que a pessoa fez com cada alerta e envia ao salvar a tarefa. */
-export function useCopilotFeedback(state: CopilotState) {
+/**
+ * O feedback de cada alerta: 👍/👎 (com motivo e comentário) vai ao banco na
+ * hora — a MAVI aprende com eles —; o que a pessoa fez (aplicou, dispensou,
+ * abriu a fonte, ignorou um alerta grave) vai ao salvar a tarefa.
+ */
+export function useCopilotFeedback(
+  state: CopilotState,
+  context: {
+    company: string;
+    contract: string | null;
+    task?: string | null;
+    title: string;
+    /** Demonstração: nada vai ao banco. */
+    demo?: boolean;
+  },
+) {
+  const ctx = useRef(context);
+  ctx.current = context;
+  const session = useRef(crypto.randomUUID());
   const actions = useRef(
     new Map<string, { alert: CopilotAlert; action: CopilotAction }>(),
+  );
+  const votes = useRef(
+    new Map<
+      string,
+      { vote: CopilotVote; reason?: DownReason | null; comment?: string }
+    >(),
   );
   const seen = useRef(new Map<string, CopilotAlert>());
   const keyOf = (a: CopilotAlert) => `${a.kind}:${a.title}`;
@@ -86,7 +114,38 @@ export function useCopilotFeedback(state: CopilotState) {
     },
     actionOf: (alert: CopilotAlert) =>
       actions.current.get(keyOf(alert))?.action,
-    /** Alertas graves sem nenhuma ação contam como ignorados. */
+    voteOf: (alert: CopilotAlert) => votes.current.get(keyOf(alert)),
+    /** Grava o voto (nulo tira); se falhar, volta ao que era. */
+    async vote(
+      alert: CopilotAlert,
+      vote: CopilotVote | null,
+      reason?: DownReason | null,
+      comment?: string,
+    ) {
+      const key = keyOf(alert);
+      const before = votes.current.get(key);
+      if (vote) votes.current.set(key, { vote, reason, comment });
+      else votes.current.delete(key);
+      if (ctx.current.demo) return;
+      try {
+        await voteCopilot({
+          company: ctx.current.company,
+          contract: ctx.current.contract,
+          task: ctx.current.task ?? null,
+          session: session.current,
+          alert,
+          draft: ctx.current.title,
+          vote,
+          reason,
+          comment,
+        });
+      } catch (e) {
+        if (before) votes.current.set(key, before);
+        else votes.current.delete(key);
+        throw e;
+      }
+    },
+    /** Alertas graves sem nenhuma ação nem voto contam como ignorados. */
     flush(companyId: string, client: string | null, task: string | null) {
       const events = [...seen.current.entries()].flatMap(([key, alert]) => {
         const done = actions.current.get(key);
@@ -99,7 +158,7 @@ export function useCopilotFeedback(state: CopilotState) {
               title: alert.title,
             },
           ];
-        return alert.severity === "high"
+        return alert.severity === "high" && !votes.current.has(key)
           ? [
               {
                 kind: alert.kind,
@@ -110,8 +169,15 @@ export function useCopilotFeedback(state: CopilotState) {
             ]
           : [];
       });
+      if (task && votes.current.size && !ctx.current.demo)
+        void attachCopilotFeedback(companyId, session.current, task).catch(
+          () => {},
+        );
       seen.current.clear();
       actions.current.clear();
+      votes.current.clear();
+      // "Criar outra em seguida": outra abertura, outros votos.
+      session.current = crypto.randomUUID();
       void sendCopilotFeedback(companyId, client, task, events).catch(() => {});
     },
   };
@@ -208,6 +274,11 @@ export function TaskCopilot({
               key={`${a.kind}:${a.title}`}
               alert={a}
               action={feedback.actionOf(a)}
+              vote={feedback.voteOf(a)}
+              onVote={async (vote, reason, comment) => {
+                await feedback.vote(a, vote, reason, comment);
+                redraw((v) => v + 1);
+              }}
               onAct={(action) => act(a, action)}
               onApplyFix={
                 onApplyFix && a.fix
@@ -226,7 +297,15 @@ export function TaskCopilot({
         <section className="copilot-related" aria-label="Relacionados">
           {similar.length > 0 && (
             <>
-              <h3>Tarefas parecidas do cliente</h3>
+              <h3>
+                Tarefas parecidas do cliente
+                {state.related?.checked && (
+                  <small className="copilot-checked">
+                    {" "}
+                    · conferidas pela MAVI
+                  </small>
+                )}
+              </h3>
               <ul>
                 {similar.map((t) => {
                   const st = statuses[t.status as Status];
@@ -288,7 +367,15 @@ export function TaskCopilot({
           )}
           {cases.length > 0 && (
             <>
-              <h3>Cases de sucesso</h3>
+              <h3>
+                Cases de sucesso
+                {state.related?.checked && (
+                  <small className="copilot-checked">
+                    {" "}
+                    · conferidos pela MAVI
+                  </small>
+                )}
+              </h3>
               <ul>
                 {cases.map((c) => (
                   <li key={c.id}>
@@ -324,15 +411,39 @@ export function TaskCopilot({
 function AlertCard({
   alert: a,
   action,
+  vote,
+  onVote,
   onAct,
   onApplyFix,
 }: {
   alert: CopilotAlert;
   action?: CopilotAction;
+  vote?: { vote: CopilotVote; reason?: DownReason | null; comment?: string };
+  onVote: (
+    vote: CopilotVote | null,
+    reason?: DownReason | null,
+    comment?: string,
+  ) => Promise<void>;
   onAct: (action: CopilotAction) => void;
   onApplyFix?: () => void;
 }) {
   const Icon = KIND_ICONS[a.kind] ?? Info;
+  // 👎 grava na hora e abre o "por quê" (motivo e comentário opcionais).
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState<DownReason | null>(null);
+  const [comment, setComment] = useState("");
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const send = (
+    next: CopilotVote | null,
+    why?: DownReason | null,
+    text?: string,
+  ) => {
+    setError("");
+    onVote(next, why, text).catch(() =>
+      setError("Não foi possível registrar. Tente de novo."),
+    );
+  };
   return (
     <li className={`copilot-alert kind-${a.kind} sev-${a.severity}`}>
       <div className="copilot-alert-head">
@@ -385,17 +496,31 @@ function AlertCard({
         <span className="copilot-vote">
           <button
             type="button"
-            aria-pressed={action === "useful"}
-            onClick={() => onAct("useful")}
-            aria-label="Útil"
-            title="Útil"
+            aria-pressed={vote?.vote === "up"}
+            onClick={() => {
+              setAsking(false);
+              send(vote?.vote === "up" ? null : "up");
+            }}
+            aria-label="Ajudou"
+            title="Ajudou"
           >
             <ThumbsUp size={13} />
           </button>
           <button
             type="button"
-            aria-pressed={action === "not_useful"}
-            onClick={() => onAct("not_useful")}
+            aria-pressed={vote?.vote === "down"}
+            onClick={() => {
+              if (vote?.vote === "down") {
+                setAsking(false);
+                send(null);
+                return;
+              }
+              setReason(null);
+              setComment("");
+              setSent(false);
+              setAsking(true);
+              send("down");
+            }}
             aria-label="Não ajudou"
             title="Não ajudou"
           >
@@ -403,6 +528,56 @@ function AlertCard({
           </button>
         </span>
       </div>
+      {asking && vote?.vote === "down" && (
+        <div className="copilot-why">
+          {sent ? (
+            <span className="copilot-thanks">
+              Obrigado! A MAVI vai aprender com isso.
+            </span>
+          ) : (
+            <>
+              <small>Por que não ajudou?</small>
+              <div className="copilot-reasons">
+                {DOWN_REASONS.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    aria-pressed={reason === r.id}
+                    onClick={() => setReason(r.id)}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                maxLength={500}
+                rows={2}
+                placeholder="Conte à MAVI o que ela deveria saber (opcional)"
+                aria-label="Comentário para a MAVI"
+              />
+              <div className="copilot-why-actions">
+                <button type="button" onClick={() => setAsking(false)}>
+                  Agora não
+                </button>
+                <button
+                  type="button"
+                  className="copilot-apply"
+                  disabled={!reason && !comment.trim()}
+                  onClick={() => {
+                    send("down", reason, comment.trim());
+                    setSent(true);
+                  }}
+                >
+                  Enviar
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {error && <small className="copilot-error">{error}</small>}
     </li>
   );
 }

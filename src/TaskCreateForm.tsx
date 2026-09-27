@@ -209,7 +209,12 @@ export function TaskCreateForm({
     copilotOn && !locked,
     demo,
   );
-  const copilotFeedback = useCopilotFeedback(copilot);
+  const copilotFeedback = useCopilotFeedback(copilot, {
+    company,
+    contract: contract || null,
+    title,
+    demo,
+  });
 
   // Modal opens the dialog in its own (later) effect, which steals focus.
   useEffect(() => {

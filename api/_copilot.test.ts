@@ -159,7 +159,30 @@ describe("rascunho", () => {
 
 describe("Relacionados", () => {
   it("mostra só o que passa da semelhança e marca a possível duplicada", () => {
-    const r = related(context);
+    // Achado só por palavra (sem semelhança) ou fraco não aparece.
+    const r = related({
+      ...context,
+      similar: [
+        ...context.similar,
+        {
+          id: "texto",
+          title: "Tarefa teste",
+          status: "progress",
+          similarity: null,
+        },
+        { id: "fraca", title: "Outra", status: "progress", similarity: 0.45 },
+      ],
+      cases: [
+        ...context.cases,
+        {
+          id: "c2",
+          title: "Case fraco",
+          date: null,
+          snippet: "",
+          similarity: 0.4,
+        },
+      ],
+    });
     expect(r.similar.map((t) => t.id)).toEqual([
       taskA,
       "00000000-0000-4000-8000-00000000000e",
@@ -273,7 +296,7 @@ describe("análise em tempo real", () => {
       });
       req.onEvent?.({
         type: "text",
-        text: '{"kind":"duplicate","severity":"high","title":"Já em andamento","text":"x","refs":["S1","S2"]}',
+        text: '{"kind":"duplicate","severity":"high","title":"Já em andamento","text":"x","refs":["S1","S2"]}\n{"related":["S1","S3","S4"]}',
       });
       const meter = newMeter("claude-sonnet-5");
       meter.input = 1000;
@@ -294,8 +317,15 @@ describe("análise em tempo real", () => {
       "status",
       "alert",
       "alert",
+      "related",
       "done",
     ]);
+    // A MAVI confirmou a tarefa S1 e o case S3 (S4 é WhatsApp, não entra):
+    // a tarefa do colega (S2) sai dos Relacionados.
+    const checked = events[4] as Extract<CopilotEvent, { type: "related" }>;
+    expect(checked.similar.map((t) => t.id)).toEqual([taskA]);
+    expect(checked.cases.map((c) => c.id)).toEqual([caseA]);
+    expect(checked.checked).toBe(true);
     const done = events.at(-1) as Extract<CopilotEvent, { type: "done" }>;
     expect(done.version).toBe(3);
     expect(done.alerts[0].sources.map((s) => s.type)).toEqual(["whatsapp"]);
@@ -330,6 +360,31 @@ describe("análise em tempo real", () => {
       p_embedding: 50,
     });
     expect(log.body.p_cost).toBeGreaterThan(0.01);
+  });
+
+  it("tempo do banco esgotado: mensagem clara", async () => {
+    const fetchImpl = vi.fn(async (url: string) =>
+      url.includes("rpc/task_copilot_context")
+        ? new Response(
+            JSON.stringify({
+              message: "canceling statement due to statement timeout",
+            }),
+            { status: 500 },
+          )
+        : new Response(JSON.stringify([{ hidden_pages: [] }]), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const events: CopilotEvent[] = [];
+    await streamCopilot(
+      body,
+      token(me),
+      env,
+      { fetch: fetchImpl, llm: vi.fn(), embed },
+      (e) => events.push(e),
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      error: "A busca no histórico do cliente demorou demais. Tente de novo.",
+    });
   });
 
   it("freio por pessoa: não chama o modelo", async () => {

@@ -47,6 +47,8 @@ export type Related = {
   client: { id: string; name: string } | null;
   similar: SimilarTask[];
   cases: RelatedCase[];
+  /** A MAVI conferiu na análise: só o que tem a ver de fato com o pedido. */
+  checked?: boolean;
 };
 export type AlertKind =
   | "error"
@@ -229,6 +231,67 @@ export async function sendCopilotFeedback(
   });
 }
 
+export type CopilotVote = "up" | "down";
+export type DownReason =
+  "not_applicable" | "wrong" | "obvious" | "already" | "other";
+export const DOWN_REASONS: { id: DownReason; label: string }[] = [
+  { id: "not_applicable", label: "Não se aplica" },
+  { id: "wrong", label: "Informação errada" },
+  { id: "obvious", label: "Óbvio" },
+  { id: "already", label: "Já estava na tarefa" },
+  { id: "other", label: "Outro" },
+];
+
+/**
+ * 👍/👎 num alerta, gravado na hora (a MAVI aprende com eles). Nulo tira o
+ * voto. Um voto por pessoa, por alerta, por abertura do formulário.
+ */
+export async function voteCopilot(args: {
+  company: string;
+  contract: string | null;
+  task: string | null;
+  session: string;
+  alert: CopilotAlert;
+  draft: string;
+  vote: CopilotVote | null;
+  reason?: DownReason | null;
+  comment?: string;
+}) {
+  if (!supabase) return;
+  const { error } = await supabase.rpc("copilot_feedback_vote", {
+    p_company: args.company,
+    p_contract: args.contract,
+    p_task: args.task,
+    p_session: args.session,
+    p_alert: {
+      key: `${args.alert.kind}:${args.alert.title}`.slice(0, 200),
+      kind: args.alert.kind,
+      severity: args.alert.severity,
+      title: args.alert.title,
+      text: args.alert.text,
+      draft: args.draft.slice(0, 200),
+    },
+    p_vote: args.vote,
+    p_reason: args.reason ?? null,
+    p_comment: args.comment ?? null,
+  });
+  if (error) throw Error(error.message);
+}
+
+/** A tarefa foi criada: os votos daquela abertura passam a apontar para ela. */
+export async function attachCopilotFeedback(
+  company: string,
+  session: string,
+  task: string,
+) {
+  if (!supabase) return;
+  await supabase.rpc("copilot_feedback_attach", {
+    p_company: company,
+    p_session: session,
+    p_task: task,
+  });
+}
+
 // ------------------------------------------------------------ demonstração
 function demoResult(d: CopilotDraft): {
   related: Related;
@@ -366,6 +429,8 @@ export function useTaskCopilot(
         const r = demo
           ? demoResult(current.current).related
           : await fetchRelated(current.current, abort.signal);
+        // A análise já conferiu este rascunho: a lista dela vale.
+        if (relatedCache.get(key)?.checked) return;
         remember(relatedCache, key, r);
         setRelated(r);
       } catch {
