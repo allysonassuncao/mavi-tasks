@@ -173,6 +173,16 @@ describe("perguntas ao Jev", () => {
     expect(res.tokens).toBe(10000);
   });
 
+  it("outra recusa do Jev não encurta o texto e guarda a mensagem dele", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { message: "questions.i_x.criteria: invalid" } }), { status: 400 }),
+    ) as unknown as typeof fetch;
+    await expect(askJev(jevConfig, { conversa: "x" }, {}, fetchImpl)).rejects.toThrow(
+      /O Jev respondeu com erro \(400\): questions\.i_x\.criteria: invalid/,
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("chave recusada vira uma mensagem clara", async () => {
     const fetchImpl = vi.fn(async () => new Response("{}", { status: 401 })) as unknown as typeof fetch;
     await expect(askJev(jevConfig, {}, {}, fetchImpl)).rejects.toThrow(/API Key do provedor "OpenRouter"/);

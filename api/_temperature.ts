@@ -205,7 +205,7 @@ export function parseAnswers(q: Questions, res: JevResponse): Evaluation {
 /** Encurta os textos longos do estado (o Jev lê até ~32 mil tokens). */
 export function shrinkState(state: Row, factor: number): Row {
   return Object.fromEntries(
-    Object.entries(state).map(([k, v]) => {
+    Object.entries(state ?? {}).map(([k, v]) => {
       if (typeof v !== "string" || v.length < 2000) return [k, v];
       const keep = Math.floor(v.length * factor);
       // O fim da conversa é o mais recente: fica com o fim.
@@ -231,8 +231,13 @@ async function jevError(res: Response, name: string) {
     );
   if (res.status === 429)
     return new LlmError(429, `Limite de uso do provedor "${name}" atingido.`);
+  // Só "grande demais" leva a tentar de novo com menos texto; outra recusa
+  // volta com a mensagem do Jev (fica em last_error da leitura).
+  const tooBig =
+    res.status === 413 ||
+    (res.status === 400 && /context|token|too (long|large)|length|exceed/i.test(detail));
   return new LlmError(
-    res.status === 400 || res.status === 413 ? 413 : 502,
+    tooBig ? 413 : 502,
     `O Jev respondeu com erro (${res.status})${detail ? `: ${detail}` : "."}`,
   );
 }
