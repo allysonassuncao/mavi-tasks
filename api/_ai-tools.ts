@@ -21,7 +21,7 @@ export type AiScope = {
 };
 export type AiSource = {
   ref: string;
-  type: "meeting" | "task" | "file" | "social" | "campaign";
+  type: "meeting" | "task" | "file" | "social" | "campaign" | "case";
   id: string;
   title: string;
   date: string | null;
@@ -42,6 +42,7 @@ const SEARCH_TYPES: Record<string, string[]> = {
   file: ["drive_file"],
   social: ["social_plan", "social_briefing"],
   campaign: ["campaign"],
+  case: ["success_case"],
 };
 const SOURCE_KIND: Record<string, AiSource["type"]> = {
   meeting: "meeting",
@@ -50,6 +51,7 @@ const SOURCE_KIND: Record<string, AiSource["type"]> = {
   social_plan: "social",
   social_briefing: "social",
   campaign: "campaign",
+  success_case: "case",
 };
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -107,10 +109,10 @@ export const TOOLS: ToolSpec[] = [
           type: "array",
           items: {
             type: "string",
-            enum: ["meeting", "task", "file", "social", "campaign"],
+            enum: ["meeting", "task", "file", "social", "campaign", "case"],
           },
           description:
-            "Limitar a tipos: meeting (reuniões gravadas), task (tarefas), file (arquivos do Drive), social (briefing e planos do Social Leads), campaign (anotações e ciclos das campanhas; só líderes).",
+            "Limitar a tipos: meeting (reuniões gravadas), task (tarefas), file (arquivos do Drive), social (briefing e planos do Social Leads), campaign (anotações e ciclos das campanhas; só líderes), case (cases de sucesso aprovados: resultados, nichos, links e contatos; todos veem).",
         },
         from: dateField("Só a partir desta data"),
         to: dateField("Só até esta data"),
@@ -340,7 +342,9 @@ async function searchKnowledge(
               ? `${row.title}${row.meta?.post ? ` · post ${row.meta.post}` : ""}`
               : kind === "campaign"
                 ? `Campanha "${row.title}"`
-                : `Tarefa "${row.title}" · ${STATUS_LABELS[row.task_status ?? ""] ?? row.task_status ?? ""}${row.task_assignee ? ` · responsável ${ctx.members.get(row.task_assignee)?.name ?? "?"}` : ""}${row.task_due ? ` · prazo ${brDate(row.task_due)}` : ""}`;
+                : kind === "case"
+                  ? `Case de sucesso "${row.title}"`
+                  : `Tarefa "${row.title}" · ${STATUS_LABELS[row.task_status ?? ""] ?? row.task_status ?? ""}${row.task_assignee ? ` · responsável ${ctx.members.get(row.task_assignee)?.name ?? "?"}` : ""}${row.task_due ? ` · prazo ${brDate(row.task_due)}` : ""}`;
       // A primeira linha do trecho é o cabeçalho de contexto; aqui ele vira
       // a linha de referência.
       const body = row.content.split("\n").slice(1).join("\n").trim();
@@ -527,6 +531,7 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
       file: "nos arquivos do Drive",
       social: "no Social Leads",
       campaign: "nas campanhas",
+      case: "nos cases de sucesso",
     };
     const where =
       types.length === 1 && names[String(types[0])]

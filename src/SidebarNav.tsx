@@ -15,6 +15,7 @@ import {
   Rocket,
   Settings2,
   Sparkles,
+  Trophy,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -67,6 +68,7 @@ export function SidebarNav({
   isAdmin = false,
   allowed,
   taskCount,
+  caseCount,
   products,
   href,
   onNavigate,
@@ -80,6 +82,8 @@ export function SidebarNav({
   /** Pages the person may open. */
   allowed: (page: Page) => boolean;
   taskCount?: number;
+  /** Leaders: cases and edits waiting for their approval. */
+  caseCount?: number;
   products: Pick<Product, "id" | "name" | "color">[];
   href: (to: NavTarget) => string;
   onNavigate: (to: NavTarget) => void;
@@ -215,6 +219,13 @@ export function SidebarNav({
               to: { page: "onboarding" },
             },
           ],
+        },
+        {
+          key: "cases",
+          label: "Cases de Sucesso",
+          icon: Trophy,
+          to: { page: "cases" },
+          count: caseCount,
         },
         ...(isLeader ? [] : portfolio),
       ],

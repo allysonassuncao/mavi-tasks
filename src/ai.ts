@@ -21,7 +21,7 @@ export type AiScope = {
 };
 export type AiSource = {
   ref: string;
-  type: "meeting" | "task" | "file" | "social" | "campaign";
+  type: "meeting" | "task" | "file" | "social" | "campaign" | "case";
   id: string;
   title: string;
   date: string | null;
@@ -414,6 +414,7 @@ export function sourceLabel(s: AiSource) {
   if (s.type === "file") return s.label ? `Arquivo · ${s.label}` : "Arquivo";
   if (s.type === "social") return "Social Leads";
   if (s.type === "campaign") return "Campanha";
+  if (s.type === "case") return "Case de sucesso";
   return "Tarefa";
 }
 
@@ -422,7 +423,7 @@ export function sourceUrl(s: AiSource) {
   const company = routeParts(window.location.pathname).company;
   if (s.type === "task") return taskUrl({ id: s.id, title: s.title }, company);
   const q = new URLSearchParams();
-  let page: "drive" | "onboarding" | "campaigns" = "drive";
+  let page: "drive" | "onboarding" | "campaigns" | "cases" = "drive";
   if (s.type === "meeting") {
     q.set("gravacao", s.id);
     if (s.start && s.start > 0) q.set("t", String(Math.floor(s.start)));
@@ -430,6 +431,9 @@ export function sourceUrl(s: AiSource) {
   else if (s.type === "social") {
     page = "onboarding";
     if (s.contract_id) q.set("contrato", s.contract_id);
+  } else if (s.type === "case") {
+    page = "cases";
+    q.set("caso", s.id);
   } else {
     page = "campaigns";
     q.set("campanha", s.id);

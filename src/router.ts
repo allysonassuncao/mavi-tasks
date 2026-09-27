@@ -11,6 +11,7 @@ export const pagePaths = {
   projects: "/projetos",
   campaigns: "/campanhas",
   onboarding: "/onboarding/social-leads",
+  cases: "/cases-de-sucesso",
   hours: "/horas",
   reports: "/relatorios",
   drive: "/drive",
@@ -142,6 +143,8 @@ export function safeReturnPath(value: string | null) {
     "post",
     "gravacao",
     "t",
+    "caso",
+    "nicho",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);

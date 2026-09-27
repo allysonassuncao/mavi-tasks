@@ -19,6 +19,7 @@ import {
   Sparkles,
   Video,
   X,
+  Trophy,
 } from "lucide-react";
 import { answerPieces, type ChatTurn } from "./meetings";
 import {
@@ -145,6 +146,7 @@ const SOURCE_ICONS = {
   file: FileText,
   social: Rocket,
   campaign: Megaphone,
+  case: Trophy,
 };
 function SourceIcon({ type }: { type: AiSource["type"] }) {
   const Icon = SOURCE_ICONS[type] ?? FileText;

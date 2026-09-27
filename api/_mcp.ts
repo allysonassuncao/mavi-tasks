@@ -38,7 +38,7 @@ export type McpResponse = {
   headers?: Record<string, string>;
 };
 
-const INSTRUCTIONS = `A MAVI é o sistema de gestão da agência: clientes, produtos contratados, projetos, tarefas, reuniões gravadas (com transcrição), arquivos do Drive, Social Leads e campanhas de tráfego pago. Estas ferramentas consultam o que a pessoa conectada pode ver no MAVI.
+const INSTRUCTIONS = `A MAVI é o sistema de gestão da agência: clientes, produtos contratados, projetos, tarefas, reuniões gravadas (com transcrição), arquivos do Drive, Social Leads, campanhas de tráfego pago e cases de sucesso. Estas ferramentas consultam o que a pessoa conectada pode ver no MAVI.
 - Para fatos (o que foi dito, combinado, pedido), use search_knowledge com termos que provavelmente aparecem no texto; faça várias buscas quando a pergunta for ampla.
 - Para listas e situação atual, use list_meetings, list_tasks e campaign_results; para achar o id de um cliente pelo código, find_clients.
 - Os resultados vêm numerados ([S1], [S2]…) e cada referência tem um link para abrir na MAVI: cite as fontes com esses links.
@@ -106,6 +106,9 @@ export function sourceLink(origin: string, s: AiSource) {
   else if (s.type === "social") {
     path = "/onboarding/social-leads";
     if (s.contract_id) q.set("contrato", s.contract_id);
+  } else if (s.type === "case") {
+    path = "/cases-de-sucesso";
+    q.set("caso", s.id);
   } else {
     path = "/campanhas";
     q.set("campanha", s.id);

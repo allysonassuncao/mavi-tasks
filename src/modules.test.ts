@@ -40,6 +40,7 @@ describe("módulos visíveis por pessoa", () => {
       "projects",
       "campaigns",
       "onboarding",
+      "cases",
       "hours",
       "reports",
       "drive",
@@ -57,8 +58,11 @@ describe("módulos visíveis por pessoa", () => {
     expect(firstPage("manager", ["overview", "tasks"])).toBe("agenda");
     expect(firstPage("member", ["tasks", "agenda"])).toBe("onboarding");
     expect(firstPage("member", ["tasks", "agenda", "onboarding"])).toBe(
-      "drive",
+      "cases",
     );
+    expect(
+      firstPage("member", ["tasks", "agenda", "onboarding", "cases"]),
+    ).toBe("drive");
   });
   it("o assistente de IA é um módulo de todos, que o administrador desliga", () => {
     expect(moduleOn("assistant", "member")).toBe(true);
@@ -76,6 +80,7 @@ describe("módulos visíveis por pessoa", () => {
       "projects",
       "campaigns",
       "onboarding",
+      "cases",
       "hours",
       "reports",
       "drive",
@@ -85,6 +90,12 @@ describe("módulos visíveis por pessoa", () => {
       "assistant",
     ];
     expect(firstPage("admin", all)).toBe("profile");
+  });
+  it("Cases de Sucesso: de todos os perfis, e o administrador pode esconder", () => {
+    expect(roleAllows("cases", "member")).toBe(true);
+    expect(roleAllows("cases", "manager")).toBe(true);
+    expect(canOpenPage("cases", "member", ["cases"])).toBe(false);
+    expect(moduleOf("cases")).toBe("cases");
   });
   it("Inteligência artificial: líderes, não colaboradores", () => {
     expect(canOpenPage("aiUsage", "manager")).toBe(true);

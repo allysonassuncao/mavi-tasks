@@ -43,6 +43,7 @@ import {
   PanelsTopLeft,
   Megaphone,
   Rocket,
+  Trophy,
   Bell,
   BellOff,
   BellRing,
@@ -208,6 +209,9 @@ const AgendaPage = lazy(() =>
 const SocialLeadsPage = lazy(() =>
   import("./SocialLeadsPage").then((m) => ({ default: m.SocialLeadsPage })),
 );
+const CasesPage = lazy(() =>
+  import("./CasesPage").then((m) => ({ default: m.CasesPage })),
+);
 // Leaders only, and heavy (editor, charts): loaded when first opened.
 const DashboardsPage = lazy(() =>
   import("./DashboardsPage").then((m) => ({ default: m.DashboardsPage })),
@@ -222,6 +226,7 @@ const navigation = [
   { id: "projects", label: "Projetos", icon: FolderKanban },
   { id: "campaigns", label: "Campanhas", icon: Megaphone },
   { id: "onboarding", label: "Social Leads", icon: Rocket },
+  { id: "cases", label: "Cases de Sucesso", icon: Trophy },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
@@ -908,6 +913,27 @@ export default function App() {
     };
   }, [demo, company, session, user, refresh, liveTick]);
 
+  // Sidebar badge on Cases de Sucesso (leaders): cases and edits waiting
+  // for their approval; refreshed by the "cases" live notices.
+  const [pendingCases, setPendingCases] = useState<number | undefined>();
+  const [casesTick, setCasesTick] = useState(0);
+  useEffect(() => {
+    if (demo || !company || !session || !isLeader) {
+      setPendingCases(undefined);
+      return;
+    }
+    let alive = true;
+    api
+      .rpc("success_case_review_count", { p_company: company })
+      .then((n) => {
+        if (alive) setPendingCases(Number(n) || 0);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [demo, company, session, isLeader, casesTick]);
+
   // Latest values for the long-lived realtime subscription below.
   // Inbox: who mentioned the person, and where.
   const [inbox, setInbox] = useState<AppNotification[]>([]);
@@ -1027,6 +1053,8 @@ export default function App() {
         new CustomEvent("mavi:social-leads", { detail: {} }),
       );
       window.dispatchEvent(new CustomEvent("mavi:meetings", { detail: {} }));
+      window.dispatchEvent(new CustomEvent("mavi:cases", { detail: {} }));
+      setCasesTick((n) => n + 1);
       schedule();
     };
     const unsubscribe = api.subscribeToCompanyChanges(company, {
@@ -1095,6 +1123,12 @@ export default function App() {
           window.dispatchEvent(
             new CustomEvent("mavi:meetings", { detail: change }),
           );
+          return;
+        }
+        // Cases de Sucesso listens for its own notices.
+        if (change.kind === "cases") {
+          window.dispatchEvent(new CustomEvent("mavi:cases", { detail: change }));
+          setCasesTick((n) => n + 1);
           return;
         }
         if (change.kind === "lookup") {
@@ -1830,6 +1864,7 @@ export default function App() {
                   ).length
                 : myOpenTasks
             }
+            caseCount={pendingCases}
             products={data.products.filter(
               (p) =>
                 isLeader ||
@@ -2052,6 +2087,8 @@ export default function App() {
                         "Campanhas e entregas com começo e fim, organizadas por cliente.",
                       campaigns:
                         "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
+                      cases:
+                        "Resultados reais de clientes para usar na venda: busque por termo ou nicho e cadastre os seus.",
                       onboarding:
                         "Onboarding: briefing, plano do mês com a MAVI e aprovação do cliente pelo link.",
                       hours: "Seu tempo, registrado com clareza.",
@@ -2090,6 +2127,7 @@ export default function App() {
                   page !== "profile" &&
                   page !== "campaigns" &&
                   page !== "onboarding" &&
+                  page !== "cases" &&
                   page !== "storage" &&
                   page !== "aiUsage" &&
                   page !== "dashboards" &&
@@ -3005,6 +3043,19 @@ export default function App() {
               {page === "onboarding" && (
                 <Suspense fallback={<Loading compact />}>
                   <SocialLeadsPage
+                    key={company}
+                    data={catalogData}
+                    company={company}
+                    user={user}
+                    isLeader={isLeader}
+                    demo={demo}
+                    notify={notify}
+                  />
+                </Suspense>
+              )}
+              {page === "cases" && (
+                <Suspense fallback={<Loading compact />}>
+                  <CasesPage
                     key={company}
                     data={catalogData}
                     company={company}

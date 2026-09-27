@@ -11,6 +11,7 @@ import {
 import { aiDeps, aiEnv, handleAi, streamAi } from "./_ai.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
+import { handleCases } from "./_cases.js";
 import { appOrigin } from "./_origin.js";
 
 function credentials(): GcsCredentials | null {
@@ -191,9 +192,9 @@ export default async function handler(
       res.end();
       return;
     }
-    // Gravações da MAVI, a IA (/api/ai é reescrito para cá) e a coleta do
-    // Whatsapp (/api/whatsapp) vivem na mesma função: o plano Hobby da Vercel
-    // limita o número de funções.
+    // Gravações da MAVI, a IA (/api/ai é reescrito para cá), a coleta do
+    // Whatsapp (/api/whatsapp) e as mídias dos Cases de Sucesso vivem na
+    // mesma função: o plano Hobby da Vercel limita o número de funções.
     let result: { status: number; body: unknown };
     if (action.startsWith("whatsapp-"))
       result = await handleWhatsapp(
@@ -203,6 +204,8 @@ export default async function handler(
         { fetch },
         requestOrigin(req),
       );
+    else if (action.startsWith("case-"))
+      result = await handleCases(body, authorization, driveEnv(), fetch);
     else if (action.startsWith("meeting-"))
       result = await handleMeetings(
         body,

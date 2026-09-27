@@ -1,5 +1,5 @@
 import * as Popover from "@radix-ui/react-popover";
-import { AtSign, CheckCheck, Inbox, Sparkles } from "lucide-react";
+import { AtSign, CheckCheck, Inbox, Sparkles, Trophy } from "lucide-react";
 import { useState } from "react";
 import { Avatar } from "./components";
 import type { AppNotification, Member } from "./types";
@@ -75,7 +75,11 @@ export function NotificationInbox({
                       onOpen(n);
                     }}
                   >
-                    {n.kind === "social_leads" || n.kind === "ai_share" ? (
+                    {n.kind === "success_case" ? (
+                      <span className="inbox-system" aria-hidden="true">
+                        <Trophy size={15} />
+                      </span>
+                    ) : n.kind === "social_leads" || n.kind === "ai_share" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <Sparkles size={15} />
                       </span>
@@ -87,7 +91,9 @@ export function NotificationInbox({
                       />
                     )}
                     <span>
-                      {n.kind === "social_leads" || n.kind === "ai_share" ? (
+                      {n.kind === "social_leads" ||
+                      n.kind === "ai_share" ||
+                      n.kind === "success_case" ? (
                         <span className="inbox-line">
                           <strong>{n.task_title}</strong>
                         </span>

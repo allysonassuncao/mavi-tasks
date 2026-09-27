@@ -112,7 +112,14 @@ export interface Task {
 export interface AppNotification {
   id: string;
   /** "social_leads": a plan the AI finished (or failed) writing. */
-  kind: "mention" | "assigned" | "reply" | "social_leads" | "ai_share";
+  kind:
+    | "mention"
+    | "assigned"
+    | "reply"
+    | "social_leads"
+    | "ai_share"
+    /** Cases de Sucesso: a case to approve, or the author's case approved/returned. */
+    | "success_case";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

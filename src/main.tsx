@@ -28,6 +28,12 @@ const PublicSocialLeads = lazy(() =>
     default: m.PublicSocialLeads,
   })),
 );
+const PublicCase = lazy(() =>
+  import("./PublicCase").then((m) => ({ default: m.PublicCase })),
+);
+const publicCase = window.location.pathname.match(
+  /^\/cases\/([0-9a-f]{64})\/?$/,
+);
 const approvalLink = window.location.pathname.match(
   /^\/aprovacao\/([0-9a-f]{64})\/?$/,
 );
@@ -45,6 +51,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     ) : publicDashboard ? (
       <Suspense fallback={null}>
         <PublicDashboard token={publicDashboard[1]} />
+      </Suspense>
+    ) : publicCase ? (
+      <Suspense fallback={null}>
+        <PublicCase token={publicCase[1]} />
       </Suspense>
     ) : approvalLink ? (
       <Suspense fallback={null}>

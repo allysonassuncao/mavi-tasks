@@ -135,7 +135,7 @@ export async function callRpc<T>(
   return { ok: true, data: body as T };
 }
 
-function disposition(kind: "attachment" | "inline", name: string) {
+export function disposition(kind: "attachment" | "inline", name: string) {
   const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, "_");
   return `${kind}; filename="${ascii}"; filename*=UTF-8''${rfc3986(name)}`;
 }
