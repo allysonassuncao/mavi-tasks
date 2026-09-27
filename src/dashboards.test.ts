@@ -10,8 +10,10 @@ import {
   resolveRange,
   starterPanels,
   socialLeadsPanels,
+  performancePanels,
   groupsFor,
   metricDef,
+  sources,
   type Panel,
   type PanelResult,
   type PanelSpec,
@@ -296,6 +298,22 @@ describe("Grade dos painéis", () => {
       stage.every((p) => p.spec.queries.every((q) => q.metric === "clients")),
     ).toBe(true);
   });
+  it("o modelo de performance cabe na grade e só usa o catálogo", () => {
+    const panels = performancePanels();
+    expect(overlap(panels)).toBe(false);
+    for (const p of panels) {
+      expect(p.x + p.w).toBeLessThanOrEqual(12);
+      expect(p.spec.queries.length).toBeLessThanOrEqual(5);
+      for (const q of p.spec.queries) {
+        expect(metricDef(q)).toBeTruthy();
+        for (const f of q.filters)
+          expect(sources[q.source].filters).toContain(f.field);
+      }
+      expect(groupsFor(p.spec.queries).map((g) => g.key)).toContain(
+        p.spec.groupBy,
+      );
+    }
+  });
 });
 
 describe("Motor da demonstração", () => {
@@ -477,5 +495,23 @@ describe("Motor da demonstração", () => {
     expect(r.series.A).toHaveLength(30);
     expect(r.series.A[2].v).toBe(0.5);
     expect(r.series.A[14].v).toBe(1);
+  });
+  it("qualidade das entregas, por quem executou", () => {
+    const r = run({
+      viz: "table",
+      groupBy: "executor",
+      queries: [
+        q("A", "tasks", "on_time_rate", { dateField: "delivered_at" }),
+        q("B", "tasks", "delay_days", { dateField: "delivered_at" }),
+        q("C", "tasks", "first_pass_rate", { dateField: "delivered_at" }),
+      ],
+    });
+    // t1 (ana) no prazo; t2 (bia) 3 dias atrasada.
+    expect(r.series.A).toEqual([
+      { k: "ana", l: null, v: 100 },
+      { k: "bia", l: null, v: 0 },
+    ]);
+    expect(r.series.B.find((x) => x.k === "bia")?.v).toBe(3);
+    expect(r.series.C.every((x) => x.v === 100)).toBe(true);
   });
 });

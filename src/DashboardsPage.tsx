@@ -49,6 +49,7 @@ import {
   sources,
   starterPanels,
   socialLeadsPanels,
+  performancePanels,
   vizOptions,
   compact,
   type Dashboard,
@@ -67,6 +68,15 @@ import {
 import { priorities, statuses, type Snapshot } from "./types";
 
 type Notify = (message: string) => void;
+
+/** The data sources in the editor's menu. */
+const sourceOrder: Source[] = [
+  "tasks",
+  "status_history",
+  "reviews",
+  "hours",
+  "social_leads",
+];
 
 // The demonstration keeps its dashboards in memory for the session.
 let demoDashboards: Dashboard[] | null = null;
@@ -341,7 +351,7 @@ function DashboardList({
         <div className="panel">
           <Empty
             title="Seu primeiro dashboard"
-            body="Monte painéis com indicadores de tarefas, horas e Social Leads da agência: números, gráficos e tabelas, com filtros por período, cliente, produto, equipe e pessoa."
+            body="Monte painéis com indicadores de tarefas, status, validações, horas e Social Leads da agência: números, gráficos e tabelas, com filtros por período, cliente, produto, equipe e pessoa."
             action={
               <Button className="btn primary" onClick={() => setCreating(true)}>
                 <Plus size={16} /> Novo dashboard
@@ -362,7 +372,9 @@ function DashboardList({
                   ? starterPanels()
                   : template === "social_leads"
                     ? socialLeadsPanels()
-                    : [],
+                    : template === "performance"
+                      ? performancePanels()
+                      : [],
               variables: { range: { preset: "30d" as const }, filters: {} },
             };
             const saved = demo
@@ -377,7 +389,7 @@ function DashboardList({
   );
 }
 
-type Template = "operation" | "social_leads" | null;
+type Template = "operation" | "social_leads" | "performance" | null;
 function CreateDashboard({
   onClose,
   onCreate,
@@ -449,6 +461,20 @@ function CreateDashboard({
               status, clientes e pessoas) para ajustar.
             </small>
           </label>
+          <label className={template === "performance" ? "selected" : ""}>
+            <input
+              type="radio"
+              name="template"
+              checked={template === "performance"}
+              onChange={() => setTemplate("performance")}
+            />
+            <strong>Modelo: performance da equipe</strong>
+            <small>
+              Aprovadas e reprovadas, vezes e horas em Devolvida, Em validação,
+              Alteração e Correção, prazo médio de entrega por cliente, produto,
+              projeto e pessoa.
+            </small>
+          </label>
           <label className={template === "social_leads" ? "selected" : ""}>
             <input
               type="radio"
@@ -491,6 +517,9 @@ function useLookups(data: Snapshot) {
   return useMemo(() => {
     const byName = (a: PickOption, b: PickOption) =>
       a.label.localeCompare(b.label, "pt-BR");
+    const people = data.members
+      .map((m) => ({ value: m.user_id, label: m.name }))
+      .sort(byName);
     return {
       client: data.clients
         .map((c) => ({ value: c.id, label: c.name }))
@@ -504,12 +533,11 @@ function useLookups(data: Snapshot) {
       team: data.teams
         .map((t) => ({ value: t.id, label: t.name }))
         .sort(byName),
-      person: data.members
-        .map((m) => ({ value: m.user_id, label: m.name }))
-        .sort(byName),
-      creator: data.members
-        .map((m) => ({ value: m.user_id, label: m.name }))
-        .sort(byName),
+      person: people,
+      creator: people,
+      executor: people,
+      previous: people,
+      validator: people,
       status: Object.entries(statuses).map(([k, s]) => ({
         value: k,
         label: s.label,
@@ -1465,9 +1493,11 @@ function QueryEditor({
               });
             }}
           >
-            <SelectOption value="tasks">Tarefas</SelectOption>
-            <SelectOption value="hours">Horas</SelectOption>
-            <SelectOption value="social_leads">Social Leads</SelectOption>
+            {sourceOrder.map((k) => (
+              <SelectOption key={k} value={k}>
+                {sources[k].label}
+              </SelectOption>
+            ))}
           </Select>
         </label>
         <label>

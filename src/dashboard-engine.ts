@@ -19,6 +19,16 @@ import {
 
 type Row = { task: Task; entry?: TimeEntry };
 
+/** Task metrics over delivered tasks only. */
+const DELIVERED_ONLY = [
+  "lead_time_days",
+  "on_time_rate",
+  "on_time_original_rate",
+  "delay_days",
+  "first_pass_rate",
+  "rework_per_task",
+];
+
 function bucketStart(day: string, interval: PanelResult["interval"]) {
   if (interval === "month") return `${day.slice(0, 7)}-01`;
   if (interval === "week") {
@@ -40,8 +50,13 @@ function series(
   tz: string,
   now: Date,
 ): SeriesRow[] {
-  // Social Leads lives in its own store in the demo: no figures here.
-  if (q.source === "social_leads")
+  // Social Leads lives in its own store, and the demo keeps no status
+  // history (status_history, reviews): no figures here.
+  if (
+    q.source === "social_leads" ||
+    q.source === "status_history" ||
+    q.source === "reviews"
+  )
     return group === "none" ? [{ k: "total", v: 0 }] : [];
   const today = dateKey(now, tz);
   const contract = new Map(data.contracts.map((k) => [k.id, k]));
@@ -83,6 +98,8 @@ function series(
         return q.source === "hours" ? r.entry!.user_id : r.task.assignee_id;
       case "creator":
         return r.task.creator_id;
+      case "executor":
+        return r.task.executor_id ?? r.task.assignee_id;
       case "status":
         return r.task.status;
       case "priority":
@@ -109,7 +126,7 @@ function series(
   const kept = rows.filter((r) => {
     const d = dateOf(r);
     if (!d || d < from || d > to) return false;
-    if (q.metric === "lead_time_days" && !r.task.delivered_at) return false;
+    if (DELIVERED_ONLY.includes(q.metric) && !r.task.delivered_at) return false;
     return allFilters.every((f) => {
       if (!f.values.length) return true;
       if (f.field === "late") {
@@ -121,8 +138,33 @@ function series(
       return (f.op ?? "in") === "in" ? hit : !hit;
     });
   });
+  const deliveredDay = (t: Task) => day(t.delivered_at) ?? "";
+  const share = (list: Row[], hit: (t: Task) => boolean) =>
+    list.length
+      ? (100 * list.filter((r) => hit(r.task)).length) / list.length
+      : null;
+  const mean = (values: number[]) =>
+    values.length ? values.reduce((s, v) => s + v, 0) / values.length : null;
   const measure = (list: Row[]): number | null => {
     switch (q.metric) {
+      case "on_time_rate":
+        return share(list, (t) => deliveredDay(t) <= t.due_date);
+      case "on_time_original_rate":
+        return share(list, (t) => deliveredDay(t) <= t.original_due_date);
+      case "delay_days":
+        return mean(
+          list
+            .filter((r) => deliveredDay(r.task) > r.task.due_date)
+            .map((r) => daysBetween(r.task.due_date, deliveredDay(r.task)) - 1),
+        );
+      case "rescheduled":
+        return list.filter((r) => r.task.due_date !== r.task.original_due_date)
+          .length;
+      // Without the status history, the demo reads rework from the revision.
+      case "first_pass_rate":
+        return share(list, (t) => t.revision <= 1);
+      case "rework_per_task":
+        return mean(list.map((r) => Math.max(r.task.revision - 1, 0)));
       case "count":
       case "entries":
         return list.length;
@@ -190,7 +232,7 @@ function series(
       team: data.teams,
     }[group as "client"];
     if (lookup) return lookup.find((x) => x.id === key)?.name ?? null;
-    if (group === "person" || group === "creator")
+    if (group === "person" || group === "creator" || group === "executor")
       return data.members.find((m) => m.user_id === key)?.name ?? null;
     return key;
   };

@@ -97,6 +97,8 @@ export interface Task {
   delivered_at: string | null;
   /** When the task entered its current status. */
   status_changed_at?: string;
+  /** Who last held it Em andamento, Alteração or Correção (who executed). */
+  executor_id?: string | null;
   /** Everyone who was ever responsible or was mentioned in it. */
   participant_ids?: string[];
   /** Template fields filled in when the task was created (its own copy). */

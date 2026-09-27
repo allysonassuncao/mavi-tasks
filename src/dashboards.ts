@@ -10,7 +10,8 @@ import { priorities, statuses, type Status } from "./types";
  * formulas, how results become series, the grid layout and the API calls.
  */
 
-export type Source = "tasks" | "hours" | "social_leads";
+export type Source =
+  "tasks" | "hours" | "social_leads" | "status_history" | "reviews";
 export type Viz = "stat" | "line" | "area" | "bar" | "hbar" | "donut" | "table";
 export type GroupBy =
   | "none"
@@ -23,7 +24,10 @@ export type GroupBy =
   | "creator"
   | "status"
   | "priority"
-  | "stage";
+  | "stage"
+  | "executor"
+  | "previous"
+  | "validator";
 export type Interval = "auto" | "day" | "week" | "month";
 /** "money" (R$) is only drawn by Campanhas' charts, not a dashboard metric. */
 export type Unit = "number" | "hours" | "days" | "percent" | "money";
@@ -37,7 +41,10 @@ export type FilterField =
   | "status"
   | "priority"
   | "late"
-  | "entry_source";
+  | "entry_source"
+  | "executor"
+  | "previous"
+  | "validator";
 
 export type QueryFilter = {
   field: FilterField;
@@ -165,6 +172,43 @@ export const sources: Record<
         unit: "days",
         additive: false,
       },
+      // Migration 20261104090000: delivery quality (delivered tasks only).
+      {
+        key: "on_time_rate",
+        label: "Entregas no prazo (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "on_time_original_rate",
+        label: "Entregas no prazo original (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "delay_days",
+        label: "Atraso médio das entregas atrasadas (dias)",
+        unit: "days",
+        additive: false,
+      },
+      {
+        key: "first_pass_rate",
+        label: "Aprovadas de primeira (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "rework_per_task",
+        label: "Retrabalhos por tarefa entregue",
+        unit: "number",
+        additive: false,
+      },
+      {
+        key: "rescheduled",
+        label: "Tarefas com prazo alterado",
+        unit: "number",
+        additive: true,
+      },
     ],
     dateFields: [
       { key: "created_at", label: "Criação" },
@@ -181,6 +225,7 @@ export const sources: Record<
       "team",
       "person",
       "creator",
+      "executor",
     ],
   },
   hours: {
@@ -265,6 +310,113 @@ export const sources: Record<
     dateFields: [{ key: "event", label: "Data da decisão ou aprovação" }],
     filters: ["client", "product", "team", "person"],
   },
+  // Migration 20261104090000: each period a task spent in a status with a
+  // responsible. "Pessoa" is who held it; "Responsável anterior", who had it
+  // before it entered the status (who returned it, who asked for changes).
+  status_history: {
+    label: "Status das tarefas",
+    metrics: [
+      {
+        key: "entries",
+        label: "Vezes no status",
+        unit: "number",
+        additive: true,
+      },
+      {
+        key: "hours",
+        label: "Tempo no status (horas)",
+        unit: "hours",
+        additive: true,
+      },
+      {
+        key: "avg_hours",
+        label: "Tempo médio por vez (horas)",
+        unit: "hours",
+        additive: false,
+      },
+      {
+        key: "tasks",
+        label: "Tarefas que passaram pelo status",
+        unit: "number",
+        additive: false,
+      },
+      {
+        key: "reopens",
+        label: "Reaberturas após a entrega",
+        unit: "number",
+        additive: true,
+      },
+    ],
+    dateFields: [
+      { key: "started_at", label: "Entrada no status" },
+      { key: "ended_at", label: "Saída do status" },
+    ],
+    filters: [
+      "status",
+      "priority",
+      "client",
+      "product",
+      "project",
+      "team",
+      "person",
+      "previous",
+      "creator",
+    ],
+  },
+  // Same history, validation only. "Pessoa" is who sent it to validation.
+  reviews: {
+    label: "Validações",
+    metrics: [
+      {
+        key: "sent",
+        label: "Envios para validação",
+        unit: "number",
+        additive: true,
+      },
+      {
+        key: "approved",
+        label: "Aprovadas",
+        unit: "number",
+        additive: true,
+      },
+      {
+        key: "reproved",
+        label: "Reprovadas (voltaram para Alteração ou Correção)",
+        unit: "number",
+        additive: true,
+      },
+      {
+        key: "approval_rate",
+        label: "Taxa de aprovação (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "reproval_rate",
+        label: "Taxa de reprovação (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "avg_hours",
+        label: "Tempo médio em validação (horas)",
+        unit: "hours",
+        additive: false,
+      },
+    ],
+    // Each metric has its own date: the sending or the decision.
+    dateFields: [{ key: "event", label: "Data do envio ou da decisão" }],
+    filters: [
+      "priority",
+      "client",
+      "product",
+      "project",
+      "team",
+      "person",
+      "validator",
+      "creator",
+    ],
+  },
 };
 export const metricDef = (q: Pick<Query, "source" | "metric">) =>
   sources[q.source]?.metrics.find((m) => m.key === q.metric);
@@ -280,6 +432,9 @@ export const filterLabels: Record<FilterField, string> = {
   priority: "Prioridade",
   late: "Atraso",
   entry_source: "Origem do apontamento",
+  executor: "Quem executou",
+  previous: "Responsável anterior",
+  validator: "Quem validou",
 };
 
 export const groupOptions: {
@@ -290,33 +445,60 @@ export const groupOptions: {
   {
     key: "none",
     label: "Total (sem agrupar)",
-    sources: ["tasks", "hours", "social_leads"],
+    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
   },
   {
     key: "time",
     label: "Tempo (dia, semana, mês)",
-    sources: ["tasks", "hours", "social_leads"],
+    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
   },
   {
     key: "client",
     label: "Cliente",
-    sources: ["tasks", "hours", "social_leads"],
+    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
   },
   {
     key: "product",
     label: "Produto",
-    sources: ["tasks", "hours", "social_leads"],
+    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
   },
-  { key: "project", label: "Projeto", sources: ["tasks", "hours"] },
-  { key: "team", label: "Equipe", sources: ["tasks", "hours"] },
+  {
+    key: "project",
+    label: "Projeto",
+    sources: ["tasks", "hours", "status_history", "reviews"],
+  },
+  {
+    key: "team",
+    label: "Equipe",
+    sources: ["tasks", "hours", "status_history", "reviews"],
+  },
   {
     key: "person",
-    label: "Pessoa (responsável ou quem registrou)",
-    sources: ["tasks", "hours", "social_leads"],
+    label: "Pessoa (responsável, quem registrou ou quem enviou)",
+    sources: ["tasks", "hours", "social_leads", "status_history", "reviews"],
   },
-  { key: "creator", label: "Criador da tarefa", sources: ["tasks"] },
-  { key: "status", label: "Status", sources: ["tasks"] },
-  { key: "priority", label: "Prioridade", sources: ["tasks"] },
+  {
+    key: "executor",
+    label: "Quem executou a tarefa",
+    sources: ["tasks"],
+  },
+  {
+    key: "previous",
+    label: "Responsável anterior",
+    sources: ["status_history"],
+  },
+  { key: "validator", label: "Quem validou", sources: ["reviews"] },
+  {
+    key: "creator",
+    label: "Criador da tarefa",
+    sources: ["tasks", "status_history", "reviews"],
+  },
+  { key: "status", label: "Status", sources: ["tasks", "status_history"] },
+  {
+    key: "priority",
+    label: "Prioridade",
+    sources: ["tasks", "status_history", "reviews"],
+  },
   {
     key: "stage",
     label: "Etapa (clientes do Social Leads)",
@@ -555,6 +737,9 @@ const emptyLabel: Partial<Record<GroupBy, string>> = {
   project: "Sem projeto",
   team: "Sem equipe",
   person: "Sem pessoa",
+  executor: "Sem pessoa",
+  previous: "Sem responsável anterior",
+  validator: "Sem pessoa",
   client: "Sem cliente",
 };
 /** The label of a category, with status and priority in words. */
@@ -1233,3 +1418,211 @@ export async function sharedDashboard(
 
 export const dashboardLinkUrl = (token: string) =>
   `${window.location.origin}/painel/${token}`;
+
+/**
+ * Performance of the team (migration 20261104090000): validations, time and
+ * times in each status by person, delivery time by client, product, project
+ * and whoever executed, first-pass approvals and deadlines.
+ */
+export function performancePanels(): Panel[] {
+  const q = (
+    ref: string,
+    source: Source,
+    metric: string,
+    extra: Partial<Query> = {},
+  ): Query => ({
+    ref,
+    source,
+    metric,
+    dateField: sources[source].dateFields[0].key,
+    filters: [],
+    ...extra,
+  });
+  const delivered = { dateField: "delivered_at" };
+  const done: QueryFilter = { field: "status", op: "in", values: ["done"] };
+  const inStatus = (
+    ref: string,
+    metric: string,
+    status: string,
+    label: string,
+  ) =>
+    q(ref, "status_history", metric, {
+      label,
+      filters: [{ field: "status", op: "in", values: [status] }],
+    });
+  const byStatus = (metric: string) => [
+    inStatus("A", metric, "returned", "Devolvida"),
+    inStatus("B", metric, "review", "Em validação"),
+    inStatus("C", metric, "rejected", "Alteração"),
+    inStatus("D", metric, "correction", "Correção"),
+  ];
+  const leadTime = (
+    id: string,
+    title: string,
+    groupBy: GroupBy,
+    x: number,
+    y: number,
+  ): Panel => ({
+    id,
+    title,
+    x,
+    y,
+    w: 6,
+    h: 6,
+    spec: {
+      viz: "hbar",
+      groupBy,
+      limit: 10,
+      queries: [q("A", "tasks", "lead_time_days", delivered)],
+    },
+  });
+  const stat = (id: string, title: string, x: number, query: Query): Panel => ({
+    id,
+    title,
+    x,
+    y: 0,
+    w: 3,
+    h: 3,
+    spec: { viz: "stat", groupBy: "none", compare: true, queries: [query] },
+  });
+  return [
+    stat(
+      "de-primeira",
+      "Aprovadas de primeira",
+      0,
+      q("A", "tasks", "first_pass_rate", delivered),
+    ),
+    stat(
+      "taxa-aprovacao",
+      "Aprovação na validação",
+      3,
+      q("A", "reviews", "approval_rate"),
+    ),
+    stat(
+      "no-prazo",
+      "Entregas no prazo",
+      6,
+      q("A", "tasks", "on_time_rate", delivered),
+    ),
+    stat(
+      "prazo-medio",
+      "Prazo médio de entrega",
+      9,
+      q("A", "tasks", "lead_time_days", delivered),
+    ),
+    {
+      id: "validacoes-pessoa",
+      title: "Validações por pessoa (quem enviou)",
+      x: 0,
+      y: 3,
+      w: 12,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "person",
+        limit: 30,
+        queries: [
+          q("A", "reviews", "sent", { label: "Envios" }),
+          q("B", "reviews", "approved", { label: "Aprovadas" }),
+          q("C", "reviews", "reproved", { label: "Reprovadas" }),
+          q("D", "reviews", "approval_rate", { label: "Taxa de aprovação" }),
+        ],
+      },
+    },
+    {
+      id: "vezes-status",
+      title: "Vezes em cada status, por pessoa",
+      x: 0,
+      y: 9,
+      w: 6,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "person",
+        limit: 30,
+        queries: byStatus("entries"),
+      },
+    },
+    {
+      id: "horas-status",
+      title: "Horas em cada status, por pessoa",
+      x: 6,
+      y: 9,
+      w: 6,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "person",
+        limit: 30,
+        queries: byStatus("hours"),
+      },
+    },
+    leadTime(
+      "prazo-cliente",
+      "Prazo médio de entrega por cliente",
+      "client",
+      0,
+      15,
+    ),
+    leadTime(
+      "prazo-produto",
+      "Prazo médio de entrega por produto",
+      "product",
+      6,
+      15,
+    ),
+    leadTime(
+      "prazo-projeto",
+      "Prazo médio de entrega por projeto",
+      "project",
+      0,
+      21,
+    ),
+    {
+      id: "entregas-executor",
+      title: "Entregas por quem executou",
+      x: 6,
+      y: 21,
+      w: 6,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "executor",
+        limit: 30,
+        queries: [
+          q("A", "tasks", "count", {
+            ...delivered,
+            filters: [done],
+            label: "Entregas",
+          }),
+          q("B", "tasks", "lead_time_days", {
+            ...delivered,
+            label: "Prazo médio (dias)",
+          }),
+          q("C", "tasks", "first_pass_rate", {
+            ...delivered,
+            label: "De primeira",
+          }),
+          q("D", "tasks", "on_time_rate", { ...delivered, label: "No prazo" }),
+        ],
+      },
+    },
+    {
+      id: "aprovadas-reprovadas",
+      title: "Aprovadas × reprovadas",
+      x: 0,
+      y: 27,
+      w: 12,
+      h: 5,
+      spec: {
+        viz: "line",
+        groupBy: "time",
+        interval: "auto",
+        queries: [
+          q("A", "reviews", "approved", { label: "Aprovadas" }),
+          q("B", "reviews", "reproved", { label: "Reprovadas" }),
+        ],
+      },
+    },
+  ];
+}

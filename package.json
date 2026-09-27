@@ -31,6 +31,7 @@
     "test:db:inbox": "node scripts/test-inbox-broadcast.mjs",
     "test:db:storage": "node scripts/test-storage-uploads.mjs",
     "test:db:dashboards": "node scripts/test-dashboards.mjs",
+    "test:db:performance": "node scripts/test-task-performance.mjs",
     "test:db:agenda": "node scripts/test-google-calendar.mjs",
     "test:db:campaigns": "node scripts/test-ad-campaigns.mjs",
     "test:db:import-maso": "node scripts/test-import-maso.mjs",
