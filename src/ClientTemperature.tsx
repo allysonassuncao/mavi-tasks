@@ -20,6 +20,7 @@ import {
   openInApp,
   scoreLabel,
   signalPath,
+  signalTitle,
   trendLabel,
   trendTone,
   type ClientTemperature as Data,
@@ -81,13 +82,15 @@ export function ClientTemperature({
             reuniões gravadas e nos grupos de WhatsApp.
           </p>
           <small className="thermo-meta">
-            {c
-              ? `${c.signals} ${c.signals === 1 ? "leitura" : "leituras"} nos últimos ${data.settings.window_days} dias`
-              : ""}
-            {data.refreshed_at ? ` · calculado em ${dateBr(data.refreshed_at)}` : ""}
-            {data.pending > 0
-              ? ` · ${data.pending} ${data.pending === 1 ? "leitura na fila" : "leituras na fila"}`
-              : ""}
+            {[
+              c &&
+                `${c.signals} ${c.signals === 1 ? "leitura" : "leituras"} nos últimos ${data.settings.window_days} dias`,
+              data.refreshed_at && `calculado em ${dateBr(data.refreshed_at)}`,
+              data.pending > 0 &&
+                `${data.pending} ${data.pending === 1 ? "leitura na fila" : "leituras na fila"}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </small>
         </div>
         <div className="thermo-head-actions">
@@ -260,21 +263,11 @@ export function ClientTemperature({
                   </span>
                   <div>
                     <div className="thermo-signal-head">
-                      <strong>{s.title || (s.type === "meeting" ? "Reunião" : "WhatsApp")}</strong>
-                      <time dateTime={s.date}>{dateBr(s.date)}</time>
-                      {s.status === "pending" && <small className="thermo-pending">na fila</small>}
-                      {path && (
-                        <a
-                          href={appPath(path)}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            openInApp(path);
-                          }}
-                          className="thermo-open"
-                        >
-                          Abrir <ExternalLink size={12} aria-hidden="true" />
-                        </a>
-                      )}
+                      <strong>{signalTitle(s)}</strong>
+                      <span className="thermo-signal-meta">
+                        <time dateTime={s.date}>{dateBr(s.date)}</time>
+                        {s.status === "pending" && <small className="thermo-pending">na fila</small>}
+                      </span>
                     </div>
                     {(notes.length > 0 || flags.length > 0 || s.reason) && (
                       <div className="thermo-chips">
@@ -304,6 +297,18 @@ export function ClientTemperature({
                     )}
                     {s.excerpt && <p className="thermo-excerpt">{s.excerpt}</p>}
                   </div>
+                  {path && (
+                    <a
+                      href={appPath(path)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        openInApp(path);
+                      }}
+                      className="thermo-open"
+                    >
+                      Abrir <ExternalLink size={12} aria-hidden="true" />
+                    </a>
+                  )}
                 </li>
               );
             })}

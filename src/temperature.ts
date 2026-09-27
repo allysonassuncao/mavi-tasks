@@ -200,6 +200,14 @@ export function signalPath(s: TemperatureSignal) {
     return `/drive?whatsapp=${s.group_id}${s.message_id ? `&msg=${s.message_id}` : ""}`;
   return null;
 }
+/** O título da leitura sem o "Whatsapp · " e a data do fim, que o ícone e a
+ * linha de baixo já mostram. */
+export function signalTitle(s: TemperatureSignal) {
+  let title = (s.title ?? "").replace(/^whatsapp\s*·\s*/i, "").trim();
+  const date = ` · ${dateBr(s.date)}`;
+  if (title.endsWith(date)) title = title.slice(0, -date.length).trim();
+  return title || (s.type === "meeting" ? "Reunião" : "WhatsApp");
+}
 /** A aba Termômetro de um cliente no Drive. */
 export const clientTemperaturePath = (client: string) =>
   `/drive?termometro=${client}`;

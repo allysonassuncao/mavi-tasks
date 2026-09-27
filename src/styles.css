@@ -19229,7 +19229,6 @@ button.copilot-chip:hover {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 860px;
 }
 .dossier-head {
   display: flex;
@@ -19262,10 +19261,11 @@ button.copilot-chip:hover {
   gap: 8px;
   align-items: center;
 }
+/* Colunas em vez de grade: cada card fica da altura do que tem, sem
+   esticar até o vizinho. */
 .dossier-groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
-  gap: 14px;
+  column-width: 340px;
+  column-gap: 14px;
 }
 .dossier-group {
   --tone: #56793a;
@@ -19274,6 +19274,8 @@ button.copilot-chip:hover {
   border-top: 3px solid var(--tone);
   border-radius: var(--radius);
   padding: 14px 14px 8px;
+  margin-bottom: 14px;
+  break-inside: avoid;
 }
 .dossier-group.kind-avoids {
   --tone: #c8514f;
@@ -19308,16 +19310,24 @@ button.copilot-chip:hover {
   margin: 0;
   padding: 0;
 }
+/* O texto usa a largura toda; os botões ficam na linha de baixo, à
+   direita das fontes. */
 .dossier-item {
-  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+  align-items: center;
   padding: 9px 0;
   border-top: 1px solid #f0f2f3;
+}
+.dossier-item > p {
+  grid-column: 1 / -1;
 }
 .dossier-item:first-child {
   border-top: 0;
 }
 .dossier-item p {
-  margin: 0 64px 4px 0;
+  margin: 0 0 4px;
   line-height: 1.45;
   font-size: 0.88rem;
 }
@@ -19343,9 +19353,8 @@ button.copilot-chip:hover {
   background: #f3f6f7;
 }
 .dossier-item-actions {
-  position: absolute;
-  top: 6px;
-  right: 0;
+  grid-column: 2;
+  margin: -4px -4px -4px 0;
   display: flex;
   gap: 2px;
   opacity: 0.35;
@@ -21788,7 +21797,6 @@ label.drive-pick-file {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 980px;
 }
 .thermo-head {
   display: flex;
@@ -22108,7 +22116,7 @@ label.drive-pick-file {
 }
 .thermo-signals li {
   display: grid;
-  grid-template-columns: 30px 1fr;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
   gap: 10px;
   padding: 10px 0;
   border-top: 1px solid #f0f2f3;
@@ -22133,12 +22141,18 @@ label.drive-pick-file {
 }
 .thermo-signal-head {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 2px;
   font-size: 0.85rem;
 }
-.thermo-signal-head time {
+.thermo-signal-head strong {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.thermo-signal-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--muted);
   font-size: 0.75rem;
 }
@@ -22150,7 +22164,9 @@ label.drive-pick-file {
   font-size: 0.7rem;
 }
 .thermo-open {
-  margin-left: auto;
+  align-self: start;
+  margin-top: 2px;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -22160,6 +22176,12 @@ label.drive-pick-file {
 }
 .thermo-open:hover {
   text-decoration: underline;
+}
+@media (max-width: 560px) {
+  .thermo-open {
+    grid-column: 2;
+    margin-top: -4px;
+  }
 }
 .thermo-chips,
 .thermo-row-flags {
