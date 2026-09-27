@@ -149,4 +149,11 @@ Fase 2 (migração `20261107090000_notice_board_insights`, mesmo teste, 23 verif
 - **A MAVI na escrita**: ação `notice-mavi` em `/api/drive`, funcionalidade `notice_writer` no Painel da MAVI (variável `NOTICE_WRITER_MODEL`, senão `AI_MODEL`). Uma chamada curta, sem ferramentas, respeitando os limites de gasto; o custo entra no módulo "Mural de avisos".
 - **Dashboards**: fonte `notices` em `dashboard_sql` (entregas da rodada atual por pessoa, datadas pela entrega). Filtros de cliente, produto e projeto do dashboard são ignorados nessa fonte; equipe é a de quem recebeu.
 
+Fase 3 (migração `20261108090000_notice_animation`, 26 verificações no mesmo teste):
+
+- **Roteiro, não código**: a MAVI devolve um roteiro de cenas em JSON (formato fechado em `src/notice-animation.ts`, até 30 s) e o player do SaaS (`NoticeAnimation.tsx`) anima com CSS. O roteiro é saneado no servidor antes de gravar e na tela antes de tocar; texto é sempre texto.
+- **Segundo plano**: `/api/drive` ação `notice-animate` abre a versão (`start_notice_animation`), responde 202 e continua com `waitUntil` (por isso `api/drive.ts` passou a `maxDuration: 300`). Os prints vão como imagens ao modelo (até 6, 5 MB cada); a base de conhecimento entra como trechos buscados antes (`ai_search`), não como ferramenta. `finish_notice_animation` grava e avisa quem pediu na caixa de entrada (tipo `notice_animation`). Uma geração por aviso de cada vez; presa há mais de 10 minutos conta como falha.
+- **Modelos**: `notice_animation_models` (liberados pelo administrador para todos os líderes ou para pessoas/equipes) ou a funcionalidade `notice_animation` do Painel da MAVI (`NOTICE_ANIMATION_MODEL`, senão `AI_MODEL`). O teto de gasto é o de `ai_limits`; o custo entra no módulo "Mural de avisos".
+- **Versões**: `notice_animations`; `notices.animation_id` é a versão que quem recebe vê. Num aviso no ar, uma versão nova só vale depois de "Usar no aviso".
+
 Para ativar: aplicar as migrações (`npx supabase db push --linked --include-all --skip-vault`), conferir o job com `select jobname, schedule from cron.job where jobname = 'mavi-notices'` e publicar o frontend.

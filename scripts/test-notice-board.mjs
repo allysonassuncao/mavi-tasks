@@ -957,4 +957,342 @@ await check(
   },
 );
 
+// ------------------------------------------------------------ fase 3
+// (migration 20261108090000_notice_animation)
+const [claude, gpt] = (
+  await sql(
+    `insert into mavi_private.ai_providers(company_id,name,kind,key_cipher,models) values
+     ($1,'Claude da Make','anthropic','v1:x','[{"id":"claude-sonnet-5","input":2,"output":10}]'),
+     ($1,'OpenAI','openai','v1:y','[{"id":"gpt-5.6-luna","input":1,"output":8}]') returning id`,
+    [A],
+  )
+).map((r) => r.id);
+let launch, shot;
+await check(
+  "animação: o administrador libera modelos para todos ou para uma equipe",
+  async () => {
+    await as(manager);
+    await rejects(
+      () => rpc("set_notice_animation_admin", [A, true, []]),
+      /Só administradores/,
+    );
+    await as(admin);
+    await rejects(
+      () =>
+        rpc("set_notice_animation_admin", [
+          A,
+          true,
+          [{ provider_id: claude, model: "inexistente" }],
+        ]),
+      /modelo cadastrado/,
+    );
+    await rpc("set_notice_animation_admin", [
+      A,
+      false,
+      [
+        { provider_id: claude, model: "claude-sonnet-5" },
+        { provider_id: gpt, model: "gpt-5.6-luna", team_ids: [midia] },
+      ],
+    ]);
+    const cfg = await rpc("notice_animation_admin", [A]);
+    assert.equal(cfg.models.length, 2);
+    assert.equal(cfg.knowledge, false);
+    await as(manager);
+    const opts = await rpc("notice_animation_options", [A]);
+    assert.deepEqual(
+      opts.models.map((m) => m.model),
+      ["claude-sonnet-5"],
+    );
+    assert.equal(opts.models[0].price.output, 10);
+    assert.equal(opts.can_manage, false);
+    await as(ana);
+    await rejects(
+      () => rpc("notice_animation_options", [A]),
+      /Somente administradores e gestores/,
+    );
+  },
+);
+
+await check(
+  "animação: gerar confere modelo, prints e base de conhecimento; uma de cada vez",
+  async () => {
+    const r = await save(
+      admin,
+      null,
+      content({
+        title: "Nova funcionalidade: Mural",
+        targets: [{ kind: "team", id: criacao }],
+      }),
+    );
+    launch = r.id;
+    await as(admin);
+    shot = await rpc("prepare_notice_attachment", [
+      launch,
+      "tela.png",
+      2048,
+      "image/png",
+    ]);
+    await rpc("confirm_notice_attachment", [shot]);
+    const pdf = await rpc("prepare_notice_attachment", [
+      launch,
+      "manual.pdf",
+      2048,
+      "application/pdf",
+    ]);
+    await rpc("confirm_notice_attachment", [pdf]);
+    await as(manager);
+    await rejects(
+      () =>
+        rpc("start_notice_animation", [
+          launch,
+          "Mostre como criar um aviso",
+          claude,
+          "claude-sonnet-5",
+          [],
+          false,
+          null,
+        ]),
+      /Sem permissão/,
+    );
+    await as(admin);
+    await rejects(
+      () =>
+        rpc("start_notice_animation", [
+          launch,
+          "x",
+          null,
+          null,
+          [],
+          false,
+          null,
+        ]),
+      /Conte para a MAVI/,
+    );
+    await sql(`delete from realtime.messages`);
+    const started = await rpc("start_notice_animation", [
+      launch,
+      "Mostre como criar um aviso",
+      claude,
+      "claude-sonnet-5",
+      [shot, pdf],
+      true,
+      null,
+    ]);
+    assert.equal(started.version, 1);
+    assert.equal(started.route.model, "claude-sonnet-5");
+    assert.equal(started.route.key_cipher, "v1:x");
+    assert.deepEqual(
+      started.refs.map((x) => x.id),
+      [shot],
+    );
+    assert.equal(started.refs[0].path, `notices/${A}/${launch}/${shot}`);
+    // A base de conhecimento está desligada pelo administrador.
+    assert.equal(started.knowledge, false);
+    assert.equal(started.notice.title, "Nova funcionalidade: Mural");
+    await rejects(
+      () =>
+        rpc("start_notice_animation", [
+          launch,
+          "De novo",
+          null,
+          null,
+          [],
+          false,
+          null,
+        ]),
+      /já está criando/,
+    );
+    await rejects(
+      () =>
+        rpc("start_notice_animation", [
+          launch,
+          "Outro modelo",
+          gpt,
+          "gpt-5.6-luna",
+          [],
+          false,
+          null,
+        ]),
+      /já está criando|não está liberado/,
+    );
+    const spec = {
+      version: 1,
+      theme: "light",
+      scenes: [
+        { layout: "title", duration: 3, heading: "Mural", transition: "fade" },
+      ],
+    };
+    await as(manager);
+    await rejects(
+      () => rpc("finish_notice_animation", [started.id, spec, null, 0.02]),
+      /não encontrada/,
+    );
+    await as(admin);
+    await rpc("finish_notice_animation", [started.id, spec, null, 0.02]);
+    const [n] = await sql(`select animation_id from notices where id=$1`, [
+      launch,
+    ]);
+    assert.equal(n.animation_id, started.id);
+    const [inbox] = await sql(
+      `select title, link, body from notifications where kind='notice_animation' and user_id=$1`,
+      [admin],
+    );
+    assert.equal(inbox.title, "Animação pronta: Nova funcionalidade: Mural");
+    assert.equal(inbox.link, `/mural?aviso=${launch}&animacao=1`);
+    assert.match(inbox.body, /US\$ 0,02/);
+  },
+);
+
+await check(
+  "animação: quem recebe vê a versão escolhida; ajustes e edições são versões novas",
+  async () => {
+    await as(ana);
+    const [live] = (await rows("my_live_notices", [A])).filter(
+      (x) => x.id === launch,
+    );
+    assert.equal(live.animation.scenes[0].heading, "Mural");
+    assert.equal(
+      (await rpc("notice_detail", [launch])).animation.scenes.length,
+      1,
+    );
+    assert.equal((await rows("notice_animations", [launch])).length, 0);
+    await rejects(
+      () => rpc("save_notice_animation", [launch, { scenes: [] }, null]),
+      /Sem permissão/,
+    );
+    await as(admin);
+    const [v1] = await rows("notice_animations", [launch]);
+    // Ajuste: a versão 2 fica pronta, mas o aviso no ar continua na 1 até escolherem.
+    const adj = await rpc("start_notice_animation", [
+      launch,
+      "Mais curta",
+      null,
+      null,
+      [],
+      false,
+      v1.id,
+    ]);
+    assert.equal(adj.base.scenes[0].heading, "Mural");
+    assert.equal(adj.route, null);
+    await rpc("finish_notice_animation", [
+      adj.id,
+      {
+        version: 1,
+        theme: "dark",
+        scenes: [
+          {
+            layout: "title",
+            duration: 2,
+            heading: "Mural novo",
+            transition: "zoom",
+          },
+        ],
+      },
+      null,
+      0.01,
+    ]);
+    assert.equal(
+      (await sql(`select animation_id from notices where id=$1`, [launch]))[0]
+        .animation_id,
+      v1.id,
+    );
+    await sql(`delete from realtime.messages`);
+    await rpc("use_notice_animation", [launch, adj.id]);
+    assert.equal(
+      (await sql(`select animation_id from notices where id=$1`, [launch]))[0]
+        .animation_id,
+      adj.id,
+    );
+    const [msg] = await sql(
+      `select payload from realtime.messages where payload->>'kind' = 'notice'`,
+    );
+    assert.equal(msg.payload.users, null);
+    const manual = await rpc("save_notice_animation", [
+      launch,
+      {
+        version: 1,
+        theme: "dark",
+        scenes: [
+          {
+            layout: "title",
+            duration: 2,
+            heading: "Editado à mão",
+            transition: "zoom",
+          },
+        ],
+      },
+      adj.id,
+    ]);
+    const versions = await rows("notice_animations", [launch]);
+    assert.deepEqual(
+      versions.map((v) => [v.version, v.source, v.current]),
+      [
+        [3, "manual", false],
+        [2, "mavi", true],
+        [1, "mavi", false],
+      ],
+    );
+    assert.ok(manual);
+    // Uma falha não troca a versão e avisa com o erro.
+    const bad = await rpc("start_notice_animation", [
+      launch,
+      "Mais cores",
+      null,
+      null,
+      [],
+      false,
+      null,
+    ]);
+    await rpc("finish_notice_animation", [
+      bad.id,
+      null,
+      "O provedor recusou a chave.",
+      0,
+    ]);
+    const [failed] = await sql(
+      `select status, error from notice_animations where id=$1`,
+      [bad.id],
+    );
+    assert.deepEqual(
+      [failed.status, failed.error],
+      ["failed", "O provedor recusou a chave."],
+    );
+    // Presa há mais de 10 minutos conta como falha e libera uma nova.
+    const stuck = await rpc("start_notice_animation", [
+      launch,
+      "Presa",
+      null,
+      null,
+      [],
+      false,
+      null,
+    ]);
+    await sql(
+      `update notice_animations set created_at = now() - interval '11 minutes' where id=$1`,
+      [stuck.id],
+    );
+    const next = await rpc("start_notice_animation", [
+      launch,
+      "Depois",
+      null,
+      null,
+      [],
+      false,
+      null,
+    ]);
+    assert.equal(
+      (
+        await sql(`select status from notice_animations where id=$1`, [
+          stuck.id,
+        ])
+      )[0].status,
+      "failed",
+    );
+    assert.ok(next.id);
+    await rpc("use_notice_animation", [launch, null]);
+    await as(ana);
+    assert.equal((await rpc("notice_detail", [launch])).animation, null);
+  },
+);
+
 console.log(`\n${passed} verificações do Mural de avisos aprovadas.`);

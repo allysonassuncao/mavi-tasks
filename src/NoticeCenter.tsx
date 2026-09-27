@@ -1,8 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ArrowRight, BellRing, X } from "lucide-react";
 import { Button } from "./ui";
 import { RichTextContent } from "./RichTextContent";
 import { LevelChip, LEVEL_ICONS, NoticeAttachments } from "./NoticeParts";
+import { specImages } from "./notice-animation";
+
+// O player só vem quando um popup tem animação.
+const AnimationPlayer = lazy(() => import("./NoticeAnimationPlayer"));
 import {
   bannerNotices,
   nextPopup,
@@ -213,7 +225,7 @@ function NoticePopup({
   return (
     <dialog
       ref={ref}
-      className={`modal notice-popup ${notice.level}`}
+      className={`modal notice-popup ${notice.level} ${notice.animation ? "with-animation" : ""}`}
       aria-label={notice.title}
       onCancel={(e) => {
         e.preventDefault();
@@ -245,6 +257,15 @@ function NoticePopup({
         )}
       </div>
       <div className="notice-popup-body">
+        {notice.animation && (
+          <Suspense fallback={<span className="nanim-wait" />}>
+            <AnimationPlayer
+              spec={notice.animation}
+              images={specImages(notice.animation)}
+              load={(ids) => api.attachmentUrls(ids, true)}
+            />
+          </Suspense>
+        )}
         {notice.body && <RichTextContent value={notice.body} />}
         <NoticeAttachments api={api} items={attachments} />
       </div>

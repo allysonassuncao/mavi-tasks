@@ -21,6 +21,10 @@ import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
 import { handleNotices } from "./_notices.js";
 import { handleNoticeWriter } from "./_notice-writer.js";
+import { handleNoticeAnimate } from "./_notice-animation.js";
+import { claudeComplete } from "./_social-leads.js";
+import { openAiEmbedder } from "./_ai-embeddings.js";
+import { waitUntil } from "@vercel/functions";
 import { appOrigin } from "./_origin.js";
 
 function credentials(): GcsCredentials | null {
@@ -283,6 +287,19 @@ export default async function handler(
         model: serverModel("notice_writer", process.env),
       };
       result = await handleNoticeWriter(body, authorization, env, aiDeps(env));
+    } else if (action === "notice-animate") {
+      // A animação do aviso: responde na hora e gera em segundo plano
+      // (na Vercel, até o maxDuration desta função).
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("notice_animation", process.env),
+      };
+      result = await handleNoticeAnimate(body, authorization, env, {
+        fetch,
+        embed: openAiEmbedder(env, fetch),
+        complete: claudeComplete,
+        background: (work) => waitUntil(work.catch(() => {})),
+      });
     } else if (action.startsWith("notice-"))
       result = await handleNotices(body, authorization, driveEnv(), fetch);
     else if (action.startsWith("meeting-"))

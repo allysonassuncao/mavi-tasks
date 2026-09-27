@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   CloudUpload,
   File as FileIcon,
+  Film,
   HardDrive,
   Plus,
   Search,
@@ -16,6 +17,7 @@ import { DropOverlay, useFileDrop } from "./useFileDrop";
 import { formatBytes, searchDriveFiles } from "./drive";
 import { LEVEL_ICONS, TemplateName } from "./NoticeParts";
 import { NoticeMavi } from "./NoticeMavi";
+import { NoticeStudio } from "./NoticeStudio";
 import {
   ATTACHMENT_MAX_BYTES,
   audienceEstimate,
@@ -36,6 +38,7 @@ import {
   type NoticeLevel,
   type NoticeSaveResult,
   type NoticesApi,
+  type NoticeAttachment,
   type NoticeTarget,
   type NoticeTemplate,
   type TargetKind,
@@ -73,6 +76,7 @@ export function NoticeForm({
   template: startTemplate,
   onClose,
   onSaved,
+  notify = () => {},
 }: {
   api: NoticesApi;
   company: string;
@@ -87,6 +91,7 @@ export function NoticeForm({
   template?: NoticeTemplate;
   onClose: () => void;
   onSaved: (result: NoticeSaveResult, published: boolean) => void;
+  notify?: (message: string) => void;
 }) {
   const [form, setForm] = useState<NoticeContent>(
     detail ? contentOf(detail) : (preset ?? emptyNotice()),
@@ -101,6 +106,9 @@ export function NoticeForm({
   const [replaceTemplate, setReplaceTemplate] = useState(true);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [templateNote, setTemplateNote] = useState("");
+  const [studio, setStudio] = useState(false);
+  // Prints enviados pelo estúdio (já são anexos do aviso).
+  const [added, setAdded] = useState<NoticeAttachment[]>([]);
   const [when, setWhen] = useState<"now" | "later">(
     detail?.status === "scheduled" ? "later" : "now",
   );
@@ -118,9 +126,8 @@ export function NoticeForm({
   const scope = useMemo(() => noticeScope(data, user), [data, user]);
   const status = detail?.status ?? "draft";
   const live = status === "live";
-  const existing = (detail?.attachments ?? []).filter(
-    (a) => !remove.includes(a.id),
-  );
+  const attachments = [...(detail?.attachments ?? []), ...added];
+  const existing = attachments.filter((a) => !remove.includes(a.id));
   const count =
     existing.length + queue.filter((q) => !q.error).length + drive.length;
   const set = <K extends keyof NoticeContent>(k: K, v: NoticeContent[K]) =>
@@ -204,6 +211,40 @@ export function NoticeForm({
       ...LEVELS[level].formats,
       require_ack: LEVELS[level].ack,
     }));
+  }
+
+  // A animação é de um aviso salvo: um aviso novo vira rascunho antes (um
+  // agendado continua agendado); no ar, o estúdio abre direto.
+  async function openStudio() {
+    setError("");
+    if (live && saved.current) return setStudio(true);
+    const content: NoticeContent = {
+      ...form,
+      title: form.title.trim(),
+      body: readBody(),
+      publish_at: when === "later" ? form.publish_at : "",
+    };
+    if (content.title.length < 2)
+      return setError("Dê um título ao aviso antes de criar a animação.");
+    if (!content.targets.length)
+      return setError("Escolha quem recebe antes de criar a animação.");
+    setBusy(true);
+    try {
+      const r = await api.save(
+        company,
+        saved.current?.id ?? null,
+        content,
+        status === "scheduled",
+        false,
+        saved.current?.version ?? null,
+      );
+      saved.current = { id: r.id, version: r.version };
+      setStudio(true);
+    } catch (e) {
+      setError((e as Error).message || "Não foi possível salvar o rascunho.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submit(publish: boolean) {
@@ -585,13 +626,36 @@ export function NoticeForm({
         </fieldset>
 
         <fieldset className="notice-block">
+          <legend>Animação</legend>
+          <small>
+            Uma animação curta (até 30 segundos, só visual) criada pela MAVI,
+            que aparece no popup e no aviso aberto. Ex.: o passo a passo de uma
+            funcionalidade nova, a partir dos prints.
+            {!saved.current && " O aviso é salvo como rascunho para começar."}
+          </small>
+          <div>
+            <Button
+              type="button"
+              className="btn secondary"
+              onClick={() => void openStudio()}
+              disabled={busy}
+            >
+              <Film size={16} />{" "}
+              {detail?.animation_id
+                ? "Abrir o estúdio da animação"
+                : "Criar animação com a MAVI"}
+            </Button>
+          </div>
+        </fieldset>
+
+        <fieldset className="notice-block">
           <legend>Anexos</legend>
           <small>
             Imagens aparecem no aviso; outros arquivos viram um botão de baixar.
             Até {MAX_ATTACHMENTS} anexos de 500 MB.
           </small>
           <ul className="case-upload-list">
-            {(detail?.attachments ?? []).map((a) => {
+            {attachments.map((a) => {
               const off = remove.includes(a.id);
               return (
                 <li key={a.id} className={off ? "removing" : ""}>
@@ -792,6 +856,19 @@ export function NoticeForm({
           </Button>
         </div>
       </form>
+      {studio && saved.current && (
+        <NoticeStudio
+          api={api}
+          company={company}
+          notice={saved.current.id}
+          live={live}
+          attachments={attachments}
+          demo={demo}
+          notify={notify}
+          onAttachments={(list) => setAdded((a) => [...a, ...list])}
+          onClose={() => setStudio(false)}
+        />
+      )}
     </Modal>
   );
 }

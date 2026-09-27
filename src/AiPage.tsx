@@ -1,9 +1,12 @@
+import { useMemo } from "react";
 import { BarChart3, Boxes, GraduationCap, Route } from "lucide-react";
 import { aiTab, useHash, type AiTab } from "./router";
 import type { Snapshot } from "./types";
 import { AiUsagePage } from "./AiUsagePage";
 import { AiProvidersPanel, AiRoutesPanel, useAiLibrary } from "./AiProviders";
 import { CopilotLearning } from "./CopilotLearning";
+import { NoticeAnimationAdmin } from "./NoticeAnimationAdmin";
+import { noticesApi } from "./notices";
 
 const TABS: {
   id: AiTab;
@@ -104,6 +107,8 @@ function AdminTabs({
   notify: (message: string) => void;
 }) {
   const { library, error, reload, api, defaults } = useAiLibrary(company, demo);
+  // Uma instância só (na demonstração, a de exemplo guarda em memória).
+  const notices = useMemo(() => noticesApi(demo, data, ""), [demo]); // eslint-disable-line react-hooks/exhaustive-deps
   return tab === "provedores" ? (
     <AiProvidersPanel
       api={api}
@@ -113,14 +118,23 @@ function AdminTabs({
       notify={notify}
     />
   ) : (
-    <AiRoutesPanel
-      api={api}
-      data={data}
-      library={library}
-      defaults={defaults}
-      error={error}
-      reload={reload}
-      notify={notify}
-    />
+    <>
+      <AiRoutesPanel
+        api={api}
+        data={data}
+        library={library}
+        defaults={defaults}
+        error={error}
+        reload={reload}
+        notify={notify}
+      />
+      <NoticeAnimationAdmin
+        api={notices}
+        company={company}
+        data={data}
+        library={library}
+        notify={notify}
+      />
+    </>
   );
 }

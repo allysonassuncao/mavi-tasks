@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Copy,
   Eye,
+  Film,
   FileStack,
   Inbox,
   Monitor,
@@ -28,6 +29,9 @@ import { Button, Loading } from "./ui";
 import { RichTextContent } from "./RichTextContent";
 import { LevelChip, NoticeAttachments, TemplateName } from "./NoticeParts";
 import { NoticeForm } from "./NoticeForm";
+import { NoticeStudio } from "./NoticeStudio";
+import NoticeAnimationPlayer from "./NoticeAnimationPlayer";
+import { specImages } from "./notice-animation";
 import {
   contentOf,
   fromTemplate,
@@ -76,6 +80,8 @@ export function NoticesPage({
   const api = useMemo(() => noticesApi(demo, data, user), [demo]); // eslint-disable-line react-hooks/exhaustive-deps
   const [tab, setTab] = useUrlState<string>("aba", "");
   const [openId, setOpenId] = useUrlState<string>(NOTICE_PARAM, "");
+  // O link "Animação pronta" da caixa de entrada abre o estúdio.
+  const [studioParam, setStudioParam] = useUrlState<string>("animacao", "");
   const [typed, setTyped] = useState("");
   const [term, setTerm] = useState("");
   const [feed, setFeed] = useState<FeedNotice[] | null>(null);
@@ -293,8 +299,14 @@ export function NoticesPage({
           api={api}
           company={company}
           id={openId}
+          demo={demo}
           notify={notify}
-          onClose={() => setOpenId("")}
+          studio={studioParam === "1"}
+          onStudio={(open) => setStudioParam(open ? "1" : "")}
+          onClose={() => {
+            setStudioParam("");
+            setOpenId("");
+          }}
           onEdit={(detail) => setForm({ detail })}
           onDuplicate={(detail) =>
             setForm({
@@ -320,6 +332,7 @@ export function NoticesPage({
           detail={form.detail}
           preset={form.preset}
           template={form.template}
+          notify={notify}
           onClose={() => setForm(null)}
           onSaved={saved}
         />
@@ -440,7 +453,10 @@ function NoticeView({
   api,
   company,
   id,
+  demo,
   notify,
+  studio,
+  onStudio,
   onClose,
   onEdit,
   onDuplicate,
@@ -449,7 +465,11 @@ function NoticeView({
   api: NoticesApi;
   company: string;
   id: string;
+  demo: boolean;
   notify: (message: string) => void;
+  /** O estúdio da animação aberto (só para quem edita). */
+  studio: boolean;
+  onStudio: (open: boolean) => void;
   onClose: () => void;
   onEdit: (detail: NoticeDetail) => void;
   onDuplicate: (detail: NoticeDetail) => void;
@@ -509,6 +529,28 @@ function NoticeView({
         />
       </Modal>
     );
+  if (studio && detail.can_edit)
+    return (
+      <NoticeStudio
+        api={api}
+        company={company}
+        notice={detail.id}
+        live={detail.status === "live"}
+        attachments={detail.attachments}
+        demo={demo}
+        notify={notify}
+        onAttachments={(added) =>
+          setDetail((d) =>
+            d ? { ...d, attachments: [...d.attachments, ...added] } : d,
+          )
+        }
+        onClose={() => {
+          onStudio(false);
+          void api.detail(id).then(setDetail, () => {});
+          onChanged();
+        }}
+      />
+    );
   const r = detail.receipt;
   return (
     <Modal
@@ -543,6 +585,14 @@ function NoticeView({
               ? ` · próxima ${whenLabel(detail.next_repeat)}`
               : ""}
           </p>
+        )}
+        {detail.animation && (
+          <NoticeAnimationPlayer
+            key={detail.animation_id ?? ""}
+            spec={detail.animation}
+            images={specImages(detail.animation)}
+            load={(ids) => api.attachmentUrls(ids, true)}
+          />
         )}
         {detail.body ? (
           <div className="notice-view-body">
@@ -606,6 +656,16 @@ function NoticeView({
         {error && <p className="form-error">{error}</p>}
         {detail.can_edit && (
           <div className="form-footer notice-view-actions">
+            {detail.status !== "ended" && (
+              <Button
+                className="btn secondary"
+                disabled={busy}
+                onClick={() => onStudio(true)}
+              >
+                <Film size={16} />{" "}
+                {detail.animation ? "Animação" : "Criar animação"}
+              </Button>
+            )}
             <Button
               className="btn secondary"
               disabled={busy}

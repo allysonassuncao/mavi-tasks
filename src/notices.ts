@@ -7,6 +7,7 @@ import {
   type RichNode,
 } from "./rich-text";
 import type { Snapshot } from "./types";
+import type { AnimationSpec } from "./notice-animation";
 
 /**
  * Mural de avisos (migration 20261106090000_notice_board). O banco decide
@@ -66,6 +67,8 @@ export interface LiveNotice {
   attachments: number;
   /** A última cobrança: o popup adiado nesta sessão volta. */
   reminded_at?: string | null;
+  /** A animação da versão escolhida (se houver). */
+  animation?: AnimationSpec | null;
 }
 export interface FeedNotice {
   id: string;
@@ -130,6 +133,8 @@ export interface NoticeDetail extends NoticeFormats {
   can_edit: boolean;
   /** Para quem edita: a última cobrança dos pendentes. */
   last_reminded_at?: string | null;
+  animation_id?: string | null;
+  animation?: AnimationSpec | null;
   receipt: {
     delivered_at: string;
     seen_at: string | null;
@@ -170,6 +175,58 @@ export interface NoticeTemplate {
   updated_at: string;
   can_edit: boolean;
 }
+/** Um modelo que pode gerar animações (liberado pelo administrador). */
+export type AnimationModel = {
+  provider_id: string;
+  provider: string;
+  kind: string;
+  model: string;
+  price: { input: number; output: number } | null;
+};
+export interface AnimationOptions {
+  /** O administrador permite a base de conhecimento. */
+  knowledge: boolean;
+  models: AnimationModel[];
+  /** O modelo da funcionalidade no Painel da MAVI (nulo: o do servidor). */
+  default: AnimationModel | null;
+  can_manage: boolean;
+}
+export interface AnimationAdmin {
+  knowledge: boolean;
+  models: {
+    provider_id: string;
+    model: string;
+    user_ids: string[];
+    team_ids: string[];
+  }[];
+}
+export interface AnimationVersion {
+  id: string;
+  version: number;
+  status: "generating" | "ready" | "failed";
+  source: "mavi" | "manual";
+  request: string;
+  spec: AnimationSpec | null;
+  refs: string[];
+  knowledge: boolean;
+  provider_id: string | null;
+  model: string | null;
+  cost_usd: number | null;
+  error: string | null;
+  author_name: string;
+  created_at: string;
+  finished_at: string | null;
+  current: boolean;
+}
+export type AnimateRequest = {
+  request: string;
+  provider: string | null;
+  model: string | null;
+  refs: string[];
+  knowledge: boolean;
+  /** A versão a ajustar (nulo: uma animação nova). */
+  base: string | null;
+};
 export type WriterMode = "write" | "improve" | "suggest";
 export type WriterStyle = "clear" | "short" | "formal" | "friendly";
 /** O que a MAVI devolve (api/_notice-writer.ts); nada é aplicado sozinho. */
@@ -685,6 +742,22 @@ export interface NoticesApi {
       style?: WriterStyle;
     },
   ): Promise<WriterResult>;
+  animationOptions(company: string): Promise<AnimationOptions>;
+  animationAdmin(company: string): Promise<AnimationAdmin>;
+  setAnimationAdmin(company: string, config: AnimationAdmin): Promise<void>;
+  /** Começa a gerar; a versão fica pronta em segundo plano. */
+  animate(
+    company: string,
+    notice: string,
+    request: AnimateRequest,
+  ): Promise<{ id: string; version: number }>;
+  animations(notice: string): Promise<AnimationVersion[]>;
+  saveAnimation(
+    notice: string,
+    spec: AnimationSpec,
+    base: string | null,
+  ): Promise<string>;
+  useAnimation(notice: string, id: string | null): Promise<void>;
 }
 
 export const serverNotices: NoticesApi = {
@@ -811,6 +884,45 @@ export const serverNotices: NoticesApi = {
       ...request,
     });
   },
+  async animationOptions(company) {
+    return (await rpc("notice_animation_options", {
+      p_company: company,
+    })) as AnimationOptions;
+  },
+  async animationAdmin(company) {
+    return (await rpc("notice_animation_admin", {
+      p_company: company,
+    })) as AnimationAdmin;
+  },
+  async setAnimationAdmin(company, config) {
+    await rpc("set_notice_animation_admin", {
+      p_company: company,
+      p_knowledge: config.knowledge,
+      p_models: config.models,
+    });
+  },
+  async animate(company, notice, request) {
+    return driveServer<{ id: string; version: number }>({
+      action: "notice-animate",
+      company,
+      notice,
+      ...request,
+    });
+  },
+  async animations(notice) {
+    return ((await rpc("notice_animations", { p_notice: notice })) ??
+      []) as AnimationVersion[];
+  },
+  async saveAnimation(notice, spec, base) {
+    return (await rpc("save_notice_animation", {
+      p_notice: notice,
+      p_spec: spec,
+      p_base: base,
+    })) as string;
+  },
+  async useAnimation(notice, id) {
+    await rpc("use_notice_animation", { p_notice: notice, p_animation: id });
+  },
 };
 
 // ------------------------------------------------------------ demo
@@ -818,6 +930,83 @@ type DemoNotice = Omit<NoticeDetail, "can_edit" | "receipt" | "status"> & {
   receipts: Record<string, NonNullable<NoticeDetail["receipt"]>>;
   urls: Record<string, string>;
   status_ended: boolean;
+  versions?: AnimationVersion[];
+};
+
+/** A animação de exemplo da demonstração: o passo a passo do próprio Mural. */
+export const DEMO_ANIMATION: AnimationSpec = {
+  version: 1,
+  theme: "light",
+  scenes: [
+    {
+      layout: "title",
+      duration: 3,
+      heading: "Chegou o Mural de avisos",
+      text: "Os comunicados da agência, num lugar só.",
+      icon: "megaphone",
+      transition: "zoom",
+    },
+    {
+      layout: "mockup",
+      duration: 5,
+      heading: "Abra o Mural no menu",
+      ui: [
+        {
+          kind: "menu",
+          label: "Menu",
+          items: ["Visão geral", "Mural", "Tarefas", "Agenda", "Drive"],
+          active: 1,
+        },
+        { kind: "button", label: "Novo aviso", primary: true },
+        {
+          kind: "card",
+          label: "Sexta-feira sem expediente",
+          text: "Feriado municipal. Voltamos na segunda.",
+        },
+        { kind: "badge", label: "Importante", tone: "amber" },
+      ],
+      target: 1,
+      cursor: { x: 60, y: 30, click: true },
+      callout: "Clique em Novo aviso",
+      transition: "slide",
+    },
+    {
+      layout: "steps",
+      duration: 5,
+      heading: "Em três passos",
+      bullets: [
+        "Escreva o aviso (a MAVI ajuda)",
+        "Escolha quem recebe",
+        "Popup, caixa de entrada, push ou faixa",
+      ],
+      transition: "slide",
+    },
+    {
+      layout: "mockup",
+      duration: 4.5,
+      heading: "Quem precisa confirmar, confirma",
+      ui: [
+        {
+          kind: "card",
+          label: "Nova política de férias",
+          text: "Leia antes de pedir as suas férias.",
+        },
+        { kind: "toggle", label: "Pedir “Li e entendi”", on: true },
+        { kind: "button", label: "Li e entendi", primary: true },
+      ],
+      target: 2,
+      cursor: { x: 50, y: 70, click: true },
+      transition: "fade",
+    },
+    {
+      layout: "closing",
+      duration: 3,
+      heading: "Tudo fica guardado no Mural",
+      text: "Menu › Mural",
+      icon: "check",
+      transition: "zoom",
+    },
+  ],
 };
 let demoStore: DemoNotice[] | null = null;
 const demoListeners = new Set<() => void>();
@@ -930,6 +1119,29 @@ export function demoNotices(data: Snapshot, user: string): NoticesApi {
         receipts: {},
       },
     ];
+    demoStore[0].animation = DEMO_ANIMATION;
+    demoStore[0].animation_id = "demo-animation-1";
+    demoStore[0].versions = [
+      {
+        id: "demo-animation-1",
+        version: 1,
+        status: "ready",
+        source: "mavi",
+        request:
+          "Mostre em até 30 segundos como abrir o Mural, criar um aviso e confirmar a leitura.",
+        spec: DEMO_ANIMATION,
+        refs: [],
+        knowledge: false,
+        provider_id: null,
+        model: "claude-opus-5-5",
+        cost_usd: 0.06,
+        error: null,
+        author_name: name(others),
+        created_at: ago(3),
+        finished_at: ago(3),
+        current: true,
+      },
+    ];
     demoStore.forEach(deliver);
   }
   const store = demoStore;
@@ -940,7 +1152,13 @@ export function demoNotices(data: Snapshot, user: string): NoticesApi {
   const detailOf = (n: DemoNotice): NoticeDetail => {
     const r = n.receipts[user] ?? null;
     const edit = canEdit(n);
-    const { receipts: _r, urls: _u, status_ended: _e, ...rest } = n;
+    const {
+      receipts: _r,
+      urls: _u,
+      status_ended: _e,
+      versions: _v,
+      ...rest
+    } = n;
     return {
       ...rest,
       status: demoStatus(n),
@@ -1189,8 +1407,73 @@ export function demoNotices(data: Snapshot, user: string): NoticesApi {
         "Na demonstração a MAVI não escreve avisos. Entre na sua conta para usar.",
       );
     },
+    async animationOptions() {
+      return {
+        knowledge: true,
+        models: [],
+        default: null,
+        can_manage: !!admin,
+      };
+    },
+    async animationAdmin() {
+      return demoAnimationAdmin;
+    },
+    async setAnimationAdmin(_c, config) {
+      demoAnimationAdmin = config;
+    },
+    async animate() {
+      throw Error(
+        "Na demonstração a MAVI não cria animações. Entre na sua conta para usar; aqui dá para editar os textos das cenas.",
+      );
+    },
+    async animations(id) {
+      const n = find(id);
+      if (!n || !canEdit(n)) return [];
+      return [...(n.versions ?? [])]
+        .map((v) => ({ ...v, current: v.id === n.animation_id }))
+        .sort((a, b) => b.version - a.version);
+    },
+    async saveAnimation(id, spec, base) {
+      const n = find(id);
+      if (!n || !canEdit(n)) throw Error("Sem permissão");
+      const versions = (n.versions ??= []);
+      const v: AnimationVersion = {
+        id: `demo-animation-${Math.random().toString(36).slice(2)}`,
+        version: Math.max(0, ...versions.map((x) => x.version)) + 1,
+        status: "ready",
+        source: "manual",
+        request: "",
+        spec,
+        refs: versions.find((x) => x.id === base)?.refs ?? [],
+        knowledge: false,
+        provider_id: null,
+        model: null,
+        cost_usd: null,
+        error: null,
+        author_name: name(user),
+        created_at: now(),
+        finished_at: now(),
+        current: false,
+      };
+      versions.push(v);
+      if (demoStatus(n) !== "live") {
+        n.animation_id = v.id;
+        n.animation = spec;
+      }
+      changed();
+      return v.id;
+    },
+    async useAnimation(id, animation) {
+      const n = find(id);
+      if (!n || !canEdit(n)) throw Error("Sem permissão");
+      const v = (n.versions ?? []).find((x) => x.id === animation);
+      n.animation_id = v?.id ?? null;
+      n.animation = v?.spec ?? null;
+      changed();
+    },
   };
 }
+let demoAnimationAdmin: AnimationAdmin = { knowledge: true, models: [] };
 const demoTemplates: {
   id: string;
   name: string;
