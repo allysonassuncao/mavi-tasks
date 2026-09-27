@@ -48,11 +48,12 @@ function gcsDevPlugin() {
         if (
           req.url?.startsWith("/api/drive") ||
           req.url?.startsWith("/api/ai") ||
+          req.url?.startsWith("/api/whatsapp") ||
           req.url?.startsWith("/api/mcp") ||
           req.url?.startsWith("/.well-known/oauth-protected-resource")
         ) {
-          // Same handler as the Vercel function (api/drive.ts); /api/ai is
-          // rewritten to it on Vercel too.
+          // Same handler as the Vercel function (api/drive.ts); /api/ai and
+          // /api/whatsapp are rewritten to it on Vercel too.
           const { default: drive } =
             await server.ssrLoadModule("/api/drive.ts");
           await drive(req, res);

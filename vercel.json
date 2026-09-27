@@ -22,6 +22,10 @@
       "destination": "/api/drive"
     },
     {
+      "source": "/api/whatsapp",
+      "destination": "/api/drive"
+    },
+    {
       "source": "/api/mcp",
       "destination": "/api/drive?mcp=1"
     },

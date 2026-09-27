@@ -141,6 +141,7 @@ import {
 import { useNow } from "./useClock";
 import { Expandable, Paged, Pagination } from "./Pagination";
 import { TaskTemplatesPanel } from "./TaskTemplates";
+import { WhatsappGroupsPanel } from "./WhatsappGroups";
 import { SuggestionDialog, SuggestionSettingsPanel } from "./SuggestionDialog";
 import { SidebarNav, type NavTarget } from "./SidebarNav";
 import { requestPasswordReset } from "./profile";
@@ -3115,6 +3116,7 @@ export default function App() {
                           data.taskTemplates?.length ?? 0,
                         ],
                         ["config-sugestoes", "Sugestões", null],
+                        ["config-whatsapp", "Grupos do Whatsapp", null],
                       ] as [SettingsTab, string, number | null][]
                     ).map(([id, label, n]) => (
                       <button
@@ -3353,6 +3355,15 @@ export default function App() {
                         data={data}
                         company={company}
                         mutate={mutate}
+                        notify={notify}
+                      />
+                    )}
+                    {settingsView === "config-whatsapp" && (
+                      <WhatsappGroupsPanel
+                        data={data}
+                        company={company}
+                        canEdit={isAdmin}
+                        demo={demo}
                         notify={notify}
                       />
                     )}

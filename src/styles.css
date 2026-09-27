@@ -16766,3 +16766,114 @@ td.ai-empty-cell {
   align-items: center;
   gap: 6px;
 }
+
+/* Configurações › Grupos do Whatsapp */
+.whatsapp-groups-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 20px 14px;
+}
+.whatsapp-groups-toolbar .scope-tabs {
+  margin: 0;
+}
+.whatsapp-groups-toolbar .ui-input {
+  flex: 1 1 260px;
+  max-width: 360px;
+}
+.whatsapp-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0 20px 16px;
+}
+.whatsapp-status > div {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfcfa;
+}
+.whatsapp-status dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.whatsapp-status dd {
+  margin: 2px 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.whatsapp-status-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 20px 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f4f7ef;
+  color: #56694a;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.whatsapp-status-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+.whatsapp-status-note.error {
+  background: #fdf1ef;
+  color: #9a4235;
+}
+.whatsapp-groups-error {
+  margin: 0 20px 12px;
+}
+.whatsapp-group-row {
+  flex-wrap: wrap;
+}
+.whatsapp-group-row > div:first-of-type {
+  flex: 1 1 260px !important;
+}
+.whatsapp-group-row > .whatsapp-group-controls {
+  flex: 0 1 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.whatsapp-group-row > div:first-of-type strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+.whatsapp-group-error {
+  color: #b0503f !important;
+}
+.whatsapp-group-link {
+  display: flex !important;
+  flex: 0 1 auto !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+}
+.whatsapp-group-link .ui-select {
+  width: 220px;
+}
+@media (max-width: 760px) {
+  .whatsapp-group-row > .whatsapp-group-controls {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+  .whatsapp-group-link {
+    flex: 1 1 100% !important;
+    flex-wrap: wrap;
+  }
+  .whatsapp-group-link .ui-select {
+    width: 100%;
+  }
+  .whatsapp-groups-toolbar .ui-input {
+    max-width: none;
+  }
+}
