@@ -86,6 +86,7 @@ import {
   TextSearch,
   MonitorDown,
   Share,
+  History as HistoryIcon,
 } from "lucide-react";
 import { supabase } from "./supabase";
 import * as api from "./api";
@@ -168,6 +169,8 @@ import { CompanyLogoDialog, WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { ProfilePage } from "./ProfilePage";
 import { MemberForm } from "./MemberForm";
 import { MemberModulesMenu } from "./MemberModulesMenu";
+import { MemberAccessLogs } from "./MemberAccessLogs";
+import { logAccess } from "./access-logs";
 import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
 import { useTaskSeconds } from "./useTaskTime";
@@ -380,6 +383,7 @@ export default function App() {
   const [updateEmailMember, setUpdateEmailMember] = useState<Member | null>(
     null,
   );
+  const [accessLogsMember, setAccessLogsMember] = useState<Member | null>(null);
   const [formPreset, setFormPreset] = useState<FormPreset>({});
   const selected = taskIdFromPath(location.split("?")[0]);
   // People a dashboard is shared with open it by its link (the module itself
@@ -728,6 +732,18 @@ export default function App() {
       }));
     }
   }, [company, demo]);
+  // Acesso ao espaço (logs de acesso em Pessoas do espaço): ao abrir e ao
+  // voltar para a aba; logAccess limita a um registro a cada 30 minutos.
+  useEffect(() => {
+    if (!company || demo || !accessUser || accessUser !== sessionUser) return;
+    logAccess(accessUser, company);
+    const onVisible = () => {
+      if (document.visibilityState === "visible")
+        logAccess(accessUser, company);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [company, demo, accessUser, sessionUser]);
   useEffect(() => {
     if (demo || !session) return;
     let alive = true;
@@ -3383,6 +3399,18 @@ export default function App() {
                                         <Pencil size={15} />
                                       </Button>
                                     )}
+                                    {(isAdmin ||
+                                      m.role !== "admin" ||
+                                      m.user_id === user) && (
+                                      <Button
+                                        className="icon-btn"
+                                        title="Logs de login e acesso"
+                                        aria-label={`Logs de login e acesso de ${m.name}`}
+                                        onClick={() => setAccessLogsMember(m)}
+                                      >
+                                        <HistoryIcon size={15} />
+                                      </Button>
+                                    )}
                                     <Button
                                       className="icon-btn"
                                       title="Redefinir senha"
@@ -3630,6 +3658,14 @@ export default function App() {
             await handleResetPassword(resetPasswordMember, mode, newPassword);
           }}
           onClose={() => setResetPasswordMember(null)}
+        />
+      )}
+      {accessLogsMember && isLeader && (
+        <MemberAccessLogs
+          member={accessLogsMember}
+          company={company}
+          demo={demo}
+          onClose={() => setAccessLogsMember(null)}
         />
       )}
       {updateEmailMember && (

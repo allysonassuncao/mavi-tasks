@@ -22671,3 +22671,162 @@ label.drive-pick-file {
     margin-left: 0;
   }
 }
+
+/* Pessoas do espaço › Logs de login e acesso de uma pessoa. */
+.access-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 28px 28px;
+  overflow-y: auto;
+}
+.access-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.access-person > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.access-person strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.access-person span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.access-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+.access-summary > div {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 13px;
+  background: #fbfcf9;
+}
+.access-summary dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+.access-summary dd {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.access-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.access-filters > :first-child {
+  flex: 1;
+  max-width: 260px;
+}
+.access-filters .btn {
+  margin-left: auto;
+}
+.access-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.access-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-top: 1px solid #f0f3ee;
+  font-size: 0.78rem;
+}
+.access-item:first-child {
+  border-top: 0;
+}
+.access-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #f0f2f0;
+  color: #4d5c58;
+}
+.access-item.login .access-icon {
+  background: #eef6e2;
+  color: #3f5a2c;
+}
+.access-item.logout .access-icon {
+  background: #fdeee8;
+  color: #9a4b31;
+}
+.access-item.access .access-icon {
+  background: #eaf3ff;
+  color: #2d5a8c;
+}
+.access-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.access-main strong {
+  font-weight: 550;
+}
+.access-main small {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.74rem;
+}
+.access-main span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.access-main code {
+  font-size: 0.7rem;
+}
+.access-item time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+.access-more {
+  align-self: center;
+}
+.access-note {
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+@media (max-width: 600px) {
+  .access-logs {
+    padding: 18px 16px 24px;
+  }
+  .access-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .access-item {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .access-item time {
+    flex-basis: 100%;
+    padding-left: 42px;
+  }
+}
