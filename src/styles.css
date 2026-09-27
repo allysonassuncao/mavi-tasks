@@ -20619,9 +20619,14 @@ button.copilot-chip:hover {
   display: flex;
   gap: 8px;
 }
-.notice-mavi-ask input {
+.notice-mavi-ask > .input-control {
   flex: 1;
-  min-width: 0;
+}
+.notice-mavi-ask .ui-input {
+  background: #fff;
+}
+.notice-mavi-ask > .btn {
+  flex-shrink: 0;
 }
 .notice-mavi-tools {
   display: flex;
@@ -21654,4 +21659,125 @@ fieldset.notice-studio-refs {
   .notice-anim-models li {
     grid-template-columns: 1fr auto;
   }
+}
+
+/* Anexar do Drive (seletor com as pastas) */
+.modal.drive-pick-modal {
+  width: 680px;
+}
+.drive-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 24px 22px;
+}
+.drive-pick-search {
+  min-height: 46px;
+}
+.drive-pick-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.drive-pick-crumbs span {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.drive-pick-crumbs button,
+.drive-pick-crumbs strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+.drive-pick-crumbs button {
+  background: none;
+  border: 0;
+  color: #5f6c6b;
+}
+.drive-pick-crumbs button:hover {
+  background: #f1f4f0;
+  color: var(--ink);
+}
+.drive-pick-crumbs strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+.drive-pick-list {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  height: min(52vh, 420px);
+  overflow-y: auto;
+}
+.drive-pick-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+}
+.drive-pick-folder,
+.drive-pick-file {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+.drive-pick-folder:hover,
+.drive-pick-file:hover {
+  background: #f5faee;
+}
+.drive-pick-folder > svg:first-child {
+  color: #8fb35c;
+}
+.drive-pick-folder > span,
+.drive-pick-file > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
+.drive-pick-folder small,
+.drive-pick-file small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.drive-pick-folder > svg:last-child {
+  color: var(--muted);
+}
+.drive-pick-file.on {
+  background: #f5faee;
+}
+label.drive-pick-file {
+  flex-direction: row;
+  font-weight: 400;
+  color: var(--ink);
+}
+.drive-pick-file > svg {
+  color: #6f7c7a;
+  flex-shrink: 0;
+}
+.drive-pick-empty {
+  padding: 16px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.drive-pick-footer {
+  align-items: center;
+}
+.drive-pick-footer small {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
 }

@@ -47,6 +47,7 @@ describe("módulos visíveis por pessoa", () => {
       "storage",
       "aiUsage",
       "dashboards",
+      "notices",
     ];
     expect(canOpenPage("profile", "member", all)).toBe(true);
     expect(canOpenPage("settings", "admin", all)).toBe(true);
@@ -88,6 +89,7 @@ describe("módulos visíveis por pessoa", () => {
       "aiUsage",
       "dashboards",
       "assistant",
+      "notices",
     ];
     expect(firstPage("admin", all)).toBe("profile");
   });
@@ -96,6 +98,14 @@ describe("módulos visíveis por pessoa", () => {
     expect(roleAllows("cases", "manager")).toBe(true);
     expect(canOpenPage("cases", "member", ["cases"])).toBe(false);
     expect(moduleOf("cases")).toBe("cases");
+  });
+  it("Mural de avisos: de todos os perfis, e o administrador pode esconder", () => {
+    expect(roleAllows("notices", "member")).toBe(true);
+    expect(canOpenPage("notices", "member", ["notices"])).toBe(false);
+    expect(moduleOn("notices", "member", ["notices"])).toBe(false);
+    expect(moduleOf("notices")).toBe("notices");
+    // Só vira destino quando nada mais abre.
+    expect(firstPage("manager", ["overview", "tasks"])).toBe("agenda");
   });
   it("Inteligência artificial: líderes, não colaboradores", () => {
     expect(canOpenPage("aiUsage", "manager")).toBe(true);

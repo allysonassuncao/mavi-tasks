@@ -1295,4 +1295,26 @@ await check(
   },
 );
 
+// ------------------------------------------------------------ módulos
+// (migration 20261109090000_notice_board_modules)
+await check(
+  "Mural escondido em Módulos visíveis: a pessoa não recebe; volta a receber se o módulo voltar",
+  async () => {
+    await as(admin);
+    await rpc("set_member_pages", [A, caio, ["notices"]]);
+    const r = await save(
+      admin,
+      null,
+      content({
+        title: "Só para quem vê o Mural",
+        targets: [{ kind: "team", id: midia }],
+      }),
+    );
+    assert.ok(!(await receivers(r.id)).includes(caio));
+    await rpc("set_member_pages", [A, caio, []]);
+    await sql(`select mavi_private.run_notices()`);
+    assert.ok((await receivers(r.id)).includes(caio));
+  },
+);
+
 console.log(`\n${passed} verificações do Mural de avisos aprovadas.`);

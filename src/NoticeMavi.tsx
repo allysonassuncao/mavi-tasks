@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Check, Sparkles, Users, Wand2, X } from "lucide-react";
-import { Button } from "./ui";
+import { Check, Lightbulb, Sparkles, Users, Wand2, X } from "lucide-react";
+import { Button, Input } from "./ui";
 import { LevelChip } from "./NoticeParts";
 import {
   FORMATS,
@@ -110,7 +110,8 @@ export function NoticeMavi({
         <small>Sugere; nada muda no aviso sem você aplicar.</small>
       </header>
       <div className="notice-mavi-ask">
-        <input
+        <Input
+          icon={Lightbulb}
           value={idea}
           onChange={(e) => setIdea(e.target.value)}
           placeholder="Do que é o aviso? Ex.: sexta não tem expediente por causa do feriado"

@@ -4,8 +4,6 @@ import {
   File as FileIcon,
   Film,
   HardDrive,
-  Plus,
-  Search,
   Trash2,
   Undo2,
   Users,
@@ -14,7 +12,8 @@ import {
 import { Modal } from "./components";
 import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
-import { formatBytes, searchDriveFiles } from "./drive";
+import { formatBytes } from "./drive";
+import { DrivePicker } from "./DrivePicker";
 import { LEVEL_ICONS, TemplateName } from "./NoticeParts";
 import { NoticeMavi } from "./NoticeMavi";
 import { NoticeStudio } from "./NoticeStudio";
@@ -107,6 +106,7 @@ export function NoticeForm({
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [templateNote, setTemplateNote] = useState("");
   const [studio, setStudio] = useState(false);
+  const [drivePicker, setDrivePicker] = useState(false);
   // Prints enviados pelo estúdio (já são anexos do aviso).
   const [added, setAdded] = useState<NoticeAttachment[]>([]);
   const [when, setWhen] = useState<"now" | "later">(
@@ -762,16 +762,17 @@ export function NoticeForm({
               </span>
             </button>
             {!demo && (
-              <DriveSearch
-                company={company}
+              <button
+                type="button"
+                className="case-drop"
+                onClick={() => setDrivePicker(true)}
                 disabled={busy || count >= MAX_ATTACHMENTS}
-                picked={drive.map((d) => d.id)}
-                onPick={(f) =>
-                  setDrive((d) =>
-                    d.some((x) => x.id === f.id) ? d : [...d, f],
-                  )
-                }
-              />
+              >
+                <HardDrive size={20} />
+                <span>
+                  <strong>Do Drive</strong> navegue pelas pastas e escolha
+                </span>
+              </button>
             )}
           </div>
           <input
@@ -856,6 +857,22 @@ export function NoticeForm({
           </Button>
         </div>
       </form>
+      {drivePicker && (
+        <DrivePicker
+          company={company}
+          data={data}
+          picked={drive.map((d) => d.id)}
+          max={Math.max(0, MAX_ATTACHMENTS - count)}
+          onClose={() => setDrivePicker(false)}
+          onPick={(files) => {
+            setDrive((d) => [
+              ...d,
+              ...files.filter((f) => !d.some((x) => x.id === f.id)),
+            ]);
+            setDrivePicker(false);
+          }}
+        />
+      )}
       {studio && saved.current && (
         <NoticeStudio
           api={api}
@@ -1108,94 +1125,5 @@ function AudiencePicker({
         </p>
       )}
     </fieldset>
-  );
-}
-
-/** Anexar um arquivo que já está no Drive (busca pelo nome). */
-function DriveSearch({
-  company,
-  disabled,
-  picked,
-  onPick,
-}: {
-  company: string;
-  disabled: boolean;
-  picked: string[];
-  onPick: (f: DrivePick) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState("");
-  const [found, setFound] = useState<DriveFile[] | null>(null);
-  useEffect(() => {
-    const q = text.trim();
-    if (q.length < 2) return setFound(null);
-    let alive = true;
-    const t = setTimeout(() => {
-      searchDriveFiles(company, q)
-        .then((list) => alive && setFound(list.slice(0, 8)))
-        .catch(() => alive && setFound([]));
-    }, 280);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-    };
-  }, [company, text]);
-  if (!open)
-    return (
-      <button
-        type="button"
-        className="case-drop"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
-      >
-        <HardDrive size={20} />
-        <span>
-          <strong>Do Drive</strong> um arquivo que já está lá
-        </span>
-      </button>
-    );
-  return (
-    <div className="notice-drive">
-      <Input
-        type="search"
-        icon={Search}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Nome do arquivo no Drive"
-        aria-label="Buscar no Drive"
-        autoFocus
-        disabled={disabled}
-      />
-      {found && (
-        <ul>
-          {found.length ? (
-            found.map((f) => (
-              <li key={f.id}>
-                <button
-                  type="button"
-                  onClick={() => onPick(f)}
-                  disabled={disabled || picked.includes(f.id)}
-                >
-                  <FileIcon size={15} aria-hidden="true" />
-                  <span>
-                    {f.name}
-                    <small>{formatBytes(f.size_bytes)}</small>
-                  </span>
-                  {picked.includes(f.id) ? (
-                    <small>anexado</small>
-                  ) : (
-                    <Plus size={15} />
-                  )}
-                </button>
-              </li>
-            ))
-          ) : (
-            <li className="notice-drive-empty">
-              Nenhum arquivo com esse nome.
-            </li>
-          )}
-        </ul>
-      )}
-    </div>
   );
 }

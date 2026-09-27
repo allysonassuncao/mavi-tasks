@@ -18,7 +18,6 @@ export const MEMBER_PAGES: readonly Page[] = [
   "agenda",
   "onboarding",
   "cases",
-  // O Mural de avisos é de todos e não se esconde: é por onde a agência avisa.
   "notices",
   "search",
   "clients",
@@ -41,6 +40,7 @@ export const ADMIN_PAGES: readonly (Page | WidgetModule)[] = [];
 /** The modules of the menu an administrator can hide, in the menu's order. */
 export const MODULES = [
   { id: "overview", label: "Visão geral" },
+  { id: "notices", label: "Mural de avisos" },
   { id: "tasks", label: "Tarefas" },
   { id: "agenda", label: "Agenda" },
   { id: "campaigns", label: "Campanhas" },
@@ -98,9 +98,11 @@ export function canOpenPage(
 
 /** Where to land when the page asked for can't be opened. */
 export function firstPage(role: Role | undefined, hidden: readonly string[]) {
+  // O Mural fica por último: é destino só quando nada mais abre.
   const pages = MODULES.map((m) => m.id).filter(
-    (id): id is Extract<ModuleId, Page> => id in pagePaths,
+    (id): id is Extract<ModuleId, Page> => id in pagePaths && id !== "notices",
   );
+  pages.push("notices");
   const order: Page[] =
     role === "admin" || role === "manager"
       ? ["overview", "tasks", ...pages]

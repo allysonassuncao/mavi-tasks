@@ -2086,7 +2086,7 @@ export default function App() {
             )}
           </div>
         )}
-        {company && member && (
+        {company && member && moduleOn("notices", member.role, hiddenPages) && (
           <NoticeCenter
             key={company}
             api={notices}
