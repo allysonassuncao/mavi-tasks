@@ -818,18 +818,7 @@ export function buildModel(tables, mapping, options = {}) {
         `${where}: tipo de meta "${goalKind}" desconhecido, sem meta.`,
       );
     }
-    const capture = cleanText(row.id_capture)
-      .split(/[,;]/)
-      .map((v) => v.trim())
-      .filter(Boolean);
-    const pages = unique(
-      capture.filter((v) => /^\d+$/.test(v) && v !== "0" && v !== "1"),
-    );
-    const destination = pages.length
-      ? "make_landing_page"
-      : capture[0] === "0"
-        ? "lead_form"
-        : "external_page";
+    const { destination, pages } = captureDestination(row.id_capture);
     const nicheId = key(row.id_nichomercado);
     const niche = (
       nicheId && nicheId !== "0" ? (niches.get(nicheId) ?? "") : ""
@@ -1224,7 +1213,33 @@ const sqlNumber = (value, decimals) => {
   if (!Number.isFinite(value)) throw new Error(`Número inválido: ${value}`);
   return decimals == null ? String(Math.round(value)) : value.toFixed(decimals);
 };
-const sqlArray = (list) =>
+/**
+ * The cycle's destination from the MASO's id_capture: "0" the Facebook form,
+ * "1" an external page, anything else Make capture pages (the ids of
+ * dados_capture.id_squeeze, letters too: "81895b88"), whose leads the MASO
+ * counted.
+ */
+export function captureDestination(value) {
+  const capture = cleanText(value)
+    .split(/[,;]/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const pages = unique(
+    capture.filter(
+      (v) => /^[0-9A-Za-z_-]{1,60}$/.test(v) && v !== "0" && v !== "1",
+    ),
+  );
+  return {
+    destination: pages.length
+      ? "make_landing_page"
+      : capture[0] === "0"
+        ? "lead_form"
+        : "external_page",
+    pages,
+  };
+}
+
+export const sqlArray = (list) =>
   sqlString(
     `{${list.map((v) => `"${v.replace(/["\\]/g, "\\$&")}"`).join(",")}}`,
   );

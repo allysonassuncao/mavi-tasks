@@ -15,6 +15,10 @@ import {
   parseSqlDump,
   readExports,
 } from "./import-maso-campaigns.mjs";
+import {
+  buildFixes,
+  renderSql as renderFixSql,
+} from "./fix-maso-capture-pages.mjs";
 
 const db = await createTestDatabase();
 const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -186,7 +190,7 @@ const cycles = [
     objetivo: "VENDA",
     meta_string: "4",
     meta_valor: "50",
-    id_capture: "0,1, 301,302",
+    id_capture: "0,1, 301,81895b88",
     id_conta_anuncios_facebook: "111",
     id_campanha_facebook: "0",
   }),
@@ -654,7 +658,7 @@ try {
         budget: 4500,
         multiplier: 1,
         destination: "make_landing_page",
-        landing_pages: ["301", "302"],
+        landing_pages: ["301", "81895b88"],
         niche: "",
         created_by: admin,
       },
@@ -674,6 +678,57 @@ try {
       },
     ]);
   });
+
+  await check(
+    "correção das páginas com letras: só ciclos como o import antigo deixou",
+    async () => {
+      const state = async () =>
+        Object.fromEntries(
+          (
+            await sql(
+              "select legacy_id,destination,landing_pages from ad_cycles order by legacy_id",
+            )
+          ).map((r) => [r.legacy_id, [r.destination, r.landing_pages]]),
+        );
+      const before = await state();
+      // What the old import left: Y2 with only its numeric page.
+      await sql(
+        "update ad_cycles set landing_pages='{301}' where legacy_id=$1",
+        [Y2],
+      );
+      const fix = renderFixSql(
+        buildFixes(
+          new Map([
+            [
+              "maso_acompanhamento_ciclo",
+              [
+                { id_ciclo: Y1, id_capture: "zz1" },
+                { id_ciclo: Y2, id_capture: "0,1, 301,81895b88" },
+                { id_ciclo: Y4, id_capture: "abc9" },
+                { id_ciclo: "outro", id_capture: "301" },
+              ],
+            ],
+          ]),
+        ),
+        { company: A },
+      );
+      await runScript(fix);
+      const after = await state();
+      // Y1 is a Facebook form in MAVI: kept.
+      assert.deepEqual(after[Y1], before[Y1]);
+      assert.deepEqual(after[Y2], ["make_landing_page", ["301", "81895b88"]]);
+      assert.deepEqual(after[Y4], ["make_landing_page", ["abc9"]]);
+      // Again: nothing more changes.
+      await runScript(fix);
+      assert.deepEqual(await state(), after);
+      // Back to the imported state for the checks below.
+      await sql(
+        "update ad_cycles set destination='external_page', landing_pages='{}' where legacy_id=$1",
+        [Y4],
+      );
+      assert.deepEqual(await state(), before);
+    },
+  );
 
   await check(
     "vínculos: contas × campanhas, Meta sem act_, Google com MCC",
