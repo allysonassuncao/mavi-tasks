@@ -197,7 +197,7 @@ Os números vêm de uma sincronização diária (migração `20261002090000_ad_m
 
 1. Gerar um segredo (`openssl rand -base64 32`), configurar `ADS_SYNC_SECRET` na Vercel e fazer redeploy.
 2. No SQL Editor do Supabase: `insert into mavi_private.ad_sync_config(url, secret) values ('https://workspace.maso.app.br/api/ads-sync', '<o mesmo segredo>');`
-3. Rodar `supabase/operations/schedule-ads-sync.sql` (a cada 20 minutos entre 06:00 e 09:40, horário de Brasília; cada chamada sincroniza os ciclos que ainda não foram sincronizados no dia).
+3. Rodar `supabase/operations/schedule-ads-sync.sql` (a cada 5 minutos entre 06:00 e 10:55, horário de Brasília; cada chamada sincroniza, 5 ao mesmo tempo, os ciclos que ainda não foram sincronizados no dia, os que estão há mais tempo sem sincronizar primeiro; quando todos estão em dia, a chamada termina na hora — migração `20261119090000_ad_sync_fair_order`).
 
 ### Campanhas: o que conta como conversão (regras dos crons do MASO)
 

@@ -117,6 +117,26 @@ export function addDays(date: string, n: number) {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
+/** fn over the items, at most `limit` at a time, results in order. */
+export async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < items.length; i = next++)
+      out[i] = await fn(items[i]);
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return out;
+}
+/** Reads at the same time per account (Meta and Google take a few). */
+const READS_AT_ONCE = 4;
+
 /**
  * Days to read: the whole cycle up to yesterday (or its end), every time —
  * late attribution and a change of rule reach every day, and a cycle is a
@@ -302,34 +322,31 @@ async function readMeta(
           }
         : {}),
     };
-    const daily = await graphAll<MetaRow>(
-      env,
-      fetchImpl,
-      token,
-      `/act_${account}/insights`,
-      {
-        ...base,
-        time_increment: "1",
-        time_range: JSON.stringify({ since, until }),
-      },
+    // The days, and the cycle-to-date up to each end at the account level:
+    // deduplicated reach (the MASO summed its ad sets' reach, counting a
+    // person once per ad set).
+    const [daily, ...cumulative] = await mapLimit(
+      [null, ...ends],
+      READS_AT_ONCE,
+      (end) =>
+        graphAll<MetaRow>(env, fetchImpl, token, `/act_${account}/insights`, {
+          ...base,
+          ...(end
+            ? {
+                time_range: JSON.stringify({ since: t.start_date, until: end }),
+              }
+            : {
+                time_increment: "1",
+                time_range: JSON.stringify({ since, until }),
+              }),
+        }),
     );
     for (const row of daily)
       if (row.date_start) addTo(days, row.date_start, metaTotals(t, row));
-    // Cycle-to-date at the account level: deduplicated reach (the MASO
-    // summed its ad sets' reach, counting a person once per ad set).
-    for (const end of ends) {
-      const [total] = await graphAll<MetaRow>(
-        env,
-        fetchImpl,
-        token,
-        `/act_${account}/insights`,
-        {
-          ...base,
-          time_range: JSON.stringify({ since: t.start_date, until: end }),
-        },
-      );
+    ends.forEach((end, i) => {
+      const [total] = cumulative[i];
       if (total) addTo(totals, end, metaTotals(t, total));
-    }
+    });
   }
   return { days, totals };
 }
@@ -532,15 +549,18 @@ async function readGoogle(
       true,
     ))
       if (day) addTo(days, day, sum);
-    for (const end of ends)
-      for (const { totals: sum } of await read(
+    const cumulative = await mapLimit(ends, READS_AT_ONCE / 2, (end) =>
+      read(
         account,
         manager,
         filter,
         `segments.date BETWEEN '${t.start_date}' AND '${end}'`,
         false,
-      ))
-        addTo(totals, end, sum);
+      ),
+    );
+    ends.forEach((end, i) => {
+      for (const { totals: sum } of cumulative[i]) addTo(totals, end, sum);
+    });
   }
   return { days, totals };
 }
@@ -657,10 +677,13 @@ export async function syncCycle(
       }
       totals.get(window.until)!.conversions += leads.total;
       // Each past cumulative counts the period's distinct leads (MASO).
-      for (const end of ends.slice(1))
-        totals.get(end)!.conversions += (
-          await makeLeads(env, fetchImpl, pages, window.since, end)
-        ).total;
+      const earlier = ends.slice(1);
+      const counts = await mapLimit(earlier, READS_AT_ONCE, (end) =>
+        makeLeads(env, fetchImpl, pages, window.since, end),
+      );
+      earlier.forEach(
+        (end, i) => (totals.get(end)!.conversions += counts[i].total),
+      );
     }
     // Days without delivery are stored as zero, so gaps read as zero.
     const list = [];
@@ -698,6 +721,8 @@ function sameSecret(given: string, expected: string) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Cycles synced at the same time in one call. */
+const CYCLES_AT_ONCE = 5;
 
 /**
  * POST /api/ads-sync. With the schedule's secret: the next cycles not synced
@@ -709,7 +734,8 @@ export async function handleAdsSync(
   authorization: string | null,
   env: SyncEnv,
   fetchImpl: Fetch = fetch,
-  budgetMs = 45_000,
+  // New cycles start until then; the function has 60 s (vercel.json).
+  budgetMs = 40_000,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const fail = (status: number, error: string) => ({
     status,
@@ -749,7 +775,10 @@ export async function handleAdsSync(
     );
     if (!found.ok) return fail(found.status, found.error);
     const batch = found.data.filter((t) => !seen.has(t.cycle_id));
-    for (const t of batch) {
+    // A few cycles at once (each waits on the platforms most of the time);
+    // none starts after the budget, so the call ends in time.
+    await mapLimit(batch, CYCLES_AT_ONCE, async (t) => {
+      if (Date.now() - started > budgetMs) return;
       seen.add(t.cycle_id);
       results.push(
         await syncCycle(
@@ -760,8 +789,7 @@ export async function handleAdsSync(
           scheduled ? "schedule" : "manual",
         ),
       );
-      if (Date.now() - started > budgetMs) break;
-    }
+    });
     // A campaign is one batch; the schedule goes on while there's time.
     if (!scheduled || !batch.length || Date.now() - started > budgetMs) break;
   }

@@ -4,6 +4,7 @@ import {
   BACKFILL_LIMIT,
   googleTotals,
   handleAdsSync,
+  mapLimit,
   metaResults,
   missingSnapshots,
   syncWindow,
@@ -38,7 +39,9 @@ type Call = {
   body?: string;
   headers: Record<string, string>;
 };
-function network(routes: [RegExp, (call: Call) => Response][]) {
+function network(
+  routes: [RegExp, (call: Call) => Response | Promise<Response>][],
+) {
   const calls: Call[] = [];
   const fetchMock = vi.fn(async (url: string, init: RequestInit = {}) => {
     const call: Call = {
@@ -93,6 +96,22 @@ describe("janela de leitura", () => {
       ),
     ).toEqual({ since: "2026-08-20", until: "2026-09-19" });
     expect(syncWindow(target({ start_date: "2026-09-24" }))).toBeNull();
+  });
+});
+
+describe("várias leituras ao mesmo tempo", () => {
+  it("no máximo o limite por vez, resultados na ordem", async () => {
+    let running = 0;
+    let peak = 0;
+    const out = await mapLimit([30, 10, 20, 5, 15], 2, async (ms) => {
+      peak = Math.max(peak, ++running);
+      await new Promise((r) => setTimeout(r, ms));
+      running--;
+      return ms * 2;
+    });
+    expect(out).toEqual([60, 20, 40, 10, 30]);
+    expect(peak).toBe(2);
+    expect(await mapLimit([], 3, async (x) => x)).toEqual([]);
   });
 });
 
@@ -604,6 +623,37 @@ describe("POST /api/ads-sync", () => {
         conversions: 42,
       }),
     ]);
+  });
+
+  it("agendamento: vários ciclos ao mesmo tempo, todos do lote", async () => {
+    let batch = Array.from({ length: 7 }, (_, i) =>
+      target({ cycle_id: `cy-${i}` }),
+    );
+    let running = 0;
+    let peak = 0;
+    const { fetch } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [
+        /act_111\/insights/,
+        async () => {
+          peak = Math.max(peak, ++running);
+          await new Promise((r) => setTimeout(r, 5));
+          running--;
+          return json({ data: [] });
+        },
+      ],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(result.body).toEqual({ synced: 7, errors: [] });
+    expect(peak).toBeGreaterThan(1);
   });
 
   it("sem acumulado faltando, não manda p_backfill (bancos antigos)", async () => {

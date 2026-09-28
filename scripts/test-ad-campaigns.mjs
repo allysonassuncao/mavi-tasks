@@ -874,6 +874,34 @@ await check(
 );
 
 await check(
+  "sincronização agendada: os que estão há mais tempo sem sincronizar primeiro",
+  async () => {
+    const order = (list) =>
+      [...list].sort(
+        (a, b) =>
+          (a.last_run === null ? 0 : 1) - (b.last_run === null ? 0 : 1) ||
+          String(a.last_run).localeCompare(String(b.last_run)) ||
+          b.end_date.localeCompare(a.end_date) ||
+          a.cycle_id.localeCompare(b.cycle_id),
+      );
+    const all = await targets(null, [secret, null, 50]);
+    assert.ok(all.length >= 2, "at least two cycles due");
+    // The one that would come first ran yesterday: the never-synced go first.
+    const first = order(all)[0].cycle_id;
+    await sql(
+      `insert into ad_sync_runs(company_id, campaign_id, cycle_id, trigger, status, created_at)
+       select company_id, campaign_id, id, 'schedule', 'error', now() - interval '1 day' from ad_cycles where id = $1`,
+      [first],
+    );
+    const again = await targets(null, [secret, null, 50]);
+    const [one] = await targets(null, [secret, null, 1]);
+    assert.equal(one.cycle_id, order(again)[0].cycle_id);
+    assert.notEqual(one.cycle_id, first);
+    await sql("delete from ad_sync_runs where cycle_id = $1", [first]);
+  },
+);
+
+await check(
   "sincronização grava dias, acumulado e status Bom/Ruim",
   async () => {
     await as(null);
