@@ -68,6 +68,8 @@ export type SyncTarget = {
   conversion_actions?: string[] | null;
   today: string;
   last_day: string | null;
+  /** The days that already have the cycle's cumulative (absent: fill none). */
+  snapshot_days?: string[];
   links: { account_id: string; campaign_id: string; manager_id: string }[];
   meta_tokens: Record<
     string,
@@ -124,6 +126,28 @@ export function syncWindow(t: SyncTarget) {
   const until = [t.end_date, addDays(t.today, -1)].sort()[0];
   const since = t.start_date;
   return since <= until ? { since, until } : null;
+}
+
+/** At most this many past cumulatives per cycle and run (the rest next time). */
+export const BACKFILL_LIMIT = 10;
+/**
+ * The cumulatives missing before today, as the MASO's cron took them (one a
+ * day, the numbers up to the day before, until the day after the cycle
+ * ends): the period ends to read, the most recent first. None when the
+ * database doesn't say which days it has.
+ */
+export function missingSnapshots(t: SyncTarget) {
+  if (!t.snapshot_days) return [];
+  const have = new Set(t.snapshot_days);
+  const last = [addDays(t.end_date, 1), addDays(t.today, -1)].sort()[0];
+  const ends: string[] = [];
+  for (
+    let taken = last;
+    taken > t.start_date && ends.length < BACKFILL_LIMIT;
+    taken = addDays(taken, -1)
+  )
+    if (!have.has(taken)) ends.push(addDays(taken, -1));
+  return ends;
 }
 
 // ------------------------------------------------------------ rules
@@ -227,15 +251,21 @@ function metaTotals(t: SyncTarget, row: MetaRow): Totals {
   };
 }
 
+/** The days of the window and the cycle-to-date totals up to each end. */
+type Reading = { days: Map<string, Totals>; totals: Map<string, Totals> };
+const addTo = (m: Map<string, Totals>, key: string, t: Totals) =>
+  m.set(key, add(m.get(key) ?? zero(), t));
+
 async function readMeta(
   env: AdsEnv,
   fetchImpl: Fetch,
   t: SyncTarget,
   since: string,
   until: string,
-) {
+  ends: string[],
+): Promise<Reading> {
   const days = new Map<string, Totals>();
-  let snapshot = zero();
+  const totals = new Map(ends.map((e) => [e, zero()]));
   const accounts = new Map<string, string[]>();
   for (const l of t.links) {
     const id = accountId("meta", l.account_id);
@@ -283,28 +313,25 @@ async function readMeta(
         time_range: JSON.stringify({ since, until }),
       },
     );
-    for (const row of daily) {
-      if (!row.date_start) continue;
-      days.set(
-        row.date_start,
-        add(days.get(row.date_start) ?? zero(), metaTotals(t, row)),
-      );
-    }
+    for (const row of daily)
+      if (row.date_start) addTo(days, row.date_start, metaTotals(t, row));
     // Cycle-to-date at the account level: deduplicated reach (the MASO
     // summed its ad sets' reach, counting a person once per ad set).
-    const [total] = await graphAll<MetaRow>(
-      env,
-      fetchImpl,
-      token,
-      `/act_${account}/insights`,
-      {
-        ...base,
-        time_range: JSON.stringify({ since: t.start_date, until }),
-      },
-    );
-    if (total) snapshot = add(snapshot, metaTotals(t, total));
+    for (const end of ends) {
+      const [total] = await graphAll<MetaRow>(
+        env,
+        fetchImpl,
+        token,
+        `/act_${account}/insights`,
+        {
+          ...base,
+          time_range: JSON.stringify({ since: t.start_date, until: end }),
+        },
+      );
+      if (total) addTo(totals, end, metaTotals(t, total));
+    }
   }
-  return { days, snapshot };
+  return { days, totals };
 }
 
 // ------------------------------------------------------------ Google Ads
@@ -400,10 +427,11 @@ async function readGoogle(
   t: SyncTarget,
   since: string,
   until: string,
-) {
+  ends: string[],
+): Promise<Reading> {
   const access = await googleAccess(env, fetchImpl, t);
   const days = new Map<string, Totals>();
-  let snapshot = zero();
+  const totals = new Map(ends.map((e) => [e, zero()]));
   const accounts = new Map<string, { manager: string; campaigns: string[] }>();
   for (const l of t.links) {
     const id = accountId("google", l.account_id);
@@ -496,24 +524,25 @@ async function readGoogle(
     const filter = campaigns.length
       ? ` AND campaign.id IN (${campaigns.join(",")})`
       : "";
-    for (const { day, totals } of await read(
+    for (const { day, totals: sum } of await read(
       account,
       manager,
       filter,
       `segments.date BETWEEN '${since}' AND '${until}'`,
       true,
     ))
-      if (day) days.set(day, add(days.get(day) ?? zero(), totals));
-    for (const { totals } of await read(
-      account,
-      manager,
-      filter,
-      `segments.date BETWEEN '${t.start_date}' AND '${until}'`,
-      false,
-    ))
-      snapshot = add(snapshot, totals);
+      if (day) addTo(days, day, sum);
+    for (const end of ends)
+      for (const { totals: sum } of await read(
+        account,
+        manager,
+        filter,
+        `segments.date BETWEEN '${t.start_date}' AND '${end}'`,
+        false,
+      ))
+        addTo(totals, end, sum);
   }
-  return { days, snapshot };
+  return { days, totals };
 }
 
 // ------------------------------------------------------------ Make pages
@@ -600,20 +629,25 @@ export async function syncCycle(
     if (!configured(env, t.platform))
       throw new AdsError(500, notConfiguredMessage(env, t.platform));
     const read = t.platform === "meta" ? readMeta : readGoogle;
-    const { days, snapshot } = await read(
+    // Today's cumulative (up to yesterday) and the past ones missing.
+    const past = missingSnapshots(t);
+    const ends = [...new Set([window.until, ...past])];
+    const { days, totals } = await read(
       env,
       fetchImpl,
       t,
       window.since,
       window.until,
+      ends,
     );
     // The capture page's leads are the result (Google adds its calls and
     // WhatsApp/purchase actions to them, as the MASO did).
     if (usesMakeLeads(t)) {
+      const pages = t.landing_pages ?? [];
       const leads = await makeLeads(
         env,
         fetchImpl,
-        t.landing_pages ?? [],
+        pages,
         window.since,
         window.until,
       );
@@ -621,7 +655,12 @@ export async function syncCycle(
         const d = days.get(day) ?? zero();
         days.set(day, { ...d, conversions: d.conversions + n });
       }
-      snapshot.conversions += leads.total;
+      totals.get(window.until)!.conversions += leads.total;
+      // Each past cumulative counts the period's distinct leads (MASO).
+      for (const end of ends.slice(1))
+        totals.get(end)!.conversions += (
+          await makeLeads(env, fetchImpl, pages, window.since, end)
+        ).total;
     }
     // Days without delivery are stored as zero, so gaps read as zero.
     const list = [];
@@ -629,7 +668,20 @@ export async function syncCycle(
       list.push({ day: d, ...round(days.get(d) ?? zero()) });
     const saved = await store("ok", {
       p_days: list,
-      p_snapshot: { period_end: window.until, ...round(snapshot) },
+      p_snapshot: {
+        period_end: window.until,
+        ...round(totals.get(window.until)!),
+      },
+      // Sent only when there is something to fill (older databases don't
+      // take it).
+      ...(past.length
+        ? {
+            p_backfill: past.map((end) => ({
+              period_end: end,
+              ...round(totals.get(end)!),
+            })),
+          }
+        : {}),
     });
     if (!saved.ok) throw new AdsError(saved.status, saved.error);
     return { cycle: t.cycle_id, status: "ok" as const, days: saved.data };

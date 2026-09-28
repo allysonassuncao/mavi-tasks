@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BACKFILL_LIMIT,
   googleTotals,
   handleAdsSync,
   metaResults,
+  missingSnapshots,
   syncWindow,
   usesMakeLeads,
   type SyncEnv,
@@ -91,6 +93,54 @@ describe("janela de leitura", () => {
       ),
     ).toEqual({ since: "2026-08-20", until: "2026-09-19" });
     expect(syncWindow(target({ start_date: "2026-09-24" }))).toBeNull();
+  });
+});
+
+describe("acumulados que faltam (histórico diário)", () => {
+  const days = (from: string, to: string) => {
+    const out: string[] = [];
+    for (
+      let d = new Date(`${from}T12:00:00Z`);
+      ;
+      d.setUTCDate(d.getUTCDate() + 1)
+    ) {
+      const day = d.toISOString().slice(0, 10);
+      if (day > to) return out;
+      out.push(day);
+    }
+  };
+  const cycle = { start_date: "2026-08-31", end_date: "2026-09-30" };
+  it("os dias sem registro antes de hoje, cada um até o dia anterior", () => {
+    const t = target({
+      ...cycle,
+      today: "2026-09-28",
+      snapshot_days: days("2026-09-01", "2026-09-24"),
+    });
+    // Taken on 27, 26 and 25/09: the numbers up to 26, 25 and 24/09.
+    expect(missingSnapshots(t)).toEqual([
+      "2026-09-26",
+      "2026-09-25",
+      "2026-09-24",
+    ]);
+  });
+  it("depois do fim, só até o dia seguinte ao fim do ciclo", () => {
+    const t = target({
+      ...cycle,
+      today: "2026-10-05",
+      snapshot_days: days("2026-09-01", "2026-09-30"),
+    });
+    expect(missingSnapshots(t)).toEqual(["2026-09-30"]);
+  });
+  it("no máximo alguns por vez, os mais recentes primeiro", () => {
+    const t = target({ ...cycle, today: "2026-09-28", snapshot_days: [] });
+    const ends = missingSnapshots(t);
+    expect(ends).toHaveLength(BACKFILL_LIMIT);
+    expect(ends[0]).toBe("2026-09-26");
+  });
+  it("sem a lista de dias do banco, nada", () => {
+    expect(missingSnapshots(target({ ...cycle, today: "2026-09-28" }))).toEqual(
+      [],
+    );
   });
 });
 
@@ -482,6 +532,99 @@ describe("POST /api/ads-sync", () => {
     expect(day("2026-09-21")).toMatchObject({ spend: 20, conversions: 3 });
     expect(day("2026-09-22")).toMatchObject({ spend: 0, conversions: 1 });
     expect(stored.p_snapshot.conversions).toBe(4);
+  });
+
+  it("preenche os acumulados que faltam, lidos da plataforma e da Make", async () => {
+    const make = target({
+      objective: "lead",
+      destination: "make_landing_page",
+      landing_pages: ["81895b88"],
+      // Up to yesterday (23/09); 22/09 and 21/09 were never taken.
+      snapshot_days: ["2026-09-21"],
+    });
+    let batch = [make];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [/act_111\/insights.*time_increment=1/, () => json({ data: [] })],
+      [
+        /act_111\/insights/,
+        (call) => {
+          const until = JSON.parse(
+            new URL(call.url).searchParams.get("time_range")!,
+          ).until;
+          return json({ data: [{ spend: until.slice(-2), reach: "10" }] });
+        },
+      ],
+      [
+        /POST https:\/\/make\.example\.com/,
+        (call) =>
+          json({
+            days: {},
+            total: Number(JSON.parse(call.body!).until.slice(-2)) * 2,
+          }),
+      ],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(result.body).toEqual({ synced: 1, errors: [] });
+    const periods = calls
+      .filter(
+        (c) => c.url.includes("insights") && !c.url.includes("time_increment"),
+      )
+      .map((c) => JSON.parse(new URL(c.url).searchParams.get("time_range")!));
+    expect(periods).toEqual([
+      { since: "2026-09-20", until: "2026-09-23" },
+      { since: "2026-09-20", until: "2026-09-22" },
+      { since: "2026-09-20", until: "2026-09-21" },
+    ]);
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    expect(stored.p_snapshot).toMatchObject({
+      period_end: "2026-09-23",
+      spend: 23,
+      conversions: 46,
+    });
+    expect(stored.p_backfill).toEqual([
+      expect.objectContaining({
+        period_end: "2026-09-22",
+        spend: 22,
+        conversions: 44,
+      }),
+      expect.objectContaining({
+        period_end: "2026-09-21",
+        spend: 21,
+        conversions: 42,
+      }),
+    ]);
+  });
+
+  it("sem acumulado faltando, não manda p_backfill (bancos antigos)", async () => {
+    let batch = [target()];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [/act_111\/insights/, () => json({ data: [] })],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    expect(stored).not.toHaveProperty("p_backfill");
   });
 
   it("página de captura da Make sem a leitura configurada: erro, sem números", async () => {

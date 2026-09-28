@@ -931,6 +931,99 @@ await check(
 );
 
 await check(
+  "sincronização preenche os acumulados que faltam, sem tocar nos que existem",
+  async () => {
+    // A day the MASO had: kept as it is.
+    await sql(
+      `insert into ad_cycle_snapshots(company_id, campaign_id, cycle_id, taken_on, period_start, period_end,
+        spend, conversions, source, author_label)
+       select company_id, campaign_id, id, $2::date, start_date, $2::date - 1, 1, 1, 'maso', 'Robô do MASO'
+       from ad_cycles where id = $1`,
+      [syncCycle, shift(-3)],
+    );
+    const [t] = await targets(admin, [null, synced, 15]);
+    assert.deepEqual(t.snapshot_days, [shift(-3), today]);
+    await as(null);
+    const snap = (end, spend, conversions) => ({
+      period_end: shift(end),
+      spend,
+      impressions: 100,
+      reach: 90,
+      clicks: 5,
+      conversions,
+    });
+    await rpc("ad_sync_store", [
+      secret,
+      syncCycle,
+      "schedule",
+      "ok",
+      "",
+      "[]",
+      null,
+      JSON.stringify([
+        snap(-2, 40, 8), // taken yesterday
+        snap(-4, 999, 1), // taken on the MASO's day: kept
+        snap(-5, 20, 1), // taken 4 days ago; CPA 20 > 12 → Ruim
+        snap(-1, 1, 1), // would be today's: left to the daily one
+        snap(-20, 1, 1), // before the cycle
+      ]),
+    ]);
+    const rows = await sql(
+      `select taken_on::text, period_end::text, spend::float, goal_status, source, author_label
+       from ad_cycle_snapshots where cycle_id=$1 order by taken_on`,
+      [syncCycle],
+    );
+    assert.deepEqual(rows, [
+      {
+        taken_on: shift(-4),
+        period_end: shift(-5),
+        spend: 20,
+        goal_status: "bad",
+        source: "meta",
+        author_label: "Sincronização retroativa",
+      },
+      {
+        taken_on: shift(-3),
+        period_end: shift(-4),
+        spend: 1,
+        goal_status: null,
+        source: "maso",
+        author_label: "Robô do MASO",
+      },
+      {
+        taken_on: shift(-1),
+        period_end: shift(-2),
+        spend: 40,
+        goal_status: "good",
+        source: "meta",
+        author_label: "Sincronização retroativa",
+      },
+      {
+        taken_on: today,
+        period_end: shift(-1),
+        spend: 900,
+        goal_status: "bad",
+        source: "meta",
+        author_label: "Sincronização manual",
+      },
+    ]);
+    await assert.rejects(
+      rpc("ad_sync_store", [
+        secret,
+        syncCycle,
+        "schedule",
+        "ok",
+        "",
+        "[]",
+        null,
+        "{}",
+      ]),
+      /Acumulados inválidos/,
+    );
+  },
+);
+
+await check(
   "erro da plataforma fica registrado, sem apagar números",
   async () => {
     await as(null);
