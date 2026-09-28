@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { apiKey, handlePublicApi } from "./_public-api";
 
 const env = { supabaseUrl: "https://db.example.com", supabaseKey: "publishable" };
-const KEY = `mavi_${"a".repeat(64)}`;
+const KEY = `workspace_${"a".repeat(64)}`;
 const CLIENT = "00000000-0000-4000-8000-000000000001";
 
 function call(
@@ -32,10 +32,11 @@ const sent = (fetchMock: ReturnType<typeof vi.fn>) => ({
 });
 
 describe("apiKey", () => {
-  it("aceita Bearer ou X-Api-Key, só no formato das chaves da MAVI", () => {
+  it("aceita Bearer ou X-Api-Key, só no formato workspace_", () => {
     expect(apiKey({ authorization: `Bearer ${KEY}` })).toBe(KEY);
     expect(apiKey({ "x-api-key": KEY })).toBe(KEY);
     expect(apiKey({ authorization: "Bearer eyJhbGciOi" })).toBeNull();
+    expect(apiKey({ authorization: `Bearer mavi_${"a".repeat(64)}` })).toBeNull();
     expect(apiKey({})).toBeNull();
   });
 });

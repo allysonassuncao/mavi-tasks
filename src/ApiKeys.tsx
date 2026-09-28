@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Check, Copy, KeyRound, Plus, ShieldAlert } from "lucide-react";
+import { BookOpen, Check, Copy, KeyRound, Plus, ShieldAlert } from "lucide-react";
 import { Button, Input } from "./ui";
 import { Empty } from "./components";
 import { rpc } from "./api";
@@ -115,7 +115,7 @@ function Keys({
     setError("");
     try {
       await rpc("api_key_revoke", { p_key: k.id });
-      if (created && k.prefix === created.key.slice(0, 13)) setCreated(null);
+      if (created && k.prefix === created.key.slice(0, 18)) setCreated(null);
       await load();
       notify(`Chave "${k.name}" revogada.`);
     } catch (e) {
@@ -138,6 +138,14 @@ function Keys({
             por sistema, para poder revogar só aquela quando precisar.
           </p>
         </div>
+        <a
+          className="btn secondary"
+          href="/docs/api"
+          target="_blank"
+          rel="noopener"
+        >
+          <BookOpen size={16} /> Documentação da API
+        </a>
       </div>
       {error && (
         <p className="form-error" role="alert">

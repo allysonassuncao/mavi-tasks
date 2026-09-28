@@ -42,6 +42,11 @@ const OAuthConsent = lazy(() =>
   import("./OAuthConsent").then((m) => ({ default: m.OAuthConsent })),
 );
 const oauthConsent = /^\/oauth\/consent\/?$/.test(window.location.pathname);
+// Documentação da API pública, aberta sem login para quem integra.
+const ApiDocs = lazy(() =>
+  import("./ApiDocs").then((m) => ({ default: m.ApiDocs })),
+);
+const apiDocs = /^\/docs\/api\/?$/.test(window.location.pathname);
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     {publicFile ? (
@@ -59,6 +64,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     ) : approvalLink ? (
       <Suspense fallback={null}>
         <PublicSocialLeads token={approvalLink[1]} />
+      </Suspense>
+    ) : apiDocs ? (
+      <Suspense fallback={null}>
+        <ApiDocs />
       </Suspense>
     ) : oauthConsent ? (
       <Suspense fallback={null}>

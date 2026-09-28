@@ -66,11 +66,11 @@ await check("só administradores criam chaves; o texto só sai na criação", as
   );
   await as(admin);
   key = (await one("select public.api_key_create($1,'CRM') k", [A])).k;
-  assert.match(key, /^mavi_[0-9a-f]{64}$/);
+  assert.match(key, /^workspace_[0-9a-f]{64}$/);
   const [row] = (await db.query("select * from public.api_keys_list($1)", [A]))
     .rows;
   assert.equal(row.name, "CRM");
-  assert.equal(row.prefix, key.slice(0, 13));
+  assert.equal(row.prefix, key.slice(0, 18));
   assert.equal(row.created_by_name, "Ana Admin");
   assert.equal(row.revoked_at, null);
   await db.exec("reset role");
@@ -92,7 +92,7 @@ await check("só administradores criam chaves; o texto só sai na criação", as
 });
 
 await check("chave inválida é recusada; a tabela não é acessível", async () => {
-  await assert.rejects(api("api_list_products", ["mavi_nada"]), /inválida/);
+  await assert.rejects(api("api_list_products", ["workspace_nada"]), /inválida/);
   await assert.rejects(api("api_list_products", [null]), /inválida/);
   await as(admin);
   await assert.rejects(

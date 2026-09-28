@@ -1,5 +1,7 @@
 # API pública da MAVI — v1
 
+> A mesma documentação, com exemplos em cURL, JavaScript e Python, fica aberta (sem login) em **`/docs/api`** no próprio Workspace, com link na tela de Chaves de API.
+
 Serve para sistemas externos (CRM, checkout, n8n, Make, Zapier…) **cadastrarem clientes e vincularem produtos** a eles, sem ninguém abrir a MAVI.
 
 - **Endereço base:** `https://SEU-DOMINIO/api/v1` (aparece pronto para copiar em **Equipe e configurações › Chaves de API**).
@@ -9,14 +11,14 @@ Serve para sistemas externos (CRM, checkout, n8n, Make, Zapier…) **cadastrarem
 ## Autenticação
 
 1. Um **administrador** abre **Equipe e configurações › Chaves de API**, dá um nome (ex.: `CRM`) e clica em **Criar chave**.
-2. A chave (`mavi_` + 64 caracteres) aparece **uma única vez**. Copie e guarde no servidor do sistema que vai usá-la. A MAVI guarda só o hash, então não é possível recuperá-la depois: se perder, crie outra e revogue a antiga.
+2. A chave (`workspace_` + 64 caracteres) aparece **uma única vez**. Copie e guarde no servidor do sistema que vai usá-la. A MAVI guarda só o hash, então não é possível recuperá-la depois: se perder, crie outra e revogue a antiga.
 3. Envie a chave em todas as requisições:
 
 ```http
-Authorization: Bearer mavi_0123…
+Authorization: Bearer workspace_0123…
 ```
 
-`X-Api-Key: mavi_0123…` também funciona.
+`X-Api-Key: workspace_0123…` também funciona.
 
 Revogar a chave na mesma tela corta o acesso na hora. A lista mostra quem criou cada chave e quando ela foi usada pela última vez. Crie **uma chave por sistema** para poder revogar só a que precisar.
 
@@ -204,4 +206,4 @@ Toda resposta de erro tem o formato `{ "error": "mensagem em português" }`.
 
 - Quem estiver com a MAVI aberta vê o cliente novo em até 10 minutos (o catálogo fica em cache) ou na hora, ao recarregar a página.
 - A API não altera nem arquiva clientes e não remove produtos. Isso continua sendo feito na MAVI.
-- Implementação: rota `/api/v1/*` → `api/_public-api.ts`; as regras ficam no banco, nas funções `api_*` da migração `20261115090000_public_api.sql` (a chave é validada e o espaço isolado ali).
+- Implementação: rota `/api/v1/*` → `api/_public-api.ts`; as regras ficam no banco, nas funções `api_*` das migrações `20261115090000_public_api.sql` e `20261116090000_api_key_workspace_prefix.sql` (a chave é validada e o espaço isolado ali).

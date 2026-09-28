@@ -18,13 +18,13 @@ const STATUS: Record<string, number> = {
   "23505": 409, // cliente com o mesmo e-mail
 };
 
-/** The key from `Authorization: Bearer mavi_…` or `X-Api-Key: mavi_…`. */
+/** The key from `Authorization: Bearer workspace_…` or `X-Api-Key: workspace_…`. */
 export function apiKey(headers: Record<string, string | string[] | undefined>) {
   const one = (v: string | string[] | undefined) =>
     (Array.isArray(v) ? v[0] : v)?.trim() ?? "";
   const bearer = one(headers["authorization"]).match(/^Bearer\s+(.+)$/i)?.[1];
   const key = bearer ?? one(headers["x-api-key"]);
-  return /^mavi_[0-9a-f]{64}$/.test(key) ? key : null;
+  return /^workspace_[0-9a-f]{64}$/.test(key) ? key : null;
 }
 
 async function rpc(
@@ -95,7 +95,7 @@ export async function handlePublicApi(
     return fail(405, "Método não permitido.", { Allow: allowed[route] });
   const key = apiKey(req.headers);
   if (!key)
-    return fail(401, "Envie a chave de API em Authorization: Bearer mavi_….");
+    return fail(401, "Envie a chave de API em Authorization: Bearer workspace_….");
   const body =
     req.body && typeof req.body === "object" && !Array.isArray(req.body)
       ? (req.body as Record<string, unknown>)
