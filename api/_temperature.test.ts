@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import type { AiEnv } from "./_ai";
+import { aiEnv, type AiEnv } from "./_ai";
 import type { LlmAdapter } from "./_ai-llm";
 import { seal } from "./_google";
 import { runTool, temperatureLine, type ToolContext } from "./_ai-tools";
@@ -221,6 +221,20 @@ describe("worker do termômetro", () => {
       embed,
     });
     expect(res.status).toBe(401);
+  });
+
+  it("aceita o AI_WORKER_SECRET da Vercel com espaços nas pontas", async () => {
+    const fromVercel = aiEnv(
+      { supabaseUrl: env.supabaseUrl, supabaseKey: env.supabaseKey },
+      { AI_WORKER_SECRET: "segredo-do-worker\n" },
+    );
+    expect(fromVercel.workerSecret).toBe("segredo-do-worker");
+    const res = await handleTemperatureWorker(
+      "Bearer segredo-do-worker",
+      { ...fromVercel, workerBudgetMs: 0 },
+      { fetch: vi.fn() as any, llm: vi.fn(), embed },
+    );
+    expect(res.status).toBe(200);
   });
 
   it("lê com o Jev, grava, recalcula e escreve o texto; falha volta para a fila", async () => {

@@ -77,7 +77,9 @@ export function aiEnv(
     model: serverModel("assistant", env),
     openaiKey: env.OPENAI_API_KEY ?? "",
     embeddingModel: env.AI_EMBEDDING_MODEL || "text-embedding-3-small",
-    workerSecret: env.AI_WORKER_SECRET ?? "",
+    // Sem espaços nas pontas: colado na Vercel com uma quebra de linha, o
+    // segredo nunca bateria com o do banco (o cabeçalho chega sem ela).
+    workerSecret: env.AI_WORKER_SECRET?.trim() ?? "",
     workerBudgetMs: Number(env.AI_WORKER_BUDGET_MS) || 50_000,
     providerKey: providerKeyFrom(env.AI_PROVIDER_KEY),
   };
