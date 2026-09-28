@@ -1,14 +1,19 @@
 // Campanhas: brings the MASO's Facebook (Meta Ads) access over to MAVI, so
-// nobody has to connect client by client again. Reads two phpMyAdmin dumps
-//   usuarios_make_facebook                   (a Facebook profile, its token
-//                                             and when it was generated)
-//   usuarios_make_facebook_accounts_makeads  (each ad account, the profile
-//                                             that reaches it and the token)
+// nobody has to connect client by client again. Reads the phpMyAdmin dumps
+//   usuarios_make_facebook           (a Facebook profile, its token and when
+//                                     it was generated)
+//   usuarios_make_facebook_accounts  (each ad account, the profile that
+//                                     reaches it and the token: the table the
+//                                     MASO's login writes and its crons read,
+//                                     facebook/global.php AdAccountV3)
 // and writes one SQL file for pgAdmin / the SQL editor (runs as postgres).
+// Not usuarios_make_facebook_accounts_makeads: its tokens are the "Make CRM"
+// app's, and MAVI signs every call with the MASO's app (META_APP_SECRET), so
+// Facebook refuses them ("Invalid appsecret_proof").
 //
 //   GOOGLE_TOKEN_KEY_ADS=… node scripts/import-maso-meta-tokens.mjs \
 //     --input usuarios_make_facebook.sql \
-//     --input usuarios_make_facebook_accounts_makeads.sql \
+//     --input usuarios_make_facebook_accounts.sql \
 //     --company <uuid> --author <uuid> --out meta-tokens.sql
 //
 // Tokens never appear in the file in the clear: each is sealed here with
@@ -41,7 +46,7 @@ const TOKEN_DAYS = 60;
 const USAGE = `Uso:
   GOOGLE_TOKEN_KEY_ADS=… node scripts/import-maso-meta-tokens.mjs \\
     --input usuarios_make_facebook.sql \\
-    --input usuarios_make_facebook_accounts_makeads.sql \\
+    --input usuarios_make_facebook_accounts.sql \\
     --company <uuid da empresa> --author <uuid de quem importa> --out meta-tokens.sql
 
 A chave é a mesma GOOGLE_TOKEN_KEY_ADS da Vercel (32 bytes em base64). Para
@@ -84,10 +89,14 @@ const validDay = (v) =>
  */
 export function buildRows(tables) {
   const profiles = tables.get("usuarios_make_facebook") ?? [];
-  const accounts = tables.get("usuarios_make_facebook_accounts_makeads") ?? [];
+  if (tables.has("usuarios_make_facebook_accounts_makeads"))
+    throw new UsageError(
+      "Não use usuarios_make_facebook_accounts_makeads: os tokens dela são do app Make CRM, e o MAVI usa o app do MASO. Passe usuarios_make_facebook_accounts.",
+    );
+  const accounts = tables.get("usuarios_make_facebook_accounts") ?? [];
   if (!accounts.length)
     throw new UsageError(
-      "A exportação não tem a tabela usuarios_make_facebook_accounts_makeads.",
+      "A exportação não tem a tabela usuarios_make_facebook_accounts (as contas de anúncio que o MASO usa).",
     );
   // The newest row of each profile.
   const profileOf = new Map();

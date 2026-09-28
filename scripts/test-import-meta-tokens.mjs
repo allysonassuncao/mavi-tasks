@@ -108,12 +108,19 @@ await sql(
 );
 
 const tok = (n) => `EAA${String(n).repeat(30)}`;
-const dump = (profiles, accounts) =>
+// The accounts in the MASO's own table (what its login writes and its crons
+// read), or in the _makeads one (another app's tokens: refused).
+const dump = (profiles, accounts, makeads = false) =>
   parseSqlDump(`
 INSERT INTO \`usuarios_make_facebook\` (\`id\`, \`id_usuario\`, \`usuario\`, \`facebook_access_token\`, \`facebook_user_id\`, \`bornlogic_access_token\`, \`owner\`, \`gerado_em\`, \`valido_ate\`) VALUES
 ${profiles.map((p, i) => `(${i + 1}, 101, '', '${p.token}', '${p.fb}', '', 'INTERNO', '${p.day}', '0000-00-00')`).join(",\n")};
-INSERT INTO \`usuarios_make_facebook_accounts_makeads\` (\`id\`, \`id_usuario\`, \`id_account\`, \`owner\`, \`access_token\`) VALUES
-${accounts.map((a, i) => `(${i + 1}, '${a.fb}', '${a.account}', 'INTERNO', '${a.token}')`).join(",\n")};
+${
+  makeads
+    ? `INSERT INTO \`usuarios_make_facebook_accounts_makeads\` (\`id\`, \`id_usuario\`, \`id_account\`, \`owner\`, \`access_token\`) VALUES
+${accounts.map((a, i) => `(${i + 1}, '${a.fb}', '${a.account}', 'INTERNO', '${a.token}')`).join(",\n")};`
+    : `INSERT INTO \`usuarios_make_facebook_accounts\` (\`id\`, \`id_usuario\`, \`id_account\`, \`access_token\`) VALUES
+${accounts.map((a, i) => `(${i + 1}, '${a.fb}', '${a.account}', '${a.token}')`).join(",\n")};`
+}
 `);
 const key = crypto.randomBytes(32);
 const run = async (tables) => {
@@ -212,6 +219,27 @@ await check(
     assert.equal(unseal(by["444"].token_cipher), tok(3));
   },
 );
+
+await check("sem a tabela de contas do MASO, avisa", async () => {
+  assert.throws(
+    () => buildRows(new Map([["usuarios_make_facebook", []]])),
+    /usuarios_make_facebook_accounts/,
+  );
+});
+
+await check("recusa a _makeads (tokens do app Make CRM)", async () => {
+  assert.throws(
+    () =>
+      buildRows(
+        dump(
+          [{ fb: "700", token: tok(1), day: shift(-5) }],
+          [{ fb: "700", account: "111", token: tok(1) }],
+          true,
+        ),
+      ),
+    /Make CRM/,
+  );
+});
 
 await check(
   "rodar de novo: só um token mais novo substitui; o do MAVI fica",
