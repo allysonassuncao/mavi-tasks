@@ -1007,6 +1007,9 @@ export default function App() {
   function openNotification(n: AppNotification) {
     if (n.link) navigate(appLink(n.link));
     else if (n.task_id) setSelected(n.task_id);
+    readNotification(n);
+  }
+  function readNotification(n: AppNotification) {
     if (n.read_at) return;
     const at = new Date().toISOString();
     setInbox((list) =>
@@ -2039,6 +2042,7 @@ export default function App() {
               items={inbox}
               members={data.members}
               onOpen={openNotification}
+              onRead={readNotification}
               onReadAll={readAllNotifications}
             />
             {notifications !== "unsupported" && (

@@ -2,6 +2,7 @@ import * as Popover from "@radix-ui/react-popover";
 import {
   AtSign,
   BellRing,
+  Check,
   CheckCheck,
   Inbox,
   Sparkles,
@@ -23,17 +24,20 @@ function when(value: string) {
 /**
  * The person's inbox, as in ClickUp: who mentioned or replied to them, and
  * where, plus notices of the Social Leads (a plan the AI finished). Opening
- * one marks it read and opens the task (or the notice's place).
+ * one marks it read and opens the task (or the notice's place); the check
+ * beside an unread one marks just it read, without opening anything.
  */
 export function NotificationInbox({
   items,
   members,
   onOpen,
+  onRead,
   onReadAll,
 }: {
   items: AppNotification[];
   members: Member[];
   onOpen: (n: AppNotification) => void;
+  onRead: (n: AppNotification) => void;
   onReadAll: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -77,7 +81,7 @@ export function NotificationInbox({
                 <li key={n.id}>
                   <button
                     type="button"
-                    className={n.read_at ? "" : "unread"}
+                    className={n.read_at ? "inbox-item" : "inbox-item unread"}
                     onClick={() => {
                       setOpen(false);
                       onOpen(n);
@@ -130,6 +134,17 @@ export function NotificationInbox({
                     </span>
                     <time dateTime={n.created_at}>{when(n.created_at)}</time>
                   </button>
+                  {!n.read_at && (
+                    <button
+                      type="button"
+                      className="inbox-read"
+                      title="Marcar como lida"
+                      aria-label="Marcar como lida"
+                      onClick={() => onRead(n)}
+                    >
+                      <Check size={13} />
+                    </button>
+                  )}
                 </li>
               );
             })}

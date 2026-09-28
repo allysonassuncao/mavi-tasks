@@ -5679,7 +5679,10 @@ label .input-control .ui-input {
   margin: 0;
   padding: 6px;
 }
-.inbox-panel li button {
+.inbox-panel li {
+  position: relative;
+}
+.inbox-panel li button.inbox-item {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 10px;
@@ -5695,15 +5698,15 @@ label .input-control .ui-input {
   line-height: 1.4;
   cursor: pointer;
 }
-.inbox-panel li button:hover,
-.inbox-panel li button:focus-visible {
+.inbox-panel li button.inbox-item:hover,
+.inbox-panel li button.inbox-item:focus-visible {
   background: #f3f6ef;
   outline: none;
 }
-.inbox-panel li button.unread {
+.inbox-panel li button.inbox-item.unread {
   background: #f4faeb;
 }
-.inbox-panel li button.unread .inbox-line::before {
+.inbox-panel li button.inbox-item.unread .inbox-line::before {
   content: "";
   display: inline-block;
   width: 7px;
@@ -5731,6 +5734,40 @@ label .input-control .ui-input {
   color: var(--muted);
   font-size: 0.64rem;
   white-space: nowrap;
+}
+/* Marks one notification read without opening it: under the time, shown
+   on hover or focus (always on touch screens, which have no hover). */
+.inbox-panel .inbox-read {
+  position: absolute;
+  top: 30px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.inbox-panel li:hover .inbox-read,
+.inbox-panel .inbox-read:focus-visible {
+  opacity: 1;
+}
+.inbox-panel .inbox-read:hover,
+.inbox-panel .inbox-read:focus-visible {
+  color: #3f7a1f;
+  border-color: #9cc47e;
+  outline: none;
+}
+@media (hover: none) {
+  .inbox-panel .inbox-read {
+    opacity: 1;
+  }
 }
 .inbox-empty {
   display: grid;
