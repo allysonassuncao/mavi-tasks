@@ -71,13 +71,23 @@ export function demoCampaigns(
   function checkCycle(a: AdCampaign, input: CycleInput, except?: string) {
     if (input.end_date < input.start_date)
       throw Error("O término precisa ser igual ou posterior ao início");
-    const other = store.cycles.find(
+    // As in the database: an edit that keeps the period is not rechecked
+    // (imported cycles may share the turnover day with the previous one).
+    const kept = store.cycles.some(
       (y) =>
-        y.campaign_id === a.id &&
-        y.id !== except &&
-        y.start_date <= input.end_date &&
-        y.end_date >= input.start_date,
+        y.id === except &&
+        y.start_date === input.start_date &&
+        y.end_date === input.end_date,
     );
+    const other =
+      !kept &&
+      store.cycles.find(
+        (y) =>
+          y.campaign_id === a.id &&
+          y.id !== except &&
+          y.start_date <= input.end_date &&
+          y.end_date >= input.start_date,
+      );
     if (other)
       throw Error(
         `O período conflita com o ciclo de ${fmt(other.start_date)} a ${fmt(other.end_date)} desta campanha`,

@@ -375,6 +375,54 @@ await check(
   },
 );
 
+await check(
+  "ciclo importado que divide o dia de virada aceita editar só o M",
+  async () => {
+    const first = await cycle(admin, main, {
+      start: "2024-01-01",
+      end: "2024-01-20",
+    });
+    const second = await cycle(admin, main, {
+      start: "2024-01-21",
+      end: "2024-02-20",
+    });
+    // As the MASO import leaves it: the first ends on the day the next starts.
+    await sql("update ad_cycles set end_date='2024-01-21' where id=$1", [
+      first,
+    ]);
+    const [y] = await sql("select version from ad_cycles where id=$1", [
+      second,
+    ]);
+    const edit = (version, start, m) =>
+      rpc("update_ad_cycle", [
+        second,
+        version,
+        "2024-01-01",
+        start,
+        "2024-02-20",
+        "lead",
+        50,
+        1000,
+        m,
+        "external_page",
+        [],
+        "",
+        "[]",
+      ]);
+    await as(admin);
+    await edit(y.version, "2024-01-21", 5.2);
+    const [row] = await sql(
+      "select multiplier::float from ad_cycles where id=$1",
+      [second],
+    );
+    assert.equal(row.multiplier, 5.2);
+    await assert.rejects(
+      edit(y.version + 1, "2024-01-20", 5.2),
+      /conflita com o ciclo de 01\/01\/2024 a 21\/01\/2024/,
+    );
+  },
+);
+
 await check("plataforma não muda com mais de um ciclo", async () => {
   const [a] = await sql("select version from ad_campaigns where id=$1", [main]);
   await as(admin);
