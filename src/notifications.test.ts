@@ -50,6 +50,26 @@ describe("Notificações de novas tarefas", () => {
     expect(FakeNotification.shown).toHaveLength(0);
     expect(await toggleNotifications()).toBe("on");
   });
+  it("pelo service worker, não repete a que o push já mostrou", async () => {
+    FakeNotification.permission = "granted";
+    const open = new Set(["t1"]);
+    const reg = {
+      getNotifications: vi.fn(async ({ tag }: { tag: string }) =>
+        open.has(tag) ? [{ tag }] : [],
+      ),
+      showNotification: vi.fn(async (_: string, o: { tag: string }) => {
+        open.add(o.tag);
+      }),
+    };
+    vi.stubGlobal("navigator", {
+      serviceWorker: { getRegistration: async () => reg },
+    });
+    showNotification("x", { body: "", tag: "t1", onClick: () => {} });
+    showNotification("y", { body: "", tag: "t2", onClick: () => {} });
+    await vi.waitFor(() => expect(open.has("t2")).toBe(true));
+    expect(reg.showNotification).toHaveBeenCalledTimes(1);
+    expect(FakeNotification.shown).toHaveLength(0);
+  });
   it("respeita o bloqueio do navegador", () => {
     FakeNotification.permission = "denied";
     expect(notificationState()).toBe("denied");

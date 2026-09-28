@@ -6,10 +6,6 @@ import { rpc } from "./api";
  * person, so notifications arrive with the app closed (api/push.ts sends
  * them). Needs the service worker, which only production registers.
  */
-let active = false;
-/** Whether this browser receives pushes (then the app shows no copy of its own). */
-export const pushActive = () => active;
-
 function supported() {
   return (
     typeof window !== "undefined" &&
@@ -19,14 +15,15 @@ function supported() {
   );
 }
 
-/** The service worker, or null when there isn't one (dev, blocked). */
+/**
+ * The service worker, or null when there isn't one (dev, blocked). Waits for
+ * it: on the first visit it's only registered on "load", after this runs.
+ */
 async function registration(): Promise<ServiceWorkerRegistration | null> {
   if (!supported()) return null;
-  const existing = await navigator.serviceWorker.getRegistration();
-  if (!existing) return null;
   return Promise.race([
     navigator.serviceWorker.ready,
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 10000)),
   ]);
 }
 
@@ -49,7 +46,7 @@ const sameKey = (a: ArrayBuffer | null, b: Uint8Array) =>
 export async function syncPush(on: boolean): Promise<boolean> {
   try {
     const reg = await registration();
-    if (!reg) return (active = false);
+    if (!reg) return false;
     const current = await reg.pushManager.getSubscription();
     if (!on || Notification.permission !== "granted") {
       if (current) {
@@ -58,14 +55,14 @@ export async function syncPush(on: boolean): Promise<boolean> {
         }).catch(() => {});
         await current.unsubscribe().catch(() => {});
       }
-      return (active = false);
+      return false;
     }
     const res = await fetch("/api/push");
     const { publicKey } = (await res.json().catch(() => ({}))) as {
       publicKey?: string;
     };
     // Not configured on the server yet: the app keeps notifying on its own.
-    if (!res.ok || !publicKey) return (active = false);
+    if (!res.ok || !publicKey) return false;
     const key = keyBytes(publicKey);
     let sub = current;
     if (sub && !sameKey(sub.options.applicationServerKey, key)) {
@@ -86,9 +83,9 @@ export async function syncPush(on: boolean): Promise<boolean> {
       p_auth: json.keys?.auth ?? "",
       p_user_agent: navigator.userAgent.slice(0, 400),
     });
-    return (active = true);
+    return true;
   } catch {
     // Push is an extra: the in-app notices keep working without it.
-    return (active = false);
+    return false;
   }
 }

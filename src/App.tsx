@@ -149,7 +149,7 @@ import { WhatsappGroupsPanel } from "./WhatsappGroups";
 import { SuggestionDialog, SuggestionSettingsPanel } from "./SuggestionDialog";
 import { SidebarNav, type NavTarget } from "./SidebarNav";
 import { requestPasswordReset } from "./profile";
-import { pushActive, syncPush } from "./push";
+import { syncPush } from "./push";
 import {
   CreateForm,
   type FormPreset,
@@ -1138,8 +1138,8 @@ export default function App() {
     const unsubscribe = api.subscribeToCompanyChanges(company, {
       user,
       // A new task for the person, a mention or a reply: the inbox row
-      // arrives here while the app is open. With push on, the browser already shows
-      // the system notification (same tag), so only the toast is added.
+      // arrives here while the app is open. It's shown here even with push on
+      // (which may never arrive); the push uses the same tag, so it never shows twice.
       onNotification: (row) => {
         live.current.loadInbox();
         api
@@ -1150,7 +1150,6 @@ export default function App() {
             // Social Leads: a plan the AI finished (or couldn't) writing.
             if (n.link) {
               notify(n.task_title);
-              if (pushActive()) return;
               const link = n.link;
               showNotification(n.task_title, {
                 body: n.excerpt ?? "",
@@ -1171,7 +1170,6 @@ export default function App() {
                 ? `Nova tarefa para você: ${n.task_title}`
                 : `${who} ${said} em ${n.task_title}`,
             );
-            if (pushActive()) return;
             showNotification(
               assigned ? "Nova tarefa para você" : `${who} ${said}`,
               {

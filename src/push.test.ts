@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.fn(async () => null);
 vi.mock("./api", () => ({ rpc }));
-const { syncPush, pushActive } = await import("./push");
+const { syncPush } = await import("./push");
 
 // A VAPID public key in base64url, and its bytes.
 const publicKey = "AQID";
@@ -65,7 +65,6 @@ describe("syncPush", () => {
   it("inscreve o navegador e registra para a pessoa", async () => {
     const { pushManager } = fakeBrowser();
     expect(await syncPush(true)).toBe(true);
-    expect(pushActive()).toBe(true);
     expect(pushManager.subscribe).toHaveBeenCalledWith({
       userVisibleOnly: true,
       applicationServerKey: keyBytes,

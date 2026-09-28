@@ -11,7 +11,7 @@ function pushEnv(): PushEnv {
     vapidPublicKey: process.env.VAPID_PUBLIC_KEY,
     vapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
     vapidSubject: process.env.VAPID_SUBJECT || "mailto:suporte@mavi.app.br",
-    secret: process.env.PUSH_SECRET,
+    secret: process.env.PUSH_SECRET?.trim(),
   };
 }
 

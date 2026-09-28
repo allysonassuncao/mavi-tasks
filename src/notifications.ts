@@ -70,16 +70,20 @@ export function showNotification(
   if (!("serviceWorker" in navigator)) return fallback();
   navigator.serviceWorker
     .getRegistration()
-    .then((reg) =>
-      reg
-        ? reg.showNotification(title, {
-            body: options.body,
-            tag: options.tag,
-            icon: "/icons/icon-192-v2.png",
-            badge: "/icons/icon-192-v2.png",
-            data: { url: options.url ?? "/" },
-          })
-        : fallback(),
-    )
+    .then(async (reg) => {
+      if (!reg) return fallback();
+      // The push (same tag) may have shown it already.
+      const shown = await reg
+        .getNotifications({ tag: options.tag })
+        .catch(() => []);
+      if (shown.length) return;
+      await reg.showNotification(title, {
+        body: options.body,
+        tag: options.tag,
+        icon: "/icons/icon-192-v2.png",
+        badge: "/icons/icon-192-v2.png",
+        data: { url: options.url ?? "/" },
+      });
+    })
     .catch(fallback);
 }
