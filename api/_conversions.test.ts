@@ -35,15 +35,64 @@ describe("ações de conversão do Google que contam", () => {
     ).toBe(false);
     expect(countsByDefault("lead", "make_landing_page", "CONTACT")).toBe(true);
   });
+  it("sem escolha, também pelo nome, como o MASO", () => {
+    // "Outro" or "Clique de saída" named WhatsApp/Lead: the MASO counted them.
+    expect(
+      countsByDefault("lead", "external_page", "DEFAULT", "Clique no WhatsApp"),
+    ).toBe(true);
+    expect(
+      countsByDefault(
+        "lead",
+        "external_page",
+        "OUTBOUND_CLICK",
+        "Lead - Formulário",
+      ),
+    ).toBe(true);
+    expect(
+      countsByDefault(
+        "lead",
+        "external_page",
+        "DEFAULT",
+        "Inscrição concluída",
+      ),
+    ).toBe(true);
+    // Never the funnel's words nor its categories.
+    expect(
+      countsByDefault(
+        "lead",
+        "external_page",
+        "DEFAULT",
+        "Visualização do WhatsApp",
+      ),
+    ).toBe(false);
+    expect(
+      countsByDefault("lead", "external_page", "PAGE_VIEW", "Página de lead"),
+    ).toBe(false);
+    expect(
+      countsByDefault("lead", "external_page", "DEFAULT", "Tempo no site"),
+    ).toBe(false);
+    // The Make page: not "lead" (its leads come from the Make), WhatsApp yes.
+    expect(
+      countsByDefault("lead", "make_landing_page", "DEFAULT", "Lead site"),
+    ).toBe(false);
+    expect(
+      countsByDefault("lead", "make_landing_page", "DEFAULT", "WhatsApp"),
+    ).toBe(true);
+    // Sales: by category only.
+    expect(countsByDefault("sale", "external_page", "DEFAULT", "Lead")).toBe(
+      false,
+    );
+  });
   it("arredonda cada ação e soma as que contam", () => {
     const r = classifyActions("lead", "external_page", actions, 5, null);
-    // 3 + 3 (2.5 rounds up); "Outro" and the purchase don't count; calls only when chosen.
-    expect(r.counted).toBe(6);
+    // 3 + 3 (2.5 rounds up) + 1 ("Compra", in the MASO's list); "Outro"
+    // without a listed name doesn't count; calls only when chosen.
+    expect(r.counted).toBe(7);
     expect(r.rows.map((x) => [x.id, x.conversions, x.counted])).toEqual([
       ["1", 3, true],
       ["2", 3, true],
       ["3", 30, false],
-      ["4", 1, false],
+      ["4", 1, true],
     ]);
     expect(r.callsCounted).toBe(false);
   });
@@ -57,7 +106,7 @@ describe("ações de conversão do Google que contam", () => {
     // An empty choice is no choice.
     expect(
       classifyActions("lead", "external_page", actions, 5, []).counted,
-    ).toBe(6);
+    ).toBe(7);
   });
   it("id da ação a partir do resource name", () => {
     expect(actionId("customers/123/conversionActions/456")).toBe("456");

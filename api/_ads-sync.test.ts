@@ -324,14 +324,15 @@ describe("o que conta como resultado (regras dos crons do MASO)", () => {
       googleActions,
     );
   it("Google, sem escolha: as categorias do objetivo", () => {
-    // Lead: WhatsApp 3 + form 3 + call 1 (not "Outro", views, cart, purchase).
+    // Lead: WhatsApp 3 + form 3 + call 1 + "Compra" 2 (in the MASO's names);
+    // not "Tempo no site" ("Outro"), views, cart.
     expect(g("lead")).toMatchObject({
       spend: 12.5,
-      conversions: 7,
+      conversions: 9,
       clicks: 50,
       reach: 0,
     });
-    expect(g("message").conversions).toBe(7);
+    expect(g("message").conversions).toBe(9);
     // Sale: purchases, and the funnel by category.
     expect(g("sale")).toMatchObject({
       conversions: 2,

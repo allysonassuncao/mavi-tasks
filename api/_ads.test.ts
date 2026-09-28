@@ -1046,7 +1046,7 @@ describe("Google: ações de conversão do ciclo", () => {
     metrics: { conversions },
   });
 
-  it("lista as ações do ciclo e diz quais contam (padrão: categorias de cadastro)", async () => {
+  it("lista as ações do ciclo e diz quais contam (padrão: categorias de cadastro e nomes do MASO)", async () => {
     const { fetch, calls } = network([
       context(),
       ...google([
@@ -1067,7 +1067,8 @@ describe("Google: ações de conversão do ciclo", () => {
       selection: null,
       phone_calls: 4,
       calls_counted: false,
-      counted: 33,
+      // The form, and "Clique WhatsApp" filed under "Outro" (the MASO's names).
+      counted: 123,
     });
     const actions = result.body.actions as {
       id: string;
@@ -1076,7 +1077,7 @@ describe("Google: ações de conversão do ciclo", () => {
     }[];
     expect(actions.map((a) => [a.id, a.counted, a.category_label])).toEqual([
       ["13", false, "Visualização de página"],
-      ["12", false, "Outro"],
+      ["12", true, "Outro"],
       ["11", true, "Envio de formulário"],
     ]);
     const search = calls.filter((c) => c.url.includes("searchStream"));

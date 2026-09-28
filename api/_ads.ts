@@ -802,6 +802,7 @@ async function googleConversionActions(
           ctx.objective,
           ctx.destination,
           r.category,
+          r.name,
         ),
       }))
       .sort((a, b) => b.conversions - a.conversions),

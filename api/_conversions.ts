@@ -5,8 +5,10 @@
  *
  *  - The cycle may choose them (ad_cycles.conversion_actions: the actions'
  *    ids, and "phone_calls" for the calls from ads): then only those count.
- *  - Otherwise, by Google's category of each action (sturdier than the name
- *    list the MASO used — an action named outside it counted as zero):
+ *  - Otherwise, by Google's category of each action, or by its name as the
+ *    MASO's cron did (google/global.php InsightsReportConversionV3): many
+ *    accounts file "WhatsApp" or "Lead" under "Outro" or "Clique de saída",
+ *    and the MASO counted them. By category:
  *      · sales (VENDA): purchases;
  *      · the Make capture page: contact, call, directions/visit and
  *        purchase — the page's leads come from the Make server, and the
@@ -14,7 +16,11 @@
  *      · everything else: the lead categories (form, contact, call,
  *        sign-up, quote, appointment, imported/qualified/converted leads,
  *        directions/visit);
- *    never page views, clicks, engagement, downloads or "Outro".
+ *    by name (without accents), not for sales: whats, phone, compra, lead,
+ *    local, purch, cadastro, contato, inscreve, subscription, subs, inscri,
+ *    instala (on the Make page only whats, phone, local, compra, purch),
+ *    never with visualiza, viu, finali, checkout, cart, content, carri, nor
+ *    in the funnel's categories.
  *  - The sales funnel by category: page view, add to cart, begin checkout.
  * Each action's conversions are rounded (as the MASO did).
  */
@@ -80,16 +86,34 @@ export const CATEGORY_LABELS: Record<string, string> = {
   DEFAULT: "Outro",
 };
 
+// The MASO's name lists (external page, and its own capture page).
+const MASO_NAMES =
+  /whats|phone|compra|lead|local|purch|cadastro|contato|inscreve|subscription|subs|inscritos|inscri|instala/i;
+const MASO_MAKE_PAGE_NAMES = /whats|phone|local|compra|purch/i;
+const MASO_NEVER = /visualiza|viu|finali|checkout|cart|content|carri/i;
+const FUNNEL_CATEGORIES = new Set([
+  "PAGE_VIEW",
+  "ADD_TO_CART",
+  "BEGIN_CHECKOUT",
+]);
+const plain = (text: string) =>
+  text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
 /** Whether an action counts by default (no choice made for the cycle). */
 export function countsByDefault(
   objective: Objective,
   destination: Destination,
   category: string,
+  name = "",
 ) {
+  const byName = (list: RegExp) =>
+    !FUNNEL_CATEGORIES.has(category) &&
+    !MASO_NEVER.test(plain(name)) &&
+    list.test(plain(name));
   if (destination === "make_landing_page")
-    return MAKE_PAGE_CATEGORIES.has(category);
+    return MAKE_PAGE_CATEGORIES.has(category) || byName(MASO_MAKE_PAGE_NAMES);
   if (objective === "sale") return SALE_CATEGORIES.has(category);
-  return LEAD_CATEGORIES.has(category);
+  return LEAD_CATEGORIES.has(category) || byName(MASO_NAMES);
 }
 
 /** "customers/123/conversionActions/456" → "456". */
@@ -113,7 +137,7 @@ export function classifyActions(
       conversions: n,
       counted: chosen
         ? chosen.has(a.id)
-        : countsByDefault(objective, destination, a.category),
+        : countsByDefault(objective, destination, a.category, a.name),
     };
   });
   // The calls from ads: only when chosen (by default a call counts when

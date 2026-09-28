@@ -101,7 +101,7 @@ export function GoogleConversions({
           conversões, no custo por resultado e no status Bom/Ruim.{" "}
           {view?.selection
             ? "Este ciclo tem uma escolha própria."
-            : "Sem escolha, contam as categorias do objetivo (formulário, contato, ligação, inscrição, orçamento, agendamento; em vendas, compra)."}
+            : "Sem escolha, contam as categorias do objetivo (formulário, contato, ligação, inscrição, orçamento, agendamento; em vendas, compra) e, como no MASO, as ações com WhatsApp, lead, contato, cadastro, inscrição, compra… no nome."}
         </p>
         {!view && !error && <Loading compact />}
         {view && !view.period && (
@@ -186,7 +186,7 @@ export function GoogleConversions({
               onClick={() =>
                 void save(
                   null,
-                  "Conversões pelas categorias do objetivo. Números sincronizados.",
+                  "Conversões pelas categorias do objetivo e pelos nomes do MASO. Números sincronizados.",
                 )
               }
             >
