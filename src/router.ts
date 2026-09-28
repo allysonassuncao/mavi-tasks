@@ -62,6 +62,7 @@ export const SETTINGS_TABS = [
   "config-templates",
   "config-sugestoes",
   "config-whatsapp",
+  "config-api",
 ] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 /** Tabs of "Painel da MAVI", by the URL's hash (the old "#ia-…" still work). */

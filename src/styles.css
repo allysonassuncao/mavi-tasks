@@ -16822,6 +16822,31 @@ td.ai-empty-cell {
     flex-basis: 100%;
   }
 }
+.api-key-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.api-key-form label {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+.api-key-created {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.api-keys .connected-list small code {
+  font-size: 0.72rem;
+}
+.api-keys .connected-list li.revoked {
+  opacity: 0.55;
+}
 .member-modules-mcp {
   margin-top: 2px;
   border-top: 1px solid #eef1ed;

@@ -26,6 +26,10 @@
       "destination": "/api/drive"
     },
     {
+      "source": "/api/v1/:path*",
+      "destination": "/api/drive?v1=:path*"
+    },
+    {
       "source": "/api/mcp",
       "destination": "/api/drive?mcp=1"
     },

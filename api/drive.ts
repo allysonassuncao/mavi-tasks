@@ -27,6 +27,7 @@ import { claudeComplete } from "./_social-leads.js";
 import { openAiEmbedder } from "./_ai-embeddings.js";
 import { waitUntil } from "@vercel/functions";
 import { appOrigin } from "./_origin.js";
+import { handlePublicApi } from "./_public-api.js";
 
 function credentials(): GcsCredentials | null {
   if (process.env.GCS_CREDENTIALS)
@@ -161,11 +162,52 @@ async function mcpRoutes(
   res.end(JSON.stringify(result.body));
 }
 
+/** API pública v1 (/api/v1/…, reescrita para cá): ver docs/API.md. */
+async function publicApiRoute(
+  req: IncomingMessage & { body?: any },
+  res: ServerResponse,
+  url: URL,
+) {
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "no-store");
+  const method = req.method ?? "GET";
+  let body: unknown = null;
+  if (method === "POST") {
+    try {
+      const raw = await readBody(req);
+      body = raw ? JSON.parse(raw) : null;
+    } catch {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: "JSON inválido no corpo." }));
+      return;
+    }
+  }
+  const path =
+    url.searchParams.get("v1") ?? url.pathname.replace(/^\/api\/v1\/?/, "");
+  const result = await handlePublicApi(
+    { method, path, query: url.searchParams, headers: req.headers, body },
+    driveEnv(),
+  );
+  for (const [k, v] of Object.entries(result.headers ?? {})) res.setHeader(k, v);
+  res.statusCode = result.status;
+  res.end(JSON.stringify(result.body));
+}
+
 export default async function handler(
   req: IncomingMessage & { body?: any },
   res: ServerResponse,
 ) {
   const url = new URL(req.url ?? "/", "https://mavi.invalid");
+  if (url.pathname.startsWith("/api/v1/") || url.searchParams.has("v1")) {
+    try {
+      await publicApiRoute(req, res, url);
+    } catch (err) {
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: (err as Error).message }));
+    }
+    return;
+  }
   if (
     url.pathname === "/api/mcp" ||
     url.pathname.startsWith("/.well-known/oauth-protected-resource") ||

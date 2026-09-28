@@ -170,6 +170,7 @@ import { ProfilePage } from "./ProfilePage";
 import { MemberForm } from "./MemberForm";
 import { MemberModulesMenu } from "./MemberModulesMenu";
 import { MemberAccessLogs } from "./MemberAccessLogs";
+import { ApiKeysPanel } from "./ApiKeys";
 import { logAccess } from "./access-logs";
 import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
@@ -3270,6 +3271,9 @@ export default function App() {
                         ],
                         ["config-sugestoes", "Sugestões", null],
                         ["config-whatsapp", "Grupos do Whatsapp", null],
+                        ...(isAdmin
+                          ? [["config-api", "Chaves de API", null]]
+                          : []),
                       ] as [SettingsTab, string, number | null][]
                     ).map(([id, label, n]) => (
                       <button
@@ -3528,6 +3532,14 @@ export default function App() {
                         data={data}
                         company={company}
                         canEdit={isAdmin}
+                        demo={demo}
+                        notify={notify}
+                      />
+                    )}
+                    {settingsView === "config-api" && (
+                      <ApiKeysPanel
+                        company={company}
+                        isAdmin={isAdmin}
                         demo={demo}
                         notify={notify}
                       />
