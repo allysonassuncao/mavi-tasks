@@ -247,7 +247,7 @@ export async function graph<T>(
     if (body.error?.code === 190)
       throw new AdsError(
         409,
-        "O acesso ao Facebook desta conta expirou. Conecte o Facebook de novo.",
+        `O acesso ao Facebook desta conta expirou. Conecte o Facebook de novo.${body.error.message ? ` (Facebook: ${body.error.message})` : ""}`,
         "expired",
       );
     throw new AdsError(
@@ -332,12 +332,8 @@ async function metaAccountToken(
       "Esta conta de anúncio não está conectada. Conecte o Facebook com um usuário que tenha acesso a ela.",
       "not_connected",
     );
-  if (row.token_expires_at && Date.parse(row.token_expires_at) < Date.now())
-    throw new AdsError(
-      409,
-      "O acesso ao Facebook desta conta expirou. Conecte o Facebook de novo.",
-      "expired",
-    );
+  // The stored expiry is only an estimate: Facebook says (code 190 in
+  // graph) whether the token still works.
   return unseal(env.tokenKey!, row.token_cipher);
 }
 

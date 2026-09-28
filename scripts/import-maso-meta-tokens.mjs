@@ -25,8 +25,9 @@
 // kept without a client (the sync still finds them by account).
 //
 // Safe to run again: an account connected in MAVI (by a person, after the
-// Facebook login) is never touched; one imported before only gets a newer
-// token.
+// Facebook login) is never touched; one imported before gets the file's
+// token. The expiry isn't stored (see renderSql): the estimate below only
+// picks between repeated rows and goes to the summary.
 import crypto from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -197,18 +198,19 @@ left join lateral (
  ) k2 order by (k2.status = 'active') desc, k2.end_date desc, k2.account_name is null limit 1
 ) owner on true;
 
+-- The expiry stays unknown: the MASO's dates don't tell it (tokens past the
+-- estimate still work), and Facebook answers whether a token works.
 insert into mavi_private.ad_meta_accounts(company_id, account_id, name, fb_user_id, fb_user_name, token_cipher,
  token_expires_at, connected_by, client_id)
 select ${c}, account_id, left(account_name, 200), fb_user_id, ${sqlString(IMPORTED_PROFILE)}, token_cipher,
- expires_at, ${sqlString(author)}, client_id
+ null, ${sqlString(author)}, client_id
 from maso_meta_import where not connected_in_mavi
 on conflict (company_id, account_id) do update set token_cipher = excluded.token_cipher,
- token_expires_at = excluded.token_expires_at, fb_user_id = excluded.fb_user_id,
+ token_expires_at = null, fb_user_id = excluded.fb_user_id,
  name = case when excluded.name <> '' then excluded.name else ad_meta_accounts.name end,
  client_id = coalesce(ad_meta_accounts.client_id, excluded.client_id), updated_at = now()
--- Imported before: only a newer token replaces it.
-where ad_meta_accounts.fb_user_name = ${sqlString(IMPORTED_PROFILE)}
- and coalesce(ad_meta_accounts.token_expires_at, '-infinity') <= coalesce(excluded.token_expires_at, 'infinity');
+-- Imported before: the file's token (the MASO's current one) replaces it.
+where ad_meta_accounts.fb_user_name = ${sqlString(IMPORTED_PROFILE)};
 
 -- Summary (shown by pgAdmin after the script).
 select count(*) as contas_no_arquivo,

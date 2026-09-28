@@ -2,8 +2,10 @@ import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   BACKFILL_LIMIT,
+  gate,
   googleTotals,
   handleAdsSync,
+  leadsUpTo,
   mapLimit,
   metaResults,
   missingSnapshots,
@@ -112,6 +114,36 @@ describe("várias leituras ao mesmo tempo", () => {
     expect(out).toEqual([60, 20, 40, 10, 30]);
     expect(peak).toBe(2);
     expect(await mapLimit([], 3, async (x) => x)).toEqual([]);
+  });
+});
+
+describe("Make: poucas leituras por vez e acumulados de uma chamada", () => {
+  it("gate: no máximo o limite rodando, os outros esperam", async () => {
+    const run = gate(2);
+    let running = 0;
+    let peak = 0;
+    const out = await Promise.all(
+      [1, 2, 3, 4, 5].map((n) =>
+        run(async () => {
+          peak = Math.max(peak, ++running);
+          await new Promise((r) => setTimeout(r, 5));
+          running--;
+          return n;
+        }),
+      ),
+    );
+    expect(out).toEqual([1, 2, 3, 4, 5]);
+    expect(peak).toBe(2);
+  });
+  it("leads distintos até um dia: a soma dos que apareceram até ele", () => {
+    const firsts = new Map([
+      ["2026-09-21", 3],
+      ["2026-09-22", 2],
+      ["2026-09-24", 1],
+    ]);
+    expect(leadsUpTo(firsts, "2026-09-20")).toBe(0);
+    expect(leadsUpTo(firsts, "2026-09-22")).toBe(5);
+    expect(leadsUpTo(firsts, "2026-09-30")).toBe(6);
   });
 });
 
@@ -656,6 +688,57 @@ describe("POST /api/ads-sync", () => {
     expect(peak).toBeGreaterThan(1);
   });
 
+  it("Make com os primeiros dias: uma chamada só para todos os acumulados", async () => {
+    let batch = [
+      target({
+        objective: "lead",
+        destination: "make_landing_page",
+        landing_pages: ["81895b88"],
+        snapshot_days: ["2026-09-21"],
+      }),
+    ];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [/act_111\/insights/, () => json({ data: [] })],
+      [
+        /POST https:\/\/make\.example\.com/,
+        () =>
+          json({
+            days: {},
+            total: 9,
+            firsts: { "2026-09-20": 4, "2026-09-22": 3, "2026-09-23": 2 },
+          }),
+      ],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(
+      calls.filter((c) => c.url.includes("make.example.com")),
+    ).toHaveLength(1);
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    expect(stored.p_snapshot.conversions).toBe(9);
+    expect(
+      stored.p_backfill.map(
+        (b: { period_end: string; conversions: number }) => [
+          b.period_end,
+          b.conversions,
+        ],
+      ),
+    ).toEqual([
+      ["2026-09-22", 7],
+      ["2026-09-21", 4],
+    ]);
+  });
+
   it("sem acumulado faltando, não manda p_backfill (bancos antigos)", async () => {
     let batch = [target()];
     const { fetch, calls } = network([
@@ -732,13 +815,20 @@ describe("POST /api/ads-sync", () => {
           return json(now);
         },
       ],
+      // The estimate says expired; Facebook is what refuses it.
+      [
+        /graph\.facebook\.com/,
+        () =>
+          json({ error: { code: 190, message: "Session has expired" } }, 400),
+      ],
       [/rpc\/ad_sync_store/, () => json(0)],
     ]);
     const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
     expect(result.body.errors).toEqual([
       {
         cycle: "cy-1",
-        message: "O acesso ao Facebook da conta 111 expirou. Conecte de novo.",
+        message:
+          "Conta 111: O acesso ao Facebook desta conta expirou. Conecte o Facebook de novo. (Facebook: Session has expired)",
       },
     ]);
     const stored = JSON.parse(
@@ -749,6 +839,33 @@ describe("POST /api/ads-sync", () => {
       [],
       null,
     ]);
+  });
+
+  it("validade estimada vencida não impede: o Facebook aceitou o token", async () => {
+    let batch = [
+      target({
+        meta_tokens: {
+          "111": {
+            token_cipher: seal(key, "fb-token"),
+            expires_at: "2020-01-01T00:00:00Z",
+          },
+        },
+      }),
+    ];
+    const { fetch } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [/act_111\/insights/, () => json({ data: [] })],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(result.body).toEqual({ synced: 1, errors: [] });
   });
 
   it("botão do administrador: exige a campanha e usa a sessão", async () => {

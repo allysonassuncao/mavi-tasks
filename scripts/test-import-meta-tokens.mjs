@@ -205,14 +205,15 @@ await check(
     assert.equal(by["111"].name, "Conta Vittalium");
     assert.equal(by["111"].fb_user_id, "700");
     assert.equal(by["111"].fb_user_name, IMPORTED_PROFILE);
-    assert.equal(by["111"].expires, shift(55));
+    // The expiry isn't stored: Facebook says whether a token works.
+    assert.equal(by["111"].expires, null);
     assert.equal(unseal(by["111"].token_cipher), tok(1));
     // 222: connected in MAVI, untouched.
     assert.equal(by["222"].token_cipher, "v1:mavi");
     assert.equal(by["222"].fb_user_name, "Beto");
     // 333: no campaign uses it: kept without a client.
     assert.equal(by["333"].client, null);
-    assert.equal(by["333"].expires, shift(-40));
+    assert.equal(by["333"].expires, null);
     // 444: the ended campaign's client; its own token, expiry unknown.
     assert.equal(by["444"].client, "Nexo");
     assert.equal(by["444"].expires, null);
@@ -242,7 +243,7 @@ await check("recusa a _makeads (tokens do app Make CRM)", async () => {
 });
 
 await check(
-  "rodar de novo: só um token mais novo substitui; o do MAVI fica",
+  "rodar de novo: o token do arquivo substitui o importado; o do MAVI fica",
   async () => {
     await run(
       dump(
@@ -261,10 +262,10 @@ await check(
       (await accounts()).map((a) => [a.account_id, a]),
     );
     assert.equal(unseal(by["111"].token_cipher), tok(5));
-    assert.equal(by["111"].expires, shift(59));
+    assert.equal(by["111"].expires, null);
     assert.equal(by["111"].client, "Vittalium");
-    // Older than what is there: kept.
-    assert.equal(unseal(by["333"].token_cipher), tok(2));
+    // The MASO's current token, even with an older generation date.
+    assert.equal(unseal(by["333"].token_cipher), tok(6));
     assert.equal(by["222"].token_cipher, "v1:mavi");
     assert.equal((await accounts()).length, 4);
   },

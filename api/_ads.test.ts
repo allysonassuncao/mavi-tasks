@@ -346,15 +346,19 @@ describe("Meta: campanhas da conta", () => {
     expect(rpcArgs(calls[0])).toEqual({ p_company: company, p_account: "123" });
   });
 
-  it("token vencido ou recusado pede nova conexão", async () => {
-    const expired = network([token("2020-01-01T00:00:00Z")]);
+  it("token recusado pelo Facebook pede nova conexão (a validade guardada é estimativa)", async () => {
+    // Past the stored expiry, but Facebook still takes it.
+    const estimated = network([
+      token("2020-01-01T00:00:00Z"),
+      [/graph\.facebook\.com/, () => json({ data: [] })],
+    ]);
     const a = await handleAds(
       { action: "campaigns", company, provider: "meta", account: "123" },
       auth,
       env,
-      expired.fetch,
+      estimated.fetch,
     );
-    expect([a.status, a.body.code]).toEqual([409, "expired"]);
+    expect(a.status).toBe(200);
     const refused = network([
       token(),
       [

@@ -302,12 +302,8 @@ async function readMeta(
         `A conta ${account} não está conectada ao Facebook.`,
         "not_connected",
       );
-    if (stored.expires_at && Date.parse(stored.expires_at) < Date.now())
-      throw new AdsError(
-        409,
-        `O acesso ao Facebook da conta ${account} expirou. Conecte de novo.`,
-        "expired",
-      );
+    // The stored expiry is only an estimate (imported from the MASO, or the
+    // ~60 days Facebook announces): Facebook says whether the token works.
     const token = unseal(env.tokenKey!, stored.token_cipher);
     // Every account adds up (the MASO kept only the last account's results).
     const base: Record<string, string> = {
@@ -340,7 +336,12 @@ async function readMeta(
                 time_range: JSON.stringify({ since, until }),
               }),
         }),
-    );
+    ).catch((e) => {
+      // Which of the cycle's accounts lost its access.
+      if (e instanceof AdsError && e.code === "expired")
+        throw new AdsError(e.status, `Conta ${account}: ${e.message}`, e.code);
+      throw e;
+    });
     for (const row of daily)
       if (row.date_start) addTo(days, row.date_start, metaTotals(t, row));
     ends.forEach((end, i) => {
@@ -571,6 +572,24 @@ async function readGoogle(
  * buscaQntLeadsLPMake, dados_capture visible leads), per day and for the
  * period, from the Make server (api/capture/mavi-leads.php there).
  */
+/** Runs fn with at most `limit` running at once (across cycles). */
+export function gate(limit: number) {
+  let running = 0;
+  const queue: (() => void)[] = [];
+  return async <R>(fn: () => Promise<R>): Promise<R> => {
+    if (running >= limit) await new Promise<void>((go) => queue.push(go));
+    running++;
+    try {
+      return await fn();
+    } finally {
+      running--;
+      queue.shift()?.();
+    }
+  };
+}
+/** The Make server answers a couple of reads at a time (its MySQL is small). */
+const makeGate = gate(2);
+
 export async function makeLeads(
   env: SyncEnv,
   fetchImpl: Fetch,
@@ -591,31 +610,39 @@ export async function makeLeads(
     );
   let res: Response;
   try {
-    res = await fetchImpl(env.makeLeadsUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Mavi-Secret": env.makeLeadsSecret,
-      },
-      body: JSON.stringify({ squeezes, since, until }),
-      signal: AbortSignal.timeout(20_000),
-    });
+    res = await makeGate(() =>
+      fetchImpl(env.makeLeadsUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Mavi-Secret": env.makeLeadsSecret,
+        },
+        body: JSON.stringify({ squeezes, since, until }),
+        signal: AbortSignal.timeout(25_000),
+      }),
+    );
   } catch (e) {
     throw new AdsError(502, `Make: ${(e as Error).message}`);
   }
   const body = (await res.json().catch(() => ({}))) as {
     days?: Record<string, number>;
     total?: number;
+    firsts?: Record<string, number>;
     error?: string;
   };
   if (!res.ok) throw new AdsError(502, `Make: ${body.error ?? res.statusText}`);
+  const map = (o: Record<string, number>) =>
+    new Map(Object.entries(o).map(([d, n]) => [d, num(n)] as const));
   return {
-    days: new Map(
-      Object.entries(body.days ?? {}).map(([d, n]) => [d, num(n)] as const),
-    ),
+    days: map(body.days ?? {}),
     total: num(body.total),
+    /** Leads seen for the first time in the period, by day (newer servers). */
+    firsts: body.firsts ? map(body.firsts) : null,
   };
 }
+/** The period's distinct leads up to `end`, from the first-seen days. */
+export const leadsUpTo = (firsts: Map<string, number>, end: string) =>
+  [...firsts].reduce((sum, [day, n]) => (day <= end ? sum + n : sum), 0);
 
 // ------------------------------------------------------------ run
 const round = (t: Totals) => ({
@@ -677,13 +704,12 @@ export async function syncCycle(
       }
       totals.get(window.until)!.conversions += leads.total;
       // Each past cumulative counts the period's distinct leads (MASO).
-      const earlier = ends.slice(1);
-      const counts = await mapLimit(earlier, READS_AT_ONCE, (end) =>
-        makeLeads(env, fetchImpl, pages, window.since, end),
-      );
-      earlier.forEach(
-        (end, i) => (totals.get(end)!.conversions += counts[i].total),
-      );
+      // The earlier cumulatives: from the first-seen days of the same
+      // answer, or (older Make servers) one call each, one at a time.
+      for (const end of ends.slice(1))
+        totals.get(end)!.conversions += leads.firsts
+          ? leadsUpTo(leads.firsts, end)
+          : (await makeLeads(env, fetchImpl, pages, window.since, end)).total;
     }
     // Days without delivery are stored as zero, so gaps read as zero.
     const list = [];
