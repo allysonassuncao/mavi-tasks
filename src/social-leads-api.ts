@@ -79,7 +79,8 @@ export interface ContractBundle {
 }
 /** A client to put in the portfolio: one already registered, or a new one. */
 export type NewSocialLeadsClient =
-  { client: string; name?: undefined } | { client?: undefined; name: string };
+  | { client: string; name?: undefined }
+  | { client?: undefined; name: string; teams: string[] };
 export interface SocialLeadsBackend {
   portfolio(company: string): Promise<Portfolio>;
   /** Adds the Social Leads product to a client (creating the client if new). */
@@ -244,14 +245,15 @@ export const serverSocialLeads: SocialLeadsBackend = {
         p_company: company,
         p_name: who.name.trim(),
         p_email: "",
-        p_teams: team ? [team] : null,
+        p_teams: who.teams,
       })) as string);
     const contract = (await rpc("create_contract", {
       p_company: company,
       p_client: client,
       p_product: product.id,
       p_name: `${product.name} · ${clientName.trim()}`,
-      p_team: team,
+      // A new client already has the teams picked for it.
+      p_team: who.client ? team : null,
     })) as string;
     // Clientes and Produtos show the new contract too.
     invalidateLookupsCache(company);
@@ -949,9 +951,8 @@ export function demoSocialLeads(
       };
     },
     async addClient(company, who, product, _team, clientName) {
-      let client = who.client;
-      if (!client) {
-        client = id();
+      const client = who.client ?? id();
+      if (who.client === undefined) {
         data.clients.push({
           id: client,
           company_id: company,
@@ -960,6 +961,13 @@ export function demoSocialLeads(
           color: "#8576cf",
           archived: false,
         });
+        data.clientTeams.push(
+          ...who.teams.map((team_id) => ({
+            company_id: company,
+            client_id: client,
+            team_id,
+          })),
+        );
       }
       const contract = id();
       data.contracts.push({

@@ -14,6 +14,7 @@ import {
 import { Avatar, Empty, Modal } from "./components";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { useUrlState } from "./router";
+import { TeamPicker } from "./TeamPicker";
 import type { Snapshot } from "./types";
 import {
   demoSocialLeads,
@@ -216,6 +217,10 @@ function AddClient({
   );
   const [client, setClient] = useState("");
   const [name, setName] = useState("");
+  // A new client starts with the squad team, and whichever others are picked.
+  const [teams, setTeams] = useState<string[]>(
+    portfolio.team_id ? [portfolio.team_id] : [],
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const picked = candidates.find((c) => c.id === client);
@@ -236,7 +241,7 @@ function AddClient({
           backend
             .addClient(
               company,
-              mode === "existing" ? { client } : { name },
+              mode === "existing" ? { client } : { name, teams },
               product,
               portfolio.team_id ?? null,
               mode === "existing" ? picked!.name : name,
@@ -280,20 +285,23 @@ function AddClient({
             </Select>
           </label>
         ) : (
-          <label>
-            Nome do cliente
-            <Input
-              value={name}
-              maxLength={160}
-              placeholder="Ex.: Agente Stravitta"
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-            />
-          </label>
+          <>
+            <label>
+              Nome do cliente
+              <Input
+                value={name}
+                maxLength={160}
+                placeholder="Ex.: Agente Stravitta"
+                onChange={(e) => setName(e.target.value)}
+                autoFocus
+              />
+            </label>
+            <TeamPicker teams={data.teams} value={teams} onChange={setTeams} />
+          </>
         )}
         <p className="sl-muted">
           O cliente recebe o produto {product?.name ?? "Social Leads"}
-          {portfolio.team_id
+          {mode === "existing" && portfolio.team_id
             ? ` e passa a ser atendido pela equipe ${data.teams.find((t) => t.id === portfolio.team_id)?.name ?? "do squad"}`
             : ""}
           . Depois é só preencher o briefing.
