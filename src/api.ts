@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import * as cache from "./cache";
 import { fold, type TaskScope } from "./domain";
+import type { TaskOrder, TaskViewConfig } from "./task-grouping";
 import {
   emptySnapshot,
   type Snapshot,
@@ -37,6 +38,8 @@ export interface Filters {
   onlyMineOrCreated?: boolean;
   /** Leaders' list tabs: for them, created by them, their teams, others. */
   scope?: TaskScope;
+  /** The list's order, following its split ("Agrupar por"); due date by default. */
+  order?: TaskOrder;
 }
 
 export interface Summary {
@@ -255,6 +258,7 @@ function hashFilters(filters: Filters): string {
     sch: filters.schedule,
     mc: filters.onlyMineOrCreated,
     sc: filters.scope,
+    o: filters.order,
   });
 }
 
@@ -305,10 +309,11 @@ function filteredTasks(
   lookups: TaskLookups,
   companyTz: string,
   head = false,
+  columns = "*",
 ) {
   let query = supabase!
     .from("tasks")
-    .select(head ? "id" : "*", { count: "exact", head })
+    .select(head ? "id" : columns, { count: "exact", head })
     .eq("company_id", company)
     .eq("archived", false);
 
@@ -410,6 +415,74 @@ export function applyScope<
   return others.or(`${withTeam},${withoutTeam}`);
 }
 
+/** The list's order: its split first (packs newest first), then due date. */
+function orderTasks<
+  Q extends {
+    order: (c: string, o?: { ascending?: boolean }) => Q;
+  },
+>(query: Q, order: TaskOrder = "due"): Q {
+  const first = {
+    due: null,
+    created: "created_at",
+    contract: "contract_id",
+    assignee: "assignee_id",
+    status: "status",
+    project: "project_id",
+  }[order];
+  const q = first
+    ? query.order(first, { ascending: order !== "created" })
+    : query;
+  return q.order("due_date").order("id");
+}
+
+/** A view of the task list the person saved (only they see theirs). */
+export interface TaskView {
+  id: string;
+  company_id: string;
+  user_id: string;
+  name: string;
+  config: TaskViewConfig;
+  is_default: boolean;
+}
+export async function taskViews(company: string): Promise<TaskView[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("task_views")
+    .select("id,company_id,user_id,name,config,is_default")
+    .eq("company_id", company)
+    .order("name");
+  if (error) throw error;
+  return (data ?? []) as TaskView[];
+}
+
+/** At most this many tasks change in one bulk edit (public.bulk_update_tasks). */
+export const BULK_LIMIT = 500;
+
+/**
+ * Every task under the list's filters (all pages), for "Selecionar todas do
+ * filtro": the ids in the list's order, up to BULK_LIMIT, and how many there are.
+ */
+export async function taskIdsMatching(
+  company: string,
+  filters: Filters,
+  companyTz = "America/Sao_Paulo",
+): Promise<{ ids: string[]; count: number }> {
+  if (!supabase) throw Error("Supabase não configurado");
+  const lookups = await companyLookups(company);
+  let query = orderTasks(
+    filteredTasks(company, { ...filters, page: 0 }, lookups, companyTz, false, "id"),
+    filters.order,
+  );
+  if (filters.scope)
+    query = applyScope(query, filters.scope, filters.user, lookups);
+  const { data, error, count } = await query.range(0, BULK_LIMIT - 1);
+  if (error) throw error;
+  return {
+    ids: ((data ?? []) as unknown as { id: string }[]).map((r) => r.id),
+    count: count ?? 0,
+  };
+}
+
 export async function tasksQuery(
   company: string,
   filters: Filters,
@@ -423,9 +496,10 @@ export async function tasksQuery(
   return cache.fetchWithCache(
     cacheKey,
     async () => {
-      let query = filteredTasks(company, filters, lookups, companyTz)
-        .order("due_date")
-        .order("id");
+      let query = orderTasks(
+        filteredTasks(company, filters, lookups, companyTz),
+        filters.order,
+      );
       if (filters.scope)
         query = applyScope(query, filters.scope, filters.user, lookups);
 
@@ -1129,6 +1203,11 @@ export type LiveChange =
       /** Creator, assignee and participants (before and after). */
       users: string[];
     }
+  /**
+   * An edit of many tasks at once (public.bulk_update_tasks or its undo): one
+   * notice for all of them instead of one per task, comment and event.
+   */
+  | { kind: "tasks"; op: "update"; tasks: string[]; users: string[] }
   | { kind: "lookup"; table: string }
   /** Onboarding › Social Leads: something of this contracted product changed. */
   | { kind: "social_leads"; contract: string; table: string }

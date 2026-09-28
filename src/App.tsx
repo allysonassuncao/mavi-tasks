@@ -63,6 +63,7 @@ import {
   ArrowRight,
   CalendarDays,
   List,
+  Layers,
   Columns3,
   SlidersHorizontal,
   TriangleAlert,
@@ -176,6 +177,21 @@ import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
 import { useTaskSeconds } from "./useTaskTime";
 import { NotificationInbox } from "./NotificationInbox";
+import { BulkEditor, SelectBox, selectState } from "./TaskBulk";
+import { TaskViewsMenu } from "./TaskViews";
+import type { BulkChange, BulkResult, BulkUndo } from "./task-bulk";
+import {
+  GROUP_OPTIONS,
+  THEN_OPTIONS,
+  groupOrder,
+  groupTasks,
+  nestSubtasks,
+  normalizeViewConfig,
+  parseGroupBy,
+  withSubgroups,
+  type TaskGroup,
+  type TaskViewConfig,
+} from "./task-grouping";
 import { NoticeCenter } from "./NoticeCenter";
 import { noticesApi, onDemoNoticesChange } from "./notices";
 import { useInboxTitle } from "./inbox-title";
@@ -376,6 +392,13 @@ export default function App() {
     [projectFilter, setProjectFilter] = useUrlState<string>("projeto", ""),
     [offset, setOffset] = useUrlState<number>("pagina", 0),
     [count, setCount] = useState(0);
+  // The list's "Agrupar por … e depois por …" (src/task-grouping.ts).
+  const [groupParam, setGroupBy] = useUrlState<string>("agrupar", "auto"),
+    [thenParam, setThenBy] = useUrlState<string>("depois", "none");
+  const groupBy = parseGroupBy(groupParam, "auto");
+  const thenChoice = parseGroupBy(thenParam, "none");
+  const thenBy =
+    thenChoice === "auto" || thenChoice === groupBy ? "none" : thenChoice;
   const [entityEdit, setEntityEdit] = useState<EntityEdit | null>(null);
   const [editMember, setEditMember] = useState<Member | null>(null);
   const [resetPasswordMember, setResetPasswordMember] = useState<Member | null>(
@@ -802,6 +825,7 @@ export default function App() {
           late: page === "tasks" ? late : false,
           client: page === "tasks" ? clientFilter : "",
           project: page === "tasks" ? projectFilter : "",
+          order: page === "tasks" ? groupOrder(groupBy) : undefined,
           onlyMineOrCreated: !isLeader,
           schedule:
             page === "tasks" && scheduleView
@@ -855,6 +879,7 @@ export default function App() {
     liveTick,
     isLeader,
     listScope,
+    page === "tasks" ? groupBy : "",
     page === "tasks",
     page === "tasks" ? view : "list",
     page === "tasks" ? scheduleMonth : "",
@@ -1203,6 +1228,29 @@ export default function App() {
         }
         const l = live.current;
         const mine = change.users.includes(l.user);
+        // An edit of many tasks at once: one notice for all of them.
+        if (change.kind === "tasks") {
+          const onScreen = (id: string) =>
+            l.selected === id || l.tasks.some((t) => t.id === id);
+          if (
+            !l.isLeader &&
+            !l.supervisesTeam &&
+            !mine &&
+            !change.tasks.some(onScreen)
+          )
+            return;
+          for (const id of change.tasks) {
+            api.forgetTask(company, id);
+            api.invalidateTaskExtras(id);
+            pending.tasks.add(id);
+            pending.extras.add(id);
+          }
+          // A new status pauses the timers running on those tasks.
+          api.invalidateHoursCache(company);
+          pending.hours = true;
+          if (mine) pending.timer = true;
+          return schedule();
+        }
         if (
           !api.liveChangeConcerns(change, {
             ...l,
@@ -1670,7 +1718,7 @@ export default function App() {
     return counts;
   }, [demo, scopeCounts, unscoped, data, user, teamsOfMine]);
   // "Todas": the page split by scope; team tabs: split by team.
-  const listGroups = useMemo(() => {
+  const tabGroups = useMemo(() => {
     if (!listScope)
       return scopeTabs
         .map((sc) => ({
@@ -1702,6 +1750,206 @@ export default function App() {
     }
     return undefined;
   }, [scopeTabs, listScope, filtered, data, user, teamsOfMine]);
+  // The split the person chose: the tab's own ("Padrão da aba") or another,
+  // plus the second level. Without a first level, the second one leads.
+  const companyTimezone = currentCompany?.timezone ?? "America/Sao_Paulo";
+  const listGroups: TaskGroup[] | undefined = useMemo(() => {
+    const ctx = { lookup: nameLookup, today, timezone: companyTimezone };
+    const base =
+      groupBy === "auto"
+        ? tabGroups
+        : groupBy === "none"
+          ? undefined
+          : groupTasks(filtered, groupBy, ctx);
+    if (!base)
+      return thenBy === "none" ? undefined : groupTasks(filtered, thenBy, ctx);
+    return withSubgroups(base, thenBy, ctx);
+  }, [groupBy, thenBy, tabGroups, filtered, nameLookup, today, companyTimezone]);
+  // Tasks picked in the list for a bulk edit; "all" is every task under the
+  // filters, on every page (resolved when the edit is reviewed).
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [pickedAll, setPickedAll] = useState(false);
+  const clearPicked = useCallback(() => {
+    setPicked(new Set());
+    setPickedAll(false);
+  }, []);
+  useEffect(clearPicked, [
+    company,
+    query,
+    status,
+    product,
+    listScope,
+    late,
+    clientFilter,
+    projectFilter,
+    view,
+    clearPicked,
+  ]);
+  const togglePicked = useCallback(
+    (ids: string[]) => {
+      setPicked((prev) => {
+        const base = pickedAll ? new Set(filtered.map((t) => t.id)) : prev;
+        const on = ids.every((id) => base.has(id));
+        const next = new Set(base);
+        for (const id of ids) {
+          if (on) next.delete(id);
+          else next.add(id);
+        }
+        return next;
+      });
+      setPickedAll(false);
+    },
+    [pickedAll, filtered],
+  );
+  const matchingTotal = demo ? filtered.length : count;
+  const pickedCount = pickedAll
+    ? Math.min(matchingTotal, api.BULK_LIMIT)
+    : picked.size;
+  const pageAllPicked =
+    !pickedAll && filtered.length > 0 && filtered.every((t) => picked.has(t.id));
+  async function resolvePicked() {
+    if (!pickedAll) return [...picked];
+    if (demo) return filtered.map((t) => t.id);
+    const r = await api.taskIdsMatching(
+      company,
+      {
+        search: query,
+        status,
+        hideDone: !status,
+        product,
+        mine: false,
+        user,
+        page: 0,
+        late,
+        client: clientFilter,
+        project: projectFilter,
+        onlyMineOrCreated: !isLeader,
+        scope: listScope || undefined,
+        order: groupOrder(groupBy),
+      },
+      companyTimezone,
+    );
+    return r.ids;
+  }
+  async function runBulk(ids: string[], change: BulkChange, preview: boolean) {
+    if (demo) return demoStore.current.bulk(ids, change, preview);
+    return (await api.rpc("bulk_update_tasks", {
+      p_company: company,
+      p_tasks: ids,
+      p_change: change,
+      p_preview: preview,
+    })) as BulkResult;
+  }
+  async function undoBulk(operation: string) {
+    if (demo) return demoStore.current.undoBulk(operation);
+    return (await api.rpc("undo_task_bulk", {
+      p_operation: operation,
+    })) as BulkUndo;
+  }
+  function afterBulk() {
+    if (demo) {
+      setData({ ...demoStore.current.data });
+      setRefresh((v) => v + 1);
+      return;
+    }
+    api.invalidateCompanyCache(company);
+    api.invalidateHoursCache(company);
+    setRefresh((v) => v + 1);
+    setReportRefresh((v) => v + 1);
+    setTimerTick((v) => v + 1);
+  }
+  // The person's saved views of the list (only they see theirs); the one
+  // marked default opens when the list is reached without filters.
+  const [taskViewList, setTaskViewList] = useState<api.TaskView[] | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!company || !user) return;
+    let alive = true;
+    (demo
+      ? Promise.resolve(demoStore.current.views)
+      : api.taskViews(company)
+    )
+      .then((v) => alive && setTaskViewList(v))
+      .catch(() => alive && setTaskViewList([]));
+    return () => {
+      alive = false;
+    };
+  }, [company, demo, user]);
+  const currentViewConfig: TaskViewConfig = normalizeViewConfig({
+    group: groupBy,
+    then: thenBy,
+    view,
+    status,
+    product,
+    scope: listScope,
+    late,
+    client: clientFilter,
+    project: projectFilter,
+  });
+  function applyViewConfig(c: TaskViewConfig) {
+    setView(c.view ?? "list");
+    setStatus(c.status ?? "");
+    setProduct(c.product ?? "");
+    setScope(c.scope ?? "");
+    setLate(!!c.late);
+    setClientFilter(c.client ?? "");
+    setProjectFilter(c.project ?? "");
+    setGroupBy(c.group ?? "auto");
+    setThenBy(c.then ?? "none");
+    setSearch("");
+    setQuery("");
+    setOffset(0);
+  }
+  async function saveTaskView(
+    name: string,
+    config: TaskViewConfig,
+    isDefault: boolean,
+    id: string | null = null,
+  ) {
+    const args = {
+      p_company: company,
+      p_id: id,
+      p_name: name,
+      p_config: config,
+      p_default: isDefault,
+    };
+    const saved = (
+      demo
+        ? demoStore.current.mutate("save_task_view", args)
+        : await api.rpc("save_task_view", args)
+    ) as api.TaskView;
+    setTaskViewList((list) =>
+      [
+        ...(list ?? [])
+          .filter((v) => v.id !== saved.id)
+          .map((v) => (saved.is_default ? { ...v, is_default: false } : v)),
+        saved,
+      ].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    );
+    return saved;
+  }
+  async function deleteTaskView(v: api.TaskView) {
+    if (demo) demoStore.current.mutate("delete_task_view", { p_id: v.id });
+    else await api.rpc("delete_task_view", { p_id: v.id });
+    setTaskViewList((list) => (list ?? []).filter((x) => x.id !== v.id));
+    notify(`Visão “${v.name}” excluída.`);
+  }
+  const defaultViewDone = useRef(false);
+  useEffect(() => {
+    if (page !== "tasks") {
+      defaultViewDone.current = false;
+      return;
+    }
+    if (defaultViewDone.current || !taskViewList) return;
+    defaultViewDone.current = true;
+    // A link with its own filters (or a page of the list) opens as it is.
+    const params = new URLSearchParams(window.location.search);
+    if (LIST_PARAMS.some((k) => params.has(k))) return;
+    const preferred = taskViewList.find((v) => v.is_default);
+    if (preferred) applyViewConfig(preferred.config);
+    // Runs once per visit to the list, when the views are known.
+  }, [page, taskViewList]);
   // Collaborators only see their own entries and tasks (RLS already scopes
   // them; this keeps demo mode and cached data consistent with that).
   const visibleHours = useMemo(
@@ -2568,6 +2816,71 @@ export default function App() {
                         </Button>
                       ))}
                     </div>
+                    <div className="list-tools">
+                      {view === "list" && (
+                        <>
+                          <span className="group-pick">
+                            <Layers size={15} aria-hidden="true" />
+                            Agrupar por
+                            <Select
+                              aria-label="Agrupar por"
+                              value={groupBy}
+                              onValueChange={(value) => {
+                                setGroupBy(value);
+                                if (value === thenBy) setThenBy("none");
+                                setOffset(0);
+                              }}
+                            >
+                              {GROUP_OPTIONS.map((o) => (
+                                <SelectOption key={o.id} value={o.id}>
+                                  {o.label}
+                                </SelectOption>
+                              ))}
+                            </Select>
+                          </span>
+                          <span className="group-pick">
+                            e depois por
+                            <Select
+                              aria-label="E depois por"
+                              value={thenBy}
+                              onValueChange={setThenBy}
+                            >
+                              {THEN_OPTIONS.filter((o) => o.id !== groupBy).map(
+                                (o) => (
+                                  <SelectOption key={o.id} value={o.id}>
+                                    {o.label}
+                                  </SelectOption>
+                                ),
+                              )}
+                            </Select>
+                          </span>
+                        </>
+                      )}
+                      {taskViewList && (
+                        <TaskViewsMenu
+                          views={taskViewList}
+                          current={currentViewConfig}
+                          data={data}
+                          onApply={(v) => applyViewConfig(v.config)}
+                          onSave={(name, isDefault) =>
+                            saveTaskView(name, currentViewConfig, isDefault).then(
+                              (v) => notify(`Visão “${v.name}” salva.`),
+                            )
+                          }
+                          onDelete={deleteTaskView}
+                          onSetDefault={(v, isDefault) =>
+                            saveTaskView(v.name, v.config, isDefault, v.id).then(
+                              () =>
+                                notify(
+                                  isDefault
+                                    ? `“${v.name}” passa a abrir por padrão.`
+                                    : `“${v.name}” não abre mais por padrão.`,
+                                ),
+                            )
+                          }
+                        />
+                      )}
+                    </div>
                   </div>
                   <div
                     className="scope-tabs"
@@ -2724,15 +3037,52 @@ export default function App() {
                   {loading ? (
                     <Loading compact />
                   ) : view === "list" ? (
-                    <TaskTable
-                      tasks={filtered}
-                      groups={listGroups}
-                      me={user}
-                      lookup={nameLookup}
-                      today={today}
-                      playing={playingTimer}
-                      onSelect={setSelected}
-                    />
+                    <>
+                      {(pickedAll ||
+                        (pageAllPicked && matchingTotal > filtered.length)) && (
+                        <div className="select-banner" role="status">
+                          {pickedAll ? (
+                            <span>
+                              {matchingTotal > api.BULK_LIMIT
+                                ? `As primeiras ${api.BULK_LIMIT} das ${matchingTotal} tarefas do filtro estão selecionadas (o limite de uma vez).`
+                                : `Todas as ${matchingTotal} tarefas do filtro estão selecionadas, inclusive as de outras páginas.`}
+                            </span>
+                          ) : (
+                            <span>
+                              As {filtered.length} tarefas desta página estão
+                              selecionadas.
+                            </span>
+                          )}
+                          <Button
+                            className="text-btn"
+                            onClick={() =>
+                              pickedAll ? clearPicked() : setPickedAll(true)
+                            }
+                          >
+                            {pickedAll
+                              ? "Limpar seleção"
+                              : matchingTotal > api.BULK_LIMIT
+                                ? `Selecionar as primeiras ${api.BULK_LIMIT} do filtro`
+                                : `Selecionar todas as ${matchingTotal} do filtro`}
+                          </Button>
+                        </div>
+                      )}
+                      <TaskTable
+                        tasks={filtered}
+                        groups={listGroups}
+                        me={user}
+                        lookup={nameLookup}
+                        today={today}
+                        playing={playingTimer}
+                        onSelect={setSelected}
+                        selection={{
+                          picked,
+                          all: pickedAll,
+                          toggle: togglePicked,
+                        }}
+                        parentTitle={(id) => taskLookup.get(id)?.title}
+                      />
+                    </>
                   ) : view === "board" ? (
                     <div className="board">
                       {listedStatuses
@@ -2820,6 +3170,18 @@ export default function App() {
                       }
                       disabled={loading}
                       onPage={setOffset}
+                    />
+                  )}
+                  {view === "list" && (
+                    <BulkEditor
+                      count={pickedCount}
+                      data={data}
+                      me={user}
+                      resolveIds={resolvePicked}
+                      run={runBulk}
+                      undo={undoBulk}
+                      onClear={clearPicked}
+                      onDone={afterBulk}
                     />
                   )}
                 </section>
@@ -3830,7 +4192,21 @@ function PlayingBadge({ playing }: { playing: Playing }) {
     </span>
   );
 }
-type TaskGroup = { key: string; label: string; hint: string; tasks: Task[] };
+/** Query params of the task list: a link with any of them opens as it is. */
+const LIST_PARAMS = [
+  "visualizacao",
+  "busca",
+  "status",
+  "produto",
+  "escopo",
+  "atrasadas",
+  "cliente",
+  "projeto",
+  "agrupar",
+  "depois",
+  "pagina",
+  "minhas",
+];
 function TaskTable({
   tasks,
   groups,
@@ -3839,9 +4215,11 @@ function TaskTable({
   today,
   playing,
   onSelect,
+  selection,
+  parentTitle,
 }: {
   tasks: Task[];
-  /** Sections (e.g. "Para você", "Suas equipes"); none renders one list. */
+  /** Sections (e.g. "Para você", a pack), each maybe with a second level. */
   groups?: TaskGroup[];
   /** The viewer: their own tasks and creations are marked "Você". */
   me?: string;
@@ -3850,43 +4228,128 @@ function TaskTable({
   /** The user's running timer, marked on its task. */
   playing?: Playing | null;
   onSelect: (id: string) => void;
+  /** Checkboxes for a bulk edit: per task, per section and the whole page. */
+  selection?: {
+    picked: Set<string>;
+    /** Every task under the filters is selected. */
+    all: boolean;
+    toggle: (ids: string[]) => void;
+  };
+  /** Name of a main task that is in another section or page. */
+  parentTitle?: (id: string) => string | undefined;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const toggle = (key: string) =>
-    setCollapsed((set) => {
-      const next = new Set(set);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  const row = (t: Task) => {
+  // Main tasks whose subtasks are hidden.
+  const [folded, setFolded] = useState<Set<string>>(() => new Set());
+  const flip =
+    (set: typeof setCollapsed) =>
+    (key: string) =>
+      set((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+  const toggle = flip(setCollapsed),
+    fold = flip(setFolded);
+  const check = (ids: string[], label: string) =>
+    selection ? (
+      <SelectBox
+        state={selectState(ids, selection.picked, selection.all)}
+        label={label}
+        onToggle={() => selection.toggle(ids)}
+      />
+    ) : null;
+  const row = (
+    t: Task,
+    opts: {
+      kids?: Task[];
+      open?: boolean;
+      isChild?: boolean;
+      elsewhere?: string | null;
+      nests?: boolean;
+    } = {},
+  ) => {
     const n = namesFrom(lookup, t),
       creator = lookup.members.get(t.creator_id),
       isPlaying = playing?.entry.task_id === t.id,
       mineToDo = !!me && t.assignee_id === me,
-      mineCreated = !!me && t.creator_id === me;
+      mineCreated = !!me && t.creator_id === me,
+      kids = opts.kids ?? [],
+      picked =
+        !!selection && (selection.all || selection.picked.has(t.id));
+    const parent = opts.elsewhere
+      ? (parentTitle?.(opts.elsewhere) ?? "outra tarefa")
+      : null;
+    const classes = [
+      isPlaying && "is-playing",
+      picked && "is-picked",
+      opts.isChild && "is-subtask",
+    ]
+      .filter(Boolean)
+      .join(" ");
     return (
-      <tr key={t.id} className={isPlaying ? "is-playing" : undefined}>
+      <tr key={t.id} className={classes || undefined}>
+        {selection && (
+          <td className="col-select">
+            {check(
+              [t.id, ...kids.map((k) => k.id)],
+              kids.length
+                ? `Selecionar ${t.title} e as subtarefas`
+                : `Selecionar ${t.title}`,
+            )}
+          </td>
+        )}
         <td>
-          <Button className="task-title" onClick={() => onSelect(t.id)}>
-            <span
-              className={`task-check ${t.status === "done" ? "complete" : ""}`}
-            >
-              {t.status === "done" && <Check size={13} />}
-            </span>
-            <span>
-              <strong>{t.title}</strong>
-              <small>
-                {n.client?.name} <span> / </span> {n.product?.name}
-              </small>
-              {isPlaying && playing && <PlayingBadge playing={playing} />}
-              <span className="mobile-status">
-                <Badge status={t.status} />
+          <div className="task-cell">
+            {kids.length > 0 ? (
+              <button
+                type="button"
+                className="subtask-toggle"
+                aria-expanded={opts.open}
+                aria-label={`${opts.open ? "Ocultar" : "Mostrar"} as subtarefas de ${t.title}`}
+                onClick={() => fold(t.id)}
+              >
+                <ChevronRight
+                  size={15}
+                  className={opts.open ? "open" : ""}
+                  aria-hidden="true"
+                />
+              </button>
+            ) : (
+              opts.nests && <span className="subtask-spacer" />
+            )}
+            <Button className="task-title" onClick={() => onSelect(t.id)}>
+              <span
+                className={`task-check ${t.status === "done" ? "complete" : ""}`}
+              >
+                {t.status === "done" && <Check size={13} />}
               </span>
-            </span>
-          </Button>
+              <span>
+                <strong>{t.title}</strong>
+                <small>
+                  {parent ? (
+                    <>Subtarefa de {parent}</>
+                  ) : (
+                    <>
+                      {n.client?.name} <span> / </span> {n.product?.name}
+                    </>
+                  )}
+                </small>
+                {isPlaying && playing && <PlayingBadge playing={playing} />}
+                <span className="mobile-status">
+                  <Badge status={t.status} />
+                </span>
+              </span>
+            </Button>
+            {kids.length > 0 && (
+              <span className="subtask-count">
+                {kids.length} {kids.length === 1 ? "subtarefa" : "subtarefas"}
+              </span>
+            )}
+          </div>
         </td>
-        <td>
+        <td className="col-status">
           <Badge status={t.status} />
         </td>
         <td>
@@ -3896,7 +4359,7 @@ function TaskTable({
             {isLate(t, today) && <span className="late-dot" />}
           </span>
         </td>
-        <td>
+        <td className="col-assignee">
           <span className="task-person" title={n.member?.name}>
             <Avatar
               name={n.member?.name ?? "?"}
@@ -3929,50 +4392,93 @@ function TaskTable({
       </tr>
     );
   };
+  // A section's rows: subtasks under their main task when both are in it.
+  const rows = (list: Task[]) => {
+    const nodes = nestSubtasks(list);
+    const nests = nodes.some((node) => node.children.length > 0);
+    return nodes.flatMap((node) => {
+      const open = !folded.has(node.task.id);
+      return [
+        row(node.task, {
+          kids: node.children,
+          open,
+          elsewhere: node.parentElsewhere,
+          nests,
+        }),
+        ...(open
+          ? node.children.map((c) => row(c, { isChild: true, nests }))
+          : []),
+      ];
+    });
+  };
+  const head = (g: TaskGroup, level: 0 | 1) => {
+    const closed = collapsed.has(g.key);
+    return (
+      <tr className={`task-group-head level-${level}`} key={`head:${g.key}`}>
+        {selection && (
+          <th className="col-select">
+            {check(
+              g.tasks.map((t) => t.id),
+              `Selecionar todas de ${g.label}`,
+            )}
+          </th>
+        )}
+        <th colSpan={5} scope="rowgroup">
+          <button
+            type="button"
+            aria-expanded={!closed}
+            onClick={() => toggle(g.key)}
+          >
+            <ChevronRight
+              size={15}
+              className={closed ? "" : "open"}
+              aria-hidden="true"
+            />
+            <strong>{g.label}</strong>
+            <span className="task-group-count">{g.tasks.length}</span>
+            <small>{g.hint}</small>
+          </button>
+        </th>
+      </tr>
+    );
+  };
   return (
     <>
       <div className="table-scroll">
-        <table className="task-table">
+        <table className={`task-table ${selection ? "selectable" : ""}`}>
           <thead>
             <tr>
+              {selection && (
+                <th className="col-select">
+                  {tasks.length > 0 &&
+                    check(
+                      tasks.map((t) => t.id),
+                      "Selecionar todas as tarefas da página",
+                    )}
+                </th>
+              )}
               <th>Tarefa</th>
-              <th>Status</th>
+              <th className="col-status">Status</th>
               <th>Prazo</th>
-              <th>Responsável</th>
+              <th className="col-assignee">Responsável</th>
               <th className="col-creator">Criado por</th>
             </tr>
           </thead>
           {groups ? (
-            groups.map((g) => {
-              const closed = collapsed.has(g.key);
-              return (
-                <tbody key={g.key} className="task-group">
-                  <tr className="task-group-head">
-                    <th colSpan={5} scope="rowgroup">
-                      <button
-                        type="button"
-                        aria-expanded={!closed}
-                        onClick={() => toggle(g.key)}
-                      >
-                        <ChevronRight
-                          size={15}
-                          className={closed ? "" : "open"}
-                          aria-hidden="true"
-                        />
-                        <strong>{g.label}</strong>
-                        <span className="task-group-count">
-                          {g.tasks.length}
-                        </span>
-                        <small>{g.hint}</small>
-                      </button>
-                    </th>
-                  </tr>
-                  {!closed && g.tasks.map(row)}
-                </tbody>
-              );
-            })
+            groups.map((g) => (
+              <tbody key={g.key} className="task-group">
+                {head(g, 0)}
+                {!collapsed.has(g.key) &&
+                  (g.children
+                    ? g.children.flatMap((sub) => [
+                        head(sub, 1),
+                        ...(collapsed.has(sub.key) ? [] : rows(sub.tasks)),
+                      ])
+                    : rows(g.tasks))}
+              </tbody>
+            ))
           ) : (
-            <tbody>{tasks.map(row)}</tbody>
+            <tbody>{rows(tasks)}</tbody>
           )}
         </table>
       </div>

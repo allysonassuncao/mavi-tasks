@@ -27,6 +27,7 @@
     "test:db:temperature": "node scripts/test-client-temperature.mjs",
     "test:db:templates": "node scripts/test-task-templates.mjs",
     "test:db:assign-team": "node scripts/test-assign-to-team.mjs",
+    "test:db:bulk": "node scripts/test-task-bulk.mjs",
     "test:db:recurrence": "node scripts/test-task-recurrence.mjs",
     "test:db:replies": "node scripts/test-comment-replies.mjs",
     "test:db:suggestions": "node scripts/test-suggestions.mjs",

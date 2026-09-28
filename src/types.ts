@@ -125,7 +125,9 @@ export interface AppNotification {
     /** Mural de avisos: um aviso para a pessoa (link /mural?aviso=…). */
     | "notice"
     /** Termômetro: o cliente esfriou ou deu um sinal de alerta (link /drive?termometro=…). */
-    | "temperature";
+    | "temperature"
+    /** Alteração em massa: "Ana passou 12 tarefas para você" (link /tarefas?escopo=mine). */
+    | "tasks_assigned";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

@@ -5,6 +5,7 @@ import {
   Check,
   CheckCheck,
   Inbox,
+  ListChecks,
   Sparkles,
   Thermometer,
   Trophy,
@@ -99,6 +100,10 @@ export function NotificationInbox({
                       <span className="inbox-system temperature" aria-hidden="true">
                         <Thermometer size={15} />
                       </span>
+                    ) : n.kind === "tasks_assigned" ? (
+                      <span className="inbox-system" aria-hidden="true">
+                        <ListChecks size={15} />
+                      </span>
                     ) : n.kind === "social_leads" || n.kind === "ai_share" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <Sparkles size={15} />
@@ -115,6 +120,7 @@ export function NotificationInbox({
                       n.kind === "ai_share" ||
                       n.kind === "success_case" ||
                       n.kind === "temperature" ||
+                      n.kind === "tasks_assigned" ||
                       n.kind === "notice" ? (
                         <span className="inbox-line">
                           <strong>{n.task_title}</strong>

@@ -511,6 +511,10 @@ const statusLabel = (value: unknown) =>
 /** How the history names each event, old linear-flow actions included. */
 function eventLabel(e: TaskEvent) {
   const { from, to } = e.detail;
+  // Alterações em massa (lista de tarefas): o prazo, e o desfazer do lote.
+  if (e.action === "due_changed")
+    return `Prazo alterado · ${dateLabel(String(e.detail.old_due))} → ${dateLabel(String(e.detail.new_due))}`;
+  if (e.action === "bulk_undone") return "Alteração em massa desfeita";
   if (to === "done" && from !== "done") return "Tarefa entregue";
   if (e.action === "move")
     return from === to ? "Responsável alterado" : `Status: ${statusLabel(to)}`;

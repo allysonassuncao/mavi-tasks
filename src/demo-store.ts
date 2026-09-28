@@ -28,6 +28,19 @@ import {
   workingStatuses,
 } from "./types";
 import { MODULES } from "./modules";
+import type { TaskView } from "./api";
+import type { BulkChange, BulkItem, BulkResult, BulkUndo } from "./task-bulk";
+
+/** N business days after (or before, when negative) — mavi_private.add_business_days. */
+function addBusinessDays(day: string, n: number) {
+  const d = new Date(day + "T12:00:00Z");
+  let left = Math.abs(n);
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() + Math.sign(n));
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) left--;
+  }
+  return d.toISOString().slice(0, 10);
+}
 export class DemoStore {
   data: Snapshot = demoSnapshot();
   comments: Comment[] = [];
@@ -35,6 +48,149 @@ export class DemoStore {
   events: TaskEvent[] = [];
   /** Repetitions set up in the demo (it never opens their copies). */
   recurrences: TaskRecurrence[] = [];
+  /** The demo person's saved views of the task list. */
+  views: TaskView[] = [];
+  /** Bulk edits that can still be undone: each task as it was before. */
+  private bulkOps = new Map<
+    string,
+    { before: Map<string, Task>; afterVersion: Map<string, number> }
+  >();
+  /**
+   * Mirrors public.bulk_update_tasks: each task goes through the same rules
+   * as one by one (transition_task for responsible and status, the edit
+   * permission for due dates). The review runs it all and puts it back.
+   */
+  bulk(ids: string[], change: BulkChange, preview: boolean): BulkResult {
+    const saved = preview
+      ? {
+          tasks: structuredClone(this.data.tasks),
+          events: [...this.events],
+          comments: [...this.comments],
+          hours: structuredClone(this.data.hours),
+        }
+      : null;
+    const me = this.data.members.find((m) => m.user_id === demoUser);
+    const leader = me?.role === "admin" || me?.role === "manager";
+    const name = (id: string) =>
+      this.data.members.find((m) => m.user_id === id)?.name ?? "—";
+    const team = this.data.teams.find((t) => t.id === change.value);
+    const results: BulkItem[] = [];
+    const before = new Map<string, Task>();
+    const afterVersion = new Map<string, number>();
+    for (const id of [...new Set(ids)]) {
+      const t = this.data.tasks.find((x) => x.id === id);
+      if (!t) {
+        results.push({ id, ok: false, reason: "Tarefa não encontrada" });
+        continue;
+      }
+      const was = structuredClone(t);
+      let reason: string | null = null;
+      try {
+        const move = (status: Status, assignee: string | null, note = "") =>
+          this.mutate("transition_task", {
+            p_task: t.id,
+            p_version: t.version,
+            p_action: "move",
+            p_note: note,
+            p_status: status,
+            p_assignee: assignee,
+          });
+        if (change.kind === "assignee") {
+          if (t.assignee_id === change.value)
+            reason = `Já está com ${name(change.value)}`;
+          else move(t.status, change.value);
+        } else if (change.kind === "team") {
+          const client = this.data.contracts.find(
+            (k) => k.id === t.contract_id,
+          )?.client_id;
+          if (
+            !this.data.clientTeams.some(
+              (ct) => ct.client_id === client && ct.team_id === change.value,
+            )
+          )
+            reason = `A equipe ${team?.name ?? ""} não atende este cliente`;
+          else {
+            const pick = teamAssignee(this.data, change.value)?.user_id;
+            if (!pick)
+              throw Error("Esta equipe não tem ninguém ativo para receber tarefas.");
+            if (pick === t.assignee_id)
+              reason = `Continua com ${name(pick)}, quem tem menos tarefas na equipe`;
+            else {
+              move(t.status, pick);
+              t.team_id = change.value;
+            }
+          }
+        } else if (change.kind === "status") {
+          if (t.status === change.value)
+            reason = `Já está em ${statuses[change.value].label}`;
+          else move(change.value, null, change.note ?? "");
+        } else if (t.creator_id !== demoUser && !leader)
+          reason = "Só quem criou a tarefa ou um gestor muda o prazo";
+        else {
+          const due =
+            change.kind === "due"
+              ? change.value
+              : addBusinessDays(t.due_date, change.value);
+          if (due === t.due_date) reason = "Já tem esse prazo";
+          else if (t.start_date && due < t.start_date)
+            reason = `O prazo ficaria antes do início (${t.start_date.slice(8, 10)}/${t.start_date.slice(5, 7)})`;
+          else {
+            t.due_date = due;
+            t.version++;
+          }
+        }
+      } catch (e) {
+        reason = e instanceof Error ? e.message : String(e);
+      }
+      if (!reason) {
+        before.set(t.id, was);
+        afterVersion.set(t.id, t.version);
+      }
+      const side = (x: Task) => ({
+        status: x.status,
+        assignee_id: x.assignee_id,
+        due_date: x.due_date,
+      });
+      results.push({
+        id: t.id,
+        title: t.title,
+        contract_id: t.contract_id,
+        parent_id: t.parent_id,
+        ok: !reason,
+        reason,
+        before: side(was),
+        after: side(t),
+      });
+    }
+    const applied = results.filter((r) => r.ok).length;
+    if (saved) {
+      this.data.tasks = saved.tasks;
+      this.events = saved.events;
+      this.comments = saved.comments;
+      this.data.hours = saved.hours;
+      return { preview: true, applied, results };
+    }
+    const operation = applied ? crypto.randomUUID() : null;
+    if (operation) this.bulkOps.set(operation, { before, afterVersion });
+    return { preview: false, operation, applied, results };
+  }
+  undoBulk(operation: string): BulkUndo {
+    const op = this.bulkOps.get(operation);
+    if (!op) throw Error("Esta alteração já foi desfeita");
+    this.bulkOps.delete(operation);
+    let restored = 0,
+      kept = 0;
+    for (const [id, was] of op.before) {
+      const i = this.data.tasks.findIndex((t) => t.id === id);
+      if (i < 0 || this.data.tasks[i].version !== op.afterVersion.get(id)) {
+        kept++;
+        continue;
+      }
+      this.data.tasks[i] = { ...was, version: this.data.tasks[i].version + 1 };
+      restored++;
+    }
+    return { restored, kept };
+  }
   /** Everyone's notifications (the demo person sees only theirs). */
   notifications: (AppNotification & {
     user_id: string;
@@ -859,6 +1015,24 @@ export class DemoStore {
         member.email = newEmail;
         break;
       }
+      case "save_task_view": {
+        if (a.p_default) for (const v of this.views) v.is_default = false;
+        const view: TaskView = {
+          id: a.p_id ?? id,
+          company_id,
+          user_id: demoUser,
+          name: String(a.p_name).trim(),
+          config: a.p_config,
+          is_default: !!a.p_default,
+        };
+        this.views = [...this.views.filter((v) => v.id !== view.id), view].sort(
+          (x, y) => x.name.localeCompare(y.name, "pt-BR"),
+        );
+        return view;
+      }
+      case "delete_task_view":
+        this.views = this.views.filter((v) => v.id !== a.p_id);
+        break;
       default:
         throw Error("Operação indisponível na demonstração");
     }
