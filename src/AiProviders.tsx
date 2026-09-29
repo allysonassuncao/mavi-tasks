@@ -39,8 +39,10 @@ import {
   catalogEntry,
   featureInfo,
   isJevModel,
+  isImageModel,
   isNonChatModel,
   isTranscribeModel,
+  IMAGE_KINDS,
   TRANSCRIBE_KINDS,
   keyHint as keyHintOf,
   pickRoute,
@@ -142,7 +144,11 @@ const DEMO_DEFAULTS: ServerDefaults = {
     FEATURES.map((f) => [
       f.id,
       {
-        model: f.transcription ? "gpt-4o-mini-transcribe" : "claude-opus-5-5",
+        model: f.transcription
+          ? "gpt-4o-mini-transcribe"
+          : f.images
+            ? "gpt-image-1"
+            : "claude-opus-5-5",
         env: f.env,
       },
     ]),
@@ -1092,6 +1098,19 @@ export function AiRoutesPanel({
       Cadastre um modelo de transcrição (ex.: Whisper)
     </SelectOption>
   );
+  // Imagens: provedores com o endpoint de imagens e os modelos que geram imagens.
+  const imageOptions = providers
+    .filter((p) => IMAGE_KINDS.includes(p.kind))
+    .flatMap((p) =>
+      p.models.filter((m) => isImageModel(m.id)).map((m) => option(p, m)),
+    );
+  const imageChoices = imageOptions.length ? (
+    <>{imageOptions}</>
+  ) : (
+    <SelectOption value="none" disabled>
+      Cadastre um modelo de imagem (ex.: gpt-image-1)
+    </SelectOption>
+  );
   const jevChoices = (
     <>
       {providers
@@ -1170,6 +1189,7 @@ export function AiRoutesPanel({
         choices={choices}
         jevChoices={jevChoices}
         transcribeChoices={transcribeChoices}
+        imageChoices={imageChoices}
         embedding={defaults?.embedding}
         onSet={(feature, choice) => void set("feature", feature, choice)}
       />
@@ -1283,6 +1303,7 @@ function FeatureRoutes({
   choices,
   jevChoices,
   transcribeChoices,
+  imageChoices,
   embedding,
   onSet,
 }: {
@@ -1297,6 +1318,8 @@ function FeatureRoutes({
   jevChoices: ReactNode;
   /** Os modelos de transcrição (OpenAI, Groq, Mistral, endereço próprio). */
   transcribeChoices: ReactNode;
+  /** Os modelos de imagem (OpenAI, Google, xAI, endereço próprio). */
+  imageChoices: ReactNode;
   /** O modelo de vetores do servidor (só para leitura). */
   embedding?: { model: string; env: string };
   onSet: (feature: AiFeature, choice: string) => void;
@@ -1307,8 +1330,9 @@ function FeatureRoutes({
         <strong>Por funcionalidade</strong>
         <small>
           O provedor e o modelo de cada funcionalidade com a MAVI. Sem escolha,
-          vale o padrão da empresa (ou o do servidor); a transcrição de áudio
-          não herda o padrão da empresa, que é um modelo de conversa. Nas
+          vale o padrão da empresa (ou o do servidor); a transcrição de áudio e
+          as imagens não herdam o padrão da empresa, que é um modelo de
+          conversa. Nas
           conversas (assistente e gravações), as regras de pessoa, cliente,
           produto e projeto vencem a da funcionalidade.
         </small>
@@ -1329,7 +1353,7 @@ function FeatureRoutes({
               // Quem responde de fato: a escolha dela ou a da empresa.
               const provider = r
                 ? byId.get(r.provider_id)
-                : f.decisions || f.transcription
+                : f.decisions || f.transcription || f.images
                   ? undefined
                   : companyProvider;
               const outsideClaude =
@@ -1340,9 +1364,10 @@ function FeatureRoutes({
                     <div className="ai-feature-name">
                       <span className="ai-feature-group">{f.group}</span>
                       <span className="ai-usage-name">{f.label}</span>
-                      {(outsideClaude || f.transcription) && f.note && (
+                      {(outsideClaude || f.transcription || f.images) &&
+                        f.note && (
                         <small
-                          className={`ai-feature-note${f.transcription ? " info" : ""}`}
+                          className={`ai-feature-note${f.transcription || f.images ? " info" : ""}`}
                         >
                           {f.note}
                         </small>
@@ -1358,7 +1383,7 @@ function FeatureRoutes({
                       <SelectOption value={SERVER}>
                         {f.decisions
                           ? "Automático · o Jev cadastrado num provedor OpenRouter"
-                          : f.transcription
+                          : f.transcription || f.images
                             ? `${serverLabel(f.id)} (OpenAI)`
                             : companyLabel
                               ? `Padrão da empresa · ${companyLabel}`
@@ -1368,7 +1393,9 @@ function FeatureRoutes({
                         ? jevChoices
                         : f.transcription
                           ? transcribeChoices
-                          : choices}
+                          : f.images
+                            ? imageChoices
+                            : choices}
                     </Select>
                   </td>
                 </tr>

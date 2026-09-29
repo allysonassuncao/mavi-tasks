@@ -140,6 +140,11 @@ export type FormPreset = {
   title?: string;
   description?: string;
   due?: string;
+  /** New task only (a MAVI proposal): who and how urgent. */
+  assignee?: string;
+  priority?: "low" | "normal" | "high" | "urgent";
+  /** New task only: called with the id once the task is saved. */
+  onCreated?: (task: string) => void;
 };
 export function CreateForm({
   kind,

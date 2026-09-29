@@ -73,6 +73,7 @@ export const AI_TABS = [
   "consumo",
   "copiloto",
   "termometro",
+  "poderes",
   "provedores",
   "regras",
 ] as const;

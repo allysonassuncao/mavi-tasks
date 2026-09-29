@@ -212,7 +212,8 @@ export type AiFeature =
   | "client_temperature_text"
   | "task_audio"
   | "whatsapp_transcribe"
-  | "task_audio_transcribe";
+  | "task_audio_transcribe"
+  | "image_generation";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -234,6 +235,11 @@ export type FeatureInfo = {
    * e modelos de transcrição, e sem herdar o padrão da empresa.
    */
   transcription?: boolean;
+  /**
+   * Gera e edita imagens: só provedores com o endpoint de imagens da OpenAI
+   * e modelos de imagem, e sem herdar o padrão da empresa.
+   */
+  images?: boolean;
 };
 
 /** O Jev (TypeSafe): um modelo de decisão, que não conversa. */
@@ -364,6 +370,15 @@ export const FEATURES: FeatureInfo[] = [
     note: "O modelo escolhido precisa aceitar imagens para ler os prints.",
   },
   {
+    id: "image_generation",
+    group: "MAVI",
+    label: "Geração e edição de imagens (poder Imagens do módulo MAVI)",
+    conversation: false,
+    env: "IMAGE_MODEL",
+    images: true,
+    note: "Só modelos de imagem (gpt-image-1, Imagen, grok-2-image…). Editar uma imagem já gerada pede o gpt-image-1 ou um endereço compatível.",
+  },
+  {
     id: "client_temperature",
     group: "Termômetro do cliente",
     label: "Leitura das reuniões e do WhatsApp (Jev)",
@@ -390,9 +405,16 @@ export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
  */
 export const TRANSCRIBE_KINDS: ProviderKind[] = ["openai", "groq", "mistral", "custom"];
 export const isTranscribeModel = (id: string) => /(whisper|transcri|voxtral)/i.test(id);
-/** Vetores ou transcrição: não servem para conversar. */
+/**
+ * Imagens: os provedores que falam o endpoint de imagens da OpenAI
+ * (/images/generations) e os modelos que geram imagens. A mesma regra de
+ * mavi_private.ai_image_model no banco.
+ */
+export const IMAGE_KINDS: ProviderKind[] = ["openai", "google", "xai", "custom"];
+export const isImageModel = (id: string) => /(image|dall-e|imagen|flux)/i.test(id);
+/** Vetores, transcrição ou imagem: não servem para conversar. */
 export const isNonChatModel = (id: string) =>
-  isTranscribeModel(id) || /embed/i.test(id);
+  isTranscribeModel(id) || /embed/i.test(id) || isImageModel(id);
 
 /** Preço da transcrição (US$ por minuto de áudio), pelos preços de tabela. */
 const TRANSCRIBE_PRICES: [RegExp, number][] = [
@@ -451,6 +473,8 @@ export function serverModel(
     case "whatsapp_transcribe":
     case "task_audio_transcribe":
       return env.WHATSAPP_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
+    case "image_generation":
+      return env.IMAGE_MODEL || "gpt-image-1";
     default:
       return env.SOCIAL_LEADS_MODEL || fallback;
   }
@@ -500,8 +524,10 @@ export function pickRoute(
 ): AiRoute | null {
   const feature = where.feature ?? "assistant";
   const talk = featureInfo(feature)?.conversation ?? true;
-  // A transcrição não herda o padrão da empresa (um modelo de conversa).
-  const own = featureInfo(feature)?.transcription ?? false;
+  // A transcrição e as imagens não herdam o padrão da empresa (um modelo de conversa).
+  const own =
+    (featureInfo(feature)?.transcription || featureInfo(feature)?.images) ??
+    false;
   const id: Record<RouteScope, string | null | undefined> = {
     project: where.project,
     contract: where.contract,

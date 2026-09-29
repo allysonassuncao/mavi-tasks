@@ -22,6 +22,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { answerPieces, type ChatTurn } from "./meetings";
+import { ARTIFACT_LINE, type AiArtifact } from "./mavi-artifacts";
 import {
   sourceLabel,
   type AiAnswer,
@@ -43,6 +44,8 @@ export type ChatEntry = {
   steps?: AiStep[];
   thinking?: string;
   warnings?: string[];
+  /** Visualizações, imagens e ações (módulo MAVI). */
+  artifacts?: AiArtifact[];
   streaming?: boolean;
 };
 
@@ -57,12 +60,18 @@ export function AnswerText({
   sources = [],
   onSource,
   showSources = true,
+  renderArtifact,
 }: {
   text: string;
   onTime?: (seconds: number) => void;
   sources?: AiSource[];
   onSource?: (source: AiSource) => void;
   showSources?: boolean;
+  /**
+   * Desenha o anexo de uma linha [[V1]] (módulo MAVI). Sem ele, a linha
+   * vira um aviso de que o anexo está no módulo.
+   */
+  renderArtifact?: (ref: string) => ReactNode;
 }) {
   const byRef = new Map(sources.map((s) => [s.ref, s]));
   const render = (line: string) =>
@@ -102,7 +111,26 @@ export function AnswerText({
     if (list.length) out.push(<ul key={`l${out.length}`}>{list}</ul>);
     list = [];
   };
-  text.split("\n").forEach((line, i) => {
+  text.split("\n").forEach((raw, i) => {
+    const artifact = raw.match(ARTIFACT_LINE);
+    if (artifact) {
+      flush();
+      out.push(
+        renderArtifact ? (
+          <div key={i} className="answer-artifact">
+            {renderArtifact(artifact[1])}
+          </div>
+        ) : (
+          <p key={i} className="answer-artifact-note">
+            <Sparkles size={12} aria-hidden="true" /> Há um gráfico, uma
+            imagem ou uma ação aqui: abra esta conversa no módulo MAVI.
+          </p>
+        ),
+      );
+      return;
+    }
+    // Uma referência no meio da frase não aparece (o anexo tem o seu lugar).
+    const line = raw.replace(/\s?\[\[[VIA]\d{1,2}\]\]/g, "");
     const item = line.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/);
     if (item) list.push(<li key={i}>{render(item[1])}</li>);
     else {
@@ -175,9 +203,9 @@ export function useTypewriter(target: string, animate: boolean) {
   return { text: target.slice(0, shown), typing: shown < target.length };
 }
 
-/** Esconde o fim ainda incompleto: "[S1" sem fechar, "**" sem par, "*" solto. */
+/** Esconde o fim ainda incompleto: "[S1" ou "[[V1]" sem fechar, "**" sem par, "*" solto. */
 export function hidePartial(text: string) {
-  let t = text.replace(/\[[^\]\n]*$/, "");
+  let t = text.replace(/\[\[[VIA]?\d{0,2}\]?$/, "").replace(/\[[^\]\n]*$/, "");
   if ((t.match(/\*\*/g) ?? []).length % 2) t = t.slice(0, t.lastIndexOf("**"));
   return t.replace(/(^|[^*])\*$/, "$1");
 }
@@ -367,11 +395,17 @@ export function useAiTurns({
           }),
         onWarning: (text) =>
           patchLast((e) => ({ ...e, warnings: [...(e.warnings ?? []), text] })),
+        onArtifact: (artifact) =>
+          patchLast((e) => ({
+            ...e,
+            artifacts: [...(e.artifacts ?? []), artifact],
+          })),
       });
       patchLast((e) => ({
         ...e,
         content: result.answer,
         sources: result.sources,
+        artifacts: result.artifacts?.length ? result.artifacts : e.artifacts,
         streaming: false,
         thinking: "",
       }));
@@ -539,12 +573,14 @@ export function entriesFrom(
     content: string;
     sources?: AiSource[];
     steps?: { label: string; detail?: string }[];
+    artifacts?: AiArtifact[];
   }[],
 ): ChatEntry[] {
   return messages.map((m) => ({
     role: m.role,
     content: m.content,
     sources: m.sources ?? [],
+    artifacts: m.artifacts ?? [],
     steps: (m.steps ?? []).map((s, i) => ({
       id: `s${i}`,
       label: s.label,

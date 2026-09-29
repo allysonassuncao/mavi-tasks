@@ -85,6 +85,9 @@ export function TaskCreateForm({
   initialTitle,
   initialDescription,
   initialDue,
+  initialAssignee,
+  initialPriority,
+  onCreated,
   demo,
   data,
   company,
@@ -101,6 +104,11 @@ export function TaskCreateForm({
   initialDescription?: string;
   /** yyyy-mm-dd. */
   initialDue?: string;
+  /** A person of the company (a MAVI proposal). */
+  initialAssignee?: string;
+  initialPriority?: keyof typeof priorities;
+  /** The task was saved (the MAVI marks its proposal as confirmed). */
+  onCreated?: (task: string) => void;
   demo: boolean;
   data: Snapshot;
   company: string;
@@ -129,7 +137,12 @@ export function TaskCreateForm({
       : "",
   );
   const [title, setTitle] = useState(initialTitle ?? "");
-  const [assignee, setAssignee] = useState(user);
+  const [assignee, setAssignee] = useState(() =>
+    initialAssignee &&
+    data.members.some((m) => m.user_id === initialAssignee && m.active)
+      ? initialAssignee
+      : user,
+  );
   const [assignMode, setAssignMode] = useState<"person" | "team">("person");
   const [assignTeam, setAssignTeam] = useState("");
   // The due date follows the rule until picked by hand (a date handed in
@@ -140,7 +153,9 @@ export function TaskCreateForm({
   const [start, setStart] = useState("");
   const [clientApproval, setClientApproval] = useState(false);
   const [parent, setParent] = useState("");
-  const [priority, setPriority] = useState<keyof typeof priorities>("normal");
+  const [priority, setPriority] = useState<keyof typeof priorities>(
+    initialPriority ?? "normal",
+  );
   const [estimated, setEstimated] = useState("");
   // Which suggestion the date follows: "auto" is the company's choice (the
   // rule, or the MAVI in "fill" mode); "Aplicar"/"Usar" pick one.
@@ -465,6 +480,7 @@ export function TaskCreateForm({
       );
       // The recorded audios go into the description of the task just saved.
       if (uploads.current.taskId) await audio.bindTo(uploads.current.taskId);
+      if (uploads.current.taskId) onCreated?.(uploads.current.taskId);
       rememberContract(contract);
       copilotFeedback.flush(
         company,

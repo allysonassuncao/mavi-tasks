@@ -33,6 +33,21 @@ import {
   type ProviderConfig,
 } from "./_ai-providers.js";
 import { serverModel, embeddingModel } from "../src/ai-providers.js";
+import {
+  REGISTRY,
+  describePowerStep,
+  historyTurn,
+  powerInstructions,
+  runPowerTool,
+  summarizePowerStep,
+  toolsFor,
+  type PowerKit,
+} from "./_ai-powers.js";
+import {
+  sanitizeArtifacts,
+  type AiArtifact,
+  type Power,
+} from "../src/mavi-artifacts.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -58,6 +73,8 @@ export type AiEnv = {
   workerBudgetMs: number;
   /** Abre as API Keys da biblioteca de provedores (AI_PROVIDER_KEY). */
   providerKey: Buffer | null;
+  /** O modelo de imagem do servidor, sem regra no painel (IMAGE_MODEL). */
+  imageModel: string;
   /** GCS do Drive: o worker baixa os arquivos para ler o texto. */
   credentials?: GcsCredentials | null;
   bucket?: string;
@@ -82,6 +99,7 @@ export function aiEnv(
     workerSecret: env.AI_WORKER_SECRET?.trim() ?? "",
     workerBudgetMs: Number(env.AI_WORKER_BUDGET_MS) || 50_000,
     providerKey: providerKeyFrom(env.AI_PROVIDER_KEY),
+    imageModel: serverModel("image_generation", env),
   };
 }
 
@@ -348,10 +366,12 @@ export type AiStreamEvent =
   | { type: "text"; text: string }
   | { type: "round_end" }
   | { type: "warning"; text: string }
+  | { type: "artifact"; artifact: AiArtifact }
   | {
       type: "done";
       answer: string;
       sources: AiSource[];
+      artifacts: AiArtifact[];
       conversation: string | null;
     }
   | { type: "error"; error: string; status: number };
@@ -386,7 +406,9 @@ async function ask(
     state: "running",
   });
   const now = (deps.now ?? Date.now)();
-  const [base, limits, history, route] = await Promise.all([
+  // Os poderes (visualizações, imagens, ações) só no módulo MAVI.
+  const onPage = body.surface === "page";
+  const [base, limits, history, route, powerList] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
       env,
@@ -408,11 +430,19 @@ async function ask(
             auth,
             `ai_conversations?select=owner_id&id=eq.${conversationId}`,
           ),
-          rest<ChatTurn>(
+          rest<ChatTurn & { artifacts?: unknown }>(
             env,
             deps,
             auth,
-            `ai_messages?select=role,content&conversation_id=eq.${conversationId}&order=id.desc&limit=12`,
+            `ai_messages?select=role,content,artifacts&conversation_id=eq.${conversationId}&order=id.desc&limit=12`,
+          ).catch(() =>
+            // Antes da migração 20261212090000_mavi_powers não há anexos.
+            rest<ChatTurn>(
+              env,
+              deps,
+              auth,
+              `ai_messages?select=role,content&conversation_id=eq.${conversationId}&order=id.desc&limit=12`,
+            ),
           ),
         ])
       : Promise.resolve(null),
@@ -425,7 +455,17 @@ async function ask(
       scope,
       scope.module === "meetings" ? "meetings_history" : "assistant",
     ),
+    onPage
+      ? callRpc<string[]>(env, deps.fetch, auth, "ai_my_powers", {
+          p_company: company,
+        }).then((r) => (r.ok && Array.isArray(r.data) ? r.data : []))
+      : Promise.resolve([] as string[]),
   ]);
+  const powers = new Set(
+    powerList.filter((p): p is Power =>
+      ["visuals", "images", "actions"].includes(p),
+    ),
+  );
   // O assistente (o balão de todas as telas) é um módulo que o
   // administrador desliga para cada pessoa.
   if (
@@ -451,9 +491,27 @@ async function ask(
     if (owner.owner_id !== userIdFrom(auth))
       throw new AiError(403, "Só quem começou a conversa continua nela.");
   }
+  // O que as respostas anteriores mostraram (as imagens podem ser editadas).
+  const past = history ? [...history[1]].reverse() : [];
+  const priorImages = new Map<string, string>();
+  const next = { V: 1, I: 1, A: 1 };
+  for (const m of past)
+    for (const a of sanitizeArtifacts(m.artifacts)) {
+      const letter = a.ref[0] as keyof typeof next;
+      next[letter] = Math.max(next[letter], Number(a.ref.slice(1)) + 1);
+      if (a.type === "image") priorImages.set(a.ref, a.path);
+    }
   const messages = conversation(
     question,
-    history ? [...history[1]].reverse() : body.history,
+    history
+      ? past.map((m) => ({
+          role: m.role,
+          content:
+            m.role === "assistant"
+              ? historyTurn(m.content, sanitizeArtifacts(m.artifacts))
+              : m.content,
+        }))
+      : body.history,
   );
   emit({
     type: "step",
@@ -478,19 +536,74 @@ async function ask(
     sources: [],
     chunks: new Map(),
   };
+  const kit: PowerKit = {
+    ctx,
+    env: { ...env, credentials: env.credentials, bucket: env.bucket },
+    artifacts: [],
+    priorImages,
+    next,
+    emit: (artifact) => emit({ type: "artifact", artifact }),
+    imageCost: { usd: 0, model: "", provider: null },
+  };
+  const tools = toolsFor(powers);
+  const allowed = new Set(tools.map((t) => t.name));
   const steps: { label: string; detail?: string }[] = [];
+  // Cada chamada fica registrada (qual, quanto tempo, se falhou, quanto custou).
+  const calls: {
+    tool: string;
+    power: Power | null;
+    ok: boolean;
+    ms: number;
+    cost: number;
+    error?: string;
+  }[] = [];
   let n = 0;
   const execute = async (name: string, input: unknown) => {
     const stepId = `t${++n}`;
-    const label = describeStep(ctx, name, input);
+    const meta = REGISTRY[name];
+    const power = meta?.power ?? null;
+    const label = power
+      ? describePowerStep(name, input)
+      : describeStep(ctx, name, input);
     emit({ type: "step", id: stepId, label, state: "running" });
+    const started = Date.now();
+    const spent = kit.imageCost.usd;
     try {
-      const out = await runTool(ctx, name, input);
-      const detail = summarizeStep(name, out);
+      // Só as ferramentas oferecidas nesta pergunta (os poderes da pessoa).
+      if (!allowed.has(name)) throw Error(`Ferramenta indisponível: ${name}.`);
+      const work = power ? runPowerTool(kit, name, input) : runTool(ctx, name, input);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const out = await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(Error("A ferramenta demorou demais.")),
+            meta?.timeoutMs ?? 45_000,
+          );
+        }),
+      ]).finally(() => clearTimeout(timer));
+      const detail = power
+        ? summarizePowerStep(name, out)
+        : summarizeStep(name, out);
       steps.push({ label, detail });
+      calls.push({
+        tool: name,
+        power,
+        ok: true,
+        ms: Date.now() - started,
+        cost: kit.imageCost.usd - spent,
+      });
       emit({ type: "step", id: stepId, label, state: "done", detail });
       return out;
     } catch (e) {
+      calls.push({
+        tool: name,
+        power,
+        ok: false,
+        ms: Date.now() - started,
+        cost: kit.imageCost.usd - spent,
+        error: (e as Error).message?.slice(0, 300),
+      });
       emit({
         type: "step",
         id: stepId,
@@ -504,12 +617,12 @@ async function ask(
   let result: Awaited<ReturnType<LlmAdapter>> | undefined;
   try {
     result = await llm({
-      instructions: INSTRUCTIONS,
+      instructions: INSTRUCTIONS + powerInstructions(powers),
       context: base.context,
       messages,
-      tools: TOOLS,
+      tools,
       execute,
-      maxRounds: 6,
+      maxRounds: powers.size ? 8 : 6,
       onEvent: (e) =>
         e.type === "round_end" ? emit({ type: "round_end" }) : emit(e),
     });
@@ -541,6 +654,11 @@ async function ask(
   }
   const answer = result!.text;
   const sources = citedSources(answer, ctx.sources);
+  // O link assinado da imagem vale uma hora: não é gravado.
+  const artifacts = kit.artifacts;
+  const stored = artifacts.map((a) =>
+    a.type === "image" ? { ...a, url: undefined } : a,
+  );
   // A conversa fica salva; se não der, a resposta chega mesmo assim.
   const saved = await callRpc<string>(env, deps.fetch, auth, "ai_save_turn", {
     p_company: company,
@@ -555,15 +673,67 @@ async function ask(
     p_answer: answer,
     p_sources: sources,
     p_steps: steps,
+    ...(stored.length ? { p_artifacts: stored } : {}),
   }).catch(() => null);
   if (!saved?.ok)
     emit({ type: "warning", text: "Não foi possível salvar esta conversa." });
+  const savedId = saved?.ok ? saved.data : conversationId;
+  if (calls.length)
+    await callRpc(env, deps.fetch, auth, "ai_log_tool_calls", {
+      p_company: company,
+      p_conversation: savedId,
+      p_module: scope.module ?? "assistant",
+      p_calls: calls.map((c) => ({
+        ...c,
+        cost: Math.round(c.cost * 1e6) / 1e6,
+      })),
+    }).catch(() => {});
   return {
     type: "done",
     answer,
     sources,
-    conversation: saved?.ok ? saved.data : conversationId,
+    artifacts,
+    conversation: savedId,
   };
+}
+
+/**
+ * Links (1 hora) das imagens que a MAVI gerou, só para quem vê a conversa
+ * em que elas aparecem (o banco confere: a resposta tem que ser visível).
+ */
+async function imageUrls(body: Row, auth: string, env: AiEnv, deps: AiDeps) {
+  const company = String(body.company ?? "");
+  if (!UUID.test(company)) throw new AiError(400, "Empresa inválida.");
+  if (!env.credentials || !env.bucket)
+    throw new AiError(500, "Credenciais do GCS não configuradas.");
+  const pattern = new RegExp(
+    `^ai-images/${company}/[0-9a-f-]{36}\\.(png|webp|jpg)$`,
+    "i",
+  );
+  const paths = [
+    ...new Set(
+      (Array.isArray(body.paths) ? body.paths : [])
+        .filter((p): p is string => typeof p === "string" && pattern.test(p))
+        .slice(0, 24),
+    ),
+  ];
+  const urls: Record<string, string> = {};
+  await Promise.all(
+    paths.map(async (path) => {
+      const filter = encodeURIComponent(JSON.stringify([{ path }]));
+      const rows = await rest<{ id: number }>(
+        env,
+        deps,
+        auth,
+        `ai_messages?select=id&company_id=eq.${company}&artifacts=cs.${filter}&limit=1`,
+      );
+      if (rows.length)
+        urls[path] = signGcsUrl(env.credentials!, env.bucket!, path, "GET", {
+          expiresInSeconds: 3600,
+        });
+    }),
+  );
+  return urls;
 }
 
 function errorEvent(err: unknown): Extract<AiStreamEvent, { type: "error" }> {
@@ -775,6 +945,14 @@ export async function handleAi(
     }
     if (typeof req.action === "string" && req.action.startsWith("ai-provider-"))
       return handleProviders(req, authorization, env, deps);
+    if (req.action === "ai-image-urls") {
+      if (!authorization?.startsWith("Bearer "))
+        return { status: 401, body: { error: "Entre na sua conta." } };
+      return {
+        status: 200,
+        body: { urls: await imageUrls(req, authorization, env, deps) },
+      };
+    }
     if (req.action === "ai-ask") {
       if (!authorization?.startsWith("Bearer "))
         return { status: 401, body: { error: "Entre na sua conta." } };
@@ -784,6 +962,7 @@ export async function handleAi(
         body: {
           answer: done.answer,
           sources: done.sources,
+          artifacts: done.artifacts,
           conversation: done.conversation,
         },
       };

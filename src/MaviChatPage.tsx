@@ -24,6 +24,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { Loading, Select, SelectOption } from "./ui";
+import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
+import { ARTIFACT_LINE } from "./mavi-artifacts";
+import type { FormPreset } from "./forms";
 import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import {
@@ -134,6 +137,9 @@ export function MaviChatPage({
   conversationId,
   href,
   onOpen,
+  onNewTask,
+  onComment,
+  taskHref,
   notify,
 }: {
   company: string;
@@ -143,6 +149,10 @@ export function MaviChatPage({
   conversationId: string | null;
   href: (id: string | null) => string;
   onOpen: (id: string | null, replace?: boolean) => void;
+  /** Ações da MAVI: a tarefa proposta abre no formulário de sempre. */
+  onNewTask: (preset: FormPreset) => void;
+  onComment: (task: string, text: string) => Promise<unknown>;
+  taskHref: (task: string) => string;
   notify: (message: string) => void;
 }) {
   const [list, setList] = useState<AiConversation[] | null>(null);
@@ -511,9 +521,19 @@ export function MaviChatPage({
                 question,
                 conv?.id ?? null,
                 handlers,
+                undefined,
+                "page",
               )
             }
             onAnswer={answered}
+            host={{
+              company,
+              conversation: conv?.id ?? null,
+              onNewTask,
+              onComment,
+              taskHref,
+              notify,
+            }}
           />
         )}
       </section>
@@ -597,6 +617,7 @@ function ChatThread({
   send,
   onAnswer,
   onNew,
+  host,
 }: {
   initial: ChatEntry[];
   readOnly: boolean;
@@ -609,6 +630,7 @@ function ChatThread({
   send: AiSend;
   onAnswer: (answer: AiAnswer, question: string) => void;
   onNew: () => void;
+  host: Omit<ArtifactHost, "readOnly" | "streaming" | "onDraft">;
 }) {
   const chat = useAiTurns({ initial, send, readOnly, onAnswer });
   const { turns, busy } = chat;
@@ -640,6 +662,29 @@ function ChatThread({
     if (!(await chat.submit(question))) setDraft(question.trim());
     input.current?.focus();
   }
+  const artifactHost = {
+    ...host,
+    readOnly,
+    onDraft: (text: string) => {
+      setDraft(text);
+      requestAnimationFrame(() => {
+        const el = input.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(text.length, text.length);
+      });
+    },
+  };
+  // Os anexos que a resposta (já escrita) não colocou numa linha [[V1]].
+  const unplaced = (t: ChatEntry) => {
+    const placed = new Set(
+      t.content
+        .split("\n")
+        .map((l) => l.match(ARTIFACT_LINE)?.[1])
+        .filter(Boolean),
+    );
+    return (t.artifacts ?? []).filter((a) => !placed.has(a.ref));
+  };
 
   const composer = readOnly ? (
     <div className="mavi-readonly">
@@ -768,10 +813,28 @@ function ChatThread({
                           text={text}
                           sources={typing ? [] : (t.sources ?? [])}
                           onSource={openAiSource}
+                          renderArtifact={(ref) => {
+                            const a = t.artifacts?.find((x) => x.ref === ref);
+                            return a ? (
+                              <ArtifactView
+                                artifact={a}
+                                host={{ ...artifactHost, streaming: !!t.streaming }}
+                              />
+                            ) : null;
+                          }}
                         />
                       )}
                     />
                   )}
+                  {/* O que a resposta não pôs no lugar aparece no fim. */}
+                  {unplaced(t).map((a) => (
+                    <div key={a.id} className="answer-artifact">
+                      <ArtifactView
+                        artifact={a}
+                        host={{ ...artifactHost, streaming: !!t.streaming }}
+                      />
+                    </div>
+                  ))}
                   {!t.streaming && t.content && (
                     <div className="mavi-msg-actions">
                       <CopyButton text={plainAnswer(t.content)} />

@@ -25334,3 +25334,17 @@ main:has(> .mavi-chat) > .error-banner {
     transition: none;
   }
 }
+
+/* Na bolinha, o lugar de um anexo do módulo MAVI (gráfico, imagem, ação). */
+.answer-artifact-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 5px 10px;
+  border: 1px dashed #d5e2c6;
+  border-radius: 8px;
+  background: #fbfdf8;
+  color: #5d6a68;
+  font-size: 0.72rem;
+}

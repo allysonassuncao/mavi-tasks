@@ -355,6 +355,11 @@ export function SidebarNav({
               label: "Termômetro",
               to: { page: "aiUsage", hash: "termometro" },
             },
+            {
+              key: "ai-powers",
+              label: "Poderes",
+              to: { page: "aiUsage", hash: "poderes" },
+            },
             ...(isAdmin
               ? [
                   {

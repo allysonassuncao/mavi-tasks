@@ -18,9 +18,10 @@ import {
   type UsageRow,
 } from "./ai";
 
-type Tab = "user" | "client" | "contract" | "project" | "module" | "model";
+type Tab =
+  "user" | "client" | "contract" | "project" | "module" | "model" | "tool";
 /** Divisões sem limite próprio. */
-const NO_LIMIT = new Set<Tab>(["module", "model"]);
+const NO_LIMIT = new Set<Tab>(["module", "model", "tool"]);
 const TABS: { id: Tab; label: string }[] = [
   { id: "user", label: "Pessoas" },
   { id: "client", label: "Clientes" },
@@ -28,7 +29,25 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "project", label: "Projetos" },
   { id: "module", label: "Módulos" },
   { id: "model", label: "Modelos" },
+  { id: "tool", label: "Ferramentas" },
 ];
+/** As ferramentas da MAVI (as de consulta e as dos poderes). */
+const TOOL_LABELS: Record<string, string> = {
+  find_clients: "Achar clientes",
+  search_knowledge: "Buscar na base de conhecimento",
+  read_more: "Ler um trecho com mais contexto",
+  list_meetings: "Listar reuniões",
+  campaign_results: "Resultados das campanhas",
+  list_tasks: "Listar tarefas",
+  client_temperature: "Termômetro do cliente",
+  show_chart: "Gráfico (Visualizações)",
+  show_table: "Tabela (Visualizações)",
+  show_kpis: "Indicadores (Visualizações)",
+  show_timeline: "Linha do tempo (Visualizações)",
+  generate_image: "Gerar ou editar imagem (Imagens)",
+  propose_task: "Propor tarefa (Ações)",
+  propose_comment: "Propor comentário (Ações)",
+};
 const MODULE_LABELS: Record<string, string> = {
   assistant: "Assistente (MAVI)",
   meetings: "Gravações da MAVI",
@@ -135,6 +154,7 @@ export function AiUsagePage({
       project: report.by_project,
       module: report.by_module,
       model: report.by_model ?? [],
+      tool: [],
     }[tab];
     const list = source.map((r) => ({ ...r, id: r.id ?? "" }));
     // Quem tem limite aparece mesmo sem gasto no período.
@@ -284,6 +304,9 @@ export function AiUsagePage({
             ))}
           </div>
 
+          {tab === "tool" ? (
+            <ToolTable rows={report.by_tool ?? []} />
+          ) : (
           <div className="panel drive-table-wrap">
             <table className="drive-table ai-usage-table">
               <thead>
@@ -348,6 +371,7 @@ export function AiUsagePage({
               </tbody>
             </table>
           </div>
+          )}
           {!NO_LIMIT.has(tab) && (
             <NewLimit
               tab={tab as Exclude<Tab, "module" | "model">}
@@ -368,6 +392,70 @@ export function AiUsagePage({
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+/** Cada ferramenta: chamadas, falhas, tempo médio, pessoas e custo. */
+function ToolTable({ rows }: { rows: NonNullable<UsageReport["by_tool"]> }) {
+  const seconds = (ms: number) =>
+    ms < 1000
+      ? `${Math.round(ms)} ms`
+      : `${(ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s`;
+  return (
+    <div className="panel drive-table-wrap">
+      <table className="drive-table ai-usage-table">
+        <thead>
+          <tr>
+            <th>Ferramenta</th>
+            <th className="num">Chamadas</th>
+            <th className="num">Falhas</th>
+            <th className="num hide-mobile">Tempo médio</th>
+            <th className="num hide-mobile">Pessoas</th>
+            <th className="num">Custo próprio</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length ? (
+            rows.map((r) => (
+              <tr key={r.id}>
+                <td>
+                  <span className="ai-usage-name">
+                    {TOOL_LABELS[r.id] ?? r.id}
+                  </span>
+                </td>
+                <td className="num">{count(r.calls)}</td>
+                <td className="num">
+                  {r.errors ? (
+                    <span className="ai-tool-errors">
+                      {count(r.errors)} (
+                      {Math.round((r.errors / Math.max(1, r.calls)) * 100)}%)
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="num hide-mobile">{seconds(r.avg_ms)}</td>
+                <td className="num hide-mobile">{count(r.people)}</td>
+                <td className="num">
+                  {Number(r.cost) ? money(r.cost) : "—"}
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={6} className="muted centered">
+                Nenhuma ferramenta usada no período.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <p className="muted ai-usage-note">
+        Cada vez que a MAVI consulta o sistema, desenha, gera uma imagem ou
+        propõe uma ação. O custo próprio é o que a ferramenta gasta além da
+        resposta (as imagens); o da resposta está nas outras abas.
+      </p>
     </div>
   );
 }

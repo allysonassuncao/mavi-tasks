@@ -3703,6 +3703,13 @@ export default function App() {
                           replace,
                         )
                       }
+                      onNewTask={(preset) => openForm("task", preset)}
+                      onComment={(task, text) =>
+                        mutate("add_comment", { p_task: task, p_body: text })
+                      }
+                      taskHref={(task) =>
+                        `${pageUrl("tasks", companyPath)}/${task}`
+                      }
                       notify={notify}
                     />
                   </Suspense>
@@ -4167,6 +4174,9 @@ export default function App() {
           initialTitle={formPreset.title}
           initialDescription={formPreset.description}
           initialDue={formPreset.due}
+          initialAssignee={formPreset.assignee}
+          initialPriority={formPreset.priority}
+          onCreated={formPreset.onCreated}
           demo={demo}
           data={data}
           company={company}

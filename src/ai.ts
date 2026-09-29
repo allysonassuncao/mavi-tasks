@@ -7,6 +7,13 @@ import type {
   ProviderModel,
   RouteScope,
 } from "./ai-providers";
+import {
+  sanitizeArtifact,
+  sanitizeArtifacts,
+  type ActionState,
+  type AiArtifact,
+  type Power,
+} from "./mavi-artifacts";
 
 /**
  * IA do MAVI no navegador: a mesma pergunta serve a qualquer módulo — o
@@ -55,10 +62,13 @@ export type AiStreamHandlers = {
   /** A rodada chamou ferramentas: o texto dela era um comentário de trabalho. */
   onRoundEnd?: () => void;
   onWarning?: (text: string) => void;
+  /** A MAVI mostrou uma visualização, uma imagem ou uma ação (módulo MAVI). */
+  onArtifact?: (artifact: AiArtifact) => void;
 };
 export type AiAnswer = {
   answer: string;
   sources: AiSource[];
+  artifacts?: AiArtifact[];
   conversation: string | null;
 };
 
@@ -110,10 +120,14 @@ export async function streamAnswer(
     else if (e.type === "text") handlers.onText?.(e.text);
     else if (e.type === "round_end") handlers.onRoundEnd?.();
     else if (e.type === "warning") handlers.onWarning?.(e.text);
-    else if (e.type === "done")
+    else if (e.type === "artifact") {
+      const artifact = sanitizeArtifact(e.artifact);
+      if (artifact) handlers.onArtifact?.(artifact);
+    } else if (e.type === "done")
       final = {
         answer: e.answer ?? "",
         sources: e.sources ?? [],
+        artifacts: sanitizeArtifacts(e.artifacts),
         conversation: e.conversation ?? null,
       };
     else if (e.type === "error")
@@ -135,7 +149,10 @@ export async function streamAnswer(
   return final;
 }
 
-/** Pergunta à IA geral (busca na base de conhecimento), numa conversa salva. */
+/**
+ * Pergunta à IA geral (busca na base de conhecimento), numa conversa salva.
+ * No módulo MAVI (surface "page"), valem também os poderes da pessoa.
+ */
 export function askAi(
   company: string,
   scope: AiScope,
@@ -143,10 +160,18 @@ export function askAi(
   conversation: string | null,
   handlers: AiStreamHandlers = {},
   signal?: AbortSignal,
+  surface?: "page",
 ) {
   return streamAnswer(
     "/api/ai",
-    { action: "ai-ask", company, scope, question, conversation },
+    {
+      action: "ai-ask",
+      company,
+      scope,
+      question,
+      conversation,
+      ...(surface ? { surface } : {}),
+    },
     handlers,
     signal,
   );
@@ -167,6 +192,7 @@ export type AiStoredMessage = {
   content: string;
   sources: AiSource[];
   steps: { label: string; detail?: string }[];
+  artifacts?: AiArtifact[];
 };
 
 /** As conversas que a pessoa vê (as dela e as compartilhadas com ela). */
@@ -195,13 +221,21 @@ export async function getConversation(company: string, id: string) {
 }
 export async function conversationMessages(id: string) {
   if (!supabase) return [];
-  const { data, error } = await supabase
-    .from("ai_messages")
-    .select("id,role,content,sources,steps")
-    .eq("conversation_id", id)
-    .order("id");
+  const read = (columns: string) =>
+    supabase!
+      .from("ai_messages")
+      .select(columns)
+      .eq("conversation_id", id)
+      .order("id");
+  let { data, error } = await read("id,role,content,sources,steps,artifacts");
+  // Antes da migração 20261212090000_mavi_powers não há anexos.
+  if (error?.code === "42703")
+    ({ data, error } = await read("id,role,content,sources,steps"));
   if (error) throw error;
-  return (data ?? []) as AiStoredMessage[];
+  return ((data ?? []) as unknown as AiStoredMessage[]).map((m) => ({
+    ...m,
+    artifacts: sanitizeArtifacts(m.artifacts),
+  }));
 }
 export async function conversationShares(id: string) {
   if (!supabase) return [];
@@ -222,6 +256,56 @@ export const renameConversation = (id: string, title: string) =>
   rpc("ai_rename_conversation", { p_conversation: id, p_title: title });
 export const deleteConversation = (id: string) =>
   rpc("ai_delete_conversation", { p_conversation: id });
+/** Links (1 hora) das imagens que a MAVI gerou, para quem vê a conversa. */
+export async function imageUrls(company: string, paths: string[]) {
+  if (!paths.length) return {} as Record<string, string>;
+  const data = await providerAction<{ urls: Record<string, string> }>({
+    action: "ai-image-urls",
+    company,
+    paths,
+  });
+  return data.urls ?? {};
+}
+/** A decisão sobre uma ação que a MAVI propôs (uma vez só). */
+export const setActionState = (
+  conversation: string,
+  artifact: string,
+  state: Exclude<ActionState, "pending">,
+  result: Record<string, unknown> = {},
+) =>
+  rpc("ai_set_action_state", {
+    p_conversation: conversation,
+    p_artifact: artifact,
+    p_state: state,
+    p_result: result,
+  });
+
+// ------------------------------------------------------------ poderes
+export type PowerSetting = {
+  power: Power;
+  enabled: boolean;
+  everyone: boolean;
+  team_ids: string[];
+  user_ids: string[];
+  except_ids: string[];
+  updated_at: string | null;
+  updated_by: string | null;
+};
+export const powersAdmin = (company: string) =>
+  rpc<PowerSetting[]>("ai_powers_admin", { p_company: company });
+export const setPower = (company: string, p: PowerSetting) =>
+  rpc("ai_set_power", {
+    p_company: company,
+    p_power: p.power,
+    p_enabled: p.enabled,
+    p_everyone: p.everyone,
+    p_teams: p.team_ids,
+    p_users: p.user_ids,
+    p_except: p.except_ids,
+  });
+export const myPowers = (company: string) =>
+  rpc<Power[]>("ai_my_powers", { p_company: company });
+
 export const shareConversation = (id: string, users: string[]) =>
   rpc<{ shared: string[]; refused: { user: string; reason: string }[] }>(
     "ai_share_conversation",
@@ -257,6 +341,15 @@ export type UsageReport = {
     input_tokens: number;
     output_tokens: number;
   })[];
+  /** Cada ferramenta da MAVI: chamadas, falhas, tempo médio e custo. */
+  by_tool?: {
+    id: string;
+    calls: number;
+    errors: number;
+    avg_ms: number;
+    cost: number;
+    people: number;
+  }[];
   by_day: { day: string; cost: number; asks: number }[];
   limits: UsageLimit[];
 };
