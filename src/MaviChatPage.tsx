@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   PanelLeft,
   Pencil,
+  Paperclip,
   Puzzle,
   Search,
   Share2,
@@ -27,6 +28,8 @@ import {
 } from "lucide-react";
 import { Loading, Select, SelectOption } from "./ui";
 import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
+import { AttachButton, AttachmentTray, FileChip, useAttachmentTray } from "./MaviAttachments";
+import { conversationAttachments, type Attachment } from "./mavi-attachments";
 import { CanvasPanel } from "./MaviCanvas";
 import {
   ARTIFACT_LINE,
@@ -58,6 +61,7 @@ import {
 import {
   activeRuns,
   askAi,
+  myPowers,
   cancelRun,
   conversationMessages,
   deleteConversation,
@@ -205,6 +209,10 @@ export function MaviChatPage({
   const [runs, setRuns] = useState<ActiveRun[]>([]);
   const ownRuns = useRef(new Set<string>());
   const [reload, setReload] = useState(0);
+  // Anexos: o poder da pessoa e os arquivos da conversa aberta.
+  const [canAttach, setCanAttach] = useState(false);
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const [filesTick, setFilesTick] = useState(0);
 
   const clients = data.clients
     .filter((c) => !c.archived)
@@ -215,6 +223,11 @@ export function MaviChatPage({
     data.members.find((m) => m.user_id === id)?.name ?? "Alguém";
   const firstName = memberName(user).split(/\s+/)[0];
 
+  useEffect(() => {
+    myPowers(company)
+      .then((p) => setCanAttach(Array.isArray(p) && p.includes("attachments")))
+      .catch(() => setCanAttach(false));
+  }, [company]);
   // As skills que a pessoa pode escolher (vazio sem o poder).
   useEffect(() => {
     skillCatalog(company)
@@ -311,6 +324,25 @@ export function MaviChatPage({
     };
   }, [company, conversationId, reload]);
 
+  const openId = thread.conversation?.id ?? null;
+  useEffect(() => {
+    if (!openId) {
+      setFiles([]);
+      return;
+    }
+    let alive = true;
+    conversationAttachments(openId)
+      .then((l) => {
+        if (alive) setFiles(l);
+      })
+      .catch(() => {
+        if (alive) setFiles([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [openId, filesTick, reload]);
+
   function toggleSide() {
     if (narrow()) {
       setDrawer((v) => !v);
@@ -355,6 +387,7 @@ export function MaviChatPage({
     onOpen(c.id, true);
   }
   function answered(a: AiAnswer, question: string) {
+    setFilesTick((n) => n + 1);
     const current = thread.conversation;
     if (!current && a.conversation) {
       const c: AiConversation = {
@@ -598,6 +631,8 @@ export function MaviChatPage({
           <ChatThread
             key={thread.key}
             initial={thread.entries}
+            canAttach={canAttach && !readOnly}
+            files={files}
             readOnly={readOnly}
             greeting={`Como posso ajudar, ${firstName}?`}
             intro={
@@ -647,6 +682,7 @@ export function MaviChatPage({
                 "page",
                 picked.map(({ slug, version }) => ({ slug, version })),
                 extra?.confirm,
+                extra?.attachments,
               )
             }
             onAnswer={answered}
@@ -744,6 +780,8 @@ function ChatThread({
   onAnswer,
   onRun,
   background,
+  canAttach,
+  files,
   onNew,
   host,
 }: {
@@ -761,6 +799,9 @@ function ChatThread({
   onRun: (run: { id: string; conversation: string }, question: string) => void;
   /** Uma resposta desta conversa ainda em andamento (de quando a pessoa saiu). */
   background: ActiveRun | null;
+  /** O poder de anexar (módulo MAVI) e os arquivos já anexados na conversa. */
+  canAttach: boolean;
+  files: Attachment[];
   onNew: () => void;
   host: Omit<
     ArtifactHost,
@@ -769,6 +810,8 @@ function ChatThread({
 }) {
   const chat = useAiTurns({ initial, send, readOnly, onAnswer, onRun });
   const [stoppingBackground, setStoppingBackground] = useState(false);
+  const tray = useAttachmentTray(host.company, host.conversation);
+  const [dragging, setDragging] = useState(false);
   const { turns, busy } = chat;
   const error = chat.error || pageError;
   const [draft, setDraft] = useState("");
@@ -792,10 +835,25 @@ function ChatThread({
   }, []);
 
   async function submit(question: string) {
-    if (!question.trim() || busy || readOnly || background) return;
+    if (busy || readOnly || background || tray.working) return;
+    // Só arquivos, sem texto: a MAVI olha os anexos.
+    const ready = tray.ready.map((x) => x.attachment!);
+    const q =
+      question.trim() || (ready.length ? (ready.length === 1 ? "Veja o arquivo anexado." : "Veja os arquivos anexados.") : "");
+    if (!q) return;
     setDraft("");
     stick.current = true;
-    if (!(await chat.submit(question))) setDraft(question.trim());
+    const ok = await chat.submit(
+      q,
+      ready.length
+        ? {
+            attachments: ready.map((a) => a.id),
+            files: ready.map((a) => ({ id: a.id, name: a.name, kind: a.kind })),
+          }
+        : undefined,
+    );
+    if (!ok) setDraft(question.trim());
+    else if (ready.length) tray.sent();
     input.current?.focus();
   }
   // O canvas: abre sozinho quando a MAVI cria ou ajusta um documento.
@@ -861,7 +919,7 @@ function ChatThread({
     </div>
   ) : (
     <form
-      className="mavi-composer"
+      className={`mavi-composer${dragging ? " dragging" : ""}`}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         void submit(draft);
@@ -869,9 +927,29 @@ function ChatThread({
       onClick={(e) => {
         if (e.target === e.currentTarget) input.current?.focus();
       }}
+      onDragOver={(e) => {
+        if (!canAttach || !e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!canAttach || !e.dataTransfer.files.length) return;
+        e.preventDefault();
+        setDragging(false);
+        tray.add(e.dataTransfer.files);
+      }}
     >
+      {canAttach && <AttachmentTray items={tray.items} onRemove={tray.remove} />}
       <textarea
         ref={input}
+        onPaste={(e) => {
+          if (!canAttach || !e.clipboardData.files.length) return;
+          e.preventDefault();
+          tray.add(e.clipboardData.files);
+        }}
         rows={1}
         value={draft}
         maxLength={2000}
@@ -886,7 +964,10 @@ function ChatThread({
         }}
       />
       <div className="mavi-composer-bar">
-        {scope}
+        <span className="mavi-composer-left">
+          {canAttach && <AttachButton onFiles={tray.add} disabled={readOnly} />}
+          {scope}
+        </span>
         {busy ? (
           <button
             type="button"
@@ -902,9 +983,9 @@ function ChatThread({
           <button
             type="submit"
             className="mavi-send"
-            disabled={draft.trim().length < 2 || !!background}
+            disabled={(draft.trim().length < 2 && !tray.ready.length) || !!background || tray.working}
+            title={tray.working ? "Aguardando os anexos" : "Enviar (Enter)"}
             aria-label="Enviar"
-            title="Enviar (Enter)"
           >
             <ArrowUp size={18} />
           </button>
@@ -918,14 +999,16 @@ function ChatThread({
     </p>
   );
   // Voltou para uma conversa que ainda está respondendo (de quando saiu).
+  // Com uma resposta em andamento, nada fica para preencher (perguntas e ações esperam).
+  const waitingBackground = !!background && !busy;
   const backgroundBox = background && !busy && (
     <div className="mavi-background" role="status">
       <Loader2 size={16} className="spin" aria-hidden="true" />
       <p>
         <strong>A MAVI ainda está respondendo</strong>
         <span>
-          “{background.question}”. A conversa atualiza sozinha quando terminar, e o
-          aviso chega na sua caixa de entrada.
+          “{background.question}{background.question.length >= 80 ? "…" : ""}”. A conversa
+          atualiza sozinha quando terminar, e o aviso chega na sua caixa de entrada.
         </span>
       </p>
       {!background.cancel_requested && (
@@ -982,9 +1065,26 @@ function ChatThread({
         }}
       >
         <div className="mavi-col">
+          {files.length > 0 && (
+            <div className="mavi-conv-files" aria-label="Anexos desta conversa">
+              <span>
+                <Paperclip size={13} aria-hidden="true" /> Anexos desta conversa
+              </span>
+              {files.map((f) => (
+                <FileChip key={f.id} file={f} />
+              ))}
+            </div>
+          )}
           {turns.map((t, i) =>
             t.role === "user" ? (
               <div key={i} className="mavi-msg user">
+                {!!t.files?.length && (
+                  <div className="mavi-msg-files">
+                    {t.files.map((f) => (
+                      <FileChip key={f.id} file={f} />
+                    ))}
+                  </div>
+                )}
                 <p>{t.content}</p>
               </div>
             ) : (
@@ -1021,8 +1121,8 @@ function ChatThread({
                                 artifact={a}
                                 host={{
                           ...artifactHost,
-                          streaming: !!t.streaming,
-                          answered: i < turns.length - 1,
+                          streaming: !!t.streaming || waitingBackground,
+                          answered: i < turns.length - 1 || waitingBackground,
                         }}
                               />
                             ) : null;
@@ -1038,8 +1138,8 @@ function ChatThread({
                         artifact={a}
                         host={{
                           ...artifactHost,
-                          streaming: !!t.streaming,
-                          answered: i < turns.length - 1,
+                          streaming: !!t.streaming || waitingBackground,
+                          answered: i < turns.length - 1 || waitingBackground,
                         }}
                       />
                     </div>

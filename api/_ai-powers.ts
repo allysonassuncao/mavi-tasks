@@ -448,6 +448,8 @@ export const REGISTRY: Record<string, ToolMeta> = {
   ask_user: { kind: "ask", timeoutMs: 5_000 },
   web_research: { kind: "web", power: "web", timeoutMs: 150_000 },
   scrape_pages: { kind: "web", power: "scrape", timeoutMs: 90_000 },
+  search_attachments: { kind: "read", power: "attachments", timeoutMs: 30_000 },
+  read_attachment: { kind: "read", power: "attachments", timeoutMs: 30_000 },
   // Com modelo próprio, a skill roda inteira como ajudante: pode demorar.
   use_skill: { kind: "skill", power: "skills", timeoutMs: 150_000 },
   read_skill_file: { kind: "skill", power: "skills", timeoutMs: 15_000 },
@@ -534,6 +536,7 @@ const POWER_NAMES: Record<Power, string> = {
   web: "busca na internet",
   mcp: "conexões com serviços externos (MCP)",
   scrape: "leitura de páginas da internet",
+  attachments: "anexos na conversa",
 };
 
 /** O que muda nas instruções da MAVI quando ela tem poderes. */

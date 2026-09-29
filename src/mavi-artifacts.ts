@@ -17,7 +17,8 @@ export type Power =
   | "canvas"
   | "web"
   | "mcp"
-  | "scrape";
+  | "scrape"
+  | "attachments";
 export const POWERS: { id: Power; label: string; description: string }[] = [
   {
     id: "visuals",
@@ -42,6 +43,12 @@ export const POWERS: { id: Power; label: string; description: string }[] = [
     label: "Documentos, apresentações e planilhas",
     description:
       "A MAVI escreve documentos, monta apresentações e planilhas num canvas ao lado da conversa, que baixam em Word, PowerPoint, Excel ou PDF.",
+  },
+  {
+    id: "attachments",
+    label: "Anexos na conversa",
+    description:
+      "No módulo MAVI, a pessoa anexa documentos (PDF, Word, PowerPoint, Excel, texto), imagens, áudios e vídeos curtos. A MAVI lê uma vez (descreve imagens, transcreve áudio e vídeo), guarda em trechos vetorizados só daquela conversa e usa como contexto, citando o arquivo e a página.",
   },
   {
     id: "web",

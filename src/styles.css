@@ -25601,3 +25601,198 @@ main:has(> .mavi-chat) > .error-banner {
   flex-shrink: 0;
   font-size: 0.78rem;
 }
+
+/* MAVI · anexos na conversa */
+.mavi-composer-left {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.mavi-attach {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid #dfe4e2;
+  border-radius: 50%;
+  background: #fff;
+  color: #4f5c5c;
+  cursor: pointer;
+  transition:
+    background 150ms,
+    border-color 150ms;
+}
+.mavi-attach:hover:not(:disabled) {
+  border-color: #b9d99a;
+  background: #f4faeb;
+  color: #2d3e27;
+}
+.mavi-composer.dragging {
+  border-color: #9cc46a;
+  border-style: dashed;
+  background: #f7fbf1;
+}
+.mavi-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+  cursor: default;
+}
+.mavi-tray-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 232px;
+  max-width: 100%;
+  padding: 8px 30px 8px 8px;
+  border: 1px solid #e3e8e5;
+  border-radius: 14px;
+  background: #f8faf8;
+}
+.mavi-tray-item.failed {
+  border-color: #f1c9c2;
+  background: #fff6f4;
+}
+.mavi-tray-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: #263334;
+  color: #c8ec8e;
+}
+.mavi-tray-item.failed .mavi-tray-icon {
+  background: #fde4e1;
+  color: #a2281c;
+}
+.mavi-tray-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.mavi-tray-text strong {
+  overflow: hidden;
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.mavi-tray-text small {
+  overflow: hidden;
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.mavi-tray-item.failed small {
+  color: #a2281c;
+}
+.mavi-tray-bar {
+  display: block;
+  height: 3px;
+  margin-top: 2px;
+  border-radius: 3px;
+  background: #e3e8e5;
+  overflow: hidden;
+}
+.mavi-tray-bar > span {
+  display: block;
+  height: 100%;
+  background: #9cc46a;
+  transition: width 200ms;
+}
+.mavi-tray-item > .spin,
+.mavi-tray-ok {
+  flex-shrink: 0;
+  color: #5d8a3a;
+}
+.mavi-tray-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #6d7876;
+  cursor: pointer;
+}
+.mavi-tray-remove:hover {
+  background: #e7ebe9;
+  color: var(--ink);
+}
+.mavi-msg.user:has(.mavi-msg-files) {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.mavi-msg-files,
+.mavi-conv-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 78%;
+  justify-content: flex-end;
+}
+.mavi-conv-files {
+  max-width: none;
+  justify-content: flex-start;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #e6ebe8;
+  border-radius: 14px;
+  background: #fafbfa;
+}
+.mavi-conv-files > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #4f5c5c;
+}
+.mavi-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 5px 10px;
+  border: 1px solid #dfe6df;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.74rem;
+  color: #2d3e27;
+  cursor: pointer;
+}
+.mavi-file-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mavi-file-chip:hover {
+  border-color: #b9d99a;
+  background: #f4faeb;
+}
+.mavi-file-chip.bad {
+  border-color: #f1c9c2;
+  color: #a2281c;
+}

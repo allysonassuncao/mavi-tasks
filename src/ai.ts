@@ -37,7 +37,9 @@ export type AiSource = {
     | "campaign"
     | "case"
     | "whatsapp"
-    | "web";
+    | "web"
+    /** Um arquivo que a pessoa anexou na conversa (id: o anexo). */
+    | "attachment";
   /** Página da internet (busca na internet do módulo MAVI). */
   url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
@@ -177,6 +179,8 @@ export function askAi(
   skills?: { slug: string; version?: number }[],
   /** A ação de conexão (MCP) que a pessoa confirmou no card: roda e a MAVI continua. */
   confirm?: string,
+  /** Os anexos desta pergunta (módulo MAVI). */
+  attachments?: string[],
 ) {
   return streamAnswer(
     "/api/ai",
@@ -189,6 +193,7 @@ export function askAi(
       ...(surface ? { surface } : {}),
       ...(skills?.length ? { skills } : {}),
       ...(confirm ? { confirm } : {}),
+      ...(attachments?.length ? { attachments } : {}),
     },
     handlers,
     signal,
@@ -269,6 +274,11 @@ async function rpc<T>(name: string, args: Record<string, unknown>) {
   const { data, error } = await supabase.rpc(name, args);
   if (error) throw error;
   return data as T;
+}
+/** O link (10 minutos) para abrir um anexo da conversa. */
+export async function attachmentUrl(id: string) {
+  const data = await providerAction<{ url: string }>({ action: "ai-attach-url", id });
+  return data.url;
 }
 /** Parar uma resposta da MAVI (a sua): o servidor para no próximo passo. */
 export const cancelRun = (run: string) => rpc<boolean | null>("ai_run_cancel", { p_run: run });
@@ -580,6 +590,7 @@ export function sourceLabel(s: AiSource) {
       .filter(Boolean)
       .join(" · ");
   if (s.type === "file") return s.label ? `Arquivo · ${s.label}` : "Arquivo";
+  if (s.type === "attachment") return s.label ? `Anexo · ${s.label}` : "Anexo";
   if (s.type === "social") return "Social Leads";
   if (s.type === "campaign") return "Campanha";
   if (s.type === "case") return "Case de sucesso";
@@ -602,6 +613,8 @@ export function sourceLabel(s: AiSource) {
 /** O endereço (dentro da empresa aberta) que mostra uma fonte citada. */
 export function sourceUrl(s: AiSource) {
   const company = routeParts(window.location.pathname).company;
+  // O anexo abre pelo link assinado (openAiSource).
+  if (s.type === "attachment") return "#";
   if (s.type === "task") return taskUrl({ id: s.id, title: s.title }, company);
   const q = new URLSearchParams();
   let page: "drive" | "onboarding" | "campaigns" | "cases" = "drive";
@@ -628,6 +641,19 @@ export function sourceUrl(s: AiSource) {
 
 /** Abre uma fonte citada no lugar dela. */
 export function openAiSource(s: AiSource) {
+  // O anexo abre o arquivo (link assinado de 10 minutos).
+  if (s.type === "attachment") {
+    // A aba abre já no clique (o link chega depois, sem bloqueio de pop-up).
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
+    void attachmentUrl(s.id)
+      .then((url) => {
+        if (tab) tab.location.href = url;
+        else window.open(url, "_blank", "noopener,noreferrer");
+      })
+      .catch(() => tab?.close());
+    return;
+  }
   // Uma página da internet abre fora do sistema.
   if (s.type === "web") {
     const url = s.url ?? s.id;

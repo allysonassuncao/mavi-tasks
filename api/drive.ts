@@ -434,7 +434,11 @@ export default async function handler(
       );
     else if (action.startsWith("ai-")) {
       const env = aiEnv(driveEnv());
-      result = await handleAi(body, authorization, env, aiDeps(env));
+      result = await handleAi(body, authorization, env, {
+        ...aiDeps(env),
+        // A leitura dos anexos termina mesmo se a pessoa sair da tela.
+        background: (work) => waitUntil(work.catch(() => {})),
+      });
     } else
       result = await handleDrive(
         body,

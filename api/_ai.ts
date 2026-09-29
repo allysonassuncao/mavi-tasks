@@ -66,6 +66,15 @@ import {
 } from "./_ai-skills.js";
 import { MCP_RULES, handleMcpAction, mcpTurn, type McpCatalog } from "./_ai-mcp.js";
 import { pageForMavi, scrapePage } from "./_ai-scrape.js";
+import {
+  ATTACH_RULES,
+  ATTACH_TOOLS,
+  attachmentContext,
+  handleAttachments,
+  inlineAttachments,
+  runAttachmentTool,
+  type ConversationAttachment,
+} from "./_ai-attachments.js";
 import { appOrigin } from "./_origin.js";
 
 /**
@@ -133,6 +142,8 @@ export type AiDeps = {
   providerLlm?: (config: ProviderConfig) => LlmAdapter;
   /** Resolve o nome dos servidores das conexões (trocado nos testes). */
   lookup?: (host: string) => Promise<{ address: string }[]>;
+  /** Continua um trabalho depois da resposta (waitUntil na Vercel): leitura dos anexos. */
+  background?: (work: Promise<unknown>) => void;
 };
 export function aiDeps(env: AiEnv): AiDeps {
   return {
@@ -539,7 +550,7 @@ async function ask(
   ]);
   const powers = new Set(
     powerList.filter((p): p is Power =>
-      ["visuals", "images", "actions", "skills", "canvas", "web", "mcp", "scrape"].includes(p),
+      ["visuals", "images", "actions", "skills", "canvas", "web", "mcp", "scrape", "attachments"].includes(p),
     ),
   );
   // O assistente (o balão de todas as telas) é um módulo que o
@@ -765,6 +776,35 @@ async function ask(
     emit({ type: "step", id: `skill-model-${s.slug}`, label, state: "done" });
     break;
   }
+  // Anexos da conversa (poder 'attachments', módulo MAVI): os desta mensagem
+  // passam a ser da conversa; os que cabem vão inteiros na pergunta, e o
+  // resto a MAVI busca (search_attachments) ou lê (read_attachment).
+  const attachIds = (Array.isArray(body.attachments) ? body.attachments : [])
+    .filter((x): x is string => typeof x === "string" && UUID.test(x))
+    .slice(0, 10);
+  const attachConv = live?.run?.conversation ?? conversationId;
+  let attachments: ConversationAttachment[] = [];
+  if (onPage && powers.has("attachments") && attachConv) {
+    if (attachIds.length)
+      await callRpc(env, deps.fetch, auth, "ai_attachments_link", {
+        p_conversation: attachConv,
+        p_ids: attachIds,
+      }).catch(() => null);
+    const r = await callRpc<ConversationAttachment[]>(env, deps.fetch, auth, "ai_attachments_list", {
+      p_conversation: attachConv,
+    }).catch(() => null);
+    attachments = r?.ok && Array.isArray(r.data) ? r.data : [];
+    if (attachIds.length) {
+      const label = `Lendo ${attachIds.length === 1 ? "o anexo" : `os ${attachIds.length} anexos`}`;
+      emit({ type: "step", id: "attach", label, state: "running" });
+      const inline = await inlineAttachments(env, ctx, attachments, attachIds).catch(() => "");
+      const last = messages[messages.length - 1];
+      last.content += inline;
+      const detail = inline ? "inteiros na pergunta" : "a MAVI busca o que precisar";
+      steps.push({ label, detail });
+      emit({ type: "step", id: "attach", label, state: "done", detail });
+    }
+  }
   // As ferramentas das conexões (MCP): as que leem rodam, as outras viram proposta.
   const mcp = powers.has("mcp")
     ? mcpTurn(
@@ -788,6 +828,7 @@ async function ask(
         skills.loaded.size > 0,
     ),
     ...(mcp?.tools ?? []),
+    ...(attachments.some((a) => a.status === "ready") ? ATTACH_TOOLS : []),
   ];
   const allowed = new Set(tools.map((t) => t.name));
   let n = 0;
@@ -809,6 +850,10 @@ async function ask(
       ? `${mcpTool.write ? "Preparando" : "Consultando"} ${mcp!.label(name)}`
       : skillTool
       ? describeSkillStep(skills, name, input)
+      : name === "search_attachments"
+        ? `Buscando nos anexos “${String((input as Record<string, unknown>)?.query ?? "").slice(0, 80)}”`
+      : name === "read_attachment"
+        ? `Lendo o anexo “${String((input as Record<string, unknown>)?.attachment ?? "").slice(0, 80)}”`
       : name === "scrape_pages"
         ? `Lendo ${scrapeHosts(input)}`
       : name === "web_research"
@@ -828,6 +873,8 @@ async function ask(
         ? mcp!.run(kit, name, input)
         : skillTool
         ? runSkillTool(skills, name, input)
+        : name === "search_attachments" || name === "read_attachment"
+          ? runAttachmentTool(env, ctx, attachConv!, attachments, name, input)
         : name === "scrape_pages"
           ? scrape(input)
         : name === "web_research"
@@ -853,6 +900,10 @@ async function ask(
             : "resposta recebida"
         : skillTool
         ? summarizeSkillStep(name, out)
+        : name === "search_attachments"
+          ? `${(out.match(/^\[S\d+\] /gm) ?? []).length} trechos`
+        : name === "read_attachment"
+          ? out.includes("continua:") ? "lido em parte" : "lido"
         : name === "scrape_pages"
           ? `${(out.match(/^\[S\d+\] /gm) ?? []).length} de ${scrapeCount(input)} páginas lidas`
         : name === "web_research"
@@ -1043,11 +1094,13 @@ async function ask(
         powerInstructions(powers, onPage) +
         webNote +
         (skills.catalog.size || picked.length ? SKILL_RULES : "") +
-        (mcp?.tools.length ? MCP_RULES : ""),
+        (mcp?.tools.length ? MCP_RULES : "") +
+        (attachments.length ? ATTACH_RULES : ""),
       context:
         base.context +
         catalogContext([...skills.catalog.values()], picked) +
-        (mcp?.context ?? ""),
+        (mcp?.context ?? "") +
+        attachmentContext(attachments),
       messages: picked.length
         ? withSkills(messages, picked)
         : messages,
@@ -1434,6 +1487,12 @@ export async function handleAi(
     }
     if (typeof req.action === "string" && req.action.startsWith("ai-provider-"))
       return handleProviders(req, authorization, env, deps);
+    if (typeof req.action === "string" && req.action.startsWith("ai-attach-"))
+      return handleAttachments(req, authorization, env, {
+        fetch: deps.fetch,
+        embed: deps.embed,
+        background: deps.background,
+      });
     if (typeof req.action === "string" && req.action.startsWith("ai-mcp-"))
       return handleMcpAction(
         req,

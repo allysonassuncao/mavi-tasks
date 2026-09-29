@@ -29,7 +29,8 @@ export type AiSource = {
     | "campaign"
     | "case"
     | "whatsapp"
-    | "web";
+    | "web"
+    | "attachment";
   /** Página da internet (busca da Claude). */
   url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
@@ -293,7 +294,7 @@ function clientOf(ctx: ToolContext, input: Record<string, unknown>) {
 }
 
 /** Uma referência nova (ou a mesma, se o trecho já foi citado). */
-function cite(ctx: ToolContext, source: Omit<AiSource, "ref">) {
+export function cite(ctx: ToolContext, source: Omit<AiSource, "ref">) {
   const same = ctx.sources.find(
     (x) =>
       x.type === source.type &&

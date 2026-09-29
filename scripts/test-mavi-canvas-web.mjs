@@ -38,7 +38,7 @@ async function check(title, fn) {
 await check("canvas e web vêm desligados; ligam como os outros poderes", async () => {
   assert.deepEqual(await one(ana, "select public.ai_my_powers($1)", [A]), []);
   const list = await one(admin, "select public.ai_powers_admin($1)", [A]);
-  assert.deepEqual(list.map((p) => p.power), ["visuals", "images", "actions", "canvas", "web", "scrape", "skills", "mcp"]);
+  assert.deepEqual(list.map((p) => p.power), ["visuals", "images", "actions", "canvas", "attachments", "web", "scrape", "skills", "mcp"]);
   await q(admin, "select public.ai_set_power($1,'canvas',true,true,'{}','{}','{}')", [A]);
   await q(admin, "select public.ai_set_power($1,'web',true,false,'{}',$2::uuid[],'{}')", [A, [admin]]);
   assert.deepEqual(await one(ana, "select public.ai_my_powers($1)", [A]), ["canvas"]);

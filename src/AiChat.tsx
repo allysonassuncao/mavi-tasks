@@ -15,6 +15,7 @@ import {
   Loader2,
   Megaphone,
   MessageCircle,
+  Paperclip,
   Rocket,
   Send,
   Sparkles,
@@ -51,6 +52,8 @@ export type ChatEntry = {
   warnings?: string[];
   /** Visualizações, imagens e ações (módulo MAVI). */
   artifacts?: AiArtifact[];
+  /** Os arquivos anexados nesta pergunta (módulo MAVI; só para mostrar). */
+  files?: { id: string; name: string; kind: string }[];
   streaming?: boolean;
 };
 
@@ -208,6 +211,7 @@ const SOURCE_ICONS = {
   case: Trophy,
   whatsapp: MessageCircle,
   web: Globe,
+  attachment: Paperclip,
 };
 function SourceIcon({ type }: { type: AiSource["type"] }) {
   const Icon = SOURCE_ICONS[type] ?? FileText;
@@ -341,7 +345,13 @@ export type AiSend = (
   history: ChatTurn[],
   handlers: AiStreamHandlers,
   /** O que vai junto com a pergunta (ex.: a ação confirmada no card) e o sinal para soltar a conexão. */
-  extra?: { confirm?: string; signal?: AbortSignal },
+  extra?: {
+    confirm?: string;
+    signal?: AbortSignal;
+    /** Os anexos desta pergunta (ids) e como aparecem na mensagem. */
+    attachments?: string[];
+    files?: { id: string; name: string; kind: string }[];
+  },
 ) => Promise<AiAnswer>;
 
 /**
@@ -396,7 +406,7 @@ export function useAiTurns({
     );
   }
   /** Faz a pergunta; false quando não foi (para devolver o texto à caixa). */
-  async function submit(question: string, extra?: { confirm?: string }) {
+  async function submit(question: string, extra?: Omit<NonNullable<Parameters<AiSend>[3]>, "signal">) {
     const q = question.trim();
     if (!q || busy || readOnly) return false;
     setError("");
@@ -406,7 +416,7 @@ export function useAiTurns({
       .map(({ role, content }) => ({ role, content }));
     setTurns([
       ...turns,
-      { role: "user", content: q },
+      { role: "user", content: q, ...(extra?.files?.length ? { files: extra.files } : {}) },
       { role: "assistant", content: "", steps: [], streaming: true },
     ]);
     let notes = 0;

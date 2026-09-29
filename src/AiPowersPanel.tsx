@@ -9,6 +9,7 @@ import {
   Presentation,
   Puzzle,
   ScanText,
+  Paperclip,
 } from "lucide-react";
 import { Button, Loading } from "./ui";
 import { MultiPick } from "./MultiPick";
@@ -26,6 +27,7 @@ const ICONS = {
   web: Globe,
   mcp: Plug,
   scrape: ScanText,
+  attachments: Paperclip,
 };
 const blank = (power: Power): PowerSetting => ({
   power,
