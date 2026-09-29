@@ -72,6 +72,7 @@ export function SidebarNav({
   allowed,
   taskCount,
   caseCount,
+  skillCount,
   noticeCount,
   products,
   href,
@@ -88,6 +89,8 @@ export function SidebarNav({
   taskCount?: number;
   /** Leaders: cases and edits waiting for their approval. */
   caseCount?: number;
+  /** Leaders: MAVI skills waiting for their approval. */
+  skillCount?: number;
   /** Avisos do Mural no ar que a pessoa ainda não viu. */
   noticeCount?: number;
   products: Pick<Product, "id" | "name" | "color">[];
@@ -146,6 +149,11 @@ export function SidebarNav({
           label: "MAVI",
           icon: Sparkles,
           to: { page: "mavi" },
+          count: skillCount,
+          children: [
+            { key: "mavi-chat", label: "Conversas", to: { page: "mavi" } },
+            { key: "mavi-skills", label: "Skills", to: { page: "skills" } },
+          ],
         },
         {
           key: "notices",
@@ -407,7 +415,8 @@ export function SidebarNav({
   const inside = (item: Item) =>
     page === item.to.page ||
     (item.key === "tasks" && page === "search") ||
-    (item.key === "onboarding" && page === "socialMedia");
+    (item.key === "onboarding" && page === "socialMedia") ||
+    (item.key === "mavi" && page === "skills");
 
   const link = (to: NavTarget, content: ReactNode, props: object = {}) => (
     <a

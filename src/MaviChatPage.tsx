@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   PanelLeft,
   Pencil,
+  Puzzle,
   Search,
   Share2,
   Sparkles,
@@ -27,6 +28,10 @@ import { Loading, Select, SelectOption } from "./ui";
 import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
 import { ARTIFACT_LINE } from "./mavi-artifacts";
 import type { FormPreset } from "./forms";
+import { skillCatalog } from "./mavi-skills";
+
+/** Uma skill escolhida na caixa de mensagem (com versão: em teste). */
+type Picked = { slug: string; name: string; version?: number };
 import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import {
@@ -140,6 +145,10 @@ export function MaviChatPage({
   onNewTask,
   onComment,
   taskHref,
+  skillsHref,
+  onSkills,
+  startSkill,
+  onStartSkill,
   notify,
 }: {
   company: string;
@@ -153,9 +162,20 @@ export function MaviChatPage({
   onNewTask: (preset: FormPreset) => void;
   onComment: (task: string, text: string) => Promise<unknown>;
   taskHref: (task: string) => string;
+  /** MAVI › Skills. */
+  skillsHref: string;
+  onSkills: () => void;
+  /** Uma skill pedida pelo endereço (?skill=…&versao=…): abre uma conversa nova com ela. */
+  startSkill: { slug: string; version?: number } | null;
+  /** A skill do endereço já foi usada (o endereço volta ao normal). */
+  onStartSkill: () => void;
   notify: (message: string) => void;
 }) {
   const [list, setList] = useState<AiConversation[] | null>(null);
+  const [catalog, setCatalog] = useState<
+    { slug: string; version: number; name: string; description: string }[]
+  >([]);
+  const [picked, setPicked] = useState<Picked[]>([]);
   const [thread, setThread] = useState<Thread>({
     conversation: null,
     entries: [],
@@ -180,6 +200,38 @@ export function MaviChatPage({
   const memberName = (id: string) =>
     data.members.find((m) => m.user_id === id)?.name ?? "Alguém";
   const firstName = memberName(user).split(/\s+/)[0];
+
+  // As skills que a pessoa pode escolher (vazio sem o poder).
+  useEffect(() => {
+    skillCatalog(company)
+      .then((c) => setCatalog(Array.isArray(c) ? c : []))
+      .catch(() => setCatalog([]));
+  }, [company]);
+  // O nome das escolhidas chega com o catálogo.
+  useEffect(() => {
+    setPicked((list) =>
+      list.map((p) => ({
+        ...p,
+        name: catalog.find((c) => c.slug === p.slug)?.name ?? p.name,
+      })),
+    );
+  }, [catalog]);
+  // "Usar na conversa" e "Testar esta versão" nas Skills: uma conversa nova com a skill.
+  useEffect(() => {
+    if (!startSkill) return;
+    // O endereço volta ao normal (sem ?skill) sem entrar no histórico.
+    newChat(false);
+    setPicked([
+      {
+        slug: startSkill.slug,
+        version: startSkill.version,
+        name:
+          catalog.find((c) => c.slug === startSkill.slug)?.name ?? startSkill.slug,
+      },
+    ]);
+    onStartSkill();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startSkill?.slug, startSkill?.version]);
 
   useEffect(() => {
     listConversations(company, 300)
@@ -241,13 +293,14 @@ export function MaviChatPage({
       // Lembrar o painel aberto é só uma conveniência.
     }
   }
-  function newChat() {
+  function newChat(go = true) {
     onScreen.current = null;
+    setPicked([]);
     setClient("");
     setError("");
     setDrawer(false);
     setThread((t) => ({ conversation: null, entries: [], key: t.key + 1 }));
-    onOpen(null);
+    if (go) onOpen(null);
   }
   function open(c: AiConversation) {
     setDrawer(false);
@@ -379,9 +432,23 @@ export function MaviChatPage({
     >
       <aside className="mavi-side" aria-label="Conversas com a MAVI">
         <div className="mavi-side-head">
-          <button type="button" className="mavi-new" onClick={newChat}>
+          <button type="button" className="mavi-new" onClick={() => newChat()}>
             <SquarePen size={16} aria-hidden="true" /> Nova conversa
           </button>
+          <a
+            href={skillsHref}
+            className="icon-btn"
+            aria-label="Skills da MAVI"
+            title="Skills da MAVI"
+            onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+              if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+                return;
+              e.preventDefault();
+              onSkills();
+            }}
+          >
+            <Puzzle size={17} />
+          </a>
           <button
             type="button"
             className="icon-btn"
@@ -446,7 +513,7 @@ export function MaviChatPage({
             className="icon-btn mavi-head-new"
             aria-label="Nova conversa"
             title="Nova conversa"
-            onClick={newChat}
+            onClick={() => newChat()}
           >
             <SquarePen size={17} />
           </button>
@@ -499,6 +566,7 @@ export function MaviChatPage({
             error={error}
             onNew={newChat}
             scope={
+              <>
               <Select
                 className="mavi-scope"
                 aria-label="Sobre qual cliente"
@@ -513,6 +581,12 @@ export function MaviChatPage({
                   </SelectOption>
                 ))}
               </Select>
+              <SkillPicker
+                catalog={catalog}
+                picked={picked}
+                onChange={setPicked}
+              />
+              </>
             }
             send={(question, _history, handlers) =>
               askAi(
@@ -523,6 +597,7 @@ export function MaviChatPage({
                 handlers,
                 undefined,
                 "page",
+                picked.map(({ slug, version }) => ({ slug, version })),
               )
             }
             onAnswer={answered}
@@ -879,5 +954,99 @@ function CopyButton({ text }: { text: string }) {
     >
       {done ? <Check size={15} /> : <Copy size={15} />}
     </button>
+  );
+}
+
+/** As skills desta conversa: o botão para escolher e as escolhidas. */
+function SkillPicker({
+  catalog,
+  picked,
+  onChange,
+}: {
+  catalog: { slug: string; name: string; description: string }[];
+  picked: Picked[];
+  onChange: (next: Picked[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  if (!catalog.length && !picked.length) return null;
+  const q = fold(query.trim());
+  const shown = catalog.filter(
+    (c) => !q || fold(`${c.name} ${c.slug} ${c.description}`).includes(q),
+  );
+  const has = (slug: string) => picked.some((p) => p.slug === slug);
+  return (
+    <span className="mavi-skill-pick">
+      {picked.map((p) => (
+        <span key={p.slug} className={`mavi-skill-chip${p.version ? " test" : ""}`}>
+          <Puzzle size={12} aria-hidden="true" />
+          <span>
+            {p.name}
+            {p.version ? ` · v${p.version} em teste` : ""}
+          </span>
+          <button
+            type="button"
+            aria-label={`Tirar a skill ${p.name}`}
+            onClick={() => onChange(picked.filter((x) => x.slug !== p.slug))}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {!!catalog.length && picked.length < 3 && (
+        <Popover.Root open={open} onOpenChange={setOpen}>
+          <Popover.Trigger asChild>
+            <button
+              type="button"
+              className="mavi-skill-add"
+              aria-label="Escolher uma skill"
+              title="Escolher uma skill para esta conversa"
+            >
+              <Puzzle size={14} />
+              {!picked.length && <span>Skills</span>}
+            </button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              className="status-menu mavi-skill-menu"
+              align="start"
+              side="top"
+              sideOffset={6}
+            >
+              {catalog.length > 6 && (
+                <input
+                  className="mavi-skill-search"
+                  type="search"
+                  autoFocus
+                  placeholder="Buscar skill"
+                  aria-label="Buscar skill"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              )}
+              <p>Skills da agência</p>
+              <div className="mavi-skill-options">
+                {shown.map((c) => (
+                  <button
+                    key={c.slug}
+                    type="button"
+                    disabled={has(c.slug)}
+                    onClick={() => {
+                      onChange([...picked, { slug: c.slug, name: c.name }]);
+                      setOpen(false);
+                      setQuery("");
+                    }}
+                  >
+                    <strong>{c.name}</strong>
+                    <small>{c.description}</small>
+                  </button>
+                ))}
+                {!shown.length && <small className="mavi-skill-none">Nenhuma skill.</small>}
+              </div>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+      )}
+    </span>
   );
 }

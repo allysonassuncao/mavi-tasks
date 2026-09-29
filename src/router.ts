@@ -21,6 +21,7 @@ export const pagePaths = {
   storage: "/armazenamento",
   aiUsage: "/mavi",
   mavi: "/mavi/conversas",
+  skills: "/mavi/skills",
   dashboards: "/dashboards",
   profile: "/perfil",
   settings: "/configuracoes",
@@ -187,6 +188,7 @@ export function resolvePage(path: string): Page | null {
   if (taskIdFromPath(path)) return "tasks";
   if (dashboardIdFromPath(path)) return "dashboards";
   if (maviChatIdFromPath(path)) return "mavi";
+  if (skillIdFromPath(path)) return "skills";
   return (
     (Object.keys(pagePaths) as Page[]).find(
       (page) => pagePaths[page] === normalized,
@@ -301,6 +303,15 @@ export function maviChatIdFromPath(path: string) {
   return (
     routeParts(path).path.match(
       /^\/mavi\/conversas\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
+    )?.[1] ?? null
+  );
+}
+
+/** Uma skill da MAVI: /mavi/skills/<id>. */
+export function skillIdFromPath(path: string) {
+  return (
+    routeParts(path).path.match(
+      /^\/mavi\/skills\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
     )?.[1] ?? null
   );
 }

@@ -60,6 +60,11 @@ export const NOTICE_TYPES: {
     label: "Conversas da MAVI",
     hint: "Quando compartilham com você uma conversa com a MAVI.",
   },
+  {
+    key: "ai_skill",
+    label: "Skills da MAVI",
+    hint: "Uma skill para aprovar, ou a sua aprovada ou devolvida.",
+  },
 ];
 
 export const STATUS_ROWS: { status: string; label: string }[] = [

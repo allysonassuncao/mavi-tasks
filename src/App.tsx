@@ -3,6 +3,7 @@ import { EditEntityForm, type EntityEdit } from "./EditEntityForm";
 import {
   dashboardIdFromPath,
   maviChatIdFromPath,
+  skillIdFromPath,
   taskIdFromPath,
   taskUrl,
 } from "./router";
@@ -44,6 +45,7 @@ import {
   ChartNoAxesCombined,
   Database,
   Sparkles,
+  Puzzle,
   HardDrive,
   PanelsTopLeft,
   Megaphone,
@@ -167,6 +169,7 @@ import { ProjectsBrowser } from "./ProjectsBrowser";
 import { TeamForm } from "./TeamForm";
 import { Drive } from "./DrivePage";
 import { AiAssistant } from "./AiAssistant";
+import { skillReviewCount } from "./mavi-skills";
 import { AiPage } from "./AiPage";
 import { CampaignsPage } from "./CampaignsPage";
 import { StoragePage } from "./StoragePage";
@@ -245,6 +248,9 @@ const ScheduleNavigation = lazy(() =>
   import("./TaskSchedule").then((m) => ({ default: m.ScheduleNavigation })),
 );
 const Reports = lazy(() => import("./Reports"));
+const SkillsPage = lazy(() =>
+  import("./SkillsPage").then((m) => ({ default: m.SkillsPage })),
+);
 const MaviChatPage = lazy(() =>
   import("./MaviChatPage").then((m) => ({ default: m.MaviChatPage })),
 );
@@ -271,6 +277,7 @@ const DashboardsPage = lazy(() =>
 const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "mavi", label: "MAVI", icon: Sparkles },
+  { id: "skills", label: "Skills da MAVI", icon: Puzzle },
   { id: "notices", label: "Mural de avisos", icon: BellRing },
   { id: "tasks", label: "Tarefas", icon: CheckCheck },
   { id: "agenda", label: "Agenda", icon: CalendarDays },
@@ -485,6 +492,16 @@ export default function App() {
   // is for leaders).
   const openDashboard = dashboardIdFromPath(location.split("?")[0]);
   const openChat = maviChatIdFromPath(location.split("?")[0]);
+  const openSkill = skillIdFromPath(location.split("?")[0]);
+  // MAVI › Skills › "Usar na conversa" / "Testar esta versão".
+  const maviStartSkill = useMemo(() => {
+    const q = new URLSearchParams(location.split("?")[1] ?? "");
+    const slug = q.get("skill");
+    const version = Number(q.get("versao"));
+    return slug && /^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)
+      ? { slug, ...(Number.isInteger(version) && version > 0 ? { version } : {}) }
+      : null;
+  }, [location]);
   const taskBackground = useRef<string | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -1086,6 +1103,26 @@ export default function App() {
   // Latest values for the long-lived realtime subscription below.
   // Inbox: who mentioned the person, and where.
   const [inbox, setInbox] = useState<AppNotification[]>([]);
+  // Leaders: MAVI skills waiting for approval (again when a skill notice
+  // arrives in the inbox, or after a review on the Skills page).
+  const [pendingSkills, setPendingSkills] = useState<number | undefined>();
+  const [skillsTick, setSkillsTick] = useState(0);
+  const skillNotices = inbox.filter((n) => n.kind === "ai_skill").length;
+  useEffect(() => {
+    if (demo || !company || !session || !isLeader) {
+      setPendingSkills(undefined);
+      return;
+    }
+    let alive = true;
+    skillReviewCount(company)
+      .then((n) => {
+        if (alive) setPendingSkills(Number(n) || undefined);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [demo, company, session, isLeader, skillsTick, skillNotices]);
   const loadInbox = useCallback(() => {
     if (!company || (!demo && !session)) return;
     if (demo) {
@@ -2302,6 +2339,7 @@ export default function App() {
                 : myOpenTasks
             }
             caseCount={pendingCases}
+            skillCount={pendingSkills}
             noticeCount={noticeCount || undefined}
             products={data.products.filter(
               (p) =>
@@ -2514,6 +2552,8 @@ export default function App() {
                         "Uma visão clara do trabalho. Mais espaço para criar.",
                       tasks: "Organize prioridades e acompanhe cada entrega.",
                       mavi: "Converse com a MAVI sobre os seus clientes.",
+                      skills:
+                        "Jeitos de trabalhar que a agência ensina à MAVI: instruções e arquivos de referência. Qualquer pessoa cria; administradores e gestores aprovam.",
                       agenda:
                         "Seu Google Agenda: veja, crie e edite eventos sem sair do workspace.",
                       search:
@@ -2581,6 +2621,7 @@ export default function App() {
                   page !== "notices" &&
                   page !== "storage" &&
                   page !== "aiUsage" &&
+                  page !== "skills" &&
                   page !== "dashboards" &&
                   page !== "settings" &&
                   (!["products", "contracts", "clients", "projects"].includes(
@@ -3689,6 +3730,39 @@ export default function App() {
                   onNewTask={(preset) => openForm("task", preset)}
                 />
               )}
+              {page === "skills" &&
+                allowed("skills") &&
+                (demo ? (
+                  <Empty
+                    title="Skills indisponíveis na demonstração"
+                    body="No ambiente demonstrativo não há skills da MAVI. Entre na sua conta para usar."
+                  />
+                ) : (
+                  <Suspense fallback={<Loading compact />}>
+                    <SkillsPage
+                      key={company}
+                      company={company}
+                      data={catalogData}
+                      isLeader={isLeader}
+                      skillId={openSkill}
+                      href={(id) =>
+                        pageUrl("skills", companyPath) + (id ? `/${id}` : "")
+                      }
+                      onOpen={(id) =>
+                        navigate(
+                          pageUrl("skills", companyPath) + (id ? `/${id}` : ""),
+                        )
+                      }
+                      onTest={(slug, version) =>
+                        navigate(
+                          `${pageUrl("mavi", companyPath)}?skill=${encodeURIComponent(slug)}${version ? `&versao=${version}` : ""}`,
+                        )
+                      }
+                      onChanged={() => setSkillsTick((v) => v + 1)}
+                      notify={notify}
+                    />
+                  </Suspense>
+                ))}
               {page === "mavi" &&
                 allowed("mavi") &&
                 (demo ? (
@@ -3719,6 +3793,12 @@ export default function App() {
                       }
                       taskHref={(task) =>
                         `${pageUrl("tasks", companyPath)}/${task}`
+                      }
+                      skillsHref={pageUrl("skills", companyPath)}
+                      onSkills={() => navigate(pageUrl("skills", companyPath))}
+                      startSkill={maviStartSkill}
+                      onStartSkill={() =>
+                        navigate(pageUrl("mavi", companyPath), true)
                       }
                       notify={notify}
                     />

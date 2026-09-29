@@ -564,3 +564,118 @@
     padding-left: 0;
   }
 }
+
+/* Skills na caixa de mensagem do módulo MAVI. */
+.mavi-composer-bar > .mavi-skill-pick {
+  flex: 1;
+  min-width: 0;
+}
+.mavi-composer-bar:has(.mavi-skill-pick) {
+  justify-content: flex-start;
+}
+.mavi-composer-bar:has(.mavi-skill-pick) .mavi-send {
+  margin-left: auto;
+}
+.mavi-skill-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.mavi-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 240px;
+  min-height: 30px;
+  padding: 0 4px 0 10px;
+  border-radius: 999px;
+  background: #e3ebd8;
+  color: #2f4f1a;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+.mavi-skill-chip.test {
+  background: #fff4d6;
+  color: #8a5a00;
+}
+.mavi-skill-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mavi-skill-chip > button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.mavi-skill-chip > button:hover {
+  background: #0000000f;
+}
+.mavi-skill-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: #4f5c5c;
+  font-size: 0.76rem;
+}
+.mavi-skill-add:hover {
+  background: #f4f8ef;
+  border-color: #d5e2c6;
+}
+.mavi-skill-menu {
+  width: 340px;
+  max-height: min(420px, var(--radix-popover-content-available-height));
+  display: flex;
+  flex-direction: column;
+}
+.mavi-skill-search {
+  margin: 2px 2px 6px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+.mavi-skill-options {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mavi-skill-options button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 9px;
+  border-radius: 8px;
+  text-align: left;
+}
+.mavi-skill-options button:hover:not(:disabled) {
+  background: #f3f6f1;
+}
+.mavi-skill-options strong {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.mavi-skill-options small {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.mavi-skill-none {
+  padding: 8px;
+}

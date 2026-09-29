@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { callRpc, signGcsUrl, type GcsCredentials } from "./_drive.js";
 import type { ToolSpec } from "./_ai-llm.js";
 import { TOOLS, type ToolContext } from "./_ai-tools.js";
+import { SKILL_TOOLS } from "./_ai-skills.js";
 import {
   priceCost,
   resolveRoute,
@@ -41,7 +42,7 @@ import type { ProviderModel } from "../src/ai-providers.js";
  * cada chamada.
  */
 
-export type ToolKind = "read" | "visual" | "image" | "action";
+export type ToolKind = "read" | "visual" | "image" | "action" | "skill";
 export type ToolMeta = { kind: ToolKind; power?: Power; timeoutMs: number };
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -266,13 +267,15 @@ export const REGISTRY: Record<string, ToolMeta> = {
   generate_image: { kind: "image", power: "images", timeoutMs: 170_000 },
   propose_task: { kind: "action", power: "actions", timeoutMs: 20_000 },
   propose_comment: { kind: "action", power: "actions", timeoutMs: 20_000 },
+  use_skill: { kind: "skill", power: "skills", timeoutMs: 15_000 },
+  read_skill_file: { kind: "skill", power: "skills", timeoutMs: 15_000 },
 };
 
 /** As ferramentas desta pergunta: as de consulta e as dos poderes da pessoa. */
 export function toolsFor(powers: ReadonlySet<Power>): ToolSpec[] {
   return [
     ...TOOLS,
-    ...POWER_TOOLS.filter((t) => {
+    ...[...POWER_TOOLS, ...SKILL_TOOLS].filter((t) => {
       const power = REGISTRY[t.name]?.power;
       return !!power && powers.has(power);
     }),

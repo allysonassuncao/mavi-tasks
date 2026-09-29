@@ -152,7 +152,9 @@ export interface AppNotification {
     /** Mudança de status de uma tarefa (headline: "moveu para Correção"). */
     | "status"
     /** Tarefa em Em validação para a pessoa validar. */
-    | "review";
+    | "review"
+    /** Skills da MAVI: uma para aprovar, ou a da pessoa aprovada/devolvida (link /mavi/skills/<id>). */
+    | "ai_skill";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

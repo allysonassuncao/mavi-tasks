@@ -9,7 +9,7 @@
  * Uma ação é só uma proposta: nada muda até a pessoa confirmar.
  */
 
-export type Power = "visuals" | "images" | "actions";
+export type Power = "visuals" | "images" | "actions" | "skills";
 export const POWERS: { id: Power; label: string; description: string }[] = [
   {
     id: "visuals",
@@ -28,6 +28,12 @@ export const POWERS: { id: Power; label: string; description: string }[] = [
     label: "Ações com confirmação",
     description:
       "A MAVI propõe criar uma tarefa ou comentar numa tarefa. Nada muda até a pessoa confirmar no card.",
+  },
+  {
+    id: "skills",
+    label: "Skills",
+    description:
+      "Jeitos de trabalhar que a agência ensina à MAVI (instruções e arquivos de referência). Qualquer pessoa cria; administradores e gestores aprovam em MAVI › Skills.",
   },
 ];
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BarChart3, Check, ImageIcon, ListChecks } from "lucide-react";
+import { BarChart3, Check, ImageIcon, ListChecks, Puzzle } from "lucide-react";
 import { Button, Loading } from "./ui";
 import { MultiPick } from "./MultiPick";
 import type { Snapshot } from "./types";
@@ -7,7 +7,12 @@ import { powersAdmin, setPower, type PowerSetting } from "./ai";
 import { POWERS, type Power } from "./mavi-artifacts";
 import "./mavi-artifacts.css";
 
-const ICONS = { visuals: BarChart3, images: ImageIcon, actions: ListChecks };
+const ICONS = {
+  visuals: BarChart3,
+  images: ImageIcon,
+  actions: ListChecks,
+  skills: Puzzle,
+};
 const blank = (power: Power): PowerSetting => ({
   power,
   enabled: false,
@@ -109,13 +114,6 @@ function PowerCard({
   useEffect(() => setForm(initial), [initial]);
   const info = POWERS.find((p) => p.id === initial.power)!;
   const Icon = ICONS[initial.power];
-  const people = data.members
-    .filter((m) => m.active)
-    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
-    .map((m) => ({ value: m.user_id, label: m.name }));
-  const teams = [...data.teams]
-    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
-    .map((t) => ({ value: t.id, label: t.name }));
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
   const set = (patch: Partial<PowerSetting>) =>
     setForm((f) => ({ ...f, ...patch }));
@@ -161,68 +159,12 @@ function PowerCard({
         </button>
       </header>
       {form.enabled && (
-        <div className="ai-power-audience">
-          <fieldset>
-            <legend>Quem pode usar</legend>
-            <label>
-              <input
-                type="radio"
-                name={`power-${initial.power}`}
-                checked={form.everyone}
-                onChange={() => set({ everyone: true })}
-              />
-              Todas as pessoas da empresa
-            </label>
-            <label>
-              <input
-                type="radio"
-                name={`power-${initial.power}`}
-                checked={!form.everyone}
-                onChange={() => set({ everyone: false })}
-              />
-              Só as equipes e pessoas escolhidas
-            </label>
-          </fieldset>
-          {!form.everyone && (
-            <div className="ai-power-picks">
-              <label>
-                <span>Equipes</span>
-                <MultiPick
-                  label="Equipes"
-                  allLabel="Nenhuma equipe"
-                  noun="equipes"
-                  options={teams}
-                  value={form.team_ids}
-                  onChange={(team_ids) => set({ team_ids })}
-                />
-              </label>
-              <label>
-                <span>Pessoas</span>
-                <MultiPick
-                  label="Pessoas"
-                  allLabel="Nenhuma pessoa"
-                  noun="pessoas"
-                  options={people}
-                  value={form.user_ids}
-                  onChange={(user_ids) => set({ user_ids })}
-                />
-              </label>
-            </div>
-          )}
-          <div className="ai-power-picks">
-            <label>
-              <span>Exceto</span>
-              <MultiPick
-                label="Exceto"
-                allLabel="Ninguém"
-                noun="pessoas"
-                options={people}
-                value={form.except_ids}
-                onChange={(except_ids) => set({ except_ids })}
-              />
-            </label>
-          </div>
-        </div>
+        <AudienceFields
+          name={`power-${initial.power}`}
+          data={data}
+          value={form}
+          onChange={set}
+        />
       )}
       {error && (
         <p className="form-error" role="alert">
@@ -248,5 +190,103 @@ function PowerCard({
         </footer>
       )}
     </section>
+  );
+}
+
+export type Audience = {
+  everyone: boolean;
+  team_ids: string[];
+  user_ids: string[];
+  except_ids: string[];
+};
+
+/** Quem pode usar: todos, ou equipes e pessoas escolhidas, com exceções. */
+export function AudienceFields({
+  name,
+  data,
+  value,
+  onChange,
+  disabled,
+}: {
+  /** O nome do grupo de opções (único na tela). */
+  name: string;
+  data: Snapshot;
+  value: Audience;
+  onChange: (patch: Partial<Audience>) => void;
+  disabled?: boolean;
+}) {
+  const people = data.members
+    .filter((m) => m.active)
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+    .map((m) => ({ value: m.user_id, label: m.name }));
+  const teams = [...data.teams]
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+    .map((t) => ({ value: t.id, label: t.name }));
+  return (
+    <div className="ai-power-audience">
+      <fieldset disabled={disabled}>
+        <legend>Quem pode usar</legend>
+        <label>
+          <input
+            type="radio"
+            name={name}
+            checked={value.everyone}
+            onChange={() => onChange({ everyone: true })}
+          />
+          Todas as pessoas da empresa
+        </label>
+        <label>
+          <input
+            type="radio"
+            name={name}
+            checked={!value.everyone}
+            onChange={() => onChange({ everyone: false })}
+          />
+          Só as equipes e pessoas escolhidas
+        </label>
+      </fieldset>
+      {!value.everyone && (
+        <div className="ai-power-picks">
+          <label>
+            <span>Equipes</span>
+            <MultiPick
+              label="Equipes"
+              allLabel="Nenhuma equipe"
+              noun="equipes"
+              options={teams}
+              value={value.team_ids}
+              onChange={(team_ids) => onChange({ team_ids })}
+              disabled={disabled}
+            />
+          </label>
+          <label>
+            <span>Pessoas</span>
+            <MultiPick
+              label="Pessoas"
+              allLabel="Nenhuma pessoa"
+              noun="pessoas"
+              options={people}
+              value={value.user_ids}
+              onChange={(user_ids) => onChange({ user_ids })}
+              disabled={disabled}
+            />
+          </label>
+        </div>
+      )}
+      <div className="ai-power-picks">
+        <label>
+          <span>Exceto</span>
+          <MultiPick
+            label="Exceto"
+            allLabel="Ninguém"
+            noun="pessoas"
+            options={people}
+            value={value.except_ids}
+            onChange={(except_ids) => onChange({ except_ids })}
+            disabled={disabled}
+          />
+        </label>
+      </div>
+    </div>
   );
 }

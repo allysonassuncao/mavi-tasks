@@ -48,6 +48,16 @@ import {
   type AiArtifact,
   type Power,
 } from "../src/mavi-artifacts.js";
+import {
+  catalogContext,
+  describeSkillStep,
+  loadSkill,
+  pickedSkills,
+  runSkillTool,
+  summarizeSkillStep,
+  type CatalogSkill,
+  type SkillKit,
+} from "./_ai-skills.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -408,7 +418,7 @@ async function ask(
   const now = (deps.now ?? Date.now)();
   // Os poderes (visualizações, imagens, ações) só no módulo MAVI.
   const onPage = body.surface === "page";
-  const [base, limits, history, route, powerList] = await Promise.all([
+  const [base, limits, history, route, powerList, catalog] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
       env,
@@ -460,10 +470,16 @@ async function ask(
           p_company: company,
         }).then((r) => (r.ok && Array.isArray(r.data) ? r.data : []))
       : Promise.resolve([] as string[]),
+    // O catálogo de skills da pessoa (vazio sem o poder 'skills').
+    onPage
+      ? callRpc<CatalogSkill[]>(env, deps.fetch, auth, "ai_skill_catalog", {
+          p_company: company,
+        }).then((r) => (r.ok && Array.isArray(r.data) ? r.data : []))
+      : Promise.resolve([] as CatalogSkill[]),
   ]);
   const powers = new Set(
     powerList.filter((p): p is Power =>
-      ["visuals", "images", "actions"].includes(p),
+      ["visuals", "images", "actions", "skills"].includes(p),
     ),
   );
   // O assistente (o balão de todas as telas) é um módulo que o
@@ -545,8 +561,15 @@ async function ask(
     emit: (artifact) => emit({ type: "artifact", artifact }),
     imageCost: { usd: 0, model: "", provider: null },
   };
-  const tools = toolsFor(powers);
-  const allowed = new Set(tools.map((t) => t.name));
+  const skills: SkillKit = {
+    ctx,
+    env,
+    catalog: new Map(
+      (powers.has("skills") ? catalog : []).map((c) => [c.slug, c]),
+    ),
+    loaded: new Map(),
+    last: null,
+  };
   const steps: { label: string; detail?: string }[] = [];
   // Cada chamada fica registrada (qual, quanto tempo, se falhou, quanto custou).
   const calls: {
@@ -556,22 +579,60 @@ async function ask(
     ms: number;
     cost: number;
     error?: string;
+    skill?: string;
+    skill_version?: number;
   }[] = [];
+  // As skills escolhidas na caixa de mensagem entram já carregadas.
+  if (powers.has("skills"))
+    for (const pick of pickedSkills(body.skills)) {
+      const started = Date.now();
+      const s = await loadSkill(skills, pick.slug, pick.version).catch(() => null);
+      calls.push({
+        tool: "use_skill",
+        power: "skills",
+        ok: !!s,
+        ms: Date.now() - started,
+        cost: 0,
+        ...(s ? { skill: s.id, skill_version: s.version } : { error: `indisponível: ${pick.slug}` }),
+      });
+      if (!s) {
+        emit({ type: "warning", text: `A skill “${pick.slug}” não está disponível para você.` });
+        continue;
+      }
+      const label = `Usando a skill “${s.name}”${s.test ? ` (versão ${s.version} em teste)` : ""}`;
+      steps.push({ label, detail: "escolhida por você" });
+      emit({ type: "step", id: `skill-${s.slug}`, label, state: "done", detail: "escolhida por você" });
+    }
+  // Sem catálogo e sem skill escolhida, as ferramentas das skills não entram.
+  const tools = toolsFor(powers).filter(
+    (t) =>
+      REGISTRY[t.name]?.kind !== "skill" ||
+      skills.catalog.size > 0 ||
+      skills.loaded.size > 0,
+  );
+  const allowed = new Set(tools.map((t) => t.name));
   let n = 0;
   const execute = async (name: string, input: unknown) => {
     const stepId = `t${++n}`;
     const meta = REGISTRY[name];
     const power = meta?.power ?? null;
-    const label = power
-      ? describePowerStep(name, input)
-      : describeStep(ctx, name, input);
+    const skillTool = meta?.kind === "skill";
+    const label = skillTool
+      ? describeSkillStep(skills, name, input)
+      : power
+        ? describePowerStep(name, input)
+        : describeStep(ctx, name, input);
     emit({ type: "step", id: stepId, label, state: "running" });
     const started = Date.now();
     const spent = kit.imageCost.usd;
     try {
       // Só as ferramentas oferecidas nesta pergunta (os poderes da pessoa).
       if (!allowed.has(name)) throw Error(`Ferramenta indisponível: ${name}.`);
-      const work = power ? runPowerTool(kit, name, input) : runTool(ctx, name, input);
+      const work = skillTool
+        ? runSkillTool(skills, name, input)
+        : power
+          ? runPowerTool(kit, name, input)
+          : runTool(ctx, name, input);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const out = await Promise.race([
         work,
@@ -582,9 +643,11 @@ async function ask(
           );
         }),
       ]).finally(() => clearTimeout(timer));
-      const detail = power
-        ? summarizePowerStep(name, out)
-        : summarizeStep(name, out);
+      const detail = skillTool
+        ? summarizeSkillStep(name, out)
+        : power
+          ? summarizePowerStep(name, out)
+          : summarizeStep(name, out);
       steps.push({ label, detail });
       calls.push({
         tool: name,
@@ -592,6 +655,9 @@ async function ask(
         ok: true,
         ms: Date.now() - started,
         cost: kit.imageCost.usd - spent,
+        ...(skillTool && skills.last
+          ? { skill: skills.last.id, skill_version: skills.last.version }
+          : {}),
       });
       emit({ type: "step", id: stepId, label, state: "done", detail });
       return out;
@@ -618,7 +684,9 @@ async function ask(
   try {
     result = await llm({
       instructions: INSTRUCTIONS + powerInstructions(powers),
-      context: base.context,
+      context:
+        base.context +
+        catalogContext([...skills.catalog.values()], [...skills.loaded.values()]),
       messages,
       tools,
       execute,

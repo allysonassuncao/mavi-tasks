@@ -10,6 +10,7 @@ import {
   Sparkles,
   Thermometer,
   Trophy,
+  Puzzle,
 } from "lucide-react";
 import "./due-rules.css";
 import { useState } from "react";
@@ -110,6 +111,10 @@ export function NotificationInbox({
                       <span className="inbox-system" aria-hidden="true">
                         <ListChecks size={15} />
                       </span>
+                    ) : n.kind === "ai_skill" ? (
+                      <span className="inbox-system" aria-hidden="true">
+                        <Puzzle size={15} />
+                      </span>
                     ) : n.kind === "social_leads" || n.kind === "ai_share" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <Sparkles size={15} />
@@ -124,6 +129,7 @@ export function NotificationInbox({
                     <span>
                       {n.kind === "social_leads" ||
                       n.kind === "ai_share" ||
+                      n.kind === "ai_skill" ||
                       n.kind === "success_case" ||
                       n.kind === "temperature" ||
                       n.kind === "tasks_assigned" ||

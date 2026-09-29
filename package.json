@@ -22,6 +22,7 @@
     "test:db:ai-mcp": "node scripts/test-ai-mcp.mjs",
     "test:db:ai-providers": "node scripts/test-ai-providers.mjs",
     "test:db:mavi-powers": "node scripts/test-mavi-powers.mjs",
+    "test:db:mavi-skills": "node scripts/test-mavi-skills.mjs",
     "test:db:whatsapp": "node scripts/test-whatsapp-groups.mjs",
     "test:db:cases": "node scripts/test-success-cases.mjs",
     "test:db:notices": "node scripts/test-notice-board.mjs",

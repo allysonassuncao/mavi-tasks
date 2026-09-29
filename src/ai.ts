@@ -161,6 +161,8 @@ export function askAi(
   handlers: AiStreamHandlers = {},
   signal?: AbortSignal,
   surface?: "page",
+  /** Skills escolhidas na caixa de mensagem (a versão: em teste). */
+  skills?: { slug: string; version?: number }[],
 ) {
   return streamAnswer(
     "/api/ai",
@@ -171,6 +173,7 @@ export function askAi(
       question,
       conversation,
       ...(surface ? { surface } : {}),
+      ...(skills?.length ? { skills } : {}),
     },
     handlers,
     signal,
