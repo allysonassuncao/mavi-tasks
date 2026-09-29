@@ -359,6 +359,51 @@ export function openPublicFolderFile(
   });
 }
 
+/**
+ * Sends a file through a public folder link that accepts uploads (no
+ * sign-in): the server records it and signs the upload, the browser PUTs
+ * it, and the database marks it ready.
+ */
+export async function uploadToPublicFolder(
+  token: string,
+  file: File,
+  onProgress: (fraction: number) => void,
+) {
+  if (file.size === 0 || file.size > DRIVE_MAX_BYTES)
+    throw Error(`${file.name}: envie arquivos não vazios de até 500 MB.`);
+  const target = await driveServer<{
+    file: string;
+    url: string;
+    content_type: string;
+  }>({
+    action: "public-upload",
+    token,
+    name: file.name,
+    size: file.size,
+    content_type: file.type || "application/octet-stream",
+  });
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", target.url);
+    xhr.setRequestHeader("Content-Type", target.content_type);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(Error(`${file.name}: falha no envio (${xhr.status}).`));
+    xhr.onerror = () =>
+      reject(Error(`${file.name}: falha de conexão no envio.`));
+    xhr.send(file);
+  });
+  await rpc("drive_public_upload_done", {
+    p_token: token,
+    p_file: target.file,
+  });
+  return target.file;
+}
+
 export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];

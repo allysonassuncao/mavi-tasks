@@ -22,6 +22,8 @@ export const auditActions: Record<string, string> = {
   folder_deleted: "Pasta excluída",
   folder_shared: "Compartilhamento da pasta alterado",
   public_folder_opened: "Pasta aberta pelo link público",
+  public_upload_started: "Envio iniciado pelo link público",
+  public_upload_completed: "Arquivo enviado pelo link público",
   recording_view: "Gravação da MAVI assistida",
   whatsapp_media_opened: "Mídia do Whatsapp aberta",
 };

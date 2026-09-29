@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   Check,
   CircleAlert,
+  RotateCcw,
   Sparkles,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import { Button, Input, Select, SelectOption, Textarea } from "./ui";
 import type { Member } from "./types";
@@ -14,6 +16,7 @@ import { BriefingAiModal } from "./SocialLeadsBriefingAi";
 import {
   briefingReadiness,
   briefingSteps,
+  POSTS_DEFAULT,
   campaignObjectives,
   mediaAccept,
   mediaAllowed,
@@ -36,9 +39,11 @@ import {
   MediaInput,
   MoneyInput,
   PhoneInput,
+  PostCountInput,
   type ColorSearch,
   type Uploading,
 } from "./SocialLeadsFields";
+import { ProofFolderPanel } from "./SocialLeadsProofFolder";
 
 const MAX_FILE = 500 * 1024 * 1024;
 
@@ -102,6 +107,19 @@ export function BriefingWizard({
   >({ kind: "idle" });
   const [generating, setGenerating] = useState(false);
   const [aiFill, setAiFill] = useState(false);
+  const [postCount, setPostCount] = useState(POSTS_DEFAULT);
+  // Files the client sent to the social proof folder (count as proof).
+  const [proofFiles, setProofFiles] = useState<MediaFile[]>([]);
+  /**
+   * What the MAVI filled in the last "Preencher com a MAVI": the fields
+   * (with what was there before, to undo) until the person edits them or
+   * closes the notice.
+   */
+  const [filled, setFilled] = useState<{
+    before: BriefingFields;
+    objective: CampaignObjective | null | undefined;
+    keys: BriefingKey[];
+  } | null>(null);
   const version = useRef<number | null>(briefing?.version ?? null);
   const dirty = useRef(false);
   const timer = useRef(0);
@@ -177,6 +195,15 @@ export function BriefingWizard({
   const set = (key: BriefingKey, value: string) => {
     setFields((f) => ({ ...f, [key]: value }));
     touch();
+  };
+  // Editing a field the MAVI filled makes it the person's own.
+  const edit = (key: BriefingKey, value: string) => {
+    set(key, value);
+    setFilled((m) =>
+      m && m.keys.includes(key)
+        ? { ...m, keys: m.keys.filter((k) => k !== key) }
+        : m,
+    );
   };
 
   // Files: straight to the client's Drive, then saved in the briefing.
@@ -280,12 +307,10 @@ export function BriefingWizard({
     }
   };
 
-  const readiness = briefingReadiness(
-    fields,
-    objective,
-    item.client_name,
-    media,
-  );
+  const readiness = briefingReadiness(fields, objective, item.client_name, {
+    ...media,
+    socialProof: [...(media.socialProof ?? []), ...proofFiles],
+  });
   const running = job?.status === "running";
   const current = briefingSteps[step];
   const last = step === briefingSteps.length - 1;
@@ -294,8 +319,16 @@ export function BriefingWizard({
     setGenerating(true);
     try {
       await save();
-      await backend.generate(company, item.contract_id, "new");
-      notify("A MAVI começou a escrever o plano. Leva de 1 a 3 minutos.");
+      await backend.generate(
+        company,
+        item.contract_id,
+        "new",
+        undefined,
+        postCount,
+      );
+      notify(
+        `A MAVI começou a escrever os ${postCount} posts do plano. Leva de 1 a 3 minutos.`,
+      );
       onGenerated();
     } catch (e) {
       notify((e as Error).message);
@@ -330,15 +363,85 @@ export function BriefingWizard({
           currentObjective={objective}
           onClose={() => setAiFill(false)}
           onApply={(found, foundObjective, count) => {
+            const keys = Object.keys(found) as BriefingKey[];
+            setFilled({
+              before: Object.fromEntries(keys.map((k) => [k, fields[k] ?? ""])),
+              objective: foundObjective ? objective : undefined,
+              keys,
+            });
             setFields((f) => ({ ...f, ...found }));
             if (foundObjective) setObjective(foundObjective);
             touch();
             setAiFill(false);
+            // Open the first step the MAVI changed.
+            const first = briefingSteps.findIndex((st) =>
+              st.fields.some((f) => keys.includes(f.key)),
+            );
+            if (first >= 0) setStep(first);
+            else if (foundObjective) setStep(briefingSteps.length - 1);
             notify(
-              `${count} ${count === 1 ? "campo preenchido" : "campos preenchidos"} pela MAVI. Revise os passos e ajuste o que precisar.`,
+              `${count} ${count === 1 ? "campo preenchido" : "campos preenchidos"} pela MAVI. Os campos ficam marcados: edite o que quiser.`,
             );
           }}
         />
+      )}
+      {filled && (filled.keys.length > 0 || filled.objective !== undefined) && (
+        <div className="sl-ai-filled" role="status">
+          <Sparkles size={17} aria-hidden="true" />
+          <div>
+            <strong>
+              A MAVI preencheu {filled.keys.length}{" "}
+              {filled.keys.length === 1 ? "campo" : "campos"}
+              {filled.objective !== undefined ? " e o objetivo" : ""}. Revise e
+              edite à vontade: cada um fica marcado até você mexer nele.
+            </strong>
+            <span className="sl-ai-filled-steps">
+              {briefingSteps.map((st, i) => {
+                const n = st.fields.filter((f) =>
+                  filled.keys.includes(f.key),
+                ).length;
+                return n ? (
+                  <button
+                    key={st.id}
+                    type="button"
+                    className={i === step ? "selected" : ""}
+                    onClick={() => setStep(i)}
+                  >
+                    {st.title} <b>{n}</b>
+                  </button>
+                ) : null;
+              })}
+            </span>
+          </div>
+          {canWrite && (
+            <Button
+              className="btn secondary"
+              title="Voltar os campos que a MAVI preencheu e você ainda não editou"
+              onClick={() => {
+                setFields((f) => {
+                  const next = { ...f };
+                  for (const k of filled.keys) next[k] = filled.before[k] ?? "";
+                  return next;
+                });
+                if (filled.objective !== undefined)
+                  setObjective(filled.objective);
+                touch();
+                setFilled(null);
+                notify("O que a MAVI preencheu foi desfeito.");
+              }}
+            >
+              <RotateCcw size={15} /> Desfazer
+            </Button>
+          )}
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Fechar o aviso"
+            onClick={() => setFilled(null)}
+          >
+            <X size={15} />
+          </button>
+        </div>
       )}
       <nav className="sl-steps" aria-label="Passos do briefing">
         {briefingSteps.map((s, i) => {
@@ -357,6 +460,9 @@ export function BriefingWizard({
                 {s.title}
                 <small>
                   {r.filled} de {r.total}
+                  {filled?.keys.some((k) =>
+                    s.fields.some((f) => f.key === k),
+                  ) && <em className="sl-ai-badge">MAVI</em>}
                 </small>
               </span>
             </button>
@@ -415,7 +521,8 @@ export function BriefingWizard({
               key={f.key}
               field={f}
               value={fields[f.key] ?? ""}
-              onChange={(v) => set(f.key, v)}
+              onChange={(v) => edit(f.key, v)}
+              byMavi={!!filled?.keys.includes(f.key)}
               disabled={!canWrite}
               onBlur={
                 f.key === "igHandle" || f.key === "websiteUrl"
@@ -441,6 +548,22 @@ export function BriefingWizard({
                       urlOf: (file) => backend.mediaUrl(file),
                     }
                   : undefined
+              }
+              beside={
+                f.media === "socialProof" ? (
+                  <ProofFolderPanel
+                    company={company}
+                    contract={item.contract_id}
+                    clientName={fields.clientName || item.client_name}
+                    folderId={briefing?.proof_folder ?? null}
+                    contactWhats={fields.contactWhats}
+                    backend={backend}
+                    canWrite={canWrite}
+                    onFiles={setProofFiles}
+                    onChanged={onSaved}
+                    notify={notify}
+                  />
+                ) : undefined
               }
             />
           ))}
@@ -526,6 +649,13 @@ export function BriefingWizard({
           </p>
         ))}
         {!hasPlan && canWrite && (
+          <PostCountInput
+            value={postCount}
+            onChange={setPostCount}
+            disabled={running}
+          />
+        )}
+        {!hasPlan && canWrite && (
           <Button
             className="btn primary sl-generate"
             disabled={!!readiness.blockers.length || running}
@@ -534,7 +664,9 @@ export function BriefingWizard({
             title={readiness.blockers[0]}
           >
             <Sparkles size={16} />
-            {running ? "Gerando o plano…" : "Gerar plano do Mês 1"}
+            {running
+              ? "Gerando o plano…"
+              : `Gerar plano do Mês 1 · ${postCount} posts`}
           </Button>
         )}
         {hasPlan && (
@@ -553,15 +685,21 @@ function Field({
   field: f,
   value,
   onChange,
+  byMavi,
   disabled,
   onBlur,
   colors,
   files,
+  beside,
 }: {
   field: BriefingField;
   value: string;
   onChange: (v: string) => void;
+  /** Filled by the MAVI and not edited yet. */
+  byMavi?: boolean;
   disabled: boolean;
+  /** Shown next to the files (the social proof folder). */
+  beside?: ReactNode;
   onBlur?: () => void;
   colors?: {
     canSearch: boolean;
@@ -578,7 +716,17 @@ function Field({
 }) {
   const title = (
     <span className="sl-label">
-      {f.label}
+      <span className="sl-label-row">
+        {f.label}
+        {byMavi && (
+          <span
+            className="sl-ai-badge"
+            title="Preenchido pela MAVI. Edite à vontade."
+          >
+            <Sparkles size={10} /> MAVI
+          </span>
+        )}
+      </span>
       {f.help && <em>{f.help}</em>}
     </span>
   );
@@ -586,7 +734,7 @@ function Field({
   if (f.kind === "colors" || f.media)
     return (
       <div
-        className={`sl-field${f.long || f.media || f.kind === "colors" ? " sl-wide" : ""}`}
+        className={`sl-field${f.long || f.media || f.kind === "colors" ? " sl-wide" : ""}${byMavi ? " sl-by-mavi" : ""}`}
         role="group"
         aria-label={f.label}
       >
@@ -618,21 +766,26 @@ function Field({
           />
         )}
         {f.media && files && (
-          <MediaInput
-            files={files.list}
-            uploading={files.uploading}
-            accept={mediaAccept[f.media]}
-            what={f.mediaWhat ?? "arquivos"}
-            disabled={disabled}
-            onAdd={files.onAdd}
-            onRemove={files.onRemove}
-            urlOf={files.urlOf}
-          />
+          <div className={beside ? "sl-media-row" : undefined}>
+            <MediaInput
+              files={files.list}
+              uploading={files.uploading}
+              accept={mediaAccept[f.media]}
+              what={f.mediaWhat ?? "arquivos"}
+              disabled={disabled}
+              onAdd={files.onAdd}
+              onRemove={files.onRemove}
+              urlOf={files.urlOf}
+            />
+            {beside}
+          </div>
         )}
       </div>
     );
   return (
-    <label className={f.long ? "sl-wide" : ""}>
+    <label
+      className={`${f.long ? "sl-wide" : ""}${byMavi ? " sl-by-mavi" : ""}`}
+    >
       {title}
       {f.kind === "phone" ? (
         <PhoneInput value={value} onChange={onChange} disabled={disabled} />

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Archive,
   ArrowLeft,
   CircleCheck,
+  Trash2,
   Plus,
   ClipboardList,
   Clock3,
@@ -14,12 +16,12 @@ import {
 import { Avatar, Empty, Modal } from "./components";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { useUrlState } from "./router";
-import { TeamPicker } from "./TeamPicker";
 import type { Snapshot } from "./types";
 import {
   demoSocialLeads,
   serverSocialLeads,
   useLiveSocialLeads,
+  type AddableClient,
   type ContractBundle,
   type SocialLeadsBackend,
 } from "./social-leads-api";
@@ -35,6 +37,7 @@ import {
 } from "./social-leads";
 import { BriefingWizard } from "./SocialLeadsBriefing";
 import { PlanView, type PlanIntent, type Production } from "./SocialLeadsPlan";
+import "./social-leads-onboarding.css";
 
 /**
  * Onboarding › Social Leads. The portfolio (clients with the Social Leads
@@ -138,6 +141,7 @@ export function SocialLeadsPage({
           artDays: portfolio.art_days ?? 5,
         }}
         backend={backend}
+        demo={demo}
         tab={tab === "briefing" ? "briefing" : "plano"}
         setTab={(t) => setTab(t)}
         intent={intent}
@@ -158,7 +162,7 @@ export function SocialLeadsPage({
         user={user}
         isLeader={isLeader}
         onOpen={open}
-        onAdd={isLeader ? () => setAdding(true) : undefined}
+        onAdd={() => setAdding(true)}
         onSettings={
           isLeader
             ? () => setPortfolio({ ...portfolio, configured: false })
@@ -169,15 +173,20 @@ export function SocialLeadsPage({
         <AddClient
           data={data}
           company={company}
+          isLeader={isLeader}
           portfolio={portfolio}
           backend={backend}
           onClose={() => setAdding(false)}
-          onAdded={(id) => {
+          onAdded={(id, restored) => {
             setAdding(false);
-            notify("Cliente adicionado ao Social Leads. Comece pelo briefing.");
+            notify(
+              restored
+                ? "Cliente de volta ao Social Leads, com o histórico de antes."
+                : "Cliente adicionado ao Social Leads. Comece pelo briefing.",
+            );
             load();
             setIntent(null);
-            setTab("briefing");
+            setTab(restored ? "plano" : "briefing");
             setContract(id);
           }}
         />
@@ -188,13 +197,17 @@ export function SocialLeadsPage({
 
 // ------------------------------------------------------------ add a client
 /**
- * Puts a client in the portfolio: adds the Social Leads product to a client
- * already registered (the ones without it) or registers a new client with it.
+ * Puts a registered client in the portfolio (new clients are registered in
+ * Clientes). The list comes from the database each time it opens: the
+ * clients a team of the person serves (the squad: any), including those
+ * without any product yet, which Clientes doesn't show to whoever isn't a
+ * leader. A client taken out before comes back with its briefing and plans.
  * The squad team, when there is one, starts serving the client.
  */
 function AddClient({
   data,
   company,
+  isLeader,
   portfolio,
   backend,
   onClose,
@@ -202,29 +215,33 @@ function AddClient({
 }: {
   data: Snapshot;
   company: string;
+  isLeader: boolean;
   portfolio: Portfolio;
   backend: SocialLeadsBackend;
   onClose: () => void;
-  onAdded: (contract: string) => void;
+  onAdded: (contract: string, restored: boolean) => void;
 }) {
   const product = data.products.find((p) => p.id === portfolio.product_id);
-  const inPortfolio = new Set(portfolio.items.map((i) => i.client_id));
-  const candidates = data.clients
-    .filter((c) => !c.archived && !inPortfolio.has(c.id))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const [mode, setMode] = useState<"existing" | "new">(
-    candidates.length ? "existing" : "new",
-  );
+  const [candidates, setCandidates] = useState<AddableClient[] | null>(null);
   const [client, setClient] = useState("");
-  const [name, setName] = useState("");
-  // A new client starts with the squad team, and whichever others are picked.
-  const [teams, setTeams] = useState<string[]>(
-    portfolio.team_id ? [portfolio.team_id] : [],
-  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const picked = candidates.find((c) => c.id === client);
-  const ready = mode === "existing" ? !!picked : name.trim().length >= 2;
+  useEffect(() => {
+    let alive = true;
+    backend
+      .addableClients(company)
+      .then((list) => alive && setCandidates(list))
+      .catch((e) => {
+        if (!alive) return;
+        setCandidates([]);
+        setError((e as Error).message);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [backend, company]);
+  const picked = candidates?.find((c) => c.id === client);
+  const squad = data.teams.find((t) => t.id === portfolio.team_id)?.name;
   return (
     <Modal
       title="Adicionar cliente ao Social Leads"
@@ -235,77 +252,56 @@ function AddClient({
         className="entity-form"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!product || !ready) return;
+          if (!product || !picked) return;
           setBusy(true);
           setError("");
           backend
             .addClient(
               company,
-              mode === "existing" ? { client } : { name, teams },
+              { client: picked.id },
               product,
               portfolio.team_id ?? null,
-              mode === "existing" ? picked!.name : name,
+              picked.name,
             )
-            .then(onAdded)
+            .then((k) => onAdded(k, !!picked.archived_contract))
             .catch((err) => setError((err as Error).message))
             .finally(() => setBusy(false));
         }}
       >
-        <div className="view-switch" role="tablist" aria-label="Qual cliente">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "existing"}
-            className={mode === "existing" ? "selected" : ""}
-            onClick={() => setMode("existing")}
-            disabled={!candidates.length}
-          >
-            Cliente já cadastrado
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "new"}
-            className={mode === "new" ? "selected" : ""}
-            onClick={() => setMode("new")}
-          >
-            Cliente novo
-          </button>
-        </div>
-        {mode === "existing" ? (
+        {candidates === null ? (
+          <Loading compact />
+        ) : candidates.length ? (
           <label>
             Cliente
             <Select value={client} onValueChange={setClient} required>
               <SelectOption value="">Escolha o cliente</SelectOption>
               {candidates.map((c) => (
                 <SelectOption key={c.id} value={c.id}>
-                  {c.name}
+                  {c.archived_contract ? `${c.name} (arquivado)` : c.name}
                 </SelectOption>
               ))}
             </Select>
           </label>
         ) : (
-          <>
-            <label>
-              Nome do cliente
-              <Input
-                value={name}
-                maxLength={160}
-                placeholder="Ex.: Agente Stravitta"
-                onChange={(e) => setName(e.target.value)}
-                autoFocus
-              />
-            </label>
-            <TeamPicker teams={data.teams} value={teams} onChange={setTeams} />
-          </>
+          <p className="sl-alert info-soft">
+            {isLeader
+              ? "Todos os clientes cadastrados já estão no Social Leads. Cadastre o cliente novo em Clientes e volte aqui."
+              : "Nenhum cliente das suas equipes está fora do Social Leads. Peça a um administrador ou gestor para cadastrar o cliente em Clientes, com uma equipe sua, e volte aqui."}
+          </p>
         )}
-        <p className="sl-muted">
-          O cliente recebe o produto {product?.name ?? "Social Leads"}
-          {mode === "existing" && portfolio.team_id
-            ? ` e passa a ser atendido pela equipe ${data.teams.find((t) => t.id === portfolio.team_id)?.name ?? "do squad"}`
-            : ""}
-          . Depois é só preencher o briefing.
-        </p>
+        {picked?.archived_contract ? (
+          <p className="sl-muted">
+            {picked.name} já esteve no Social Leads e volta com o briefing, os
+            planos e o histórico de antes.
+          </p>
+        ) : (
+          <p className="sl-muted">
+            O cliente recebe o produto {product?.name ?? "Social Leads"}
+            {squad ? ` e passa a ser atendido pela equipe ${squad}` : ""}.
+            Depois é só preencher o briefing. Clientes novos são cadastrados em
+            Clientes.
+          </p>
+        )}
         {error && <p className="sl-alert bad">{error}</p>}
         <div className="form-footer">
           <Button type="button" className="btn secondary" onClick={onClose}>
@@ -314,10 +310,12 @@ function AddClient({
           <Button
             type="submit"
             className="btn primary"
-            disabled={!ready || !product}
+            disabled={!picked || !product}
             loading={busy}
           >
-            Adicionar e abrir o briefing
+            {picked?.archived_contract
+              ? "Trazer de volta"
+              : "Adicionar e abrir o briefing"}
           </Button>
         </div>
       </form>
@@ -558,8 +556,8 @@ function PortfolioView({
         title="Nenhum cliente no Social Leads ainda"
         body={
           onAdd
-            ? "Adicione o primeiro cliente: um já cadastrado ou um novo. Em seguida vem o briefing."
-            : "Quando um administrador ou gestor adicionar um cliente ao Social Leads, ele aparece aqui."
+            ? "Adicione o primeiro cliente (um já cadastrado em Clientes). Em seguida vem o briefing."
+            : "Quando alguém adicionar um cliente ao Social Leads, ele aparece aqui."
         }
         action={
           onAdd && (
@@ -825,6 +823,7 @@ function ClientView({
   teamId,
   production,
   backend,
+  demo,
   tab,
   setTab,
   intent,
@@ -841,6 +840,7 @@ function ClientView({
   teamId: string | null;
   production: Production;
   backend: SocialLeadsBackend;
+  demo: boolean;
   tab: "plano" | "briefing";
   setTab: (t: "plano" | "briefing") => void;
   intent: PlanIntent;
@@ -852,6 +852,7 @@ function ClientView({
   const [bundle, setBundle] = useState<ContractBundle | null>(null);
   const [error, setError] = useState("");
   const [month, setMonth] = useUrlState<number>("mes", 0);
+  const [leaving, setLeaving] = useState(false);
   const load = useCallback(() => {
     backend
       .contract(company, item.contract_id)
@@ -928,7 +929,32 @@ function ClientView({
             ))}
           </div>
         )}
+        {item.can_write && (
+          <Button
+            className="btn secondary sl-leave"
+            title="Tirar este cliente do Social Leads"
+            onClick={() => setLeaving(true)}
+          >
+            <Archive size={15} /> Tirar do Social Leads
+          </Button>
+        )}
       </div>
+      {leaving && (
+        <LeaveModal
+          name={name}
+          company={company}
+          contract={item.contract_id}
+          empty={item.plan_count === 0 && !plans.length}
+          backend={backend}
+          onClose={() => setLeaving(false)}
+          onDone={(message) => {
+            setLeaving(false);
+            notify(message);
+            onChanged();
+            onBack();
+          }}
+        />
+      )}
       <div
         className="scope-tabs sl-tabs"
         role="tablist"
@@ -988,6 +1014,7 @@ function ClientView({
           user={user}
           data={data}
           backend={backend}
+          demo={demo}
           intent={intent}
           clearIntent={clearIntent}
           onOpenBriefing={() => setTab("briefing")}
@@ -997,5 +1024,99 @@ function ClientView({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Taking a client out of the portfolio: archiving keeps everything (the
+ * client comes back with it through "Adicionar cliente") and pauses the
+ * client's repeating tasks; one added by mistake, without a plan yet, can be
+ * removed for good (the database refuses if anything is tied to it).
+ */
+function LeaveModal({
+  name,
+  company,
+  contract,
+  empty,
+  backend,
+  onClose,
+  onDone,
+}: {
+  name: string;
+  company: string;
+  contract: string;
+  /** No plan yet: removing for good is offered. */
+  empty: boolean;
+  backend: SocialLeadsBackend;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState<"" | "archive" | "remove">("");
+  const [error, setError] = useState("");
+  const run = (kind: "archive" | "remove") => {
+    setBusy(kind);
+    setError("");
+    (kind === "archive"
+      ? backend.archive(company, contract, true)
+      : backend.remove(company, contract)
+    )
+      .then(() =>
+        onDone(
+          kind === "archive"
+            ? `${name} saiu do Social Leads. Para trazer de volta, use “Adicionar cliente”.`
+            : `${name} foi excluído do Social Leads.`,
+        ),
+      )
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setBusy(""));
+  };
+  return (
+    <Modal
+      title={`Tirar ${name} do Social Leads?`}
+      onClose={onClose}
+      busy={!!busy}
+    >
+      <div className="entity-form">
+        <p>
+          <strong>Arquivar</strong> tira o cliente da carteira sem apagar nada:
+          o briefing, os planos, as tarefas e os arquivos no Drive ficam
+          guardados, e as tarefas que se repetem (acompanhamento e reunião)
+          param de abrir enquanto ele estiver arquivado. O cliente continua em
+          Clientes, com os outros produtos. Para trazer de volta, use “Adicionar
+          cliente”.
+        </p>
+        {empty && (
+          <p className="sl-muted">
+            Adicionou por engano? Sem plano, tarefa nem arquivo, dá para{" "}
+            <strong>excluir de vez</strong>: o produto Social Leads sai do
+            cliente e o briefing é apagado.
+          </p>
+        )}
+        {error && <p className="sl-alert bad">{error}</p>}
+        <div className="form-footer">
+          <Button type="button" className="btn secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          {empty && (
+            <Button
+              className="btn secondary danger"
+              loading={busy === "remove"}
+              disabled={!!busy}
+              onClick={() => run("remove")}
+            >
+              <Trash2 size={15} /> Excluir de vez
+            </Button>
+          )}
+          <Button
+            className="btn primary"
+            loading={busy === "archive"}
+            disabled={!!busy}
+            onClick={() => run("archive")}
+          >
+            <Archive size={15} /> Arquivar
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

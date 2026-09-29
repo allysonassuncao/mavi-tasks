@@ -101,7 +101,13 @@ describe("provedor e modelo do Painel da MAVI", () => {
     });
     const used: any[] = [];
     const r = await handleSocialLeads(
-      { action: "adjust", company, contract, plan: planId, instruction: "Troque o gancho do post 2." },
+      {
+        action: "adjust",
+        company,
+        contract,
+        plan: planId,
+        instruction: "Troque o gancho do post 2.",
+      },
       "Bearer t",
       { ...env, anthropicKey: "", providerKey },
       {
@@ -182,6 +188,54 @@ describe("geração do plano", () => {
     // O site do cliente entra; o Instagram não (pede login).
     expect(seen[0].domains).toEqual(["agente.astravitta.com.br"]);
     expect(seen[0].user).toContain('"notes": "Não gerar promessas."');
+  });
+
+  it("pede a quantidade de posts escolhida e confere a resposta", async () => {
+    const { fetchImpl, calls } = fakeDb({
+      social_leads_start_job: () => ({ body: { ...context, post_count: 12 } }),
+      social_leads_write_plan: () => ({ body: { id: planId, version: 1 } }),
+    });
+    const seen: ModelRequest[] = [];
+    const posts = (n: number) =>
+      JSON.stringify({
+        posts: Array.from({ length: n }, (_, i) => ({ numero: i + 1 })),
+      });
+    const d = deps(fetchImpl, [posts(8), posts(12)], seen);
+    const r = await handleSocialLeads(
+      { action: "generate", company, contract, mode: "new", posts: 12 },
+      "Bearer t",
+      env,
+      d,
+    );
+    expect(r.status).toBe(202);
+    await Promise.all(d.work);
+    expect(calls[0].args).toMatchObject({ p_posts: 12 });
+    expect(seen[0].user).toContain(
+      "com exatamente 12 posts, numerados de 1 a 12",
+    );
+    expect(seen[1].user).toContain(
+      "precisa de exatamente 12 posts (veio com 8)",
+    );
+    // Só a segunda resposta, com os 12, chega ao banco.
+    expect(
+      calls.filter((c) => c.name === "social_leads_write_plan"),
+    ).toHaveLength(1);
+  });
+  it("recusa quantidade fora de 8 a 16", async () => {
+    const { fetchImpl, calls } = fakeDb({});
+    const r = await handleSocialLeads(
+      { action: "generate", company, contract, mode: "new", posts: 20 },
+      "Bearer t",
+      env,
+      deps(fetchImpl, []),
+    );
+    expect(r).toEqual({
+      status: 400,
+      body: { error: "Escolha de 8 a 16 posts." },
+    });
+    expect(calls.filter((c) => c.name === "social_leads_start_job")).toEqual(
+      [],
+    );
   });
 
   it("pede de novo uma vez quando o banco recusa a estrutura", async () => {
@@ -391,7 +445,7 @@ describe("pedido para a IA", () => {
       },
       "new",
     );
-    expect(r.user).toContain("Monte o plano do Mês 2.");
+    expect(r.user).toContain("Monte o plano do Mês 2 com exatamente 8 posts");
     expect(r.user).toContain('"observacao": "Mais leve"');
     expect(r.user).toContain("Conversa no WhatsApp");
   });
@@ -797,7 +851,8 @@ describe("briefing pela IA", () => {
         clientName: "Agente Stravitta",
         segment: "Escola de idiomas",
         contactWhats: "(11) 91234-5678",
-        averageTicket: "R$ 450,00",
+        // O ticket médio é texto livre: fica como a MAVI escreveu.
+        averageTicket: "450.00",
         igHandle: "@agentestravitta",
         websiteUrl: "https://agente.astravitta.com.br",
         // No date said: the meeting's day.

@@ -239,7 +239,7 @@ let planId;
 await check("a estrutura do plano é conferida", async () => {
   const bad = [
     [{ pilares: plan().pilares.slice(0, 3) }, /exatamente 4 pilares/],
-    [{ posts: plan().posts.slice(0, 7) }, /exatamente 8 posts/],
+    [{ posts: plan().posts.slice(0, 7) }, /de 8 a 16 posts \(tem 7\)/],
     [
       { posts: plan().posts.map((p) => ({ ...p, ehAnuncio: true })) },
       /exatamente um post que vira anúncio \(tem 8\)/,

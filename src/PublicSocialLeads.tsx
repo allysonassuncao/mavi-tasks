@@ -6,7 +6,9 @@ import {
   type LinkSource,
   type SharedPlan,
 } from "./social-leads-api";
-import { pillars } from "./social-leads";
+import { pillars, postTextPlain } from "./social-leads";
+import { RichTextContent } from "./RichTextContent";
+import "./social-leads-onboarding.css";
 
 type Post = SharedPlan["posts"][number];
 
@@ -341,6 +343,20 @@ function PublicPost({
         <small>Como vai ser</small>
         <p>{post.direcaoVisual}</p>
       </div>
+      {(
+        [
+          ["textoImagem", "Texto da arte"],
+          ["textoVideo", "Roteiro do vídeo"],
+          ["legenda", "Legenda"],
+        ] as const
+      )
+        .filter(([k]) => postTextPlain(post[k]))
+        .map(([k, label]) => (
+          <div key={k} className="sl-public-visual sl-public-text">
+            <small>{label}</small>
+            <RichTextContent value={post[k] ?? ""} />
+          </div>
+        ))}
       {!open ? (
         <div className={`sl-public-decided ${post.decision}`}>
           <span>

@@ -1,15 +1,18 @@
 import {
   parseColors,
   pillars,
+  postTextPlain,
   type BriefingFields,
   type PlanContent,
   type SlPost,
 } from "./social-leads";
 
 /**
- * The two PDFs of the Social Leads (as the B29 had), in the MAVI identity:
- * - the designer's: the approved posts with the visual identity;
- * - the presentation to the client: A4 landscape slides with the arts.
+ * The two PDFs of the Social Leads (as the B29 had):
+ * - the designer's (MAVI identity): the approved posts with the visual
+ *   identity and the exact texts of each piece;
+ * - the presentation to the client (Make Acelerador de Vendas identity):
+ *   A4 landscape slides with the arts and the texts.
  * The presentation leaves out what is internal (alerts, budget, placements,
  * form questions, lead routing), like the client link. jsPDF is loaded only
  * when a PDF is made.
@@ -264,12 +267,60 @@ export async function designerPdf(input: {
     para("Direção de copy", p.copy_direction);
     para("Direção visual", p.visual_direction);
     para("Formato · CTA", `${p.format} · ${p.cta}`);
+    para("Texto exato da(s) imagem(ns)", postTextPlain(p.image_text));
+    para("Texto exato do vídeo", postTextPlain(p.video_text));
+    para("Legenda (copy)", postTextPlain(p.caption));
     if (p.note) para("Observação do cliente", p.note);
   }
   return doc.output("blob");
 }
 
 // ------------------------------------------------------------ presentation
+/**
+ * The presentation follows the Make Acelerador de Vendas identity (as on
+ * makevendas.com.br): black, the brand orange, white and greys, the
+ * lowercase "make" with the orange "m" seal. Helvetica stands in for
+ * Biennale, the site's typeface, which jsPDF doesn't carry.
+ */
+const MAKE = {
+  black: [17, 17, 17] as RGB,
+  ink: [33, 33, 33] as RGB,
+  orange: [255, 110, 40] as RGB,
+  orangeDark: [185, 74, 0] as RGB,
+  orangeSoft: [255, 240, 232] as RGB,
+  grey: [97, 97, 97] as RGB,
+  greyLight: [236, 236, 236] as RGB,
+  paper: [250, 250, 250] as RGB,
+  white: [255, 255, 255] as RGB,
+};
+const MAKE_BRAND = "Make Acelerador de Vendas";
+const MAKE_PILLAR: Record<string, RGB> = {
+  posicionar: MAKE.black,
+  autoridade: MAKE.grey,
+  oferta: MAKE.orange,
+};
+
+/** The seal (orange circle, white "m") and, when asked, the "make" word. */
+function makeMark(
+  doc: Doc,
+  x: number,
+  y: number,
+  size: number,
+  word: RGB | null,
+) {
+  doc.setFillColor(...MAKE.orange);
+  doc.circle(x + size / 2, y + size / 2, size / 2, "F");
+  doc.setTextColor(...MAKE.white);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(size * 2.3);
+  doc.text("m", x + size / 2, y + size * 0.69, { align: "center" });
+  if (word) {
+    doc.setTextColor(...word);
+    doc.setFontSize(size * 2.1);
+    doc.text("make", x + size * 1.35, y + size * 0.72);
+  }
+}
+
 export async function presentationPdf(input: {
   company: string;
   client: string;
@@ -285,24 +336,41 @@ export async function presentationPdf(input: {
   const W = 297;
   const H = 210;
   const M = 20;
+  let page = 1;
+  const footer = (dark: boolean) => {
+    doc.setDrawColor(...MAKE.orange);
+    doc.setLineWidth(0.6);
+    doc.line(M, H - 14, W - M, H - 14);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...(dark ? MAKE.greyLight : MAKE.grey));
+    doc.text(`${MAKE_BRAND} · makevendas.com.br`, M, H - 8.5);
+    doc.text(String(page), W - M, H - 8.5, { align: "right" });
+  };
   const slide = (dark = false) => {
     doc.addPage();
-    doc.setFillColor(...(dark ? DARK : SOFT));
+    page++;
+    doc.setFillColor(...(dark ? MAKE.black : MAKE.white));
     doc.rect(0, 0, W, H, "F");
+    makeMark(doc, M, 10, 7, dark ? MAKE.white : MAKE.black);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.setTextColor(...(dark ? GREEN : MUTED));
+    doc.setTextColor(...(dark ? MAKE.greyLight : MAKE.grey));
     doc.text(
-      `${input.company.toUpperCase()} · ${input.client.toUpperCase()} · ${input.label.toUpperCase()}`,
-      M,
-      14,
+      `${input.client.toUpperCase()} · ${input.label.toUpperCase()}`,
+      W - M,
+      15.5,
+      { align: "right" },
     );
+    footer(dark);
   };
-  const title = (text: string, dark = false) => {
+  const title = (text: string, dark = false, y = 40) => {
+    doc.setFillColor(...MAKE.orange);
+    doc.rect(M, y - 8.5, 3, 10, "F");
     doc.setFont("helvetica", "bold");
     doc.setFontSize(24);
-    doc.setTextColor(...(dark ? ([255, 255, 255] as RGB) : INK));
-    doc.text(text, M, 36);
+    doc.setTextColor(...(dark ? MAKE.white : MAKE.black));
+    doc.text(text, M + 7, y);
   };
   const body = (
     text: string,
@@ -310,46 +378,68 @@ export async function presentationPdf(input: {
     y: number,
     width: number,
     size = 12,
-    color: RGB = INK,
+    color: RGB = MAKE.ink,
+    maxLines = Infinity,
   ) => {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(size);
     doc.setTextColor(...color);
-    const lines = doc.splitTextToSize(text, width);
+    let lines = doc.splitTextToSize(text, width) as string[];
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, Math.max(1, maxLines));
+      lines[lines.length - 1] =
+        `${lines[lines.length - 1].replace(/\s+\S*$/, "")}…`;
+    }
     doc.text(lines, x, y);
     return y + lines.length * size * 0.45;
   };
+  const label = (
+    text: string,
+    x: number,
+    y: number,
+    color: RGB = MAKE.orange,
+  ) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...color);
+    doc.text(text, x, y);
+  };
 
   // Cover (the first page).
-  doc.setFillColor(...DARK);
+  doc.setFillColor(...MAKE.black);
   doc.rect(0, 0, W, H, "F");
-  doc.setFillColor(...GREEN);
-  doc.roundedRect(M, 24, 12, 12, 2.5, 2.5, "F");
-  doc.setTextColor(...DARK);
+  doc.setFillColor(...MAKE.orange);
+  doc.rect(0, 0, 6, H, "F");
+  makeMark(doc, M, 22, 12, MAKE.white);
+  // The big seal, cut by the page edge.
+  doc.setFillColor(...MAKE.orange);
+  doc.circle(W - 34, H - 40, 62, "F");
+  doc.setTextColor(...MAKE.white);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text(input.company.slice(0, 1).toUpperCase(), M + 6, 32.3, {
-    align: "center",
-  });
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(11);
-  doc.text(input.company, M + 16, 32);
-  doc.setTextColor(166, 180, 179);
-  doc.setFontSize(12);
-  doc.text("PLANO DE CONTEÚDO", M, 92);
-  doc.setTextColor(...GREEN);
-  doc.setFontSize(40);
-  doc.text(doc.splitTextToSize(input.client, W - 2 * M), M, 110);
-  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(190);
+  doc.text("m", W - 34, H - 12, { align: "center" });
+  label("PLANO DE CONTEÚDO", M, 88);
+  doc.setTextColor(...MAKE.white);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(38);
+  const name = doc.splitTextToSize(input.client, W - 2 * M - 90);
+  doc.text(name, M, 104);
+  let cy = 104 + name.length * 15;
   doc.setFontSize(15);
-  doc.text(`${input.label} · ${input.posts.length} publicações`, M, 132);
-  doc.setTextColor(166, 180, 179);
+  doc.setTextColor(...MAKE.orange);
+  doc.text(`${input.label} · ${input.posts.length} publicações`, M, cy);
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(10.5);
+  doc.setTextColor(...MAKE.greyLight);
+  cy += 9;
   doc.text(
     `Criado em ${date(input.createdAt)}${input.responsible ? ` · com ${input.responsible}` : ""}`,
     M,
-    141,
+    cy,
   );
+  doc.setFontSize(8.5);
+  doc.setTextColor(...MAKE.grey);
+  doc.text(`${MAKE_BRAND} · makevendas.com.br`, M, H - 14);
 
   // Diagnosis and audience.
   slide();
@@ -357,74 +447,141 @@ export async function presentationPdf(input: {
   let y = body(
     input.content.diagnostico.comoQuerSerVista,
     M,
-    52,
+    56,
     W - 2 * M,
     16,
+    MAKE.black,
   );
-  y = body(input.content.diagnostico.negocio, M, y + 6, W - 2 * M, 12, MUTED);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.setTextColor(...INK);
-  doc.text("PARA QUEM", M, y + 12);
-  body(input.content.publico, M, y + 19, W - 2 * M, 12);
+  y = body(
+    input.content.diagnostico.negocio,
+    M,
+    y + 6,
+    W - 2 * M,
+    11.5,
+    MAKE.grey,
+  );
+  doc.setFillColor(...MAKE.orangeSoft);
+  doc.setFontSize(12);
+  const pub = doc.splitTextToSize(
+    input.content.publico,
+    W - 2 * M - 16,
+  ) as string[];
+  const boxH = Math.min(H - 20 - (y + 8), 16 + pub.length * 5.4);
+  doc.roundedRect(M, y + 8, W - 2 * M, boxH, 3, 3, "F");
+  label("PARA QUEM", M + 8, y + 17);
+  body(
+    input.content.publico,
+    M + 8,
+    y + 24,
+    W - 2 * M - 16,
+    12,
+    MAKE.ink,
+    Math.max(1, Math.floor((boxH - 18) / 5.4)),
+  );
 
   // Pillars.
   slide();
-  title("Os 4 pilares do mês");
+  title(`Os ${input.content.pilares.length} pilares do mês`);
   const cw = (W - 2 * M - 3 * 8) / 4;
   input.content.pilares.forEach((p, i) => {
     const x = M + i * (cw + 8);
-    doc.setFillColor(255, 255, 255);
-    doc.setDrawColor(...LINE);
-    doc.roundedRect(x, 50, cw, 120, 4, 4, "FD");
-    doc.setTextColor(...(GREEN.map((v) => v - 60) as RGB));
+    doc.setFillColor(...(i % 2 ? MAKE.paper : MAKE.white));
+    doc.setDrawColor(...MAKE.greyLight);
+    doc.roundedRect(x, 52, cw, 128, 3, 3, "FD");
+    doc.setFillColor(...MAKE.orange);
+    doc.rect(x, 52, cw, 2.2, "F");
+    doc.setTextColor(...MAKE.orange);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(30);
-    doc.text(String(i + 1).padStart(2, "0"), x + 8, 70);
-    doc.setTextColor(...INK);
+    doc.text(String(i + 1).padStart(2, "0"), x + 8, 74);
+    doc.setTextColor(...MAKE.black);
     doc.setFontSize(14);
     const t = doc.splitTextToSize(p.titulo, cw - 16);
-    doc.text(t, x + 8, 84);
-    body(p.descricao, x + 8, 86 + t.length * 6.5, cw - 16, 10.5, MUTED);
+    doc.text(t, x + 8, 88);
+    body(p.descricao, x + 8, 90 + t.length * 6.5, cw - 16, 10.5, MAKE.grey, 14);
   });
 
   // One slide per post.
   for (const p of input.posts) {
     slide();
     const arts = (input.arts[p.number] ?? []).slice(0, 4);
-    const textW = arts.length ? 140 : W - 2 * M;
-    doc.setFillColor(...(PILLAR[p.pillar] ?? MUTED));
-    doc.roundedRect(M, 24, 30, 7, 1.5, 1.5, "F");
-    doc.setTextColor(255, 255, 255);
+    const textW = arts.length ? 140 : 165;
+    const tagColor = MAKE_PILLAR[p.pillar] ?? MAKE.grey;
+    doc.setFillColor(...tagColor);
+    doc.roundedRect(M, 26, 32, 7, 3.5, 3.5, "F");
+    doc.setTextColor(...MAKE.white);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text(pillars[p.pillar].toUpperCase(), M + 15, 29, { align: "center" });
-    doc.setTextColor(...MUTED);
-    doc.text(`POST ${p.number} DE ${input.posts.length}`, M + 36, 29);
+    doc.text(pillars[p.pillar].toUpperCase(), M + 16, 31, { align: "center" });
+    doc.setTextColor(...MAKE.grey);
+    doc.text(`POST ${p.number} DE ${input.posts.length}`, M + 37, 31);
     if (p.is_ad) {
-      doc.setFillColor(...DARK);
-      doc.roundedRect(M + 72, 24, 30, 7, 1.5, 1.5, "F");
-      doc.setTextColor(...GREEN);
-      doc.text("VIRA ANÚNCIO", M + 87, 29, { align: "center" });
+      doc.setFillColor(...MAKE.orange);
+      doc.roundedRect(M + 72, 26, 32, 7, 3.5, 3.5, "F");
+      doc.setTextColor(...MAKE.white);
+      doc.text("VIRA ANÚNCIO", M + 88, 31, { align: "center" });
     }
-    doc.setTextColor(...INK);
+    doc.setTextColor(...MAKE.black);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
-    const hook = doc.splitTextToSize(p.hook, textW);
-    doc.text(hook, M, 46);
+    doc.setFontSize(21);
+    const hook = (doc.splitTextToSize(p.hook, textW) as string[]).slice(0, 3);
+    doc.text(hook, M, 47);
+    const bottom = H - 20;
     let py =
-      body(p.copy_direction, M, 50 + hook.length * 9, textW, 12, INK) + 6;
+      body(
+        p.copy_direction,
+        M,
+        51 + hook.length * 8.6,
+        textW,
+        11,
+        MAKE.grey,
+        4,
+      ) + 5;
+    // Format and call side by side.
+    label("FORMATO", M, py);
+    label("CHAMADA", M + textW / 2, py);
+    body(p.format, M, py + 5, textW / 2 - 4, 10.5, MAKE.ink, 2);
+    const after = body(
+      p.cta,
+      M + textW / 2,
+      py + 5,
+      textW / 2 - 4,
+      10.5,
+      MAKE.ink,
+      2,
+    );
+    py = Math.max(after, py + 10) + 5;
+    // The exact texts, in boxes, while there is room.
+    // Blank lines between paragraphs take room a slide doesn't have.
+    const tight = (t: string | undefined) =>
+      postTextPlain(t).replace(/\n\s*\n+/g, "\n");
     for (const [k, v] of [
-      ["FORMATO", p.format],
-      ["COMO VAI SER", p.visual_direction],
-      ["CHAMADA", p.cta],
+      ["TEXTO DA ARTE", tight(p.image_text)],
+      ["ROTEIRO DO VÍDEO", tight(p.video_text)],
+      ["LEGENDA", tight(p.caption)],
+      [
+        "COMO VAI SER",
+        postTextPlain(p.image_text) || postTextPlain(p.video_text)
+          ? ""
+          : p.visual_direction,
+      ],
     ] as const) {
-      if (py > H - 20) break;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
-      doc.setTextColor(...MUTED);
-      doc.text(k, M, py);
-      py = body(v, M, py + 5, textW, 10.5) + 4;
+      if (!v || py > bottom - 16) continue;
+      const room = Math.floor((bottom - py - 10) / 4.3);
+      const lines = Math.min(
+        room,
+        (doc.splitTextToSize(v, textW - 10) as string[]).length,
+        k === "LEGENDA" ? 6 : 7,
+      );
+      if (lines < 1) continue;
+      const h = 10 + lines * 4.3;
+      doc.setFillColor(...MAKE.paper);
+      doc.rect(M, py - 4, textW, h, "F");
+      doc.setFillColor(...MAKE.orange);
+      doc.rect(M, py - 4, 1.4, h, "F");
+      label(k, M + 5, py + 1);
+      body(v, M + 5, py + 6, textW - 10, 9.5, MAKE.ink, lines);
+      py += h + 4;
     }
     if (arts.length) {
       const x0 = M + textW + 10;
@@ -433,20 +590,23 @@ export async function presentationPdf(input: {
       const rows = Math.ceil(arts.length / cols);
       const cell = Math.min(
         (aw - (cols - 1) * 4) / cols,
-        (H - 44 - (rows - 1) * 4) / rows,
+        (H - 50 - (rows - 1) * 4) / rows,
       );
       arts.forEach((a, i) => {
         const cx = x0 + (i % cols) * (cell + 4);
-        const cy = 24 + Math.floor(i / cols) * (cell + 4);
-        doc.setFillColor(255, 255, 255);
-        doc.roundedRect(cx, cy, cell, cell, 3, 3, "F");
-        fit(doc, a, cx + 2, cy + 2, cell - 4, cell - 4);
+        const cy2 = 26 + Math.floor(i / cols) * (cell + 4);
+        doc.setFillColor(...MAKE.paper);
+        doc.setDrawColor(...MAKE.greyLight);
+        doc.roundedRect(cx, cy2, cell, cell, 2, 2, "FD");
+        fit(doc, a, cx + 2, cy2 + 2, cell - 4, cell - 4);
       });
     } else {
-      doc.setTextColor(232, 236, 236);
+      doc.setTextColor(...MAKE.orangeSoft);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(160);
-      doc.text(String(p.number), W - M, H - 20, { align: "right" });
+      doc.setFontSize(150);
+      doc.text(String(p.number).padStart(2, "0"), W - M, H - 24, {
+        align: "right",
+      });
     }
   }
 
@@ -455,39 +615,49 @@ export async function presentationPdf(input: {
   title("O anúncio do mês");
   const c = input.content.campanha;
   const ad = input.posts.find((p) => p.is_ad);
-  let cy = 54;
-  for (const [k, v] of [
+  let ay = 58;
+  const facts = [
     ["OBJETIVO", c.objetivo],
     ["ONDE", c.regiao],
     ["PARA QUEM", c.idadeGenero],
     ["O ANÚNCIO", ad ? `Post ${ad.number}: ${ad.hook}` : ""],
-  ] as const) {
-    if (!v) continue;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(...MUTED);
-    doc.text(k, M, cy);
-    cy = body(v, M, cy + 7, W - 2 * M, 14) + 8;
+  ] as const;
+  for (const [k, v] of facts) {
+    if (!v || ay > H - 30) continue;
+    label(k, M, ay);
+    ay = body(v, M, ay + 7, W - 2 * M, 13, MAKE.ink, 4) + 8;
   }
 
   // Closing.
   slide(true);
-  title("Próximo passo: sua aprovação", true);
+  title("Próximo passo: sua aprovação", true, 52);
   let fy = body(
-    "Aprove ou peça ajuste em cada post. Com os 8 aprovados, a produção das artes começa e o anúncio vai ao ar.",
+    `Aprove ou peça ajuste em cada post. Com os ${input.posts.length} aprovados, a produção das artes começa e o anúncio vai ao ar.`,
     M,
-    54,
-    W - 2 * M,
+    68,
+    W - 2 * M - 60,
     15,
-    [230, 238, 237],
+    MAKE.greyLight,
   );
   if (input.link) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(...GREEN);
-    doc.text("LINK DE APROVAÇÃO", M, fy + 12);
-    fy = body(input.link, M, fy + 19, W - 2 * M, 11, [255, 255, 255]);
+    label("LINK DE APROVAÇÃO", M, fy + 14);
+    doc.setFillColor(...MAKE.orange);
+    const linkLines = doc.splitTextToSize(
+      input.link,
+      W - 2 * M - 20,
+    ) as string[];
+    const lh = 8 + linkLines.length * 5;
+    doc.roundedRect(M, fy + 18, W - 2 * M - 60, lh, 2, 2, "F");
+    fy = body(
+      input.link,
+      M + 6,
+      fy + 18 + lh / 2 + 1.6 - (linkLines.length - 1) * 2.5,
+      W - 2 * M - 72,
+      11,
+      MAKE.white,
+    );
   }
+  makeMark(doc, W - M - 44, H - 48, 14, MAKE.white);
   return doc.output("blob");
 }
 

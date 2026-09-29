@@ -5,6 +5,7 @@ import {
   createDriveFolder,
   deleteDriveFile,
   driveViewUrl,
+  publicFolderUrl,
   uploadDriveFile,
 } from "./drive";
 import type { Snapshot } from "./types";
@@ -27,7 +28,10 @@ import {
   type SlTask,
   type SlPostEvent,
   postEventsFor,
+  clampPosts,
+  POSTS_DEFAULT,
   type BriefingSuggestion,
+  type SlAlertRead,
 } from "./social-leads";
 
 /**
@@ -46,6 +50,17 @@ export interface PlanBundle {
   tasks: SlTask[];
   /** Each post's history: decisions, notes, edits, arts, comments. */
   events: SlPostEvent[];
+  /** The alerts marked as read (who and when). */
+  alertReads: SlAlertRead[];
+}
+/** The client's social proof folder in the Drive, with its public link. */
+export interface ProofFolder {
+  id: string;
+  name: string;
+  /** The link the client opens to send files (null when off). */
+  url: string | null;
+  upload: boolean;
+  files: MediaFile[];
 }
 /** Who receives each post's art task: a team (distributed) or a person. */
 export type ReleaseTarget = { team: string } | { user: string };
@@ -77,13 +92,23 @@ export interface ContractBundle {
   plans: SlPlan[];
   job: SlJob | null;
 }
-/** A client to put in the portfolio: one already registered, or a new one. */
-export type NewSocialLeadsClient =
-  | { client: string; name?: undefined }
-  | { client?: undefined; name: string; teams: string[] };
+/** A client to put in the portfolio: one already registered. */
+export type NewSocialLeadsClient = { client: string };
+/** A client the person may put in the portfolio (social_leads_addable_clients). */
+export interface AddableClient {
+  id: string;
+  name: string;
+  color: string;
+  /** It had Social Leads before (archived): it comes back with its history. */
+  archived_contract: string | null;
+}
 export interface SocialLeadsBackend {
   portfolio(company: string): Promise<Portfolio>;
-  /** Adds the Social Leads product to a client (creating the client if new). */
+  /**
+   * Adds the Social Leads product to a registered client (an archived one
+   * comes back with its history). Anyone active may, for the clients a team
+   * of theirs serves (the squad: any); the squad starts serving the client.
+   */
   addClient(
     company: string,
     who: NewSocialLeadsClient,
@@ -91,6 +116,41 @@ export interface SocialLeadsBackend {
     team: string | null,
     clientName: string,
   ): Promise<string>;
+  /** The clients the person may add, read fresh from the database. */
+  addableClients(company: string): Promise<AddableClient[]>;
+  /** Takes the client out of the portfolio (history kept), or back. */
+  archive(company: string, contract: string, archived: boolean): Promise<void>;
+  /** Removes for good a client added by mistake (no plan, task or file). */
+  remove(company: string, contract: string): Promise<void>;
+  /** Marks (or unmarks) an alert of the plan as read. */
+  markAlert(
+    plan: string,
+    text: string,
+    kind: SlAlertRead["kind"],
+    read: boolean,
+  ): Promise<void>;
+  /** The client's social proof folder (null: none linked). */
+  proofFolder(
+    company: string,
+    folder: string | null,
+  ): Promise<ProofFolder | null>;
+  /** The contracted product's folders in the Drive (to pick one). */
+  contractFolders(
+    company: string,
+    contract: string,
+  ): Promise<{ id: string; name: string }[]>;
+  /**
+   * Links a folder (the one given, or a new one named `name`) as the social
+   * proof folder, with a public link that accepts uploads; `enabled` false
+   * turns the link off and unlinks it.
+   */
+  setProofFolder(
+    company: string,
+    contract: string,
+    folder: string | null,
+    name: string | null,
+    enabled: boolean,
+  ): Promise<void>;
   setSettings(
     company: string,
     product: string,
@@ -184,6 +244,8 @@ export interface SocialLeadsBackend {
     contract: string,
     mode: "new" | "current",
     plan?: string,
+    /** How many posts (8 to 16); none: the current or previous plan's. */
+    posts?: number,
   ): Promise<void>;
   adjust(
     company: string,
@@ -238,26 +300,108 @@ export const serverSocialLeads: SocialLeadsBackend = {
       p_company: company,
     })) as Portfolio;
   },
-  async addClient(company, who, product, team, clientName) {
-    const client =
-      who.client ??
-      ((await rpc("create_client", {
-        p_company: company,
-        p_name: who.name.trim(),
-        p_email: "",
-        p_teams: who.teams,
-      })) as string);
-    const contract = (await rpc("create_contract", {
+  async addClient(company, who) {
+    const contract = (await rpc("social_leads_add_client", {
       p_company: company,
-      p_client: client,
-      p_product: product.id,
-      p_name: `${product.name} · ${clientName.trim()}`,
-      // A new client already has the teams picked for it.
-      p_team: who.client ? team : null,
+      p_client: who.client,
+      p_name: null,
+      p_teams: null,
     })) as string;
-    // Clientes and Produtos show the new contract too.
+    // Clientes and Produtos show the new client and contract too.
     invalidateLookupsCache(company);
     return contract;
+  },
+  async addableClients(company) {
+    return ((await rpc("social_leads_addable_clients", {
+      p_company: company,
+    })) ?? []) as AddableClient[];
+  },
+  async archive(company, contract, archived) {
+    await rpc("social_leads_archive", {
+      p_contract: contract,
+      p_archived: archived,
+    });
+    // Clientes and Produtos show the product archived (or back) too.
+    invalidateLookupsCache(company);
+  },
+  async remove(company, contract) {
+    await rpc("social_leads_remove", { p_contract: contract });
+    invalidateLookupsCache(company);
+  },
+  async markAlert(plan, text, kind, read) {
+    await rpc("social_leads_mark_alert", {
+      p_plan: plan,
+      p_text: text,
+      p_kind: kind,
+      p_read: read,
+    });
+  },
+  async proofFolder(company, folder) {
+    if (!folder) return null;
+    const [f, files] = await Promise.all([
+      db()
+        .from("drive_folders")
+        .select("id,name,visibility,share_token,public_upload")
+        .eq("company_id", company)
+        .eq("id", folder)
+        .maybeSingle(),
+      db()
+        .from("drive_files")
+        .select("id,name,content_type,size_bytes")
+        .eq("company_id", company)
+        .eq("folder_id", folder)
+        .eq("status", "ready")
+        .order("created_at", { ascending: false })
+        .limit(60),
+    ]);
+    if (f.error) throw f.error;
+    if (!f.data) return null;
+    const row = f.data as {
+      id: string;
+      name: string;
+      visibility: string;
+      share_token: string;
+      public_upload: boolean;
+    };
+    return {
+      id: row.id,
+      name: row.name,
+      url:
+        row.visibility === "public" ? publicFolderUrl(row.share_token) : null,
+      upload: row.visibility === "public" && row.public_upload,
+      files: (
+        (files.data ?? []) as {
+          id: string;
+          name: string;
+          content_type: string;
+          size_bytes: number;
+        }[]
+      ).map((x) => ({
+        id: x.id,
+        name: x.name,
+        type: x.content_type,
+        size: x.size_bytes,
+      })),
+    };
+  },
+  async contractFolders(company, contract) {
+    const r = await db()
+      .from("drive_folders")
+      .select("id,name")
+      .eq("company_id", company)
+      .eq("contract_id", contract)
+      .order("name");
+    if (r.error) throw r.error;
+    return (r.data ?? []) as { id: string; name: string }[];
+  },
+  async setProofFolder(company, contract, folder, name, enabled) {
+    await rpc("social_leads_proof_folder", {
+      p_company: company,
+      p_contract: contract,
+      p_folder: folder,
+      p_name: name,
+      p_enabled: enabled,
+    });
   },
   async setSettings(company, product, team, designTeam, artDays) {
     await rpc("set_social_leads_settings", {
@@ -319,7 +463,7 @@ export const serverSocialLeads: SocialLeadsBackend = {
     };
   },
   async plan(plan) {
-    const [p, x, r, u, e] = await Promise.all([
+    const [p, x, r, u, e, a] = await Promise.all([
       db()
         .from("social_leads_plans")
         .select(PLAN_COLUMNS)
@@ -353,6 +497,11 @@ export const serverSocialLeads: SocialLeadsBackend = {
         .order("created_at")
         .order("seq")
         .limit(2000),
+      db()
+        .from("social_leads_alert_reads")
+        .select("alert_text,kind,read_by,read_at")
+        .eq("plan_id", plan)
+        .limit(200),
     ]);
     for (const q of [p, x, r]) if (q.error) throw q.error;
     const posts = (x.data ?? []) as SlPost[];
@@ -372,6 +521,8 @@ export const serverSocialLeads: SocialLeadsBackend = {
       tasks: t.error ? [] : ((t.data ?? []) as SlTask[]),
       // Without the history (migration not applied yet) the plan still opens.
       events: e.error ? [] : ((e.data ?? []) as SlPostEvent[]),
+      // Without the reads (migration not applied yet) every alert is unread.
+      alertReads: a.error ? [] : ((a.data ?? []) as SlAlertRead[]),
     };
   },
   async saveBriefing(
@@ -511,13 +662,14 @@ export const serverSocialLeads: SocialLeadsBackend = {
       shared_at: string | null;
     };
   },
-  async generate(company, contract, mode, plan) {
+  async generate(company, contract, mode, plan, posts) {
     await server({
       action: "generate",
       company,
       contract,
       mode,
       plan: plan ?? null,
+      posts: posts ?? null,
     });
   },
   async adjust(company, contract, plan, instruction) {
@@ -576,6 +728,9 @@ export interface SharedPlan {
     direcaoVisual: string;
     formato: string;
     cta: string;
+    textoImagem?: string;
+    textoVideo?: string;
+    legenda?: string;
     ehAnuncio: boolean;
     decision: Decision;
     note: string;
@@ -642,11 +797,25 @@ type DemoState = {
   seen: Record<string, SlPost>;
   /** Why the plan is being written now (like the database's revision). */
   reason: string | null;
+  alertReads: (SlAlertRead & { plan_id: string })[];
+  /** Drive folders of the demo's contracts (the social proof folder). */
+  folders: {
+    id: string;
+    contract: string;
+    name: string;
+    url: string | null;
+    upload: boolean;
+    files: MediaFile[];
+  }[];
 };
 let demoState: DemoState | null = null;
 
 /** A plausible plan for the demonstration (the real one comes from the AI). */
-export function samplePlan(client: string, month: number): PlanContent {
+export function samplePlan(
+  client: string,
+  month: number,
+  count = POSTS_DEFAULT,
+): PlanContent {
   const hooks = [
     `Quem está por trás da ${client}`,
     "3 perguntas que todo cliente faz antes de decidir",
@@ -656,6 +825,14 @@ export function samplePlan(client: string, month: number): PlanContent {
     "Como funciona o primeiro atendimento",
     "Mito ou verdade?",
     "Bastidores do mês",
+    "Antes e depois de um projeto real",
+    "O que ninguém conta sobre reforma",
+    "Perguntas da semana",
+    "Nosso processo em 4 passos",
+    "Um material que a gente ama",
+    "Por que começar pelo projeto",
+    "Um canto pequeno, bem resolvido",
+    "Como escolher a paleta de cores",
   ];
   return {
     diagnostico: {
@@ -723,7 +900,7 @@ export function samplePlan(client: string, month: number): PlanContent {
     alertas: [
       "Sem depoimentos reais ainda: captar autorizações de clientes neste mês.",
     ],
-    posts: hooks.map((gancho, i) => ({
+    posts: hooks.slice(0, clampPosts(count)).map((gancho, i) => ({
       numero: i + 1,
       badge: (["posicionar", "autoridade", "oferta"] as const)[i % 3],
       gancho: month > 1 ? `${gancho} (mês ${month})` : gancho,
@@ -731,6 +908,15 @@ export function samplePlan(client: string, month: number): PlanContent {
       direcaoVisual: "Foto real da equipe, cores da marca, sem texto na arte.",
       formato: i % 2 ? "Carrossel" : "Reels",
       cta: i === 3 ? "Chamar no WhatsApp" : "Seguir a página",
+      textoImagem:
+        i % 2
+          ? `Card 1: ${gancho}\nCard 2: O que a gente observa em cada projeto\nCard 3: Salve para lembrar depois`
+          : "",
+      textoVideo:
+        i % 2
+          ? ""
+          : `Cena 1 (0–3 s): "${gancho}"\nCena 2 (3–12 s): a equipe mostra o detalhe na obra\nTexto na tela: ${client}`,
+      legenda: `${gancho}.\n\nNo dia a dia da ${client}, cada detalhe é pensado com você.\n\n${i === 3 ? "Chame no WhatsApp e conheça a consultoria." : "Siga a página para ver mais."}\n\n#interiores #reforma`,
       ehAnuncio: i === 3,
     })),
   };
@@ -760,6 +946,8 @@ export function demoSocialLeads(
       events: [],
       seen: {},
       reason: null,
+      alertReads: [],
+      folders: [],
     };
   const s = demoState;
   const spend = (plan: string, kind: SlUsage["kind"], cost: number) =>
@@ -866,6 +1054,9 @@ export function demoSocialLeads(
         visual_direction: p.direcaoVisual,
         format: p.formato,
         cta: p.cta,
+        image_text: p.textoImagem ?? "",
+        video_text: p.textoVideo ?? "",
+        caption: p.legenda ?? "",
         is_ad: p.ehAnuncio,
         decision:
           p.status === "aprovado"
@@ -921,7 +1112,14 @@ export function demoSocialLeads(
                   share_enabled: last.share_enabled,
                   shared_at: last.shared_at,
                   alerts: last.content.alertas.length,
+                  alerts_unread: last.content.alertas.filter(
+                    (a) =>
+                      !s.alertReads.some(
+                        (r) => r.plan_id === last.id && r.alert_text === a,
+                      ),
+                  ).length,
                   first_alert: last.content.alertas[0] ?? null,
+                  posts: posts.length,
                   approved: posts.filter((x) => x.decision === "approved")
                     .length,
                   rejected: posts.filter((x) => x.decision === "rejected")
@@ -950,25 +1148,66 @@ export function demoSocialLeads(
         items,
       };
     },
-    async addClient(company, who, product, _team, clientName) {
-      const client = who.client ?? id();
-      if (who.client === undefined) {
-        data.clients.push({
-          id: client,
-          company_id: company,
-          name: clientName.trim(),
-          email: "",
-          color: "#8576cf",
-          archived: false,
-        });
-        data.clientTeams.push(
-          ...who.teams.map((team_id) => ({
-            company_id: company,
-            client_id: client,
-            team_id,
-          })),
+    async addableClients() {
+      const product = s.settings?.product;
+      return data.clients
+        .filter(
+          (c) =>
+            !c.archived &&
+            !data.contracts.some(
+              (k) =>
+                k.client_id === c.id && k.product_id === product && !k.archived,
+            ),
+        )
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          color: c.color,
+          archived_contract:
+            data.contracts.find(
+              (k) =>
+                k.client_id === c.id && k.product_id === product && k.archived,
+            )?.id ?? null,
+        }));
+    },
+    async archive(_c, contract, archived) {
+      const k = data.contracts.find((x) => x.id === contract);
+      if (!k) throw new Error("Cliente não encontrado no Social Leads.");
+      k.archived = archived;
+      emit();
+    },
+    async remove(_c, contract) {
+      if (s.plans.some((p) => p.contract_id === contract))
+        throw new Error(
+          "Este cliente já tem histórico no Social Leads (plano, tarefa ou arquivo). Arquive em vez de excluir.",
         );
+      data.contracts = data.contracts.filter((k) => k.id !== contract);
+      delete s.briefings[contract];
+      emit();
+    },
+    async addClient(company, who, product, _team, clientName) {
+      if (
+        data.contracts.some(
+          (k) =>
+            k.client_id === who.client &&
+            k.product_id === product.id &&
+            !k.archived,
+        )
+      )
+        throw new Error("Este cliente já está no Social Leads.");
+      const archived = data.contracts.find(
+        (k) =>
+          k.client_id === who.client &&
+          k.product_id === product.id &&
+          k.archived,
+      );
+      if (archived) {
+        archived.archived = false;
+        emit();
+        return archived.id;
       }
+      const client = who.client;
       const contract = id();
       data.contracts.push({
         id: contract,
@@ -1070,7 +1309,67 @@ export function demoSocialLeads(
           s.posts.some((x) => x.plan_id === planId && x.task_id === t.id),
         ),
         events: s.events.filter((e) => e.plan_id === planId),
+        alertReads: s.alertReads.filter((r) => r.plan_id === planId),
       };
+    },
+    async markAlert(planId, text, kind, read) {
+      s.alertReads = s.alertReads.filter(
+        (r) => !(r.plan_id === planId && r.alert_text === text),
+      );
+      if (read)
+        s.alertReads.push({
+          plan_id: planId,
+          alert_text: text,
+          kind,
+          read_by: user,
+          read_at: now(),
+        });
+      emit();
+    },
+    async proofFolder(_c, folder) {
+      const f = s.folders.find((x) => x.id === folder);
+      return f
+        ? {
+            id: f.id,
+            name: f.name,
+            url: f.url,
+            upload: f.upload,
+            files: f.files,
+          }
+        : null;
+    },
+    async contractFolders(_c, contract) {
+      return s.folders
+        .filter((f) => f.contract === contract)
+        .map((f) => ({ id: f.id, name: f.name }));
+    },
+    async setProofFolder(_c, contract, folder, name, enabled) {
+      let f = s.folders.find((x) => x.id === folder);
+      if (!f && enabled) {
+        f = {
+          id: id(),
+          contract,
+          name: name?.trim() || "Prova social",
+          url: null,
+          upload: false,
+          files: [],
+        };
+        s.folders.push(f);
+      }
+      if (!f) throw new Error("Pasta não encontrada neste produto do cliente.");
+      f.url = enabled ? `${window.location.origin}/pasta/demo-${f.id}` : null;
+      f.upload = enabled;
+      const b = s.briefings[contract] ?? {
+        fields: {},
+        campaign_objective: null,
+        responsible_id: null,
+        version: 1,
+        updated_at: now(),
+        media: {},
+      };
+      b.proof_folder = enabled ? f.id : null;
+      s.briefings[contract] = b;
+      emit();
     },
     async saveBriefing(
       _c,
@@ -1200,6 +1499,9 @@ export function demoSocialLeads(
           o.visual_direction === p.direcaoVisual &&
           o.format === p.formato &&
           o.cta === p.cta &&
+          (o.image_text ?? "") === (p.textoImagem ?? "") &&
+          (o.video_text ?? "") === (p.textoVideo ?? "") &&
+          (o.caption ?? "") === (p.legenda ?? "") &&
           o.pillar === p.badge &&
           o.is_ad === p.ehAnuncio;
         return same
@@ -1269,7 +1571,7 @@ export function demoSocialLeads(
         shared_at: plan.shared_at,
       };
     },
-    async generate(_c, contract, mode, planId) {
+    async generate(_c, contract, mode, planId, posts) {
       if (!s.briefings[contract])
         throw new Error("Preencha o briefing antes de gerar o plano.");
       const job: SlJob = {
@@ -1288,9 +1590,16 @@ export function demoSocialLeads(
         const n =
           s.plans.filter((p) => p.contract_id === contract).length +
           (mode === "new" ? 1 : 0);
+        const previous = s.posts.filter(
+          (x) =>
+            x.plan_id ===
+            (mode === "current"
+              ? planId
+              : s.plans.filter((p) => p.contract_id === contract).at(-1)?.id),
+        ).length;
         const plan = putPlan(
           contract,
-          samplePlan(client, n),
+          samplePlan(client, n, posts ?? (previous || POSTS_DEFAULT)),
           mode === "current" ? planId : undefined,
         );
         if (mode === "current") s.reason = "regeneração do mês";
@@ -1334,6 +1643,9 @@ export function demoSocialLeads(
               direcaoVisual: x.visual_direction,
               formato: x.format,
               cta: x.cta,
+              textoImagem: x.image_text ?? "",
+              textoVideo: x.video_text ?? "",
+              legenda: x.caption ?? "",
               ehAnuncio: x.is_ad,
               decision: x.decision,
               note: x.note,

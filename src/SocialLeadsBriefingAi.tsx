@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
+  CircleCheck,
   ClipboardPaste,
   FileText,
+  LoaderCircle,
   Sparkles,
   Video,
 } from "lucide-react";
@@ -30,6 +32,110 @@ const labels = Object.fromEntries(
 const order = briefingSteps.flatMap((s) => s.fields.map((f) => f.key));
 const minutes = (s: number | null) =>
   s ? `${Math.max(1, Math.round(s / 60))} min` : "";
+const stepOf = Object.fromEntries(
+  briefingSteps.flatMap((st) => st.fields.map((f) => [f.key, st.title])),
+) as Record<BriefingKey, string>;
+const clock = (s: number) =>
+  `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/**
+ * What the MAVI is doing while it reads: the material in numbers, then the
+ * stages of the reading, the time so far and about how long it takes. The
+ * reading is one call to the server; the stages advance with the expected
+ * time (longer material, longer reading) and the last one waits for the
+ * answer, so nothing claims to be done before it is.
+ */
+function ReadingProgress({
+  what,
+  size,
+  expected,
+  onCancel,
+}: {
+  what: string;
+  size: string;
+  /** Seconds the reading usually takes for this material. */
+  expected: number;
+  onCancel: () => void;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+  const start = useRef(Date.now());
+  useEffect(() => {
+    const t = window.setInterval(
+      () => setElapsed((Date.now() - start.current) / 1000),
+      250,
+    );
+    return () => window.clearInterval(t);
+  }, []);
+  const stages = [
+    "Recebendo o material",
+    "Lendo a conversa e separando o que o cliente disse",
+    "Encontrando negócio, oferta, público e concorrentes",
+    "Preenchendo os campos do briefing",
+    "Conferindo de qual trecho veio cada campo",
+  ];
+  // Each stage takes its share of the expected time; the last one waits.
+  const share = [0.06, 0.34, 0.3, 0.2];
+  let acc = 0;
+  let current = stages.length - 1;
+  for (let i = 0; i < share.length; i++) {
+    acc += share[i] * expected;
+    if (elapsed < acc) {
+      current = i;
+      break;
+    }
+  }
+  // Up to 92% by the expected time, then slowly toward 99%.
+  const pct =
+    elapsed <= expected
+      ? (elapsed / expected) * 92
+      : 92 + 7 * (1 - Math.exp(-(elapsed - expected) / 40));
+  return (
+    <div className="sl-ai-reading" role="status" aria-live="polite">
+      <div className="sl-ai-reading-head">
+        <span className="sl-ai-orb" aria-hidden="true">
+          <Sparkles size={20} />
+        </span>
+        <span>
+          <strong>A MAVI está lendo {what}</strong>
+          <small>{size}</small>
+        </span>
+      </div>
+      <div className="sl-ai-reading-bar" aria-hidden="true">
+        <i style={{ width: `${Math.min(99, pct)}%` }} />
+      </div>
+      <ol className="sl-ai-stages">
+        {stages.map((label, i) => (
+          <li
+            key={label}
+            className={i < current ? "done" : i === current ? "current" : ""}
+          >
+            {i < current ? (
+              <CircleCheck size={16} />
+            ) : i === current ? (
+              <LoaderCircle size={16} className="spin" />
+            ) : (
+              <span className="sl-ai-dot" />
+            )}
+            {label}
+          </li>
+        ))}
+      </ol>
+      <p className="sl-ai-reading-foot">
+        <span>
+          {clock(elapsed)} · costuma levar cerca de {Math.round(expected)} s
+        </span>
+        {elapsed > expected * 1.15 && (
+          <em>Material longo: a MAVI ainda está lendo, falta pouco.</em>
+        )}
+      </p>
+      <div className="form-footer">
+        <Button type="button" className="btn secondary" onClick={onCancel}>
+          Cancelar a leitura
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * "Preencher com a IA": notes or a transcript (pasted, or from a .txt/.vtt/
@@ -70,6 +176,8 @@ export function BriefingAiModal({
   const [values, setValues] = useState<BriefingFields>({});
   const [chosen, setChosen] = useState<Set<BriefingKey>>(new Set());
   const [useObjective, setUseObjective] = useState(false);
+  // The reading in progress (a canceled one is ignored when it answers).
+  const reading = useRef(0);
 
   useEffect(() => {
     let alive = true;
@@ -85,6 +193,7 @@ export function BriefingAiModal({
   }, [backend, company, contract]);
 
   const read = () => {
+    const mine = ++reading.current;
     setBusy(true);
     setError("");
     backend
@@ -94,14 +203,26 @@ export function BriefingAiModal({
         tab === "meeting" ? { recording } : { text },
       )
       .then((r) => {
+        if (reading.current !== mine) return;
         setResult(r);
         setValues(r.fields);
         setChosen(new Set(defaultBriefingChoice(current, r.fields)));
         setUseObjective(!!r.objective && !currentObjective);
       })
-      .catch((e) => setError((e as Error).message))
-      .finally(() => setBusy(false));
+      .catch((e) => reading.current === mine && setError((e as Error).message))
+      .finally(() => reading.current === mine && setBusy(false));
   };
+  const cancel = () => {
+    reading.current++;
+    setBusy(false);
+  };
+  const meeting = meetings?.find((m) => m.id === recording);
+  // About how long the reading takes: the model reads ~4 thousand
+  // characters a second of wall time, plus the answer (a meeting's
+  // transcript is ~900 characters a minute).
+  const chars =
+    tab === "meeting" ? (meeting?.duration_seconds ?? 1800) * 15 : text.length;
+  const expected = Math.min(110, Math.max(18, 14 + chars / 4000));
   const loadFile = async (file: File | undefined) => {
     if (!file) return;
     if (
@@ -139,6 +260,7 @@ export function BriefingAiModal({
   const count =
     rows.filter((k) => chosen.has(k)).length +
     (objectiveChanges && useObjective ? 1 : 0);
+  const fresh = rows.filter((k) => !current[k]?.trim()).length;
 
   return (
     <Modal
@@ -147,11 +269,37 @@ export function BriefingAiModal({
       busy={busy}
       className="sl-ai-dialog"
     >
-      {!result ? (
+      {busy ? (
+        <ReadingProgress
+          what={
+            tab === "meeting"
+              ? `a reunião “${meeting?.title || "com o cliente"}”`
+              : fileName
+                ? `o arquivo ${fileName}`
+                : "o material colado"
+          }
+          size={
+            tab === "meeting"
+              ? [
+                  meeting?.duration_seconds
+                    ? `${minutes(meeting.duration_seconds)} de reunião`
+                    : "",
+                  meeting?.speakers?.length
+                    ? `${meeting.speakers.length} ${meeting.speakers.length === 1 ? "pessoa" : "pessoas"} falando`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "Transcrição da gravação"
+              : `${text.length.toLocaleString("pt-BR")} caracteres · cerca de ${Math.max(1, Math.round(text.split(/\s+/).length / 150))} min de conversa`
+          }
+          expected={expected}
+          onCancel={cancel}
+        />
+      ) : !result ? (
         <div className="sl-ai-fill-modal">
           <p className="sl-muted">
-            A MAVI lê o que o cliente disse e sugere os campos. Você escolhe o que
-            entra; nada é salvo sem a sua revisão.
+            A MAVI lê o que o cliente disse e sugere os campos. Você escolhe o
+            que entra; nada é salvo sem a sua revisão.
           </p>
           <div className="sl-ai-tabs" role="tablist">
             <button
@@ -293,6 +441,59 @@ export function BriefingAiModal({
               <small>Custo da MAVI: {formatUsd(result.cost_usd)}</small>
             </span>
           </p>
+          <ul className="sl-ai-tally" aria-label="O que a MAVI encontrou">
+            <li className="new">
+              <strong>{fresh}</strong>
+              {fresh === 1
+                ? "campo vazio preenchido"
+                : "campos vazios preenchidos"}
+            </li>
+            <li className="swap">
+              <strong>{rows.length - fresh}</strong>
+              {rows.length - fresh === 1
+                ? "sugestão para o que já está"
+                : "sugestões para o que já está"}
+            </li>
+            <li>
+              <strong>{same}</strong>
+              {same === 1 ? "já estava igual" : "já estavam iguais"}
+            </li>
+            <li className="ask">
+              <strong>{result.missing.length}</strong>
+              para perguntar ao cliente
+            </li>
+          </ul>
+          {rows.length > 1 && (
+            <div className="sl-ai-bulk">
+              <button
+                type="button"
+                className="sl-link"
+                onClick={() => setChosen(new Set(rows))}
+              >
+                Marcar todos
+              </button>
+              <button
+                type="button"
+                className="sl-link"
+                onClick={() =>
+                  setChosen(new Set(rows.filter((k) => !current[k]?.trim())))
+                }
+              >
+                Só os vazios
+              </button>
+              <button
+                type="button"
+                className="sl-link"
+                onClick={() => setChosen(new Set())}
+              >
+                Nenhum
+              </button>
+              <small>
+                Você pode editar cada texto aqui e, depois de aplicar, em
+                qualquer passo do briefing.
+              </small>
+            </div>
+          )}
           {rows.length || objectiveChanges ? (
             <ul className="sl-ai-review">
               {objectiveChanges && (
@@ -329,6 +530,7 @@ export function BriefingAiModal({
                       }
                     />
                     <strong>{labels[k]}</strong>
+                    <small className="sl-ai-step">{stepOf[k]}</small>
                     {current[k]?.trim() ? (
                       <em>substitui o que já está</em>
                     ) : (
@@ -358,12 +560,6 @@ export function BriefingAiModal({
           ) : (
             <p className="sl-alert info-soft">
               A MAVI não encontrou nada novo para o briefing neste material.
-            </p>
-          )}
-          {same > 0 && (
-            <p className="sl-muted">
-              {same} {same === 1 ? "campo já estava" : "campos já estavam"}{" "}
-              igual ao que a MAVI leu.
             </p>
           )}
           {!!result.missing.length && (

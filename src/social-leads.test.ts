@@ -29,6 +29,9 @@ import {
   pointsOf,
   shortFact,
   campaignFacts,
+  clampPosts,
+  flagText,
+  postTextPlain,
   type SlPost,
   type SlPostEvent,
   type PlanContent,
@@ -617,7 +620,8 @@ describe("briefing pela IA", () => {
       }),
     ).toEqual({
       clientName: "Aurora Studio",
-      averageTicket: "R$ 4.500,00",
+      // Ticket médio é texto livre (faixas, "por mês"…): fica como veio.
+      averageTicket: "4500.00",
       mediaBudget: "abc",
       contactWhats: "(11) 91234-5678",
       igHandle: "@aurora.studio",
@@ -747,5 +751,121 @@ describe("leitura do plano", () => {
       ],
     ]);
     expect(shortFact("Advantage+ (Feeds, Stories)")).toBe("Advantage+");
+  });
+});
+
+describe("planos de 8 a 16 posts e textos exatos", () => {
+  const rich = (text: string) =>
+    `mavi:richtext:v1:${JSON.stringify({
+      type: "doc",
+      content: text.split("\n").map((line) => ({
+        type: "paragraph",
+        content: [{ type: "text", text: line, marks: [{ type: "bold" }] }],
+      })),
+    })}`;
+  it("lê o texto formatado do editor como texto simples", () => {
+    expect(postTextPlain(rich("Card 1: Olá\nCard 2: Fim"))).toBe(
+      "Card 1: Olá\nCard 2: Fim",
+    );
+    expect(postTextPlain("  texto simples ")).toBe("texto simples");
+    expect(postTextPlain("mavi:richtext:v1:{quebrado")).toBe(
+      "mavi:richtext:v1:{quebrado",
+    );
+    expect(postTextPlain(undefined)).toBe("");
+  });
+  it("a quantidade fica entre 8 e 16", () => {
+    expect([
+      clampPosts(3),
+      clampPosts(12),
+      clampPosts(40),
+      clampPosts("x"),
+    ]).toEqual([8, 12, 16, 8]);
+  });
+  it("a checagem de promessas lê também a legenda e o texto da arte", () => {
+    const posts = plan().posts;
+    posts[1].legenda = rich("Resultado garantido em 30 dias");
+    posts[2].textoImagem = "Ganhe dinheiro fácil";
+    const flags = complianceFlags(posts);
+    expect(flags.map((f) => `${f.post} ${f.field} ${f.term}`)).toEqual([
+      "2 Legenda garantido",
+      "2 Legenda em 30 dias",
+      "3 Texto da imagem Ganhe dinheiro",
+    ]);
+    expect(flagText(flags[0])).toBe(
+      "Post 2 · Legenda: “garantido”, promessa de resultado",
+    );
+  });
+  it("o plano aprovado é todos os posts aprovados, seja qual for a quantidade", () => {
+    const item = {
+      contract_id: "k",
+      contract_name: "Social Leads",
+      client_id: "c",
+      client_name: "Cliente",
+      client_color: "#999",
+      contract_created_at: "2026-09-01T00:00:00Z",
+      can_write: true,
+      briefing: {
+        fields: {},
+        campaign_objective: null,
+        responsible_id: null,
+        updated_at: "2026-09-20T12:00:00Z",
+      },
+      plan_count: 1,
+      job: null,
+      plan: {
+        id: "p",
+        month_number: 1,
+        label: "Mês 1",
+        created_at: "2026-09-20T12:00:00Z",
+        updated_at: "2026-09-20T12:00:00Z",
+        share_enabled: true,
+        shared_at: "2026-09-20T12:00:00Z",
+        alerts: 0,
+        first_alert: null,
+        approved: 8,
+        rejected: 0,
+        last_decision_at: null,
+        posts: 12,
+      },
+    } as PortfolioItem;
+    expect(stageOf(item)).toBe(2);
+    expect(stageLabel(item)).toBe("Aprovação · 8/12");
+    item.plan!.approved = 12;
+    expect(stageOf(item)).toBe(3);
+    expect(nextActions([item])[0].title).toBe(
+      "Cliente: o cliente aprovou os 12 posts",
+    );
+    // Planos de antes da quantidade variável: 8.
+    delete item.plan!.posts;
+    item.plan!.approved = 8;
+    expect(stageOf(item)).toBe(3);
+  });
+  it("a importação aceita os posts além do 8 e os textos exatos", () => {
+    const current = plan();
+    current.posts.push(
+      ...Array.from({ length: 4 }, (_, i) => ({
+        ...current.posts[0],
+        numero: 9 + i,
+        ehAnuncio: false,
+        status: "pendente" as const,
+      })),
+    );
+    const r = parseImport(
+      json({
+        posts: [{ numero: 12, legenda: "Nova legenda", textoVideo: "" }],
+      }),
+      current,
+      opened,
+    );
+    expect(r.ok && r.changes).toEqual(["Post 12: legenda"]);
+    const bad = parseImport(
+      json({ posts: [{ numero: 13, gancho: "x" }] }),
+      current,
+      opened,
+    );
+    expect(bad).toEqual({
+      ok: false,
+      error: "Número de post fora de 1 a 12: 13.",
+    });
   });
 });

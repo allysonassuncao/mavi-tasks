@@ -15,6 +15,7 @@ import {
   briefingReadiness,
   briefingSteps,
   campaignObjectives,
+  clampPosts,
   cleanBriefingSuggestion,
   type BriefingFields,
   type BriefingKey,
@@ -121,7 +122,7 @@ async function rpc<T>(
 // ------------------------------------------------------------ the prompt
 export const SYSTEM_PROMPT = `Você é estrategista de conteúdo da agência e monta o plano mensal do produto Social Leads: gestão de Instagram e Facebook com tráfego pago no Meta, para negócios com verba de mídia pequena. A prioridade do cliente é, nesta ordem: leads qualificados, rede social com autoridade, novos seguidores.
 
-Cada mês tem até 8 postagens orgânicas; exatamente uma delas também vira o criativo do anúncio pago. O plano tem: diagnóstico, SWOT, exatamente 4 pilares de conteúdo, público, 8 posts numerados de 1 a 8 e a especificação da campanha.
+Cada mês tem de 8 a 16 postagens orgânicas (a quantidade exata vem no pedido); exatamente uma delas também vira o criativo do anúncio pago. O plano tem: diagnóstico, SWOT, exatamente 4 pilares de conteúdo, público, os posts numerados de 1 até a quantidade pedida e a especificação da campanha.
 
 Regras obrigatórias:
 1. Nunca invente depoimento, nome de cliente, número de alunos, citação ou caso como prova social. Sem "socialProof" no briefing, use situações genéricas e verídicas e inclua um alerta pedindo a captação de depoimentos reais.
@@ -138,6 +139,11 @@ Regras obrigatórias:
 Posts:
 - "badge" é o papel do post: "posicionar", "autoridade" ou "oferta". Equilibre os três ao longo do mês.
 - "gancho" é a frase curta que abre o post; "direcaoCopy" orienta o redator; "direcaoVisual" orienta o designer; "formato" (ex.: "Carrossel", "Reels", "Imagem única"); "cta" é a chamada.
+- Escreva também os textos EXATOS da peça, prontos para usar, sem descrever o que escrever:
+  - "textoImagem": o texto que vai escrito na(s) imagem(ns). Carrossel: um card por linha, "Card 1: …", "Card 2: …". Imagem única: o texto da arte. Sem texto na arte ou post só em vídeo: "".
+  - "textoVideo": para Reels e vídeos, o roteiro com as falas e os textos que aparecem na tela, em ordem ("Cena 1 (0–3 s): …"). Sem vídeo: "".
+  - "legenda": a legenda completa do post, como vai ser publicada: abertura, corpo, a chamada do "cta" e as hashtags no fim.
+  - As regras 1, 2, 3, 6 e 7 valem para esses textos palavra por palavra.
 - Exatamente um post tem "ehAnuncio": true, e ele precisa funcionar como anúncio para o objetivo da campanha.
 
 Se receber o site do cliente, você pode lê-lo com web_fetch para entender o negócio e o estilo visual. Perfis do Instagram e do Facebook costumam exigir login: se não abrirem, siga o briefing e não conclua que o perfil não existe só por isso. Escreva tudo em português do Brasil. Responda somente com o JSON do plano.`;
@@ -274,7 +280,7 @@ export const PLAN_SCHEMA = obj({
   posts: {
     type: "array",
     description:
-      "Exatamente 8 posts, numerados de 1 a 8, e só um com ehAnuncio true.",
+      "Exatamente a quantidade de posts pedida (de 8 a 16), numerados de 1 até ela, e só um com ehAnuncio true.",
     items: obj({
       numero: { type: "integer" },
       badge: { type: "string", enum: ["posicionar", "autoridade", "oferta"] },
@@ -283,6 +289,9 @@ export const PLAN_SCHEMA = obj({
       direcaoVisual: str,
       formato: str,
       cta: str,
+      textoImagem: str,
+      textoVideo: str,
+      legenda: str,
       ehAnuncio: { type: "boolean" },
     }),
   },
@@ -318,6 +327,9 @@ export const ADJUST_SCHEMA = obj({
           direcaoVisual: str,
           formato: str,
           cta: str,
+          textoImagem: str,
+          textoVideo: str,
+          legenda: str,
           ehAnuncio: { type: "boolean" },
         },
         required: ["numero"],
@@ -333,6 +345,7 @@ const MEDIA_LABELS: Record<string, string> = {
   socialProof: "Prova social",
   brandLogo: "Logo",
   brandVisualElements: "Elementos visuais",
+  socialProofFolder: "Prova social enviada pelo cliente (pasta do Drive)",
 };
 type Context = {
   job: string;
@@ -342,6 +355,8 @@ type Context = {
   campaign_objective: CampaignObjective | null;
   responsible: string | null;
   next_month: number;
+  /** How many posts to write (8 to 16; the database resolves the default). */
+  post_count?: number;
   previous: (PlanContent & { label?: string }) | null;
 };
 
@@ -395,10 +410,13 @@ export function planRequest(
       `Plano do mês anterior (${ctx.previous.label ?? ""}), com as decisões do cliente. Não repita ganchos; aproveite o que foi aprovado e evite o que foi reprovado:\n${JSON.stringify(summaryOf(ctx.previous), null, 2)}`,
     );
   }
+  const total = clampPosts(ctx.post_count);
   parts.push(
-    kind === "current" && ctx.previous
-      ? `Monte de novo o plano do ${ctx.previous.label ?? "mês"}.`
-      : `Monte o plano do Mês ${ctx.next_month}.`,
+    `${
+      kind === "current" && ctx.previous
+        ? `Monte de novo o plano do ${ctx.previous.label ?? "mês"}`
+        : `Monte o plano do Mês ${ctx.next_month}`
+    } com exatamente ${total} posts, numerados de 1 a ${total}, cada um com os textos exatos (textoImagem, textoVideo, legenda).`,
   );
   const domains = siteDomains(ctx.briefing);
   if (domains.length)
@@ -593,6 +611,8 @@ export type SocialLeadsRequest =
       contract: string;
       plan?: string | null;
       mode: "new" | "current";
+      /** How many posts (8 to 16); none: the current or previous plan's count. */
+      posts?: number | null;
     }
   | {
       action: "adjust";
@@ -683,11 +703,14 @@ async function generate(
     return { status: 400, body: { error: "Pedido inválido." } };
   if (body.mode === "current" && !UUID.test(body.plan ?? ""))
     return { status: 400, body: { error: "Plano não informado." } };
+  if (body.posts != null && clampPosts(body.posts) !== Number(body.posts))
+    return { status: 400, body: { error: "Escolha de 8 a 16 posts." } };
   const ctx = await rpc<Context>(env, deps, auth, "social_leads_start_job", {
     p_company: body.company,
     p_contract: body.contract,
     p_plan: body.mode === "current" ? body.plan : null,
     p_kind: body.mode,
+    p_posts: body.posts ?? null,
   });
   // Same rule as the page: no channel and no colours, no plan.
   const blockers = briefingReadiness(
@@ -746,6 +769,14 @@ async function run(
         content = JSON.parse(text);
       } catch {
         lastError = "a resposta não era um JSON válido.";
+        continue;
+      }
+      // The database accepts 8 to 16; the plan must have the count asked for.
+      const want = clampPosts(ctx.post_count);
+      const list = (content as { posts?: unknown })?.posts;
+      const got = Array.isArray(list) ? list.length : null;
+      if (got !== null && got !== want) {
+        lastError = `o plano precisa de exatamente ${want} posts (veio com ${got}).`;
         continue;
       }
       const saved = await callRpc<{ id: string }>(
@@ -836,7 +867,7 @@ async function adjust(
       `Briefing do cliente (JSON):\n${JSON.stringify({ ...ctx.briefing, campaignObjective: ctx.campaign_objective }, null, 2)}`,
       `Plano atual (${ctx.plan.label}):\n${JSON.stringify(ctx.plan, null, 2)}`,
       `Pedido da equipe: ${instruction}`,
-      `Devolva SOMENTE o que muda, no formato de atualização parcial: em "alteracoes.posts" só os posts alterados (com "numero" e os campos que mudam); "publico" e "alertas" como null quando não mudam. Mantenha exatamente um post com ehAnuncio true no plano final. Em "resumo", uma frase dizendo o que mudou.`,
+      `Devolva SOMENTE o que muda, no formato de atualização parcial: em "alteracoes.posts" só os posts alterados (com "numero" e os campos que mudam; se o gancho, a copy ou o formato mudarem, reescreva também textoImagem, textoVideo e legenda para combinar); "publico" e "alertas" como null quando não mudam. Os textos exatos que já estiverem formatados (começam com "mavi:richtext:v1:") só mudam se o pedido falar deles; ao mudar, escreva em texto simples. Mantenha exatamente um post com ehAnuncio true no plano final. Em "resumo", uma frase dizendo o que mudou.`,
     ].join("\n\n"),
     schema: ADJUST_SCHEMA,
     domains: [],
@@ -1108,7 +1139,7 @@ async function briefing(
       "Você preenche o briefing de onboarding do produto Social Leads (gestão de Instagram e Facebook com tráfego pago no Meta) a partir do que o cliente disse. Use só o que está no material: nunca invente nome, número, depoimento, concorrente ou promessa. Escreva em português do Brasil, em frases curtas e objetivas, como a equipe preencheria.",
     user: [
       `Campos do briefing (chave: rótulo):\n${briefingAiKeys.map((k) => `${k}: ${briefingLabels[k]}`).join("\n")}`,
-      `Regras de formato: campo sem resposta no material fica "" (vazio). Dinheiro (averageTicket, mediaBudget): só o número em reais com ponto decimal, ex.: 1500.00. WhatsApp: só os dígitos com DDD. briefingDate: AAAA-MM-DD${meetingDate ? ` (a reunião foi em ${meetingDate})` : ""}. igHandle: @perfil. websiteUrl: o endereço. As forças, fraquezas, oportunidades e ameaças podem resumir o que foi dito, sem inventar. campaignObjective: "ctwa" se o cliente quer conversas no WhatsApp, "form_nativo" se quer cadastros por formulário, "" se não ficou claro. Em evidence, um trecho curto (até 200 caracteres) do material para cada campo preenchido. Em missing, os campos importantes que faltam. Em resumo, uma frase sobre o que foi aproveitado.`,
+      `Regras de formato: campo sem resposta no material fica "" (vazio). Verba (mediaBudget): só o número em reais com ponto decimal, ex.: 1500.00. Ticket médio (averageTicket): em texto, como o cliente disse, ex.: "R$ 300 a R$ 500 por mês". WhatsApp: só os dígitos com DDD. briefingDate: AAAA-MM-DD${meetingDate ? ` (a reunião foi em ${meetingDate})` : ""}. igHandle: @perfil. websiteUrl: o endereço. As forças, fraquezas, oportunidades e ameaças podem resumir o que foi dito, sem inventar. campaignObjective: "ctwa" se o cliente quer conversas no WhatsApp, "form_nativo" se quer cadastros por formulário, "" se não ficou claro. Em evidence, um trecho curto (até 200 caracteres) do material para cada campo preenchido. Em missing, os campos importantes que faltam. Em resumo, uma frase sobre o que foi aproveitado.`,
       `Material (${source}):\n${material}`,
     ].join("\n\n"),
     schema: BRIEFING_SCHEMA,

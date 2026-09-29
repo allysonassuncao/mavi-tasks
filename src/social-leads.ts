@@ -25,8 +25,53 @@ export interface PlanPost {
   formato: string;
   cta: string;
   ehAnuncio: boolean;
+  /**
+   * The exact texts of the piece (migration 20261120090000): what goes on
+   * the image(s), in the video and the caption. Plain text from the AI, or
+   * the editor's rich text (mavi:richtext:v1:) once the team edits it.
+   */
+  textoImagem?: string;
+  textoVideo?: string;
+  legenda?: string;
   status?: PostStatus;
   observacao?: string;
+}
+/** How many posts a plan may have (the team picks it; 8 is the B29's). */
+export const POSTS_MIN = 8;
+export const POSTS_MAX = 16;
+export const POSTS_DEFAULT = 8;
+export const clampPosts = (n: unknown) =>
+  Math.min(
+    POSTS_MAX,
+    Math.max(POSTS_MIN, Math.round(Number(n) || POSTS_DEFAULT)),
+  );
+
+const RICH_PREFIX = "mavi:richtext:v1:";
+/**
+ * The visible text of a post text (rich or plain), paragraphs on their own
+ * lines. Same reading as rich-text.ts, here without imports (the server
+ * loads this file as is).
+ */
+export function postTextPlain(value: string | null | undefined): string {
+  const v = value ?? "";
+  if (!v.startsWith(RICH_PREFIX)) return v.trim();
+  type Node = { type?: string; text?: string; content?: Node[] };
+  const blocks = new Set(["paragraph", "listItem"]);
+  const walk = (n: Node): string =>
+    n.type === "text"
+      ? (n.text ?? "")
+      : n.type === "hardBreak"
+        ? "\n"
+        : (n.content ?? [])
+            .map((c) => walk(c) + (c.type && blocks.has(c.type) ? "\n" : ""))
+            .join("");
+  try {
+    return walk(JSON.parse(v.slice(RICH_PREFIX.length)) as Node)
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  } catch {
+    return v.trim();
+  }
 }
 export interface PlanCampaign {
   objetivo: string;
@@ -65,6 +110,10 @@ export interface SlPost {
   format: string;
   cta: string;
   is_ad: boolean;
+  /** The exact texts: on the image(s), in the video, the caption ('' when none). */
+  image_text?: string;
+  video_text?: string;
+  caption?: string;
   decision: Decision;
   note: string;
   decided_via: "link" | "team" | null;
@@ -76,6 +125,16 @@ export interface SlPost {
   /** The art files, in the client's Drive. */
   arts?: MediaFile[];
 }
+/** An alert (or promise check) marked as read (social_leads_alert_reads). */
+export interface SlAlertRead {
+  alert_text: string;
+  kind: "alerta" | "checagem";
+  read_by: string;
+  read_at: string;
+}
+/** The promise check as the alerts tab lists it (and marks it read). */
+export const flagText = (f: Flag) =>
+  `Post ${f.post} · ${f.field}: “${f.term}”, ${f.why}`;
 /** An art task as the plan shows it. */
 export interface SlTask {
   id: string;
@@ -135,6 +194,11 @@ export interface SlBriefing {
   media?: BriefingMedia;
   /** The client's cycle tasks, once the first release opened it. */
   cycle?: { followup?: string; meeting?: string; started_at?: string } | null;
+  /**
+   * The Drive folder the client uploads social proof to, by its public
+   * link (migration 20261120090000).
+   */
+  proof_folder?: string | null;
 }
 /** Briefing fields that take files as well as text. */
 export type MediaKey = "socialProof" | "brandLogo" | "brandVisualElements";
@@ -362,7 +426,11 @@ export interface PortfolioItem {
     share_enabled: boolean;
     shared_at: string | null;
     alerts: number;
+    /** Alerts nobody marked as read yet. */
+    alerts_unread?: number;
     first_alert: string | null;
+    /** How many posts the plan has (8 to 16). */
+    posts?: number;
     approved: number;
     rejected: number;
     last_decision_at: string | null;
@@ -396,6 +464,9 @@ export function postContent(p: SlPost): PlanPost {
     formato: p.format,
     cta: p.cta,
     ehAnuncio: p.is_ad,
+    textoImagem: p.image_text ?? "",
+    textoVideo: p.video_text ?? "",
+    legenda: p.caption ?? "",
     status:
       p.decision === "approved"
         ? "aprovado"
@@ -504,7 +575,12 @@ export const briefingSteps: BriefingStep[] = [
         label: "Oferta em destaque",
         help: "O que o anúncio do mês vai oferecer.",
       },
-      { key: "averageTicket", label: "Ticket médio", kind: "money" },
+      {
+        key: "averageTicket",
+        label: "Ticket médio",
+        help: "Em texto livre: faixa, por mês, por procedimento…",
+        placeholder: "Ex.: R$ 300 a R$ 500 por mês",
+      },
     ],
   },
   {
@@ -691,10 +767,14 @@ export const stages = [
   "Produção",
   "Campanha",
 ] as const;
+/** How many posts the latest plan has (8 before the count could change). */
+export const postsOf = (plan: { posts?: number } | null | undefined) =>
+  plan?.posts || POSTS_DEFAULT;
 /** 0 briefing · 1 plano (a revisar) · 2 aprovação · 3 aprovado/produção. */
 export function stageOf(item: PortfolioItem) {
   if (!item.plan) return 0;
-  if (item.plan.approved === 8) return item.campaign?.active ? 4 : 3;
+  if (item.plan.approved >= postsOf(item.plan))
+    return item.campaign?.active ? 4 : 3;
   if (!item.plan.share_enabled && item.plan.approved + item.plan.rejected === 0)
     return 1;
   return 2;
@@ -704,13 +784,14 @@ export function stageLabel(item: PortfolioItem) {
   if (item.job?.status === "running") return "Gerando o plano…";
   if (!p) return item.briefing ? "Briefing em andamento" : "Sem briefing";
   const decided = p.approved + p.rejected;
-  if (p.approved === 8) {
+  const total = postsOf(p);
+  if (p.approved >= total) {
     if (item.campaign?.active) return "Campanha no ar";
     if (!p.tasks) return "Plano aprovado";
-    return `Produção · ${p.arts ?? 0}/8 artes`;
+    return `Produção · ${p.arts ?? 0}/${total} artes`;
   }
   if (!p.share_enabled && decided === 0) return "Plano para revisar";
-  return `Aprovação · ${decided}/8`;
+  return `Aprovação · ${decided}/${total}`;
 }
 
 export type Tone = "bad" | "warn" | "good" | "info";
@@ -745,6 +826,7 @@ export function nextActions(
   for (const i of items) {
     const base = { contract: i.contract_id, client: i.client_name };
     const p = i.plan;
+    const total = postsOf(p);
     if (i.job?.status === "running") {
       out.push({
         ...base,
@@ -803,7 +885,7 @@ export function nextActions(
       });
       continue;
     }
-    if (p.approved === 8) {
+    if (p.approved >= total) {
       const age = daysSince(p.created_at, now);
       const arts = p.arts ?? 0;
       if (age >= 25)
@@ -815,21 +897,21 @@ export function nextActions(
           action: "next-month",
           label: "Gerar próximo mês",
         });
-      else if ((p.tasks ?? 0) < 8)
+      else if ((p.tasks ?? 0) < total)
         out.push({
           ...base,
           tone: "good",
-          title: `${i.client_name}: o cliente aprovou os 8 posts`,
+          title: `${i.client_name}: o cliente aprovou os ${total} posts`,
           detail: "Libere a produção: cada post vira uma tarefa de arte.",
           action: "release",
           label: "Liberar produção",
         });
-      else if (arts < 8)
+      else if (arts < total)
         out.push({
           ...base,
           tone: "info",
           title: `${i.client_name}: produção em andamento`,
-          detail: `${arts} de 8 posts com arte.`,
+          detail: `${arts} de ${total} posts com arte.`,
           action: "open-plan",
           label: "Ver artes",
         });
@@ -858,7 +940,7 @@ export function nextActions(
         ...base,
         tone: "warn",
         title: `${i.client_name}: ajuste pedido em ${p.rejected} ${p.rejected === 1 ? "post" : "posts"}`,
-        detail: `${p.approved + p.rejected} de 8 decididos no ${p.label}.`,
+        detail: `${p.approved + p.rejected} de ${total} decididos no ${p.label}.`,
         action: "open-plan",
         label: "Ver pedidos",
       });
@@ -881,7 +963,7 @@ export function nextActions(
         ...base,
         tone: "warn",
         title: `${i.client_name}: aprovação parada há ${idle} dias`,
-        detail: `${p.approved + p.rejected} de 8 decididos · link enviado ${relativeDays(p.shared_at, now)}.`,
+        detail: `${p.approved + p.rejected} de ${total} decididos · link enviado ${relativeDays(p.shared_at, now)}.`,
         action: "share",
         label: "Reenviar link",
       });
@@ -932,11 +1014,14 @@ export function complianceFlags(posts: PlanPost[]): Flag[] {
     ["direcaoCopy", "Direção de copy"],
     ["direcaoVisual", "Texto pedido para a arte"],
     ["cta", "CTA"],
+    ["textoImagem", "Texto da imagem"],
+    ["textoVideo", "Texto do vídeo"],
+    ["legenda", "Legenda"],
   ];
   const out: Flag[] = [];
   for (const p of posts)
     for (const [key, label] of fields) {
-      const text = String(p[key] ?? "");
+      const text = postTextPlain(String(p[key] ?? ""));
       for (const { re, why } of PROMISES) {
         const m = text.match(re);
         if (m) out.push({ post: p.numero, field: label, term: m[0], why });
@@ -958,12 +1043,19 @@ export type ImportResult =
     }
   | { ok: false; error: string };
 
-const POST_FIELDS: { key: keyof PlanPost; label: string }[] = [
+const POST_FIELDS: {
+  key: keyof PlanPost;
+  label: string;
+  optional?: boolean;
+}[] = [
   { key: "gancho", label: "gancho" },
   { key: "direcaoCopy", label: "direção de copy" },
   { key: "direcaoVisual", label: "direção visual" },
   { key: "formato", label: "formato" },
   { key: "cta", label: "CTA" },
+  { key: "textoImagem", label: "texto da imagem", optional: true },
+  { key: "textoVideo", label: "texto do vídeo", optional: true },
+  { key: "legenda", label: "legenda", optional: true },
 ];
 const isObject = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
@@ -1025,17 +1117,18 @@ export function parseImport(
   if (a.posts != null) {
     if (!Array.isArray(a.posts))
       return { ok: false, error: '"posts" precisa ser uma lista.' };
-    if (a.posts.length > 8)
-      return { ok: false, error: "Mais de 8 posts no JSON." };
+    const total = next.posts.length;
+    if (a.posts.length > total)
+      return { ok: false, error: `Mais de ${total} posts no JSON.` };
     const seen = new Set<number>();
     for (const item of a.posts) {
       if (!isObject(item))
         return { ok: false, error: "Post inválido no JSON." };
       const n = Number(item.numero);
-      if (!Number.isInteger(n) || n < 1 || n > 8)
+      if (!Number.isInteger(n) || n < 1 || n > total)
         return {
           ok: false,
-          error: `Número de post fora de 1 a 8: ${String(item.numero)}.`,
+          error: `Número de post fora de 1 a ${total}: ${String(item.numero)}.`,
         };
       if (seen.has(n))
         return { ok: false, error: `Post ${n} repetido no JSON.` };
@@ -1058,12 +1151,12 @@ export function parseImport(
       for (const f of POST_FIELDS) {
         if (item[f.key] == null) continue;
         const value = String(item[f.key]).trim();
-        if (!value)
+        if (!value && !f.optional)
           return {
             ok: false,
             error: `O ${f.label} do post ${n} ficaria vazio.`,
           };
-        if (value !== post[f.key]) {
+        if (value !== (post[f.key] ?? "")) {
           (post as unknown as Record<string, unknown>)[f.key] = value;
           what.push(f.label);
         }
@@ -1193,6 +1286,9 @@ export const postFields = {
   visual_direction: "Direção visual",
   format: "Formato",
   cta: "CTA",
+  image_text: "Texto da imagem",
+  video_text: "Texto do vídeo",
+  caption: "Legenda",
   is_ad: "Anúncio do mês",
 } as const;
 export type PostField = keyof typeof postFields;
@@ -1275,9 +1371,9 @@ export function postEventsFor(
   const was: PostEventDetail["before"] = {};
   const now: PostEventDetail["after"] = {};
   for (const f of Object.keys(postFields) as PostField[])
-    if (before[f] !== after[f]) {
-      was[f] = before[f];
-      now[f] = after[f];
+    if ((before[f] ?? "") !== (after[f] ?? "")) {
+      was[f] = before[f] ?? "";
+      now[f] = after[f] ?? "";
     }
   const edited = Object.keys(was).length > 0;
   const reason = ctx.reason ?? undefined;
@@ -1358,7 +1454,7 @@ const shown = (f: PostField, v: string | boolean | undefined) =>
       : "Não"
     : f === "pillar"
       ? (pillars[v as Pillar] ?? String(v ?? ""))
-      : String(v ?? "");
+      : postTextPlain(String(v ?? ""));
 const plural = (n: number, one: string, many: string) =>
   `${n} ${n === 1 ? one : many}`;
 

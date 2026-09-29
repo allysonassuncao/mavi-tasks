@@ -21,6 +21,8 @@ import {
   parseColors,
   parseMoney,
   phoneComplete,
+  POSTS_MAX,
+  POSTS_MIN,
   serializeColors,
   type BrandColor,
   type CurrencyCode,
@@ -236,8 +238,8 @@ export function ColorsInput({
       </div>
       {search.state === "searching" && (
         <p className="sl-ai-note" role="status">
-          <Sparkles size={14} /> A MAVI está lendo o site e o Instagram para achar
-          as cores…
+          <Sparkles size={14} /> A MAVI está lendo o site e o Instagram para
+          achar as cores…
         </p>
       )}
       {search.state === "error" && (
@@ -286,6 +288,59 @@ export function ColorsInput({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ post count
+/**
+ * How many posts the MAVI writes in the plan (8 to 16): one button per
+ * number, the one exactly one ad goes with.
+ */
+export function PostCountInput({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  disabled?: boolean;
+}) {
+  const options = Array.from(
+    { length: POSTS_MAX - POSTS_MIN + 1 },
+    (_, i) => POSTS_MIN + i,
+  );
+  return (
+    <div className="sl-count" role="group" aria-label="Quantidade de posts">
+      <span className="sl-label">
+        Quantidade de posts
+        <em>
+          De {POSTS_MIN} a {POSTS_MAX} publicações no mês; uma delas vira o
+          anúncio.
+        </em>
+      </span>
+      <div className="sl-count-options" role="radiogroup">
+        {options.map((n) => (
+          <button
+            key={n}
+            type="button"
+            role="radio"
+            aria-checked={value === n}
+            className={value === n ? "selected" : ""}
+            disabled={disabled}
+            onClick={() => onChange(n)}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+      <small className="sl-count-note">
+        {value} posts ≈{" "}
+        {((value / 30) * 7).toLocaleString("pt-BR", {
+          maximumFractionDigits: 1,
+        })}{" "}
+        por semana
+      </small>
     </div>
   );
 }

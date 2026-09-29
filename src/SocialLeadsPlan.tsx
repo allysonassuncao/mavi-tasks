@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Check,
   CircleAlert,
+  CircleCheck,
   Copy,
   ExternalLink,
   FileJson,
@@ -84,9 +93,22 @@ import {
   campaignFacts,
   leadOf,
   pointsOf,
+  postTextPlain,
+  flagText,
+  clampPosts,
+  type SlAlertRead,
   type CampaignObjective,
 } from "./social-leads";
-import { MediaInput, type Uploading } from "./SocialLeadsFields";
+import {
+  MediaInput,
+  PostCountInput,
+  type Uploading,
+} from "./SocialLeadsFields";
+import { RichTextContent } from "./RichTextContent";
+import { parseDescription, serializeDescription } from "./rich-text";
+import "./social-leads-onboarding.css";
+
+const RichTextEditor = lazy(() => import("./RichTextEditor"));
 
 /** A place in the app, inside the current company (/agencias/<slug>/…). */
 const appPath = (path: string) => {
@@ -133,6 +155,7 @@ export function PlanView({
   user,
   data,
   backend,
+  demo = false,
   intent,
   clearIntent,
   onOpenBriefing,
@@ -142,6 +165,8 @@ export function PlanView({
 }: {
   item: PortfolioItem;
   isLeader: boolean;
+  /** Demo mode (the editor keeps images in memory). */
+  demo?: boolean;
   production: Production;
   clientName: string;
   briefing: SlBriefing | null;
@@ -183,6 +208,8 @@ export function PlanView({
     source: "import" | "ai";
   }>(null);
   const [busy, setBusy] = useState("");
+  // How many posts the next generation writes (the plan's own, by default).
+  const [count, setCount] = useState<number | null>(null);
   const previous = useRef<SlPost[] | null>(null);
 
   const load = useCallback(() => {
@@ -246,7 +273,7 @@ export function PlanView({
       ? job
       : null;
 
-  const generate = async (mode: "new" | "current") => {
+  const generate = async (mode: "new" | "current", posts?: number) => {
     setBusy(mode);
     try {
       await backend.generate(
@@ -254,8 +281,11 @@ export function PlanView({
         item.contract_id,
         mode,
         mode === "current" ? plan?.id : undefined,
+        posts,
       );
-      notify("A MAVI começou a escrever o plano. Leva de 1 a 3 minutos.");
+      notify(
+        `A MAVI começou a escrever ${posts ? `os ${posts} posts do plano` : "o plano"}. Leva de 1 a 3 minutos.`,
+      );
       setModal(null);
       onChanged();
       if (mode === "new") onMonth(0);
@@ -333,7 +363,10 @@ export function PlanView({
   const content = fullContent(bundle.plan, posts);
   const approved = posts.filter((p) => p.decision === "approved").length;
   const rejected = posts.filter((p) => p.decision === "rejected").length;
-  const allApproved = approved === 8;
+  const total = posts.length;
+  const allApproved = total > 0 && approved === total;
+  const postCount = clampPosts(count ?? total);
+  const reads = bundle.alertReads ?? [];
   const isLatest = plans.at(-1)?.id === plan.id;
   const flags = complianceFlags(content.posts);
   const cost = usageSummary(bundle.usage ?? []);
@@ -396,11 +429,11 @@ export function PlanView({
                   ? `${bundle.plan.source === "artifact" ? "importado do artefato" : bundle.plan.source === "ai" ? "gerado pela MAVI" : "editado"} · ${bundle.revisions.length} ${bundle.revisions.length === 1 ? "versão anterior" : "versões anteriores"}`
                   : i === 2
                     ? bundle.plan.share_enabled
-                      ? `${approved + rejected} de 8 · link enviado ${relativeDays(bundle.plan.shared_at)}`
-                      : `${approved + rejected} de 8 · link não enviado`
+                      ? `${approved + rejected} de ${total} · link enviado ${relativeDays(bundle.plan.shared_at)}`
+                      : `${approved + rejected} de ${total} · link não enviado`
                     : i === 3
                       ? withTask
-                        ? `${withArt} de 8 com arte · ${withTask} ${withTask === 1 ? "tarefa" : "tarefas"}`
+                        ? `${withArt} de ${total} com arte · ${withTask} ${withTask === 1 ? "tarefa" : "tarefas"}`
                         : allApproved
                           ? "pronta para liberar"
                           : "depois da aprovação"
@@ -449,7 +482,7 @@ export function PlanView({
             )}
             {allApproved && toRelease === 0 && isLeader && (
               <Button
-                className={`btn ${withArt === 8 && !item.campaign?.active ? "primary" : "secondary"}`}
+                className={`btn ${withArt === total && !item.campaign?.active ? "primary" : "secondary"}`}
                 onClick={() =>
                   item.campaign?.id
                     ? navigate(
@@ -465,7 +498,10 @@ export function PlanView({
             {!isLatest ? null : allApproved ? (
               <Button
                 className={`btn ${toRelease === 0 && (item.campaign?.active || !isLeader) ? "primary" : "secondary"}`}
-                onClick={() => setModal("next-month")}
+                onClick={() => {
+                  setCount(null);
+                  setModal("next-month");
+                }}
                 disabled={running}
               >
                 <Sparkles size={16} /> Gerar Mês {bundle.plan.month_number + 1}
@@ -494,15 +530,32 @@ export function PlanView({
                 <Link2 size={16} /> Link
               </Button>
             )}
+            {isLatest && !allApproved && (
+              <Button
+                className="btn secondary"
+                disabled={running}
+                title="Criar o plano do próximo mês sem esperar a aprovação deste"
+                onClick={() => {
+                  setCount(null);
+                  setModal("next-month");
+                }}
+              >
+                <Sparkles size={15} /> Novo plano: Mês{" "}
+                {bundle.plan.month_number + 1}
+              </Button>
+            )}
             <Button
               className="btn secondary"
               disabled={allApproved || running}
               title={
                 allApproved
                   ? 'Plano aprovado. Para mudar um post, use "Alterar" nele ou "Pedir ajuste à MAVI".'
-                  : "Escrever de novo os 8 posts deste mês"
+                  : `Escrever de novo os posts deste mês (hoje ${total})`
               }
-              onClick={() => setModal("regenerate")}
+              onClick={() => {
+                setCount(null);
+                setModal("regenerate");
+              }}
             >
               {allApproved ? <Lock size={15} /> : <RefreshCw size={15} />}
               {allApproved ? "Plano aprovado" : "Regenerar este mês"}
@@ -528,10 +581,19 @@ export function PlanView({
       <div className="scope-tabs" role="tablist" aria-label="Partes do plano">
         {(
           [
-            ["posts", "Posts", 8],
+            ["posts", "Posts", total],
             ["estrategia", "Estratégia", null],
             ["campanha", "Campanha", null],
-            ["alertas", "Alertas", content.alertas.length + flags.length],
+            [
+              "alertas",
+              "Alertas",
+              content.alertas.filter(
+                (a) => !reads.some((r) => r.alert_text === a),
+              ).length +
+                flags.filter(
+                  (f) => !reads.some((r) => r.alert_text === flagText(f)),
+                ).length,
+            ],
             ["versoes", "Versões", bundle.revisions.length],
           ] as const
         ).map(([id, label, n]) => (
@@ -599,6 +661,7 @@ export function PlanView({
                   <small>
                     {p.format} · {p.cta}
                   </small>
+                  <PostTextChips post={p} />
                   {!!f.length && (
                     <span className="sl-flag">
                       <TriangleAlert size={12} /> “{f[0].term}”: {f[0].why}
@@ -651,7 +714,23 @@ export function PlanView({
           notify={notify}
         />
       )}
-      {section === "alertas" && <Alerts content={content} flags={flags} />}
+      {section === "alertas" && (
+        <Alerts
+          content={content}
+          flags={flags}
+          reads={reads}
+          who={people}
+          onMark={async (text, kind, read) => {
+            try {
+              await backend.markAlert(plan.id, text, kind, read);
+              load();
+              onChanged();
+            } catch (e) {
+              notify((e as Error).message);
+            }
+          }}
+        />
+      )}
       {section === "versoes" && (
         <Revisions
           bundle={bundle}
@@ -672,6 +751,9 @@ export function PlanView({
           post={posts.find((p) => p.number === openPost)!}
           content={content}
           canWrite={item.can_write}
+          company={company}
+          demo={demo}
+          notify={notify}
           who={people}
           flags={flags.filter((f) => f.post === openPost)}
           onClose={() => setOpenPost(null)}
@@ -734,6 +816,7 @@ export function PlanView({
           clientName={clientName}
           backend={backend}
           decided={approved + rejected}
+          total={total}
           onClose={() => setModal(null)}
           onChanged={() => {
             load();
@@ -746,7 +829,7 @@ export function PlanView({
         <ReleaseModal
           label={bundle.plan.label}
           posts={posts.filter((p) => p.decision === "approved" && !p.task_id)}
-          waiting={8 - withTask - toRelease}
+          waiting={total - withTask - toRelease}
           startsCycle={!briefing?.cycle}
           user={user}
           production={production}
@@ -778,11 +861,11 @@ export function PlanView({
               completa o ciclo (verba, datas, conta de anúncio) e ativa. Quando
               ela estiver ativa, este cliente aparece como “Campanha no ar”.
             </p>
-            {withArt < 8 && (
+            {withArt < total && (
               <p className="sl-alert warn">
                 <TriangleAlert size={15} />
-                {withArt} de 8 posts com arte. Dá para criar agora e ativar
-                quando o anúncio estiver pronto.
+                {withArt} de {total} posts com arte. Dá para criar agora e
+                ativar quando o anúncio estiver pronto.
               </p>
             )}
             <div className="form-footer">
@@ -844,9 +927,11 @@ export function PlanView({
         >
           <div className="entity-form">
             <p>
-              A MAVI escreve de novo os 8 posts com o briefing atual. O plano de
-              agora fica guardado em Versões.
+              A MAVI escreve de novo os posts com o briefing atual, cada um com
+              o texto da imagem, do vídeo e a legenda. O plano de agora fica
+              guardado em Versões.
             </p>
+            <PostCountInput value={postCount} onChange={setCount} />
             {approved + rejected > 0 && (
               <p className="sl-alert warn">
                 <TriangleAlert size={15} />
@@ -867,9 +952,9 @@ export function PlanView({
               <Button
                 className="btn primary"
                 loading={busy === "current"}
-                onClick={() => void generate("current")}
+                onClick={() => void generate("current", postCount)}
               >
-                <RefreshCw size={15} /> Regenerar
+                <RefreshCw size={15} /> Regenerar com {postCount} posts
               </Button>
             </div>
           </div>
@@ -884,8 +969,20 @@ export function PlanView({
           <div className="entity-form">
             <p>
               A MAVI usa o briefing atual e o que o cliente aprovou e pediu para
-              ajustar no {plans.at(-1)?.label}, sem repetir ganchos.
+              ajustar no {plans.at(-1)?.label}, sem repetir ganchos. Cada post
+              vem com o texto exato da imagem, do vídeo e a legenda.
             </p>
+            {!allApproved && (
+              <p className="sl-alert warn">
+                <TriangleAlert size={15} />O {plans.at(-1)?.label} ainda tem{" "}
+                {total - approved}{" "}
+                {total - approved === 1
+                  ? "post sem aprovação"
+                  : "posts sem aprovação"}
+                . O novo plano não muda nada nele.
+              </p>
+            )}
+            <PostCountInput value={postCount} onChange={setCount} />
             <div className="form-footer">
               <Button className="btn secondary" onClick={() => setModal(null)}>
                 Cancelar
@@ -893,9 +990,9 @@ export function PlanView({
               <Button
                 className="btn primary"
                 loading={busy === "new"}
-                onClick={() => void generate("new")}
+                onClick={() => void generate("new", postCount)}
               >
-                <Sparkles size={15} /> Gerar
+                <Sparkles size={15} /> Gerar {postCount} posts
               </Button>
             </div>
           </div>
@@ -936,10 +1033,54 @@ export function PlanView({
 }
 
 // ------------------------------------------------------------ post
+/** The exact texts of a post: field, label and what each one is for. */
+const POST_TEXTS = [
+  {
+    key: "textoImagem",
+    column: "image_text",
+    label: "Texto da(s) imagem(ns)",
+    hint: "O que vai escrito na arte. Carrossel: um card por linha.",
+  },
+  {
+    key: "textoVideo",
+    column: "video_text",
+    label: "Texto do vídeo",
+    hint: "Roteiro: falas e textos na tela, cena por cena.",
+  },
+  {
+    key: "legenda",
+    column: "caption",
+    label: "Legenda (copy)",
+    hint: "A legenda completa, como vai ser publicada.",
+  },
+] as const;
+
+/** Which exact texts a post has, on its card. */
+function PostTextChips({ post }: { post: SlPost }) {
+  const has = POST_TEXTS.filter((t) => postTextPlain(post[t.column]));
+  if (!has.length) return null;
+  return (
+    <span className="sl-text-chips" aria-label="Textos prontos">
+      {has.map((t) => (
+        <span key={t.key}>
+          {t.key === "textoImagem"
+            ? "Imagem"
+            : t.key === "textoVideo"
+              ? "Vídeo"
+              : "Legenda"}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function PostModal({
   post,
   content,
   canWrite,
+  company,
+  demo,
+  notify,
   who,
   flags,
   onClose,
@@ -952,6 +1093,9 @@ function PostModal({
   post: SlPost;
   content: PlanContent;
   canWrite: boolean;
+  company: string;
+  demo: boolean;
+  notify: (m: string) => void;
   who: (id: string | null) => string | undefined;
   flags: ReturnType<typeof complianceFlags>;
   onClose: () => void;
@@ -1001,8 +1145,22 @@ function PostModal({
             className="entity-form"
             onSubmit={(e) => {
               e.preventDefault();
+              // The editors keep their text in hidden inputs (serialized).
+              const form = new FormData(e.currentTarget);
+              // The editor rewrites plain text as rich text when it opens:
+              // an untouched text stays as it was (no false edit).
+              const texts = Object.fromEntries(
+                POST_TEXTS.map((t) => {
+                  const next = String(form.get(t.key) ?? "");
+                  const was = draft[t.key] ?? "";
+                  const same =
+                    next === was ||
+                    next === serializeDescription(parseDescription(was));
+                  return [t.key, same ? was : next];
+                }),
+              );
               void run("edit", async () => {
-                await onEdit(draft);
+                await onEdit({ ...draft, ...texts });
                 setEditing(false);
               });
             }}
@@ -1079,6 +1237,27 @@ function PostModal({
                 onChange={(e) => setDraft({ ...draft, cta: e.target.value })}
               />
             </label>
+            <div className="sl-post-texts-edit">
+              <p className="sl-muted">
+                Os textos exatos da peça. Formate à vontade: negrito, cores e
+                listas chegam assim à tarefa de arte e ao link do cliente.
+              </p>
+              <Suspense fallback={<Loading compact />}>
+                {POST_TEXTS.map((t) => (
+                  <div key={t.key} className="sl-post-text-field">
+                    <RichTextEditor
+                      name={t.key}
+                      label={t.label}
+                      defaultValue={draft[t.key] ?? ""}
+                      company={company}
+                      demo={demo}
+                      images={false}
+                    />
+                    <em>{t.hint}</em>
+                  </div>
+                ))}
+              </Suspense>
+            </div>
             <label className="checkbox-label">
               <Checkbox
                 checked={draft.ehAnuncio}
@@ -1126,6 +1305,7 @@ function PostModal({
                 <dt>CTA</dt>
                 <dd>{post.cta}</dd>
               </dl>
+              <PostTexts post={post} notify={notify} />
               {flags.map((f) => (
                 <p key={f.field + f.term} className="sl-alert warn">
                   <TriangleAlert size={15} />
@@ -1505,6 +1685,7 @@ function ShareModal({
   clientName,
   backend,
   decided,
+  total,
   onClose,
   onChanged,
   notify,
@@ -1514,6 +1695,7 @@ function ShareModal({
   clientName: string;
   backend: SocialLeadsBackend;
   decided: number;
+  total: number;
   onClose: () => void;
   onChanged: () => void;
   notify: (m: string) => void;
@@ -1577,7 +1759,7 @@ function ShareModal({
             <p>
               O cliente abre o plano no celular, sem senha, e aprova ou pede
               ajuste em cada post. A decisão aparece aqui na hora.{" "}
-              {decided > 0 && `${decided} de 8 já decididos.`}
+              {decided > 0 && `${decided} de ${total} já decididos.`}
             </p>
             <label>
               Endereço
@@ -2165,8 +2347,9 @@ function PdfModal({
               {busy === "presentation" ? "Gerando…" : "PDF de apresentação"}
             </strong>
             <small>
-              Slides para o cliente: diagnóstico, pilares, os 8 posts com as
-              artes e o anúncio. Sem alertas nem dados internos.
+              Slides na identidade da Make: diagnóstico, pilares, os{" "}
+              {posts.length} posts com as artes, os textos e o anúncio. Sem
+              alertas nem dados internos.
             </small>
           </span>
         </button>
@@ -2629,13 +2812,29 @@ function Campaign({
     </div>
   );
 }
+/**
+ * The plan's alerts and the promise check, each with "Marcar como lido".
+ * Who marked it and when stays saved (social_leads_alert_reads); a text
+ * that changes comes back unread.
+ */
 function Alerts({
   content,
   flags,
+  reads,
+  who,
+  onMark,
 }: {
   content: PlanContent;
   flags: ReturnType<typeof complianceFlags>;
+  reads: SlAlertRead[];
+  who: (id: string | null) => string | undefined;
+  onMark: (
+    text: string,
+    kind: SlAlertRead["kind"],
+    read: boolean,
+  ) => Promise<void>;
 }) {
+  const [busy, setBusy] = useState("");
   if (!content.alertas.length && !flags.length)
     return (
       <Empty
@@ -2643,34 +2842,82 @@ function Alerts({
         body="A MAVI não apontou bloqueios nem riscos neste plano."
       />
     );
+  const readOf = (text: string) => reads.find((r) => r.alert_text === text);
+  const all = content.alertas.length + flags.length;
+  const done =
+    content.alertas.filter((a) => readOf(a)).length +
+    flags.filter((f) => readOf(flagText(f))).length;
+  const mark = (text: string, kind: SlAlertRead["kind"], read: boolean) => {
+    setBusy(text);
+    void onMark(text, kind, read).finally(() => setBusy(""));
+  };
+  const readToggle = (text: string, kind: SlAlertRead["kind"]) => {
+    const r = readOf(text);
+    return (
+      <span className="sl-alert-read">
+        <label>
+          <Checkbox
+            checked={!!r}
+            disabled={busy === text}
+            onCheckedChange={(v) => mark(text, kind, v === true)}
+            aria-label={r ? "Marcar como não lido" : "Marcar como lido"}
+          />
+          {r ? "Lido" : "Marcar como lido"}
+        </label>
+        {r && (
+          <small>
+            {who(r.read_by)?.split(" ")[0] ?? "Alguém"} · {dateTime(r.read_at)}
+          </small>
+        )}
+      </span>
+    );
+  };
   return (
     <div className="sl-alerts">
+      <p className="sl-alerts-progress">
+        <CircleCheck size={15} /> {done} de {all}{" "}
+        {all === 1 ? "alerta lido" : "alertas lidos"}
+        <span className="sl-meter" aria-hidden="true">
+          <i style={{ width: `${Math.round((done / all) * 100)}%` }} />
+        </span>
+      </p>
       {content.alertas.map((a, i) => (
-        <p
+        <div
           key={a}
-          className={`sl-alert ${i === 0 && /^bloqueio/i.test(a) ? "bad" : "warn"}`}
+          className={`sl-alert sl-alert-item ${i === 0 && /^bloqueio/i.test(a) ? "bad" : "warn"}${readOf(a) ? " read" : ""}`}
         >
           {i === 0 && /^bloqueio/i.test(a) ? (
             <CircleAlert size={15} />
           ) : (
             <TriangleAlert size={15} />
           )}
-          {a}
-        </p>
+          <span>{a}</span>
+          {readToggle(a, "alerta")}
+        </div>
       ))}
       {flags.length > 0 && (
         <section className="panel">
           <h3>Checagem de promessas nos posts</h3>
           <p className="sl-muted">
             Palavras que costumam virar promessa de resultado ou de ganho.
-            Confira cada uma, inclusive o texto pedido para a arte.
+            Confira cada uma, inclusive os textos da imagem, do vídeo e a
+            legenda.
           </p>
-          <ul className="sl-changes">
-            {flags.map((f) => (
-              <li key={`${f.post}${f.field}${f.term}`}>
-                Post {f.post} · {f.field}: “{f.term}”, {f.why}
-              </li>
-            ))}
+          <ul className="sl-flag-list">
+            {flags.map((f) => {
+              const text = flagText(f);
+              return (
+                <li
+                  key={`${f.post}${f.field}${f.term}`}
+                  className={readOf(text) ? "read" : ""}
+                >
+                  <span>
+                    Post {f.post} · {f.field}: “{f.term}”, {f.why}
+                  </span>
+                  {readToggle(text, "checagem")}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -2706,6 +2953,7 @@ function Revisions({
           const decided = r.content.posts.filter(
             (p) => p.status && p.status !== "pendente",
           ).length;
+          const of = r.content.posts.length;
           return (
             <li key={r.id}>
               <History size={16} />
@@ -2716,7 +2964,7 @@ function Revisions({
                 <small>
                   {dateTime(r.created_at)}
                   {who(r.created_by) ? ` · ${who(r.created_by)}` : ""} ·{" "}
-                  {decided} de 8 decididos
+                  {decided} de {of} decididos
                 </small>
               </div>
               {canWrite &&
@@ -2758,5 +3006,50 @@ function Revisions({
         })}
       </ul>
     </section>
+  );
+}
+
+/** The post's exact texts, each with a copy button (plain text). */
+function PostTexts({
+  post,
+  notify,
+}: {
+  post: SlPost;
+  notify: (m: string) => void;
+}) {
+  const shown = POST_TEXTS.filter((t) => postTextPlain(post[t.column]));
+  if (!shown.length)
+    return (
+      <p className="sl-muted sl-post-texts-empty">
+        Sem os textos exatos da peça (plano anterior a eles). Use “Editar post”
+        ou “Pedir ajuste à MAVI” para escrever o texto da imagem, do vídeo e a
+        legenda.
+      </p>
+    );
+  return (
+    <div className="sl-post-texts">
+      {shown.map((t) => (
+        <section key={t.key}>
+          <header>
+            <strong>{t.label}</strong>
+            <button
+              type="button"
+              className="sl-link"
+              onClick={() =>
+                navigator.clipboard
+                  .writeText(postTextPlain(post[t.column]))
+                  .then(
+                    () => notify(`${t.label} copiado.`),
+                    () => notify("Não foi possível copiar."),
+                  )
+              }
+            >
+              <Copy size={13} /> Copiar
+            </button>
+          </header>
+          <RichTextContent value={post[t.column] ?? ""} />
+        </section>
+      ))}
+    </div>
   );
 }

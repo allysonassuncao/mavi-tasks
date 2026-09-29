@@ -151,6 +151,18 @@ export type DriveRequest =
       token: string;
       file: string;
       inline?: boolean;
+    }
+  /**
+   * A file sent through a public folder link that accepts uploads
+   * (drive_folders.public_upload): the database records it and the answer
+   * is where to PUT it. No sign-in.
+   */
+  | {
+      action: "public-upload";
+      token: string;
+      name: string;
+      size: number;
+      content_type: string;
     };
 
 /** The browser behind a request, recorded in the Drive audit trail. */
@@ -173,6 +185,33 @@ export async function handleDrive(
   const creds = env.credentials;
   const isId = (v: unknown): v is string =>
     typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
+
+  if (req.action === "public-upload") {
+    if (typeof req.token !== "string" || !/^[0-9a-f]{64}$/.test(req.token))
+      return fail(404, "Link inválido ou pasta indisponível.");
+    const created = await callRpc<
+      { id: string; path: string; content_type: string }[]
+    >(env, fetchImpl, null, "drive_public_upload", {
+      p_token: req.token,
+      p_name: String(req.name ?? "").slice(0, 255),
+      p_size: Number(req.size),
+      p_content_type: String(req.content_type ?? ""),
+      p_origin: origin,
+    });
+    if (!created.ok) return fail(created.status, created.error);
+    const file = created.data[0];
+    if (!file) return fail(403, "Envio não autorizado.");
+    return {
+      status: 200,
+      body: {
+        file: file.id,
+        url: signGcsUrl(creds, env.bucket, file.path, "PUT", {
+          contentType: file.content_type,
+        }),
+        content_type: file.content_type,
+      },
+    };
+  }
 
   if (req.action === "public" || req.action === "public-folder-file") {
     if (typeof req.token !== "string" || !/^[0-9a-f]{64}$/.test(req.token))

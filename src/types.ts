@@ -346,6 +346,8 @@ export interface DriveFolder {
   /** "public": anyone with /pasta/<share_token> views it (read-only). */
   visibility?: DriveVisibility;
   share_token?: string;
+  /** The public link also accepts uploads (the client sends files). */
+  public_upload?: boolean;
 }
 /** Who a folder is shared with, as the sharing dialog edits it. */
 export interface DriveFolderSharing {
@@ -357,6 +359,10 @@ export interface DriveFolderSharing {
 export interface PublicFolderView {
   root: { id: string; name: string };
   folder: string;
+  /** The link also accepts uploads (migration 20261121090000). */
+  upload?: boolean;
+  /** Who shares (the company's name), for the upload page. */
+  company?: string;
   /** From the shared folder down to the one shown. */
   path: { id: string; name: string }[];
   folders: { id: string; name: string }[];
