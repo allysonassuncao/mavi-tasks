@@ -83,8 +83,14 @@ describe("Validação", () => {
     expect(as("user-julia", approved).approveInternal).toBe(false);
   });
   it("só o validador aprova", () => {
-    expect(as("user-lucas", task("review")).approveInternal).toBe(false);
-    expect(as("user-julia", task("review")).approveInternal).toBe(true);
+    const sent = task("review", { assignee_id: "user-julia" });
+    expect(as("user-lucas", sent).approveInternal).toBe(false);
+    expect(as("user-julia", sent).approveInternal).toBe(true);
+  });
+  it("quem ficou responsável pela validação também aprova", () => {
+    // Lucas sent it to validation and kept himself responsible.
+    expect(as("user-lucas", task("review")).approveInternal).toBe(true);
+    expect(as("user-lucas", task("progress")).approveInternal).toBe(false);
   });
 });
 

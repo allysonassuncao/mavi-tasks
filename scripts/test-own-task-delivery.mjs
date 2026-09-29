@@ -1,10 +1,12 @@
 // Own tasks (migration 20261125090000_own_task_delivery): whoever creates a
-// task for themselves delivers it without passing through Em validação.
+// task for themselves delivers it without passing through Em validação. And
+// (20261130090000_review_assignee_approves) whoever is responsible for a task
+// in Em validação validates it.
 import assert from "node:assert/strict";
 import { applyMigration, createTestDatabase } from "./database-fixture.mjs";
 
-const MIGRATION = "20261125090000";
-const db = await createTestDatabase({ until: MIGRATION });
+const REVIEW_ASSIGNEE = "20261130090000";
+const db = await createTestDatabase({ until: REVIEW_ASSIGNEE });
 const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const [A, admin, member] = [1, 10, 11].map(uid);
 await db.query(`insert into auth.users select unnest($1::uuid[])`, [
@@ -46,8 +48,6 @@ async function check(title, fn) {
     throw e;
   }
 }
-
-await applyMigration(db, MIGRATION);
 
 await as(admin);
 const team = await rpc("create_team", [A, "Equipe A", [member]]);
@@ -106,10 +106,13 @@ await check("também de dentro de Em validação", async () => {
   assert.equal((await statusOf(task)).status, "done");
 });
 
-await check("tarefa criada por outra pessoa continua exigindo validação", async () => {
-  const task = await newTask(admin, member, "Pedido da Ana");
-  await assert.rejects(() => deliver(member, task), /exige validação/);
-});
+await check(
+  "tarefa criada por outra pessoa continua exigindo validação",
+  async () => {
+    const task = await newTask(admin, member, "Pedido da Ana");
+    await assert.rejects(() => deliver(member, task), /exige validação/);
+  },
+);
 
 await check("o criador não entrega a tarefa de outra pessoa", async () => {
   const task = await newTask(member, admin, "Pedido do Bruno");
@@ -124,5 +127,76 @@ await check("com aprovação do cliente, aguarda o cliente", async () => {
   assert.equal(row.internal_approved_by, member);
 });
 
+const toReview = async (user, id, assignee) => {
+  const { version } = await statusOf(id);
+  await as(user);
+  return rpc("transition_task", [id, version, "move", "", "review", assignee]);
+};
+const approve = async (user, id) => {
+  const { version } = await statusOf(id);
+  await as(user);
+  return rpc("transition_task", [
+    id,
+    version,
+    "approve_internal",
+    "Conferido",
+    null,
+    null,
+  ]);
+};
+
+await check("antes, quem enviou para validação não validava", async () => {
+  const task = await newTask(admin, member, "Validar eu mesmo");
+  await toReview(member, task, member);
+  await assert.rejects(
+    () => approve(member, task),
+    /Sem permissão para aprovar/,
+  );
+});
+
+await db.exec("reset role");
+await applyMigration(db, REVIEW_ASSIGNEE);
+
+await check("responsável pela validação valida e entrega", async () => {
+  const task = await newTask(admin, member, "Eu mesmo valido");
+  await toReview(member, task, member);
+  await approve(member, task);
+  const row = await statusOf(task);
+  assert.equal(row.status, "done");
+  assert.equal(row.internal_approved_by, member);
+});
+
+await check("fora de Em validação o responsável não aprova", async () => {
+  const task = await newTask(admin, member, "Em andamento");
+  await assert.rejects(
+    () => approve(member, task),
+    /Sem permissão para aprovar/,
+  );
+});
+
+await check(
+  "quem passou a validação para outra pessoa não aprova",
+  async () => {
+    const task = await newTask(admin, member, "Ana valida");
+    await toReview(member, task, admin);
+    const { version } = await statusOf(task);
+    await as(member);
+    await assert.rejects(
+      () =>
+        rpc("transition_task", [
+          task,
+          version,
+          "approve_internal",
+          "Ok!",
+          null,
+          null,
+        ]),
+      /Sem permissão para aprovar/,
+    );
+  },
+);
+
 await db.close();
-console.log(`\n${passed} verificações da entrega da própria tarefa aprovadas.`);
+console.log(
+  `\n${passed} verificações da entrega e validação pelo próprio responsável aprovadas.`,
+);

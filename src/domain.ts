@@ -414,8 +414,10 @@ export type BlockedAction = { blocked: string };
  * The flow is free: the current assignee, the creator or a leader moves the
  * task between its working statuses in any order, and picks who is
  * responsible from then on. While in validation, whoever validates may move
- * it too. Delivery still goes through the validator's approval — except
- * on a task someone created for themselves, which they deliver directly.
+ * and approve it: the project's validators and whoever is responsible for it
+ * then (the person picked to validate, even the one who sent it). Delivery
+ * still goes through that approval — except on a task someone created for
+ * themselves, which they deliver directly.
  */
 export function taskActions(
   data: Snapshot,
@@ -430,8 +432,10 @@ export function taskActions(
     assignee = task.assignee_id === userId,
     /** Created for themselves: no validation is needed to deliver it. */
     ownTask = creator && assignee,
-    approver = canApproveTask(data, task, userId),
-    s = task.status;
+    s = task.status,
+    /** Besides the usual validators, whoever is responsible while in validation. */
+    approver =
+      canApproveTask(data, task, userId) || (s === "review" && assignee);
   const review = projectReview(
     data.projects.find((p) => p.id === task.project_id),
   ).required;

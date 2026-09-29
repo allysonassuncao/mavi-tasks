@@ -64,6 +64,7 @@ import {
   workingStatuses,
 } from "./types";
 import {
+  canApproveTask,
   contractOpen,
   dateLabel,
   defaultContractName,
@@ -800,11 +801,19 @@ export function TaskDetail({
     data.projects.find((p) => p.id === task.project_id),
   );
   // Tasks outside a project keep the default: validation by creator or leader.
-  const reviewer = !task.project_id
-    ? "o criador ou um gestor"
+  const usualReviewer = !task.project_id
+    ? "pelo criador ou por um gestor"
     : review.approver === "supervisor"
-      ? "o supervisor da equipe"
-      : "o criador da tarefa";
+      ? "pelo supervisor da equipe"
+      : "pelo criador da tarefa";
+  // In validation, whoever is responsible for it validates it too.
+  const validator =
+    task.status === "review" && !canApproveTask(data, task, task.assignee_id)
+      ? data.members.find((m) => m.user_id === task.assignee_id)?.name
+      : undefined;
+  const reviewer = validator
+    ? `por ${validator}, ${usualReviewer}`
+    : usualReviewer;
   // Side panel (comments, history, files, Drive): the open/closed choice is
   // a per-viewer convenience kept in the browser.
   const [panelOpen, setPanelOpen] = useState(() => {
@@ -940,7 +949,7 @@ export function TaskDetail({
           : review.required
             ? task.status === "review" && task.internal_approved_by
               ? "Aguardando a aprovação do cliente"
-              : `A entrega é aprovada por ${reviewer}, com a tarefa em validação`
+              : `A entrega é aprovada ${reviewer}, com a tarefa em validação`
             : moveHint,
     },
   ];
@@ -1579,7 +1588,7 @@ export function TaskDetail({
             <span>
               {review.required ? (
                 <>
-                  Validação por {reviewer}:{" "}
+                  Validação {reviewer}:{" "}
                   <strong>
                     {task.internal_approved_by ? "aprovada" : "pendente"}
                   </strong>
