@@ -2229,8 +2229,7 @@ export function TaskDetail({
                 <div className="comment-composer-actions">
                   {!demo && !commentAudio && (
                     <AudioRecorder
-                      compact
-                      label="Gravar áudio no comentário"
+                      label="Gravar áudio"
                       disabled={busy || sendingAudio}
                       onUse={(r) => setCommentAudio(r)}
                       onActiveChange={setCommentRecording}

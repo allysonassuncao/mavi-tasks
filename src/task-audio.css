@@ -402,6 +402,18 @@
   min-height: 34px;
   padding: 7px 14px;
 }
+/* "Gravar áudio" ao lado do "Enviar": mesmo formato, com contorno para o
+   Enviar seguir como a ação principal. */
+.comment-composer-actions .btn.audio-start {
+  min-height: 34px;
+  padding: 7px 14px;
+  gap: 9px;
+  border-color: #bddf85;
+  color: #3f5a2a;
+}
+.comment-composer-actions .btn.audio-start:hover:not(:disabled) {
+  background: #f3f8ea;
+}
 .comment-form .audio-recorder.live,
 .comment-form .audio-recorder.review {
   flex-basis: 100%;
