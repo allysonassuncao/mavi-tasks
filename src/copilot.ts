@@ -159,10 +159,19 @@ export type CopilotVerdict = {
   status: "ok" | "attention" | "quiet";
   text: string;
 };
+/**
+ * O tamanho da entrega que a MAVI leu, comparado com o comum: o prazo
+ * inteligente tira um dia (simple) ou soma um quarto (complex).
+ */
+export type CopilotEffort = {
+  level: "simple" | "normal" | "complex";
+  why: string;
+};
 type ReviewResult = {
   alerts: CopilotAlert[];
   version: number;
   verdict: CopilotVerdict;
+  effort?: CopilotEffort | null;
 };
 export type CopilotAction =
   "applied" | "useful" | "not_useful" | "dismissed" | "ignored" | "opened";
@@ -303,6 +312,7 @@ export async function streamReview(
           status: e.alerts?.length ? "attention" : "quiet",
           text: "",
         },
+        effort: e.effort ?? null,
       };
     else if (e.type === "error")
       throw Error(e.error ?? "A MAVI não respondeu.");
@@ -409,6 +419,7 @@ function demoResult(d: CopilotDraft): {
   related: Related;
   alerts: CopilotAlert[];
   verdict: CopilotVerdict;
+  effort: CopilotEffort;
 } {
   const src = (
     type: AiSource["type"],
@@ -425,6 +436,10 @@ function demoResult(d: CopilotDraft): {
   // Descrição caprichada: a demonstração mostra a tarefa completa.
   const complete = d.description.trim().length >= 80;
   return {
+    effort:
+      d.description.trim().length >= 400
+        ? { level: "complex", why: "A descrição pede várias entregas." }
+        : { level: "normal", why: "" },
     related: {
       client: { id: "demo", name: "Cliente demo" },
       similar: [
@@ -497,6 +512,8 @@ export type CopilotState = {
   alerts: CopilotAlert[];
   /** O resultado da última análise (nulo: ainda não houve). */
   verdict: CopilotVerdict | null;
+  /** O tamanho da entrega da última análise (para o prazo sugerido). */
+  effort: CopilotEffort | null;
   /** A análise está rodando (os alertas ainda podem chegar). */
   reviewing: boolean;
   /** Em que passo a análise está: 1 lendo, 2 histórico, 3 escrevendo. */
@@ -520,6 +537,7 @@ export function useTaskCopilot(
   const [related, setRelated] = useState<Related | null>(null);
   const [alerts, setAlerts] = useState<CopilotAlert[]>([]);
   const [verdict, setVerdict] = useState<CopilotVerdict | null>(null);
+  const [effort, setEffort] = useState<CopilotEffort | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [step, setStep] = useState(0);
   const [status, setStatus] = useState("");
@@ -578,6 +596,7 @@ export function useTaskCopilot(
     if (cached) {
       setAlerts(cached.alerts);
       setVerdict(cached.verdict);
+      setEffort(cached.effort ?? null);
       setReviewedKey(key);
       return;
     }
@@ -608,10 +627,12 @@ export function useTaskCopilot(
             setRelated(r.related);
             setAlerts(r.alerts);
             setVerdict(r.verdict);
+            setEffort(r.effort);
             remember(reviewCache, key, {
               alerts: r.alerts,
               version: 0,
               verdict: r.verdict,
+              effort: r.effort,
             });
             setReviewedKey(key);
             return;
@@ -642,6 +663,7 @@ export function useTaskCopilot(
           remember(reviewCache, key, result);
           setAlerts(result.alerts);
           setVerdict(result.verdict);
+          setEffort(result.effort ?? null);
           setReviewedKey(key);
         } catch (e) {
           if (abort.signal.aborted) return;
@@ -671,6 +693,7 @@ export function useTaskCopilot(
       related: text.length >= MIN_RELATED ? related : null,
       alerts,
       verdict,
+      effort,
       reviewing,
       step,
       status,
@@ -686,6 +709,7 @@ export function useTaskCopilot(
       related,
       alerts,
       verdict,
+      effort,
       reviewing,
       step,
       status,

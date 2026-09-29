@@ -330,6 +330,11 @@ Como decidir (é a sua revisão, antes de escrever os alertas):
    g) se ignorado, não causaria retrabalho, reclamação do cliente nem tarefa repetida.
 3. Fique com no máximo 2 dos que sobreviveram, do mais importante para o menos. Nenhum é uma resposta boa e esperada.
 
+Esforço (campo effort), para o prazo sugerido: compare o tamanho desta entrega com o comum para este tipo de tarefa neste cliente (as tarefas parecidas [S#] ajudam).
+- simple: claramente menor que o comum (um ajuste pontual, uma peça só, um texto curto, uma troca simples).
+- complex: claramente maior que o comum (várias peças ou formatos, várias etapas, pesquisa ou estratégia, algo novo para o cliente).
+- normal: o resto. Na dúvida, normal. why: até 120 caracteres, dizendo o que no rascunho mostra isso.
+
 Veredito (campo verdict):
 - ok: a tarefa está bem completa — o objetivo, a entrega e os dados específicos estão claros e nada no histórico vai contra. Diga em uma frase o que está bom (ex.: "Formato, prazo e as referências que o cliente aprovou estão claros.").
 - attention: há alertas. Uma frase curta dizendo o que revisar.
@@ -343,9 +348,10 @@ Regras:
 - title: até 70 caracteres, específico desta tarefa. text: até 240 caracteres, em português do Brasil, falando com quem cria a tarefa e dizendo por que isso importa para ESTE cliente. fix: opcional, uma ou duas frases prontas para acrescentar à descrição da tarefa (sem citar referências); omita quando não fizer sentido.
 - Por último, sempre, uma linha com as referências das tarefas parecidas e dos cases que têm a ver de fato com este pedido: mesmo assunto ou entrega (tarefa) ou que ajudam de verdade nesta entrega (case). Semelhança alta não basta; uma tarefa genérica ("teste", "reunião") ou um case de outro assunto fica de fora. Nenhum: lista vazia.
 
-Formato da resposta: cada linha um objeto JSON completo, sem texto antes, entre ou depois e sem cercas de código, nesta ordem — a revisão, de 0 a 2 alertas, o veredito e os relacionados:
+Formato da resposta: cada linha um objeto JSON completo, sem texto antes, entre ou depois e sem cercas de código, nesta ordem — a revisão, de 0 a 2 alertas, o esforço, o veredito e os relacionados:
 {"review":"sua revisão, até 700 caracteres: os candidatos e por que cada um ficou ou saiu (ninguém vê)"}
 {"kind":"avoids","severity":"high","title":"...","text":"...","fix":"...","refs":["D2","S3"],"quote":"..."}
+{"effort":"normal","why":"..."}
 {"verdict":"attention","text":"..."}
 {"related":["S1"]}`;
 
@@ -676,6 +682,7 @@ export function alertReader(
   const dropped: { title: string; why: string }[] = [];
   let review = "";
   let said: { verdict: string; text: string } | null = null;
+  let effort: Effort | null = null;
   // Ids das tarefas e cases que a MAVI confirmou (linha "related").
   let confirmed: Set<string> | null = null;
   const items = ctx.dossier?.items ?? [];
@@ -699,6 +706,11 @@ export function alertReader(
     if (typeof o.review === "string") {
       review = o.review.slice(0, 2000);
       options.onReview?.();
+      return;
+    }
+    if (typeof o.effort === "string") {
+      const level = EFFORT_LEVELS.find((l) => l === o.effort);
+      if (level) effort = { level, why: str(o.why, 200) };
       return;
     }
     if (typeof o.verdict === "string") {
@@ -799,11 +811,21 @@ export function alertReader(
       if (s?.verdict === "ok") return { status: "ok", text: s.text };
       return { status: "quiet", text: s?.verdict === "quiet" ? s.text : "" };
     },
+    /** O tamanho da entrega que a MAVI leu (para o prazo sugerido). */
+    effort: () => effort,
     /** A revisão interna e o que o crivo barrou (para o registro). */
     review: () => review,
     dropped: () => dropped,
   };
 }
+
+/**
+ * O tamanho da entrega comparado com o comum (prazo inteligente, migration
+ * 20261202120000_smart_due_effort): simple tira um dia do histórico,
+ * complex soma um quarto.
+ */
+export const EFFORT_LEVELS = ["simple", "normal", "complex"] as const;
+export type Effort = { level: (typeof EFFORT_LEVELS)[number]; why: string };
 
 export type CopilotEvent =
   | ({ type: "related" } & ReturnType<typeof related>)
@@ -814,6 +836,8 @@ export type CopilotEvent =
       type: "done";
       alerts: Alert[];
       verdict: Verdict;
+      /** O tamanho da entrega (nulo: a MAVI não disse). */
+      effort?: Effort | null;
       /** Versão do dossiê usada (a tela descarta análises de outra versão). */
       version: number;
       model: string;
@@ -1005,6 +1029,7 @@ async function review(
     type: "done",
     alerts,
     verdict,
+    effort: reader.effort(),
     version: ctx.dossier?.version ?? 0,
     model,
   });

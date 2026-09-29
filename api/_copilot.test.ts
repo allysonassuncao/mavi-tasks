@@ -257,6 +257,16 @@ describe("leitura dos alertas", () => {
     expect(all.map((a) => a.title)).toEqual(["Falta o formato", "E0"]);
   });
 
+  it("lê o esforço da entrega para o prazo sugerido (e ignora nível desconhecido)", () => {
+    const r = alertReader(context, sources, () => {});
+    r.push('{"effort":"enorme","why":"x"}\n');
+    expect(r.effort()).toBeNull();
+    r.push('{"effort":"complex","why":"Três formatos e um roteiro novo"}\n');
+    r.end();
+    expect(r.effort()).toEqual({ level: "complex", why: "Três formatos e um roteiro novo" });
+    expect(r.end()).toEqual([]);
+  });
+
   it("revisão fica de fora; veredito ok só sem alertas", () => {
     let reviewed = 0;
     const r = alertReader(context, sources, () => {}, {

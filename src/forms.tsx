@@ -1242,6 +1242,9 @@ export function TaskDetail({
         // "Aplicar" the rule: the database counts the date and it follows the rule.
         p_due_manual: fd.get("due_rule") === "1" ? false : null,
         p_due_reason: String(fd.get("due_reason") ?? "").trim() || null,
+        // "Usar" the MAVI's date: the database counts it again.
+        p_due_smart: fd.get("due_smart") === "1" ? true : null,
+        p_due_effort: String(fd.get("due_effort") ?? "") || null,
         p_start: fd.get("start_date") || null,
         p_estimated: Number(fd.get("estimated")) * 60,
         p_priority: fd.get("priority"),
@@ -1658,6 +1661,8 @@ export function TaskDetail({
                     data={data}
                     task={task}
                     start={editStart ?? task.start_date ?? ""}
+                    demo={demo}
+                    effort={copilotOn && !copilot.stale ? copilot.effort : null}
                   />
                   <label>
                     Estimativa em horas

@@ -44,6 +44,21 @@ describe("smartReasons", () => {
     expect(fits[1]).toMatch(/cabe no prazo\.$/);
   });
 
+  it("diz quando a descrição mexeu no prazo, e por quê", () => {
+    const r = smartReasons(
+      { ...base, days: 4, effort: "complex", effort_days: 1 },
+      data,
+      "normal",
+      "Três formatos e um roteiro novo.",
+    );
+    expect(r[1]).toBe(
+      "+1 dia útil: pela descrição, a entrega é mais trabalhosa que o comum (Três formatos e um roteiro novo).",
+    );
+    expect(smartReasons({ ...base, days: 2, effort_days: -1 }, data)[1]).toBe(
+      "−1 dia útil: pela descrição, a entrega é mais simples que o comum.",
+    );
+  });
+
   it("lista aprovação, retrabalho, prioridade e o que ficou de fora", () => {
     const r = smartReasons(
       { ...base, days: 6, approval_days: 2, rework_days: 1, unestimated_tasks: 2 },

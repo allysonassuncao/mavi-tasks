@@ -145,6 +145,12 @@ export function TaskCreateForm({
   // Which suggestion the date follows: "auto" is the company's choice (the
   // rule, or the MAVI in "fill" mode); "Aplicar"/"Usar" pick one.
   const [duePick, setDuePick] = useState<"auto" | "rule" | "smart">("auto");
+  // The size the MAVI read in the description (from its analysis, below):
+  // the smart due date takes a day off or adds a quarter.
+  const [dueEffort, setDueEffort] = useState<{
+    level: "simple" | "complex";
+    why: string;
+  } | null>(null);
   const [repeat, setRepeat] = useState<RecurrenceFrequency | "">("");
   const [showDetails, setShowDetails] = useState(false);
   const [detailsMounted, setDetailsMounted] = useState(false);
@@ -226,6 +232,7 @@ export function TaskCreateForm({
           estimated: Math.round(Number(estimated || 0) * 60),
           timezone: companyRow?.timezone ?? "America/Sao_Paulo",
           today: dateKey(),
+          effort: dueEffort?.level ?? null,
         }
       : null,
     demo,
@@ -309,6 +316,17 @@ export function TaskCreateForm({
     copilotOn && !locked,
     demo,
   );
+  const readEffort =
+    copilotOn && !copilot.stale && copilot.effort?.level !== "normal"
+      ? (copilot.effort ?? null)
+      : null;
+  useEffect(() => {
+    setDueEffort(
+      readEffort && readEffort.level !== "normal"
+        ? { level: readEffort.level, why: readEffort.why }
+        : null,
+    );
+  }, [readEffort?.level, readEffort?.why]);
   const copilotFeedback = useCopilotFeedback(copilot, {
     company,
     contract: contract || null,
@@ -408,6 +426,7 @@ export function TaskCreateForm({
       // The database counts the MAVI's date again (in a team, for whoever
       // receives the task).
       p_due_smart: usingSmart,
+      ...(dueEffort ? { p_due_effort: dueEffort.level } : {}),
       ...(dueManual && dueReason.trim()
         ? { p_due_reason: dueReason.trim() }
         : {}),
@@ -676,6 +695,7 @@ export function TaskCreateForm({
                   due={due}
                   byTeam={byTeam}
                   priority={priority}
+                  effortWhy={dueEffort?.why}
                   onUse={() => {
                     setDueByHand(false);
                     setDuePick("smart");

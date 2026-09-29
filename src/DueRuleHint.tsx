@@ -11,7 +11,7 @@ import {
   type DueSuggestion,
 } from "./dueRules";
 import { dayLabel } from "./task-bulk";
-import { smartReasons, type SmartDue } from "./smartDue";
+import { smartReasons, useSmartDue, type SmartDue } from "./smartDue";
 import { absenceKinds, type Snapshot, type Task } from "./types";
 import "./due-rules.css";
 
@@ -101,16 +101,49 @@ export function TaskDueEdit({
   data,
   task,
   start,
+  demo,
+  effort,
 }: {
-  data: Parameters<typeof suggestDue>[0] &
-    Pick<Snapshot, "projects" | "clients" | "products" | "teams" | "members">;
+  data: Snapshot;
   task: Task;
   /** The start date being edited (the count starts there). */
   start: string;
+  demo: boolean;
+  /** The size the MAVI read while editing (Assistente MAVI). */
+  effort?: { level: "simple" | "normal" | "complex"; why: string } | null;
 }) {
   const [due, setDue] = useState(task.due_date);
   const [byRule, setByRule] = useState(false);
+  const [bySmart, setBySmart] = useState(false);
   const [reason, setReason] = useState("");
+  const company = data.companies.find((c) => c.id === task.company_id);
+  const level = effort?.level === "normal" ? null : (effort?.level ?? null);
+  // The MAVI's date for this task (it stays out of its own workload).
+  const smart = useSmartDue(
+    (company?.smart_due ?? "suggest") === "off"
+      ? null
+      : {
+          company: task.company_id,
+          contract: task.contract_id,
+          project: task.project_id,
+          team: null,
+          assignee: task.assignee_id,
+          start: start || dateKey(new Date(task.created_at)),
+          approval: task.requires_client_approval,
+          priority: task.priority,
+          estimated: task.estimated_minutes,
+          timezone: company?.timezone ?? "America/Sao_Paulo",
+          today: dateKey(),
+          effort: level,
+          task: task.id,
+        },
+    demo,
+    data,
+  ).state;
+  const smartDate = smart?.available ? (smart.due ?? null) : null;
+  // "Usar": the date follows the MAVI while the suggestion lasts.
+  const using = bySmart && !!smartDate;
+  const shown = using ? smartDate! : due;
   const suggestion = suggestDue(data, {
     contract: task.contract_id,
     project: task.project_id,
@@ -119,7 +152,8 @@ export function TaskDueEdit({
     base: start || dateKey(new Date(task.created_at)),
     approval: task.requires_client_approval,
   });
-  const following = byRule || (due === task.due_date && task.due_manual === false);
+  const following =
+    !using && (byRule || (due === task.due_date && task.due_manual === false && !task.due_smart));
   return (
     <div className="due-rule-field">
       <label>
@@ -127,10 +161,11 @@ export function TaskDueEdit({
         <Input
           type="date"
           name="due"
-          value={due}
+          value={shown}
           onChange={(e) => {
             setDue(e.target.value);
             setByRule(false);
+            setBySmart(false);
           }}
           required
         />
@@ -138,19 +173,35 @@ export function TaskDueEdit({
       <DueRuleHint
         data={data}
         suggestion={suggestion}
-        due={due}
+        due={shown}
         following={following}
-        shortening={due < task.due_date}
+        alternative={using || (task.due_smart === true && due === task.due_date)}
+        shortening={shown < task.due_date}
         reason={reason}
         onReason={setReason}
         onApply={() => {
           if (!suggestion) return;
           setDue(suggestion.due);
           setByRule(true);
+          setBySmart(false);
         }}
       />
-      <AbsenceNote data={data} assignee={task.assignee_id} due={due} />
+      <SmartDueHint
+        data={data}
+        smart={smart}
+        using={using || (task.due_smart === true && shown === task.due_date && shown === smartDate)}
+        due={shown}
+        priority={task.priority}
+        effortWhy={level ? effort?.why : ""}
+        onUse={() => {
+          setBySmart(true);
+          setByRule(false);
+        }}
+      />
+      <AbsenceNote data={data} assignee={task.assignee_id} due={shown} />
       {byRule && <input type="hidden" name="due_rule" value="1" />}
+      {using && <input type="hidden" name="due_smart" value="1" />}
+      {using && level && <input type="hidden" name="due_effort" value={level} />}
       <input type="hidden" name="due_reason" value={reason} />
     </div>
   );
@@ -206,6 +257,7 @@ export function SmartDueHint({
   due,
   byTeam = false,
   priority,
+  effortWhy = "",
   onUse,
 }: {
   data: Pick<Snapshot, "members">;
@@ -215,6 +267,8 @@ export function SmartDueHint({
   due: string;
   byTeam?: boolean;
   priority: Task["priority"];
+  /** Why the MAVI read the description as simpler or bigger. */
+  effortWhy?: string;
   onUse: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -254,7 +308,7 @@ export function SmartDueHint({
       </button>
       {open && (
         <ul>
-          {smartReasons(smart, data, priority).map((r) => (
+          {smartReasons(smart, data, priority, effortWhy).map((r) => (
             <li key={r}>{r}</li>
           ))}
         </ul>

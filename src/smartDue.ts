@@ -26,6 +26,9 @@ export interface SmartDue {
   median_days?: number;
   approval_days?: number;
   rework_days?: number;
+  /** What the MAVI read in the description ("simple" / "complex"), and its days. */
+  effort?: "simple" | "complex" | null;
+  effort_days?: number;
   load_minutes?: number;
   load_tasks?: number;
   unestimated_tasks?: number;
@@ -50,6 +53,10 @@ export interface SmartDueInput {
   estimated: number;
   timezone: string;
   today: string;
+  /** The size the MAVI read in the description (null: normal or not read). */
+  effort?: "simple" | "complex" | null;
+  /** Editing: the task itself stays out of its own workload. */
+  task?: string | null;
 }
 
 const h = (minutes: number) => {
@@ -63,6 +70,8 @@ export function smartReasons(
   s: SmartDue,
   data: Pick<Snapshot, "members">,
   priority: Task["priority"] = "normal",
+  /** Why the MAVI read the description as simpler or bigger. */
+  effortWhy = "",
 ) {
   if (!s.available) return [];
   const first =
@@ -71,6 +80,10 @@ export function smartReasons(
   const out = [
     `Tarefas parecidas (${s.level_label}) levaram ${days(s.median_days ?? 0)} até a primeira entrega — mediana de ${s.sample} entregas.`,
   ];
+  if (s.effort_days)
+    out.push(
+      `${s.effort_days > 0 ? "+" : "−"}${days(Math.abs(s.effort_days))}: pela descrição, a entrega é ${s.effort_days > 0 ? "mais trabalhosa" : "mais simples"} que o comum${effortWhy ? ` (${effortWhy.replace(/\.$/, "")})` : ""}.`,
+    );
   if (s.approval_days)
     out.push(
       `+${days(s.approval_days)} pela aprovação do cliente, que as parecidas em geral não tinham.`,
@@ -82,7 +95,10 @@ export function smartReasons(
     const meetings = s.busy_minutes ? `, menos ${h(s.busy_minutes)} de reuniões na agenda` : "";
     const fits =
       (s.load_days ?? 0) >
-      (s.median_days ?? 0) + (s.approval_days ?? 0) + (s.rework_days ?? 0);
+      (s.median_days ?? 0) +
+        (s.effort_days ?? 0) +
+        (s.approval_days ?? 0) +
+        (s.rework_days ?? 0);
     out.push(
       `${first} tem ${h(s.load_minutes ?? 0)} em aberto vencendo antes${s.own_minutes ? ` e esta tarefa estima ${h(s.own_minutes)}` : ""}, com ${h(s.daily_minutes ?? 480)} por dia${meetings}: ${fits ? `só cabe em ${days(s.load_days ?? 0)}` : "cabe no prazo"}.`,
     );
@@ -132,6 +148,8 @@ async function fetchSmartDue(input: SmartDueInput): Promise<SmartDue> {
       p_approval: input.approval,
       p_priority: input.priority,
       p_estimated: input.estimated,
+      p_task: input.task ?? null,
+      p_effort: input.effort ?? null,
     }) as Promise<SmartDue>;
   const first = await ask();
   if (!first.available || first.busy !== "stale") return first;
@@ -166,7 +184,9 @@ function demoSmartDue(data: Snapshot, input: SmartDueInput): SmartDue {
   const load = data.tasks
     .filter((t) => t.assignee_id === who && t.status !== "done" && !t.archived && t.due_date <= rule.due)
     .reduce((sum, t) => sum + t.estimated_minutes, 0);
-  const n = rule.days + 1;
+  const effortDays =
+    input.effort === "complex" ? Math.max(1, Math.ceil((rule.days + 1) * 0.25)) : input.effort === "simple" ? -1 : 0;
+  const n = rule.days + 1 + effortDays;
   return {
     available: true,
     mode,
@@ -179,7 +199,9 @@ function demoSmartDue(data: Snapshot, input: SmartDueInput): SmartDue {
     level: 2,
     level_label: "este cliente e produto",
     sample: 8,
-    median_days: n,
+    median_days: rule.days + 1,
+    effort: input.effort ?? null,
+    effort_days: effortDays,
     approval_days: 0,
     rework_days: 0,
     load_minutes: load,

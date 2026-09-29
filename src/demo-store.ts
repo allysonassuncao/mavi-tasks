@@ -1016,8 +1016,10 @@ export class DemoStore {
               task.due_tight_reason ||
               null
             : null;
-          task.due_manual = !byRule;
+          task.due_manual = !byRule && !a.p_due_smart;
           task.due_rule_id = byRule ? rule!.rule.id : null;
+          // "Usar" the MAVI's date (the demo keeps the form's date).
+          task.due_smart = !!a.p_due_smart;
         }
         Object.assign(task, {
           title: a.p_title,

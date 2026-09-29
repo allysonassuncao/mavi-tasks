@@ -114,7 +114,7 @@ const suggest = (o = {}) =>
   as(o.user ?? admin).then(() =>
     rpc("smart_due_suggestion", [
       A, o.contract ?? clinicaAds, null, o.team ?? null, o.team ? null : (o.assignee ?? ana), START,
-      o.approval ?? false, o.priority ?? "normal", o.estimated ?? 0, null,
+      o.approval ?? false, o.priority ?? "normal", o.estimated ?? 0, null, o.effort ?? null,
     ]),
   );
 
@@ -135,6 +135,17 @@ await check("a mediana das parecidas mais específicas, em dias úteis de quem e
   // Bia não tem entregas próprias aqui: vale o cliente + produto.
   const b = await suggest({ assignee: bia });
   assert.deepEqual([b.level, b.median_days], [2, 3]);
+});
+
+await check("a complexidade que a MAVI leu na descrição mexe no histórico", async () => {
+  // Mediana 3: mais simples, 2; mais trabalhosa, 3 + 1.
+  const simple = await suggest({ effort: "simple" });
+  assert.deepEqual([simple.effort_days, simple.days], [-1, 2]);
+  assert.equal(simple.due, await plus(START, 2, ana));
+  const complex = await suggest({ effort: "complex" });
+  assert.deepEqual([complex.effort_days, complex.days], [1, 4]);
+  // Qualquer outra coisa vale como normal.
+  assert.equal((await suggest({ effort: "enorme" })).effort_days, 0);
 });
 
 await check("os dias em Devolvida não contam no ciclo", async () => {
@@ -249,6 +260,15 @@ await check("a criação guarda o que a regra e a MAVI davam, e usa a MAVI quand
   assert.deepEqual(await row(await create({})), { due: rule, due_manual: false, due_smart: false, rule, smart });
   const byHand = await row(await create({ manual: true, due: "2026-12-10", smart: true }));
   assert.deepEqual([byHand.due, byHand.due_smart, byHand.smart], ["2026-12-10", false, smart]);
+  // Na edição, "Usar" a sugestão: a data da MAVI, contada de novo no banco.
+  const edited = await create({ manual: true, due: "2026-12-20" });
+  const v0 = (await sql("select version from tasks where id=$1", [edited]))[0].version;
+  await rpc("update_task", [edited, v0, "Nova", "", "2026-12-20", 0, "normal", START, null, null, true, null]);
+  assert.deepEqual(await row(edited), { due: smart, due_manual: false, due_smart: true, rule, smart });
+  // Editar só o título mantém a marca.
+  const v1 = (await sql("select version from tasks where id=$1", [edited]))[0].version;
+  await rpc("update_task", [edited, v1, "Outro nome", "", smart, 0, "normal", START]);
+  assert.equal((await row(edited)).due_smart, true);
   // Mudar o prazo depois deixa de ser o da MAVI.
   const id = await create({ smart: true });
   const v = (await sql("select version from tasks where id=$1", [id]))[0].version;
