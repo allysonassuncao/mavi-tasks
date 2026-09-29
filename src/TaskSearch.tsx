@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, CalendarDays, Search, X } from "lucide-react";
 import { Button, Input, Select, SelectOption } from "./ui";
+import { BULK_LIMIT } from "./api";
 import { Avatar, Badge, Empty, Loading } from "./components";
 import { dateLabel } from "./domain";
 import { useUrlState } from "./router";
+import { BulkEditor, SelectBox, selectState } from "./TaskBulk";
+import type { BulkChange, BulkResult, BulkUndo } from "./task-bulk";
 import { listedStatuses, statuses, type Comment, type Snapshot } from "./types";
 import {
   SEARCH_FIELDS,
@@ -36,6 +39,9 @@ export function TaskSearch({
   demoComments,
   onOpen,
   onBack,
+  runBulk,
+  undoBulk,
+  onBulkDone,
 }: {
   data: Snapshot;
   company: string;
@@ -44,6 +50,14 @@ export function TaskSearch({
   demoComments: () => Comment[];
   onOpen: (taskId: string) => void;
   onBack: () => void;
+  /** The same bulk edit as the task list's, over the tasks found. */
+  runBulk: (
+    ids: string[],
+    change: BulkChange,
+    preview: boolean,
+  ) => Promise<BulkResult>;
+  undoBulk: (operation: string) => Promise<BulkUndo>;
+  onBulkDone: () => void;
 }) {
   const [query, setQuery] = useUrlState<string>("termo", "");
   const [fieldsParam, setFieldsParam] = useUrlState<string>("em", "");
@@ -89,17 +103,17 @@ export function TaskSearch({
   );
   const active = hasCriteria(params);
 
+  function page(p: TaskSearchParams) {
+    return demo
+      ? Promise.resolve(searchTasksLocal(data, demoComments(), user, p))
+      : searchTasks(company, p);
+  }
   function run(offset: number) {
     const id = ++request.current;
     setError("");
     if (offset) setMore(true);
     else setLoading(true);
-    const search = demo
-      ? Promise.resolve(
-          searchTasksLocal(data, demoComments(), user, { ...params, offset }),
-        )
-      : searchTasks(company, { ...params, offset });
-    search
+    page({ ...params, offset })
       .then((rows) => {
         if (id !== request.current) return;
         setHits((list) => (offset ? [...list, ...rows] : rows));
@@ -124,6 +138,45 @@ export function TaskSearch({
     run(0);
     // `run` reads the current params; re-run only when they change.
   }, [params, active, company, demo]);
+
+  // Tasks picked for a bulk edit; "all" is every task the search finds, on
+  // every "Carregar mais" (resolved when the edit is reviewed).
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [pickedAll, setPickedAll] = useState(false);
+  const clearPicked = useCallback(() => {
+    setPicked(new Set());
+    setPickedAll(false);
+  }, []);
+  useEffect(clearPicked, [params, company, clearPicked]);
+  const shownIds = hits.map((h) => h.task_id);
+  function togglePicked(ids: string[]) {
+    setPicked((prev) => {
+      const base = pickedAll ? new Set(shownIds) : prev;
+      const on = ids.every((id) => base.has(id));
+      const next = new Set(base);
+      for (const id of ids) {
+        if (on) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+    setPickedAll(false);
+  }
+  async function resolvePicked() {
+    if (!pickedAll) return [...picked];
+    const ids = new Set<string>();
+    const want = Math.min(total, BULK_LIMIT);
+    while (ids.size < want) {
+      const rows = await page({ ...params, offset: ids.size, limit: 100 });
+      if (!rows.length) break;
+      for (const r of rows) ids.add(r.task_id);
+    }
+    return [...ids].slice(0, BULK_LIMIT);
+  }
+  function afterBulk() {
+    onBulkDone();
+    run(0);
+  }
 
   function toggleField(id: SearchField) {
     const next = fields.includes(id)
@@ -162,6 +215,9 @@ export function TaskSearch({
     .sort((a, b) => a.name.localeCompare(b.name));
   const member = (id: string) => data.members.find((m) => m.user_id === id);
   const total = hits[0]?.total ?? 0;
+  const pickedCount = pickedAll ? Math.min(total, BULK_LIMIT) : picked.size;
+  const shownAllPicked =
+    !pickedAll && hits.length > 0 && shownIds.every((id) => picked.has(id));
 
   return (
     <section className="panel task-search">
@@ -316,11 +372,41 @@ export function TaskSearch({
         />
       ) : (
         <>
-          <p className="task-search-count" role="status">
-            {total === 1
-              ? "1 tarefa encontrada"
-              : `${total} tarefas encontradas`}
-          </p>
+          <div className="task-search-count">
+            <SelectBox
+              state={selectState(shownIds, picked, pickedAll)}
+              label="Selecionar as tarefas mostradas"
+              onToggle={() => togglePicked(shownIds)}
+            />
+            <p role="status">
+              {total === 1
+                ? "1 tarefa encontrada"
+                : `${total} tarefas encontradas`}
+            </p>
+          </div>
+          {(pickedAll || (shownAllPicked && total > hits.length)) && (
+            <div className="select-banner task-search-banner" role="status">
+              <span>
+                {pickedAll
+                  ? total > BULK_LIMIT
+                    ? `As primeiras ${BULK_LIMIT} das ${total} tarefas da busca estão selecionadas (o limite de uma vez).`
+                    : `Todas as ${total} tarefas da busca estão selecionadas, inclusive as ainda não carregadas.`
+                  : `As ${hits.length} tarefas mostradas estão selecionadas.`}
+              </span>
+              <Button
+                className="text-btn"
+                onClick={() =>
+                  pickedAll ? clearPicked() : setPickedAll(true)
+                }
+              >
+                {pickedAll
+                  ? "Limpar seleção"
+                  : total > BULK_LIMIT
+                    ? `Selecionar as primeiras ${BULK_LIMIT} da busca`
+                    : `Selecionar todas as ${total} da busca`}
+              </Button>
+            </div>
+          )}
           <ol className="task-search-results">
             {hits.map((h) => {
               const contract = data.contracts.find(
@@ -336,8 +422,17 @@ export function TaskSearch({
                 (p) => p.id === h.project_id,
               )?.name;
               const who = member(h.assignee_id);
+              const isPicked = pickedAll || picked.has(h.task_id);
               return (
-                <li key={h.task_id}>
+                <li
+                  key={h.task_id}
+                  className={isPicked ? "is-picked" : undefined}
+                >
+                  <SelectBox
+                    state={isPicked ? "all" : "none"}
+                    label={`Selecionar ${h.title}`}
+                    onToggle={() => togglePicked([h.task_id])}
+                  />
                   <button
                     type="button"
                     className="task-search-hit"
@@ -406,6 +501,16 @@ export function TaskSearch({
           )}
         </>
       )}
+      <BulkEditor
+        count={pickedCount}
+        data={data}
+        me={user}
+        resolveIds={resolvePicked}
+        run={runBulk}
+        undo={undoBulk}
+        onClear={clearPicked}
+        onDone={afterBulk}
+      />
     </section>
   );
 }

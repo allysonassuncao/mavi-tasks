@@ -2841,6 +2841,9 @@ export default function App() {
                   demoComments={() => demoStore.current.comments}
                   onOpen={setSelected}
                   onBack={() => go("tasks")}
+                  runBulk={runBulk}
+                  undoBulk={undoBulk}
+                  onBulkDone={afterBulk}
                 />
               )}
               {page === "tasks" && (

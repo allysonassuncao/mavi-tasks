@@ -23,6 +23,8 @@ export type TaskSearchParams = {
   from?: string;
   to?: string;
   offset?: number;
+  /** Page size (the database caps it at 100). */
+  limit?: number;
 };
 export type TaskSearchHit = {
   task_id: string;
@@ -110,7 +112,7 @@ export async function searchTasks(
     p_status: p.status || null,
     p_from: p.from || null,
     p_to: p.to || null,
-    p_limit: SEARCH_PAGE,
+    p_limit: p.limit ?? SEARCH_PAGE,
     p_offset: p.offset ?? 0,
   })) as TaskSearchHit[] | null;
   return (rows ?? []).map((r) => ({ ...r, total: Number(r.total) }));
@@ -191,6 +193,6 @@ export function searchTasksLocal(
   );
   const offset = p.offset ?? 0;
   return hits
-    .slice(offset, offset + SEARCH_PAGE)
+    .slice(offset, offset + (p.limit ?? SEARCH_PAGE))
     .map(({ rank: _rank, ...h }) => ({ ...h, total: hits.length }));
 }

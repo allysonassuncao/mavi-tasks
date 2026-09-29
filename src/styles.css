@@ -7185,8 +7185,17 @@ label .input-control .ui-input {
   font-size: 0.78rem;
 }
 .task-search-count {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 16px;
   font-size: 0.78rem;
   color: var(--muted);
+  margin-bottom: 10px;
+}
+.task-search-banner {
+  border: 1px solid #e3eed5;
+  border-radius: 10px;
   margin-bottom: 10px;
 }
 .task-search-results {
@@ -7195,6 +7204,23 @@ label .input-control .ui-input {
   padding: 0;
   display: grid;
   gap: 10px;
+}
+/* The checkbox sits inside the card, over its left padding. */
+.task-search-results li {
+  position: relative;
+}
+.task-search-results li > .select-box {
+  position: absolute;
+  top: 15px;
+  left: 16px;
+  z-index: 1;
+}
+.task-search-results li > .task-search-hit {
+  padding-left: 46px;
+}
+.task-search-results li.is-picked > .task-search-hit {
+  border-color: #c8dcae;
+  background: #f4f9ec;
 }
 .task-search-hit {
   display: flex;
