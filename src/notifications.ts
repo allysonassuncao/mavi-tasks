@@ -1,40 +1,28 @@
 /**
- * Browser notifications for new tasks. The on/off choice is a UI preference
- * kept outside the "mavi:cache:" prefix, so logging out doesn't reset it.
+ * Browser notifications. The permission is the browser's; what the person
+ * receives and the pause are theirs, kept in the database (notificationPrefs)
+ * and valid on every device — a pause holds these notifications, not the inbox.
  */
-const PREF_KEY = "mavi:notifications";
-export type NotificationState =
-  "unsupported" | "default" | "denied" | "on" | "off";
+export type NotificationState = "unsupported" | "default" | "denied" | "on";
 
 export function notificationState(): NotificationState {
   if (typeof window === "undefined" || !("Notification" in window))
     return "unsupported";
   if (Notification.permission === "denied") return "denied";
   if (Notification.permission === "default") return "default";
-  try {
-    return localStorage.getItem(PREF_KEY) === "off" ? "off" : "on";
-  } catch {
-    return "on";
-  }
+  return "on";
 }
 
-function savePreference(on: boolean) {
-  try {
-    localStorage.setItem(PREF_KEY, on ? "on" : "off");
-  } catch {
-    // Blocked storage: the choice just won't persist.
-  }
+// Until when the person paused (ms), set by the app from their preferences.
+let pausedUntil = 0;
+export function setNotificationPause(until: number) {
+  pausedUntil = until;
 }
+const paused = () => pausedUntil > Date.now();
 
 /** Must run from a click: browsers only show the permission prompt on a user gesture. */
-export async function toggleNotifications(): Promise<NotificationState> {
-  const state = notificationState();
-  if (state === "default") {
-    const permission = await Notification.requestPermission();
-    if (permission === "granted") savePreference(true);
-  } else if (state === "on" || state === "off") {
-    savePreference(state === "off");
-  }
+export async function enableNotifications(): Promise<NotificationState> {
+  if (notificationState() === "default") await Notification.requestPermission();
   return notificationState();
 }
 
@@ -48,7 +36,7 @@ export function showNotification(
     url?: string;
   },
 ) {
-  if (notificationState() !== "on") return;
+  if (notificationState() !== "on" || paused()) return;
   const fallback = () => {
     try {
       const n = new Notification(title, {
@@ -86,13 +74,6 @@ export function showNotification(
       });
     })
     .catch(fallback);
-}
-
-/** Pauses or resumes this browser's notifications (permission already given). */
-export function setNotificationsOn(on: boolean): NotificationState {
-  if (notificationState() === "on" || notificationState() === "off")
-    savePreference(on);
-  return notificationState();
 }
 
 /**

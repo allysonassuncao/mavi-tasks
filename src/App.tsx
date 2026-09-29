@@ -177,6 +177,13 @@ import { useInstall } from "./pwa";
 import { useTaskSeconds } from "./useTaskTime";
 import { NotificationInbox } from "./NotificationInbox";
 import { NotificationMenu } from "./NotificationMenu";
+import { NotificationSettings } from "./NotificationSettings";
+import {
+  defaultPrefs,
+  pauseUntil,
+  type NotificationPrefs,
+  type PauseChoice,
+} from "./notificationPrefs";
 import { BulkEditor, SelectBox, selectState } from "./TaskBulk";
 import { TaskViewsMenu } from "./TaskViews";
 import type { BulkChange, BulkResult, BulkUndo } from "./task-bulk";
@@ -208,6 +215,7 @@ import { OnlineMembers, PresenceDot } from "./OnlineMembers";
 import { usePresence } from "./presence";
 import {
   notificationState,
+  setNotificationPause,
   showNotification,
   type NotificationState,
 } from "./notifications";
@@ -341,6 +349,42 @@ export default function App() {
     if (!pushUser || notifications === "unsupported") return;
     void syncPush(notifications === "on");
   }, [pushUser, notifications]);
+  // What the person receives and the pause (Meu perfil › Notificações), the
+  // same on every device; the demo keeps the defaults in memory.
+  const [notifyPrefs, setNotifyPrefs] = useState<NotificationPrefs | null>(
+    null,
+  );
+  const loadNotifyPrefs = useCallback(() => {
+    if (demo) return setNotifyPrefs((p) => p ?? defaultPrefs());
+    if (!company || !pushUser) return;
+    api
+      .myNotificationPrefs(company)
+      .then(setNotifyPrefs)
+      .catch(() => {});
+  }, [demo, company, pushUser]);
+  useEffect(loadNotifyPrefs, [loadNotifyPrefs]);
+  useEffect(() => {
+    const until = notifyPrefs?.paused_until;
+    setNotificationPause(
+      !until ? 0 : until === "infinity" ? Infinity : Date.parse(until),
+    );
+  }, [notifyPrefs]);
+  const pauseNotify = useCallback(
+    async (choice: PauseChoice | null) => {
+      const until = choice ? pauseUntil(choice) : null;
+      if (demo) {
+        setNotifyPrefs((p) => ({ ...(p ?? defaultPrefs()), paused_until: until }));
+        return;
+      }
+      try {
+        setNotifyPrefs(await api.pauseNotifications(company, until));
+      } catch (err) {
+        notify((err as Error).message || "Não foi possível pausar.");
+      }
+    },
+    // notify (declared below) is stable for the app's lifetime.
+    [demo, company],
+  );
   // A click on a push notification, with the app already open (sw.js).
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -1161,6 +1205,17 @@ export default function App() {
             if (!n.task_id) return;
             const taskId = n.task_id;
             const who = n.actor_name ?? "Alguém";
+            // Status and validation: "Ana moveu para Correção".
+            if (n.headline) {
+              notify(`${who} ${n.headline}: ${n.task_title}`);
+              showNotification(`${who} ${n.headline}`, {
+                body: n.task_title,
+                tag: n.id,
+                url: `/tarefas/${taskId}`,
+                onClick: () => live.current.openTask(taskId),
+              });
+              return;
+            }
             const assigned = n.kind === "assigned";
             const said =
               n.kind === "reply" ? "respondeu um comentário" : "mencionou você";
@@ -2310,6 +2365,20 @@ export default function App() {
               <NotificationMenu
                 state={notifications}
                 onState={setNotifications}
+                prefs={notifyPrefs}
+                onPause={pauseNotify}
+                onOpen={loadNotifyPrefs}
+                onConfigure={() => {
+                  go("profile");
+                  // Scrolls once Meu perfil has drawn its Notificações section.
+                  let tries = 0;
+                  const scroll = () => {
+                    const section = document.getElementById("notificacoes");
+                    if (section) section.scrollIntoView({ block: "start" });
+                    else if (++tries < 20) setTimeout(scroll, 100);
+                  };
+                  setTimeout(scroll, 50);
+                }}
                 serverTest={demo ? undefined : api.testPush}
               />
             )}
@@ -3464,6 +3533,18 @@ export default function App() {
                   demo={demo}
                   mutate={mutate}
                   notify={notify}
+                  notifications={
+                    <NotificationSettings
+                      company={company}
+                      demo={demo}
+                      prefs={notifyPrefs}
+                      onPrefs={setNotifyPrefs}
+                      onPause={pauseNotify}
+                      state={notifications}
+                      onState={setNotifications}
+                      notify={notify}
+                    />
+                  }
                 />
               )}
               {page === "campaigns" && isLeader && (

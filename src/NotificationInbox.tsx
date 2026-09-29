@@ -135,7 +135,9 @@ export function NotificationInbox({
                       ) : (
                         <span className="inbox-line">
                           <strong>{n.actor_name ?? "Alguém"}</strong>{" "}
-                          {n.kind === "assigned"
+                          {n.headline
+                            ? `${n.headline}:`
+                            : n.kind === "assigned"
                             ? "criou uma tarefa para você:"
                             : n.kind === "reply"
                               ? "respondeu um comentário em"
@@ -166,9 +168,10 @@ export function NotificationInbox({
           <p className="inbox-empty">
             <AtSign size={18} />
             Quando criarem uma tarefa para você, mencionarem você com @,
-            responderem um comentário seu, a agência publicar um aviso no Mural,
-            a MAVI terminar um plano do Social Leads ou um cliente seu esfriar, o
-            aviso aparece aqui.
+            responderem um comentário seu, uma tarefa chegar para você validar,
+            a agência publicar um aviso no Mural ou um cliente seu esfriar, o
+            aviso aparece aqui. Escolha o que receber em Meu perfil ›
+            Notificações.
           </p>
         )}
       </Popover.Content>

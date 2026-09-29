@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  enableNotifications,
   notificationEnvironment,
   notificationState,
-  setNotificationsOn,
+  setNotificationPause,
   showNotification,
-  toggleNotifications,
 } from "./notifications";
 
 class FakeNotification {
@@ -37,7 +37,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Notificações de novas tarefas", () => {
   it("pede permissão no primeiro clique e passa a notificar", async () => {
     expect(notificationState()).toBe("default");
-    expect(await toggleNotifications()).toBe("on");
+    expect(await enableNotifications()).toBe("on");
     showNotification("Nova tarefa para você", {
       body: "Post de lançamento",
       tag: "t1",
@@ -45,12 +45,14 @@ describe("Notificações de novas tarefas", () => {
     });
     expect(FakeNotification.shown).toHaveLength(1);
   });
-  it("pausar guarda a escolha e silencia", async () => {
+  it("em pausa, silencia até a hora marcada", async () => {
     FakeNotification.permission = "granted";
-    expect(await toggleNotifications()).toBe("off");
+    setNotificationPause(Date.now() + 60_000);
     showNotification("x", { body: "", tag: "t", onClick: () => {} });
     expect(FakeNotification.shown).toHaveLength(0);
-    expect(await toggleNotifications()).toBe("on");
+    setNotificationPause(Date.now() - 1);
+    showNotification("x", { body: "", tag: "t", onClick: () => {} });
+    expect(FakeNotification.shown).toHaveLength(1);
   });
   it("pelo service worker, não repete a que o push já mostrou", async () => {
     FakeNotification.permission = "granted";
@@ -75,15 +77,6 @@ describe("Notificações de novas tarefas", () => {
   it("respeita o bloqueio do navegador", () => {
     FakeNotification.permission = "denied";
     expect(notificationState()).toBe("denied");
-  });
-  it("pausa e retoma sem pedir permissão de novo", () => {
-    FakeNotification.requestPermission.mockClear();
-    FakeNotification.permission = "granted";
-    expect(setNotificationsOn(false)).toBe("off");
-    expect(setNotificationsOn(true)).toBe("on");
-    expect(FakeNotification.requestPermission).not.toHaveBeenCalled();
-    FakeNotification.permission = "default";
-    expect(setNotificationsOn(true)).toBe("default");
   });
   it("reconhece o sistema e o navegador para orientar a liberação", () => {
     vi.stubGlobal("navigator", {

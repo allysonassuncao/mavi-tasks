@@ -5688,6 +5688,164 @@ label .input-control .ui-input {
   font-size: 0.72rem;
   font-weight: 600;
 }
+.notify-toggle.paused {
+  color: #9aa3a2;
+}
+.notify-pause {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.notify-pause > span {
+  color: var(--muted);
+}
+.notify-pause > button {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: #45524d;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.notify-pause > button:hover:not(:disabled) {
+  background: #f3f6ef;
+}
+.notify-note {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.notify-configure {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px -14px -14px;
+  padding: 11px 14px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: #3f5a2c;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.notify-configure:hover {
+  background: #f4faeb;
+}
+/* Meu perfil › Notificações. */
+.notify-settings {
+  scroll-margin-top: 80px;
+}
+.notify-settings-browser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.78rem;
+}
+.notify-settings-browser > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+.notify-settings-browser > div:first-child span {
+  color: #66726e;
+  line-height: 1.45;
+}
+.notify-settings-browser .btn {
+  min-height: 34px;
+  padding: 7px 13px;
+}
+.notify-settings-group {
+  display: grid;
+  gap: 10px;
+}
+.notify-settings-group h3 {
+  margin: 6px 0 0;
+  font-size: 0.86rem;
+}
+.notify-settings-group > p {
+  margin: 0;
+  color: #66726e;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.notify-types {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.notify-types li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 14px;
+}
+.notify-types li + li {
+  border-top: 1px solid var(--border);
+}
+.notify-types li > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 0.78rem;
+}
+.notify-types small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.notify-grid-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.notify-grid {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+.notify-grid th,
+.notify-grid td {
+  padding: 10px 14px;
+  text-align: center;
+}
+.notify-grid thead th {
+  color: #66726e;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #f7f9f6;
+}
+.notify-grid th[scope="row"],
+.notify-grid thead th:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+.notify-grid tbody tr + tr > * {
+  border-top: 1px solid var(--border);
+}
+.notify-grid td .ui-checkbox {
+  margin: 0 auto;
+}
+.notify-settings-skeleton {
+  height: 220px;
+  border-radius: 10px;
+}
 /* Inbox (mentions), as in ClickUp. */
 .inbox-toggle {
   position: relative;

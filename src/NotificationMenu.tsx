@@ -9,15 +9,21 @@ import {
   Loader2,
   RotateCw,
   Send,
+  Settings2,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import {
+  enableNotifications,
   notificationEnvironment,
-  setNotificationsOn,
   showTestNotification,
-  toggleNotifications,
   type NotificationState,
 } from "./notifications";
+import {
+  isPaused,
+  pauseLabel,
+  type NotificationPrefs,
+  type PauseChoice,
+} from "./notificationPrefs";
 import { connectPush } from "./push";
 import { Button } from "./ui";
 
@@ -50,17 +56,8 @@ function siteHelp() {
     : `Clique no ícone à esquerda do endereço (cadeado ou ajustes) › Notificações › Permitir, e recarregue a página.`;
 }
 
-async function pushSteps(
-  state: NotificationState,
-  serverTest: ServerTest,
-): Promise<Step> {
+async function pushSteps(serverTest: ServerTest): Promise<Step> {
   const label = "Com o app fechado";
-  if (state === "off")
-    return {
-      label,
-      status: "skip",
-      text: "Notificações pausadas: retome para receber com o app fechado.",
-    };
   const push = await connectPush(true);
   if (push.state === "unsupported")
     return {
@@ -123,10 +120,22 @@ async function pushSteps(
 export function NotificationMenu({
   state,
   onState,
+  prefs,
+  onPause,
+  onConfigure,
+  onOpen,
   serverTest,
 }: {
   state: NotificationState;
   onState: (state: NotificationState) => void;
+  /** What the person receives and the pause; null while loading. */
+  prefs: NotificationPrefs | null;
+  /** Pauses (or resumes, with null) the browser notifications. */
+  onPause: (choice: PauseChoice | null) => Promise<void>;
+  /** Opens Meu perfil › Notificações. */
+  onConfigure: () => void;
+  /** The panel opened: a chance to reload the preferences. */
+  onOpen?: () => void;
   /** Push through the server; absent in the demo. */
   serverTest?: ServerTest;
 }) {
@@ -136,9 +145,11 @@ export function NotificationMenu({
   const [local, setLocal] = useState<Step | null>(null);
   const [seen, setSeen] = useState<boolean | null>(null);
   const [push, setPush] = useState<Step | null>(null);
+  const [pausing, setPausing] = useState<PauseChoice | "resume" | null>(null);
+  const paused = isPaused(prefs);
 
   async function enable() {
-    const next = await toggleNotifications();
+    const next = await enableNotifications();
     setAsked(true);
     onState(next);
   }
@@ -155,26 +166,42 @@ export function NotificationMenu({
         ? "Enviada agora, no canto da tela. Ela apareceu?"
         : "O navegador recusou a notificação. Recarregue a página e tente de novo.",
     });
-    if (serverTest) setPush(await pushSteps(state, serverTest));
+    if (serverTest) setPush(await pushSteps(serverTest));
     setTesting(false);
   }
 
+  async function pause(choice: PauseChoice | null) {
+    setPausing(choice ?? "resume");
+    try {
+      await onPause(choice);
+    } finally {
+      setPausing(null);
+    }
+  }
+
   const Icon =
-    state === "on" ? BellRing : state === "default" ? Bell : BellOff;
-  const title = {
-    unsupported: "",
-    default:
-      "Receber um aviso quando uma tarefa for criada para você ou quando mencionarem você",
-    on: "Notificações ativadas",
-    off: "Notificações pausadas",
-    denied: "Notificações bloqueadas neste navegador",
-  }[state];
+    state === "on" && !paused
+      ? BellRing
+      : state === "default"
+        ? Bell
+        : BellOff;
+  const title =
+    state === "on" && paused && prefs?.paused_until
+      ? `Notificações pausadas ${pauseLabel(prefs.paused_until)}`
+      : {
+          unsupported: "",
+          default:
+            "Receber um aviso quando uma tarefa for criada para você ou quando mencionarem você",
+          on: "Notificações ativadas",
+          denied: "Notificações bloqueadas neste navegador",
+        }[state];
 
   return (
     <Popover.Root
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
+        if (next) onOpen?.();
         if (!next) {
           setLocal(null);
           setPush(null);
@@ -184,8 +211,8 @@ export function NotificationMenu({
     >
       <Popover.Trigger asChild>
         <Button
-          className={`notify-toggle ${state}`}
-          aria-pressed={state === "on"}
+          className={`notify-toggle ${state}${paused ? " paused" : ""}`}
+          aria-pressed={state === "on" && !paused}
           title={title}
         >
           <Icon size={17} />
@@ -238,21 +265,49 @@ export function NotificationMenu({
               </Button>
             </>
           )}
-          {(state === "on" || state === "off") && (
+          {state === "on" && (
             <>
               <div className="notify-status">
-                <span className={`notify-dot ${state}`} />
-                {state === "on"
-                  ? "Ativadas neste navegador."
-                  : "Pausadas neste navegador."}
-                <button
-                  type="button"
-                  className="text-btn"
-                  onClick={() => onState(setNotificationsOn(state === "off"))}
-                >
-                  {state === "on" ? "Pausar" : "Retomar"}
-                </button>
+                <span className={`notify-dot ${paused ? "off" : "on"}`} />
+                {paused && prefs?.paused_until
+                  ? `Pausadas ${pauseLabel(prefs.paused_until)}.`
+                  : "Ativadas neste navegador."}
+                {paused && (
+                  <Button
+                    className="text-btn"
+                    loading={pausing === "resume"}
+                    onClick={() => void pause(null)}
+                  >
+                    Retomar
+                  </Button>
+                )}
               </div>
+              {!paused && (
+                <div className="notify-pause">
+                  <span>Pausar:</span>
+                  {(
+                    [
+                      ["hour", "1 hora"],
+                      ["tomorrow", "Até amanhã"],
+                      ["forever", "Até eu retomar"],
+                    ] as const
+                  ).map(([choice, label]) => (
+                    <Button
+                      key={choice}
+                      className="chip-btn"
+                      loading={pausing === choice}
+                      disabled={!prefs || !!pausing}
+                      onClick={() => void pause(choice)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              <p className="notify-note">
+                A pausa vale para todos os seus dispositivos. Os avisos continuam
+                chegando na caixa de entrada.
+              </p>
               <Button
                 className="btn secondary"
                 loading={testing}
@@ -310,6 +365,16 @@ export function NotificationMenu({
               )}
             </>
           )}
+          <button
+            type="button"
+            className="notify-configure"
+            onClick={() => {
+              setOpen(false);
+              onConfigure();
+            }}
+          >
+            <Settings2 size={15} /> Escolher o que receber
+          </button>
         </div>
       </Popover.Content>
     </Popover.Root>

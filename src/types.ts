@@ -148,7 +148,11 @@ export interface AppNotification {
     /** Alteração em massa: "Ana passou 12 tarefas para você" (link /tarefas?escopo=mine). */
     | "tasks_assigned"
     /** Prazo: a MAVI acha que a tarefa pode atrasar (link /tarefas/<id>). */
-    | "due_risk";
+    | "due_risk"
+    /** Mudança de status de uma tarefa (headline: "moveu para Correção"). */
+    | "status"
+    /** Tarefa em Em validação para a pessoa validar. */
+    | "review";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */
@@ -160,6 +164,8 @@ export interface AppNotification {
   created_at: string;
   /** Where the notice opens, when it isn't a task. */
   link?: string | null;
+  /** Status and validation notices: what the actor did ("moveu para Correção"). */
+  headline?: string | null;
 }
 export interface TimeEntry {
   id: string;

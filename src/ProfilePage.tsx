@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   Camera,
   Check,
@@ -38,6 +44,7 @@ export function ProfilePage({
   demo,
   mutate,
   notify,
+  notifications,
 }: {
   company: string;
   data: Snapshot;
@@ -46,6 +53,8 @@ export function ProfilePage({
   demo: boolean;
   mutate: (name: string, args: Record<string, unknown>) => Promise<unknown>;
   notify: (message: string) => void;
+  /** Meu perfil › Notificações (NotificationSettings). */
+  notifications?: ReactNode;
 }) {
   const me = data.members.find((m) => m.user_id === user);
   const [name, setName] = useState(me?.name ?? "");
@@ -397,6 +406,7 @@ export function ProfilePage({
           </section>
         )}
       </div>
+      {notifications}
       {!demo && <ConnectedApps notify={notify} />}
     </div>
   );

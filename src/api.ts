@@ -1,3 +1,4 @@
+import type { NotificationPrefs } from "./notificationPrefs";
 import { supabase } from "./supabase";
 import * as cache from "./cache";
 import { fold, type TaskScope } from "./domain";
@@ -1347,6 +1348,37 @@ export async function myNotifications(
     p_company: company,
     p_limit: 30,
   })) ?? []) as AppNotification[];
+}
+
+/** What the person receives and until when they paused (Meu perfil › Notificações). */
+export async function myNotificationPrefs(
+  company: string,
+): Promise<NotificationPrefs> {
+  return (await rpc("my_notification_prefs", {
+    p_company: company,
+  })) as NotificationPrefs;
+}
+
+/** Saves some choices (only known keys); returns everything, with defaults. */
+export async function saveNotificationPrefs(
+  company: string,
+  prefs: Record<string, boolean>,
+): Promise<NotificationPrefs> {
+  return (await rpc("save_notification_prefs", {
+    p_company: company,
+    p_prefs: prefs,
+  })) as NotificationPrefs;
+}
+
+/** Pauses the browser notifications until then ("infinity": until resumed; null resumes). */
+export async function pauseNotifications(
+  company: string,
+  until: string | null,
+): Promise<NotificationPrefs> {
+  return (await rpc("pause_notifications", {
+    p_company: company,
+    p_until: until,
+  })) as NotificationPrefs;
 }
 
 /**

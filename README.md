@@ -309,6 +309,16 @@ Cada pessoa ativa as notificações no sino do topo; no iPhone, só com o app in
 
 O sino abre um painel com o estado do navegador (não ativadas, ativadas, pausadas ou bloqueadas, com o caminho para liberar). Nele, **Enviar notificação de teste** confere cada etapa: mostra uma notificação na hora e pergunta se ela apareceu (se não apareceu, explica onde liberar no macOS ou no Windows), registra o navegador para o push e manda um push pelo servidor para os navegadores da própria pessoa. Se faltar o `push_config`, ou se a pessoa não tiver nenhum navegador registrado, o painel diz isso (`test_push`; migração `20261207090000_push_test`; `src/NotificationMenu.tsx`; `npm run test:db:push`).
 
+**O que cada pessoa recebe (Meu perfil › Notificações; "Escolher o que receber" no sino):**
+- Cada aviso liga ou desliga: tarefa nova, menções, respostas, tarefa para validar, risco de atraso, Termômetro, Cases, Social Leads e conversas da MAVI.
+- Uma grade liga os avisos de **mudança de status** (Em andamento, Devolvida, Em validação, Alteração, Correção, Entregue) conforme o papel da pessoa na tarefa: criou, é responsável ou participa.
+- **Tarefa para validar** avisa quem valida quando a tarefa entra em Em validação: o criador, ou os supervisores da equipe quando o projeto valida pelo supervisor.
+- Padrão para quem nunca mexeu: os avisos que já existiam, tarefa para validar e Alteração/Correção para o responsável. O resto começa desligado.
+- As escolhas ficam no banco e valem em todos os dispositivos. Um aviso desligado não é gravado: não aparece na caixa de entrada, nem em tempo real, nem por push.
+- **Pausar** (1 hora, até amanhã às 8h, até retomar) segura só o navegador; a caixa de entrada continua recebendo.
+- Quem fez a mudança não é avisado, e as alterações em massa não avisam tarefa por tarefa. Os avisos do Mural seguem o formato de quem publica.
+- Código: `notification_prefs`, `my_notification_prefs`, `save_notification_prefs`, `pause_notifications`, migração `20261208090000_notification_prefs`, `src/NotificationSettings.tsx`, `src/notificationPrefs.ts`; teste `npm run test:db:notification-prefs`.
+
 Conta identificada: `allysoncombr`. Nenhum deploy foi executado pelo agente. Não é necessário autenticar o CLI da Vercel para seguir pelo fluxo GitHub escolhido.
 
 Domínio oficial: `https://workspace.maso.app.br` (definido em `api/_origin.ts`; a variável `APP_ORIGIN` na Vercel o substitui). É o endereço dos links enviados por e-mail (convite e redefinição de senha) e precisa constar em `APP_ORIGIN` / `APP_ADDITIONAL_ORIGINS` das funções do Supabase.
