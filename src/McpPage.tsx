@@ -292,7 +292,7 @@ export function McpPage({
   return (
     <div className="mcp-page">
       {!mcpOn && (
-        <p className="panel skill-note">
+        <p className="panel mcp-off">
           O poder <strong>Conexões (MCP)</strong> está desligado para você: a MAVI
           só usa as conexões depois que um administrador ou gestor ligar em{" "}
           <a href={powersHref}>Painel da MAVI › Poderes</a>.
@@ -327,14 +327,33 @@ export function McpPage({
       {list === null ? (
         <Loading compact />
       ) : !list.length ? (
-        <div className="panel skills-empty">
-          <Plug size={22} aria-hidden="true" />
-          <strong>Nenhuma conexão ainda.</strong>
+        <div className="panel mcp-empty">
+          <span className="mcp-empty-icon" aria-hidden="true">
+            <Plug size={22} />
+          </span>
+          <strong>Nenhuma conexão ainda</strong>
           <p>
-            Uma conexão é o endereço de um servidor MCP (termina, em geral, em
-            /mcp). Com ela, a MAVI lê e — com a sua confirmação — cria e atualiza
-            coisas no serviço, dentro da conversa.
+            Uma conexão é o endereço de um servidor MCP (em geral termina em
+            /mcp). Com ela, a MAVI lê os dados do serviço e, com a sua
+            confirmação, cria e atualiza coisas nele, direto na conversa.
           </p>
+          {(isLeader || mcpOn) && (
+            <div className="mcp-empty-actions">
+              {isLeader && (
+                <Button className="btn primary" onClick={() => setEditing(blankDraft(false))}>
+                  <Building2 size={16} /> Criar conexão da empresa
+                </Button>
+              )}
+              {mcpOn && (
+                <Button
+                  className={`btn ${isLeader ? "secondary" : "primary"}`}
+                  onClick={() => setEditing(blankDraft(true))}
+                >
+                  <Plus size={16} /> Criar conexão pessoal
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <>

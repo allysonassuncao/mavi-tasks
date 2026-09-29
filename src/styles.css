@@ -9621,47 +9621,126 @@ label .input-control .ui-input {
   opacity: 0.6;
 }
 .multi-pick-menu {
-  z-index: 60;
-  width: 260px;
-  padding: 8px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  width: max(260px, var(--radix-popover-trigger-width));
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 6px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 12px 40px #1c272822;
+  box-shadow: 0 14px 40px #1c27281f, 0 2px 6px #1c27280d;
+  color: var(--ink);
+  font-size: 0.8rem;
 }
 .multi-pick-search {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
   border-radius: 8px;
+  background: #f5f7f3;
   color: var(--muted);
+}
+.multi-pick-search:focus-within {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px #b9d99a;
 }
 .multi-pick-search input {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
   border: 0;
   outline: none;
+  background: transparent;
   font-size: 0.8rem;
+  color: var(--ink);
+}
+.multi-pick-search-clear {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #e3e8df;
+  color: #4f5c5c;
+  cursor: pointer;
 }
 .multi-pick-list {
-  display: grid;
-  gap: 2px;
-  max-height: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 260px;
   margin-top: 6px;
   overflow-y: auto;
+  scrollbar-width: thin;
 }
-.multi-pick-list .checkbox-label {
-  padding: 6px 4px;
-  border-radius: 6px;
+.multi-pick-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 7px;
   font-size: 0.8rem;
+  font-weight: 450;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
 }
-.multi-pick-list .checkbox-label:hover {
-  background: #f4f6f5;
+.multi-pick-option > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.multi-pick-clear {
+.multi-pick-option:hover {
+  background: #f4f6f2;
+}
+.multi-pick-option.on {
+  background: #f1f8e8;
+  font-weight: 600;
+  color: #2d3e27;
+}
+.multi-pick-option .ui-checkbox {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 5px;
+}
+.multi-pick-empty {
+  margin: 0;
+  padding: 14px 8px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.multi-pick-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
   margin-top: 6px;
+  padding: 4px 6px 0;
+  border-top: 1px solid var(--border);
+}
+.multi-pick-foot small {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.multi-pick-foot .text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 0.74rem;
 }
 

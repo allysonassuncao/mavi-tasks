@@ -325,3 +325,54 @@
   border-color: #f1b7ae;
   background: #fdf1ef;
 }
+/* Sem conexões e poder desligado (a tela não depende do CSS das Skills). */
+.mcp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 44px 24px 40px;
+  text-align: center;
+  color: #5d6a68;
+}
+.mcp-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  border-radius: 14px;
+  background: #263334;
+  color: #c8ec8e;
+}
+.mcp-empty strong {
+  font-size: 0.98rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.mcp-empty p {
+  max-width: 520px;
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+.mcp-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.mcp-off {
+  margin: 0;
+  padding: 12px 16px;
+  border-color: #f0dca6;
+  background: #fffbef;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #4f5c5c;
+}
+.mcp-off a {
+  color: #2d5a8c;
+  text-decoration: underline;
+}
