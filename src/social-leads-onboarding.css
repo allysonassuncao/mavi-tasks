@@ -647,3 +647,16 @@
 .sl-row-archived td {
   cursor: default;
 }
+
+/* ------------------------------------------------------------ modais largos com rolagem */
+/* The wide modal (the task sheet) is a fixed-height column that clips what
+   overflows and leaves the scrolling to its content: the Social Leads ones
+   scroll inside, below the sticky title. */
+.modal.sheet[open] > .sl-post-modal,
+.modal.sheet[open] > .sl-public.embedded,
+.modal.sheet[open] > .sl-release {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
