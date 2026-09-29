@@ -307,6 +307,8 @@ values ('https://SEU-DOMINIO/api/push', '<o mesmo PUSH_SECRET da Vercel>');
 
 Cada pessoa ativa as notificações no sino do topo; no iPhone, só com o app instalado na tela de início (iOS 16.4+). Sem essa configuração o app continua avisando enquanto está aberto.
 
+O sino abre um painel com o estado do navegador (não ativadas, ativadas, pausadas ou bloqueadas, com o caminho para liberar). Nele, **Enviar notificação de teste** confere cada etapa: mostra uma notificação na hora e pergunta se ela apareceu (se não apareceu, explica onde liberar no macOS ou no Windows), registra o navegador para o push e manda um push pelo servidor para os navegadores da própria pessoa. Se faltar o `push_config`, ou se a pessoa não tiver nenhum navegador registrado, o painel diz isso (`test_push`; migração `20261207090000_push_test`; `src/NotificationMenu.tsx`; `npm run test:db:push`).
+
 Conta identificada: `allysoncombr`. Nenhum deploy foi executado pelo agente. Não é necessário autenticar o CLI da Vercel para seguir pelo fluxo GitHub escolhido.
 
 Domínio oficial: `https://workspace.maso.app.br` (definido em `api/_origin.ts`; a variável `APP_ORIGIN` na Vercel o substitui). É o endereço dos links enviados por e-mail (convite e redefinição de senha) e precisa constar em `APP_ORIGIN` / `APP_ADDITIONAL_ORIGINS` das funções do Supabase.

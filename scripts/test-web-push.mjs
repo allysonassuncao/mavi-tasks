@@ -107,6 +107,18 @@ await check("anônimo não registra navegador", async () => {
   );
 });
 
+await check("teste de notificação sem configuração não envia", async () => {
+  await as(member);
+  assert.deepEqual(await rpc("test_push", []), {
+    configured: false,
+    browsers: 0,
+    sent: false,
+  });
+  await as(null);
+  await denied(() => rpc("test_push", []));
+  assert.equal((await requests()).length, 0);
+});
+
 await as(member);
 await rpc("save_push_subscription", [
   "https://push.example/bruno-celular",
@@ -144,6 +156,30 @@ await check("nova tarefa é entregue ao serviço de push", async () => {
       keys: { p256dh: "chave-p256dh", auth: "segredo-auth" },
     },
   ]);
+});
+
+await check("teste de notificação vai só para os navegadores da pessoa", async () => {
+  const before = (await requests()).length;
+  await as(other);
+  assert.deepEqual(await rpc("test_push", []), {
+    configured: true,
+    browsers: 0,
+    sent: false,
+  });
+  await as(member);
+  assert.deepEqual(await rpc("test_push", []), {
+    configured: true,
+    browsers: 1,
+    sent: true,
+  });
+  const sent = (await requests()).slice(before);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].body.message.tag, "mavi-test-push");
+  assert.equal(sent[0].headers.Authorization, `Bearer ${secret}`);
+  assert.deepEqual(
+    sent[0].body.subscriptions.map((s) => s.endpoint),
+    ["https://push.example/bruno-celular"],
+  );
 });
 
 await check("quem não tem navegador registrado não gera envio", async () => {

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  notificationEnvironment,
   notificationState,
+  setNotificationsOn,
   showNotification,
   toggleNotifications,
 } from "./notifications";
@@ -73,5 +75,32 @@ describe("Notificações de novas tarefas", () => {
   it("respeita o bloqueio do navegador", () => {
     FakeNotification.permission = "denied";
     expect(notificationState()).toBe("denied");
+  });
+  it("pausa e retoma sem pedir permissão de novo", () => {
+    FakeNotification.requestPermission.mockClear();
+    FakeNotification.permission = "granted";
+    expect(setNotificationsOn(false)).toBe("off");
+    expect(setNotificationsOn(true)).toBe("on");
+    expect(FakeNotification.requestPermission).not.toHaveBeenCalled();
+    FakeNotification.permission = "default";
+    expect(setNotificationsOn(true)).toBe("default");
+  });
+  it("reconhece o sistema e o navegador para orientar a liberação", () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+    });
+    expect(notificationEnvironment()).toEqual({
+      system: "mac",
+      browser: "Google Chrome",
+    });
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0",
+    });
+    expect(notificationEnvironment()).toEqual({
+      system: "windows",
+      browser: "Microsoft Edge",
+    });
   });
 });

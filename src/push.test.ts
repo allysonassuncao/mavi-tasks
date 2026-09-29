@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.fn(async () => null);
 vi.mock("./api", () => ({ rpc }));
-const { syncPush } = await import("./push");
+const { syncPush, connectPush } = await import("./push");
 
 // A VAPID public key in base64url, and its bytes.
 const publicKey = "AQID";
@@ -74,6 +74,20 @@ describe("syncPush", () => {
       p_p256dh: "p",
       p_auth: "a",
       p_user_agent: "Teste",
+    });
+  });
+
+  it("diz por que o push não ligou", async () => {
+    setGlobals({ window: {}, navigator: {} });
+    expect(await connectPush(true)).toEqual({ state: "unsupported" });
+    fakeBrowser();
+    setGlobals({ fetch: vi.fn(async () => new Response("{}", { status: 503 })) });
+    expect(await connectPush(true)).toEqual({ state: "server-off" });
+    const { pushManager } = fakeBrowser();
+    pushManager.subscribe.mockRejectedValueOnce(Error("push service error"));
+    expect(await connectPush(true)).toEqual({
+      state: "error",
+      error: "push service error",
     });
   });
 

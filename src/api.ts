@@ -1349,6 +1349,23 @@ export async function myNotifications(
   })) ?? []) as AppNotification[];
 }
 
+/**
+ * "Enviar notificação de teste": a push to the person's own browsers, through
+ * the same path as real notices. Says where it would stop (no push_config in
+ * the database, no browser registered).
+ */
+export async function testPush(): Promise<{
+  configured: boolean;
+  browsers: number;
+  sent: boolean;
+}> {
+  return (await rpc("test_push")) as {
+    configured: boolean;
+    browsers: number;
+    sent: boolean;
+  };
+}
+
 /** Marks notifications as read (all of them when no ids are given). */
 export async function readNotifications(company: string, ids?: string[]) {
   await rpc("read_notifications", { p_company: company, p_ids: ids ?? null });

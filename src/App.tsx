@@ -45,8 +45,6 @@ import {
   Rocket,
   Trophy,
   Thermometer,
-  Bell,
-  BellOff,
   BellRing,
   Lightbulb,
   Settings2,
@@ -178,6 +176,7 @@ import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
 import { useTaskSeconds } from "./useTaskTime";
 import { NotificationInbox } from "./NotificationInbox";
+import { NotificationMenu } from "./NotificationMenu";
 import { BulkEditor, SelectBox, selectState } from "./TaskBulk";
 import { TaskViewsMenu } from "./TaskViews";
 import type { BulkChange, BulkResult, BulkUndo } from "./task-bulk";
@@ -210,7 +209,6 @@ import { usePresence } from "./presence";
 import {
   notificationState,
   showNotification,
-  toggleNotifications,
   type NotificationState,
 } from "./notifications";
 import {
@@ -2309,35 +2307,11 @@ export default function App() {
               onReadAll={readAllNotifications}
             />
             {notifications !== "unsupported" && (
-              <Button
-                className={`notify-toggle ${notifications}`}
-                disabled={notifications === "denied"}
-                aria-pressed={notifications === "on"}
-                title={
-                  {
-                    default:
-                      "Receber um aviso quando uma tarefa for criada para você ou quando mencionarem você",
-                    on: "Notificações ativadas — clique para pausar",
-                    off: "Notificações pausadas — clique para ativar",
-                    denied:
-                      "Notificações bloqueadas. Libere-as nas configurações do navegador para este site.",
-                  }[notifications]
-                }
-                onClick={() =>
-                  void toggleNotifications().then(setNotifications)
-                }
-              >
-                {notifications === "on" ? (
-                  <BellRing size={17} />
-                ) : notifications === "default" ? (
-                  <Bell size={17} />
-                ) : (
-                  <BellOff size={17} />
-                )}
-                {notifications === "default" && (
-                  <span>Ativar notificações</span>
-                )}
-              </Button>
+              <NotificationMenu
+                state={notifications}
+                onState={setNotifications}
+                serverTest={demo ? undefined : api.testPush}
+              />
             )}
             <OnlineMembers
               members={data.members}
@@ -4350,11 +4324,14 @@ function TaskTable({
               opts.nests && <span className="subtask-spacer" />
             )}
             <Button className="task-title" onClick={() => onSelect(t.id)}>
-              <span
-                className={`task-check ${t.status === "done" ? "complete" : ""}`}
-              >
-                {t.status === "done" && <Check size={13} />}
-              </span>
+              {/* With the selection checkbox beside it, a second box confuses. */}
+              {!selection && (
+                <span
+                  className={`task-check ${t.status === "done" ? "complete" : ""}`}
+                >
+                  {t.status === "done" && <Check size={13} />}
+                </span>
+              )}
               <span>
                 <strong>{t.title}</strong>
                 <small>

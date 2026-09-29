@@ -87,3 +87,73 @@ export function showNotification(
     })
     .catch(fallback);
 }
+
+/** Pauses or resumes this browser's notifications (permission already given). */
+export function setNotificationsOn(on: boolean): NotificationState {
+  if (notificationState() === "on" || notificationState() === "off")
+    savePreference(on);
+  return notificationState();
+}
+
+/**
+ * Shows a test notification now, through the service worker when there is
+ * one. Resolves false when the browser refused it; true only means it was
+ * handed over — the system may still hide it (Focus, Do not disturb, the
+ * browser's notifications turned off in the system settings).
+ */
+export async function showTestNotification(): Promise<boolean> {
+  if (typeof window === "undefined" || !("Notification" in window))
+    return false;
+  if (Notification.permission !== "granted") return false;
+  const title = "Teste de notificação";
+  const options = {
+    body: "Se você está vendo isto, as notificações funcionam neste navegador.",
+    tag: "mavi-test-local",
+    icon: "/icons/icon-192-v2.png",
+  };
+  try {
+    const reg =
+      "serviceWorker" in navigator
+        ? await navigator.serviceWorker.getRegistration()
+        : undefined;
+    if (reg) {
+      await reg.showNotification(title, {
+        ...options,
+        badge: "/icons/icon-192-v2.png",
+        data: { url: "/" },
+      });
+      return true;
+    }
+    new Notification(title, options);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type NotificationSystem = "mac" | "windows" | "other";
+
+/** The system and browser, to say where notifications are turned on. */
+export function notificationEnvironment(): {
+  system: NotificationSystem;
+  browser: string;
+} {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  const system: NotificationSystem = /Mac OS X|Macintosh/.test(ua)
+    ? "mac"
+    : /Windows/.test(ua)
+      ? "windows"
+      : "other";
+  const browser = /Edg\//.test(ua)
+    ? "Microsoft Edge"
+    : /OPR\//.test(ua)
+      ? "Opera"
+      : /Firefox\//.test(ua)
+        ? "Firefox"
+        : /Chrome\//.test(ua)
+          ? "Google Chrome"
+          : /Safari\//.test(ua)
+            ? "Safari"
+            : "navegador";
+  return { system, browser };
+}

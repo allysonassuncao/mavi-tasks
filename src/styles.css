@@ -5607,6 +5607,87 @@ label .input-control .ui-input {
     display: none;
   }
 }
+/* Bell panel: turn on, pause, and the test that says what to fix. */
+.notify-panel {
+  width: 340px;
+}
+.notify-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+.notify-body p {
+  margin: 0;
+}
+.notify-body > .btn {
+  justify-self: start;
+  min-height: 34px;
+  padding: 7px 13px;
+}
+.notify-hint {
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #fbf4e4;
+  color: #6b4d12;
+}
+.notify-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.notify-status .text-btn {
+  margin-left: auto;
+  font-size: 0.72rem;
+}
+.notify-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #56793a;
+}
+.notify-dot.off {
+  background: #b8c0bf;
+}
+.notify-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.notify-panel .notify-steps li.notify-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px;
+  align-items: start;
+}
+.notify-step > svg {
+  margin-top: 2px;
+  color: var(--muted);
+}
+.notify-step.ok > svg {
+  color: #56793a;
+}
+.notify-step.fail > svg {
+  color: #c8514f;
+}
+.notify-step div {
+  display: grid;
+  gap: 5px;
+}
+.notify-step p {
+  color: #57645f;
+}
+.notify-answer {
+  display: flex;
+  gap: 14px;
+}
+.notify-answer .text-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
 /* Inbox (mentions), as in ClickUp. */
 .inbox-toggle {
   position: relative;

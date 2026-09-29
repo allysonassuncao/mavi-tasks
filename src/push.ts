@@ -39,14 +39,31 @@ const sameKey = (a: ArrayBuffer | null, b: Uint8Array) =>
   a.byteLength === b.length;
 
 /**
+ * Where this browser's push stands: "on" (registered for the person), "off"
+ * (notifications paused or not allowed), "unsupported", "no-worker" (the
+ * service worker isn't running), "server-off" (no VAPID key on the server)
+ * or "error" (the browser or the database refused; `error` says why).
+ */
+export type PushResult = {
+  state: "on" | "off" | "unsupported" | "no-worker" | "server-off" | "error";
+  error?: string;
+};
+
+/**
  * Turns this browser's pushes on or off for the signed-in person. Safe to
  * call often: an existing subscription is reused (and re-registered, which
  * also moves it to whoever signed in on this browser).
  */
 export async function syncPush(on: boolean): Promise<boolean> {
+  return (await connectPush(on)).state === "on";
+}
+
+/** syncPush, telling why push isn't on (for "Enviar notificação de teste"). */
+export async function connectPush(on: boolean): Promise<PushResult> {
   try {
+    if (!supported()) return { state: "unsupported" };
     const reg = await registration();
-    if (!reg) return false;
+    if (!reg) return { state: "no-worker" };
     const current = await reg.pushManager.getSubscription();
     if (!on || Notification.permission !== "granted") {
       if (current) {
@@ -55,14 +72,14 @@ export async function syncPush(on: boolean): Promise<boolean> {
         }).catch(() => {});
         await current.unsubscribe().catch(() => {});
       }
-      return false;
+      return { state: "off" };
     }
     const res = await fetch("/api/push");
     const { publicKey } = (await res.json().catch(() => ({}))) as {
       publicKey?: string;
     };
     // Not configured on the server yet: the app keeps notifying on its own.
-    if (!res.ok || !publicKey) return false;
+    if (!res.ok || !publicKey) return { state: "server-off" };
     const key = keyBytes(publicKey);
     let sub = current;
     if (sub && !sameKey(sub.options.applicationServerKey, key)) {
@@ -83,9 +100,9 @@ export async function syncPush(on: boolean): Promise<boolean> {
       p_auth: json.keys?.auth ?? "",
       p_user_agent: navigator.userAgent.slice(0, 400),
     });
-    return true;
-  } catch {
+    return { state: "on" };
+  } catch (err) {
     // Push is an extra: the in-app notices keep working without it.
-    return false;
+    return { state: "error", error: (err as Error)?.message || String(err) };
   }
 }

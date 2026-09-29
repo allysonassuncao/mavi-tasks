@@ -57,6 +57,19 @@
         "--strictPort"
       ],
       "port": 5183
+    },
+    {
+      "name": "mavi-dev-notificacoes",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5184",
+        "--strictPort"
+      ],
+      "port": 5184
     }
   ]
 }
