@@ -20,12 +20,8 @@ import {
   uploadAvatar,
   type OptimizedAvatar,
 } from "./profile";
-import {
-  loadMemberPhone,
-  phoneDigits,
-  phoneLabel,
-  saveMemberPhone,
-} from "./temperature";
+import { loadMemberPhones, saveMemberPhones } from "./temperature";
+import { PhoneListField, phoneRows, phonesChanged } from "./PhoneListField";
 
 const roleLabel = {
   admin: "Administrador",
@@ -54,19 +50,19 @@ export function ProfilePage({
   const me = data.members.find((m) => m.user_id === user);
   const [name, setName] = useState(me?.name ?? "");
   const [savingName, setSavingName] = useState(false);
-  // O celular: nos grupos de WhatsApp dos clientes, as mensagens dele são do time.
-  const [phone, setPhone] = useState("");
-  const [savedPhone, setSavedPhone] = useState<string | null>(null);
+  // Os celulares: nos grupos de WhatsApp dos clientes, as mensagens deles são do time.
+  const [phones, setPhones] = useState([""]);
+  const [savedPhones, setSavedPhones] = useState<string[]>([]);
   useEffect(() => {
     if (!company) return;
-    loadMemberPhone(company, user)
+    loadMemberPhones(company, user)
       .then((p) => {
-        setSavedPhone(p);
-        setPhone(phoneLabel(p));
+        setSavedPhones(p);
+        setPhones(phoneRows(p));
       })
       .catch(() => {});
   }, [company, user]);
-  const phoneChanged = phoneDigits(phone) !== (savedPhone ?? "");
+  const phoneChanged = phonesChanged(phones, savedPhones);
   const nameChanged = name.trim() !== me?.name;
   const [photo, setPhoto] = useState<OptimizedAvatar | null>(null);
   const [savingPhoto, setSavingPhoto] = useState(false);
@@ -100,16 +96,16 @@ export function ProfilePage({
     try {
       if (nameChanged) await mutate("update_my_profile", { p_name: name.trim() });
       if (phoneChanged) {
-        const saved = await saveMemberPhone(company, user, phone);
-        setSavedPhone(saved);
-        setPhone(phoneLabel(saved));
+        const saved = await saveMemberPhones(company, user, phones);
+        setSavedPhones(saved);
+        setPhones(phoneRows(saved));
       }
       notify(
         nameChanged && phoneChanged
-          ? "Nome e celular atualizados."
+          ? "Nome e celulares atualizados."
           : nameChanged
             ? "Nome atualizado."
-            : "Celular atualizado.",
+            : "Celulares atualizados.",
       );
     } catch (err) {
       setError((err as Error).message);
@@ -318,21 +314,11 @@ export function ProfilePage({
                 autoComplete="name"
               />
             </label>
-            <label>
-              Celular com WhatsApp
-              <Input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="(11) 98765-4321"
-                autoComplete="tel"
-                maxLength={24}
-              />
-            </label>
-            <small>
-              Nos grupos de WhatsApp dos clientes, as mensagens deste número
-              contam como do time: o termômetro do cliente avalia só o cliente.
-            </small>
+            <PhoneListField
+              phones={phones}
+              onChange={setPhones}
+              hint="Nos grupos de WhatsApp dos clientes, as mensagens destes números contam como do time: o termômetro do cliente avalia só o cliente."
+            />
             <div className="form-columns">
               <label>
                 E-mail

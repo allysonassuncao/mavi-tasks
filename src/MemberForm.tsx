@@ -4,12 +4,8 @@ import { Modal } from "./components";
 import { Button, Checkbox, Input, Select, SelectOption } from "./ui";
 import type { Member, Role, Snapshot } from "./types";
 import { ADMIN_PAGES, MODULES, roleAllows } from "./modules";
-import {
-  loadMemberPhone,
-  phoneDigits,
-  phoneLabel,
-  saveMemberPhone,
-} from "./temperature";
+import { loadMemberPhones, saveMemberPhones } from "./temperature";
+import { PhoneListField, phoneRows, phonesChanged } from "./PhoneListField";
 
 const roles: { id: Role; label: string }[] = [
   { id: "member", label: "Colaborador — Execução de tarefas e apontamentos" },
@@ -56,15 +52,15 @@ export function MemberForm({
   );
   // Modules an administrator hid from the person (src/modules.ts).
   const [hidden, setHidden] = useState<string[]>(member.hidden_pages ?? []);
-  // Celular com WhatsApp: nos grupos dos clientes, as mensagens dele são do time.
-  const [phone, setPhone] = useState("");
-  const [savedPhone, setSavedPhone] = useState<string | null>(null);
+  // Celulares com WhatsApp: nos grupos dos clientes, as mensagens deles são do time.
+  const [phones, setPhones] = useState([""]);
+  const [savedPhones, setSavedPhones] = useState<string[]>([]);
   const canEditPhone = callerIsAdmin || member.role !== "admin" || self;
   useEffect(() => {
-    loadMemberPhone(company, member.user_id)
+    loadMemberPhones(company, member.user_id)
       .then((p) => {
-        setSavedPhone(p);
-        setPhone(phoneLabel(p));
+        setSavedPhones(p);
+        setPhones(phoneRows(p));
       })
       .catch(() => {});
   }, [company, member.user_id]);
@@ -92,8 +88,8 @@ export function MemberForm({
         p_active: active,
         p_teams: teams,
       });
-      if (canEditPhone && phoneDigits(phone) !== (savedPhone ?? ""))
-        setSavedPhone(await saveMemberPhone(company, member.user_id, phone));
+      if (canEditPhone && phonesChanged(phones, savedPhones))
+        setSavedPhones(await saveMemberPhones(company, member.user_id, phones));
       const before = [...(member.hidden_pages ?? [])].sort().join();
       if (callerIsAdmin && [...hidden].sort().join() !== before)
         await mutate("set_member_pages", {
@@ -146,21 +142,12 @@ export function MemberForm({
             E-mail
             <Input value={member.email || "Não informado"} readOnly disabled />
           </label>
-          <label>
-            Celular com WhatsApp
-            <Input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="(11) 98765-4321"
-              maxLength={24}
-              disabled={!canEditPhone}
-            />
-            <small>
-              Nos grupos de WhatsApp dos clientes, as mensagens deste número
-              contam como do time.
-            </small>
-          </label>
+          <PhoneListField
+            phones={phones}
+            onChange={setPhones}
+            disabled={!canEditPhone}
+            hint="Nos grupos de WhatsApp dos clientes, as mensagens destes números contam como do time."
+          />
           <label>
             Perfil de acesso
             <Select

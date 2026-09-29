@@ -277,21 +277,25 @@ export async function saveTemperatureConfig(
     p_config: payload,
   });
 }
-export async function loadMemberPhone(company: string, user: string) {
-  if (offline(company)) return demoPhones.get(user) ?? null;
-  return rpc<string | null>("member_phone", { p_company: company, p_user: user });
+export async function loadMemberPhones(company: string, user: string) {
+  if (offline(company)) return demoPhones.get(user) ?? [];
+  return rpc<string[]>("member_phones", { p_company: company, p_user: user });
 }
-export async function saveMemberPhone(company: string, user: string, phone: string) {
+/** Grava a lista inteira (vazia apaga todos); devolve como ficou no banco. */
+export async function saveMemberPhones(
+  company: string,
+  user: string,
+  phones: string[],
+) {
   if (offline(company)) {
-    const full = phoneDigits(phone);
-    if (full) demoPhones.set(user, full);
-    else demoPhones.delete(user);
-    return full || null;
+    const full = [...new Set(phones.map(phoneDigits).filter(Boolean))];
+    demoPhones.set(user, full);
+    return full;
   }
-  return rpc<string | null>("set_member_phone", {
+  return rpc<string[]>("set_member_phones", {
     p_company: company,
     p_user: user,
-    p_phone: phone,
+    p_phones: phones,
   });
 }
 /** Os dígitos como o banco guarda (com 55 quando falta o país). */
@@ -307,7 +311,7 @@ export function phoneLabel(digits: string | null | undefined) {
 }
 
 // ------------------------------------------------------------ demonstração
-const demoPhones = new Map<string, string>();
+const demoPhones = new Map<string, string[]>();
 export const DEFAULT_BANDS: TemperatureBand[] = [
   { name: "Gelado", min: 0, color: "#2a78d6", alert: true },
   { name: "Frio", min: 30, color: "#7fb2ea", alert: true },

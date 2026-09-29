@@ -165,21 +165,31 @@ await check("o Jev só vale no termômetro, e o termômetro só com o Jev", asyn
   await rejects(() => rpc("ai_temperature_config", ["x".repeat(40), A]), /Sem permissão/);
 });
 
-await check("cada pessoa informa o telefone; líderes também, com as regras de sempre", async () => {
+await check("cada pessoa informa os telefones; líderes também, com as regras de sempre", async () => {
   await as(member);
-  assert.equal(await rpc("set_member_phone", [A, member, "(11) 98765-4321"]), "5511987654321");
-  assert.equal(await rpc("member_phone", [A, member]), "5511987654321");
-  await rejects(() => rpc("set_member_phone", [A, admin, "11 99999-0000"]), /Sem permissão/);
+  assert.deepEqual(await rpc("set_member_phones", [A, member, ["(11) 98765-4321"]]), ["5511987654321"]);
+  assert.deepEqual(await rpc("member_phones", [A, member]), ["5511987654321"]);
+  // Mais de um número, na ordem da pessoa; o repetido (sem o nono dígito) e o vazio saem.
+  assert.deepEqual(
+    await rpc("set_member_phones", [A, member, ["", "+44 20 7946 0958", "(11) 98765-4321", "11 8765-4321"]]),
+    ["442079460958", "5511987654321"],
+  );
+  assert.deepEqual(await rpc("member_phones", [A, member]), ["442079460958", "5511987654321"]);
+  await rejects(() => rpc("set_member_phones", [A, admin, ["11 99999-0000"]]), /Sem permissão/);
   await as(member);
-  await rejects(() => rpc("member_phone", [A, admin]), /Sem permissão/);
+  await rejects(() => rpc("member_phones", [A, admin]), /Sem permissão/);
   await as(member);
-  await rejects(() => rpc("set_member_phone", [A, member, "123"]), /DDD/);
+  await rejects(() => rpc("set_member_phones", [A, member, ["11 98765-4321", "123"]]), /telefone 123 com DDD/);
+  await as(member);
+  const eleven = Array.from({ length: 11 }, (_, i) => `11 9876${String(i).padStart(2, "0")}-0000`);
+  await rejects(() => rpc("set_member_phones", [A, member, eleven]), /no máximo 10/);
   await as(manager);
-  assert.equal(await rpc("member_phone", [A, member]), "5511987654321");
-  await rejects(() => rpc("set_member_phone", [A, admin, "11 99999-0000"]), /administradores/);
+  assert.deepEqual(await rpc("member_phones", [A, member]), ["442079460958", "5511987654321"]);
+  await rejects(() => rpc("set_member_phones", [A, admin, ["11 99999-0000"]]), /administradores/);
   await as(admin);
-  assert.equal(await rpc("set_member_phone", [A, admin, "+55 11 99999-0000"]), "5511999990000");
-  assert.equal(await rpc("set_member_phone", [A, admin, ""]), null);
+  assert.deepEqual(await rpc("set_member_phones", [A, admin, ["+55 11 99999-0000"]]), ["5511999990000"]);
+  assert.deepEqual(await rpc("set_member_phones", [A, admin, []]), []);
+  assert.deepEqual(await rpc("member_phones", [A, admin]), []);
   await as(outsider);
   await rejects(() => db.query(`select * from mavi_private.user_phones`), /permission denied/);
 });
@@ -489,13 +499,21 @@ await check("grupo muda de cliente e reunião apagada: as leituras acompanham", 
 await check("o telefone novo do time faz o grupo ser lido de novo", async () => {
   await sql(`update temperature_signals set status = 'done' where source_type = 'whatsapp' and status = 'pending'`);
   await as(admin);
-  await rpc("set_member_phone", [A, outsider, "11 91111-2222"]);
+  await rpc("set_member_phones", [A, outsider, ["11 91111-2222"]]);
   // Só o dia em que o número falou.
   const days = await sql(`select status from temperature_signals where source_type = 'whatsapp' order by day`);
   assert.deepEqual(days.map((d) => d.status), ["done", "pending"]);
   // Agora o Carlos é do time: o dia fica sem fala do cliente e sai sem ir ao Jev.
   const claimed = await claim();
   assert.equal(claimed.filter((c) => c.source_type === "whatsapp").length, 0);
+});
+
+await check("somar um número que não falou não lê o grupo de novo", async () => {
+  await sql(`update temperature_signals set status = 'done' where source_type = 'whatsapp'`);
+  await as(admin);
+  await rpc("set_member_phones", [A, outsider, ["11 91111-2222", "21 97777-6666"]]);
+  const days = await sql(`select status from temperature_signals where source_type = 'whatsapp' order by day`);
+  assert.deepEqual(days.map((d) => d.status), ["done", "done"]);
 });
 
 await check("reservar é leve e o material de uma reunião grande cabe no tempo da API", async () => {
