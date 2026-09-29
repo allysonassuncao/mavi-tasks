@@ -382,15 +382,31 @@ export function AiAssistant({
                 quem a começou continua. Para perguntar, abra uma nova conversa.
               </>
             }
-            send={(q, _history, handlers) =>
+            send={(q, _history, handlers, extra) =>
               askAi(
                 company,
                 { client: client || undefined, module: "assistant" },
                 q,
                 conv?.id ?? null,
                 handlers,
+                extra?.signal,
               )
             }
+            onRun={(run) => {
+              // A conversa nova já existe: parar ou sair não perde o fio.
+              if (!conv)
+                setChat((p) => ({
+                  ...p,
+                  conversation: {
+                    id: run.conversation,
+                    owner_id: user,
+                    title: "Nova conversa",
+                    scope: client ? { client } : {},
+                    module: "assistant",
+                    updated_at: new Date().toISOString(),
+                  },
+                }));
+            }}
             onAnswer={(a) => {
               if (!conv && a.conversation)
                 setChat((p) => ({

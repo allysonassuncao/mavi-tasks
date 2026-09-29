@@ -154,7 +154,9 @@ export interface AppNotification {
     /** Tarefa em Em validação para a pessoa validar. */
     | "review"
     /** Skills da MAVI: uma para aprovar, ou a da pessoa aprovada/devolvida (link /mavi/skills/<id>). */
-    | "ai_skill";
+    | "ai_skill"
+    /** A MAVI terminou (ou não conseguiu terminar) uma resposta depois que a pessoa saiu (link /mavi/conversas/<id>). */
+    | "ai_answer";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

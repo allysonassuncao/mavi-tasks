@@ -61,9 +61,10 @@ await check("tudo vem desligado; só líderes configuram", async () => {
     ["visuals", false],
     ["images", false],
     ["actions", false],
-    // As migrações 20261214090000 (skills), 20261216090000 (canvas e web) e 20261218090000 (mcp) acrescentam poderes.
+    // As migrações 20261214090000 (skills), 20261216090000 (canvas e web), 20261218090000 (mcp) e 20261220090000 (scrape) acrescentam poderes.
     ["canvas", false],
     ["web", false],
+    ["scrape", false],
     ["skills", false],
     ["mcp", false],
   ]);

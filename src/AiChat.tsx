@@ -18,6 +18,7 @@ import {
   Rocket,
   Send,
   Sparkles,
+  Square,
   Video,
   X,
   Trophy,
@@ -27,6 +28,7 @@ import { ARTIFACT_LINE, type AiArtifact } from "./mavi-artifacts";
 import { MaviMarkdown } from "./MaviMarkdown";
 import { QuestionCard } from "./MaviQuestions";
 import {
+  cancelRun,
   sourceLabel,
   type AiAnswer,
   type AiSource,
@@ -338,8 +340,8 @@ export type AiSend = (
   question: string,
   history: ChatTurn[],
   handlers: AiStreamHandlers,
-  /** O que vai junto com a pergunta (ex.: a ação confirmada no card). */
-  extra?: { confirm?: string },
+  /** O que vai junto com a pergunta (ex.: a ação confirmada no card) e o sinal para soltar a conexão. */
+  extra?: { confirm?: string; signal?: AbortSignal },
 ) => Promise<AiAnswer>;
 
 /**
@@ -351,15 +353,40 @@ export function useAiTurns({
   send,
   readOnly,
   onAnswer,
+  onRun,
 }: {
   initial?: ChatEntry[];
   send: AiSend;
   readOnly?: boolean;
   onAnswer?: (answer: AiAnswer, question: string) => void;
+  /** A resposta começou no servidor (a conversa em que ela fica). */
+  onRun?: (run: { id: string; conversation: string }, question: string) => void;
 }) {
   const [turns, setTurns] = useState<ChatEntry[]>(initial ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [stopping, setStopping] = useState(false);
+  // A resposta em andamento: a conexão (para soltar) e a execução (para parar).
+  const current = useRef<{ controller: AbortController; run: string | null; stop: boolean } | null>(null);
+  // Saiu da tela no meio da resposta: solta a conexão; o servidor continua e avisa.
+  useEffect(() => () => current.current?.controller.abort(), []);
+
+  /** Parar: pede ao servidor (a conversa fica com o que já chegou) e solta a conexão. */
+  async function stop() {
+    const c = current.current;
+    if (!c || c.stop) return;
+    c.stop = true;
+    setStopping(true);
+    // Sem o id ainda (acabou de perguntar), para quando ele chegar.
+    if (!c.run) {
+      setTimeout(() => {
+        if (current.current === c && !c.run) c.controller.abort();
+      }, 2500);
+      return;
+    }
+    await cancelRun(c.run).catch(() => null);
+    c.controller.abort();
+  }
 
   function patchLast(patch: (e: ChatEntry) => ChatEntry) {
     setTurns((t) =>
@@ -383,11 +410,19 @@ export function useAiTurns({
       { role: "assistant", content: "", steps: [], streaming: true },
     ]);
     let notes = 0;
+    const run: NonNullable<typeof current.current> = { controller: new AbortController(), run: null, stop: false };
+    current.current = run;
     try {
       const result = await send(
         q,
         history,
         {
+        onRun: (r) => {
+          run.run = r.id;
+          onRun?.(r, q);
+          // Pediu para parar antes de a execução existir.
+          if (run.stop) void cancelRun(r.id).catch(() => null).finally(() => run.controller.abort());
+        },
         onStep: (step) =>
           patchLast((e) => {
             const steps = e.steps ?? [];
@@ -436,7 +471,7 @@ export function useAiTurns({
             artifacts: [...(e.artifacts ?? []), artifact],
           })),
         },
-        extra,
+        { ...extra, signal: run.controller.signal },
       );
       patchLast((e) => ({
         ...e,
@@ -449,14 +484,28 @@ export function useAiTurns({
       onAnswer?.(result, q);
       return true;
     } catch (e) {
+      // Parou: fica o que já tinha chegado (o servidor guarda igual).
+      if (run.stop) {
+        patchLast((x) => ({
+          ...x,
+          content: `${x.content.trim() ? `${x.content.trim()}\n\n` : ""}*(Resposta interrompida por você.)*`,
+          streaming: false,
+          thinking: "",
+        }));
+        return true;
+      }
+      // Saiu da tela: nada a mostrar (a resposta segue no servidor).
+      if (run.controller.signal.aborted) return true;
       setError((e as Error).message);
       setTurns(turns);
       return false;
     } finally {
+      if (current.current === run) current.current = null;
+      setStopping(false);
       setBusy(false);
     }
   }
-  return { turns, busy, error, submit };
+  return { turns, busy, error, submit, stop, stopping };
 }
 
 export function AiChat({
@@ -469,6 +518,7 @@ export function AiChat({
   readOnly,
   readOnlyNote,
   onAnswer,
+  onRun,
 }: {
   intro: ReactNode;
   placeholder: string;
@@ -485,8 +535,10 @@ export function AiChat({
   readOnly?: boolean;
   readOnlyNote?: ReactNode;
   onAnswer?: (answer: AiAnswer) => void;
+  /** A resposta começou no servidor (a conversa já existe). */
+  onRun?: (run: { id: string; conversation: string }) => void;
 }) {
-  const chat = useAiTurns({ initial, send, readOnly, onAnswer });
+  const chat = useAiTurns({ initial, send, readOnly, onAnswer, onRun });
   const { turns, busy, error } = chat;
   const [draft, setDraft] = useState("");
   const log = useRef<HTMLDivElement>(null);
@@ -600,14 +652,27 @@ export function AiChat({
               }
             }}
           />
-          <button
-            type="submit"
-            className="btn primary"
-            disabled={busy || draft.trim().length < 2}
-            aria-label="Perguntar"
-          >
-            <Send size={15} />
-          </button>
+          {busy ? (
+            <button
+              type="button"
+              className="btn secondary ai-stop"
+              disabled={chat.stopping}
+              onClick={() => void chat.stop()}
+              aria-label="Parar a resposta"
+              title="Parar a resposta"
+            >
+              {chat.stopping ? <Loader2 size={15} className="spin" /> : <Square size={13} fill="currentColor" />}
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="btn primary"
+              disabled={draft.trim().length < 2}
+              aria-label="Perguntar"
+            >
+              <Send size={15} />
+            </button>
+          )}
         </form>
       )}
     </div>

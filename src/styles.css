@@ -25551,3 +25551,53 @@ main:has(> .mavi-chat) > .error-banner {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* MAVI · parar a resposta e a resposta que segue em segundo plano. */
+.mavi-send.stop {
+  background: #263334;
+  color: #fff;
+}
+.mavi-send.stop:disabled {
+  background: #6d7876;
+  color: #fff;
+}
+.meeting-chat-form .ai-stop {
+  color: #263334;
+}
+.mavi-background {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 8px 0;
+  padding: 12px 14px;
+  border: 1px solid #dfe8d3;
+  border-radius: 16px;
+  background: #f5faef;
+  color: #3e4b47;
+  text-align: left;
+}
+.mavi-background > svg {
+  flex-shrink: 0;
+  color: #5d8a3a;
+}
+.mavi-background p {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.mavi-background strong {
+  font-size: 0.84rem;
+  color: #263334;
+}
+.mavi-background .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+}

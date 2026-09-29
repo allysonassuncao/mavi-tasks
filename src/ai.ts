@@ -73,6 +73,8 @@ export type AiStreamHandlers = {
   onWarning?: (text: string) => void;
   /** A MAVI mostrou uma visualização, uma imagem ou uma ação (módulo MAVI). */
   onArtifact?: (artifact: AiArtifact) => void;
+  /** A execução desta resposta (para parar) e a conversa em que ela fica. */
+  onRun?: (run: { id: string; conversation: string }) => void;
 };
 export type AiAnswer = {
   answer: string;
@@ -129,6 +131,7 @@ export async function streamAnswer(
     else if (e.type === "text") handlers.onText?.(e.text);
     else if (e.type === "round_end") handlers.onRoundEnd?.();
     else if (e.type === "warning") handlers.onWarning?.(e.text);
+    else if (e.type === "run") handlers.onRun?.({ id: e.id, conversation: e.conversation });
     else if (e.type === "artifact") {
       const artifact = sanitizeArtifact(e.artifact);
       if (artifact) handlers.onArtifact?.(artifact);
@@ -267,6 +270,18 @@ async function rpc<T>(name: string, args: Record<string, unknown>) {
   if (error) throw error;
   return data as T;
 }
+/** Parar uma resposta da MAVI (a sua): o servidor para no próximo passo. */
+export const cancelRun = (run: string) => rpc<boolean | null>("ai_run_cancel", { p_run: run });
+export type ActiveRun = {
+  id: string;
+  conversation: string | null;
+  question: string;
+  started_at: string;
+  cancel_requested: boolean;
+};
+/** As respostas da MAVI ainda em andamento (de quem está logado). */
+export const activeRuns = (company: string) =>
+  rpc<ActiveRun[]>("ai_runs_active", { p_company: company }).then((l) => l ?? []);
 export const renameConversation = (id: string, title: string) =>
   rpc("ai_rename_conversation", { p_conversation: id, p_title: title });
 export const deleteConversation = (id: string) =>

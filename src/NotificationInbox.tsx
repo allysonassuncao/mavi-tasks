@@ -115,7 +115,7 @@ export function NotificationInbox({
                       <span className="inbox-system" aria-hidden="true">
                         <Puzzle size={15} />
                       </span>
-                    ) : n.kind === "social_leads" || n.kind === "ai_share" ? (
+                    ) : n.kind === "social_leads" || n.kind === "ai_share" || n.kind === "ai_answer" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <Sparkles size={15} />
                       </span>
@@ -130,6 +130,7 @@ export function NotificationInbox({
                       {n.kind === "social_leads" ||
                       n.kind === "ai_share" ||
                       n.kind === "ai_skill" ||
+                      n.kind === "ai_answer" ||
                       n.kind === "success_case" ||
                       n.kind === "temperature" ||
                       n.kind === "tasks_assigned" ||

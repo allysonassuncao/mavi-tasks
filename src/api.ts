@@ -1265,6 +1265,8 @@ export interface RealtimeCallbacks {
   user?: string;
   /** A new notification for `user` (e.g. they were mentioned). */
   onNotification?: (row: { id: string; task_id: string }) => void;
+  /** Uma resposta da MAVI de `user` terminou (ou parou), no mesmo tópico da caixa de entrada. */
+  onAiRun?: (row: { id: string; conversation: string | null; status: string }) => void;
   onChange?: (change: LiveChange) => void;
   /** Back online after a drop: notices sent meanwhile were missed. */
   onResync?: () => void;
@@ -1307,6 +1309,15 @@ export function subscribeToCompanyChanges(
             company_id: string;
           };
           if (row.company_id === company) callbacks.onNotification?.(row);
+        })
+        .on("broadcast", { event: "ai_run" }, ({ payload }) => {
+          const row = payload as {
+            id: string;
+            company_id: string;
+            conversation: string | null;
+            status: string;
+          };
+          if (row.company_id === company) callbacks.onAiRun?.(row);
         })
     : null;
   // Private topics are authorised with the person's session token.

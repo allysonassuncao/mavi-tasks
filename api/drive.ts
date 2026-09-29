@@ -277,10 +277,30 @@ export default async function handler(
       res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
       res.setHeader("X-Accel-Buffering", "no");
       res.statusCode = 200;
-      const write = (event: unknown) => res.write(`${JSON.stringify(event)}\n`);
+      // Quem saiu da página não recebe mais nada (e nada quebra).
+      res.on("error", () => {});
+      const write = (event: unknown) => {
+        if (!res.destroyed && !res.writableEnded) res.write(`${JSON.stringify(event)}\n`);
+      };
       if (action === "ai-ask") {
         const env = aiEnv(driveEnv());
-        await streamAi(body, authorization, env, aiDeps(env), write);
+        // A conexão caiu antes do fim: parou ou saiu (a resposta continua e avisa).
+        const closed: (() => void)[] = [];
+        let done = false;
+        res.on("close", () => {
+          if (!done) for (const listener of closed.splice(0)) listener();
+        });
+        const work = streamAi(body, authorization, env, aiDeps(env), write, {
+          onClose: (listener) => {
+            if (res.destroyed && !done) listener();
+            else closed.push(listener);
+          },
+        }).finally(() => {
+          done = true;
+        });
+        // Na Vercel, o que segue depois que a pessoa sai precisa do waitUntil.
+        waitUntil(work.catch(() => {}));
+        await work;
       } else
         await streamMeetingAsk(
           body,

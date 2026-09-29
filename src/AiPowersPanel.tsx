@@ -8,6 +8,7 @@ import {
   Plug,
   Presentation,
   Puzzle,
+  ScanText,
 } from "lucide-react";
 import { Button, Loading } from "./ui";
 import { MultiPick } from "./MultiPick";
@@ -24,6 +25,7 @@ const ICONS = {
   canvas: Presentation,
   web: Globe,
   mcp: Plug,
+  scrape: ScanText,
 };
 const blank = (power: Power): PowerSetting => ({
   power,

@@ -21,6 +21,7 @@ import {
   Search,
   Share2,
   Sparkles,
+  Square,
   SquarePen,
   Trash2,
 } from "lucide-react";
@@ -55,13 +56,16 @@ import {
   SUGGESTIONS_CLIENT,
 } from "./AiAssistant";
 import {
+  activeRuns,
   askAi,
+  cancelRun,
   conversationMessages,
   deleteConversation,
   getConversation,
   listConversations,
   openAiSource,
   renameConversation,
+  type ActiveRun,
   type AiAnswer,
   type AiConversation,
 } from "./ai";
@@ -197,6 +201,10 @@ export function MaviChatPage({
   const [drawer, setDrawer] = useState(false);
   // A conversa na tela: quando o endereço muda para ela, nada a carregar.
   const onScreen = useRef<string | null>(null);
+  // Respostas em andamento de quando a pessoa saiu (as desta tela ficam de fora).
+  const [runs, setRuns] = useState<ActiveRun[]>([]);
+  const ownRuns = useRef(new Set<string>());
+  const [reload, setReload] = useState(0);
 
   const clients = data.clients
     .filter((c) => !c.archived)
@@ -246,7 +254,24 @@ export function MaviChatPage({
         setList([]);
         setError((e as Error).message);
       });
-  }, [company]);
+  }, [company, reload]);
+  useEffect(() => {
+    activeRuns(company)
+      .then((l) => setRuns(l.filter((r) => !ownRuns.current.has(r.id))))
+      .catch(() => setRuns([]));
+  }, [company, conversationId, reload]);
+  // Uma resposta terminou (aviso pelo tópico da pessoa): a conversa aberta recarrega.
+  useEffect(() => {
+    const done = (e: Event) => {
+      const row = (e as CustomEvent<{ id: string; conversation: string | null }>).detail;
+      if (!row || ownRuns.current.has(row.id)) return;
+      setRuns((l) => l.filter((r) => r.id !== row.id));
+      if (row.conversation && row.conversation === onScreen.current) onScreen.current = null;
+      setReload((n) => n + 1);
+    };
+    window.addEventListener("mavi:ai-run", done);
+    return () => window.removeEventListener("mavi:ai-run", done);
+  }, []);
 
   // O endereço manda: abre a conversa dele (ou uma nova).
   useEffect(() => {
@@ -284,7 +309,7 @@ export function MaviChatPage({
     return () => {
       alive = false;
     };
-  }, [company, conversationId]);
+  }, [company, conversationId, reload]);
 
   function toggleSide() {
     if (narrow()) {
@@ -311,6 +336,23 @@ export function MaviChatPage({
   function open(c: AiConversation) {
     setDrawer(false);
     if (c.id !== thread.conversation?.id) onOpen(c.id);
+  }
+  /** A resposta começou: a conversa nova já existe (aparece na lista e no endereço). */
+  function started(run: { id: string; conversation: string }, question: string) {
+    ownRuns.current.add(run.id);
+    if (thread.conversation || onScreen.current === run.conversation) return;
+    const c: AiConversation = {
+      id: run.conversation,
+      owner_id: user,
+      title: titleFrom(question),
+      scope: client ? { client } : {},
+      module: "assistant",
+      updated_at: new Date().toISOString(),
+    };
+    onScreen.current = c.id;
+    setThread((t) => ({ ...t, conversation: c }));
+    setList((l) => [c, ...(l ?? []).filter((x) => x.id !== c.id)]);
+    onOpen(c.id, true);
   }
   function answered(a: AiAnswer, question: string) {
     const current = thread.conversation;
@@ -601,13 +643,15 @@ export function MaviChatPage({
                 question,
                 conv?.id ?? null,
                 handlers,
-                undefined,
+                extra?.signal,
                 "page",
                 picked.map(({ slug, version }) => ({ slug, version })),
                 extra?.confirm,
               )
             }
             onAnswer={answered}
+            onRun={started}
+            background={runs.find((r) => r.conversation === (conv?.id ?? null)) ?? null}
             host={{
               company,
               conversation: conv?.id ?? null,
@@ -698,6 +742,8 @@ function ChatThread({
   scope,
   send,
   onAnswer,
+  onRun,
+  background,
   onNew,
   host,
 }: {
@@ -711,13 +757,18 @@ function ChatThread({
   scope: ReactNode;
   send: AiSend;
   onAnswer: (answer: AiAnswer, question: string) => void;
+  /** A resposta começou no servidor: a conversa nova já existe. */
+  onRun: (run: { id: string; conversation: string }, question: string) => void;
+  /** Uma resposta desta conversa ainda em andamento (de quando a pessoa saiu). */
+  background: ActiveRun | null;
   onNew: () => void;
   host: Omit<
     ArtifactHost,
     "readOnly" | "streaming" | "onDraft" | "onOpenCanvas" | "onReply" | "answered" | "onConfirmMcp"
   >;
 }) {
-  const chat = useAiTurns({ initial, send, readOnly, onAnswer });
+  const chat = useAiTurns({ initial, send, readOnly, onAnswer, onRun });
+  const [stoppingBackground, setStoppingBackground] = useState(false);
   const { turns, busy } = chat;
   const error = chat.error || pageError;
   const [draft, setDraft] = useState("");
@@ -741,7 +792,7 @@ function ChatThread({
   }, []);
 
   async function submit(question: string) {
-    if (!question.trim() || busy || readOnly) return;
+    if (!question.trim() || busy || readOnly || background) return;
     setDraft("");
     stick.current = true;
     if (!(await chat.submit(question))) setDraft(question.trim());
@@ -836,19 +887,28 @@ function ChatThread({
       />
       <div className="mavi-composer-bar">
         {scope}
-        <button
-          type="submit"
-          className="mavi-send"
-          disabled={busy || draft.trim().length < 2}
-          aria-label="Enviar"
-          title="Enviar (Enter)"
-        >
-          {busy ? (
-            <Loader2 size={17} className="spin" />
-          ) : (
+        {busy ? (
+          <button
+            type="button"
+            className="mavi-send stop"
+            disabled={chat.stopping}
+            onClick={() => void chat.stop()}
+            aria-label="Parar a resposta"
+            title="Parar a resposta"
+          >
+            {chat.stopping ? <Loader2 size={17} className="spin" /> : <Square size={13} fill="currentColor" />}
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="mavi-send"
+            disabled={draft.trim().length < 2 || !!background}
+            aria-label="Enviar"
+            title="Enviar (Enter)"
+          >
             <ArrowUp size={18} />
-          )}
-        </button>
+          </button>
+        )}
       </div>
     </form>
   );
@@ -856,6 +916,33 @@ function ChatThread({
     <p className="form-error mavi-error" role="alert">
       {error}
     </p>
+  );
+  // Voltou para uma conversa que ainda está respondendo (de quando saiu).
+  const backgroundBox = background && !busy && (
+    <div className="mavi-background" role="status">
+      <Loader2 size={16} className="spin" aria-hidden="true" />
+      <p>
+        <strong>A MAVI ainda está respondendo</strong>
+        <span>
+          “{background.question}”. A conversa atualiza sozinha quando terminar, e o
+          aviso chega na sua caixa de entrada.
+        </span>
+      </p>
+      {!background.cancel_requested && (
+        <button
+          type="button"
+          className="btn secondary"
+          disabled={stoppingBackground}
+          onClick={() => {
+            setStoppingBackground(true);
+            void cancelRun(background.id).catch(() => setStoppingBackground(false));
+          }}
+        >
+          {stoppingBackground ? <Loader2 size={14} className="spin" /> : <Square size={11} fill="currentColor" />}
+          {stoppingBackground ? "Parando…" : "Parar"}
+        </button>
+      )}
+    </div>
   );
 
   if (!turns.length)
@@ -868,6 +955,7 @@ function ChatThread({
           <h2>{greeting}</h2>
           <p>{intro}</p>
           {errorBox}
+          {backgroundBox}
           {composer}
           {!readOnly && (
             <div className="mavi-suggestions">
@@ -966,6 +1054,7 @@ function ChatThread({
             ),
           )}
           {errorBox}
+          {backgroundBox}
         </div>
       </div>
       <div className="mavi-dock">

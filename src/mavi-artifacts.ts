@@ -16,7 +16,8 @@ export type Power =
   | "skills"
   | "canvas"
   | "web"
-  | "mcp";
+  | "mcp"
+  | "scrape";
 export const POWERS: { id: Power; label: string; description: string }[] = [
   {
     id: "visuals",
@@ -47,6 +48,12 @@ export const POWERS: { id: Power; label: string; description: string }[] = [
     label: "Busca na internet",
     description:
       "A MAVI pesquisa na internet e lê páginas (notícias, concorrentes, dados públicos) e cita os links. Funciona com os modelos da Claude; cada busca custa US$ 0,01.",
+  },
+  {
+    id: "scrape",
+    label: "Leitura de páginas (web scraping)",
+    description:
+      "A MAVI abre links e sites públicos e lê o conteúdo: texto, tabelas, preços e dados de produtos, com as páginas citadas como fontes. Funciona com qualquer modelo e respeita o robots.txt dos sites.",
   },
   {
     id: "skills",
