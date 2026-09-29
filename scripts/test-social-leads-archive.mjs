@@ -203,6 +203,81 @@ await check("excluir de vez só o que não tem histórico", async () => {
   );
 });
 
+await check(
+  "cliente que já tem o produto, sem equipe, entra pelo Adicionar cliente sem duplicar",
+  async () => {
+    const [orphan, orphanContract] = [30, 31].map(uid);
+    await db.exec("reset role");
+    await db.exec(`insert into clients(company_id,id,name) values('${A}','${orphan}','5066');
+insert into contracts(company_id,id,client_id,product_id,name) values('${A}','${orphanContract}','${orphan}','${product}','Social Leads · 5066');`);
+    await as(lorena);
+    // Não aparece na carteira dela (nenhuma equipe sua atende o cliente)…
+    assert.ok(!(await portfolio()).includes("5066"));
+    // …mas aparece no Adicionar cliente, marcado como já tendo o produto.
+    const row = (
+      await one("select public.social_leads_addable_clients($1) as r", [A])
+    ).r.find((c) => c.name === "5066");
+    assert.equal(row.hidden_contract, orphanContract);
+    const k = (
+      await one("select public.social_leads_add_client($1,$2,null,null) as r", [
+        A,
+        orphan,
+      ])
+    ).r;
+    assert.equal(k, orphanContract);
+    assert.ok((await portfolio()).includes("5066"));
+    assert.ok(!(await names()).includes("5066"));
+    await db.exec("reset role");
+    assert.equal(
+      (
+        await one(
+          "select count(*)::int as n from contracts where client_id=$1",
+          [orphan],
+        )
+      ).n,
+      1,
+    );
+    // O administrador vê tudo na carteira: para ele, não é "a adicionar".
+    await as(admin);
+    assert.ok(!(await names()).includes("5066"));
+  },
+);
+
+await check(
+  "cadastrar em Clientes com o produto avisa a carteira aberta",
+  async () => {
+    const [c2, k2, other2] = [32, 33, 34].map(uid);
+    await db.exec("reset role");
+    await db.exec("delete from realtime.messages");
+    await db.exec(`insert into clients(company_id,id,name) values('${A}','${c2}','5067');
+insert into contracts(company_id,id,client_id,product_id,name) values('${A}','${k2}','${c2}','${product}','Social Leads · 5067');`);
+    const sent = await all("select payload from realtime.messages");
+    assert.ok(
+      sent.some(
+        (m) => m.payload?.kind === "social_leads" && m.payload?.contract === k2,
+      ),
+      JSON.stringify(sent),
+    );
+    // Outro produto não avisa o Social Leads.
+    await db.exec("delete from realtime.messages");
+    await db.exec(`insert into products(company_id,id,name) values('${A}','${other2}','Make Ads');
+insert into contracts(company_id,client_id,product_id,name) values('${A}','${c2}','${other2}','Make Ads · 5067');`);
+    assert.ok(
+      !(await all("select payload from realtime.messages")).some(
+        (m) => m.payload?.kind === "social_leads",
+      ),
+    );
+    // Arquivar o cliente em Clientes também avisa.
+    await db.exec("update clients set archived = true where id = '" + c2 + "'");
+    assert.ok(
+      (await all("select payload from realtime.messages")).some(
+        (m) =>
+          m.payload?.kind === "social_leads" && m.payload?.table === "clients",
+      ),
+    );
+  },
+);
+
 console.log(
   `\n${passed} verificações de arquivar e adicionar clientes passaram.`,
 );

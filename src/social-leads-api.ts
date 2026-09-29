@@ -101,6 +101,11 @@ export interface AddableClient {
   color: string;
   /** It had Social Leads before (archived): it comes back with its history. */
   archived_contract: string | null;
+  /**
+   * It has Social Leads already, but no team of the person serves it (so it
+   * isn't in their portfolio): adding makes the squad serve it.
+   */
+  hidden_contract?: string | null;
 }
 export interface SocialLeadsBackend {
   portfolio(company: string): Promise<Portfolio>;

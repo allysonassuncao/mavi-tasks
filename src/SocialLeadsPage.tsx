@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
+  RotateCcw,
   ArrowLeft,
   CircleCheck,
   Trash2,
@@ -161,6 +162,10 @@ export function SocialLeadsPage({
         data={data}
         user={user}
         isLeader={isLeader}
+        company={company}
+        backend={backend}
+        onChanged={load}
+        notify={notify}
         onOpen={open}
         onAdd={() => setAdding(true)}
         onSettings={
@@ -181,7 +186,7 @@ export function SocialLeadsPage({
             setAdding(false);
             notify(
               restored
-                ? "Cliente de volta ao Social Leads, com o histórico de antes."
+                ? "Cliente na carteira do Social Leads, com o histórico que já havia."
                 : "Cliente adicionado ao Social Leads. Comece pelo briefing.",
             );
             load();
@@ -241,6 +246,16 @@ function AddClient({
     };
   }, [backend, company]);
   const picked = candidates?.find((c) => c.id === client);
+  // Clients already in the portfolio stay in the list, disabled, so that
+  // searching for one never answers "Nada encontrado".
+  const listed = new Set(candidates?.map((c) => c.id) ?? []);
+  const inPortfolio = [
+    ...new Map(
+      portfolio.items
+        .filter((i) => !listed.has(i.client_id))
+        .map((i) => [i.client_id, i.client_name]),
+    ),
+  ].sort((a, b) => a[1].localeCompare(b[1]));
   const squad = data.teams.find((t) => t.id === portfolio.team_id)?.name;
   return (
     <Modal
@@ -263,24 +278,44 @@ function AddClient({
               portfolio.team_id ?? null,
               picked.name,
             )
-            .then((k) => onAdded(k, !!picked.archived_contract))
+            .then((k) =>
+              onAdded(
+                k,
+                !!(picked.archived_contract || picked.hidden_contract),
+              ),
+            )
             .catch((err) => setError((err as Error).message))
             .finally(() => setBusy(false));
         }}
       >
         {candidates === null ? (
           <Loading compact />
-        ) : candidates.length ? (
+        ) : candidates.length || inPortfolio.length ? (
           <label>
             Cliente
             <Select value={client} onValueChange={setClient} required>
               <SelectOption value="">Escolha o cliente</SelectOption>
               {candidates.map((c) => (
                 <SelectOption key={c.id} value={c.id}>
-                  {c.archived_contract ? `${c.name} (arquivado)` : c.name}
+                  {c.hidden_contract
+                    ? `${c.name} (já tem o produto)`
+                    : c.archived_contract
+                      ? `${c.name} (arquivado)`
+                      : c.name}
+                </SelectOption>
+              ))}
+              {inPortfolio.map(([id, name]) => (
+                <SelectOption key={id} value={`na-carteira:${id}`} disabled>
+                  {`${name} · já está na carteira`}
                 </SelectOption>
               ))}
             </Select>
+            {!candidates.length && (
+              <small className="sl-muted">
+                Os clientes que você pode adicionar já estão na carteira. Para
+                um cliente novo, cadastre-o em Clientes e volte aqui.
+              </small>
+            )}
           </label>
         ) : (
           <p className="sl-alert info-soft">
@@ -289,7 +324,14 @@ function AddClient({
               : "Nenhum cliente das suas equipes está fora do Social Leads. Peça a um administrador ou gestor para cadastrar o cliente em Clientes, com uma equipe sua, e volte aqui."}
           </p>
         )}
-        {picked?.archived_contract ? (
+        {picked?.hidden_contract ? (
+          <p className="sl-muted">
+            {picked.name} já tem o produto Social Leads, mas nenhuma equipe sua
+            atende o cliente, por isso ele não aparecia na carteira. Ao
+            adicionar, {squad ? `a equipe ${squad}` : "o squad"} passa a
+            atendê-lo, com o mesmo produto e o que já houver nele.
+          </p>
+        ) : picked?.archived_contract ? (
           <p className="sl-muted">
             {picked.name} já esteve no Social Leads e volta com o briefing, os
             planos e o histórico de antes.
@@ -313,9 +355,11 @@ function AddClient({
             disabled={!picked || !product}
             loading={busy}
           >
-            {picked?.archived_contract
-              ? "Trazer de volta"
-              : "Adicionar e abrir o briefing"}
+            {picked?.hidden_contract
+              ? "Adicionar à carteira"
+              : picked?.archived_contract
+                ? "Trazer de volta"
+                : "Adicionar e abrir o briefing"}
           </Button>
         </div>
       </form>
@@ -485,6 +529,10 @@ function PortfolioView({
   data,
   user,
   isLeader,
+  company,
+  backend,
+  onChanged,
+  notify,
   onOpen,
   onAdd,
   onSettings,
@@ -493,6 +541,10 @@ function PortfolioView({
   data: Snapshot;
   user: string;
   isLeader: boolean;
+  company: string;
+  backend: SocialLeadsBackend;
+  onChanged: () => void;
+  notify: (m: string) => void;
   onOpen: (
     item: PortfolioItem,
     tab: "plano" | "briefing",
@@ -512,8 +564,31 @@ function PortfolioView({
   const [stage, setStage] = useUrlState<string>("etapa", "");
   const [query, setQuery] = useState("");
   const [allActions, setAllActions] = useState(false);
+  const [leaving, setLeaving] = useState<PortfolioItem | null>(null);
+  // Clients taken out of the portfolio, to bring back ("Arquivados").
+  const [archived, setArchived] = useState<AddableClient[]>([]);
+  const [restoring, setRestoring] = useState("");
+  const loadArchived = useCallback(() => {
+    backend
+      .addableClients(company)
+      .then((list) => setArchived(list.filter((c) => c.archived_contract)))
+      .catch(() => setArchived([]));
+  }, [backend, company]);
+  useEffect(loadArchived, [loadArchived, portfolio]);
   const member = (id: string | null | undefined) =>
     data.members.find((m) => m.user_id === id);
+  const restore = (c: AddableClient) => {
+    setRestoring(c.id);
+    backend
+      .archive(company, c.archived_contract!, false)
+      .then(() => {
+        notify(`${c.name} voltou ao Social Leads, com o histórico de antes.`);
+        onChanged();
+        loadArchived();
+      })
+      .catch((e) => notify((e as Error).message))
+      .finally(() => setRestoring(""));
+  };
 
   const scoped = items.filter(
     (i) => scope !== "minha" || i.briefing?.responsible_id === user,
@@ -550,7 +625,7 @@ function PortfolioView({
     else onOpen(item, "plano");
   };
 
-  if (!items.length)
+  if (!items.length && !archived.length)
     return (
       <Empty
         title="Nenhum cliente no Social Leads ainda"
@@ -669,12 +744,23 @@ function PortfolioView({
             <button
               type="button"
               role="tab"
-              aria-selected={scope !== "minha"}
-              className={scope !== "minha" ? "selected" : ""}
+              aria-selected={scope === "todos"}
+              className={scope === "todos" ? "selected" : ""}
               onClick={() => setScope("todos")}
             >
               Todos <span>{items.length}</span>
             </button>
+            {(archived.length > 0 || scope === "arquivados") && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope === "arquivados"}
+                className={scope === "arquivados" ? "selected" : ""}
+                onClick={() => setScope("arquivados")}
+              >
+                Arquivados <span>{archived.length}</span>
+              </button>
+            )}
           </div>
           <div className="sl-search">
             <Input
@@ -701,7 +787,64 @@ function PortfolioView({
             </Button>
           )}
         </div>
-        {!shown.length ? (
+        {scope === "arquivados" ? (
+          !archived.length ? (
+            <Empty
+              title="Nenhum cliente arquivado"
+              body="Clientes tirados do Social Leads aparecem aqui, para trazer de volta com o histórico."
+            />
+          ) : (
+            <div className="sl-table-wrap">
+              <table className="sl-table">
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Situação</th>
+                    <th aria-label="Ações" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {archived
+                    .filter(
+                      (c) =>
+                        !query.trim() ||
+                        fold(c.name).includes(fold(query.trim())),
+                    )
+                    .map((c) => (
+                      <tr key={c.id} className="sl-row-archived">
+                        <td>
+                          <div className="sl-client">
+                            <span
+                              className="sl-initials"
+                              style={{
+                                background: `${c.color}33`,
+                                color: c.color,
+                              }}
+                            >
+                              {c.name.slice(0, 2).toUpperCase()}
+                            </span>
+                            <strong>{c.name}</strong>
+                          </div>
+                        </td>
+                        <td className="sl-muted">
+                          Arquivado · briefing e planos guardados
+                        </td>
+                        <td className="sl-row-actions">
+                          <Button
+                            className="btn secondary"
+                            loading={restoring === c.id}
+                            onClick={() => restore(c)}
+                          >
+                            <RotateCcw size={15} /> Trazer de volta
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : !shown.length ? (
           <Empty
             title="Nenhum cliente aqui"
             body={
@@ -720,6 +863,7 @@ function PortfolioView({
                   <th>Mês</th>
                   <th>Próximo passo</th>
                   <th>Responsável</th>
+                  <th aria-label="Ações" />
                 </tr>
               </thead>
               <tbody>
@@ -788,6 +932,23 @@ function PortfolioView({
                           <span className="sl-muted">Sem responsável</span>
                         )}
                       </td>
+                      <td className="sl-row-actions">
+                        {i.can_write && (
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label={`Tirar ${i.client_name} do Social Leads`}
+                            title="Arquivar ou excluir do Social Leads"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setLeaving(i);
+                            }}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
+                            <Archive size={16} />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -796,6 +957,21 @@ function PortfolioView({
           </div>
         )}
       </section>
+      {leaving && (
+        <LeaveModal
+          name={leaving.briefing?.fields.clientName || leaving.client_name}
+          company={company}
+          contract={leaving.contract_id}
+          empty={leaving.plan_count === 0}
+          backend={backend}
+          onClose={() => setLeaving(null)}
+          onDone={(message) => {
+            setLeaving(null);
+            notify(message);
+            onChanged();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -852,7 +1028,6 @@ function ClientView({
   const [bundle, setBundle] = useState<ContractBundle | null>(null);
   const [error, setError] = useState("");
   const [month, setMonth] = useUrlState<number>("mes", 0);
-  const [leaving, setLeaving] = useState(false);
   const load = useCallback(() => {
     backend
       .contract(company, item.contract_id)
@@ -929,32 +1104,7 @@ function ClientView({
             ))}
           </div>
         )}
-        {item.can_write && (
-          <Button
-            className="btn secondary sl-leave"
-            title="Tirar este cliente do Social Leads"
-            onClick={() => setLeaving(true)}
-          >
-            <Archive size={15} /> Tirar do Social Leads
-          </Button>
-        )}
       </div>
-      {leaving && (
-        <LeaveModal
-          name={name}
-          company={company}
-          contract={item.contract_id}
-          empty={item.plan_count === 0 && !plans.length}
-          backend={backend}
-          onClose={() => setLeaving(false)}
-          onDone={(message) => {
-            setLeaving(false);
-            notify(message);
-            onChanged();
-            onBack();
-          }}
-        />
-      )}
       <div
         className="scope-tabs sl-tabs"
         role="tablist"
@@ -1063,7 +1213,7 @@ function LeaveModal({
       .then(() =>
         onDone(
           kind === "archive"
-            ? `${name} saiu do Social Leads. Para trazer de volta, use “Adicionar cliente”.`
+            ? `${name} saiu do Social Leads. Para trazer de volta, abra “Arquivados”.`
             : `${name} foi excluído do Social Leads.`,
         ),
       )
@@ -1082,8 +1232,8 @@ function LeaveModal({
           o briefing, os planos, as tarefas e os arquivos no Drive ficam
           guardados, e as tarefas que se repetem (acompanhamento e reunião)
           param de abrir enquanto ele estiver arquivado. O cliente continua em
-          Clientes, com os outros produtos. Para trazer de volta, use “Adicionar
-          cliente”.
+          Clientes, com os outros produtos. Para trazer de volta, use a aba
+          “Arquivados” da carteira.
         </p>
         {empty && (
           <p className="sl-muted">

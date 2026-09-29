@@ -203,23 +203,61 @@
   flex: 1;
 }
 .sl-alert-read {
-  display: grid;
-  justify-items: end;
-  gap: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
   flex-shrink: 0;
-  font-size: 0.72rem;
-  font-weight: 600;
+  margin-left: auto;
 }
-.sl-alert-read label {
+.sl-read-toggle {
   display: inline-flex;
+  flex-direction: row;
   align-items: center;
   gap: 6px;
-  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 4px 10px 4px 6px;
+  color: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
   white-space: nowrap;
+  cursor: pointer;
+}
+.sl-read-toggle:hover:not(:disabled) {
+  background: #fff;
+  border-color: rgba(0, 0, 0, 0.22);
+}
+.sl-read-toggle:focus-visible {
+  outline: 2px solid #9fc970;
+  outline-offset: 2px;
+}
+.sl-read-box {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  opacity: 0.7;
+}
+.sl-read-toggle.on {
+  border-color: #b9db81;
+  background: #eef7df;
+  color: #3f6a2b;
+}
+.sl-read-toggle.on .sl-read-box {
+  border-color: #4f9879;
+  background: #4f9879;
+  color: #fff;
+  opacity: 1;
 }
 .sl-alert-read small {
+  color: #6b7876;
+  font-size: 0.68rem;
   font-weight: 400;
-  opacity: 0.8;
 }
 .sl-alert-item.read,
 .sl-flag-list li.read {
@@ -253,8 +291,9 @@
     flex-wrap: wrap;
   }
   .sl-alert-read {
-    justify-items: start;
+    align-items: flex-start;
     width: 100%;
+    margin-left: 0;
     padding-left: 23px;
   }
 }
@@ -591,4 +630,20 @@
 }
 .sl-public-text .rich-text-content p {
   margin: 0 0 4px;
+}
+
+/* ------------------------------------------------------------ carteira: ações e arquivados */
+.sl-row-actions {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+.sl-row-actions .icon-btn {
+  color: #84908f;
+}
+.sl-row-actions .icon-btn:hover {
+  color: #8d3d4b;
+}
+.sl-row-archived td {
+  cursor: default;
 }

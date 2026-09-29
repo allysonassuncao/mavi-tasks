@@ -2855,15 +2855,20 @@ function Alerts({
     const r = readOf(text);
     return (
       <span className="sl-alert-read">
-        <label>
-          <Checkbox
-            checked={!!r}
-            disabled={busy === text}
-            onCheckedChange={(v) => mark(text, kind, v === true)}
-            aria-label={r ? "Marcar como não lido" : "Marcar como lido"}
-          />
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={!!r}
+          className={`sl-read-toggle${r ? " on" : ""}`}
+          disabled={busy === text}
+          title={r ? "Marcar como não lido" : "Marcar como lido"}
+          onClick={() => mark(text, kind, !r)}
+        >
+          <span className="sl-read-box" aria-hidden="true">
+            {r && <Check size={11} strokeWidth={3.2} />}
+          </span>
           {r ? "Lido" : "Marcar como lido"}
-        </label>
+        </button>
         {r && (
           <small>
             {who(r.read_by)?.split(" ")[0] ?? "Alguém"} · {dateTime(r.read_at)}
