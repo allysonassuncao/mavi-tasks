@@ -1686,6 +1686,13 @@ tbody tr:last-child td {
   align-items: center;
   max-width: 90vw;
 }
+/* In the top layer (popover), so it shows above open modals. */
+.toast[popover] {
+  inset: auto auto 24px 50%;
+  margin: 0;
+  overflow: visible;
+  z-index: 2147483647;
+}
 .toast.connection-toast {
   inset: 18px auto auto 50%;
   margin: 0;

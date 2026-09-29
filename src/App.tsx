@@ -206,6 +206,7 @@ import {
   type TaskViewConfig,
 } from "./task-grouping";
 import { NoticeCenter } from "./NoticeCenter";
+import { useAlwaysOnTop } from "./ConnectionStatus";
 import { noticesApi, onDemoNoticesChange } from "./notices";
 import { useInboxTitle } from "./inbox-title";
 import { authErrorMessage } from "./auth-errors";
@@ -763,6 +764,9 @@ export default function App() {
     const id = setTimeout(() => setToast(""), 4500);
     return () => clearTimeout(id);
   }, [toast]);
+  // Feedback from inside a modal (e.g. a recording's "Copiar link") must show
+  // above it, not behind in the page.
+  const toastRef = useAlwaysOnTop(!!toast);
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data, error }) => {
@@ -4119,7 +4123,7 @@ export default function App() {
           />
         )}
       {toast && (
-        <div className="toast" role="status">
+        <div ref={toastRef} popover="manual" className="toast" role="status">
           <Check size={17} />
           {toast}
         </div>

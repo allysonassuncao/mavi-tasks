@@ -26,7 +26,7 @@ export type ConnectionNotice = "offline" | "back" | null;
  * z-index. The notice joins that layer as a manual popover and moves back to
  * the front whenever a dialog opens after it, so nothing ever covers it.
  */
-function useAlwaysOnTop(active: boolean) {
+export function useAlwaysOnTop(active: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current;
