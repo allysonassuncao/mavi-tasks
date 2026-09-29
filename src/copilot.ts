@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabase";
 import type { AiSource } from "./ai";
+import type { Snapshot } from "./types";
 
 /**
  * Assistente MAVI nas tarefas, no navegador. Duas camadas, só quando a
@@ -22,7 +23,85 @@ export type CopilotDraft = {
   due?: string;
   /** Campos do modelo, como "Campo: valor". */
   extra?: string;
+  /** Campos do modelo em branco (um por linha). */
+  empty?: string;
+  /** Nomes dos anexos (um por linha). */
+  files?: string;
+  /** Tarefa principal e subtarefas. */
+  family?: string;
+  /** Quem executa: nome e equipes. */
+  assignee?: string;
 };
+
+/**
+ * O resto da tarefa, para a MAVI ler inteira: sem isso ela pedia o que já
+ * estava nos campos, nos anexos ou na tarefa principal.
+ */
+export function copilotExtras(
+  data: Pick<Snapshot, "members" | "teams" | "teamMembers" | "tasks">,
+  args: {
+    /** Quem executa (ou a equipe que vai receber). */
+    assignee?: string | null;
+    team?: string | null;
+    /** A tarefa principal (subtarefa) e a própria tarefa (edição). */
+    parent?: string | null;
+    task?: string | null;
+    files?: string[];
+    /** Campos do modelo com o valor (o formulário ou a cópia da tarefa). */
+    fields?: { label: string; required?: boolean; value?: unknown }[];
+  },
+): Pick<CopilotDraft, "extra" | "empty" | "files" | "family" | "assignee"> {
+  const teamName = (id: string) => data.teams.find((t) => t.id === id)?.name;
+  const person = args.assignee
+    ? data.members.find((m) => m.user_id === args.assignee)
+    : undefined;
+  const teams = person
+    ? data.teamMembers
+        .filter((t) => t.user_id === person.user_id)
+        .flatMap((t) => teamName(t.team_id) ?? [])
+    : [];
+  const assignee = args.team
+    ? `equipe ${teamName(args.team) ?? "?"} (distribuída automaticamente)`
+    : person
+      ? `${person.name}${teams.length ? ` · equipes: ${teams.join(", ")}` : ""}`
+      : "";
+  const parent = args.parent
+    ? data.tasks.find((t) => t.id === args.parent)
+    : undefined;
+  const subtasks = args.task
+    ? data.tasks.filter((t) => t.parent_id === args.task && !t.archived)
+    : [];
+  const family = [
+    parent ? `Tarefa principal: ${parent.title}` : "",
+    subtasks.length
+      ? `Subtarefas: ${subtasks
+          .slice(0, 12)
+          .map((t) => t.title)
+          .join("; ")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const filled = (v: unknown) =>
+    !(v == null || v === "" || v === false || (Array.isArray(v) && !v.length));
+  const fields = args.fields ?? [];
+  return {
+    extra: fields
+      .filter((f) => filled(f.value))
+      .map(
+        (f) =>
+          `${f.label}: ${Array.isArray(f.value) ? f.value.join(", ") : f.value === true ? "sim" : String(f.value)}`,
+      )
+      .join("\n"),
+    empty: fields
+      .filter((f) => !filled(f.value))
+      .map((f) => `${f.label}${f.required ? " (obrigatório)" : ""}`)
+      .join("\n"),
+    files: (args.files ?? []).slice(0, 20).join("\n"),
+    family,
+    assignee,
+  };
+}
 export type SimilarTask = {
   id: string;
   title: string;
@@ -65,8 +144,23 @@ export type CopilotAlert = {
   title: string;
   text: string;
   fix?: string;
+  /** O trecho literal da fonte que sustenta o alerta. */
+  quote?: string;
   sources: AiSource[];
   dossier: { id: string; kind: string; text: string }[];
+};
+/**
+ * O resultado da análise: ok = a tarefa está bem completa; attention = há
+ * pontos a revisar; quiet = nada do histórico muda a tarefa.
+ */
+export type CopilotVerdict = {
+  status: "ok" | "attention" | "quiet";
+  text: string;
+};
+type ReviewResult = {
+  alerts: CopilotAlert[];
+  version: number;
+  verdict: CopilotVerdict;
 };
 export type CopilotAction =
   "applied" | "useful" | "not_useful" | "dismissed" | "ignored" | "opened";
@@ -96,6 +190,10 @@ export const draftKey = (d: CopilotDraft) =>
     clean(d.description),
     d.due,
     clean(d.extra ?? ""),
+    clean(d.empty ?? ""),
+    clean(d.files ?? ""),
+    clean(d.family ?? ""),
+    d.assignee,
   ]
     .map((x) => x ?? "")
     .join("|");
@@ -110,7 +208,13 @@ export function meaningfulChange(
   next: CopilotDraft,
 ) {
   if (!prev) return true;
-  if (prev.contract !== next.contract || prev.due !== next.due) return true;
+  if (
+    prev.contract !== next.contract ||
+    prev.due !== next.due ||
+    prev.files !== next.files ||
+    prev.extra !== next.extra
+  )
+    return true;
   const words = (d: CopilotDraft) =>
     new Set(
       draftText(d)
@@ -128,10 +232,7 @@ export function meaningfulChange(
 
 // Cache desta aba (o mesmo rascunho não vai ao servidor de novo).
 const relatedCache = new Map<string, Related>();
-const reviewCache = new Map<
-  string,
-  { alerts: CopilotAlert[]; version: number }
->();
+const reviewCache = new Map<string, ReviewResult>();
 function remember<T>(cache: Map<string, T>, key: string, value: T) {
   cache.set(key, value);
   if (cache.size > 40) cache.delete(cache.keys().next().value!);
@@ -165,14 +266,14 @@ export async function fetchRelated(d: CopilotDraft, signal: AbortSignal) {
 type ReviewHandlers = {
   onRelated: (r: Related) => void;
   onAlert: (a: CopilotAlert) => void;
-  onStatus: (text: string) => void;
+  onStatus: (text: string, step: number) => void;
 };
 /** A análise em tempo real (linhas JSON); devolve os alertas e a versão do dossiê. */
 export async function streamReview(
   d: CopilotDraft,
   handlers: ReviewHandlers,
   signal: AbortSignal,
-): Promise<{ alerts: CopilotAlert[]; version: number } | "throttled"> {
+): Promise<ReviewResult | "throttled"> {
   const res = await post({ action: "ai-copilot-review", ...d }, signal);
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => ({}));
@@ -181,17 +282,23 @@ export async function streamReview(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let final: { alerts: CopilotAlert[]; version: number } | "throttled" | null =
-    null;
+  let final: ReviewResult | "throttled" | null = null;
   const handle = (line: string) => {
     if (!line.trim()) return;
     const e = JSON.parse(line);
     if (e.type === "related") handlers.onRelated(e);
     else if (e.type === "alert") handlers.onAlert(e.alert);
-    else if (e.type === "status") handlers.onStatus(e.text);
+    else if (e.type === "status") handlers.onStatus(e.text, e.step ?? 2);
     else if (e.type === "throttled") final = "throttled";
     else if (e.type === "done")
-      final = { alerts: e.alerts ?? [], version: e.version ?? 0 };
+      final = {
+        alerts: e.alerts ?? [],
+        version: e.version ?? 0,
+        verdict: e.verdict ?? {
+          status: e.alerts?.length ? "attention" : "quiet",
+          text: "",
+        },
+      };
     else if (e.type === "error")
       throw Error(e.error ?? "A MAVI não respondeu.");
   };
@@ -296,6 +403,7 @@ export async function attachCopilotFeedback(
 function demoResult(d: CopilotDraft): {
   related: Related;
   alerts: CopilotAlert[];
+  verdict: CopilotVerdict;
 } {
   const src = (
     type: AiSource["type"],
@@ -309,6 +417,8 @@ function demoResult(d: CopilotDraft): {
     date,
     client_id: null,
   });
+  // Descrição caprichada: a demonstração mostra a tarefa completa.
+  const complete = d.description.trim().length >= 80;
   return {
     related: {
       client: { id: "demo", name: "Cliente demo" },
@@ -336,37 +446,43 @@ function demoResult(d: CopilotDraft): {
         },
       ],
     },
-    alerts: [
-      {
-        id: "a1",
-        kind: "avoids",
-        severity: "high",
-        title: "O cliente pediu para não usar vermelho",
-        text: "Na reunião de alinhamento ele disse que vermelho lembra a concorrente.",
-        fix: "Evitar vermelho nas artes (pedido do cliente).",
-        sources: [src("meeting", "Alinhamento mensal", "2026-09-10T13:00:00Z")],
-        dossier: [],
-      },
-      {
-        id: "a2",
-        kind: "duplicate",
-        severity: "medium",
-        title: "Há uma tarefa parecida em andamento",
-        text: `"Carrossel com a oferta do mês" está em andamento. Confira se "${d.title.slice(0, 40)}" não é o mesmo pedido.`,
-        sources: [src("task", "Carrossel com a oferta do mês", "2026-09-20")],
-        dossier: [],
-      },
-      {
-        id: "a3",
-        kind: "missing",
-        severity: "low",
-        title: "Diga quem aprova e até quando",
-        text: "As aprovações deste cliente passam pela gerente de marketing; um prazo de aprovação evita atraso.",
-        fix: "Aprovação: gerente de marketing, até 2 dias antes da publicação.",
-        sources: [],
-        dossier: [],
-      },
-    ],
+    alerts: complete
+      ? []
+      : [
+          {
+            id: "a1",
+            kind: "avoids",
+            severity: "high",
+            title: "O cliente pediu para não usar vermelho",
+            text: "Na reunião de alinhamento ele disse que vermelho lembra a concorrente.",
+            fix: "Evitar vermelho nas artes (pedido do cliente).",
+            quote: "vermelho lembra muito a concorrente, prefiro evitar",
+            sources: [
+              src("meeting", "Alinhamento mensal", "2026-09-10T13:00:00Z"),
+            ],
+            dossier: [],
+          },
+          {
+            id: "a2",
+            kind: "duplicate",
+            severity: "medium",
+            title: "Há uma tarefa parecida em andamento",
+            text: `"Carrossel com a oferta do mês" está em andamento. Confira se "${d.title.slice(0, 40)}" não é o mesmo pedido.`,
+            sources: [
+              src("task", "Carrossel com a oferta do mês", "2026-09-20"),
+            ],
+            dossier: [],
+          },
+        ],
+    verdict: complete
+      ? {
+          status: "ok",
+          text: "Formato, oferta e prazo estão claros, e nada vai contra o que o cliente pediu.",
+        }
+      : {
+          status: "attention",
+          text: "Revise a cor das artes e confira a tarefa parecida antes de criar.",
+        },
   };
 }
 
@@ -374,8 +490,12 @@ function demoResult(d: CopilotDraft): {
 export type CopilotState = {
   related: Related | null;
   alerts: CopilotAlert[];
+  /** O resultado da última análise (nulo: ainda não houve). */
+  verdict: CopilotVerdict | null;
   /** A análise está rodando (os alertas ainda podem chegar). */
   reviewing: boolean;
+  /** Em que passo a análise está: 1 lendo, 2 histórico, 3 escrevendo. */
+  step: number;
   status: string;
   error: string;
   throttled: boolean;
@@ -394,7 +514,9 @@ export function useTaskCopilot(
 ): CopilotState {
   const [related, setRelated] = useState<Related | null>(null);
   const [alerts, setAlerts] = useState<CopilotAlert[]>([]);
+  const [verdict, setVerdict] = useState<CopilotVerdict | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [step, setStep] = useState(0);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [throttled, setThrottled] = useState(false);
@@ -450,6 +572,7 @@ export function useTaskCopilot(
     const cached = reviewCache.get(key);
     if (cached) {
       setAlerts(cached.alerts);
+      setVerdict(cached.verdict);
       setReviewedKey(key);
       return;
     }
@@ -464,15 +587,27 @@ export function useTaskCopilot(
         setReviewing(true);
         setError("");
         setThrottled(false);
-        setStatus("A MAVI está lendo o rascunho");
+        setStatus("A MAVI está lendo a tarefa");
+        setStep(1);
         const incoming: CopilotAlert[] = [];
         try {
           if (demo) {
             const r = demoResult(snapshot);
-            await new Promise((ok) => setTimeout(ok, 600));
+            const wait = () => new Promise((ok) => setTimeout(ok, 700));
+            await wait();
+            setStep(2);
+            setStatus("A MAVI está conferindo o histórico do cliente");
+            await wait();
+            setStep(3);
+            await wait();
             setRelated(r.related);
             setAlerts(r.alerts);
-            remember(reviewCache, key, { alerts: r.alerts, version: 0 });
+            setVerdict(r.verdict);
+            remember(reviewCache, key, {
+              alerts: r.alerts,
+              version: 0,
+              verdict: r.verdict,
+            });
             setReviewedKey(key);
             return;
           }
@@ -487,7 +622,10 @@ export function useTaskCopilot(
                 incoming.push(a);
                 setAlerts([...incoming]);
               },
-              onStatus: setStatus,
+              onStatus: (text, n) => {
+                setStatus(text);
+                setStep(n);
+              },
             },
             abort.signal,
           );
@@ -498,6 +636,7 @@ export function useTaskCopilot(
           }
           remember(reviewCache, key, result);
           setAlerts(result.alerts);
+          setVerdict(result.verdict);
           setReviewedKey(key);
         } catch (e) {
           if (abort.signal.aborted) return;
@@ -507,6 +646,7 @@ export function useTaskCopilot(
           if (reviewAbort.current === abort) {
             setReviewing(false);
             setStatus("");
+            setStep(0);
           }
         }
       },
@@ -525,7 +665,9 @@ export function useTaskCopilot(
     () => ({
       related: text.length >= MIN_RELATED ? related : null,
       alerts,
+      verdict,
       reviewing,
+      step,
       status,
       error,
       throttled,
@@ -538,7 +680,9 @@ export function useTaskCopilot(
     [
       related,
       alerts,
+      verdict,
       reviewing,
+      step,
       status,
       error,
       throttled,

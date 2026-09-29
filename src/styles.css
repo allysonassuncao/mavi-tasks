@@ -19288,6 +19288,203 @@ button.copilot-chip:hover {
 .copilot-status-pill {
   font-weight: 600;
 }
+/* O resultado da MAVI no topo do painel: à vista, com cor e ícone. */
+.copilot-result {
+  --tone: #56793a;
+  --tone-bg: #eef5e6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 13px;
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, #fff);
+  border-radius: 12px;
+  background: var(--tone-bg);
+  color: var(--ink);
+}
+.copilot-result.tone-ok {
+  --tone: #2f8a5b;
+  --tone-bg: #e6f5ec;
+}
+.copilot-result.tone-attention {
+  --tone: #b7791f;
+  --tone-bg: #fdf3e1;
+}
+.copilot-result.tone-quiet {
+  --tone: #5f7478;
+  --tone-bg: #f1f4f5;
+}
+.copilot-result.is-working {
+  --tone: #56793a;
+  --tone-bg: #f1f7ea;
+}
+.copilot-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tone);
+}
+.copilot-result-head strong {
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+.copilot-result p {
+  margin: 0;
+  color: #3f4d4e;
+  line-height: 1.45;
+}
+.copilot-result-stale {
+  color: var(--muted);
+}
+.copilot-result.flash {
+  animation: copilot-flash 1.6s ease-out;
+}
+@keyframes copilot-flash {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone) 55%, transparent);
+    transform: scale(1.02);
+  }
+  35% {
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+.copilot-steps {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+}
+.copilot-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.copilot-steps li > span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid #b9c8ad;
+  flex: none;
+}
+.copilot-steps li.done {
+  color: #56793a;
+}
+.copilot-steps li.done > span {
+  background: #83a657;
+  border-color: #83a657;
+}
+.copilot-steps li.current {
+  color: var(--ink);
+  font-weight: 600;
+}
+.copilot-steps li.current > span {
+  border-color: #83a657;
+  background: #c8ed8d;
+  animation: copilot-pulse 1.2s ease-in-out infinite;
+}
+.copilot-progress {
+  height: 4px;
+  border-radius: 4px;
+  background: #e0ead5;
+  overflow: hidden;
+}
+.copilot-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #83a657, #c8ed8d, #83a657);
+  background-size: 200% 100%;
+  animation: copilot-shimmer 1.4s linear infinite;
+  transition: width 0.5s ease;
+}
+@keyframes copilot-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.copilot-sparkle {
+  animation: copilot-twinkle 1.6s ease-in-out infinite;
+}
+@keyframes copilot-twinkle {
+  50% {
+    opacity: 0.45;
+    transform: rotate(12deg) scale(0.9);
+  }
+}
+.copilot.is-reviewing {
+  border-color: #c9dcb4;
+}
+.copilot-alert {
+  background: color-mix(in srgb, var(--tone-bg) 55%, #fff);
+}
+.copilot-quote {
+  margin: 2px 0 0;
+  padding: 5px 9px;
+  border-left: 2px solid color-mix(in srgb, var(--tone) 45%, #fff);
+  background: #fff;
+  border-radius: 0 6px 6px 0;
+  color: #4c5a5b;
+  font-style: italic;
+  line-height: 1.4;
+}
+/* O selo ao lado de Criar/Salvar. */
+.copilot-badge {
+  --tone: #56793a;
+  --tone-bg: #eef5e6;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  width: fit-content;
+  margin: 0 0 -4px auto;
+  padding: 6px 11px;
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, #fff);
+  border-radius: 999px;
+  background: var(--tone-bg);
+  color: var(--tone);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  animation: copilot-in 0.25s ease-out;
+}
+.copilot-badge:hover {
+  filter: brightness(0.97);
+}
+.copilot-badge.tone-ok {
+  --tone: #2f8a5b;
+  --tone-bg: #e6f5ec;
+}
+.copilot-badge.tone-attention {
+  --tone: #a86c12;
+  --tone-bg: #fdf3e1;
+}
+.copilot-badge.tone-quiet {
+  --tone: #5f7478;
+  --tone-bg: #f1f4f5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copilot-result.flash,
+  .copilot-steps li.current > span,
+  .copilot-progress span,
+  .copilot-sparkle,
+  .copilot-badge {
+    animation: none;
+  }
+}
+@media (max-width: 600px) {
+  .copilot-badge {
+    width: 100%;
+    justify-content: center;
+  }
+}
 @media (max-width: 860px) {
   .modal.with-copilot {
     width: 560px;

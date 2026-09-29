@@ -7,8 +7,11 @@ import {
   dossierContext,
   handleDossierWorker,
   parseDossierOps,
+  draftMessage,
+  promptNotes,
   readDraft,
   related,
+  relevantEvidence,
   streamCopilot,
   type CopilotEvent,
   type DossierEnv,
@@ -241,7 +244,7 @@ describe("leitura dos alertas", () => {
     expect(all[1].dossier[0].id).toBe(item1);
   });
 
-  it("descarta alerta sem base, tipo desconhecido, JSON quebrado e passa de 5", () => {
+  it("descarta alerta sem base, tipo desconhecido, JSON quebrado e passa de 2", () => {
     const r = alertReader(context, sources, () => {});
     r.push('{"kind":"suggestion","title":"Genérico","text":"x","refs":[]}\n');
     r.push('{"kind":"missing","title":"Falta o formato","text":"x"}\n');
@@ -251,13 +254,135 @@ describe("leitura dos alertas", () => {
     for (let i = 0; i < 6; i++)
       r.push(`{"kind":"error","title":"E${i}","text":"x","refs":["S1"]}\n`);
     const all = r.end();
-    expect(all.map((a) => a.title)).toEqual([
-      "Falta o formato",
-      "E0",
-      "E1",
-      "E2",
-      "E3",
+    expect(all.map((a) => a.title)).toEqual(["Falta o formato", "E0"]);
+  });
+
+  it("revisão fica de fora; veredito ok só sem alertas", () => {
+    let reviewed = 0;
+    const r = alertReader(context, sources, () => {}, {
+      onReview: () => reviewed++,
+    });
+    r.push('{"review":"candidatos: formato (já está nos campos)"}\n');
+    r.push('{"verdict":"ok","text":"Formato e prazo claros."}\n');
+    expect(r.end()).toEqual([]);
+    expect(reviewed).toBe(1);
+    expect(r.review()).toContain("candidatos");
+    expect(r.verdict()).toEqual({
+      status: "ok",
+      text: "Formato e prazo claros.",
+    });
+    const withAlert = alertReader(context, sources, () => {});
+    withAlert.push(
+      '{"kind":"missing","title":"Falta a medida","text":"x"}\n{"verdict":"ok","text":"Tudo certo"}',
+    );
+    withAlert.end();
+    expect(withAlert.verdict().status).toBe("attention");
+    const silent = alertReader(context, sources, () => {});
+    silent.end();
+    expect(silent.verdict()).toEqual({ status: "quiet", text: "" });
+  });
+
+  it("o trecho citado tem de estar na fonte; alerta recusado pelo time não volta", () => {
+    const texts = new Map([
+      ["S1", "[S1] Tarefa\nCliente: não usem vermelho nas artes"],
     ]);
+    const memory = {
+      rejected: [
+        {
+          kind: "missing",
+          title: "Complete o briefing do anúncio",
+          text: "",
+          reason: "already",
+          comment: null,
+          scope: "client" as const,
+        },
+      ],
+      helped: [],
+    };
+    const r = alertReader(context, sources, () => {}, { texts, memory });
+    r.push(
+      '{"kind":"avoids","title":"Inventado","text":"x","refs":["S1"],"quote":"o cliente odeia azul e verde"}\n',
+    );
+    r.push('{"kind":"avoids","title":"Sem trecho","text":"x","refs":["S1"]}\n');
+    r.push(
+      '{"kind":"missing","title":"Completar o briefing do anúncio","text":"x"}\n',
+    );
+    r.push(
+      '{"kind":"avoids","title":"Sem vermelho","text":"x","refs":["S1"],"quote":"Não usem vermelho nas artes!"}\n',
+    );
+    const all = r.end();
+    expect(all.map((a) => a.title)).toEqual(["Sem vermelho"]);
+    expect(all[0].quote).toBe("Não usem vermelho nas artes!");
+    expect(r.dropped().map((d) => d.why)).toEqual([
+      "quote",
+      "quote",
+      "rejected",
+    ]);
+  });
+
+  it("trechos do histórico: só os que têm a ver (mínimo e perto do melhor)", () => {
+    const ev = (similarity: number | null) => ({
+      ...context.evidence[0],
+      similarity,
+    });
+    expect(
+      relevantEvidence([ev(0.6), ev(0.5), ev(0.4), ev(0.25), ev(null)]).map(
+        (e) => e.similarity,
+      ),
+    ).toEqual([0.6, 0.5, null]);
+  });
+
+  it("o rascunho vai inteiro: campos, em branco, anexos, família, responsável e recusas", () => {
+    const tool = {
+      sources: [],
+      chunks: new Map(),
+      members: new Map(),
+      clients: new Map(),
+    } as unknown as Parameters<typeof draftMessage>[2];
+    const notes = promptNotes();
+    const text = draftMessage(
+      {
+        ...readDraft({
+          company,
+          contract,
+          title: "Relatório de ganhos",
+          description: "Do mês",
+        }),
+        extra: "Período: setembro",
+        empty: "Destinatário (obrigatório)",
+        files: "briefing.pdf",
+        family: "Subtarefas: Coletar dados",
+        assignee: "Kamilli · equipe Design",
+      },
+      { ...context, product: "MakeCRM" },
+      tool,
+      "2026-09-29",
+      {
+        rejected: [
+          {
+            kind: "avoids",
+            title: "Evite tratar ganhos como financeiro",
+            text: "",
+            reason: "not_applicable",
+            comment: "No CRM, ganhos são negócios ganhos",
+            scope: "client",
+          },
+        ],
+        helped: [{ kind: "duplicate", title: "Já existe" }],
+      },
+      notes,
+    );
+    expect(text).toContain("Produto da tarefa: MakeCRM");
+    expect(text).toContain("Campos preenchidos:\nPeríodo: setembro");
+    expect(text).toContain("Campos do modelo em branco:\nDestinatário");
+    expect(text).toContain("Anexos:\nbriefing.pdf");
+    expect(text).toContain("Subtarefas: Coletar dados");
+    expect(text).toContain("Responsável: Kamilli");
+    expect(text).toContain("[R1] Este cliente · avoids");
+    expect(text).toContain("comentário do time: No CRM");
+    expect(text).toContain('- duplicate · "Já existe"');
+    expect(notes.texts.get("S1")).toContain("Post de Black Friday");
+    expect(notes.refs[0]).toMatchObject({ ref: "S1", similarity: 0.81 });
   });
 
   it("o dossiê abre o prompt (igual para todos do cliente)", () => {
@@ -292,7 +417,7 @@ describe("análise em tempo real", () => {
       request = req;
       req.onEvent?.({
         type: "text",
-        text: '{"kind":"avoids","severity":"high","title":"Sem vermelho","text":"O cliente não gosta","refs":["D1","S4"]}\n',
+        text: '{"review":"vermelho vai contra o cliente; duplicada em andamento"}\n{"kind":"avoids","severity":"high","title":"Sem vermelho","text":"O cliente não gosta","refs":["D1","S4"],"quote":"não usem vermelho nas artes"}\n',
       });
       req.onEvent?.({
         type: "text",
@@ -315,6 +440,7 @@ describe("análise em tempo real", () => {
     expect(events.map((e) => e.type)).toEqual([
       "related",
       "status",
+      "status",
       "alert",
       "alert",
       "related",
@@ -322,12 +448,14 @@ describe("análise em tempo real", () => {
     ]);
     // A MAVI confirmou a tarefa S1 e o case S3 (S4 é WhatsApp, não entra):
     // a tarefa do colega (S2) sai dos Relacionados.
-    const checked = events[4] as Extract<CopilotEvent, { type: "related" }>;
+    const checked = events[5] as Extract<CopilotEvent, { type: "related" }>;
     expect(checked.similar.map((t) => t.id)).toEqual([taskA]);
     expect(checked.cases.map((c) => c.id)).toEqual([caseA]);
     expect(checked.checked).toBe(true);
     const done = events.at(-1) as Extract<CopilotEvent, { type: "done" }>;
     expect(done.version).toBe(3);
+    expect(done.verdict.status).toBe("attention");
+    expect(done.alerts[0].quote).toBe("não usem vermelho nas artes");
     expect(done.alerts[0].sources.map((s) => s.type)).toEqual(["whatsapp"]);
     expect(done.alerts[1].sources[0].id).toBe(taskA);
     // A tarefa do colega vira citação sem atalho, só com título e status.
@@ -339,7 +467,7 @@ describe("análise em tempo real", () => {
     // Uma chamada, sem ferramentas; o dossiê no contexto em cache e o rascunho na mensagem.
     expect(request!.tools).toEqual([]);
     expect(request!.cacheContext).toBe(true);
-    expect(request!.effort).toBe("low");
+    expect(request!.effort).toBe("medium");
     expect(request!.context).toContain("Não gosta de vermelho");
     expect(request!.messages[0].content).toContain("Arte em vermelho");
     expect(request!.messages[0].content).toContain(
@@ -360,6 +488,15 @@ describe("análise em tempo real", () => {
       p_embedding: 50,
     });
     expect(log.body.p_cost).toBeGreaterThan(0.01);
+    // A análise fica registrada: resposta crua, fontes com a semelhança.
+    const run = calls.find((c) => c.url.includes("rpc/copilot_log_run"))!;
+    expect(run.body.p_output).toContain('"review"');
+    expect(run.body.p_verdict).toBe("attention");
+    expect(run.body.p_sources[0]).toMatchObject({
+      ref: "S1",
+      similarity: 0.81,
+    });
+    expect(run.body.p_alerts).toHaveLength(2);
   });
 
   it("tempo do banco esgotado: mensagem clara", async () => {

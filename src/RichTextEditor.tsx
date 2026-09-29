@@ -1,4 +1,4 @@
-import { Node } from "@tiptap/core";
+import { Node, type Editor } from "@tiptap/core";
 import { InlineImage, uploadInlineImage } from "./inline-images";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import {
@@ -27,6 +27,25 @@ import {
 import { parseDescription, safeHref, serializeDescription } from "./rich-text";
 import { mentionExtension, type MentionPerson } from "./mentions";
 import { Loading } from "./ui";
+/**
+ * O texto para quem lê a descrição sem vê-la (o Assistente MAVI): as imagens
+ * viram "[imagem]" e os links saem com o endereço — sem isso, "o briefing
+ * está aqui" chegava sem o link e a MAVI pedia o briefing.
+ */
+function readableText(editor: Editor) {
+  const text = editor.getText({
+    textSerializers: { inlineImage: () => "[imagem]" },
+  });
+  const links = new Set<string>();
+  editor.state.doc.descendants((node) => {
+    const link = node.marks.find((m) => m.type.name === "link");
+    if (link && node.text) links.add(`${node.text.trim()}: ${link.attrs.href}`);
+  });
+  return links.size
+    ? `${text}\n\nLinks na descrição:\n${[...links].join("\n")}`
+    : text;
+}
+
 function ImageNodeView({ node }: NodeViewProps) {
   return (
     <NodeViewWrapper className="editor-image" contentEditable={false}>
@@ -151,10 +170,10 @@ export default function RichTextEditor({
         class: "rich-text-content rich-text-input",
       },
     },
-    onCreate: ({ editor }) => textListener.current?.(editor.getText()),
+    onCreate: ({ editor }) => textListener.current?.(readableText(editor)),
     onUpdate: ({ editor }) => {
       setValue(serializeDescription(editor.getJSON()));
-      textListener.current?.(editor.getText());
+      textListener.current?.(readableText(editor));
     },
   });
   useEffect(() => {

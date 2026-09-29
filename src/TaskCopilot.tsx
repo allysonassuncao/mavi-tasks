@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Ban,
+  CheckCircle2,
   CheckSquare,
   Copy,
   FileText,
@@ -213,9 +214,17 @@ export function TaskCopilot({
   const similar = state.related?.similar ?? [];
   const cases = state.related?.cases ?? [];
   const nothing =
-    !alerts.length && !similar.length && !cases.length && !state.reviewing;
+    !alerts.length &&
+    !similar.length &&
+    !cases.length &&
+    !state.reviewing &&
+    !state.verdict;
   return (
-    <aside className="copilot" aria-label="Assistente MAVI" aria-live="polite">
+    <aside
+      className={`copilot${state.reviewing ? " is-reviewing" : ""}`}
+      aria-label="Assistente MAVI"
+      aria-live="polite"
+    >
       <header className="copilot-head">
         <Sparkles size={16} aria-hidden="true" />
         <strong>Assistente MAVI</strong>
@@ -234,17 +243,7 @@ export function TaskCopilot({
         </button>
       </header>
 
-      {state.reviewing && (
-        <p className="copilot-status">
-          <span className="copilot-dot" aria-hidden="true" />
-          {state.status || "A MAVI está conferindo"}
-        </p>
-      )}
-      {state.stale && alerts.length > 0 && (
-        <p className="copilot-note">
-          O texto mudou: a MAVI revisa de novo quando você parar de digitar.
-        </p>
-      )}
+      <CopilotResult state={state} count={alerts.length} />
       {state.throttled && (
         <p className="copilot-note">
           Muitas análises seguidas. A MAVI volta em instantes.
@@ -262,8 +261,8 @@ export function TaskCopilot({
       {nothing && !state.error && (
         <p className="copilot-empty">
           {typedEnough
-            ? "Nada a apontar por enquanto. A MAVI continua conferindo enquanto você escreve."
-            : `Escreva o título e a descrição: a MAVI confere com o histórico do cliente (o que ele gosta, não gosta, já pediu) e aponta o que pode melhorar.`}
+            ? "A MAVI confere a tarefa quando você parar de digitar."
+            : `Escreva o título e a descrição: a MAVI confere com o histórico do cliente (o que ele gosta, não gosta, já pediu) e avisa se falta algo ou se a tarefa está boa.`}
         </p>
       )}
 
@@ -408,6 +407,157 @@ export function TaskCopilot({
   );
 }
 
+const STEPS = [
+  "Lendo a tarefa",
+  "Conferindo o histórico do cliente",
+  "Escrevendo o que vale apontar",
+];
+
+/**
+ * O resultado no topo do painel, bem à vista: a análise em curso (com os
+ * passos), a tarefa completa, os pontos a revisar ou nada a mudar. Pisca
+ * quando um resultado novo chega.
+ */
+function CopilotResult({
+  state,
+  count,
+}: {
+  state: CopilotState;
+  count: number;
+}) {
+  const v = state.verdict;
+  const flash = useFlash(
+    state.reviewing ? "" : v ? `${v.status}:${count}:${v.text}` : "",
+  );
+  if (state.reviewing)
+    return (
+      <div className="copilot-result is-working" role="status">
+        <div className="copilot-result-head">
+          <Sparkles size={18} className="copilot-sparkle" aria-hidden="true" />
+          <strong>A MAVI está conferindo a tarefa</strong>
+        </div>
+        <ol className="copilot-steps">
+          {STEPS.map((label, i) => (
+            <li
+              key={label}
+              className={
+                i + 1 < state.step
+                  ? "done"
+                  : i + 1 === state.step
+                    ? "current"
+                    : undefined
+              }
+            >
+              <span aria-hidden="true" />
+              {label}
+            </li>
+          ))}
+        </ol>
+        <div className="copilot-progress" aria-hidden="true">
+          <span style={{ width: `${Math.max(1, state.step) * 30}%` }} />
+        </div>
+      </div>
+    );
+  if (!v) return null;
+  const tone = count ? "attention" : v.status;
+  const Icon =
+    tone === "ok" ? CheckCircle2 : tone === "attention" ? AlertTriangle : Info;
+  const heading =
+    tone === "ok"
+      ? "Tarefa bem completa"
+      : tone === "attention"
+        ? count === 1
+          ? "1 ponto para revisar"
+          : `${count} pontos para revisar`
+        : "Nada do histórico muda esta tarefa";
+  const text =
+    v.text ||
+    (tone === "ok"
+      ? "A MAVI conferiu com o histórico do cliente e não viu nada faltando."
+      : tone === "attention"
+        ? "Veja abaixo antes de criar."
+        : "A MAVI não achou nada no histórico do cliente que precise entrar.");
+  return (
+    <div
+      className={`copilot-result tone-${tone}${flash ? " flash" : ""}`}
+      role="status"
+    >
+      <div className="copilot-result-head">
+        <Icon size={20} aria-hidden="true" />
+        <strong>{heading}</strong>
+      </div>
+      <p>{text}</p>
+      {state.stale && (
+        <small className="copilot-result-stale">
+          O texto mudou: a MAVI confere de novo quando você parar de digitar.
+        </small>
+      )}
+    </div>
+  );
+}
+
+/** Verdadeiro por um instante sempre que `key` muda para um valor não vazio. */
+function useFlash(key: string) {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (!key) return;
+    setOn(true);
+    const t = setTimeout(() => setOn(false), 1600);
+    return () => clearTimeout(t);
+  }, [key]);
+  return on;
+}
+
+/**
+ * O selo ao lado do botão de criar/salvar: o que a MAVI achou, sem precisar
+ * olhar o painel. Clicar leva ao painel (no celular ele fica embaixo).
+ */
+export function CopilotBadge({ state }: { state: CopilotState }) {
+  const v = state.verdict;
+  const count = state.alerts.length;
+  if (!state.reviewing && !v) return null;
+  const tone = state.reviewing
+    ? "working"
+    : count
+      ? "attention"
+      : (v?.status ?? "quiet");
+  const label = state.reviewing
+    ? "MAVI conferindo…"
+    : tone === "ok"
+      ? "MAVI: tarefa completa"
+      : tone === "attention"
+        ? `MAVI: ${count} ${count === 1 ? "ponto" : "pontos"} para revisar`
+        : "MAVI: nada a mudar";
+  const Icon =
+    tone === "working"
+      ? Sparkles
+      : tone === "ok"
+        ? CheckCircle2
+        : tone === "attention"
+          ? AlertTriangle
+          : Info;
+  return (
+    <button
+      type="button"
+      className={`copilot-badge tone-${tone}`}
+      onClick={(e) =>
+        e.currentTarget
+          .closest("form")
+          ?.parentElement?.querySelector(".copilot")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" })
+      }
+      title="Ver o Assistente MAVI"
+    >
+      <Icon
+        size={14}
+        className={tone === "working" ? "copilot-sparkle" : undefined}
+        aria-hidden="true"
+      />
+      {label}
+    </button>
+  );
+}
+
 function AlertCard({
   alert: a,
   action,
@@ -461,6 +611,9 @@ function AlertCard({
       </div>
       <strong>{a.title}</strong>
       {a.text && <p>{a.text}</p>}
+      {a.quote && (
+        <blockquote className="copilot-quote">“{a.quote}”</blockquote>
+      )}
       {(a.sources.length > 0 || a.dossier.length > 0) && (
         <div className="copilot-sources">
           {a.dossier.map((d) => (

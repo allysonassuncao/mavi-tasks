@@ -31,6 +31,19 @@
         "--strictPort"
       ],
       "port": 5181
+    },
+    {
+      "name": "mavi-dev-copiloto",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5182",
+        "--strictPort"
+      ],
+      "port": 5182
     }
   ]
 }

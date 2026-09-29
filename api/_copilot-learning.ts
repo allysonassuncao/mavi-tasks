@@ -70,6 +70,7 @@ Como aprender:
 - Procure padrões: o mesmo tipo de alerta recusado pelo mesmo motivo, comentários que corrigem um fato, alertas que o time valoriza (👍) e devem continuar.
 - Escreva instruções acionáveis e específicas, até 300 caracteres, em português do Brasil, no imperativo, dizendo quando se aplicam. Ex.: "Não aponte falta de prazo de aprovação em tarefas internas do cliente 4282: a aprovação é sempre verbal com o dono." ou "Continue apontando duplicadas quando a tarefa parecida está em andamento: o time valoriza."
 - Um comentário que corrige um fato (ex.: "o cliente liberou o vermelho em setembro") vira aprendizado do cliente.
+- 👎 por "óbvio", "não se aplica" ou "já estava na tarefa" ensinam um princípio, não só aquele alerta: escreva a regra geral que evitaria a família inteira de alertas parecidos, no alcance mais amplo que os feedbacks sustentam. Ex.: "Não aponte práticas do próprio ofício (testar ângulos criativos, validar alegações, revisar texto) em tarefas de criação: o time já faz." ou "Em relatórios do MakeCRM, 'ganhos' são negócios ganhos no CRM, não promessa de resultado financeiro."
 - Um único 👎 sem motivo nem comentário é ruído: não crie aprendizado só com ele.
 - Prefira ajustar (update) um aprendizado parecido a criar outro. Aposente (retire) o que os feedbacks novos mostram que deixou de valer.
 - Aprendizados "escrito por líder", "pausado" ou "excluído por líder" são decisões do time: não os mude, não os aposente e não crie outro que diga o mesmo que um excluído.

@@ -104,9 +104,9 @@ import { TaskCustomFieldsPanel } from "./CustomFieldsForm";
 import { postOfTask, taskPostPath, type TaskPost } from "./social-leads-task";
 import { navigate, routeParts } from "./router";
 import { canOpenPage } from "./modules";
-import { TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
+import { CopilotBadge, TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
 import { TaskDueEdit } from "./DueRuleHint";
-import { MIN_REVIEW, useTaskCopilot } from "./copilot";
+import { MIN_REVIEW, copilotExtras, useTaskCopilot } from "./copilot";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
 export type FormPreset = {
@@ -760,6 +760,14 @@ export function TaskDetail({
       task: task.id,
       title: editTitle,
       description: editText ?? "",
+      due: task.due_date,
+      ...copilotExtras(data, {
+        assignee: task.assignee_id,
+        parent: task.parent_id,
+        task: task.id,
+        files: extras.attachments.map((a) => a.name),
+        fields: task.custom_fields,
+      }),
     },
     copilotOn,
     demo,
@@ -1499,6 +1507,7 @@ export function TaskDetail({
                     ))}
                   </Select>
                 </label>
+                {copilotOn && <CopilotBadge state={copilot} />}
                 <div className="form-footer">
                   <Button
                     type="button"

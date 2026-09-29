@@ -25,6 +25,7 @@
     "test:db:notices": "node scripts/test-notice-board.mjs",
     "test:db:copilot": "node scripts/test-task-copilot.mjs",
     "test:db:copilot-learning": "node scripts/test-copilot-learning.mjs",
+    "test:db:copilot-quality": "node scripts/test-copilot-quality.mjs",
     "test:db:temperature": "node scripts/test-client-temperature.mjs",
     "test:db:templates": "node scripts/test-task-templates.mjs",
     "test:db:assign-team": "node scripts/test-assign-to-team.mjs",

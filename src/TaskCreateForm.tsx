@@ -14,8 +14,8 @@ import { Modal, Loading } from "./components";
 import { ContractPicker } from "./ContractPicker";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
 import { CustomFieldsForm } from "./CustomFieldsForm";
-import { TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
-import { MIN_REVIEW, useTaskCopilot } from "./copilot";
+import { CopilotBadge, TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
+import { MIN_REVIEW, copilotExtras, useTaskCopilot } from "./copilot";
 import {
   customFieldsError,
   teamTemplateFields,
@@ -240,7 +240,17 @@ export function TaskCreateForm({
       title,
       description: descriptionText,
       due,
-      extra: fieldsText(customFields, customValues),
+      ...copilotExtras(data, {
+        assignee: byTeam ? null : assignee,
+        team: byTeam ? team || null : null,
+        parent: parentTask?.id ?? null,
+        files: uploads.current.pending.map((f) => f.name),
+        fields: customFields.map((f) => ({
+          label: f.label,
+          required: f.required,
+          value: customValues[`${f.template_id}.${f.id}`],
+        })),
+      }),
     },
     copilotOn && !locked,
     demo,
@@ -770,6 +780,7 @@ export function TaskCreateForm({
               {error}
             </p>
           )}
+          {copilotOn && <CopilotBadge state={copilot} />}
           <div className="form-footer quick-task-footer">
             {!uploads.current.taskId && (
               <label className="checkbox-label create-another">
@@ -818,26 +829,6 @@ export function TaskCreateForm({
       </div>
     </Modal>
   );
-}
-
-/** Os campos do modelo preenchidos, como texto para a MAVI ("Campo: valor"). */
-export function fieldsText(
-  fields: { template_id: string; id: string; label: string }[],
-  values: Record<string, unknown>,
-) {
-  return fields
-    .flatMap((f) => {
-      const v = values[`${f.template_id}.${f.id}`];
-      if (v == null || v === "" || v === false) return [];
-      if (Array.isArray(v) && !v.length) return [];
-      const text = Array.isArray(v)
-        ? v.join(", ")
-        : v === true
-          ? "sim"
-          : String(v);
-      return [`${f.label}: ${text}`];
-    })
-    .join("\n");
 }
 
 /**
