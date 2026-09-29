@@ -182,7 +182,7 @@ describe("handleDrive", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify("drive/c/f")))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockResolvedValue(new Response(null, { status: 204 }));
     const res = await handleDrive(
       { action: "delete", file: fileId },
       "Bearer user-token",
@@ -193,6 +193,91 @@ describe("handleDrive", () => {
     expect(fetchMock.mock.calls[1][1].method).toBe("DELETE");
     expect(new URL(fetchMock.mock.calls[1][0]).pathname).toBe(
       "/drive-bucket/drive/c/f",
+    );
+  });
+  it("miniaturas: o banco escolhe o que cada arquivo mostra, sem registrar visualização", async () => {
+    const other = "00000000-0000-4000-8000-000000000002";
+    const fetchMock = rpcReply([
+      { id: fileId, path: `drive/c/${fileId}.thumb.webp`, ready: true },
+      { id: other, path: `drive/c/${other}`, ready: false },
+    ]);
+    const res = await handleDrive(
+      { action: "thumbs", files: [fileId, other, fileId, "../x"] },
+      "Bearer user-token",
+      env,
+      fetchMock,
+    );
+    expect(res.status).toBe(200);
+    const [url, init] = (fetchMock as any).mock.calls[0];
+    expect(url).toBe("https://db.example.com/rest/v1/rpc/drive_thumb_sources");
+    // Invalid ids and repeats never reach the database.
+    expect(JSON.parse(init.body)).toEqual({ p_files: [fileId, other] });
+    const thumbs = res.body.thumbs as Record<
+      string,
+      { url: string; ready: boolean }
+    >;
+    const ready = new URL(thumbs[fileId].url);
+    expect(ready.pathname).toBe(`/drive-bucket/drive/c/${fileId}.thumb.webp`);
+    // Same URL for the whole hour: the browser cache serves it again.
+    expect(ready.searchParams.get("X-Goog-Date")).toMatch(/T\d{2}0000Z$/);
+    expect(ready.searchParams.get("X-Goog-Expires")).toBe("7200");
+    expect(thumbs[other].ready).toBe(false);
+    expect(new URL(thumbs[other].url).searchParams.get("X-Goog-Expires")).toBe(
+      "900",
+    );
+  });
+  it("miniaturas exigem login", async () => {
+    const fetchMock = rpcReply([]);
+    const res = await handleDrive(
+      { action: "thumbs", files: [fileId] },
+      null,
+      env,
+      fetchMock,
+    );
+    expect(res.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("assina o envio da miniatura com tipo e tamanho máximo", async () => {
+    const fetchMock = rpcReply([{ path: `drive/c/${fileId}.thumb.webp` }]);
+    const res = await handleDrive(
+      { action: "sign-thumb", file: fileId, type: "text/html" },
+      "Bearer user-token",
+      env,
+      fetchMock,
+    );
+    expect((fetchMock as any).mock.calls[0][0]).toBe(
+      "https://db.example.com/rest/v1/rpc/drive_thumb_target",
+    );
+    const signed = new URL(res.body.url as string);
+    expect(signed.searchParams.get("X-Goog-SignedHeaders")).toBe(
+      "cache-control;content-type;host;x-goog-content-length-range",
+    );
+    // Anything but JPEG is stored as WebP.
+    expect(res.body.headers).toMatchObject({
+      "Content-Type": "image/webp",
+      "x-goog-content-length-range": "1,1048576",
+    });
+    const denied = await handleDrive(
+      { action: "sign-thumb", file: fileId },
+      "Bearer user-token",
+      env,
+      rpcReply([]),
+    );
+    expect(denied.status).toBe(403);
+  });
+  it("excluir remove também a miniatura", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify("drive/c/f")))
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    await handleDrive(
+      { action: "delete", file: fileId },
+      "Bearer user-token",
+      env,
+      fetchMock as unknown as typeof fetch,
+    );
+    expect(new URL(fetchMock.mock.calls[2][0]).pathname).toBe(
+      "/drive-bucket/drive/c/f.thumb.webp",
     );
   });
 });

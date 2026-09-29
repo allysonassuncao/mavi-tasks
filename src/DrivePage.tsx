@@ -14,16 +14,12 @@ import {
   CloudUpload,
   Download,
   Eye,
-  File as FileIcon,
-  FileArchive,
-  FileAudio,
-  FileImage,
-  FileSpreadsheet,
-  FileText,
-  FileVideo,
+  EllipsisVertical,
   Folder,
   FolderPlus,
   Globe,
+  LayoutGrid,
+  List,
   Share2,
   History,
   Link2,
@@ -37,11 +33,14 @@ import {
   MessageCircle,
   X,
 } from "lucide-react";
+import * as Popover from "@radix-ui/react-popover";
 import { Button, Input, Select, SelectOption, Loading } from "./ui";
 import { Empty } from "./components";
 import { Paged } from "./Pagination";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
 import { ShareFolderDialog } from "./ShareFolderDialog";
+import { DriveThumb, FileTypeIcon } from "./DriveThumb";
+import { thumbAfterUpload, useDriveThumbs } from "./drive-thumbs";
 import type {
   DriveFile,
   DriveFolder,
@@ -99,21 +98,15 @@ type Editing =
 const byNameDesc = (a: { name: string }, b: { name: string }) =>
   b.name.localeCompare(a.name, "pt-BR");
 
-function iconFor(type: string, name: string) {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (type.startsWith("image/")) return FileImage;
-  if (type.startsWith("video/")) return FileVideo;
-  if (type.startsWith("audio/")) return FileAudio;
-  if (
-    /zip|rar|7z|tar|gzip/.test(type) ||
-    ["zip", "rar", "7z", "gz"].includes(ext)
-  )
-    return FileArchive;
-  if (/sheet|excel|csv/.test(type) || ["xlsx", "xls", "csv"].includes(ext))
-    return FileSpreadsheet;
-  if (type.startsWith("text/") || /pdf|word|document|presentation/.test(type))
-    return FileText;
-  return FileIcon;
+/** Files as thumbnail cards (as in Google Drive) or as a list; each person's choice. */
+type FileView = "grid" | "list";
+const VIEW_KEY = "mavi.drive.view";
+function savedView(): FileView {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid";
+  } catch {
+    return "grid";
+  }
 }
 
 type DriveProps = {
@@ -222,6 +215,15 @@ function DriveTree({
   const [busyId, setBusyId] = useState("");
   const [editing, setEditing] = useState<Editing>(null);
   const [draft, setDraft] = useState("");
+  const [fileView, setFileView] = useState<FileView>(savedView);
+  function pickView(next: FileView) {
+    setFileView(next);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // Private mode: the choice lasts this visit.
+    }
+  }
   const [viewer, setViewer] = useState<{
     list: DriveFile[];
     index: number;
@@ -514,7 +516,7 @@ function DriveTree({
     let sent = 0;
     for (const { file, key } of batch) {
       try {
-        await uploadDriveFile(
+        const id = await uploadDriveFile(
           company,
           target,
           file,
@@ -524,6 +526,7 @@ function DriveTree({
               u.map((x) => (x.key === key ? { ...x, progress } : x)),
             ),
         );
+        thumbAfterUpload(id, file);
         sent++;
         setUploads((u) => u.filter((x) => x.key !== key));
       } catch (e) {
@@ -642,7 +645,11 @@ function DriveTree({
     </form>
   );
 
-  const fileRows = (list: DriveFile[], showPath: boolean) => (
+  const fileList = (
+    list: DriveFile[],
+    showPath: boolean,
+    thumb: (id: string) => string | undefined,
+  ) => (
     <div className="panel drive-table-wrap">
       <table className="drive-table">
         <thead>
@@ -657,7 +664,6 @@ function DriveTree({
         </thead>
         <tbody>
           {list.map((f) => {
-            const Icon = iconFor(f.content_type, f.name);
             const owner = isLeader || f.uploaded_by === user;
             const writable =
               isLeader ||
@@ -670,7 +676,7 @@ function DriveTree({
                     nameForm(`Novo nome de ${f.name}`)
                   ) : (
                     <span className="drive-row-name">
-                      <Icon size={17} aria-hidden="true" />
+                      <DriveThumb file={f} url={thumb(f.id)} variant="row" />
                       <button
                         type="button"
                         className="drive-file-name"
@@ -783,6 +789,171 @@ function DriveTree({
         </tbody>
       </table>
     </div>
+  );
+
+  const view = (list: DriveFile[], f: DriveFile) =>
+    setViewer({ list, index: list.indexOf(f) });
+  /** The ⋮ menu of a card: what the list shows as buttons. */
+  const fileMenu = (
+    list: DriveFile[],
+    f: DriveFile,
+    owner: boolean,
+    renamable: boolean,
+  ) => {
+    const item = (
+      label: string,
+      icon: ReactNode,
+      action: () => void,
+      danger = false,
+    ) => (
+      <Popover.Close asChild>
+        <button
+          type="button"
+          className={`drive-menu-item ${danger ? "danger" : ""}`}
+          onClick={action}
+        >
+          {icon}
+          {label}
+        </button>
+      </Popover.Close>
+    );
+    return (
+      <Popover.Root>
+        <Popover.Trigger asChild>
+          <button
+            type="button"
+            className="icon-btn drive-card-more"
+            aria-label={`Ações de ${f.name}`}
+            title="Mais ações"
+            disabled={busyId === f.id}
+          >
+            <EllipsisVertical size={16} />
+          </button>
+        </Popover.Trigger>
+        {/* Not portaled: it must work inside the task dialog too. */}
+        <Popover.Content
+          className="drive-menu"
+          align="end"
+          sideOffset={4}
+          collisionPadding={12}
+        >
+          {item("Visualizar", <Eye size={15} />, () => view(list, f))}
+          {item(
+            "Baixar",
+            <Download size={15} />,
+            () => void run(f.id, () => openDriveFile(f.id)),
+          )}
+          {f.visibility === "public" &&
+            item(
+              "Copiar link público",
+              <Link2 size={15} />,
+              () => void copyLink(f),
+            )}
+          {renamable &&
+            item("Renomear", <Pencil size={14} />, () =>
+              startEdit({ kind: "file", id: f.id }, f.name),
+            )}
+          {owner &&
+            (f.visibility === "public"
+              ? item(
+                  "Tornar privado",
+                  <Lock size={15} />,
+                  () => void changeVisibility(f, "private"),
+                )
+              : item(
+                  "Tornar público",
+                  <Globe size={15} />,
+                  () => void changeVisibility(f, "public"),
+                ))}
+          {owner && (
+            <>
+              <hr />
+              {item(
+                "Excluir",
+                <Trash2 size={15} />,
+                () => void removeFile(f),
+                true,
+              )}
+            </>
+          )}
+        </Popover.Content>
+      </Popover.Root>
+    );
+  };
+  /** Thumbnail cards, as in Google Drive. */
+  const fileGrid = (
+    list: DriveFile[],
+    showPath: boolean,
+    thumb: (id: string) => string | undefined,
+  ) => (
+    <div className="drive-cards">
+      {list.map((f) => {
+        const owner = isLeader || f.uploaded_by === user;
+        const writable =
+          isLeader ||
+          (!!f.contract_id && canCreateTaskIn(data, f.contract_id, user));
+        const renaming = editing?.kind === "file" && editing.id === f.id;
+        return (
+          <div
+            key={f.id}
+            className={`drive-card ${busyId === f.id ? "busy" : ""}`}
+          >
+            <div className="drive-card-head">
+              {renaming ? (
+                nameForm(`Novo nome de ${f.name}`)
+              ) : (
+                <>
+                  <FileTypeIcon file={f} size={16} />
+                  <button
+                    type="button"
+                    className="drive-card-name"
+                    title={f.name}
+                    onClick={() => view(list, f)}
+                  >
+                    {f.name}
+                  </button>
+                  {f.visibility === "public" && (
+                    <Globe
+                      size={13}
+                      className="drive-card-public"
+                      aria-label="Público"
+                    />
+                  )}
+                  {fileMenu(list, f, owner, writable && !showPath)}
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              className="drive-card-preview"
+              aria-label={`Visualizar ${f.name}`}
+              onClick={() => view(list, f)}
+            >
+              <DriveThumb file={f} url={thumb(f.id)} variant="card" />
+            </button>
+            <small
+              className="drive-card-meta"
+              title={showPath ? pathOf(f) : undefined}
+            >
+              {showPath
+                ? pathOf(f)
+                : `${formatBytes(f.size_bytes)} · ${who(f.uploaded_by)} · ${new Date(
+                    f.created_at,
+                  ).toLocaleDateString("pt-BR")}`}
+            </small>
+          </div>
+        );
+      })}
+    </div>
+  );
+  const fileRows = (list: DriveFile[], showPath: boolean) => (
+    <DriveThumbs files={list}>
+      {(thumb) =>
+        fileView === "grid"
+          ? fileGrid(list, showPath, thumb)
+          : fileList(list, showPath, thumb)
+      }
+    </DriveThumbs>
   );
 
   const folderCard = (
@@ -936,6 +1107,32 @@ function DriveTree({
               icon={Search}
             />
           </span>
+          <div
+            className="drive-view drive-layout"
+            role="group"
+            aria-label="Exibir arquivos em"
+          >
+            <button
+              type="button"
+              className={fileView === "grid" ? "selected" : ""}
+              aria-pressed={fileView === "grid"}
+              title="Grade, com miniaturas"
+              onClick={() => pickView("grid")}
+            >
+              <LayoutGrid size={15} />
+              <span>Grade</span>
+            </button>
+            <button
+              type="button"
+              className={fileView === "list" ? "selected" : ""}
+              aria-pressed={fileView === "list"}
+              title="Lista"
+              onClick={() => pickView("list")}
+            >
+              <List size={15} />
+              <span>Lista</span>
+            </button>
+          </div>
           {canWrite && !searching && (
             <div className="drive-upload-controls">
               <Button
@@ -1428,4 +1625,16 @@ function DriveTree({
       )}
     </div>
   );
+}
+
+/** Asks for the thumbnails of the files on screen (one page at a time). */
+function DriveThumbs({
+  files,
+  children,
+}: {
+  files: DriveFile[];
+  children: (thumb: (id: string) => string | undefined) => ReactNode;
+}) {
+  const thumb = useDriveThumbs(files);
+  return <>{children(thumb)}</>;
 }

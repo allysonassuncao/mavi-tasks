@@ -144,6 +144,13 @@ export type DriveRequest =
   | { action: "sign-upload"; file: string }
   | { action: "download"; file: string; inline?: boolean }
   | { action: "delete"; file: string }
+  /**
+   * What each file of a list shows instead of an icon: its thumbnail, or
+   * the file itself when the browser still has to make the thumbnail.
+   */
+  | { action: "thumbs"; files: string[] }
+  /** Where the browser stores a thumbnail it made (WebP, up to 1 MB). */
+  | { action: "sign-thumb"; file: string; type?: string }
   | { action: "public"; token: string; inline?: boolean }
   /** A file inside a publicly shared folder (or one of its subfolders). */
   | {
@@ -164,6 +171,13 @@ export type DriveRequest =
       size: number;
       content_type: string;
     };
+
+export const THUMBS_PER_REQUEST = 200;
+/** Signed into the thumbnail upload: at most 1 MB, cached by the browser. */
+const THUMB_UPLOAD_HEADERS = {
+  "x-goog-content-length-range": "1,1048576",
+  "Cache-Control": "private, max-age=7200",
+};
 
 /** The browser behind a request, recorded in the Drive audit trail. */
 export type RequestOrigin = { ip?: string; user_agent?: string };
@@ -259,7 +273,69 @@ export async function handleDrive(
 
   if (!authorization?.startsWith("Bearer "))
     return fail(401, "Autenticação necessária.");
+
+  if (req.action === "thumbs") {
+    const ids = Array.isArray(req.files)
+      ? [...new Set(req.files.filter(isId))].slice(0, THUMBS_PER_REQUEST)
+      : [];
+    if (!ids.length) return { status: 200, body: { thumbs: {} } };
+    const sources = await callRpc<
+      { id: string; path: string; ready: boolean }[]
+    >(env, fetchImpl, authorization, "drive_thumb_sources", { p_files: ids });
+    if (!sources.ok) return fail(sources.status, sources.error);
+    // A thumbnail keeps the same URL for the whole hour, so the browser
+    // cache serves it again while the folder is browsed.
+    const now = new Date();
+    const hour = new Date(Math.floor(now.getTime() / 3600000) * 3600000);
+    return {
+      status: 200,
+      body: {
+        thumbs: Object.fromEntries(
+          sources.data.map((s) => [
+            s.id,
+            {
+              ready: s.ready,
+              url: signGcsUrl(
+                creds,
+                env.bucket,
+                s.path,
+                "GET",
+                s.ready
+                  ? { now: hour, expiresInSeconds: 7200 }
+                  : { now, expiresInSeconds: 900 },
+              ),
+            },
+          ]),
+        ),
+      },
+    };
+  }
+
   if (!isId(req.file)) return fail(400, "Arquivo inválido.");
+
+  if (req.action === "sign-thumb") {
+    const target = await callRpc<{ path: string }[]>(
+      env,
+      fetchImpl,
+      authorization,
+      "drive_thumb_target",
+      { p_file: req.file },
+    );
+    const file = target.ok ? target.data[0] : undefined;
+    if (!file) return fail(403, "Sem acesso a este arquivo.");
+    // WebP; JPEG from browsers that cannot encode WebP.
+    const contentType = req.type === "image/jpeg" ? "image/jpeg" : "image/webp";
+    return {
+      status: 200,
+      body: {
+        url: signGcsUrl(creds, env.bucket, file.path, "PUT", {
+          contentType,
+          headers: THUMB_UPLOAD_HEADERS,
+        }),
+        headers: { "Content-Type": contentType, ...THUMB_UPLOAD_HEADERS },
+      },
+    };
+  }
 
   if (req.action === "sign-upload") {
     const target = await callRpc<{ path: string; content_type: string }[]>(
@@ -321,6 +397,11 @@ export async function handleDrive(
     // unreachable object behind (its path was never exposed).
     const res = await fetchImpl(
       signGcsUrl(creds, env.bucket, removed.data, "DELETE"),
+      { method: "DELETE" },
+    ).catch(() => null);
+    // The thumbnail, when there is one, goes too.
+    await fetchImpl(
+      signGcsUrl(creds, env.bucket, `${removed.data}.thumb.webp`, "DELETE"),
       { method: "DELETE" },
     ).catch(() => null);
     return {

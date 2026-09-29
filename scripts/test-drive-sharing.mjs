@@ -264,6 +264,105 @@ await check("cada mudança fica no histórico do Drive", async () => {
   assert.deepEqual(log[0].details.added, [outsider]);
 });
 
+// ------------------------------------------------ thumbnails (20261209090000)
+const thumbSources = async (user, ids) => {
+  await as(user);
+  return (
+    await db.query(
+      `select * from public.drive_thumb_sources($1::uuid[]) order by id`,
+      [ids],
+    )
+  ).rows;
+};
+const thumbTarget = async (user, id) => {
+  await as(user);
+  return rows("drive_thumb_target", [id]);
+};
+const typed = async (name, type, size) =>
+  (
+    await sql(
+      `insert into drive_files(company_id,name,content_type,size_bytes,path,status,uploaded_by,client_id,contract_id,folder_id)
+     values($1,$2,$3,$4,'drive/'||gen_random_uuid(),'ready',$5,$6,$7,$8) returning id`,
+      [A, name, type, size, admin, client, contract, deliveries],
+    )
+  )[0].id;
+const zipFile = await typed("pacote.zip", "application/zip", 100);
+const hugePhoto = await typed("enorme.png", "image/png", 30000000);
+const hugeVideo = await typed("video.mp4", "video/mp4", 400000000);
+
+await check(
+  "miniaturas: sem uma ainda, o banco entrega o próprio arquivo de imagem, vídeo ou PDF",
+  async () => {
+    const found = await thumbSources(teamMember, [
+      photoFile,
+      zipFile,
+      hugePhoto,
+      hugeVideo,
+    ]);
+    const byId = Object.fromEntries(found.map((r) => [r.id, r]));
+    const [photoPath] = await sql(`select path from drive_files where id=$1`, [
+      photoFile,
+    ]);
+    assert.deepEqual(byId[photoFile], {
+      id: photoFile,
+      path: photoPath.path,
+      ready: false,
+    });
+    assert.ok(byId[hugeVideo], "vídeo de qualquer tamanho");
+    assert.ok(!byId[zipFile], "zip fica com o ícone");
+    assert.ok(!byId[hugePhoto], "imagem grande demais fica com o ícone");
+  },
+);
+
+await check("miniaturas: quem não vê o arquivo não recebe nada", async () => {
+  assert.deepEqual(await thumbSources(outsider, [photoFile]), []);
+  assert.deepEqual(await thumbTarget(outsider, photoFile), []);
+  await as(outsider);
+  await assert.rejects(
+    () => rpc("set_drive_thumb", [photoFile, true]),
+    /não encontrado/,
+  );
+});
+
+await check(
+  "miniaturas: depois de guardada, a lista recebe a miniatura, sem registrar visualização",
+  async () => {
+    const [before] = await sql(`select count(*)::int as n from drive_audit`);
+    const [target] = await thumbTarget(teamMember, photoFile);
+    assert.match(target.path, /\.thumb\.webp$/);
+    await as(teamMember);
+    await rpc("set_drive_thumb", [photoFile, true]);
+    const [shown] = await thumbSources(teamMember, [photoFile]);
+    assert.equal(shown.path, target.path);
+    assert.equal(shown.ready, true);
+    const [after] = await sql(`select count(*)::int as n from drive_audit`);
+    assert.equal(after.n, before.n);
+  },
+);
+
+await check(
+  "miniaturas: quem só vê o arquivo cria a que falta, mas não troca a que existe",
+  async () => {
+    await as(admin);
+    await rpc("set_drive_folder_sharing", [deliveries, false, [outsider]]);
+    assert.equal((await thumbTarget(outsider, deliveryFile)).length, 1);
+    // Shared read-only: the thumbnail already made stays.
+    assert.deepEqual(await thumbTarget(outsider, photoFile), []);
+    await as(outsider);
+    await assert.rejects(
+      () => rpc("set_drive_thumb", [photoFile, false]),
+      /não encontrado/,
+    );
+    // Could not read the file: the icon stays, no more attempts.
+    await rpc("set_drive_thumb", [deliveryFile, false]);
+    assert.deepEqual(await thumbSources(outsider, [deliveryFile]), []);
+    // Whoever may change the file still makes it.
+    assert.equal((await thumbTarget(teamMember, deliveryFile)).length, 1);
+    await as(admin);
+    await rpc("set_drive_folder_sharing", [deliveries, false, []]);
+  },
+);
+
 await db.close();
 console.log(
   `\n${passed} verificações de compartilhamento de pastas aprovadas.`,

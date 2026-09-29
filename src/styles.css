@@ -6407,6 +6407,222 @@ label .input-control .ui-input {
 .drive-page .drive-row-name .drive-file-name {
   overflow-wrap: anywhere;
 }
+
+/* Thumbnails (DriveThumb.tsx): cards as in Google Drive, or a small
+   picture at the start of each row of the list. */
+.drive-toolbar .drive-layout {
+  flex: none;
+  margin-left: auto;
+}
+.drive-layout button {
+  padding: 7px 10px;
+}
+.drive-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+.drive-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px 10px;
+  background: #f1f5ec;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  transition: background 0.15s ease;
+}
+.drive-card:hover {
+  background: #e6eedc;
+}
+.drive-card:focus-within {
+  border-color: #cfe0bb;
+}
+.drive-card.busy {
+  opacity: 0.6;
+}
+.drive-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding-left: 4px;
+}
+.drive-card-head .drive-name-form {
+  flex: 1;
+  min-width: 0;
+}
+.drive-card-name {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-card-public {
+  flex: none;
+  color: #2d5a8c;
+}
+.drive-card-more.icon-btn {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+}
+.drive-card-preview {
+  display: block;
+  border: 0;
+  padding: 0;
+  background: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.drive-card-meta {
+  padding: 0 4px;
+  font-size: 0.7rem;
+  color: #8e9a95;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-thumb {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #fff;
+}
+.drive-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* Documents from the top, as in Google Drive. */
+.drive-thumb.pdf img {
+  object-position: top;
+}
+.drive-thumb.card {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+}
+.drive-thumb.row {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: #f1f5ec;
+}
+.drive-thumb.row.has-picture {
+  background: #fff;
+  box-shadow: 0 0 0 1px #1c272814;
+}
+.drive-thumb-play {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #0b1411a8;
+  color: #fff;
+}
+.drive-thumb.row .drive-thumb-play {
+  left: 50%;
+  top: 50%;
+  bottom: auto;
+  width: 16px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+}
+/* File type colors, as in Google Drive. */
+.drive-type {
+  flex: none;
+  color: #7d8a85;
+}
+.drive-type.image {
+  color: #d9534f;
+}
+.drive-type.video,
+.drive-type.pdf {
+  color: #d93025;
+}
+.drive-type.doc {
+  color: #3f7ad9;
+}
+.drive-type.sheet {
+  color: #1e8e4e;
+}
+.drive-type.slides {
+  color: #e0a00b;
+}
+.drive-type.audio {
+  color: #8e5cc9;
+}
+.drive-menu {
+  min-width: 210px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 38px #152c2026;
+  z-index: 101;
+}
+.drive-menu hr {
+  border: 0;
+  border-top: 1px solid #eef1ef;
+  margin: 5px 2px;
+}
+.drive-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 8px 10px;
+  border-radius: 7px;
+  text-align: left;
+  font-size: 0.8rem;
+  color: #34403b;
+}
+.drive-menu-item:hover,
+.drive-menu-item:focus-visible {
+  background: #f3f6f1;
+  outline: none;
+}
+.drive-menu-item svg {
+  color: #7d8a85;
+}
+.drive-menu-item.danger,
+.drive-menu-item.danger svg {
+  color: #b3452f;
+}
+@media (max-width: 760px) {
+  .drive-cards {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px;
+  }
+  .drive-layout span {
+    display: none;
+  }
+}
+.task-drive .drive-cards {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
 .visibility-select.ui-select {
   width: auto;
   min-height: 30px;
