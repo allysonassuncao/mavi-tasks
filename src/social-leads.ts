@@ -73,6 +73,145 @@ export function postTextPlain(value: string | null | undefined): string {
     return v.trim();
   }
 }
+
+/**
+ * One slide (or the single art) as the MAVI writes it: the texts that go
+ * on the art and, apart, an image idea for the designer.
+ */
+export interface PostSlide {
+  headline: string;
+  subheadline: string;
+  texto: string;
+  sugestaoImagem: string;
+}
+/** Starts the image idea, so nobody takes it for text of the art. */
+export const IMAGE_SUGGESTION_LABEL = "SUGESTÃO DE IMAGEM";
+const SUGGESTION_NOTE =
+  " (só uma ideia para o designer, não vai escrito na arte): ";
+const SLIDE_FIELDS = [
+  ["headline", "Headline"],
+  ["subheadline", "Subheadline"],
+  ["texto", "Texto"],
+] as const;
+/** A single art has no slides: one item and a format that isn't a carousel. */
+export const isSingleArt = (count: number, formato: string) =>
+  count === 1 && !/carross/i.test(formato);
+type RichInline = { type: string; text?: string; marks?: { type: string }[] };
+function richLines(text: string, marks?: { type: string }[]): RichInline[] {
+  return text
+    .split("\n")
+    .flatMap((line, i) => [
+      ...(i ? [{ type: "hardBreak" }] : []),
+      ...(line
+        ? [{ type: "text", text: line, ...(marks ? { marks } : {}) }]
+        : []),
+    ]);
+}
+/**
+ * The art texts as rich text (mavi:richtext:v1:), one paragraph per slide:
+ * "Slide 1 (Capa)" in bold, then "Headline: …", "Subheadline: …",
+ * "Texto: …" and the image idea (highlighted) on their own lines, with a
+ * blank line between slides. "" when there's nothing on the art.
+ */
+export function slidesRichText(slides: PostSlide[], single: boolean): string {
+  const list = slides
+    .map((s) => ({
+      headline: (s.headline ?? "").trim(),
+      subheadline: (s.subheadline ?? "").trim(),
+      texto: (s.texto ?? "").trim(),
+      sugestaoImagem: (s.sugestaoImagem ?? "").trim(),
+    }))
+    .filter((s) => s.headline || s.subheadline || s.texto || s.sugestaoImagem);
+  if (!list.length) return "";
+  const bold = [{ type: "bold" }];
+  const br = { type: "hardBreak" };
+  const content = list.flatMap((s, i) => {
+    const title = single
+      ? "Arte"
+      : `Slide ${i + 1}${i === 0 && list.length > 1 ? " (Capa)" : ""}`;
+    const lines: RichInline[] = [{ type: "text", text: title, marks: bold }];
+    for (const [k, label] of SLIDE_FIELDS)
+      if (s[k])
+        lines.push(
+          br,
+          { type: "text", text: `${label}: `, marks: bold },
+          ...richLines(s[k]),
+        );
+    if (s.sugestaoImagem)
+      lines.push(
+        br,
+        {
+          type: "text",
+          text: IMAGE_SUGGESTION_LABEL,
+          marks: [{ type: "bold" }, { type: "highlight" }],
+        },
+        { type: "text", text: SUGGESTION_NOTE, marks: bold },
+        ...richLines(s.sugestaoImagem, [{ type: "italic" }]),
+      );
+    return [
+      ...(i ? [{ type: "paragraph" }] : []),
+      { type: "paragraph", content: lines },
+    ];
+  });
+  return RICH_PREFIX + JSON.stringify({ type: "doc", content });
+}
+/**
+ * The slides back from a text slidesRichText wrote, or null when the text
+ * is something else (old plain text, or the team edited it in the editor).
+ */
+export function slidesFromText(
+  value: string | null | undefined,
+): { slides: PostSlide[]; single: boolean } | null {
+  const v = value ?? "";
+  if (!v.startsWith(RICH_PREFIX)) return null;
+  type Node = { type?: string; text?: string; content?: Node[] };
+  let doc: Node;
+  try {
+    doc = JSON.parse(v.slice(RICH_PREFIX.length)) as Node;
+  } catch {
+    return null;
+  }
+  const suggestion = IMAGE_SUGGESTION_LABEL + SUGGESTION_NOTE;
+  const slides: PostSlide[] = [];
+  let single = false;
+  for (const n of doc.content ?? []) {
+    if (n.type !== "paragraph") return null;
+    const text = (n.content ?? [])
+      .map((c) => (c.type === "hardBreak" ? "\n" : (c.text ?? "")))
+      .join("");
+    if (!text) continue;
+    const [title, ...lines] = text.split("\n");
+    if (!/^(Arte|Slide \d+( \(Capa\))?)$/.test(title)) return null;
+    single = title === "Arte";
+    const slide: PostSlide = {
+      headline: "",
+      subheadline: "",
+      texto: "",
+      sugestaoImagem: "",
+    };
+    let field: keyof PostSlide | null = null;
+    for (const line of lines) {
+      const f = SLIDE_FIELDS.find(([, l]) => line.startsWith(`${l}: `));
+      if (f) {
+        field = f[0];
+        slide[field] = line.slice(f[1].length + 2);
+      } else if (line.startsWith(suggestion)) {
+        field = "sugestaoImagem";
+        slide.sugestaoImagem = line.slice(suggestion.length);
+      } else if (field) slide[field] += `\n${line}`;
+      else return null;
+    }
+    slides.push(slide);
+  }
+  if (!slides.length || slidesRichText(slides, single) !== v) return null;
+  return { slides, single };
+}
+/** The art text without the image ideas (the client's presentation PDF). */
+export const withoutImageSuggestions = (plain: string) =>
+  plain
+    .split("\n")
+    .filter((l) => !l.startsWith(IMAGE_SUGGESTION_LABEL))
+    .join("\n");
 export interface PlanCampaign {
   objetivo: string;
   regiao: string;

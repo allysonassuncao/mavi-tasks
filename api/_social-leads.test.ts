@@ -1,14 +1,17 @@
 import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { seal } from "./_google";
+import { postTextPlain, slidesRichText } from "../src/social-leads";
 import {
   SYSTEM_PROMPT,
   addUsage,
   handleSocialLeads,
   newMeter,
   publicArt,
+  planForAdjust,
   planRequest,
   siteDomains,
+  withArtText,
   socialLeadsEnv,
   type Deps,
   type ModelRequest,
@@ -417,6 +420,98 @@ describe("pedido de ajuste", () => {
     });
     expect(seen[0].user).toContain("Pedido da equipe: Post 6 mais leve");
     expect(seen[0].domains).toEqual([]);
+  });
+});
+
+describe("texto da arte por slide", () => {
+  const slides = [
+    {
+      headline: "3 erros na reforma",
+      subheadline: "E como evitar",
+      texto: "",
+      sugestaoImagem: "Foto de uma obra real do cliente.",
+    },
+    {
+      headline: "Erro 1",
+      subheadline: "",
+      texto: "Pular o projeto.",
+      sugestaoImagem: "",
+    },
+  ];
+  it("a geração grava os slides como textoImagem formatado", async () => {
+    const { fetchImpl, calls } = fakeDb({
+      social_leads_start_job: () => ({ body: context }),
+      social_leads_write_plan: () => ({ body: { id: planId, version: 1 } }),
+    });
+    const d = deps(fetchImpl, [
+      JSON.stringify({
+        posts: Array.from({ length: 8 }, (_, i) => ({
+          numero: i + 1,
+          formato: i ? "Reels" : "Carrossel",
+          slides: i ? [] : slides,
+        })),
+      }),
+    ]);
+    await handleSocialLeads(
+      { action: "generate", company, contract, mode: "new" },
+      "Bearer t",
+      env,
+      d,
+    );
+    await Promise.all(d.work);
+    const posts = calls[1].args.p_content.posts;
+    expect(posts[0].slides).toBeUndefined();
+    expect(posts[0].textoImagem).toBe(slidesRichText(slides, false));
+    expect(postTextPlain(posts[0].textoImagem)).toBe(
+      [
+        "Slide 1 (Capa)",
+        "Headline: 3 erros na reforma",
+        "Subheadline: E como evitar",
+        "SUGESTÃO DE IMAGEM (só uma ideia para o designer, não vai escrito na arte): Foto de uma obra real do cliente.",
+        "",
+        "Slide 2",
+        "Headline: Erro 1",
+        "Texto: Pular o projeto.",
+      ].join("\n"),
+    );
+    expect(posts[1].textoImagem).toBe("");
+  });
+  it("imagem única vira “Arte”, sem numerar", () => {
+    const out = withArtText({
+      formato: "Imagem única",
+      slides: [slides[0]],
+    }) as any;
+    expect(postTextPlain(out.textoImagem)).toMatch(/^Arte\nHeadline:/);
+  });
+  it("o ajuste lê os slides da MAVI e marca o que a equipe editou", () => {
+    const edited =
+      'mavi:richtext:v1:{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Card 1: editado"}]}]}';
+    const plan = planForAdjust({
+      posts: [
+        {
+          numero: 1,
+          formato: "Carrossel",
+          textoImagem: slidesRichText(slides, false),
+        },
+        { numero: 2, formato: "Carrossel", textoImagem: edited, legenda: "Oi" },
+        {
+          numero: 3,
+          formato: "Carrossel",
+          textoImagem: "(1) Antigo, (2) texto",
+        },
+      ],
+    } as any);
+    expect(plan.posts[0]).toMatchObject({ slides });
+    expect(plan.posts[0]).not.toHaveProperty("textoImagem");
+    expect(plan.posts[0]).not.toHaveProperty("editadosPelaEquipe");
+    expect(plan.posts[1]).toMatchObject({
+      textoImagem: "Card 1: editado",
+      legenda: "Oi",
+      editadosPelaEquipe: ["textoImagem"],
+    });
+    expect(plan.posts[2]).toMatchObject({
+      textoImagem: "(1) Antigo, (2) texto",
+    });
   });
 });
 

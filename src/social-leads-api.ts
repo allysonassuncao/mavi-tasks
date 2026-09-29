@@ -29,6 +29,7 @@ import {
   type SlPostEvent,
   postEventsFor,
   clampPosts,
+  slidesRichText,
   POSTS_DEFAULT,
   type BriefingSuggestion,
   type SlAlertRead,
@@ -915,7 +916,33 @@ export function samplePlan(
       cta: i === 3 ? "Chamar no WhatsApp" : "Seguir a página",
       textoImagem:
         i % 2
-          ? `Card 1: ${gancho}\nCard 2: O que a gente observa em cada projeto\nCard 3: Salve para lembrar depois`
+          ? slidesRichText(
+              [
+                {
+                  headline: gancho,
+                  subheadline: "O que ninguém conta antes da obra",
+                  texto: "",
+                  sugestaoImagem:
+                    "Foto de um ambiente já entregue pela equipe, com luz natural e espaço livre no alto para o título.",
+                },
+                {
+                  headline: "O que a gente observa em cada projeto",
+                  subheadline: "",
+                  texto:
+                    "Luz, circulação e o jeito que a família usa o espaço no dia a dia.",
+                  sugestaoImagem:
+                    "Detalhe da planta ou do esboço do projeto sobre a mesa, com as mãos da arquiteta.",
+                },
+                {
+                  headline: "Salve para lembrar depois",
+                  subheadline: "",
+                  texto: "",
+                  sugestaoImagem:
+                    "Só tipografia sobre a cor principal da marca, com o logo no rodapé.",
+                },
+              ],
+              false,
+            )
           : "",
       textoVideo:
         i % 2

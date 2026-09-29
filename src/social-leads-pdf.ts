@@ -2,6 +2,7 @@ import {
   parseColors,
   pillars,
   postTextPlain,
+  withoutImageSuggestions,
   type BriefingFields,
   type PlanContent,
   type SlPost,
@@ -556,7 +557,8 @@ export async function presentationPdf(input: {
     const tight = (t: string | undefined) =>
       postTextPlain(t).replace(/\n\s*\n+/g, "\n");
     for (const [k, v] of [
-      ["TEXTO DA ARTE", tight(p.image_text)],
+      // The image ideas are for the designer, not for the client's deck.
+      ["TEXTO DA ARTE", withoutImageSuggestions(tight(p.image_text))],
       ["ROTEIRO DO VÍDEO", tight(p.video_text)],
       ["LEGENDA", tight(p.caption)],
       [

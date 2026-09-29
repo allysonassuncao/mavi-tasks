@@ -70,6 +70,19 @@
         "--strictPort"
       ],
       "port": 5184
+    },
+    {
+      "name": "mavi-dev-slides",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5185",
+        "--strictPort"
+      ],
+      "port": 5185
     }
   ]
 }

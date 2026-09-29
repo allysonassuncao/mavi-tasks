@@ -17,6 +17,11 @@ import {
   campaignObjectives,
   clampPosts,
   cleanBriefingSuggestion,
+  isSingleArt,
+  postTextPlain,
+  slidesFromText,
+  slidesRichText,
+  type PostSlide,
   type BriefingFields,
   type BriefingKey,
   type CampaignObjective,
@@ -140,10 +145,11 @@ Posts:
 - "badge" é o papel do post: "posicionar", "autoridade" ou "oferta". Equilibre os três ao longo do mês.
 - "gancho" é a frase curta que abre o post; "direcaoCopy" orienta o redator; "direcaoVisual" orienta o designer; "formato" (ex.: "Carrossel", "Reels", "Imagem única"); "cta" é a chamada.
 - Escreva também os textos EXATOS da peça, prontos para usar, sem descrever o que escrever:
-  - "textoImagem": o texto que vai escrito na(s) imagem(ns). Carrossel: um card por linha, "Card 1: …", "Card 2: …". Imagem única: o texto da arte. Sem texto na arte ou post só em vídeo: "".
+  - "slides": o que vai escrito na(s) imagem(ns), um item por slide, na ordem em que aparecem (no carrossel, o primeiro é a capa). Imagem única: um item só. Sem texto na arte ou post só em vídeo: []. Em cada slide, separado e sem numerar: "headline" (o título do slide), "subheadline" (a linha de apoio abaixo do título; "" se o slide não tiver), "texto" (o corpo do slide; "" se não tiver) e "sugestaoImagem".
+  - "sugestaoImagem" é uma SUGESTÃO de imagem para o slide, para o designer decidir: em uma ou duas frases, o que mostrar (foto, cena, objeto, ilustração ou só tipografia) e como compor com o texto. Prefira o que o cliente tem de verdade (fotos do negócio, da equipe, dos produtos, os arquivos anexados ao briefing) e cite o arquivo quando fizer sentido. Não é texto da arte e nunca vai escrita nela. As regras 1 e 9 valem aqui: nada de depoimento, pessoa real, logo ou cor inventados.
   - "textoVideo": para Reels e vídeos, o roteiro com as falas e os textos que aparecem na tela, em ordem ("Cena 1 (0–3 s): …"). Sem vídeo: "".
   - "legenda": a legenda completa do post, como vai ser publicada: abertura, corpo, a chamada do "cta" e as hashtags no fim.
-  - As regras 1, 2, 3, 6 e 7 valem para esses textos palavra por palavra.
+  - As regras 1, 2, 3, 6 e 7 valem para esses textos (headline, subheadline, texto, textoVideo e legenda) palavra por palavra.
 - Exatamente um post tem "ehAnuncio": true, e ele precisa funcionar como anúncio para o objetivo da campanha.
 
 Se receber o site do cliente, você pode lê-lo com web_fetch para entender o negócio e o estilo visual. Perfis do Instagram e do Facebook costumam exigir login: se não abrirem, siga o briefing e não conclua que o perfil não existe só por isso. Escreva tudo em português do Brasil. Responda somente com o JSON do plano.`;
@@ -267,6 +273,18 @@ const obj = (properties: Record<string, unknown>) => ({
   required: Object.keys(properties),
   additionalProperties: false,
 });
+/** The art texts, slide by slide (the server turns them into textoImagem). */
+const SLIDES_SCHEMA = {
+  type: "array",
+  description:
+    "Um item por slide, na ordem (o primeiro é a capa); imagem única: um item; sem texto na arte: [].",
+  items: obj({
+    headline: str,
+    subheadline: str,
+    texto: str,
+    sugestaoImagem: str,
+  }),
+};
 /** The plan in the artifact's contract (without the decisions). */
 export const PLAN_SCHEMA = obj({
   diagnostico: obj({ negocio: str, comoQuerSerVista: str }),
@@ -289,7 +307,7 @@ export const PLAN_SCHEMA = obj({
       direcaoVisual: str,
       formato: str,
       cta: str,
-      textoImagem: str,
+      slides: SLIDES_SCHEMA,
       textoVideo: str,
       legenda: str,
       ehAnuncio: { type: "boolean" },
@@ -327,7 +345,7 @@ export const ADJUST_SCHEMA = obj({
           direcaoVisual: str,
           formato: str,
           cta: str,
-          textoImagem: str,
+          slides: SLIDES_SCHEMA,
           textoVideo: str,
           legenda: str,
           ehAnuncio: { type: "boolean" },
@@ -375,6 +393,56 @@ export function siteDomains(f: BriefingFields) {
   return out;
 }
 
+/**
+ * The model writes the art slide by slide ("slides"); the post keeps it as
+ * textoImagem in rich text, so the plan, the client's link and the art
+ * task read "Slide 1 (Capa) / Headline / Subheadline / Texto" and the
+ * image idea apart. No "slides": the post is left as it came.
+ */
+export function withArtText(post: unknown, formato = ""): unknown {
+  if (!post || typeof post !== "object") return post;
+  const { slides, ...rest } = post as Record<string, unknown>;
+  if (!Array.isArray(slides)) return post;
+  const list = (slides as Partial<PostSlide>[]).map((x) => ({
+    headline: String(x?.headline ?? ""),
+    subheadline: String(x?.subheadline ?? ""),
+    texto: String(x?.texto ?? ""),
+    sugestaoImagem: String(x?.sugestaoImagem ?? ""),
+  }));
+  const kept = list.filter((x) => Object.values(x).some((v) => v.trim()));
+  const format = typeof rest.formato === "string" ? rest.formato : formato;
+  return {
+    ...rest,
+    textoImagem: slidesRichText(kept, isSingleArt(kept.length, format)),
+  };
+}
+/**
+ * The plan as the adjustment reads it: the MAVI's own art back in
+ * "slides"; anything the team formatted by hand in plain text, listed in
+ * "editadosPelaEquipe" (the editor's JSON would only cost tokens).
+ */
+export function planForAdjust(plan: PlanContent & { label?: string }) {
+  return {
+    ...plan,
+    posts: plan.posts.map((p) => {
+      const out: Record<string, unknown> = { ...p };
+      const art = slidesFromText(p.textoImagem);
+      if (art) {
+        delete out.textoImagem;
+        out.slides = art.slides;
+      }
+      const edited = (["textoImagem", "textoVideo", "legenda"] as const).filter(
+        (k) =>
+          typeof out[k] === "string" &&
+          (out[k] as string).startsWith("mavi:richtext:v1:"),
+      );
+      for (const k of edited) out[k] = postTextPlain(out[k] as string);
+      if (edited.length) out.editadosPelaEquipe = edited;
+      return out;
+    }),
+  };
+}
+
 /** What Claude receives for a new month or a regeneration. */
 export function planRequest(
   ctx: Context,
@@ -416,7 +484,7 @@ export function planRequest(
       kind === "current" && ctx.previous
         ? `Monte de novo o plano do ${ctx.previous.label ?? "mês"}`
         : `Monte o plano do Mês ${ctx.next_month}`
-    } com exatamente ${total} posts, numerados de 1 a ${total}, cada um com os textos exatos (textoImagem, textoVideo, legenda).`,
+    } com exatamente ${total} posts, numerados de 1 a ${total}, cada um com os textos exatos (slides, textoVideo, legenda).`,
   );
   const domains = siteDomains(ctx.briefing);
   if (domains.length)
@@ -771,6 +839,12 @@ async function run(
         lastError = "a resposta não era um JSON válido.";
         continue;
       }
+      const posts = (content as { posts?: unknown })?.posts;
+      if (Array.isArray(posts))
+        content = {
+          ...(content as object),
+          posts: posts.map((p) => withArtText(p)),
+        };
       // The database accepts 8 to 16; the plan must have the count asked for.
       const want = clampPosts(ctx.post_count);
       const list = (content as { posts?: unknown })?.posts;
@@ -865,9 +939,9 @@ async function adjust(
     system: SYSTEM_PROMPT,
     user: [
       `Briefing do cliente (JSON):\n${JSON.stringify({ ...ctx.briefing, campaignObjective: ctx.campaign_objective }, null, 2)}`,
-      `Plano atual (${ctx.plan.label}):\n${JSON.stringify(ctx.plan, null, 2)}`,
+      `Plano atual (${ctx.plan.label}):\n${JSON.stringify(planForAdjust(ctx.plan), null, 2)}`,
       `Pedido da equipe: ${instruction}`,
-      `Devolva SOMENTE o que muda, no formato de atualização parcial: em "alteracoes.posts" só os posts alterados (com "numero" e os campos que mudam; se o gancho, a copy ou o formato mudarem, reescreva também textoImagem, textoVideo e legenda para combinar); "publico" e "alertas" como null quando não mudam. Os textos exatos que já estiverem formatados (começam com "mavi:richtext:v1:") só mudam se o pedido falar deles; ao mudar, escreva em texto simples. Mantenha exatamente um post com ehAnuncio true no plano final. Em "resumo", uma frase dizendo o que mudou.`,
+      `Devolva SOMENTE o que muda, no formato de atualização parcial: em "alteracoes.posts" só os posts alterados (com "numero" e os campos que mudam; se o gancho, a copy ou o formato mudarem, reescreva também slides, textoVideo e legenda para combinar); "publico" e "alertas" como null quando não mudam. A arte de cada post vem em "slides" ou, nos planos antigos e nos textos editados, em "textoImagem" como texto corrido; para mudar a arte, devolva em "slides" todos os slides do post, cada um com headline, subheadline, texto e sugestaoImagem. Os textos listados em "editadosPelaEquipe" foram editados à mão pela equipe: só mudam se o pedido falar deles. Mantenha exatamente um post com ehAnuncio true no plano final. Em "resumo", uma frase dizendo o que mudou.`,
     ].join("\n\n"),
     schema: ADJUST_SCHEMA,
     domains: [],
@@ -885,6 +959,13 @@ async function adjust(
     const alteracoes = Object.fromEntries(
       Object.entries(parsed.alteracoes ?? {}).filter(([, v]) => v != null),
     );
+    if (Array.isArray(alteracoes.posts))
+      alteracoes.posts = alteracoes.posts.map((p: { numero?: number }) =>
+        withArtText(
+          p,
+          ctx.plan.posts.find((x) => x.numero === p?.numero)?.formato,
+        ),
+      );
     return {
       status: 200,
       body: {

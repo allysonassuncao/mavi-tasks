@@ -1039,7 +1039,7 @@ const POST_TEXTS = [
     key: "textoImagem",
     column: "image_text",
     label: "Texto da(s) imagem(ns)",
-    hint: "O que vai escrito na arte. Carrossel: um card por linha.",
+    hint: "O que vai escrito na arte, slide a slide. A sugestão de imagem é só uma ideia para o designer.",
   },
   {
     key: "textoVideo",
