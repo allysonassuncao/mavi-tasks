@@ -27,6 +27,9 @@ const DELIVERED_ONLY = [
   "delay_days",
   "first_pass_rate",
   "rework_per_task",
+  "smart_hit_rate",
+  "rule_hit_rate",
+  "smart_error_days",
 ];
 
 function bucketStart(day: string, interval: PanelResult["interval"]) {
@@ -162,6 +165,35 @@ function series(
       case "rescheduled":
         return list.filter((r) => r.task.due_date !== r.task.original_due_date)
           .length;
+      // Migration 20261201120000: the suggested due dates.
+      case "smart_hit_rate": {
+        const had = list.filter((r) => r.task.due_smart_date);
+        return had.length
+          ? (100 * had.filter((r) => deliveredDay(r.task) <= r.task.due_smart_date!).length) / had.length
+          : null;
+      }
+      case "rule_hit_rate": {
+        const had = list.filter((r) => r.task.due_rule_date);
+        return had.length
+          ? (100 * had.filter((r) => deliveredDay(r.task) <= r.task.due_rule_date!).length) / had.length
+          : null;
+      }
+      case "smart_error_days":
+        return mean(
+          list
+            .filter((r) => r.task.due_smart_date)
+            .map(
+              (r) =>
+                Math.abs(Date.parse(deliveredDay(r.task)) - Date.parse(r.task.due_smart_date!)) /
+                86400000,
+            ),
+        );
+      case "tight_due":
+        return list.filter((r) => r.task.due_tight_reason).length;
+      case "shorter_than_smart":
+        return list.filter(
+          (r) => r.task.due_smart_date && r.task.original_due_date < r.task.due_smart_date,
+        ).length;
       // Without the status history, the demo reads rework from the revision.
       case "first_pass_rate":
         return share(list, (t) => t.revision <= 1);

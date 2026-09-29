@@ -461,3 +461,175 @@
   display: block;
   padding: 0 20px 18px;
 }
+
+/* Fase 4: quem entrega antes (WhoDeliversFirst). */
+.who-first {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.who-first-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #56793a;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.who-first-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+.who-first-list > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1px 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.who-first-list > button:first-of-type {
+  border-top: 0;
+}
+.who-first-list > button:hover,
+.who-first-list > button.current {
+  background: #f3f7ee;
+}
+.who-first-list > button span {
+  color: #56793a;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.who-first-list > button small {
+  grid-column: 1 / -1;
+  color: #7f8f72;
+  font-size: 0.72rem;
+}
+.who-first-empty {
+  padding: 8px 10px;
+  color: #7f8f72;
+}
+
+/* Risco de atraso (DueRiskNote) e o aviso na caixa de entrada. */
+.due-risk-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #efd9a8;
+  border-radius: 10px;
+  background: #fdf8ec;
+  color: #6b5317;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.due-risk-note > svg {
+  flex: none;
+  margin-top: 2px;
+  color: #c28a1e;
+}
+.due-risk-note > span {
+  flex: 1;
+  min-width: 220px;
+}
+.due-risk-note button {
+  border: 1px solid #e7d3a2;
+  background: #fff;
+  border-radius: 999px;
+  padding: 3px 11px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 650;
+  color: #7a5a12;
+  cursor: pointer;
+}
+.inbox-system.due-risk {
+  background: #fbf4e4;
+  color: #c28a1e;
+}
+
+/* Replanejamento (ReplanModal). */
+.replan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.replan-intro,
+.replan-empty {
+  margin: 0;
+  color: #6f7d6a;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+.replan-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.replan-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.replan-item legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  float: left;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 0;
+}
+.replan-item legend small {
+  color: #7f8f72;
+  font-size: 0.74rem;
+}
+.replan-item label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 7px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.replan-item label small {
+  color: #7f8f72;
+  font-size: 0.74rem;
+}
+.due-absence-affected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #fdf8ec;
+  color: #6b5317;
+  font-size: 0.8rem;
+}
+.due-absence-affected > span {
+  flex: 1;
+  min-width: 200px;
+}

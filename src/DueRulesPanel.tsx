@@ -29,12 +29,14 @@ export function DueRulesPanel({
   data,
   company,
   user,
+  demo,
   mutate,
   notify,
 }: {
   data: Snapshot;
   company: string;
   user: string;
+  demo: boolean;
   mutate: Mutate;
   notify: (message: string) => void;
 }) {
@@ -180,6 +182,7 @@ export function DueRulesPanel({
         data={data}
         company={company}
         user={user}
+        demo={demo}
         mutate={mutate}
         notify={notify}
       />

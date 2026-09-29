@@ -50,6 +50,7 @@ import {
   starterPanels,
   socialLeadsPanels,
   performancePanels,
+  duePanels,
   noticesPanels,
   temperaturePanels,
   vizOptions,
@@ -379,7 +380,9 @@ function DashboardList({
                     ? socialLeadsPanels()
                     : template === "performance"
                       ? performancePanels()
-                      : template === "notices"
+                      : template === "due"
+                        ? duePanels()
+                        : template === "notices"
                         ? noticesPanels()
                         : template === "temperature"
                           ? temperaturePanels()
@@ -399,7 +402,13 @@ function DashboardList({
 }
 
 type Template =
-  "operation" | "social_leads" | "performance" | "notices" | "temperature" | null;
+  | "operation"
+  | "social_leads"
+  | "performance"
+  | "due"
+  | "notices"
+  | "temperature"
+  | null;
 function CreateDashboard({
   onClose,
   onCreate,
@@ -483,6 +492,19 @@ function CreateDashboard({
               Aprovadas e reprovadas, vezes e horas em Devolvida, Em validação,
               Alteração e Correção, prazo médio de entrega por cliente, produto,
               projeto e pessoa.
+            </small>
+          </label>
+          <label className={template === "due" ? "selected" : ""}>
+            <input
+              type="radio"
+              name="template"
+              checked={template === "due"}
+              onChange={() => setTemplate("due")}
+            />
+            <strong>Modelo: prazos e previsões</strong>
+            <small>
+              Quanto as datas da MAVI e das regras acertam, o erro médio da
+              MAVI e quem define prazos apertados ou mais curtos que a sugestão.
             </small>
           </label>
           <label className={template === "social_leads" ? "selected" : ""}>

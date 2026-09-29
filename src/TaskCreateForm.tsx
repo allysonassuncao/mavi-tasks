@@ -31,6 +31,7 @@ import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
 import { suggestDue } from "./dueRules";
 import { AbsenceNote, DueRuleHint, SmartDueHint } from "./DueRuleHint";
 import { useSmartDue } from "./smartDue";
+import { WhoDeliversFirst } from "./DueAssist";
 import { dayLabel } from "./task-bulk";
 import {
   attachmentAccept,
@@ -572,6 +573,23 @@ export function TaskCreateForm({
                     </button>
                   ))}
                 </div>
+                {!byTeam && contract && (
+                  <WhoDeliversFirst
+                    input={{
+                      company,
+                      contract,
+                      project: project || null,
+                      start: start || null,
+                      approval: clientApproval,
+                      priority,
+                      estimated: Math.round(Number(estimated || 0) * 60),
+                    }}
+                    demo={demo}
+                    data={data}
+                    current={assignee}
+                    onPick={setAssignee}
+                  />
+                )}
                 {byTeam && (
                   <small className="assign-team-hint">
                     Vai para quem da equipe tem menos tarefas em aberto.

@@ -3913,6 +3913,7 @@ export default function App() {
                         data={data}
                         company={company}
                         user={user}
+                        demo={demo}
                         mutate={mutate}
                         notify={notify}
                       />

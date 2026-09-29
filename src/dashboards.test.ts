@@ -11,6 +11,7 @@ import {
   starterPanels,
   socialLeadsPanels,
   performancePanels,
+  duePanels,
   noticesPanels,
   groupsFor,
   metricDef,
@@ -315,6 +316,17 @@ describe("Grade dos painéis", () => {
       );
     }
   });
+  it("o modelo de prazos e previsões cabe na grade e só usa o catálogo", () => {
+    const panels = duePanels();
+    expect(overlap(panels)).toBe(false);
+    for (const p of panels) {
+      expect(p.x + p.w).toBeLessThanOrEqual(12);
+      for (const q of p.spec.queries) expect(metricDef(q)).toBeTruthy();
+      expect(groupsFor(p.spec.queries).map((g) => g.key)).toContain(
+        p.spec.groupBy,
+      );
+    }
+  });
   it("o modelo do Mural de avisos cabe na grade e só usa a fonte Avisos", () => {
     const panels = noticesPanels();
     expect(overlap(panels)).toBe(false);
@@ -510,6 +522,44 @@ describe("Motor da demonstração", () => {
     expect(r.series.A).toHaveLength(30);
     expect(r.series.A[2].v).toBe(0.5);
     expect(r.series.A[14].v).toBe(1);
+  });
+  it("acerto das datas da MAVI e da regra", () => {
+    const delivered = (id: string, day: string, rule: string, smart: string) =>
+      task(id, {
+        status: "done",
+        delivered_at: `${day}T18:00:00Z`,
+        due_rule_date: rule,
+        due_smart_date: smart,
+      });
+    const r = runPanel(
+      {
+        ...data,
+        tasks: [
+          delivered("d1", "2026-09-05", "2026-09-06", "2026-09-05"),
+          delivered("d2", "2026-09-09", "2026-09-06", "2026-09-07"),
+          delivered("d3", "2026-09-07", "2026-09-08", "2026-09-07"),
+          task("d4", { due_tight_reason: "Cliente pediu", created_at: "2026-09-03T12:00:00Z" }),
+        ],
+      },
+      {
+        viz: "stat",
+        groupBy: "none",
+        queries: [
+          q("A", "tasks", "smart_hit_rate", { dateField: "delivered_at" }),
+          q("B", "tasks", "rule_hit_rate", { dateField: "delivered_at" }),
+          q("C", "tasks", "smart_error_days", { dateField: "delivered_at" }),
+          q("D", "tasks", "tight_due"),
+        ],
+      },
+      range,
+      {},
+      "America/Sao_Paulo",
+      new Date("2026-09-24T15:00:00Z"),
+    );
+    expect(Math.round(r.series.A[0].v!)).toBe(67);
+    expect(Math.round(r.series.B[0].v!)).toBe(67);
+    expect(r.series.C[0].v).toBeCloseTo(0.67, 2);
+    expect(r.series.D[0].v).toBe(1);
   });
   it("qualidade das entregas, por quem executou", () => {
     const r = run({

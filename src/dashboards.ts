@@ -221,6 +221,37 @@ export const sources: Record<
         unit: "number",
         additive: true,
       },
+      // Migration 20261201120000: how the suggested due dates did.
+      {
+        key: "smart_hit_rate",
+        label: "Entregas até a data da MAVI (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "rule_hit_rate",
+        label: "Entregas até a data da regra (%)",
+        unit: "percent",
+        additive: false,
+      },
+      {
+        key: "smart_error_days",
+        label: "Erro médio da MAVI (dias)",
+        unit: "days",
+        additive: false,
+      },
+      {
+        key: "tight_due",
+        label: "Prazos apertados (antes do mínimo)",
+        unit: "number",
+        additive: true,
+      },
+      {
+        key: "shorter_than_smart",
+        label: "Prazos mais curtos que a MAVI sugeriu",
+        unit: "number",
+        additive: true,
+      },
     ],
     dateFields: [
       { key: "created_at", label: "Criação" },
@@ -1787,6 +1818,93 @@ export function performancePanels(): Panel[] {
         queries: [
           q("A", "reviews", "approved", { label: "Aprovadas" }),
           q("B", "reviews", "reproved", { label: "Reprovadas" }),
+        ],
+      },
+    },
+  ];
+}
+
+/**
+ * Prazos e previsões (migration 20261201120000): quanto as datas da MAVI e
+ * das regras acertam, o erro médio da MAVI, e quem define prazos apertados
+ * ou mais curtos que a sugestão (por quem criou a tarefa).
+ */
+export function duePanels(): Panel[] {
+  const q = (ref: string, metric: string, extra: Partial<Query> = {}): Query => ({
+    ref,
+    source: "tasks",
+    metric,
+    dateField: "delivered_at",
+    filters: [],
+    ...extra,
+  });
+  const stat = (id: string, title: string, x: number, query: Query): Panel => ({
+    id,
+    title,
+    x,
+    y: 0,
+    w: 3,
+    h: 3,
+    spec: { viz: "stat", groupBy: "none", compare: true, queries: [query] },
+  });
+  const created = { dateField: "created_at" };
+  return [
+    stat("mavi-acerto", "Entregas até a data da MAVI", 0, q("A", "smart_hit_rate")),
+    stat("regra-acerto", "Entregas até a data da regra", 3, q("A", "rule_hit_rate")),
+    stat("mavi-erro", "Erro médio da MAVI", 6, q("A", "smart_error_days")),
+    stat("no-prazo-definido", "Entregas no prazo definido", 9, q("A", "on_time_rate")),
+    {
+      id: "acerto-tempo",
+      title: "Acerto ao longo do tempo",
+      x: 0,
+      y: 3,
+      w: 12,
+      h: 5,
+      spec: {
+        viz: "line",
+        groupBy: "time",
+        interval: "auto",
+        queries: [
+          q("A", "smart_hit_rate", { label: "Data da MAVI" }),
+          q("B", "rule_hit_rate", { label: "Data da regra" }),
+          q("C", "on_time_rate", { label: "Prazo definido" }),
+        ],
+      },
+    },
+    {
+      id: "acerto-pessoa",
+      title: "Acerto por quem executou",
+      x: 0,
+      y: 8,
+      w: 12,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "executor",
+        limit: 30,
+        queries: [
+          q("A", "count", { label: "Entregas" }),
+          q("B", "smart_hit_rate", { label: "Até a data da MAVI" }),
+          q("C", "rule_hit_rate", { label: "Até a data da regra" }),
+          q("D", "smart_error_days", { label: "Erro da MAVI (dias)" }),
+        ],
+      },
+    },
+    {
+      id: "prazos-quem-cria",
+      title: "Prazos apertados e mais curtos que a MAVI, por quem criou",
+      x: 0,
+      y: 14,
+      w: 12,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "creator",
+        limit: 30,
+        queries: [
+          q("A", "count", { ...created, label: "Tarefas criadas" }),
+          q("B", "tight_due", { ...created, label: "Antes do mínimo" }),
+          q("C", "shorter_than_smart", { ...created, label: "Mais curtos que a MAVI" }),
         ],
       },
     },

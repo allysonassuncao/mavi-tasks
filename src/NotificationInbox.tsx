@@ -2,6 +2,7 @@ import * as Popover from "@radix-ui/react-popover";
 import {
   AtSign,
   BellRing,
+  CalendarClock,
   Check,
   CheckCheck,
   Inbox,
@@ -10,6 +11,7 @@ import {
   Thermometer,
   Trophy,
 } from "lucide-react";
+import "./due-rules.css";
 import { useState } from "react";
 import { Avatar } from "./components";
 import type { AppNotification, Member } from "./types";
@@ -100,6 +102,10 @@ export function NotificationInbox({
                       <span className="inbox-system temperature" aria-hidden="true">
                         <Thermometer size={15} />
                       </span>
+                    ) : n.kind === "due_risk" ? (
+                      <span className="inbox-system due-risk" aria-hidden="true">
+                        <CalendarClock size={15} />
+                      </span>
                     ) : n.kind === "tasks_assigned" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <ListChecks size={15} />
@@ -121,6 +127,7 @@ export function NotificationInbox({
                       n.kind === "success_case" ||
                       n.kind === "temperature" ||
                       n.kind === "tasks_assigned" ||
+                      n.kind === "due_risk" ||
                       n.kind === "notice" ? (
                         <span className="inbox-line">
                           <strong>{n.task_title}</strong>

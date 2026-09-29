@@ -106,6 +106,8 @@ import { navigate, routeParts } from "./router";
 import { canOpenPage } from "./modules";
 import { CopilotBadge, TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
 import { TaskDueEdit } from "./DueRuleHint";
+import { DueRiskNote, ReplanModal } from "./DueAssist";
+import { canManageDueScope } from "./dueRules";
 import { MIN_REVIEW, copilotExtras, useTaskCopilot } from "./copilot";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
@@ -745,6 +747,14 @@ export function TaskDetail({
   const [editTitle, setEditTitle] = useState(task.title);
   // The count of the due rule starts at the start date being edited.
   const [editStart, setEditStart] = useState<string | null>(null);
+  // Prazos (Fase 4): replanning the assignee's tasks from the risk warning.
+  const [replanning, setReplanning] = useState(false);
+  const canReplan = canManageDueScope(data, user, {
+    project_id: null,
+    client_id: null,
+    team_id: null,
+    user_id: task.assignee_id,
+  });
   const [editText, setEditText] = useState<string | null>(null);
   const appendToDescription = useRef<((text: string) => void) | null>(null);
   const copilotOn =
@@ -1229,6 +1239,24 @@ export function TaskDetail({
               {error}
             </p>
           )}
+          <DueRiskNote
+            task={task}
+            data={data}
+            demo={demo}
+            refresh={refresh}
+            onReplan={canReplan ? () => setReplanning(true) : undefined}
+          />
+          {replanning && (
+            <ReplanModal
+              company={task.company_id}
+              user={task.assignee_id}
+              data={data}
+              demo={demo}
+              mutate={mutate}
+              notify={notify}
+              onClose={() => setReplanning(false)}
+            />
+          )}
           <div className="task-properties">
             <div className="property-group">
               <div className="property-row">
@@ -1254,6 +1282,7 @@ export function TaskDetail({
                 <div className={`property-value${late ? " late" : ""}`}>
                   {dateLabel(task.due_date)}
                   {late && <small className="late">atrasada</small>}
+                  {task.due_smart && !late && <small>pela MAVI</small>}
                 </div>
               </div>
               <div className="property-row">

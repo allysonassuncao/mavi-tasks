@@ -146,7 +146,9 @@ export interface AppNotification {
     /** Termômetro: o cliente esfriou ou deu um sinal de alerta (link /drive?termometro=…). */
     | "temperature"
     /** Alteração em massa: "Ana passou 12 tarefas para você" (link /tarefas?escopo=mine). */
-    | "tasks_assigned";
+    | "tasks_assigned"
+    /** Prazo: a MAVI acha que a tarefa pode atrasar (link /tarefas/<id>). */
+    | "due_risk";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

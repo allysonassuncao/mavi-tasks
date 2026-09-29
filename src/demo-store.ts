@@ -942,6 +942,34 @@ export class DemoStore {
           ).length,
         };
       }
+      case "apply_replan": {
+        // Mirrors public.apply_replan (the move goes through transition_task).
+        const results = (a.p_items as { task: string; assignee?: string | null; due?: string | null }[]).map((i) => {
+          const t = this.data.tasks.find((x) => x.id === i.task);
+          if (!t || t.status === "done") return { task_id: i.task, ok: false, reason: "Tarefa não encontrada ou já entregue" };
+          try {
+            if (i.assignee && i.assignee !== t.assignee_id)
+              this.mutate("transition_task", {
+                p_task: t.id,
+                p_version: t.version,
+                p_action: "move",
+                p_note: "",
+                p_status: t.status,
+                p_assignee: i.assignee,
+              });
+            if (i.due && i.due !== t.due_date) {
+              t.due_date = i.due;
+              t.due_manual = true;
+              t.due_rule_id = null;
+              t.version++;
+            }
+            return { task_id: t.id, ok: true, reason: null };
+          } catch (e) {
+            return { task_id: t.id, ok: false, reason: (e as Error).message };
+          }
+        });
+        return { applied: results.filter((r) => r.ok).length, results };
+      }
       case "delete_member_absence":
         this.data.absences = (this.data.absences ?? []).filter(
           (x) => x.id !== a.p_id,

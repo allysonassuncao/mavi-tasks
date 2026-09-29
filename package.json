@@ -34,6 +34,7 @@
     "test:db:due-rules": "node scripts/test-task-due-rules.mjs",
     "test:db:workload": "node scripts/test-workload-absences.mjs",
     "test:db:smart-due": "node scripts/test-smart-due.mjs",
+    "test:db:due-assist": "node scripts/test-due-assist.mjs",
     "test:db:replies": "node scripts/test-comment-replies.mjs",
     "test:db:suggestions": "node scripts/test-suggestions.mjs",
     "test:db:inbox": "node scripts/test-inbox-broadcast.mjs",

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Palmtree, Plus, Save, Search, Trash2 } from "lucide-react";
+import { CalendarClock, Palmtree, Plus, Save, Search, Trash2 } from "lucide-react";
+import { ReplanModal } from "./DueAssist";
 import { Avatar } from "./components";
 import { Button, Input, Select, SelectOption } from "./ui";
 import { dateKey, fold } from "./domain";
@@ -31,16 +32,20 @@ export function WorkloadPanel({
   data,
   company,
   user,
+  demo,
   mutate,
   notify,
 }: {
   data: Snapshot;
   company: string;
   user: string;
+  demo: boolean;
   mutate: Mutate;
   notify: (message: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  // Replanning someone's tasks (Fase 4): from their row or a new absence.
+  const [replanFor, setReplanFor] = useState<string | null>(null);
   const [error, setError] = useState("");
   const isAdmin = data.members.some((m) => m.user_id === user && m.active && m.role === "admin");
   const companyMinutes = data.companies.find((c) => c.id === company)?.work_minutes ?? 480;
@@ -94,6 +99,7 @@ export function WorkloadPanel({
             member={m}
             companyMinutes={companyMinutes}
             canEdit={canManage(m.user_id)}
+            onReplan={() => setReplanFor(m.user_id)}
             onSave={async (minutes, days) => {
               setError("");
               try {
@@ -119,7 +125,19 @@ export function WorkloadPanel({
         canManage={canManage}
         mutate={mutate}
         notify={notify}
+        onReplan={setReplanFor}
       />
+      {replanFor && (
+        <ReplanModal
+          company={company}
+          user={replanFor}
+          data={data}
+          demo={demo}
+          mutate={mutate}
+          notify={notify}
+          onClose={() => setReplanFor(null)}
+        />
+      )}
       {error && (
         <p className="form-error template-error" role="alert">
           {error}
@@ -198,11 +216,13 @@ function PersonWorkday({
   member,
   companyMinutes,
   canEdit,
+  onReplan,
   onSave,
 }: {
   member: Member;
   companyMinutes: number;
   canEdit: boolean;
+  onReplan: () => void;
   onSave: (minutes: number | null, days: number[] | null) => Promise<void>;
 }) {
   const savedDays = member.work_days?.length ? member.work_days : [1, 2, 3, 4, 5];
@@ -272,6 +292,16 @@ function PersonWorkday({
           <Save size={15} />
         </Button>
       )}
+      {canEdit && !dirty && (
+        <Button
+          className="icon-btn"
+          aria-label={`Replanejar tarefas de ${member.name}`}
+          title="Replanejar tarefas (a MAVI propõe; você aplica)"
+          onClick={onReplan}
+        >
+          <CalendarClock size={15} />
+        </Button>
+      )}
     </div>
   );
 }
@@ -283,6 +313,7 @@ function Absences({
   canManage,
   mutate,
   notify,
+  onReplan,
 }: {
   data: Snapshot;
   company: string;
@@ -291,7 +322,10 @@ function Absences({
   canManage: (user: string) => boolean;
   mutate: Mutate;
   notify: (message: string) => void;
+  onReplan: (user: string) => void;
 }) {
+  // After an absence that catches open tasks: the way to replan them.
+  const [affected, setAffected] = useState<{ user: string; n: number } | null>(null);
   const today = dateKey();
   const [who, setWho] = useState("");
   const [kind, setKind] = useState<AbsenceKind>("vacation");
@@ -319,11 +353,8 @@ function Absences({
         p_kind: kind,
       })) as { open_tasks?: number } | null;
       const n = result?.open_tasks ?? 0;
-      notify(
-        n
-          ? `Ausência registrada. ${name(person)} tem ${plural(n, "tarefa em aberto", "tarefas em aberto")} vencendo nesse período: reveja os prazos.`
-          : "Ausência registrada.",
-      );
+      notify("Ausência registrada.");
+      setAffected(n ? { user: person, n } : null);
       setStarts("");
       setEnds("");
     } catch (e) {
@@ -376,6 +407,24 @@ function Absences({
         <p className="template-empty">
           <Palmtree size={15} aria-hidden="true" /> Ninguém com ausência marcada.
         </p>
+      )}
+      {affected && (
+        <div className="due-absence-affected" role="status">
+          <CalendarClock size={15} aria-hidden="true" />
+          <span>
+            {name(affected.user)} tem {plural(affected.n, "tarefa em aberto", "tarefas em aberto")}{" "}
+            vencendo nesse período.
+          </span>
+          <Button
+            className="btn secondary"
+            onClick={() => {
+              onReplan(affected.user);
+              setAffected(null);
+            }}
+          >
+            Replanejar
+          </Button>
+        </div>
       )}
       {people.length > 0 ? (
         <div className="due-absence-add">
