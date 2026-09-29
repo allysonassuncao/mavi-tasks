@@ -117,6 +117,11 @@ type ChatChunk = {
         id?: string;
         function?: { name?: string; arguments?: string };
       }[];
+      /** OpenRouter com o plugin web: as páginas citadas. */
+      annotations?: {
+        type?: string;
+        url_citation?: { url?: string; title?: string };
+      }[];
     };
     finish_reason?: string | null;
   }[];
@@ -124,6 +129,8 @@ type ChatChunk = {
     prompt_tokens?: number;
     completion_tokens?: number;
     prompt_tokens_details?: { cached_tokens?: number } | null;
+    /** OpenRouter: o custo de verdade (inclui o plugin web). */
+    cost?: number;
   } | null;
   error?: { message?: string };
 };
@@ -194,7 +201,11 @@ function addChatUsage(
   meter.input += input;
   meter.cacheRead += cached;
   meter.output += output;
-  meter.cost += priceCost(config.price, { input, output, cached });
+  // O OpenRouter diz quanto cobrou (tokens e plugins); os outros, pelos preços.
+  meter.cost +=
+    config.kind === "openrouter" && typeof usage.cost === "number" && usage.cost >= 0
+      ? usage.cost
+      : priceCost(config.price, { input, output, cached });
 }
 
 const authHeaders = (apiKey: string) => ({
@@ -232,6 +243,10 @@ export function openAiChatAdapter(
     let nudged = false;
     // Nem todo provedor aceita stream_options: sem ele, o uso vem se vier.
     let usageOption = true;
+    const router = config.kind === "openrouter";
+    // Busca na internet pelo plugin web do OpenRouter; as páginas viram fontes.
+    const web = !!request.webSearch && router;
+    const cited = new Map<string, string>();
     for (let round = 0; ; round++) {
       const last = round >= maxRounds;
       const body = {
@@ -242,6 +257,8 @@ export function openAiChatAdapter(
           : {}),
         stream: true,
         ...(usageOption ? { stream_options: { include_usage: true } } : {}),
+        ...(router ? { usage: { include: true } } : {}),
+        ...(web ? { plugins: [{ id: "web", max_results: 5 }] } : {}),
       };
       const res = await fetchImpl(`${config.baseUrl}/chat/completions`, {
         method: "POST",
@@ -296,6 +313,11 @@ export function openAiChatAdapter(
           if (tc.function?.name) calls[i].name += tc.function.name;
           if (tc.function?.arguments) calls[i].args += tc.function.arguments;
         }
+        for (const a of delta.annotations ?? []) {
+          const url = a.url_citation?.url;
+          if (web && url && /^https?:\/\//.test(url) && request.onCitation && !cited.has(url))
+            cited.set(url, request.onCitation({ url, title: a.url_citation?.title || url }));
+        }
         if (choice.finish_reason) finish = choice.finish_reason;
       }
       const used = calls.filter((c) => c && c.name);
@@ -325,8 +347,10 @@ export function openAiChatAdapter(
         messages.push(...results);
         continue;
       }
-      const answer = text.trim();
-      if (!answer) {
+      // As páginas que o OpenRouter citou, no fim (quando o texto não citou).
+      const refs = [...cited.values()].filter((r) => !text.includes(`[${r}]`));
+      const answer = `${text.trim()}${refs.length ? ` ${refs.map((r) => `[${r}]`).join("")}` : ""}`.trim();
+      if (!text.trim()) {
         if (!nudged) {
           nudged = true;
           request.onEvent?.({ type: "round_end", tools: 0 });

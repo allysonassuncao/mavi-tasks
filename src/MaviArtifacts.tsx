@@ -30,6 +30,7 @@ import { imageUrls, setActionState } from "./ai";
 import { priorities } from "./types";
 import type { FormPreset } from "./forms";
 import { CanvasCard } from "./MaviCanvas";
+import { QuestionCard } from "./MaviQuestions";
 import type {
   ActionArtifact,
   AiArtifact,
@@ -65,6 +66,10 @@ export type ArtifactHost = {
   onDraft: (text: string) => void;
   /** Abre o documento, a apresentação ou a planilha no canvas. */
   onOpenCanvas: (artifact: CanvasArtifact) => void;
+  /** Responde às perguntas da MAVI (vira a próxima mensagem). */
+  onReply: (text: string) => void;
+  /** A conversa já seguiu depois desta resposta. */
+  answered?: boolean;
   notify: (message: string) => void;
 };
 
@@ -81,6 +86,15 @@ export function ArtifactView({
     return <ImageCard image={artifact} host={host} />;
   if (artifact.type === "canvas")
     return <CanvasCard artifact={artifact} onOpen={() => host.onOpenCanvas(artifact)} />;
+  if (artifact.type === "question")
+    return (
+      <QuestionCard
+        artifact={artifact}
+        answered={!!host.answered}
+        disabled={host.readOnly || host.streaming}
+        onReply={host.onReply}
+      />
+    );
   return <ActionCard artifact={artifact} host={host} />;
 }
 

@@ -25369,3 +25369,106 @@ main:has(> .mavi-chat) > .error-banner {
   color: #5d6a68;
   font-size: 0.72rem;
 }
+
+/* Perguntas da MAVI antes de seguir (bolinha e módulo). */
+.mavi-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid #d5e2c6;
+  border-radius: 12px;
+  background: #fbfdf8;
+  font-size: 0.82rem;
+}
+.mavi-questions.done {
+  border-color: var(--border);
+  background: #fafafa;
+}
+.mavi-questions > header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #3f6a24;
+}
+.mavi-questions.done > header {
+  color: #5d6a68;
+}
+.mavi-questions > header strong {
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+.mavi-questions ol {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mavi-questions li p {
+  margin-bottom: 6px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.mavi-questions.done li p {
+  margin: 0;
+  font-weight: 500;
+  color: #5d6a68;
+}
+.mavi-question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.mavi-question-options button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 11px;
+  border: 1px solid #dfe4e2;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.76rem;
+  line-height: 1.3;
+  text-align: left;
+  color: #3c4948;
+}
+.mavi-question-options button:hover:not(:disabled) {
+  border-color: #c3d6ad;
+}
+.mavi-question-options button.on {
+  border-color: #4f7d2d;
+  background: #e3ebd8;
+  color: #2f4f1a;
+  font-weight: 600;
+}
+.mavi-question-other {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #dfe4e2;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.78rem;
+}
+.mavi-questions > footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.mavi-questions > footer .btn {
+  min-height: 32px;
+  padding: 6px 14px;
+  gap: 6px;
+}
+.mavi-question-skip {
+  font-size: 0.74rem;
+  color: #5d6a68;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

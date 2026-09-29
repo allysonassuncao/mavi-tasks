@@ -710,7 +710,10 @@ function ChatThread({
   send: AiSend;
   onAnswer: (answer: AiAnswer, question: string) => void;
   onNew: () => void;
-  host: Omit<ArtifactHost, "readOnly" | "streaming" | "onDraft" | "onOpenCanvas">;
+  host: Omit<
+    ArtifactHost,
+    "readOnly" | "streaming" | "onDraft" | "onOpenCanvas" | "onReply" | "answered"
+  >;
 }) {
   const chat = useAiTurns({ initial, send, readOnly, onAnswer });
   const { turns, busy } = chat;
@@ -762,6 +765,7 @@ function ChatThread({
     ...host,
     readOnly,
     onOpenCanvas: (a: CanvasArtifact) => setCanvas(a),
+    onReply: (text: string) => void submit(text),
     onDraft: (text: string) => {
       setDraft(text);
       requestAnimationFrame(() => {
@@ -917,7 +921,11 @@ function ChatThread({
                             return a ? (
                               <ArtifactView
                                 artifact={a}
-                                host={{ ...artifactHost, streaming: !!t.streaming }}
+                                host={{
+                          ...artifactHost,
+                          streaming: !!t.streaming,
+                          answered: i < turns.length - 1,
+                        }}
                               />
                             ) : null;
                           }}
@@ -930,7 +938,11 @@ function ChatThread({
                     <div key={a.id} className="answer-artifact">
                       <ArtifactView
                         artifact={a}
-                        host={{ ...artifactHost, streaming: !!t.streaming }}
+                        host={{
+                          ...artifactHost,
+                          streaming: !!t.streaming,
+                          answered: i < turns.length - 1,
+                        }}
                       />
                     </div>
                   ))}

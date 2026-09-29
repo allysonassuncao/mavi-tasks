@@ -153,6 +153,7 @@ function AdminTabs({
         reload={reload}
         notify={notify}
         canManageProviders={isAdmin}
+        company={demo ? undefined : company}
       />
       <NoticeAnimationAdmin
         api={notices}

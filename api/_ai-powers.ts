@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { callRpc, signGcsUrl, type GcsCredentials } from "./_drive.js";
-import type { ToolSpec } from "./_ai-llm.js";
+import type { LlmAdapter, ToolSpec } from "./_ai-llm.js";
 import { TOOLS, type ToolContext } from "./_ai-tools.js";
 import { SKILL_TOOLS } from "./_ai-skills.js";
 import {
@@ -18,7 +18,9 @@ import {
   SLIDE_THEMES,
   artifactSummary,
   sanitizeCanvas,
+  sanitizeQuestions,
   sanitizeVisual,
+  type QuestionArtifact,
   type CanvasArtifact,
   type ActionArtifact,
   type AiArtifact,
@@ -47,7 +49,7 @@ import type { ProviderModel } from "../src/ai-providers.js";
  */
 
 export type ToolKind =
-  "read" | "visual" | "image" | "action" | "skill" | "canvas" | "web";
+  "read" | "visual" | "image" | "action" | "skill" | "canvas" | "web" | "ask";
 export type ToolMeta = { kind: ToolKind; power?: Power; timeoutMs: number };
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -358,6 +360,44 @@ export const POWER_TOOLS: ToolSpec[] = [
   },
 ];
 
+/** Perguntar antes de seguir: nas duas MAVIs, sem poder (é o jeito de trabalhar). */
+export const ASK_TOOL: ToolSpec = {
+  name: "ask_user",
+  description:
+    "Faz perguntas à pessoa antes de seguir, com respostas prováveis para ela escolher (ela também pode escrever outra). Use quando o pedido for ambíguo de um jeito que muda o resultado, ou antes de um trabalho grande (apresentação, documento, planilha, imagem, ação, análise longa). Depois de chamar, não use mais ferramentas: escreva uma frase curta e espere as respostas.",
+  parameters: obj(
+    {
+      questions: {
+        type: "array",
+        description: "De 1 a 3 perguntas curtas.",
+        items: obj(
+          {
+            question: { type: "string" },
+            options: {
+              type: "array",
+              items: { type: "string" },
+              description: "De 2 a 5 respostas prováveis, curtas (a pessoa também pode escrever outra).",
+            },
+            multiple: { type: "boolean", description: "true quando dá para escolher mais de uma." },
+          },
+          ["question", "options"],
+        ),
+      },
+    },
+    ["questions"],
+  ),
+};
+
+/** Quando e como perguntar (nas duas MAVIs). */
+export const ASK_RULES = `
+
+Perguntar antes de seguir (ask_user):
+- Pergunte quando o pedido estiver ambíguo de um jeito que muda o resultado (qual cliente, qual período, para quem é, objetivo, formato, tom, tamanho) ou antes de um trabalho grande ou caro (apresentação, documento, planilha, imagem, ação, análise longa) quando faltar algo importante.
+- Até 3 perguntas curtas, cada uma com 2 a 5 respostas prováveis: as que você acha mais prováveis primeiro. Junte tudo numa chamada só.
+- Não pergunte o que dá para descobrir com as ferramentas (busque antes), nem o óbvio, nem de novo o que a pessoa já disse. Consulta rápida não precisa de pergunta: responda.
+- Se a pessoa disser para seguir sem responder, siga com o mais provável e diga em uma frase o que assumiu.
+- Depois de ask_user, não chame mais ferramentas: escreva uma frase curta dizendo o que vai fazer com as respostas, e pare.`;
+
 export const REGISTRY: Record<string, ToolMeta> = {
   ...Object.fromEntries(
     TOOLS.map((t) => [t.name, { kind: "read" as const, timeoutMs: 45_000 }]),
@@ -376,18 +416,81 @@ export const REGISTRY: Record<string, ToolMeta> = {
   // A busca da Claude roda no servidor dela: só para o registro.
   web_search: { kind: "web", power: "web", timeoutMs: 0 },
   web_fetch: { kind: "web", power: "web", timeoutMs: 0 },
-  use_skill: { kind: "skill", power: "skills", timeoutMs: 15_000 },
+  ask_user: { kind: "ask", timeoutMs: 5_000 },
+  web_research: { kind: "web", power: "web", timeoutMs: 150_000 },
+  // Com modelo próprio, a skill roda inteira como ajudante: pode demorar.
+  use_skill: { kind: "skill", power: "skills", timeoutMs: 150_000 },
   read_skill_file: { kind: "skill", power: "skills", timeoutMs: 15_000 },
 };
 
-/** As ferramentas desta pergunta: as de consulta e as dos poderes da pessoa. */
-export function toolsFor(powers: ReadonlySet<Power>): ToolSpec[] {
+/** A busca na internet por outro modelo (o de "Quem usa qual modelo › Busca na internet"). */
+export const WEB_RESEARCH_TOOL: ToolSpec = {
+  name: "web_research",
+  description:
+    "Pesquisa na internet (notícias, concorrentes, tendências, dados públicos, o conteúdo de um link) e devolve um resumo com as páginas citadas como fontes [S#]. Faça a pergunta completa, com o contexto que importa.",
+  parameters: obj(
+    { question: { type: "string", description: "O que pesquisar, com o contexto." } },
+    ["question"],
+  ),
+};
+
+/** No modo escritor, o canvas recebe o pedido e o material; outro modelo escreve. */
+const briefTool = (name: string, what: string, extra: Record<string, unknown> = {}): ToolSpec => ({
+  name,
+  description: `${what} Um modelo escritor faz o conteúdo a partir do pedido e do material que você mandar: junte antes, com as ferramentas, tudo o que ele precisa (números, fatos, nomes, datas, com as referências [S#]). Para ajustar um que já existe, leia com read_canvas e diga o que muda. Devolve a referência (ex.: D1).`,
+  parameters: obj(
+    {
+      title: { type: "string" },
+      brief: {
+        type: "string",
+        description: "O que fazer: objetivo, público, estrutura, tom, tamanho e o que a pessoa pediu.",
+      },
+      material: {
+        type: "string",
+        description: "Os dados e fatos que o conteúdo deve usar, com as referências [S#] das fontes.",
+      },
+      revises: { type: "string", description: "Opcional: a referência que esta versão ajusta (ex.: D1)." },
+      ...extra,
+    },
+    ["title", "brief", "material"],
+  ),
+});
+export const WRITER_TOOLS: ToolSpec[] = [
+  briefTool(
+    "create_document",
+    "Escreve um documento no canvas ao lado da conversa (relatório, proposta, briefing, ata, plano, roteiro), que a pessoa baixa em Word ou PDF.",
+  ),
+  briefTool(
+    "create_presentation",
+    "Monta uma apresentação no canvas, que a pessoa baixa em PowerPoint ou PDF.",
+    { theme: { type: "string", enum: SLIDE_THEMES, description: "claro (padrão), escuro ou verde." } },
+  ),
+  briefTool(
+    "create_spreadsheet",
+    "Monta uma planilha no canvas, que a pessoa baixa em Excel ou CSV.",
+  ),
+];
+
+/**
+ * As ferramentas desta pergunta: as de consulta, a de perguntar e as dos
+ * poderes da pessoa. Com um escritor no canvas, as de criar recebem o pedido
+ * em vez do conteúdo; com um modelo para a busca, ela vira web_research.
+ */
+export function toolsFor(
+  powers: ReadonlySet<Power>,
+  options: { writer?: boolean; webResearch?: boolean } = {},
+): ToolSpec[] {
+  const writer = new Map(WRITER_TOOLS.map((t) => [t.name, t]));
   return [
     ...TOOLS,
-    ...[...POWER_TOOLS, ...SKILL_TOOLS].filter((t) => {
-      const power = REGISTRY[t.name]?.power;
-      return !!power && powers.has(power);
-    }),
+    ASK_TOOL,
+    ...[...POWER_TOOLS, ...SKILL_TOOLS]
+      .filter((t) => {
+        const power = REGISTRY[t.name]?.power;
+        return !!power && powers.has(power);
+      })
+      .map((t) => (options.writer && writer.get(t.name)) || t),
+    ...(options.webResearch && powers.has("web") ? [WEB_RESEARCH_TOOL] : []),
   ];
 }
 
@@ -458,12 +561,18 @@ export type PowerKit = {
   /** Imagens das respostas anteriores da conversa (ref → caminho). */
   priorImages: Map<string, string>;
   /** O próximo número de cada tipo de referência (V, I, A, D). */
-  next: Record<"V" | "I" | "A" | "D", number>;
+  next: Record<"V" | "I" | "A" | "D" | "Q", number>;
   /** Documentos, apresentações e planilhas das respostas anteriores (ref → anexo). */
   priorCanvas: Map<string, CanvasArtifact>;
   emit: (artifact: AiArtifact) => void;
   /** Gasto com imagens nesta resposta (para o consumo). */
   imageCost: { usd: number; model: string; provider: string | null };
+  /** O escritor do canvas ("Quem usa qual modelo"), quando há. */
+  writer?: { llm: LlmAdapter; model: string; name: string; providerId: string } | null;
+  /** A MAVI perguntou: nada mais roda nesta resposta. */
+  asked?: boolean;
+  /** Gasto dos outros modelos nesta resposta (escritor), para o consumo. */
+  extraCost?: { usd: number };
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -474,7 +583,7 @@ const fold = (s: string) =>
 
 function add<T extends AiArtifact>(
   kit: PowerKit,
-  letter: "V" | "I" | "A" | "D",
+  letter: "V" | "I" | "A" | "D" | "Q",
   a: Omit<T, "id" | "ref">,
 ) {
   const artifact = {
@@ -814,18 +923,93 @@ function findCanvas(kit: PowerKit, ref: string) {
     ) ?? kit.priorCanvas.get(r)
   );
 }
-function createCanvas(kit: PowerKit, name: string, input: Record<string, unknown>) {
+const WRITER_RULES = `Você escreve para a MAVI, a inteligência de uma agência de marketing. Use só o material recebido: não invente números, nomes, datas ou citações; onde faltar dado, deixe claro (ex.: "[a confirmar]"). Mantenha as referências [S#] do material junto das informações que vieram delas. Português do Brasil, claro e profissional.`;
+const WRITER_FORMAT: Record<"document" | "slides" | "sheet", string> = {
+  document: `${WRITER_RULES}\nDevolva só o documento, em Markdown completo (títulos com # e ##, listas, tabelas quando ajudar, negrito no essencial). Sem comentários antes ou depois.`,
+  slides: `${WRITER_RULES}\nDevolva só um JSON: {"slides": [...]} com de 6 a 15 slides. Cada slide: {"layout", "title", e os campos do layout}. Layouts: "title" (capa: title, subtitle), "section" (title, subtitle), "bullets" (title, subtitle opcional, bullets: até 6 tópicos de até 12 palavras), "two_columns" (title, left_title, left, right_title, right), "stats" (title, stats: 2 a 4 {value, label}, subtitle opcional), "quote" (quote, author), "closing" (title, subtitle). Uma ideia por slide, layouts variados, e em cada slide "notes" com o que falar. Sem nada fora do JSON.`,
+  sheet: `${WRITER_RULES}\nDevolva só um JSON: {"sheets": [{"name", "columns": [{"label", "unit"}], "rows": [[...]]}]}. unit: text, number, money, percent, hours ou days. Números como números (sem R$ nem %). Até 1.000 linhas por aba. Sem nada fora do JSON.`,
+};
+/** O primeiro objeto JSON de um texto (o modelo às vezes cerca com ```). */
+export function jsonFrom(text: string): unknown {
+  const t = text.replace(/^[\s\S]*?```(?:json)?\s*/i, (m) => (/```/.test(m) ? "" : m)).replace(/```[\s\S]*$/, "");
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(t.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+/** O escritor faz o conteúdo a partir do pedido e do material. */
+async function write(
+  kit: PowerKit,
+  kind: "document" | "slides" | "sheet",
+  input: Record<string, unknown>,
+  previous?: CanvasArtifact,
+) {
+  const writer = kit.writer!;
+  const out = await writer.llm({
+    instructions: WRITER_FORMAT[kind],
+    context: `Hoje: ${kit.ctx.today}.`,
+    messages: [
+      {
+        role: "user",
+        content: [
+          `Título: ${str(input.title)}`,
+          `Pedido: ${str(input.brief)}`,
+          `Material:\n${str(input.material)}`,
+          previous ? `Versão atual (ajuste a partir dela):\n${JSON.stringify(previous.canvas).slice(0, 60_000)}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      },
+    ],
+    tools: [],
+    execute: async () => "",
+    maxRounds: 0,
+    maxTokens: 32_000,
+  });
+  if (kit.extraCost) kit.extraCost.usd += out.meter.cost;
+  await callRpc(kit.env, kit.ctx.fetch, kit.ctx.auth, "ai_log_usage", {
+    p_company: kit.ctx.company,
+    p_module: kit.ctx.scope.module ?? "assistant",
+    p_kind: "canvas",
+    p_client: kit.ctx.scope.client ?? null,
+    p_contract: kit.ctx.scope.contract ?? null,
+    p_project: kit.ctx.scope.project ?? null,
+    p_recording: null,
+    p_model: out.meter.model || writer.model,
+    p_input: out.meter.input,
+    p_output: out.meter.output,
+    p_cache_read: out.meter.cacheRead,
+    p_cache_write: out.meter.cacheWrite,
+    p_embedding: 0,
+    p_cost: Math.round(out.meter.cost * 1e6) / 1e6,
+    p_provider: writer.providerId,
+  }).catch(() => {});
+  if (kind === "document") return { title: input.title, markdown: out.text };
+  const data = jsonFrom(out.text) as Record<string, unknown> | null;
+  return data ? { ...data, title: input.title, theme: input.theme ?? data.theme } : null;
+}
+
+async function createCanvas(kit: PowerKit, name: string, input: Record<string, unknown>) {
   const kind =
     name === "create_document" ? "document" : name === "create_presentation" ? "slides" : "sheet";
-  const canvas = sanitizeCanvas({ ...input, kind });
+  const revisesRef = str(input.revises).toUpperCase();
+  const before = revisesRef ? findCanvas(kit, revisesRef) : undefined;
+  // Com escritor: o pedido e o material vão para ele; o conteúdo volta.
+  const content = kit.writer && str(input.brief) ? await write(kit, kind, input, before) : input;
+  if (!content) return "O escritor não devolveu o conteúdo no formato certo. Tente de novo com um pedido mais direto.";
+  const canvas = sanitizeCanvas({ ...content, kind });
   if (!canvas)
     return kind === "document"
       ? "Não deu para criar: mande o documento inteiro em markdown."
       : kind === "slides"
         ? "Não deu para criar: mande pelo menos um slide com título."
         : "Não deu para criar: cada aba precisa de colunas e linhas.";
-  const revises = str(input.revises).toUpperCase();
-  const previous = revises ? findCanvas(kit, revises) : undefined;
+  const previous = before;
   if (canvas.kind === "slides") {
     const missing = canvas.slides
       .map((s) => s.image)
@@ -845,6 +1029,15 @@ function readCanvas(kit: PowerKit, input: Record<string, unknown>) {
   const a = findCanvas(kit, str(input.ref));
   if (!a) return `Não há ${str(input.ref) || "esse documento"} nesta conversa.`;
   return `${artifactSummary(a)} (${a.ref}), no formato em que foi criado:\n${JSON.stringify(a.canvas).slice(0, 80_000)}`;
+}
+
+// ------------------------------------------------------------ perguntas
+function askUser(kit: PowerKit, input: Record<string, unknown>) {
+  const questions = sanitizeQuestions(input.questions);
+  if (!questions) return "Mande de 1 a 3 perguntas, cada uma com respostas prováveis.";
+  const a = add<QuestionArtifact>(kit, "Q", { type: "question", questions });
+  kit.asked = true;
+  return `As perguntas (${a.ref}) estão na tela para a pessoa responder. Não chame mais ferramentas: escreva uma frase curta dizendo o que vai fazer com as respostas, e pare.`;
 }
 
 // ------------------------------------------------------------ ações
@@ -948,6 +1141,7 @@ export async function runPowerTool(kit: PowerKit, name: string, raw: unknown) {
       : {};
   if (name.startsWith("show_")) return showVisual(kit, name, input);
   if (name === "read_canvas") return readCanvas(kit, input);
+  if (name === "ask_user") return askUser(kit, input);
   if (name.startsWith("create_")) return createCanvas(kit, name, input);
   if (name === "generate_image") return generateImage(kit, input);
   if (name === "propose_task") return proposeTask(kit, input);
@@ -968,11 +1162,13 @@ export function describePowerStep(name: string, raw: unknown) {
   if (name === "create_presentation") return `Montando a apresentação${t ? ` “${t}”` : ""}`;
   if (name === "create_spreadsheet") return `Montando a planilha${t ? ` “${t}”` : ""}`;
   if (name === "read_canvas") return `Lendo ${str(input.ref).toUpperCase() || "o documento"}`;
+  if (name === "ask_user") return "Preparando perguntas para você";
   if (name === "propose_task") return `Preparando a tarefa${t ? ` “${t}”` : ""} para você confirmar`;
   if (name === "propose_comment") return "Preparando o comentário para você confirmar";
   return "Trabalhando";
 }
 export function summarizePowerStep(name: string, output: string) {
+  if (/^As perguntas/.test(output)) return "esperando suas respostas";
   if (/^(Mostrado|Imagem pronta|Proposta pronta|Pronto no canvas)/.test(output))
     return name.startsWith("propose_") ? "aguardando sua confirmação" : "pronto";
   return "não deu";

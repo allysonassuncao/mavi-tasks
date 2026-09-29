@@ -25,6 +25,7 @@ import {
 import { answerPieces, type ChatTurn } from "./meetings";
 import { ARTIFACT_LINE, type AiArtifact } from "./mavi-artifacts";
 import { MaviMarkdown } from "./MaviMarkdown";
+import { QuestionCard } from "./MaviQuestions";
 import {
   sourceLabel,
   type AiAnswer,
@@ -127,6 +128,8 @@ export function AnswerText({
   };
   text.split("\n").forEach((raw, i) => {
     const artifact = raw.match(ARTIFACT_LINE);
+    // As perguntas (Q1) a bolinha desenha logo abaixo da resposta.
+    if (artifact && !renderArtifact && artifact[1].startsWith("Q")) return;
     if (artifact) {
       flush();
       out.push(
@@ -144,7 +147,7 @@ export function AnswerText({
       return;
     }
     // Uma referência no meio da frase não aparece (o anexo tem o seu lugar).
-    const line = raw.replace(/\s?\[\[[VIAD]\d{1,2}\]\]/g, "");
+    const line = raw.replace(/\s?\[\[[VIADQ]\d{1,2}\]\]/g, "");
     const item = line.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/);
     if (item) list.push(<li key={i}>{render(item[1])}</li>);
     else {
@@ -232,7 +235,7 @@ export function useTypewriter(target: string, animate: boolean) {
 
 /** Esconde o fim ainda incompleto: "[S1" ou "[[V1]" sem fechar, "**" sem par, "*" solto. */
 export function hidePartial(text: string) {
-  let t = text.replace(/\[\[[VIAD]?\d{0,2}\]?$/, "").replace(/\[[^\]\n]*$/, "");
+  let t = text.replace(/\[\[[VIADQ]?\d{0,2}\]?$/, "").replace(/\[[^\]\n]*$/, "");
   if ((t.match(/\*\*/g) ?? []).length % 2) t = t.slice(0, t.lastIndexOf("**"));
   return t.replace(/(^|[^*])\*$/, "$1");
 }
@@ -545,6 +548,17 @@ export function AiChat({
                     renderAnswer(text, typing ? [] : (t.sources ?? []), typing)
                   }
                 />
+              )}
+              {t.artifacts?.map((a) =>
+                a.type === "question" ? (
+                  <QuestionCard
+                    key={a.id}
+                    artifact={a}
+                    answered={i < turns.length - 1}
+                    disabled={!!readOnly || busy}
+                    onReply={(text) => void submit(text)}
+                  />
+                ) : null,
               )}
             </div>
           ),

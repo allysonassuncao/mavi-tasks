@@ -89,19 +89,21 @@ const answer = (text: string) => ({
 
 describe("registro de ferramentas", () => {
   it("sem poderes, só as de consulta; cada poder abre as suas", () => {
-    expect(toolsFor(new Set()).map((t) => t.name)).toEqual(TOOLS.map((t) => t.name));
+    // Perguntar antes de seguir vale sempre (bolinha e módulo).
+    expect(toolsFor(new Set()).map((t) => t.name)).toEqual([...TOOLS.map((t) => t.name), "ask_user"]);
     const visuals = toolsFor(new Set(["visuals"])).map((t) => t.name);
     expect(visuals).toEqual([
       ...TOOLS.map((t) => t.name),
+      "ask_user",
       "show_chart",
       "show_table",
       "show_kpis",
       "show_timeline",
     ]);
     // 4 visualizações, 1 de imagem, 2 ações; o canvas tem as suas 4.
-    expect(toolsFor(new Set(["visuals", "images", "actions"]))).toHaveLength(TOOLS.length + 7);
+    expect(toolsFor(new Set(["visuals", "images", "actions"]))).toHaveLength(TOOLS.length + 8);
     expect(toolsFor(new Set(["visuals", "images", "actions", "canvas"]))).toHaveLength(
-      TOOLS.length + POWER_TOOLS.length,
+      TOOLS.length + POWER_TOOLS.length + 1,
     );
     expect(powerInstructions(new Set())).toBe("");
     expect(powerInstructions(new Set(["actions"]))).toContain("Nunca diga que a tarefa foi criada");
@@ -208,7 +210,7 @@ describe("poderes no módulo MAVI", () => {
     const { fetchImpl, calls } = world(base(["visuals"]));
     let failed = "";
     const llm: LlmAdapter = async (r) => {
-      expect(r.tools.map((t) => t.name)).toEqual(TOOLS.map((t) => t.name));
+      expect(r.tools.map((t) => t.name)).toEqual([...TOOLS.map((t) => t.name), "ask_user"]);
       await r.execute("show_chart", {}).catch((e) => (failed = e.message));
       return answer("Ok.");
     };
@@ -631,5 +633,219 @@ describe("imagens pelo OpenRouter", () => {
     const usage = calls.find((c) => c.url.includes("ai_log_usage") && c.body.p_kind === "image")!;
     expect(usage.body.p_cost).toBe(0.039);
     expect(usage.body.p_model).toBe("google/gemini-2.5-flash-image");
+  });
+});
+
+describe("um modelo para cada parte", () => {
+  const key = crypto.randomBytes(32);
+  const route = (model: string, kind = "openrouter") => ({
+    scope: "feature",
+    provider_id: `00000000-0000-4000-8000-${model.length.toString().padStart(12, "0")}`,
+    provider: "Provedor",
+    kind,
+    base_url: null,
+    key_cipher: seal(key, "sk-x"),
+    model,
+    price: null,
+  });
+  /** Cada modelo escolhido vira um adaptador falso que diz quem é. */
+  function models(behavior: Record<string, LlmAdapter>) {
+    const used: string[] = [];
+    const providerLlm = (c: { model: string }) => {
+      used.push(c.model);
+      return behavior[c.model] ?? (async () => answer(`feito por ${c.model}`));
+    };
+    return { used, providerLlm };
+  }
+
+  it("a bolinha e o módulo pedem regras diferentes; o módulo sem regra segue a bolinha no banco", async () => {
+    const page = world(base([]));
+    await handleAi(
+      { action: "ai-ask", company, scope: {}, question: "Oi?", surface: "page" },
+      token(me),
+      env,
+      { fetch: page.fetchImpl, llm: async () => answer("Oi."), embed: vi.fn() },
+    );
+    const bubble = world(base([]));
+    await handleAi(
+      { action: "ai-ask", company, scope: {}, question: "Oi?" },
+      token(me),
+      env,
+      { fetch: bubble.fetchImpl, llm: async () => answer("Oi."), embed: vi.fn() },
+    );
+    const feature = (calls: Call[]) => calls.find((c) => c.url.includes("ai_resolve_route"))!.body.p_feature;
+    expect(feature(page.calls)).toBe("mavi_page");
+    expect(feature(bubble.calls)).toBe("assistant");
+  });
+
+  it("o escritor do canvas faz o conteúdo a partir do pedido e do material", async () => {
+    const { fetchImpl, calls } = world({
+      ...base(["canvas"]),
+      "rpc/ai_resolve_route": (c: Call) => (c.body.p_feature === "canvas_writer" ? route("writer-model") : null),
+    });
+    const { used, providerLlm } = models({
+      "writer-model": async (r) => {
+        expect(r.messages[0].content).toContain("Material:\nLeads 612 [S1]");
+        expect(r.instructions).toContain('{"slides": [...]}');
+        return answer('```json\n{"slides":[{"layout":"title","title":"Setembro"},{"layout":"stats","title":"Números","stats":[{"value":"612","label":"leads"}]}]}\n```');
+      },
+    });
+    let tools: string[] = [];
+    let schema: any;
+    const outputs: string[] = [];
+    const llm: LlmAdapter = async (r) => {
+      tools = r.tools.map((t) => t.name);
+      schema = r.tools.find((t) => t.name === "create_presentation")!.parameters;
+      outputs.push(await r.execute("create_presentation", { title: "Pitch", brief: "6 slides para o cliente", material: "Leads 612 [S1]" }));
+      return answer("[[D1]]");
+    };
+    const events: AiStreamEvent[] = [];
+    await streamAi(
+      { action: "ai-ask", company, scope: {}, question: "Apresentação?", surface: "page" },
+      token(me),
+      { ...env, providerKey: key },
+      { fetch: fetchImpl, llm, embed: vi.fn(), providerLlm: providerLlm as any },
+      (e) => events.push(e),
+    );
+    expect(tools).toContain("create_presentation");
+    expect(schema.required).toEqual(["title", "brief", "material"]);
+    expect(used).toContain("writer-model");
+    expect(outputs[0]).toMatch(/^Pronto no canvas como D1 \(apresentação de 2 slides “Pitch”\)/);
+    const done = events.at(-1) as Extract<AiStreamEvent, { type: "done" }>;
+    expect((done.artifacts[0] as any).canvas.slides[1].stats[0].value).toBe("612");
+    expect(calls.some((c) => c.url.includes("ai_log_usage") && c.body.p_kind === "canvas")).toBe(true);
+  });
+
+  it("com um modelo para a busca, ela vira web_research; as páginas viram fontes", async () => {
+    const { fetchImpl, calls } = world({
+      ...base(["web"]),
+      "rpc/ai_resolve_route": (c: Call) => (c.body.p_feature === "web_search" ? route("perplexity/sonar") : null),
+    });
+    const { providerLlm } = models({
+      "perplexity/sonar": async (r) => {
+        expect(r.webSearch).toBe(true);
+        r.onEvent?.({ type: "server_tool", name: "web_search", input: { query: "cpm meta 2026" } });
+        const ref = r.onCitation!({ url: "https://news.com/cpm", title: "CPM sobe" });
+        return answer(`O CPM subiu 12% [${ref}].`);
+      },
+    });
+    let request: AgentRequest | undefined;
+    const outputs: string[] = [];
+    const llm: LlmAdapter = async (r) => {
+      request = r;
+      outputs.push(await r.execute("web_research", { question: "Como está o CPM da Meta em 2026?" }));
+      return answer("Subiu [S1].");
+    };
+    const events: AiStreamEvent[] = [];
+    await streamAi(
+      { action: "ai-ask", company, scope: {}, question: "CPM?", surface: "page" },
+      token(me),
+      { ...env, providerKey: key },
+      { fetch: fetchImpl, llm, embed: vi.fn(), providerLlm: providerLlm as any },
+      (e) => events.push(e),
+    );
+    expect(request!.webSearch).toBe(false);
+    expect(request!.tools.map((t) => t.name)).toContain("web_research");
+    expect(outputs[0]).toContain("feita com perplexity/sonar");
+    expect(outputs[0]).toContain("O CPM subiu 12% [S1].");
+    const done = events.at(-1) as Extract<AiStreamEvent, { type: "done" }>;
+    expect(done.sources[0]).toMatchObject({ type: "web", url: "https://news.com/cpm" });
+    expect(calls.some((c) => c.url.includes("ai_log_usage") && c.body.p_kind === "web")).toBe(true);
+  });
+
+  it("a skill escolhida com modelo próprio responde a pergunta nele", async () => {
+    const skillId = "00000000-0000-4000-8000-0000000000e1";
+    const { fetchImpl } = world({
+      ...base(["skills"]),
+      "rpc/ai_skill_catalog": [],
+      "rpc/ai_skill_load": { id: skillId, slug: "relatorio", version: 2, name: "Relatório", description: "x", instructions: "Siga o modelo de relatório mensal.", test: false, files: [] },
+      "rpc/ai_skill_route": route("skill-model"),
+    });
+    const { used, providerLlm } = models({});
+    const events: AiStreamEvent[] = [];
+    await streamAi(
+      { action: "ai-ask", company, scope: {}, question: "Relatório?", surface: "page", skills: ["relatorio"] },
+      token(me),
+      { ...env, providerKey: key },
+      { fetch: fetchImpl, llm: async () => answer("não devia"), embed: vi.fn(), providerLlm: providerLlm as any },
+      (e) => events.push(e),
+    );
+    expect(used).toEqual(["skill-model"]);
+    expect(events).toContainEqual({ type: "step", id: "skill-model-relatorio", label: "A skill “Relatório” responde com skill-model", state: "done" });
+    expect((events.at(-1) as any).answer).toBe("feito por skill-model");
+  });
+
+  it("a skill com modelo próprio que a MAVI carrega roda nele como ajudante", async () => {
+    const skillId = "00000000-0000-4000-8000-0000000000e1";
+    const { fetchImpl } = world({
+      ...base(["skills"]),
+      "rpc/ai_skill_catalog": [{ slug: "relatorio", version: 2, name: "Relatório", description: "Relatório mensal do cliente." }],
+      "rpc/ai_skill_load": { id: skillId, slug: "relatorio", version: 2, name: "Relatório", description: "x", instructions: "Siga o modelo.", test: false, files: [] },
+      "rpc/ai_skill_route": route("skill-model"),
+    });
+    const { providerLlm } = models({
+      "skill-model": async (r) => {
+        expect(r.messages.at(-1)!.content).toContain("<skill>\nSiga o modelo.\n</skill>");
+        expect(await r.execute("show_chart", {})).toBe("Ferramenta indisponível: show_chart.");
+        return answer("Relatório pronto pelo ajudante.");
+      },
+    });
+    const outputs: string[] = [];
+    const llm: LlmAdapter = async (r) => {
+      outputs.push(await r.execute("use_skill", { skill: "relatorio" }));
+      return answer("Aqui está.");
+    };
+    await handleAi(
+      { action: "ai-ask", company, scope: {}, question: "Relatório?", surface: "page" },
+      token(me),
+      { ...env, providerKey: key },
+      { fetch: fetchImpl, llm, embed: vi.fn(), providerLlm: providerLlm as any },
+    );
+    expect(outputs[0]).toContain("Resultado da skill “Relatório” (feito com skill-model");
+    expect(outputs[0]).toContain("Relatório pronto pelo ajudante.");
+  });
+});
+
+describe("perguntas antes de seguir", () => {
+  it("na bolinha também: mostra as perguntas, grava e não deixa mais nada rodar", async () => {
+    const { fetchImpl, calls } = world(base([]));
+    let request: AgentRequest | undefined;
+    const outputs: string[] = [];
+    const llm: LlmAdapter = async (r) => {
+      request = r;
+      outputs.push(
+        await r.execute("ask_user", {
+          questions: [
+            { question: "Para qual cliente?", options: ["4282", "4283", "4282"] },
+            { question: "Quais canais?", options: ["Meta", "Google"], multiple: true },
+          ],
+        }),
+      );
+      outputs.push(await r.execute("list_tasks", {}));
+      return answer("Assim que responder, eu monto.\n[[Q1]]");
+    };
+    const events: AiStreamEvent[] = [];
+    await streamAi(
+      { action: "ai-ask", company, scope: {}, question: "Monta um relatório" },
+      token(me),
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+      (e) => events.push(e),
+    );
+    expect(request!.instructions).toContain("Perguntar antes de seguir (ask_user)");
+    expect(outputs[0]).toMatch(/^As perguntas \(Q1\) estão na tela/);
+    expect(outputs[1]).toMatch(/^Você fez perguntas à pessoa: espere as respostas/);
+    const done = events.at(-1) as Extract<AiStreamEvent, { type: "done" }>;
+    expect(done.artifacts[0]).toMatchObject({
+      type: "question",
+      ref: "Q1",
+      questions: [
+        { question: "Para qual cliente?", options: ["4282", "4283"] },
+        { question: "Quais canais?", options: ["Meta", "Google"], multiple: true },
+      ],
+    });
+    expect(calls.find((c) => c.url.includes("ai_save_turn"))!.body.p_artifacts).toHaveLength(1);
+    // A tarefa não foi consultada depois das perguntas.
+    expect(calls.some((c) => c.url.includes("tasks?"))).toBe(false);
   });
 });

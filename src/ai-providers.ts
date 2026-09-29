@@ -213,7 +213,10 @@ export type AiFeature =
   | "task_audio"
   | "whatsapp_transcribe"
   | "task_audio_transcribe"
-  | "image_generation";
+  | "image_generation"
+  | "mavi_page"
+  | "web_search"
+  | "canvas_writer";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -240,6 +243,10 @@ export type FeatureInfo = {
    * e modelos de imagem, e sem herdar o padrão da empresa.
    */
   images?: boolean;
+  /** Busca na internet: a Claude (nativa) ou o OpenRouter (plugin web). */
+  web?: boolean;
+  /** Sem regra, não usa o padrão da empresa: a própria MAVI do módulo faz. */
+  own?: boolean;
 };
 
 /** O Jev (TypeSafe): um modelo de decisão, que não conversa. */
@@ -248,10 +255,46 @@ export const isJevModel = (id: string) => /typesafe\/jev/i.test(id);
 export const FEATURES: FeatureInfo[] = [
   {
     id: "assistant",
-    group: "Assistente",
-    label: "Assistente da MAVI (balão em todas as telas)",
+    group: "MAVI",
+    label: "MAVI na bolinha (em todas as telas)",
     conversation: true,
     env: "AI_MODEL",
+  },
+  {
+    id: "mavi_page",
+    group: "MAVI",
+    label: "MAVI no módulo (página inteira): a que orquestra os poderes",
+    conversation: true,
+    env: "AI_MODEL",
+    note: "Sem escolha, segue o modelo da bolinha. A busca na internet nativa só funciona se este for um modelo da Claude (ou escolha um modelo para a busca abaixo).",
+  },
+  {
+    id: "web_search",
+    group: "MAVI · poderes",
+    label: "Busca na internet",
+    conversation: false,
+    env: "",
+    web: true,
+    own: true,
+    note: "A Claude (busca nativa, US$ 0,01 por busca) ou um modelo do OpenRouter (plugin web ou modelos online, como o perplexity/sonar). Sem escolha, a MAVI do módulo busca sozinha se for Claude.",
+  },
+  {
+    id: "canvas_writer",
+    group: "MAVI · poderes",
+    label: "Documentos, apresentações e planilhas (quem escreve)",
+    conversation: false,
+    env: "",
+    own: true,
+    note: "A MAVI do módulo junta os dados e este modelo escreve o documento, os slides ou a planilha. Sem escolha, a própria MAVI do módulo escreve.",
+  },
+  {
+    id: "image_generation",
+    group: "MAVI · poderes",
+    label: "Geração e edição de imagens (poder Imagens)",
+    conversation: false,
+    env: "IMAGE_MODEL",
+    images: true,
+    note: "Só modelos de imagem: gpt-image-1, Imagen, grok-2-image ou os do OpenRouter (ex.: google/gemini-2.5-flash-image, openai/gpt-5-image). Editar uma imagem já gerada funciona com o gpt-image-1, o OpenRouter ou um endereço compatível.",
   },
   {
     id: "meetings_history",
@@ -370,15 +413,6 @@ export const FEATURES: FeatureInfo[] = [
     note: "O modelo escolhido precisa aceitar imagens para ler os prints.",
   },
   {
-    id: "image_generation",
-    group: "MAVI",
-    label: "Geração e edição de imagens (poder Imagens do módulo MAVI)",
-    conversation: false,
-    env: "IMAGE_MODEL",
-    images: true,
-    note: "Só modelos de imagem: gpt-image-1, Imagen, grok-2-image ou os do OpenRouter (ex.: google/gemini-2.5-flash-image, openai/gpt-5-image). Editar uma imagem já gerada funciona com o gpt-image-1, o OpenRouter ou um endereço compatível.",
-  },
-  {
     id: "client_temperature",
     group: "Termômetro do cliente",
     label: "Leitura das reuniões e do WhatsApp (Jev)",
@@ -412,6 +446,8 @@ export const isTranscribeModel = (id: string) => /(whisper|transcri|voxtral)/i.t
  */
 export const IMAGE_KINDS: ProviderKind[] = ["openai", "google", "xai", "openrouter", "custom"];
 export const isImageModel = (id: string) => /(image|dall-e|imagen|flux)/i.test(id);
+/** Busca na internet: a Claude (nativa) e o OpenRouter (plugin web). */
+export const WEB_KINDS: ProviderKind[] = ["anthropic", "openrouter"];
 /** Vetores, transcrição ou imagem: não servem para conversar. */
 export const isNonChatModel = (id: string) =>
   isTranscribeModel(id) || /embed/i.test(id) || isImageModel(id);
@@ -447,7 +483,12 @@ export function serverModel(
   const fallback = "claude-opus-5-5";
   switch (feature) {
     case "assistant":
+    case "mavi_page":
     case "meetings_history":
+      return env.AI_MODEL || fallback;
+    case "web_search":
+      return env.AI_MODEL || fallback;
+    case "canvas_writer":
       return env.AI_MODEL || fallback;
     case "meetings_ask":
       return env.MEETINGS_MODEL || fallback;
@@ -482,7 +523,7 @@ export function serverModel(
 
 // ------------------------------------------------------------ regras
 export type RouteScope =
-  "company" | "user" | "client" | "contract" | "project" | "feature";
+  "company" | "user" | "client" | "contract" | "project" | "feature" | "skill";
 export type AiRoute = {
   id: string;
   type: RouteScope;
@@ -524,10 +565,10 @@ export function pickRoute(
 ): AiRoute | null {
   const feature = where.feature ?? "assistant";
   const talk = featureInfo(feature)?.conversation ?? true;
-  // A transcrição e as imagens não herdam o padrão da empresa (um modelo de conversa).
-  const own =
-    (featureInfo(feature)?.transcription || featureInfo(feature)?.images) ??
-    false;
+  // Transcrição, imagens, busca e o escritor do canvas não herdam o padrão da
+  // empresa (um modelo de conversa).
+  const info = featureInfo(feature);
+  const own = !!(info?.transcription || info?.images || info?.own);
   const id: Record<RouteScope, string | null | undefined> = {
     project: where.project,
     contract: where.contract,
@@ -535,20 +576,25 @@ export function pickRoute(
     user: where.user,
     feature: null,
     company: null,
+    // As regras de skill não entram aqui: valem só quando a skill roda.
+    skill: null,
   };
   for (const type of ROUTE_ORDER) {
     const general = type === "company" || type === "feature";
     if (!general && (!talk || !id[type])) continue;
     if (type === "company" && own) continue;
-    const r = routes.find(
-      (x) =>
-        x.type === type &&
-        (type === "company" ||
-          (type === "feature"
-            ? x.feature === feature
-            : x.scope_id === id[type])) &&
-        activeProviders.has(x.provider_id),
-    );
+    const match = (f: AiFeature) =>
+      routes.find(
+        (x) =>
+          x.type === type &&
+          (type === "company" ||
+            (type === "feature" ? x.feature === f : x.scope_id === id[type])) &&
+          activeProviders.has(x.provider_id),
+      );
+    // O módulo MAVI sem regra própria segue a da bolinha.
+    const r =
+      match(feature) ??
+      (type === "feature" && feature === "mavi_page" ? match("assistant") : undefined);
     if (r) return r;
   }
   return null;

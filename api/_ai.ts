@@ -32,9 +32,11 @@ import {
   resolveRoute,
   routeConfig,
   type ProviderConfig,
+  type ResolvedRoute,
 } from "./_ai-providers.js";
 import { serverModel, embeddingModel } from "../src/ai-providers.js";
 import {
+  ASK_RULES,
   REGISTRY,
   describePowerStep,
   historyTurn,
@@ -488,7 +490,12 @@ async function ask(
       auth,
       company,
       scope,
-      scope.module === "meetings" ? "meetings_history" : "assistant",
+      // A MAVI do módulo e a da bolinha têm regras próprias no painel.
+      scope.module === "meetings"
+        ? "meetings_history"
+        : body.surface === "page"
+          ? "mavi_page"
+          : "assistant",
     ),
     onPage
       ? callRpc<string[]>(env, deps.fetch, auth, "ai_my_powers", {
@@ -514,10 +521,21 @@ async function ask(
     base.hidden.includes("assistant")
   )
     throw new AiError(403, "A MAVI está desligada para você nesta empresa.");
-  const provider = route ? routeConfig(env, route) : null;
-  const llm = provider
-    ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider)
-    : deps.llm;
+  const makeLlm = (c: ProviderConfig) =>
+    (deps.providerLlm ?? ((x: ProviderConfig) => adapterFor(x, deps.fetch)))(c);
+  let turnRoute: ResolvedRoute | null = route;
+  let provider = route ? routeConfig(env, route) : null;
+  let llm = provider ? makeLlm(provider) : deps.llm;
+  // Modelos próprios de poderes ("Quem usa qual modelo"): a busca na
+  // internet e o escritor do canvas. Sem regra, a MAVI do módulo faz.
+  const optional = (on: boolean, feature: "web_search" | "canvas_writer") =>
+    on
+      ? resolveRoute(env, deps.fetch, auth, company, scope, feature).catch(() => null)
+      : Promise.resolve(null);
+  const [webRoute, writerRoute] = await Promise.all([
+    optional(onPage && powers.has("web"), "web_search"),
+    optional(onPage && powers.has("canvas"), "canvas_writer"),
+  ]);
   if (limits.ok && limits.data.blocked)
     throw new AiError(
       429,
@@ -536,7 +554,7 @@ async function ask(
   const past = history ? [...history[1]].reverse() : [];
   const priorImages = new Map<string, string>();
   const priorCanvas = new Map<string, CanvasArtifact>();
-  const next = { V: 1, I: 1, A: 1, D: 1 };
+  const next = { V: 1, I: 1, A: 1, D: 1, Q: 1 };
   for (const m of past)
     for (const a of sanitizeArtifacts(m.artifacts)) {
       const letter = a.ref[0] as keyof typeof next;
@@ -588,7 +606,37 @@ async function ask(
     next,
     emit: (artifact) => emit({ type: "artifact", artifact }),
     imageCost: { usd: 0, model: "", provider: null },
+    extraCost: { usd: 0 },
+    writer: writerRoute
+      ? (() => {
+          const c = routeConfig(env, writerRoute);
+          return { llm: makeLlm(c), model: c.model, name: c.name, providerId: writerRoute.provider_id };
+        })()
+      : null,
   };
+  /** O gasto de outro modelo desta resposta (busca, skill) no consumo. */
+  const logUsage = (
+    kind: string,
+    meter: { model: string; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number },
+    providerId: string | null,
+  ) =>
+    callRpc(env, deps.fetch, auth, "ai_log_usage", {
+      p_company: company,
+      p_module: scope.module ?? "assistant",
+      p_kind: kind,
+      p_client: scope.client ?? null,
+      p_contract: scope.contract ?? null,
+      p_project: scope.project ?? null,
+      p_recording: null,
+      p_model: meter.model,
+      p_input: meter.input,
+      p_output: meter.output,
+      p_cache_read: meter.cacheRead,
+      p_cache_write: meter.cacheWrite,
+      p_embedding: 0,
+      p_cost: Math.round(meter.cost * 1e6) / 1e6,
+      ...(providerId ? { p_provider: providerId } : {}),
+    }).catch(() => {});
   const skills: SkillKit = {
     ctx,
     env,
@@ -634,8 +682,23 @@ async function ask(
       steps.push({ label, detail: "escolhida por você" });
       emit({ type: "step", id: `skill-${s.slug}`, label, state: "done", detail: "escolhida por você" });
     }
+  // A skill escolhida com modelo próprio responde esta pergunta nele.
+  for (const s of picked) {
+    const r = await callRpc<ResolvedRoute | null>(env, deps.fetch, auth, "ai_skill_route", {
+      p_company: company,
+      p_skill: s.id,
+    }).catch(() => null);
+    if (!r?.ok || !r.data?.key_cipher) continue;
+    turnRoute = r.data;
+    provider = routeConfig(env, r.data);
+    llm = makeLlm(provider);
+    const label = `A skill “${s.name}” responde com ${provider.model}`;
+    steps.push({ label });
+    emit({ type: "step", id: `skill-model-${s.slug}`, label, state: "done" });
+    break;
+  }
   // Sem catálogo e sem skill escolhida, as ferramentas das skills não entram.
-  const tools = toolsFor(powers).filter(
+  const tools = toolsFor(powers, { writer: !!kit.writer, webResearch: !!webRoute }).filter(
     (t) =>
       REGISTRY[t.name]?.kind !== "skill" ||
       skills.catalog.size > 0 ||
@@ -643,27 +706,35 @@ async function ask(
   );
   const allowed = new Set(tools.map((t) => t.name));
   let n = 0;
-  const execute = async (name: string, input: unknown) => {
+  const execute = async (name: string, input: unknown): Promise<string> => {
+    // Depois das perguntas, nada mais roda: a MAVI espera as respostas.
+    if (kit.asked && name !== "ask_user")
+      return "Você fez perguntas à pessoa: espere as respostas antes de seguir. Escreva só uma frase curta e pare.";
     const stepId = `t${++n}`;
     const meta = REGISTRY[name];
     const power = meta?.power ?? null;
-    const skillTool = meta?.kind === "skill";
+    const kind = meta?.kind ?? "read";
+    const skillTool = kind === "skill";
     const label = skillTool
       ? describeSkillStep(skills, name, input)
-      : power
-        ? describePowerStep(name, input)
-        : describeStep(ctx, name, input);
+      : name === "web_research"
+        ? `Pesquisando na internet “${String((input as Record<string, unknown>)?.question ?? "").slice(0, 80)}”`
+        : kind === "read"
+          ? describeStep(ctx, name, input)
+          : describePowerStep(name, input);
     emit({ type: "step", id: stepId, label, state: "running" });
     const started = Date.now();
-    const spent = kit.imageCost.usd;
+    const spent = kit.imageCost.usd + (kit.extraCost?.usd ?? 0);
     try {
       // Só as ferramentas oferecidas nesta pergunta (os poderes da pessoa).
       if (!allowed.has(name)) throw Error(`Ferramenta indisponível: ${name}.`);
       const work = skillTool
         ? runSkillTool(skills, name, input)
-        : power
-          ? runPowerTool(kit, name, input)
-          : runTool(ctx, name, input);
+        : name === "web_research"
+          ? research(input)
+          : kind === "read"
+            ? runTool(ctx, name, input)
+            : runPowerTool(kit, name, input);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const out = await Promise.race([
         work,
@@ -676,16 +747,18 @@ async function ask(
       ]).finally(() => clearTimeout(timer));
       const detail = skillTool
         ? summarizeSkillStep(name, out)
-        : power
-          ? summarizePowerStep(name, out)
-          : summarizeStep(name, out);
+        : name === "web_research"
+          ? `${new Set(out.match(/\[S\d+\]/g) ?? []).size} páginas`
+          : kind === "read"
+            ? summarizeStep(name, out)
+            : summarizePowerStep(name, out);
       steps.push({ label, detail });
       calls.push({
         tool: name,
         power,
         ok: true,
         ms: Date.now() - started,
-        cost: kit.imageCost.usd - spent,
+        cost: kit.imageCost.usd + (kit.extraCost?.usd ?? 0) - spent,
         ...(skillTool && skills.last
           ? { skill: skills.last.id, skill_version: skills.last.version }
           : {}),
@@ -698,7 +771,7 @@ async function ask(
         power,
         ok: false,
         ms: Date.now() - started,
-        cost: kit.imageCost.usd - spent,
+        cost: kit.imageCost.usd + (kit.extraCost?.usd ?? 0) - spent,
         error: (e as Error).message?.slice(0, 300),
       });
       emit({
@@ -711,13 +784,15 @@ async function ask(
       throw e;
     }
   };
-  // Busca na internet: a da Claude (no servidor dela). Com outro provedor
-  // da biblioteca, o poder fica de fora e a MAVI diz por quê.
-  const webOn = powers.has("web") && (!provider || provider.kind === "anthropic");
-  if (powers.has("web") && !webOn) powers.delete("web");
+  // Busca na internet: com um modelo escolhido para ela, vira web_research
+  // (outro modelo pesquisa); sem, a da Claude no servidor dela. Com outro
+  // provedor e sem modelo de busca, o poder fica de fora e a MAVI diz por quê.
+  const webOn =
+    powers.has("web") && !webRoute && (!provider || provider.kind === "anthropic");
+  if (powers.has("web") && !webOn && !webRoute) powers.delete("web");
   const webNote =
-    onPage && !webOn && powerList.includes("web")
-      ? `\nA busca na internet está liberada para esta pessoa, mas só funciona com os modelos da Claude, e esta conversa usa ${provider?.name ?? "outro provedor"}. Se o pedido precisar da internet, diga isso.`
+    onPage && !webOn && !webRoute && powerList.includes("web")
+      ? `\nA busca na internet está liberada para esta pessoa, mas a busca nativa só funciona com os modelos da Claude, e esta conversa usa ${provider?.name ?? "outro provedor"}. Um administrador ou gestor pode escolher um modelo para a busca em Painel da MAVI › Quem usa qual modelo. Se o pedido precisar da internet, diga isso.`
       : "";
   // Cada página citada vira uma fonte, como as do sistema.
   const citeWeb = (page: { url: string; title: string }) => {
@@ -754,12 +829,59 @@ async function ask(
       cost: name === "web_search" ? WEB_SEARCH_PRICE : 0,
     });
   };
+  // A busca por outro modelo: ele pesquisa e resume, com as páginas como fontes.
+  const research = async (raw: unknown) => {
+    const q = String((raw as Record<string, unknown>)?.question ?? "").trim().slice(0, 1500);
+    if (q.length < 3) return "Diga o que pesquisar.";
+    const c = routeConfig(env, webRoute!);
+    const out = await makeLlm(c)({
+      instructions:
+        "Você pesquisa na internet para a MAVI, a inteligência de uma agência de marketing. Busque, leia as páginas que importam e responda em português do Brasil com os fatos encontrados, as datas e de onde veio cada um. Não invente: se não achar, diga. Seja objetiva.",
+      context: `Hoje é ${base.today}.`,
+      messages: [{ role: "user", content: q }],
+      tools: [],
+      execute: async () => "",
+      maxRounds: 0,
+      webSearch: true,
+      onCitation: citeWeb,
+      onEvent: (e) => {
+        if (e.type === "server_tool") webStep(e.name, e.input);
+      },
+    });
+    kit.extraCost!.usd += out.meter.cost;
+    await logUsage("web", out.meter, webRoute!.provider_id);
+    return `Resultado da pesquisa na internet (feita com ${c.model}; as páginas são as fontes [S#]):\n${out.text}`;
+  };
+  // A skill com modelo próprio, carregada pela MAVI, roda nele como ajudante.
+  skills.delegate = async (s) => {
+    const r = await callRpc<ResolvedRoute | null>(env, deps.fetch, auth, "ai_skill_route", {
+      p_company: company,
+      p_skill: s.id,
+    }).catch(() => null);
+    if (!r?.ok || !r.data?.key_cipher || r.data.provider_id === turnRoute?.provider_id && r.data.model === turnRoute?.model)
+      return null;
+    const c = routeConfig(env, r.data);
+    const reads = new Set(TOOLS.map((t) => t.name));
+    const out = await makeLlm(c)({
+      instructions: INSTRUCTIONS + (onPage ? PAGE_STYLE : "") + SKILL_RULES,
+      context: base.context,
+      messages: withSkills(messages, [s]),
+      tools: TOOLS,
+      execute: (name, input) =>
+        reads.has(name) ? execute(name, input) : Promise.resolve(`Ferramenta indisponível: ${name}.`),
+      maxRounds: 12,
+    });
+    kit.extraCost!.usd += out.meter.cost;
+    await logUsage("skill", out.meter, r.data.provider_id);
+    return `Resultado da skill “${s.name}” (feito com ${c.model}, seguindo as instruções dela):\n${out.text}\n\nApresente este resultado à pessoa: pode ajustar a forma, mas mantenha o conteúdo e as fontes [S#].`;
+  };
   let result: Awaited<ReturnType<LlmAdapter>> | undefined;
   try {
     result = await llm({
       instructions:
         INSTRUCTIONS +
         (onPage ? PAGE_STYLE : "") +
+        ASK_RULES +
         powerInstructions(powers, onPage) +
         webNote +
         (skills.catalog.size || picked.length ? SKILL_RULES : ""),
@@ -804,7 +926,7 @@ async function ask(
         p_cache_write: m?.cacheWrite ?? 0,
         p_embedding: ctx.usage.embeddingTokens,
         p_cost: Math.round(((m?.cost ?? 0) + embedCost) * 1e6) / 1e6,
-        ...(route ? { p_provider: route.provider_id } : {}),
+        ...(turnRoute ? { p_provider: turnRoute.provider_id } : {}),
       }).catch(() => {});
   }
   const answer = result!.text;

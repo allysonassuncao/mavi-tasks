@@ -157,6 +157,8 @@ export type SkillKit = {
   loaded: Map<string, LoadedSkill>;
   /** A skill da última chamada (para o registro). */
   last: { id: string; version: number } | null;
+  /** A skill com modelo próprio roda nele (o resultado volta como texto). */
+  delegate?: (skill: LoadedSkill) => Promise<string | null>;
 };
 
 export async function loadSkill(kit: SkillKit, slug: string, version?: number) {
@@ -184,6 +186,8 @@ async function useSkill(kit: SkillKit, input: Record<string, unknown>) {
   const s = await loadSkill(kit, slug);
   if (!s) return `A skill "${slug}" não está disponível para esta pessoa.`;
   kit.last = { id: s.id, version: s.version };
+  const delegated = await kit.delegate?.(s);
+  if (delegated) return delegated;
   return skillBlock(s, "Skill carregada");
 }
 

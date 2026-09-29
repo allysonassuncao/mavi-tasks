@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   CheckCircle2,
   ExternalLink,
@@ -18,6 +25,7 @@ import { Modal } from "./components";
 import { contractProductLabel } from "./domain";
 import { fold } from "./task-search";
 import type { Snapshot } from "./types";
+import { listSkills, type SkillSummary } from "./mavi-skills";
 import {
   deleteProvider,
   fetchProviderModels,
@@ -44,6 +52,7 @@ import {
   isTranscribeModel,
   IMAGE_KINDS,
   TRANSCRIBE_KINDS,
+  WEB_KINDS,
   keyHint as keyHintOf,
   pickRoute,
   safeBaseUrl,
@@ -972,6 +981,128 @@ const SCOPES: { id: PersonScope; label: string; one: string }[] = [
 ];
 const SERVER = "server";
 
+/** As partes da MAVI que não chamam um modelo (nada a escolher). */
+const FIXED_ROWS = [
+  {
+    group: "MAVI · poderes",
+    label: "Visualizações (gráficos, tabelas, indicadores, linha do tempo)",
+    note: "A MAVI do módulo descreve e o app desenha: não chama outro modelo.",
+    value: "Usa o modelo da MAVI do módulo",
+  },
+  {
+    group: "MAVI · poderes",
+    label: "Ações com confirmação (propor tarefa e comentário)",
+    note: "A MAVI do módulo propõe e a pessoa confirma: não chama outro modelo.",
+    value: "Usa o modelo da MAVI do módulo",
+  },
+  {
+    group: "MAVI · ferramentas",
+    label: "Consultas (buscar na base, reuniões, tarefas, campanhas, termômetro, skills)",
+    note: "Leem o banco com as permissões de quem pergunta: não chamam modelo. A busca por significado usa os vetores abaixo.",
+    value: "Não usam modelo",
+  },
+  {
+    group: "MAVI · ferramentas",
+    label: "Perguntas antes de seguir",
+    note: "Parte do jeito de trabalhar de cada MAVI (bolinha e módulo).",
+    value: "Usa o modelo de quem pergunta",
+  },
+];
+
+function fixedRow(row: (typeof FIXED_ROWS)[number]) {
+  return (
+    <tr key={row.label}>
+      <td>
+        <div className="ai-feature-name">
+          <span className="ai-feature-group">{row.group}</span>
+          <span className="ai-usage-name">{row.label}</span>
+          <small className="ai-feature-note info">{row.note}</small>
+        </div>
+      </td>
+      <td>
+        <span className="ai-feature-fixed">{row.value}</span>
+      </td>
+    </tr>
+  );
+}
+/** As da MAVI primeiro (bolinha, módulo e poderes), depois as outras. */
+const ORDERED = [
+  ...FEATURES.filter((f) => f.group.startsWith("MAVI")),
+  ...FEATURES.filter((f) => !f.group.startsWith("MAVI")),
+];
+const MAVI_ROWS = FEATURES.filter((f) => f.group.startsWith("MAVI")).length;
+
+/**
+ * Cada skill pode ter o seu modelo: escolhida na caixa de mensagem, a
+ * resposta inteira usa ele; carregada pela MAVI, a skill roda nele como
+ * ajudante e o resultado volta para a conversa.
+ */
+function SkillRoutes({
+  skills,
+  routes,
+  choices,
+  onSet,
+}: {
+  skills: SkillSummary[];
+  routes: AiRoute[];
+  choices: ReactNode;
+  onSet: (skill: string, choice: string) => void;
+}) {
+  const shown = skills.filter((s) => s.published && !s.archived);
+  return (
+    <section className="panel ai-features" aria-label="Por skill">
+      <header>
+        <strong>Por skill</strong>
+        <small>
+          O modelo que roda cada skill. Escolhida na caixa de mensagem, a
+          resposta inteira usa este modelo; carregada pela MAVI, a skill roda
+          nele como ajudante e o resultado volta para a conversa. Sem escolha,
+          vale o modelo da conversa.
+        </small>
+      </header>
+      {!shown.length ? (
+        <p className="muted ai-route-empty">Nenhuma skill publicada ainda.</p>
+      ) : (
+        <div className="drive-table-wrap">
+          <table className="drive-table ai-usage-table ai-feature-table">
+            <thead>
+              <tr>
+                <th>Skill</th>
+                <th>Provedor e modelo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((s) => {
+                const r = routes.find((x) => x.type === "skill" && x.scope_id === s.id);
+                return (
+                  <tr key={s.id}>
+                    <td>
+                      <div className="ai-feature-name">
+                        <span className="ai-feature-group">{s.slug}</span>
+                        <span className="ai-usage-name">{s.current?.name ?? s.slug}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <Select
+                        aria-label={`Modelo da skill ${s.current?.name ?? s.slug}`}
+                        value={r ? `${r.provider_id}|${r.model}` : SERVER}
+                        onValueChange={(v) => onSet(s.id, v)}
+                      >
+                        <SelectOption value={SERVER}>O modelo da conversa</SelectOption>
+                        {choices}
+                      </Select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function AiRoutesPanel({
   api,
   data,
@@ -981,6 +1112,7 @@ export function AiRoutesPanel({
   reload,
   notify,
   canManageProviders = true,
+  company,
 }: {
   api: LibraryApi;
   data: Snapshot;
@@ -995,7 +1127,16 @@ export function AiRoutesPanel({
    * regras entre os provedores já cadastrados.
    */
   canManageProviders?: boolean;
+  /** A empresa (as skills, para escolher o modelo de cada uma). */
+  company?: string;
 }) {
+  const [skills, setSkills] = useState<SkillSummary[] | null>(null);
+  useEffect(() => {
+    if (!company) return;
+    listSkills(company)
+      .then((list) => setSkills(Array.isArray(list) ? list : null))
+      .catch(() => setSkills(null));
+  }, [company]);
   const [tab, setTab] = useState<PersonScope>("user");
   const [problem, setProblem] = useState("");
   const providers = library?.providers ?? [];
@@ -1111,6 +1252,21 @@ export function AiRoutesPanel({
       Cadastre um modelo de imagem (ex.: gpt-image-1)
     </SelectOption>
   );
+  // Busca na internet: a Claude e o OpenRouter, com modelos de conversa.
+  const webOptions = providers
+    .filter((p) => WEB_KINDS.includes(p.kind))
+    .flatMap((p) =>
+      p.models
+        .filter((m) => !isJevModel(m.id) && !isNonChatModel(m.id))
+        .map((m) => option(p, m)),
+    );
+  const webChoices = webOptions.length ? (
+    <>{webOptions}</>
+  ) : (
+    <SelectOption value="none" disabled>
+      Cadastre um provedor da Claude ou do OpenRouter
+    </SelectOption>
+  );
   const jevChoices = (
     <>
       {providers
@@ -1190,9 +1346,19 @@ export function AiRoutesPanel({
         jevChoices={jevChoices}
         transcribeChoices={transcribeChoices}
         imageChoices={imageChoices}
+        webChoices={webChoices}
+        routeLabel={(r) => choiceLabel(r)}
         embedding={defaults?.embedding}
         onSet={(feature, choice) => void set("feature", feature, choice)}
       />
+      {skills && (
+        <SkillRoutes
+          skills={skills}
+          routes={routes}
+          choices={choices}
+          onSet={(skill, choice) => void set("skill", skill, choice)}
+        />
+      )}
 
       <div className="drive-view drive-tabs" role="tablist">
         {SCOPES.map((s) => {
@@ -1304,6 +1470,8 @@ function FeatureRoutes({
   jevChoices,
   transcribeChoices,
   imageChoices,
+  webChoices,
+  routeLabel,
   embedding,
   onSet,
 }: {
@@ -1318,8 +1486,11 @@ function FeatureRoutes({
   jevChoices: ReactNode;
   /** Os modelos de transcrição (OpenAI, Groq, Mistral, endereço próprio). */
   transcribeChoices: ReactNode;
-  /** Os modelos de imagem (OpenAI, Google, xAI, endereço próprio). */
+  /** Os modelos de imagem (OpenAI, Google, xAI, OpenRouter, endereço próprio). */
   imageChoices: ReactNode;
+  /** Os modelos da busca na internet (Claude e OpenRouter). */
+  webChoices: ReactNode;
+  routeLabel: (r: AiRoute) => string;
   /** O modelo de vetores do servidor (só para leitura). */
   embedding?: { model: string; env: string };
   onSet: (feature: AiFeature, choice: string) => void;
@@ -1346,28 +1517,34 @@ function FeatureRoutes({
             </tr>
           </thead>
           <tbody>
-            {FEATURES.map((f) => {
+            {ORDERED.map((f, fi) => {
               const r = routes.find(
                 (x) => x.type === "feature" && x.feature === f.id,
               );
               // Quem responde de fato: a escolha dela ou a da empresa.
               const provider = r
                 ? byId.get(r.provider_id)
-                : f.decisions || f.transcription || f.images
+                : f.decisions || f.transcription || f.images || f.own
                   ? undefined
                   : companyProvider;
+              // O módulo sem regra própria segue a regra da bolinha.
+              const bubble =
+                f.id === "mavi_page"
+                  ? routes.find((x) => x.type === "feature" && x.feature === "assistant")
+                  : undefined;
               const outsideClaude =
                 provider && catalogEntry(provider.kind)?.api !== "anthropic";
               return (
-                <tr key={f.id}>
+                <Fragment key={f.id}>
+                <tr>
                   <td>
                     <div className="ai-feature-name">
                       <span className="ai-feature-group">{f.group}</span>
                       <span className="ai-usage-name">{f.label}</span>
-                      {(outsideClaude || f.transcription || f.images) &&
+                      {(outsideClaude || f.transcription || f.images || f.own || f.web || f.id === "mavi_page") &&
                         f.note && (
                         <small
-                          className={`ai-feature-note${f.transcription || f.images ? " info" : ""}`}
+                          className={`ai-feature-note${f.transcription || f.images || f.own || f.web || f.id === "mavi_page" ? " info" : ""}`}
                         >
                           {f.note}
                         </small>
@@ -1385,7 +1562,13 @@ function FeatureRoutes({
                           ? "Automático · o Jev cadastrado num provedor OpenRouter"
                           : f.transcription || f.images
                             ? `${serverLabel(f.id)} (OpenAI)`
-                            : companyLabel
+                            : f.id === "web_search"
+                              ? "Sem modelo próprio · a MAVI do módulo busca (se for Claude)"
+                              : f.id === "canvas_writer"
+                                ? "Sem modelo próprio · a MAVI do módulo escreve"
+                                : bubble
+                                  ? `Segue a bolinha · ${routeLabel(bubble)}`
+                                  : companyLabel
                               ? `Padrão da empresa · ${companyLabel}`
                               : serverLabel(f.id)}
                       </SelectOption>
@@ -1395,10 +1578,15 @@ function FeatureRoutes({
                           ? transcribeChoices
                           : f.images
                             ? imageChoices
-                            : choices}
+                            : f.web
+                              ? webChoices
+                              : choices}
                     </Select>
                   </td>
                 </tr>
+                {/* As partes da MAVI sem modelo, logo depois das dela. */}
+                {fi === MAVI_ROWS - 1 && FIXED_ROWS.map(fixedRow)}
+                </Fragment>
               );
             })}
             <tr>

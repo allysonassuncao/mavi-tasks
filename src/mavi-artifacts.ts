@@ -208,11 +208,25 @@ export type CanvasArtifact = Base & {
   revision_of?: string;
 };
 
+// ------------------------------------------------------------ perguntas
+/** Uma pergunta da MAVI antes de seguir, com respostas prováveis. */
+export type QuestionItem = {
+  question: string;
+  options: string[];
+  /** Pode marcar mais de uma. */
+  multiple?: boolean;
+};
+export type QuestionArtifact = Base & {
+  type: "question";
+  questions: QuestionItem[];
+};
+
 export type AiArtifact =
   | VisualArtifact
   | ImageArtifact
   | ActionArtifact
-  | CanvasArtifact;
+  | CanvasArtifact
+  | QuestionArtifact;
 
 export type ImageSize = "square" | "portrait" | "landscape";
 export const IMAGE_SIZES: Record<ImageSize, string> = {
@@ -222,12 +236,12 @@ export const IMAGE_SIZES: Record<ImageSize, string> = {
 };
 
 /** Uma linha só com [[V1]]: o lugar do anexo na resposta. */
-export const ARTIFACT_LINE = /^\s*\[\[([VIAD]\d{1,2})\]\]\s*$/;
+export const ARTIFACT_LINE = /^\s*\[\[([VIADQ]\d{1,2})\]\]\s*$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ID = /^[A-Za-z0-9_-]{4,64}$/;
-const REF = /^[VIAD]\d{1,2}$/;
+const REF = /^[VIADQ]\d{1,2}$/;
 
 const text = (v: unknown, max: number) =>
   typeof v === "string"
@@ -370,6 +384,22 @@ const strings = (v: unknown, max: number, len: number) =>
   list(v, max)
     .map((x) => text(x, len))
     .filter(Boolean);
+
+/** Até 3 perguntas, cada uma com 2 a 5 respostas prováveis (null: não dá). */
+export function sanitizeQuestions(raw: unknown): QuestionItem[] | null {
+  const items = list(raw, 10)
+    .map((q) => {
+      const o = obj(q);
+      if (!o) return null;
+      const question = text(o.question, 300);
+      const options = [...new Set(strings(o.options, 5, 120))];
+      if (question.length < 3) return null;
+      return { question, options, ...(o.multiple === true ? { multiple: true } : {}) };
+    })
+    .filter((q): q is QuestionItem => !!q)
+    .slice(0, 3);
+  return items.length ? items : null;
+}
 
 /** Um documento, apresentação ou planilha no formato fechado (null: não dá). */
 export function sanitizeCanvas(raw: unknown): Canvas | null {
@@ -538,6 +568,10 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       ...(/^https:\/\//.test(url) ? { url } : {}),
     };
   }
+  if (a.type === "question") {
+    const questions = sanitizeQuestions(a.questions);
+    return questions ? { id, ref, type: "question", questions } : null;
+  }
   if (a.type === "canvas") {
     const canvas = sanitizeCanvas(a.canvas);
     const prev = text(a.revision_of, 4);
@@ -595,6 +629,8 @@ export function artifactSummary(a: AiArtifact): string {
   }
   if (a.type === "image")
     return `imagem${a.edited_from ? ` (edição de ${a.edited_from})` : ""}: ${a.prompt.slice(0, 120)}`;
+  if (a.type === "question")
+    return `perguntas para a pessoa: ${a.questions.map((q) => `“${q.question}”`).join("; ")}`;
   if (a.type === "canvas") {
     const c = a.canvas;
     const what =
