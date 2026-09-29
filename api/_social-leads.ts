@@ -82,8 +82,9 @@ export function socialLeadsEnv(
     anthropicKey: env.ANTHROPIC_API_KEY ?? "",
     model: serverModel("social_leads_plan", env),
     providerKey: providerKeyFrom(env.AI_PROVIDER_KEY),
-    // The function may run for 300 s (vercel.json); stop a little before.
-    deadlineMs: Number(env.SOCIAL_LEADS_DEADLINE_MS) || 280_000,
+    // The function may run for 300 s (vercel.json), counted from the
+    // request; stop early enough to still record a failure.
+    deadlineMs: Number(env.SOCIAL_LEADS_DEADLINE_MS) || 270_000,
   };
 }
 
@@ -706,6 +707,7 @@ export async function handleSocialLeads(
   env: SocialLeadsEnv,
   deps: Deps,
 ): Promise<{ status: number; body: unknown }> {
+  const startedAt = Date.now();
   if (!authorization)
     return { status: 401, body: { error: "Entre na sua conta." } };
   if (!UUID.test(body?.company ?? "") || !UUID.test(body?.contract ?? ""))
@@ -734,7 +736,7 @@ export async function handleSocialLeads(
         },
       };
     if (body.action === "generate")
-      return await generate(body, authorization, env, deps);
+      return await generate(body, authorization, env, deps, startedAt);
     if (body.action === "adjust")
       return await adjust(body, authorization, env, deps);
     if (body.action === "colors")
@@ -766,6 +768,7 @@ async function generate(
   auth: string,
   env: SocialLeadsEnv,
   deps: Deps,
+  startedAt: number,
 ) {
   if (body.mode !== "new" && body.mode !== "current")
     return { status: 400, body: { error: "Pedido inválido." } };
@@ -790,7 +793,7 @@ async function generate(
     await finish(env, deps, auth, ctx.job, null, blockers.join(" "));
     return { status: 422, body: { error: blockers.join(" ") } };
   }
-  deps.background(run(body, ctx, auth, env, deps));
+  deps.background(run(body, ctx, auth, env, deps, startedAt));
   return { status: 202, body: { job: ctx.job } };
 }
 
@@ -816,9 +819,14 @@ async function run(
   auth: string,
   env: SocialLeadsEnv,
   deps: Deps,
+  startedAt: number,
 ) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), env.deadlineMs);
+  // The platform's limit counts from the request, not from here.
+  const timer = setTimeout(
+    () => controller.abort(),
+    Math.max(0, env.deadlineMs - (Date.now() - startedAt)),
+  );
   const request = planRequest(ctx, body.mode);
   const meter = newMeter(env.model);
   const at = { company: body.company, contract: body.contract, job: ctx.job };

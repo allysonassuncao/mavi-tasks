@@ -137,6 +137,11 @@ const dateTime = (iso: string | null | undefined) =>
       })
     : "";
 const date = (iso: string) => new Date(iso).toLocaleDateString("pt-BR");
+/** Longer than any generation can run (300 s on Vercel); keep in step with
+ * mavi_private.social_leads_expire_jobs, which closes it a minute sooner. */
+const STUCK_JOB_MS = 7 * 60_000;
+const STUCK_JOB_ERROR =
+  "A geração foi interrompida antes de terminar e não voltou. Tente de novo.";
 const decisionLabel: Record<Decision, string> = {
   pending: "Pendente",
   approved: "Aprovado",
@@ -268,10 +273,21 @@ export function PlanView({
     clearIntent();
   }, [intent, plan]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const running = job?.status === "running";
-  const failed =
-    job?.status === "failed" &&
-    (!plan || new Date(job.created_at) > new Date(plan.updated_at))
+  // A generation the server stopped mid-way never reports back: past the
+  // limit it shows as failed (the database closes it a minute before).
+  const [now, setNow] = useState(() => Date.now());
+  const age = job ? now - new Date(job.created_at).getTime() : 0;
+  const stale = job?.status === "running" && age >= STUCK_JOB_MS;
+  useEffect(() => {
+    if (job?.status !== "running" || stale) return;
+    const t = setTimeout(() => setNow(Date.now()), STUCK_JOB_MS - age + 1000);
+    return () => clearTimeout(t);
+  }, [job?.id, job?.status, stale]); // eslint-disable-line react-hooks/exhaustive-deps
+  const running = job?.status === "running" && !stale;
+  const failed = stale
+    ? { ...job, error: STUCK_JOB_ERROR }
+    : job?.status === "failed" &&
+        (!plan || new Date(job.created_at) > new Date(plan.updated_at))
       ? job
       : null;
 
