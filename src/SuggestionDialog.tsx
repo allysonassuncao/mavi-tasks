@@ -20,7 +20,6 @@ import { Modal, Loading } from "./components";
 import { Button, Input, Select, SelectOption, Skeleton } from "./ui";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
 import {
-  attachmentAccept,
   validateAttachment,
   uploadAttachment,
   saveTaskWithAttachments,
@@ -308,7 +307,6 @@ export function SuggestionDialog({
               <Input
                 type="file"
                 multiple
-                accept={attachmentAccept}
                 disabled={locked}
                 onChange={(e) => {
                   addFiles(e.target.files);
@@ -330,7 +328,7 @@ export function SuggestionDialog({
           <small>
             {demo
               ? "No modo demonstração os anexos e capturas não são armazenados."
-              : "Até 20 MB por arquivo. A captura mostra a tela atrás desta janela."}
+              : "Qualquer arquivo de até 100 MB. A captura mostra a tela atrás desta janela."}
           </small>
           {uploads.current.pending.map((file, index) => {
             const preview = previews.current.get(file);

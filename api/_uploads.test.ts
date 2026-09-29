@@ -122,6 +122,76 @@ describe("handleUpload", () => {
     expect(fetchMock.mock.calls[1][1].method).toBe("DELETE");
     expect(removal.pathname).toBe(`/public-bucket/c/t/${id}`);
   });
+  it("anexo de qualquer tipo: executável recusado, o resto baixa como arquivo", async () => {
+    const exe = await handleUpload(
+      { kind: "attachment", id },
+      "Bearer user-token",
+      env,
+      reply([{ path: `c/t/${id}`, name: "setup.exe", size_bytes: 10 }]),
+    );
+    expect(exe.status).toBe(400);
+    const psd = await handleUpload(
+      { kind: "attachment", id, contentType: "text/html" },
+      "Bearer user-token",
+      env,
+      reply([{ path: `c/t/${id}`, name: "arte.psd", size_bytes: 10 }]),
+    );
+    expect(psd.status).toBe(200);
+    expect(psd.body.headers).toMatchObject({
+      "Content-Type": "application/octet-stream",
+    });
+  });
+  it("áudio gravado: o tipo que o rascunho declarou, nunca o do pedido", async () => {
+    const fetchMock = reply([
+      { path: `c/audio/${id}`, mime: "audio/webm", size_bytes: 5000 },
+    ]);
+    const res = await handleUpload(
+      { kind: "audio", id, contentType: "text/html" },
+      "Bearer user-token",
+      env,
+      fetchMock,
+    );
+    expect(res.status).toBe(200);
+    expect((fetchMock as any).mock.calls[0][0]).toBe(
+      "https://db.example.com/rest/v1/rpc/task_audio_upload_target",
+    );
+    expect(JSON.parse((fetchMock as any).mock.calls[0][1].body)).toEqual({
+      p_audio: id,
+    });
+    expect(res.body.headers).toEqual({
+      "Content-Type": "audio/webm",
+      "x-goog-content-length-range": "0,5000",
+    });
+  });
+  it("exclui áudio: o arquivo fica enquanto uma cópia da tarefa ainda o usa", async () => {
+    const shared = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(null)));
+    const kept = await handleUpload(
+      { action: "delete-audio", id },
+      "Bearer user-token",
+      env,
+      shared as unknown as typeof fetch,
+    );
+    expect(kept).toEqual({ status: 200, body: { deleted: true, storage: true } });
+    expect(shared).toHaveBeenCalledTimes(1);
+    expect(shared.mock.calls[0][0]).toBe(
+      "https://db.example.com/rest/v1/rpc/delete_task_audio",
+    );
+    const last = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(`c/audio/${id}`)))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await handleUpload(
+      { action: "delete-audio", id },
+      "Bearer user-token",
+      env,
+      last as unknown as typeof fetch,
+    );
+    expect(new URL(last.mock.calls[1][0]).pathname).toBe(
+      `/public-bucket/c/audio/${id}`,
+    );
+  });
   it("exclusão negada pelo banco não toca no bucket", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ message: "Sem permissão" }), {

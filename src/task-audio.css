@@ -1,0 +1,423 @@
+/* Áudio nas tarefas: gravador (AudioRecorder), player (AudioPlayer) e os
+   áudios da descrição e dos comentários (TaskAudios). */
+
+.audio-recorder.idle {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.audio-recorder.idle.compact {
+  display: inline-flex;
+}
+.audio-start {
+  min-height: 36px;
+  padding: 8px 13px;
+}
+.audio-mic {
+  color: #6f8a52;
+}
+.audio-recorder-error {
+  font-size: 0.74rem;
+  color: #a04a2c;
+  line-height: 1.45;
+  max-width: 460px;
+}
+
+/* Gravando: ponto, onda, cronômetro e controles numa linha só. */
+.audio-recorder.live {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e3c6b8;
+  background: #fff8f4;
+  border-radius: 10px;
+  color: #c2562d;
+}
+.audio-recorder.live.paused {
+  border-color: #e1e6dc;
+  background: #fafbf8;
+  color: #9aa98c;
+}
+.audio-rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+  animation: audio-pulse 1.2s ease-in-out infinite;
+}
+.audio-recorder.paused .audio-rec-dot {
+  animation: none;
+  opacity: 0.6;
+}
+@keyframes audio-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .audio-rec-dot {
+    animation: none;
+  }
+}
+.audio-wave {
+  flex: 1;
+  min-width: 90px;
+  height: 30px;
+  color: inherit;
+}
+.audio-timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: #3e4a3a;
+}
+.audio-timer small {
+  font-weight: 400;
+  color: #98a78a;
+}
+.audio-recorder.warn .audio-timer {
+  color: #b5461d;
+}
+.audio-recorder.live .icon-btn {
+  color: #55624f;
+}
+.audio-recorder.live .audio-stop {
+  color: #c2562d;
+}
+.audio-warn {
+  flex-basis: 100%;
+  font-size: 0.72rem;
+  color: #a2471f;
+}
+
+/* Ouvir antes de usar. */
+.audio-recorder.review {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #dce8cc;
+  background: #fbfdf8;
+  border-radius: 10px;
+}
+.audio-recorder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.audio-recorder-actions .btn {
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 0.74rem;
+  gap: 6px;
+}
+
+/* Player. */
+.audio-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.audio-play {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid #bddf85;
+  background: #c8ec8e;
+  color: #2d3e27;
+}
+.audio-play:hover:not(:disabled) {
+  background: #bcdf81;
+}
+.audio-seek {
+  flex: 1;
+  min-width: 60px;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    #7fa653 var(--played, 0%),
+    #e2ead8 var(--played, 0%)
+  );
+  cursor: pointer;
+}
+.audio-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #5f8a37;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #c7d9b1;
+}
+.audio-seek::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #5f8a37;
+  border: 2px solid #fff;
+}
+.audio-seek:focus {
+  outline-offset: 4px;
+}
+.audio-time {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: #7c8c6f;
+  white-space: nowrap;
+}
+.audio-speed {
+  flex: none;
+  min-width: 38px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid #dfe7d4;
+  background: #fff;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: #5b6c4d;
+  font-variant-numeric: tabular-nums;
+}
+.audio-speed:hover {
+  background: #f3f7ec;
+}
+
+/* Áudios da descrição. */
+.task-audios {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.task-audios-add {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.audio-hint {
+  font-size: 0.72rem;
+  color: #97a888;
+}
+.audio-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid #e3ebd8;
+  border-radius: 10px;
+  background: #fbfdf8;
+}
+.audio-card > header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #5d6f4c;
+}
+.audio-card > header .audio-remove {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  color: #9aa98c;
+}
+.audio-card-player {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.audio-card-player .audio-remove {
+  width: 28px;
+  height: 28px;
+  color: #9aa98c;
+}
+.audio-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  margin: 0;
+}
+.audio-status > svg {
+  flex: none;
+}
+.audio-status > span {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.audio-status.working {
+  color: #6d8a4e;
+}
+.audio-status.working svg {
+  animation: audio-pulse 1.4s ease-in-out infinite;
+}
+.audio-status .skeleton-line {
+  width: 90px;
+  height: 10px;
+}
+.audio-status.failed {
+  color: #a04a2c;
+}
+.audio-status.muted-status {
+  color: #97a888;
+}
+.audio-status button,
+.audio-transcript-foot button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #dfe7d4;
+  background: #fff;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #4f6340;
+}
+.audio-status button:hover,
+.audio-transcript-foot button:hover {
+  background: #f3f7ec;
+}
+
+/* O resumo é o que se lê primeiro: bem visível. */
+.audio-summary {
+  border-left: 3px solid #a7c782;
+  background: #f3f8ea;
+  border-radius: 0 8px 8px 0;
+  padding: 8px 11px;
+}
+.audio-summary strong {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: #587a36;
+  margin-bottom: 4px;
+}
+.audio-summary ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #3f4d38;
+}
+.audio-transcript summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #7a8e67;
+}
+.audio-transcript p {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #56654c;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.audio-transcript-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.audio-transcript-foot small {
+  font-size: 0.68rem;
+  color: #a0ae93;
+}
+.audio-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.audio-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #5d6f4c;
+}
+.audio-edit textarea {
+  border: 1px solid #dfe7d4;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+.audio-edit small {
+  font-size: 0.7rem;
+  color: #97a888;
+}
+.audio-edit-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.audio-edit-actions .btn {
+  min-height: 32px;
+  padding: 6px 12px;
+}
+
+/* No comentário: só o player e a transcrição recolhida. */
+.audio-card.in-comment {
+  margin-top: 7px;
+  padding: 8px 9px;
+  gap: 6px;
+}
+.comment-audio-draft {
+  padding: 6px 8px;
+  border: 1px solid #e3ebd8;
+  border-radius: 9px;
+  background: #fbfdf8;
+}
+.comment-composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.comment-composer-actions > .btn {
+  margin-left: auto;
+  min-height: 34px;
+  padding: 7px 14px;
+}
+.comment-form .audio-recorder.live,
+.comment-form .audio-recorder.review {
+  flex-basis: 100%;
+}
+
+@media (max-width: 520px) {
+  .audio-time {
+    display: none;
+  }
+  .audio-recorder-actions .btn {
+    flex: 1;
+  }
+}
+
+/* Áudio anexado: toca direto na lista de arquivos. */
+.file-row-player {
+  display: flex;
+  margin-top: 6px;
+}

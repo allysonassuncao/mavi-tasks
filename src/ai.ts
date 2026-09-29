@@ -333,7 +333,11 @@ async function providerAction<T>(body: Record<string, unknown>): Promise<T> {
 /** O padrão do servidor de cada funcionalidade (só os nomes dos modelos). */
 export type ServerDefaults = {
   claudeKey: boolean;
+  /** A transcrição e os vetores sem regra usam a OPENAI_API_KEY. */
+  openaiKey?: boolean;
   features: Partial<Record<AiFeature, { model: string; env: string }>>;
+  /** Os vetores da MAVI (busca e RAG): só para leitura. */
+  embedding?: { model: string; env: string };
 };
 export const serverDefaults = () =>
   providerAction<ServerDefaults>({ action: "ai-provider-defaults" });

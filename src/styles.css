@@ -16576,6 +16576,19 @@ td.ai-empty-cell {
 .ai-feature-note {
   color: #9a5b00;
 }
+/* Informação, não aviso: a transcrição e os vetores. */
+.ai-feature-note.info {
+  color: #6b7775;
+}
+.ai-feature-fixed {
+  display: block;
+  min-width: 280px;
+  text-align: left;
+  padding-left: 12px;
+  font-size: 0.8rem;
+  color: #57645f;
+  padding: 8px 0;
+}
 .ai-feature-table td:last-child {
   width: 1%;
   white-space: nowrap;

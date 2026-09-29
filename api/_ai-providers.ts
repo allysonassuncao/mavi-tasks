@@ -12,6 +12,7 @@ import {
   CATALOG,
   FEATURES,
   catalogEntry,
+  embeddingModel,
   keyHint,
   providerBaseUrl,
   safeBaseUrl,
@@ -855,9 +856,13 @@ async function testProvider(
 export function serverDefaults(env: Record<string, string | undefined>) {
   return {
     claudeKey: !!env.ANTHROPIC_API_KEY,
+    /** A transcrição e os vetores sem regra usam esta chave. */
+    openaiKey: !!env.OPENAI_API_KEY,
     features: Object.fromEntries(
       FEATURES.map((f) => [f.id, { model: serverModel(f.id, env), env: f.env }]),
     ),
+    /** Os vetores da MAVI (busca e RAG): fixos, só para leitura. */
+    embedding: { model: embeddingModel(env), env: "AI_EMBEDDING_MODEL" },
   };
 }
 

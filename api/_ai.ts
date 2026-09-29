@@ -32,7 +32,7 @@ import {
   routeConfig,
   type ProviderConfig,
 } from "./_ai-providers.js";
-import { serverModel } from "../src/ai-providers.js";
+import { serverModel, embeddingModel } from "../src/ai-providers.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -76,7 +76,7 @@ export function aiEnv(
     anthropicKey: env.ANTHROPIC_API_KEY ?? "",
     model: serverModel("assistant", env),
     openaiKey: env.OPENAI_API_KEY ?? "",
-    embeddingModel: env.AI_EMBEDDING_MODEL || "text-embedding-3-small",
+    embeddingModel: embeddingModel(env),
     // Sem espaços nas pontas: colado na Vercel com uma quebra de linha, o
     // segredo nunca bateria com o do banco (o cabeçalho chega sem ela).
     workerSecret: env.AI_WORKER_SECRET?.trim() ?? "",

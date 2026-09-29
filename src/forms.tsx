@@ -87,6 +87,24 @@ import { getGcsPublicUrl } from "./gcs";
 import type { DemoStore } from "./demo-store";
 import { RichTextContent } from "./RichTextContent";
 import {
+  AudioCard,
+  RecordingPreview,
+  TaskAudioList,
+  useTaskAudios,
+} from "./TaskAudios";
+import { AudioRecorder, type Recording } from "./AudioRecorder";
+import { AudioPlayer } from "./AudioPlayer";
+import { formatBytes } from "./drive";
+import {
+  addAudioComment,
+  audioTranscripts,
+  deleteAudio,
+  editAudioTranscript,
+  processAudio,
+  uploadRecordedAudio,
+  type TaskAudio,
+} from "./task-audio";
+import {
   parseDescription,
   richTextPlain,
   serializeDescription,
@@ -96,7 +114,7 @@ import { ContractPicker } from "./ContractPicker";
 import { TaskDrive } from "./DrivePage";
 import { TeamPicker } from "./TeamPicker";
 import { ReviewSettings } from "./ReviewSettings";
-import { attachmentAccept, uploadAttachment } from "./attachments";
+import { ATTACHMENT_HINT, uploadAttachment } from "./attachments";
 import { attachmentType } from "./upload-types";
 import { FileViewer } from "./FileViewer";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
@@ -731,6 +749,8 @@ export function TaskDetail({
       attachments: Attachment[];
       events: TaskEvent[];
       recurrence?: TaskRecurrence | null;
+      /** Da descrição e dos comentários (migration task_audio). */
+      audios?: TaskAudio[];
     }>({ comments: [], attachments: [], events: [] }),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false),
@@ -743,6 +763,10 @@ export function TaskDetail({
     [uploadProgress, setUploadProgress] = useState("");
   const [editorUploading, setEditorUploading] = useState(false);
   const [commentRevision, setCommentRevision] = useState(0);
+  // The audio recorded in the comment composer, until it is sent.
+  const [commentAudio, setCommentAudio] = useState<Recording | null>(null);
+  const [commentRecording, setCommentRecording] = useState(false);
+  const [sendingAudio, setSendingAudio] = useState(false);
   // Assistente MAVI na edição: confere só o que a pessoa mudar.
   const [editTitle, setEditTitle] = useState(task.title);
   // The count of the due rule starts at the start date being edited.
@@ -757,6 +781,19 @@ export function TaskDetail({
   });
   const [editText, setEditText] = useState<string | null>(null);
   const appendToDescription = useRef<((text: string) => void) | null>(null);
+  // Áudios da descrição: cada gravação entra na tarefa na hora (quem edita
+  // a tarefa grava, corrige a transcrição e tira).
+  const audio = useTaskAudios({
+    company: task.company_id,
+    task: task.id,
+    audios: extras.audios,
+    onChanged: () => {
+      invalidateTaskExtras(task.id);
+      setLocalRefresh((v) => v + 1);
+    },
+    onError: setError,
+  });
+  const descriptionAudios = audio.items;
   const copilotOn =
     editing &&
     editText !== null &&
@@ -770,6 +807,7 @@ export function TaskDetail({
       task: task.id,
       title: editTitle,
       description: editText ?? "",
+      audio: audioTranscripts(descriptionAudios),
       due: task.due_date,
       ...copilotExtras(data, {
         assignee: task.assignee_id,
@@ -1023,9 +1061,17 @@ export function TaskDetail({
   }
   async function comment(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (editorUploading) return;
+    if (editorUploading || sendingAudio) return;
     const form = e.currentTarget,
       body = String(new FormData(form).get("body") ?? "").trim();
+    if (commentRecording) {
+      setError("Termine a gravação: use o áudio ou descarte antes de enviar.");
+      return;
+    }
+    if (commentAudio) {
+      void sendAudioComment(form, richTextPlain(body) ? body : "");
+      return;
+    }
     if (!body) return;
     try {
       const result = await mutate("add_comment", {
@@ -1049,6 +1095,96 @@ export function TaskDetail({
     } catch (e) {
       setError((e as Error).message);
     }
+  }
+  // A comment with audio: the recording goes up as a draft, becomes the
+  // comment and then the MAVI transcribes it (everyone sees it arrive).
+  async function sendAudioComment(form: HTMLFormElement, body: string) {
+    if (!commentAudio) return;
+    setSendingAudio(true);
+    setError("");
+    try {
+      const a = await uploadRecordedAudio(
+        task.company_id,
+        "comment",
+        commentAudio.blob,
+        commentAudio.mime,
+        commentAudio.seconds,
+      );
+      const result = (await addAudioComment(
+        task.id,
+        body,
+        replyTo ? replyRoot(replyTo) : null,
+        a.id,
+      )) as Comment;
+      setExtras((x) => ({
+        ...x,
+        comments: [result, ...x.comments],
+        audios: [
+          ...(x.audios ?? []),
+          { ...a, task_id: task.id, comment_id: result.id },
+        ],
+      }));
+      setCommentAudio(null);
+      form.reset();
+      setReplyTo(null);
+      setCommentRevision((v) => v + 1);
+      void processAudio(a.id)
+        .catch(() => {})
+        .finally(refreshExtras);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSendingAudio(false);
+    }
+  }
+  function refreshExtras() {
+    invalidateTaskExtras(task.id);
+    setLocalRefresh((v) => v + 1);
+  }
+  function commentAudios(c: Comment) {
+    const own = (extras.audios ?? []).filter((a) => a.comment_id === c.id);
+    const mayManage = c.author_id === user || isLeader;
+    return own.map((a) => (
+      <AudioCard
+        key={a.id}
+        audio={a}
+        label="áudio do comentário"
+        variant="comment"
+        canManage={mayManage}
+        nameOf={memberName}
+        onRetry={() => {
+          setExtras((x) => ({
+            ...x,
+            audios: (x.audios ?? []).map((y) =>
+              y.id === a.id
+                ? { ...y, status: "transcribing", status_at: new Date().toISOString(), error: null }
+                : y,
+            ),
+          }));
+          void processAudio(a.id)
+            .catch((e) => setError((e as Error).message))
+            .finally(refreshExtras);
+        }}
+        onEdit={async (text) => {
+          try {
+            await editAudioTranscript(a.id, text);
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            refreshExtras();
+          }
+        }}
+        onDelete={async () => {
+          try {
+            await deleteAudio(a.id);
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            refreshExtras();
+          }
+        }}
+      />
+    ));
   }
   function startReply(c: Comment) {
     setReplyTo(c);
@@ -1078,7 +1214,8 @@ export function TaskDetail({
               <Reply size={12} /> Em resposta a um comentário anterior
             </span>
           )}
-          <RichTextContent value={c.body} />
+          {c.body.trim() && <RichTextContent value={c.body} />}
+          {commentAudios(c)}
           <button
             type="button"
             className="comment-reply"
@@ -1184,7 +1321,7 @@ export function TaskDetail({
         {drop.active && (
           <DropOverlay
             label="Solte para anexar à tarefa"
-            hint="PDF, imagens, documentos, planilhas ou ZIP · até 20 MB cada"
+            hint={ATTACHMENT_HINT}
           />
         )}
         <div className="task-main">
@@ -1500,6 +1637,13 @@ export function TaskDetail({
                     appendRef={appendToDescription}
                   />
                 </Suspense>
+                <TaskAudioList
+                  state={audio}
+                  canManage={canEdit}
+                  demo={demo}
+                  disabled={busy}
+                  nameOf={memberName}
+                />
                 <label>
                   Início planejado (opcional)
                   <Input
@@ -1593,6 +1737,13 @@ export function TaskDetail({
                 <h3>Descrição</h3>
               </div>
               <RichTextContent value={task.description} />
+              <TaskAudioList
+                state={audio}
+                canManage={canEdit}
+                demo={demo}
+                disabled={busy}
+                nameOf={memberName}
+              />
               {slPost &&
                 (canOpenPage(
                   "onboarding",
@@ -1933,14 +2084,11 @@ export function TaskDetail({
                         "Clique ou arraste arquivos para anexar"
                       )}
                     </strong>
-                    <small>
-                      PDF, imagens, documentos, planilhas ou ZIP · até 20 MB
-                    </small>
+                    <small>{ATTACHMENT_HINT}</small>
                     <Input
                       type="file"
                       multiple
                       disabled={demo || uploading}
-                      accept={attachmentAccept}
                       onChange={(e) => {
                         void upload(Array.from(e.target.files ?? []));
                         e.target.value = "";
@@ -1959,7 +2107,16 @@ export function TaskDetail({
                         >
                           {a.name}
                         </button>
-                        <small>{(a.size_bytes / 1024).toFixed(0)} KB</small>
+                        <small>{formatBytes(a.size_bytes)}</small>
+                        {attachmentType(a.name)?.startsWith("audio/") && (
+                          <span className="file-row-player">
+                            <AudioPlayer
+                              src={getGcsPublicUrl(a.path)}
+                              duration={0}
+                              label={a.name}
+                            />
+                          </span>
+                        )}
                       </span>
                       <Button
                         className="icon-btn"
@@ -2027,7 +2184,9 @@ export function TaskDetail({
                           (m) => m.user_id === replyTo.author_id,
                         )?.name ?? "Usuário"}
                       </strong>
-                      <small>{richTextPlain(replyTo.body)}</small>
+                      <small>
+                        {richTextPlain(replyTo.body) || "Áudio"}
+                      </small>
                     </span>
                     <button
                       type="button"
@@ -2051,14 +2210,34 @@ export function TaskDetail({
                     onUploading={setEditorUploading}
                   />
                 </Suspense>
-                <Button
-                  className="btn primary"
-                  disabled={busy || editorUploading}
-                  loading={busy || editorUploading}
-                  aria-label={replyTo ? "Enviar resposta" : "Enviar comentário"}
-                >
-                  <Send size={16} /> {replyTo ? "Responder" : "Enviar"}
-                </Button>
+                {commentAudio && (
+                  <div className="comment-audio-draft" role="group" aria-label="Áudio do comentário">
+                    <RecordingPreview
+                      recording={commentAudio}
+                      onRemove={() => setCommentAudio(null)}
+                      disabled={sendingAudio}
+                    />
+                  </div>
+                )}
+                <div className="comment-composer-actions">
+                  {!demo && !commentAudio && (
+                    <AudioRecorder
+                      compact
+                      label="Gravar áudio no comentário"
+                      disabled={busy || sendingAudio}
+                      onUse={(r) => setCommentAudio(r)}
+                      onActiveChange={setCommentRecording}
+                    />
+                  )}
+                  <Button
+                    className="btn primary"
+                    disabled={busy || editorUploading || commentRecording}
+                    loading={busy || editorUploading || sendingAudio}
+                    aria-label={replyTo ? "Enviar resposta" : "Enviar comentário"}
+                  >
+                    <Send size={16} /> {replyTo ? "Responder" : "Enviar"}
+                  </Button>
+                </div>
               </form>
             )}
           </aside>

@@ -44,6 +44,19 @@
         "--strictPort"
       ],
       "port": 5182
+    },
+    {
+      "name": "mavi-dev-audio",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5183",
+        "--strictPort"
+      ],
+      "port": 5183
     }
   ]
 }

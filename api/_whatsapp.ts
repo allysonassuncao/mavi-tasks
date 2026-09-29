@@ -8,8 +8,14 @@ import {
 import { extractFileText } from "./_ai-extract.js";
 import type { AskRequest, MeetingsEnv } from "./_meetings.js";
 import { newMeter, type Meter } from "./_social-leads.js";
-import { featureProvider, providerKeyFrom } from "./_ai-providers.js";
-import { serverModel } from "../src/ai-providers.js";
+import {
+  featureProvider,
+  providerKeyFrom,
+  routeConfig,
+  type ProviderConfig,
+  type ResolvedRoute,
+} from "./_ai-providers.js";
+import { serverModel, transcribePerMinute } from "../src/ai-providers.js";
 
 /**
  * Drive › cliente › "Whatsapp": a coleta dos grupos na Uazapi
@@ -534,34 +540,46 @@ type ClaimedContent = {
   client_id: string | null;
 };
 
-/** O texto de um áudio, pela OpenAI (uma nova tentativa em 429 e 5xx). */
+/**
+ * Quem transcreve, quando o Painel da MAVI escolheu um provedor da
+ * biblioteca (a regra da funcionalidade de transcrição): o endpoint de
+ * transcrição da OpenAI, que o Groq, a Mistral e endereços compatíveis
+ * também oferecem.
+ */
+export type Transcriber = Pick<ProviderConfig, "baseUrl" | "apiKey" | "model">;
+
+/**
+ * O texto de um áudio (uma nova tentativa em 429 e 5xx): pelo provedor
+ * escolhido ou, sem regra, pela OpenAI do servidor (OPENAI_API_KEY).
+ */
 export async function transcribe(
-  env: WhatsappEnv,
-  deps: WhatsappDeps,
+  env: Pick<WhatsappEnv, "openaiKey" | "transcribeModel">,
+  deps: Pick<WhatsappDeps, "fetch">,
   bytes: Uint8Array,
   mime: string,
   name: string,
+  via?: Transcriber | null,
 ) {
-  if (!env.openaiKey)
+  if (!via && !env.openaiKey)
     throw new Error(
       "Transcrição não configurada: falta OPENAI_API_KEY na Vercel.",
     );
+  const url = via
+    ? `${via.baseUrl.replace(/\/+$/, "")}/audio/transcriptions`
+    : "https://api.openai.com/v1/audio/transcriptions";
   let last = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const form = new FormData();
     form.append("file", new Blob([bytes], { type: mime }), name);
-    form.append("model", env.transcribeModel);
+    form.append("model", via?.model ?? env.transcribeModel);
     form.append("language", "pt");
     form.append("response_format", "json");
-    const res = await deps.fetch(
-      "https://api.openai.com/v1/audio/transcriptions",
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${env.openaiKey}` },
-        body: form,
-        signal: AbortSignal.timeout(60_000),
-      },
-    );
+    const res = await deps.fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${via?.apiKey ?? env.openaiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(60_000),
+    });
     const text = await res.text();
     if (res.ok) return str(JSON.parse(text)?.text).trim();
     last = `Transcrição (${res.status}): ${text.slice(0, 200)}`;
@@ -579,6 +597,8 @@ async function readContent(
   deps: WhatsappDeps,
   item: ClaimedContent,
   creds: GcsCredentials,
+  /** Quem transcreve os áudios (nulo: a OpenAI do servidor). */
+  via: Transcriber | null = null,
 ) {
   const report = (
     status: string,
@@ -612,11 +632,18 @@ async function readContent(
         bytes,
         item.media_mime || "audio/mpeg",
         item.path.split("/").pop() || "audio.mp3",
+        via,
       );
       await report(text ? "done" : "empty", text || null);
       // Sem a duração, estima pelo tamanho do MP3 (~16 KB por segundo).
       const seconds = item.media_seconds || bytes.byteLength / 16_000;
-      return (seconds / 60) * env.transcribeUsdPerMinute;
+      return (
+        (seconds / 60) *
+        transcribePerMinute(
+          via?.model ?? env.transcribeModel,
+          env.transcribeUsdPerMinute,
+        )
+      );
     }
     const out = await extractFileText(item.content_kind, bytes, name);
     const text = out.pages
@@ -687,6 +714,28 @@ export async function runWhatsappSync(env: WhatsappEnv, deps: WhatsappDeps) {
   let mediaDone = !env.credentials;
   let contentDone = !env.credentials;
   const costs = new Map<string, number>();
+  // Quem transcreve (Painel da MAVI › Quem usa qual modelo), uma vez por
+  // rodada e só se houver áudio para ler. Sem regra: a OpenAI do servidor.
+  let via: ProviderConfig | null | undefined;
+  const transcriber = async () => {
+    if (via !== undefined) return via;
+    try {
+      const route = await rpc<ResolvedRoute | null>(
+        env,
+        deps,
+        "whatsapp_transcribe_route",
+        {},
+      );
+      via = route?.key_cipher
+        ? routeConfig({ providerKey: env.providerKey ?? null }, route)
+        : null;
+    } catch (e) {
+      // Migração ainda não aplicada ou chave que não abre: segue no padrão.
+      stats.errors.push(`Transcrição: ${(e as Error).message}`);
+      via = null;
+    }
+    return via;
+  };
   if (!env.credentials)
     stats.errors.push(
       "Credenciais do GCS não configuradas: mídias ficam na fila.",
@@ -735,7 +784,13 @@ export async function runWhatsappSync(env: WhatsappEnv, deps: WhatsappDeps) {
       );
       if (!claimed.length) contentDone = true;
       await pool(claimed, 2, async (item) => {
-        const cost = await readContent(env, deps, item, env.credentials!);
+        const cost = await readContent(
+          env,
+          deps,
+          item,
+          env.credentials!,
+          await transcriber(),
+        );
         stats.contents++;
         if (cost > 0 && item.client_id)
           costs.set(item.client_id, (costs.get(item.client_id) ?? 0) + cost);
@@ -744,7 +799,7 @@ export async function runWhatsappSync(env: WhatsappEnv, deps: WhatsappDeps) {
   }
   if (costs.size)
     await rpc(env, deps, "whatsapp_log_usage", {
-      p_model: env.transcribeModel,
+      p_model: via?.model ?? env.transcribeModel,
       p_items: [...costs].map(([client, cost]) => ({
         client,
         cost: Math.round(cost * 1e6) / 1e6,

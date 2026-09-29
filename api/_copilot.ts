@@ -78,6 +78,8 @@ export type Draft = {
   task: string | null;
   title: string;
   description: string;
+  /** Transcrição dos áudios da descrição (conta como descrição). */
+  audio: string;
   due: string;
   /** Campos do modelo de tarefa, já como texto ("Campo: valor"). */
   extra: string;
@@ -105,6 +107,7 @@ export function readDraft(body: Row): Draft {
     task: UUID.test(task) ? task : null,
     title: str(body.title, 300),
     description: str(body.description, 6000),
+    audio: str(body.audio, 6000),
     due: /^\d{4}-\d{2}-\d{2}$/.test(str(body.due, 10)) ? str(body.due, 10) : "",
     extra: str(body.extra, 1500),
     empty: str(body.empty, 600),
@@ -117,7 +120,7 @@ export function readDraft(body: Row): Draft {
   return draft;
 }
 const draftText = (d: Draft) =>
-  [d.title, d.description].filter(Boolean).join("\n").trim();
+  [d.title, d.description, d.audio].filter(Boolean).join("\n").trim();
 
 // ------------------------------------------------------------ banco
 export type SimilarTask = {
@@ -215,8 +218,8 @@ async function loadContext(
       p_contract: draft.contract,
       p_task: draft.task,
       p_embedding: vectors[0] ? vectorLiteral(vectors[0]) : null,
-      // A busca por texto usa o título e o começo da descrição.
-      p_query: `${draft.title} ${draft.description.slice(0, 300)}`.trim(),
+      // A busca por texto usa o título e o começo da descrição (ou do áudio).
+      p_query: `${draft.title} ${(draft.description || draft.audio).slice(0, 300)}`.trim(),
       p_review: review,
     },
   );
@@ -299,7 +302,7 @@ Quem executa a tarefa é um profissional da área (designer, social media, gesto
 
 O que você recebe:
 - O dossiê do cliente: itens [D#] com o que ele prefere, o que não gosta, regras e combinados, tom e identidade, contexto do negócio e histórico que pesa nas entregas. Itens fixados foram confirmados por um líder e valem mais.
-- O rascunho completo: título, prazo, responsável, campos do modelo (preenchidos e em branco), anexos, links, tarefa principal, subtarefas e descrição.
+- O rascunho completo: título, prazo, responsável, campos do modelo (preenchidos e em branco), anexos, links, tarefa principal, subtarefas, descrição e a transcrição dos áudios gravados na descrição.
 - Tarefas parecidas do mesmo cliente [S#], com status, responsável e semelhança (0 a 1).
 - Cases de sucesso de outros clientes [S#].
 - Trechos do histórico do cliente [S#]: reuniões, WhatsApp, arquivos, Social Leads, campanhas — cada um com a data.
@@ -316,7 +319,7 @@ Tipos de alerta (campo kind):
 - case: um case [S#] com referência, argumento ou número útil para esta entrega.
 
 Como decidir (é a sua revisão, antes de escrever os alertas):
-1. Leia o rascunho inteiro. Uma informação já está na tarefa se aparece no título, nos campos, na descrição, na tarefa principal ou nas subtarefas, mesmo com outras palavras, ou se um anexo ou link claramente a contém (ex.: anexo "briefing.pdf", link do Figma ou do Drive).
+1. Leia o rascunho inteiro. Uma informação já está na tarefa se aparece no título, nos campos, na descrição, nos áudios da descrição (a transcrição: o que foi falado vale como escrito), na tarefa principal ou nas subtarefas, mesmo com outras palavras, ou se um anexo ou link claramente a contém (ex.: anexo "briefing.pdf", link do Figma ou do Drive).
 2. Liste os pontos candidatos e descarte cada um que:
    a) já está na tarefa;
    b) um profissional experiente faria de qualquer jeito (testar variações ou ângulos, validar informações e alegações, revisar o texto, conferir a marca, seguir o briefing, alinhar com o cliente, definir métricas padrão);
@@ -481,7 +484,10 @@ export function draftMessage(
     draft.empty ? `Campos do modelo em branco:\n${draft.empty}` : "",
     draft.files ? `Anexos:\n${draft.files}` : "Anexos: nenhum",
     draft.family ? `Tarefa principal e subtarefas:\n${draft.family}` : "",
-    `Descrição:\n${draft.description || "(vazia)"}`,
+    `Descrição:\n${draft.description || (draft.audio ? "(só em áudio)" : "(vazia)")}`,
+    draft.audio
+      ? `Áudios da descrição (transcrição automática; o que foi dito conta como descrição e pode ter erros de reconhecimento):\n${draft.audio}`
+      : "",
   ];
   if (similar.length)
     blocks.push(

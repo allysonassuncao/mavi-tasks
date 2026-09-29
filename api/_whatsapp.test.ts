@@ -229,6 +229,8 @@ function world(opts: {
   fileBytes?: number;
   contentLength?: number;
   clock?: () => number;
+  /** A regra "Transcrição dos áudios dos grupos" (nulo: o servidor). */
+  transcribeRoute?: unknown;
 }) {
   const calls: Call[] = [];
   let groupsClaimed = false;
@@ -271,6 +273,8 @@ function world(opts: {
       }
       if (rpc === "whatsapp_store_content" || rpc === "whatsapp_log_usage")
         return json(null);
+      if (rpc === "whatsapp_transcribe_route")
+        return json(opts.transcribeRoute ?? null);
       throw new Error(`rpc inesperada ${rpc}`);
     }
     if (url === "https://uaz.example.com/chat/find") {
@@ -315,7 +319,10 @@ function world(opts: {
         headers["content-length"] = String(opts.contentLength);
       return new Response(new Uint8Array(opts.fileBytes ?? 10), { headers });
     }
-    if (url === "https://api.openai.com/v1/audio/transcriptions")
+    if (
+      url === "https://api.openai.com/v1/audio/transcriptions" ||
+      url === "https://api.groq.com/openai/v1/audio/transcriptions"
+    )
       return json({ text: opts.transcript ?? "" });
     if (
       url.startsWith("https://storage.googleapis.com/") &&
@@ -734,6 +741,33 @@ describe("leitura das mídias para a MAVI", () => {
     expect(rpcCalls(w.calls, "whatsapp_log_usage")[0]).toMatchObject({
       p_model: "gpt-4o-mini-transcribe",
       p_items: [{ client: "cl1", cost: 0.002 }],
+    });
+  });
+  it("com a regra do Painel da MAVI, transcreve pelo provedor escolhido", async () => {
+    const providerKey = crypto.randomBytes(32);
+    const w = world({
+      content: [audio],
+      transcript: "Subir a verba",
+      transcribeRoute: {
+        scope: "feature",
+        provider_id: "p-groq",
+        provider: "Groq",
+        kind: "groq",
+        base_url: null,
+        key_cipher: seal(providerKey, "gsk-da-agencia"),
+        model: "whisper-large-v3-turbo",
+        price: null,
+      },
+    });
+    const stats = await runWhatsappSync({ ...env, providerKey, openaiKey: "" }, w.deps);
+    expect(stats.errors).toEqual([]);
+    const call = w.calls.find((c) => c.url.endsWith("/audio/transcriptions"))!;
+    expect(call.url).toBe("https://api.groq.com/openai/v1/audio/transcriptions");
+    expect((call.body as FormData).get("model")).toBe("whisper-large-v3-turbo");
+    // Uma consulta por rodada, não uma por áudio.
+    expect(rpcCalls(w.calls, "whatsapp_transcribe_route")).toHaveLength(1);
+    expect(rpcCalls(w.calls, "whatsapp_log_usage")[0]).toMatchObject({
+      p_model: "whisper-large-v3-turbo",
     });
   });
   it("áudio sem fala fica vazio; sem chave da OpenAI, erro (volta para a fila)", async () => {

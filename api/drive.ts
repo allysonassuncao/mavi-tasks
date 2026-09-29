@@ -28,6 +28,7 @@ import { openAiEmbedder } from "./_ai-embeddings.js";
 import { waitUntil } from "@vercel/functions";
 import { appOrigin } from "./_origin.js";
 import { handlePublicApi } from "./_public-api.js";
+import { handleTaskAudio, taskAudioEnv } from "./_task-audio.js";
 
 function credentials(): GcsCredentials | null {
   if (process.env.GCS_CREDENTIALS)
@@ -325,7 +326,16 @@ export default async function handler(
     // Mural de avisos vivem na
     // mesma função: o plano Hobby da Vercel limita o número de funções.
     let result: { status: number; body: unknown };
-    if (action.startsWith("whatsapp-"))
+    // Áudios das tarefas: transcrição e resumo da MAVI (funcionalidade
+    // 'task_audio'); quem gravou espera a resposta.
+    if (action === "task-audio")
+      result = await handleTaskAudio(
+        body,
+        authorization,
+        taskAudioEnv(driveEnv()),
+        { fetch, ask: claudeAsk },
+      );
+    else if (action.startsWith("whatsapp-"))
       result = await handleWhatsapp(
         body,
         authorization,

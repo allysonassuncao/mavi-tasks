@@ -19,16 +19,16 @@ const TABS: {
   { id: "copiloto", label: "Copiloto", icon: GraduationCap, admin: false },
   { id: "termometro", label: "Termômetro", icon: Thermometer, admin: false },
   { id: "provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
-  { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: true },
+  { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: false },
 ];
 
 /**
  * Painel de IA (líderes): o consumo e os limites de gasto, o aprendizado
  * do Assistente MAVI nas tarefas (#copiloto), o Termômetro do cliente
- * (#termometro); para
- * administradores, também a biblioteca de provedores e as regras de quem usa
- * qual provedor e modelo (por funcionalidade, pessoa, cliente, produto e
- * projeto). Cada aba tem o seu endereço (#consumo, #copiloto, #provedores, #regras).
+ * (#termometro) e as regras de quem usa qual provedor e modelo (por
+ * funcionalidade, pessoa, cliente, produto e projeto, #regras); para
+ * administradores, também a biblioteca de provedores e API Keys
+ * (#provedores). Cada aba tem o seu endereço.
  */
 export function AiPage({
   company,
@@ -45,8 +45,8 @@ export function AiPage({
   notify: (message: string) => void;
 }) {
   const hash = aiTab(useHash());
-  const tab =
-    isAdmin || hash === "copiloto" || hash === "termometro" ? hash : "consumo";
+  // Gestores veem tudo menos a biblioteca de provedores (as API Keys).
+  const tab = isAdmin || hash !== "provedores" ? hash : "consumo";
   const tabs = TABS.filter((t) => isAdmin || !t.admin);
   return (
     <div className="ai-page">
@@ -92,6 +92,7 @@ export function AiPage({
           data={data}
           tab={tab}
           demo={demo}
+          isAdmin={isAdmin}
           notify={notify}
         />
       )}
@@ -104,12 +105,14 @@ function AdminTabs({
   data,
   tab,
   demo,
+  isAdmin,
   notify,
 }: {
   company: string;
   data: Snapshot;
   tab: AiTab;
   demo: boolean;
+  isAdmin: boolean;
   notify: (message: string) => void;
 }) {
   const { library, error, reload, api, defaults } = useAiLibrary(company, demo);
@@ -133,6 +136,7 @@ function AdminTabs({
         error={error}
         reload={reload}
         notify={notify}
+        canManageProviders={isAdmin}
       />
       <NoticeAnimationAdmin
         api={notices}

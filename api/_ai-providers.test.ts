@@ -627,6 +627,15 @@ describe("regra que vale (a mesma ordem do banco)", () => {
     // Provedor desligado: cai na empresa.
     expect(pickRoute(withFeatures, { feature: "whatsapp_task" }, on)?.type).toBe("company");
   });
+  it("transcrição: só a regra dela (o padrão da empresa é de conversa)", () => {
+    expect(pickRoute(all, { user: "u1", client: "c1", feature: "task_audio_transcribe" }, on)).toBeNull();
+    const withTranscribe: AiRoute[] = [
+      ...all,
+      { id: "t1", type: "feature", scope_id: null, feature: "whatsapp_transcribe", provider_id: "p1", model: "whisper-large-v3" },
+    ];
+    expect(pickRoute(withTranscribe, { feature: "whatsapp_transcribe" }, on)?.id).toBe("t1");
+    expect(pickRoute(withTranscribe, { feature: "task_audio_transcribe" }, on)).toBeNull();
+  });
 });
 
 describe("JSON pela API de chat (Social Leads fora da Claude)", () => {

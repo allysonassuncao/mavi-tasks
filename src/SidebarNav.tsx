@@ -319,7 +319,7 @@ export function SidebarNav({
           label: "Painel da MAVI",
           icon: Sparkles,
           to: { page: "aiUsage" },
-          // Gestores veem o consumo e o Copiloto; o resto é dos administradores.
+          // Gestores veem tudo menos Provedores e modelos (as API Keys).
           children: [
             {
               key: "ai-usage",
@@ -343,13 +343,13 @@ export function SidebarNav({
                     label: "Provedores e modelos",
                     to: { page: "aiUsage" as const, hash: "provedores" },
                   },
-                  {
-                    key: "ai-routes",
-                    label: "Quem usa qual modelo",
-                    to: { page: "aiUsage" as const, hash: "regras" },
-                  },
                 ]
               : []),
+            {
+              key: "ai-routes",
+              label: "Quem usa qual modelo",
+              to: { page: "aiUsage" as const, hash: "regras" },
+            },
           ],
         },
       ],

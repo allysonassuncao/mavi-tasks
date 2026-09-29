@@ -20,6 +20,8 @@ export type CopilotDraft = {
   title: string;
   /** Descrição em texto (sem HTML). */
   description: string;
+  /** O que foi dito nos áudios da descrição (as transcrições). */
+  audio?: string;
   due?: string;
   /** Campos do modelo, como "Campo: valor". */
   extra?: string;
@@ -188,6 +190,7 @@ export const draftKey = (d: CopilotDraft) =>
     d.task,
     clean(d.title),
     clean(d.description),
+    clean(d.audio ?? ""),
     d.due,
     clean(d.extra ?? ""),
     clean(d.empty ?? ""),
@@ -197,7 +200,8 @@ export const draftKey = (d: CopilotDraft) =>
   ]
     .map((x) => x ?? "")
     .join("|");
-const draftText = (d: CopilotDraft) => clean(`${d.title} ${d.description}`);
+const draftText = (d: CopilotDraft) =>
+  clean(`${d.title} ${d.description} ${d.audio ?? ""}`);
 
 /**
  * Mudou o bastante para outra análise? Palavras novas ou removidas somando
@@ -212,6 +216,7 @@ export function meaningfulChange(
     prev.contract !== next.contract ||
     prev.due !== next.due ||
     prev.files !== next.files ||
+    (prev.audio ?? "") !== (next.audio ?? "") ||
     prev.extra !== next.extra
   )
     return true;

@@ -24,12 +24,28 @@ const file = (name: string, size = 100) =>
   ({ name, size, lastModified: 1 }) as File;
 beforeEach(() => vi.clearAllMocks());
 describe("task creation attachments", () => {
-  it("rejects empty, oversized and unsupported files before creating records", async () => {
-    for (const f of [file("a.pdf", 0), file("a.pdf", 20971521), file("a.exe")])
+  it("rejects empty, oversized and executable files before creating records", async () => {
+    for (const f of [
+      file("a.pdf", 0),
+      file("a.pdf", 104857601),
+      file("a.exe"),
+      file("setup.SH"),
+      file("app.apk"),
+    ])
       expect(() => validateAttachment(f)).toThrow();
-    expect(validateAttachment(file("REPORT.PDF", 20971520))).toBe(
+    expect(validateAttachment(file("REPORT.PDF", 104857600))).toBe(
       "application/pdf",
     );
+    // Any other file goes: audio and video keep their type, the rest downloads.
+    expect(validateAttachment(file("reuniao.m4a"))).toBe("audio/mp4");
+    expect(validateAttachment(file("video.MOV"))).toBe("video/quicktime");
+    expect(validateAttachment(file("layout.psd"))).toBe(
+      "application/octet-stream",
+    );
+    expect(validateAttachment(file("pagina.html"))).toBe(
+      "application/octet-stream",
+    );
+    expect(validateAttachment(file("LEIAME"))).toBe("application/octet-stream");
     await expect(uploadAttachment("t", file("a.exe"))).rejects.toThrow();
     expect(mocks.rpc).not.toHaveBeenCalled();
   });

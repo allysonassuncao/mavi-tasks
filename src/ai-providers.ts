@@ -209,7 +209,10 @@ export type AiFeature =
   | "notice_writer"
   | "notice_animation"
   | "client_temperature"
-  | "client_temperature_text";
+  | "client_temperature_text"
+  | "task_audio"
+  | "whatsapp_transcribe"
+  | "task_audio_transcribe";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -226,6 +229,11 @@ export type FeatureInfo = {
    * OpenRouter, e sem escolha usa o primeiro Jev cadastrado.
    */
   decisions?: boolean;
+  /**
+   * Transcreve áudio: só provedores com o endpoint de transcrição da OpenAI
+   * e modelos de transcrição, e sem herdar o padrão da empresa.
+   */
+  transcription?: boolean;
 };
 
 /** O Jev (TypeSafe): um modelo de decisão, que não conversa. */
@@ -259,6 +267,15 @@ export const FEATURES: FeatureInfo[] = [
     label: "Tarefa a partir das mensagens",
     conversation: false,
     env: "WHATSAPP_TASK_MODEL",
+  },
+  {
+    id: "whatsapp_transcribe",
+    group: "WhatsApp",
+    label: "Transcrição dos áudios dos grupos",
+    conversation: false,
+    env: "WHATSAPP_TRANSCRIBE_MODEL",
+    transcription: true,
+    note: "Todo áudio que chega nos grupos: prefira um modelo barato (ex.: Whisper no Groq).",
   },
   {
     id: "social_leads_plan",
@@ -313,6 +330,23 @@ export const FEATURES: FeatureInfo[] = [
     env: "COPILOT_LEARNING_MODEL",
   },
   {
+    id: "task_audio_transcribe",
+    group: "Tarefas",
+    label: "Transcrição dos áudios das tarefas",
+    conversation: false,
+    env: "WHATSAPP_TRANSCRIBE_MODEL",
+    transcription: true,
+    note: "Na descrição e nos comentários. Quem ouve os áudios; o resumo em tópicos é a linha de baixo.",
+  },
+  {
+    id: "task_audio",
+    group: "Tarefas",
+    label: "Resumo dos áudios da descrição",
+    conversation: false,
+    env: "TASK_AUDIO_MODEL",
+    note: "Tópicos a partir da transcrição: um modelo rápido basta.",
+  },
+  {
     id: "notice_writer",
     group: "Mural de avisos",
     label: "A MAVI escrevendo e revisando avisos",
@@ -350,6 +384,37 @@ export const FEATURES: FeatureInfo[] = [
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
 
 /**
+ * Transcrição: os provedores que falam o endpoint de transcrição da OpenAI
+ * (/audio/transcriptions) e os modelos que transcrevem. A mesma regra de
+ * mavi_private.ai_transcribe_model no banco.
+ */
+export const TRANSCRIBE_KINDS: ProviderKind[] = ["openai", "groq", "mistral", "custom"];
+export const isTranscribeModel = (id: string) => /(whisper|transcri|voxtral)/i.test(id);
+/** Vetores ou transcrição: não servem para conversar. */
+export const isNonChatModel = (id: string) =>
+  isTranscribeModel(id) || /embed/i.test(id);
+
+/** Preço da transcrição (US$ por minuto de áudio), pelos preços de tabela. */
+const TRANSCRIBE_PRICES: [RegExp, number][] = [
+  [/gpt-4o-mini-transcribe/i, 0.003],
+  [/gpt-4o-transcribe/i, 0.006],
+  [/whisper-large-v3-turbo/i, 0.04 / 60],
+  [/whisper-large-v3/i, 0.111 / 60],
+  [/distil-whisper/i, 0.02 / 60],
+  [/whisper-1/i, 0.006],
+  [/voxtral-mini/i, 0.001],
+  [/voxtral/i, 0.002],
+];
+export function transcribePerMinute(model: string, fallback: number) {
+  return TRANSCRIBE_PRICES.find(([re]) => re.test(model))?.[1] ?? fallback;
+}
+
+/** O modelo de vetores da MAVI (busca e RAG): só para leitura no painel. */
+export function embeddingModel(env: Record<string, string | undefined>) {
+  return env.AI_EMBEDDING_MODEL || "text-embedding-3-small";
+}
+
+/**
  * O modelo do padrão do servidor para cada funcionalidade (as variáveis da
  * Vercel vencem o código).
  */
@@ -381,6 +446,11 @@ export function serverModel(
       return "~typesafe/jev-latest";
     case "client_temperature_text":
       return env.CLIENT_TEMPERATURE_TEXT_MODEL || env.AI_MODEL || fallback;
+    case "task_audio":
+      return env.TASK_AUDIO_MODEL || env.AI_MODEL || fallback;
+    case "whatsapp_transcribe":
+    case "task_audio_transcribe":
+      return env.WHATSAPP_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
     default:
       return env.SOCIAL_LEADS_MODEL || fallback;
   }
@@ -430,6 +500,8 @@ export function pickRoute(
 ): AiRoute | null {
   const feature = where.feature ?? "assistant";
   const talk = featureInfo(feature)?.conversation ?? true;
+  // A transcrição não herda o padrão da empresa (um modelo de conversa).
+  const own = featureInfo(feature)?.transcription ?? false;
   const id: Record<RouteScope, string | null | undefined> = {
     project: where.project,
     contract: where.contract,
@@ -441,6 +513,7 @@ export function pickRoute(
   for (const type of ROUTE_ORDER) {
     const general = type === "company" || type === "feature";
     if (!general && (!talk || !id[type])) continue;
+    if (type === "company" && own) continue;
     const r = routes.find(
       (x) =>
         x.type === type &&

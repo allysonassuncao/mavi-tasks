@@ -34,12 +34,14 @@ import { useSmartDue } from "./smartDue";
 import { WhoDeliversFirst } from "./DueAssist";
 import { dayLabel } from "./task-bulk";
 import {
-  attachmentAccept,
+  ATTACHMENT_HINT,
   validateAttachment,
   uploadAttachment,
   saveTaskWithAttachments,
   type TaskUploadState,
 } from "./attachments";
+import { TaskAudioList, useTaskAudios } from "./TaskAudios";
+import { audioTranscripts } from "./task-audio";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
 
@@ -272,6 +274,15 @@ export function TaskCreateForm({
   // com o módulo "Assistente MAVI" da pessoa).
   const [descriptionText, setDescriptionText] = useState("");
   const appendToDescription = useRef<((text: string) => void) | null>(null);
+  // Áudios da descrição: gravados e transcritos aqui mesmo (o Assistente
+  // MAVI já lê o que foi dito) e ligados à tarefa ao criar.
+  const audio = useTaskAudios({
+    company,
+    task: null,
+    contract: contract || null,
+    onError: setError,
+  });
+  const [recording, setRecording] = useState(false);
   const copilotOn = !data.members
     .find((m) => m.user_id === user)
     ?.hidden_pages?.includes("assistant");
@@ -281,6 +292,7 @@ export function TaskCreateForm({
       contract: contract || null,
       title,
       description: descriptionText,
+      audio: audioTranscripts(audio.items),
       due,
       ...copilotExtras(data, {
         assignee: byTeam ? null : assignee,
@@ -310,7 +322,10 @@ export function TaskCreateForm({
     return () => cancelAnimationFrame(id);
   }, []);
   const close = () => {
-    if (!submitting.current && !editorUploading) onClose();
+    if (submitting.current || editorUploading) return;
+    // Closed without creating: the recorded drafts go away.
+    audio.discardAll();
+    onClose();
   };
   function toggleDetails() {
     setDetailsMounted(true);
@@ -367,6 +382,14 @@ export function TaskCreateForm({
       setError("Escolha a equipe que vai receber a tarefa.");
       return;
     }
+    if (recording) {
+      setError("Termine a gravação: use o áudio ou descarte antes de criar a tarefa.");
+      return;
+    }
+    if (audio.uploading) {
+      setError("Espere o áudio terminar de enviar.");
+      return;
+    }
     const fieldsProblem = customFieldsError(customFields, customValues);
     if (fieldsProblem) {
       setError(fieldsProblem);
@@ -421,6 +444,8 @@ export function TaskCreateForm({
         uploadAttachment,
         redrawUploads,
       );
+      // The recorded audios go into the description of the task just saved.
+      if (uploads.current.taskId) await audio.bindTo(uploads.current.taskId);
       rememberContract(contract);
       copilotFeedback.flush(
         company,
@@ -434,7 +459,7 @@ export function TaskCreateForm({
         (e as Error).message ?? "Não foi possível enviar o arquivo.";
       setError(
         uploads.current.taskId
-          ? `A tarefa foi salva. ${message} Tente reenviar os anexos pendentes ou feche para continuar depois.`
+          ? `A tarefa foi salva. ${message} Tente de novo para enviar os anexos e áudios pendentes, ou feche para continuar depois.`
           : message,
       );
     } finally {
@@ -686,6 +711,16 @@ export function TaskCreateForm({
                 appendRef={appendToDescription}
               />
             </Suspense>
+            <TaskAudioList
+              state={audio}
+              canManage
+              demo={demo}
+              disabled={locked}
+              nameOf={(id) =>
+                data.members.find((m) => m.user_id === id)?.name ?? "alguém"
+              }
+              onRecording={setRecording}
+            />
           </fieldset>
           <section
             className="creation-attachments"
@@ -699,7 +734,6 @@ export function TaskCreateForm({
               <Input
                 type="file"
                 multiple
-                accept={attachmentAccept}
                 disabled={saving || demo}
                 onChange={(e) => {
                   addFiles(e.target.files);
@@ -710,7 +744,7 @@ export function TaskCreateForm({
             <small>
               {demo
                 ? "Envio de arquivos disponível no ambiente conectado. O modo demonstração não armazena arquivos."
-                : "Até 20 MB por arquivo. PDF, imagens, TXT, CSV, ZIP, DOCX, XLSX e PPTX."}
+                : `${ATTACHMENT_HINT}.`}
             </small>
             {uploads.current.pending.map((file, index) => (
               <div

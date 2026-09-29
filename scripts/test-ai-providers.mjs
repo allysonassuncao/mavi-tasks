@@ -62,7 +62,7 @@ async function check(title, fn) {
     passed++;
     console.log(`PASS ${title}`);
   } catch (e) {
-    console.error(`FAIL ${title}`);
+    console.error(`FAIL ${title}`, String(e?.message ?? e).slice(0, 300));
     throw e;
   }
 }
@@ -87,16 +87,21 @@ await check("só administradores cadastram provedores; a lista não traz a chave
     "OpenAI:wxyz:2",
   ]);
   assert.ok(!JSON.stringify(list).includes("v1:"));
-  await assert.rejects(() => q(manager, "select public.ai_provider_list($1)", [A]), /Só administradores/);
+  // Gestores leem a lista (para escolher nas regras), sem a chave; não cadastram.
+  const seen = await one(manager, "select public.ai_provider_list($1)", [A]);
+  assert.equal(seen.providers.length, 2);
+  assert.ok(!JSON.stringify(seen).includes("v1:"));
+  await assert.rejects(() => save(manager, "Outro", "openai", models("gpt-c")), /Só administradores/);
   await assert.rejects(() => q(manager, "select * from public.ai_provider_secret($1,$2)", [A, claude]), /Só administradores/);
+  await assert.rejects(() => q(member, "select public.ai_provider_list($1)", [A]), /administradores e gestores/);
   await assert.rejects(() => q(member, "select * from mavi_private.ai_providers"), /permission denied/);
   // Outra empresa não enxerga nem mexe.
-  await assert.rejects(() => q(outsider, "select public.ai_provider_list($1)", [A]), /Só administradores/);
+  await assert.rejects(() => q(outsider, "select public.ai_provider_list($1)", [A]), /administradores e gestores/);
 });
 
 await check("a regra mais específica vale: projeto › produto › cliente › pessoa › empresa", async () => {
   assert.equal(await resolve(member, client), null);
-  await assert.rejects(() => route(manager, "company", null, claude, "claude-sonnet-5"), /Só administradores/);
+  await assert.rejects(() => route(member, "company", null, claude, "claude-sonnet-5"), /administradores e gestores/);
   await assert.rejects(() => route(admin, "company", null, claude, "gpt-a"), /modelo cadastrado/);
   await assert.rejects(() => route(admin, "client", null, claude, "claude-sonnet-5"), /para quem vale/);
   await assert.rejects(() => route(admin, "client", uid(99), claude, "claude-sonnet-5"), /Não encontrado/);
@@ -169,7 +174,7 @@ await check("cada funcionalidade tem o seu modelo; pessoa e cliente só valem na
   };
   const setFeature = (user, feature, provider, model) =>
     q(user, "select public.ai_set_route($1,'feature',null,$2,$3,$4)", [A, provider, model, feature]);
-  await assert.rejects(() => setFeature(manager, "social_leads_plan", gpt, "gpt-c"), /Só administradores/);
+  await assert.rejects(() => setFeature(member, "social_leads_plan", gpt, "gpt-c"), /administradores e gestores/);
   await assert.rejects(() => setFeature(admin, "inventada", gpt, "gpt-c"), /Funcionalidade inválida/);
   await assert.rejects(() => setFeature(admin, null, gpt, "gpt-c"), /Funcionalidade inválida/);
   await assert.rejects(() => setFeature(admin, "social_leads_plan", gpt, "claude-sonnet-5"), /modelo cadastrado/);
@@ -212,6 +217,44 @@ await check("o assistente entra nos módulos que o administrador esconde", async
   await db.exec("reset role");
   const [row] = (await db.query("select hidden_pages from memberships where company_id=$1 and user_id=$2", [A, member])).rows;
   assert.deepEqual(row.hidden_pages, ["assistant"]);
+});
+
+
+await check("gestores editam as regras; transcrição só com modelo e provedor de transcrição", async () => {
+  const groq = await save(admin, "Groq", "groq", models("whisper-large-v3-turbo", "llama-4"));
+  const setFeature = (user, feature, provider, model) =>
+    q(user, "select public.ai_set_route($1,'feature',null,$2,$3,$4)", [A, provider, model, feature]);
+  const resolveFeature = async (user, feature) => {
+    const r = await one(user, "select public.ai_resolve_route($1,null,null,null,$2)", [A, feature]);
+    return r ? `${r.scope}:${r.provider}:${r.model}` : null;
+  };
+  // O padrão da empresa (conversa) não vale para a transcrição.
+  await route(manager, "company", null, claude, "claude-sonnet-5");
+  assert.equal(await resolveFeature(member, "task_audio_transcribe"), null);
+  assert.equal(await resolveFeature(member, "whatsapp_task"), "company:Claude:claude-sonnet-5");
+  await assert.rejects(() => setFeature(manager, "task_audio_transcribe", claude, "claude-sonnet-5"), /transcrição usa/);
+  await assert.rejects(() => setFeature(manager, "task_audio_transcribe", groq, "llama-4"), /modelo de transcrição/);
+  await assert.rejects(() => setFeature(manager, "whatsapp_task", groq, "whisper-large-v3-turbo"), /só transcreve/);
+  await assert.rejects(() => route(manager, "company", null, groq, "whisper-large-v3-turbo"), /só transcreve/);
+  await setFeature(manager, "task_audio_transcribe", groq, "whisper-large-v3-turbo");
+  assert.equal(await resolveFeature(member, "task_audio_transcribe"), "feature:Groq:whisper-large-v3-turbo");
+  // Whatsapp: a coleta (segredo do worker) acha a regra dela.
+  const secret = "s".repeat(40);
+  await db.exec("reset role");
+  await db.query("insert into mavi_private.whatsapp_config(company_id,url,secret) values($1,'https://uaz.example',$2)", [A, secret]);
+  assert.equal(await one(null, "select public.whatsapp_transcribe_route($1)", [secret]), null);
+  await setFeature(manager, "whatsapp_transcribe", groq, "whisper-large-v3-turbo");
+  const wr = await one(null, "select public.whatsapp_transcribe_route($1)", [secret]);
+  assert.equal(wr.model, "whisper-large-v3-turbo");
+  assert.equal(wr.kind, "groq");
+  await assert.rejects(() => q(null, "select public.whatsapp_transcribe_route($1)", ["x".repeat(40)]), /Não autorizado/);
+  // Os modelos das animações do Mural também são dos gestores.
+  await q(manager, "select public.set_notice_animation_admin($1,true,'[]'::jsonb)", [A]);
+  assert.equal((await one(manager, "select public.notice_animation_admin($1)", [A])).knowledge, true);
+  await assert.rejects(() => q(member, "select public.notice_animation_admin($1)", [A]), /Sem permissão/);
+  await setFeature(manager, "task_audio_transcribe", null, null);
+  await setFeature(manager, "whatsapp_transcribe", null, null);
+  await route(manager, "company", null, null, null);
 });
 
 await db.close();

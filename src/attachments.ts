@@ -2,17 +2,16 @@ import { rpc, invalidateTaskExtras } from "./api";
 import { supabase } from "./supabase";
 import { uploadToGcs } from "./gcs";
 import type { Attachment } from "./types";
-import { attachmentType, attachmentTypes } from "./upload-types";
-export const attachmentAccept = Object.keys(attachmentTypes)
-  .map((ext) => `.${ext}`)
-  .join(",");
+import { ATTACHMENT_MAX_BYTES, attachmentType } from "./upload-types";
+export const ATTACHMENT_HINT =
+  "Qualquer arquivo de até 100 MB (menos programas, como .exe ou .apk)";
 export function validateAttachment(file: Pick<File, "name" | "size">) {
-  if (file.size === 0 || file.size > 20971520)
-    throw Error(`${file.name}: escolha um arquivo não vazio de até 20 MB.`);
+  if (file.size === 0 || file.size > ATTACHMENT_MAX_BYTES)
+    throw Error(`${file.name}: escolha um arquivo não vazio de até 100 MB.`);
   const type = attachmentType(file.name);
   if (!type)
     throw Error(
-      `${file.name}: formato não permitido. Use PDF, imagem, TXT, CSV, ZIP ou documentos do Office.`,
+      `${file.name}: por segurança, programas e scripts (.exe, .bat, .sh, .apk…) não podem ser anexados. Compacte em ZIP se precisar enviar.`,
     );
   return type;
 }

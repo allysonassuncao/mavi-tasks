@@ -10,8 +10,14 @@ export function getGcsPublicUrl(path: string): string {
   return `https://storage.googleapis.com/${GCS_BUCKET}/${encodeURI(cleanPath).replace(/#/g, "%23").replace(/\?/g, "%3F")}`;
 }
 
-/** A record prepared for upload (prepare_attachment / prepare_inline_image). */
-export type UploadTarget = { kind: "attachment" | "inline-image"; id: string };
+/**
+ * A record prepared for upload (prepare_attachment / prepare_inline_image /
+ * prepare_task_audio).
+ */
+export type UploadTarget = {
+  kind: "attachment" | "inline-image" | "audio";
+  id: string;
+};
 
 /**
  * Uploads the file for a record the user just prepared. The server
@@ -19,7 +25,7 @@ export type UploadTarget = { kind: "attachment" | "inline-image"; id: string };
  */
 export async function uploadToGcs(
   target: UploadTarget,
-  file: File,
+  file: Blob,
   contentType?: string,
 ): Promise<void> {
   const token = supabase

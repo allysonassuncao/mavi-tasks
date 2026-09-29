@@ -971,11 +971,14 @@ let launch, shot;
 await check(
   "animação: o administrador libera modelos para todos ou para uma equipe",
   async () => {
-    await as(manager);
+    // Gestores também escolhem (Painel da MAVI › Quem usa qual modelo).
+    await as(ana);
     await rejects(
       () => rpc("set_notice_animation_admin", [A, true, []]),
-      /Só administradores/,
+      /administradores e gestores/,
     );
+    await as(manager);
+    await rpc("set_notice_animation_admin", [A, true, []]);
     await as(admin);
     await rejects(
       () =>

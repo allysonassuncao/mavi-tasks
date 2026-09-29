@@ -1,5 +1,9 @@
 import { callRpc, signGcsUrl, type DriveEnv } from "./_drive.js";
-import { attachmentType, inlineImageTypes } from "../src/upload-types.js";
+import {
+  attachmentType,
+  inlineImageTypes,
+  recordedAudioTypes,
+} from "../src/upload-types.js";
 
 /**
  * Signs uploads for task attachments and inline images. The client names a
@@ -8,13 +12,22 @@ import { attachmentType, inlineImageTypes } from "../src/upload-types.js";
  * only for that user's own recent, still-pending record. The signed URL fixes
  * the content type and caps the size at what was declared when preparing.
  *
+ * Recorded audio (task descriptions and comments) goes the same way: the
+ * draft prepared by prepare_task_audio, with the audio type it declared.
+ *
  * It also deletes task attachments permanently (Armazenamento page): the
  * database removes the record if the caller may (delete_attachment) and
- * returns the object path, which is then removed from the bucket.
+ * returns the object path, which is then removed from the bucket. Audio is
+ * removed the same way (delete_task_audio), except that copies of a
+ * repeating task share the object: it goes only with the last record.
  */
 export type UploadRequest =
-  | { kind: "attachment" | "inline-image"; id: string; contentType?: string }
-  | { action: "delete-attachment"; id: string };
+  | {
+      kind: "attachment" | "inline-image" | "audio";
+      id: string;
+      contentType?: string;
+    }
+  | { action: "delete-attachment" | "delete-audio"; id: string };
 
 export async function handleUpload(
   body: unknown,
@@ -33,17 +46,21 @@ export async function handleUpload(
     id?: unknown;
     contentType?: string;
   };
-  if (req.action === "delete-attachment") {
+  if (req.action === "delete-attachment" || req.action === "delete-audio") {
     if (typeof req.id !== "string" || !/^[0-9a-f-]{36}$/i.test(req.id))
       return fail(400, "Registro inválido.");
-    const removed = await callRpc<string>(
+    const removed = await callRpc<string | null>(
       env,
       fetchImpl,
       authorization,
-      "delete_attachment",
-      { p_attachment: req.id },
+      req.action === "delete-audio" ? "delete_task_audio" : "delete_attachment",
+      req.action === "delete-audio"
+        ? { p_audio: req.id }
+        : { p_attachment: req.id },
     );
     if (!removed.ok) return fail(removed.status, removed.error);
+    // Another copy of the task still plays this audio.
+    if (!removed.data) return { status: 200, body: { deleted: true, storage: true } };
     // The record is gone either way; a failed object removal only leaves an
     // object that no record points to.
     const res = await fetchImpl(
@@ -55,29 +72,41 @@ export async function handleUpload(
       body: { deleted: true, storage: !!res && (res.ok || res.status === 404) },
     };
   }
-  if (req.kind !== "attachment" && req.kind !== "inline-image")
+  if (
+    req.kind !== "attachment" &&
+    req.kind !== "inline-image" &&
+    req.kind !== "audio"
+  )
     return fail(400, "Tipo de envio inválido.");
   if (typeof req.id !== "string" || !/^[0-9a-f-]{36}$/i.test(req.id))
     return fail(400, "Registro inválido.");
 
   const target = await callRpc<
-    { path: string; name: string; size_bytes: number }[]
+    { path: string; name?: string; mime?: string; size_bytes: number }[]
   >(
     env,
     fetchImpl,
     authorization,
     req.kind === "attachment"
       ? "attachment_upload_target"
-      : "inline_image_upload_target",
-    req.kind === "attachment" ? { p_attachment: req.id } : { p_image: req.id },
+      : req.kind === "audio"
+        ? "task_audio_upload_target"
+        : "inline_image_upload_target",
+    req.kind === "attachment"
+      ? { p_attachment: req.id }
+      : req.kind === "audio"
+        ? { p_audio: req.id }
+        : { p_image: req.id },
   );
   const record = target.ok ? target.data[0] : undefined;
   if (!record) return fail(403, "Envio não autorizado ou expirado.");
 
   const contentType =
     req.kind === "attachment"
-      ? attachmentType(record.name)
-      : inlineImageTypes.find((t) => t === req.contentType);
+      ? attachmentType(record.name ?? "")
+      : req.kind === "audio"
+        ? recordedAudioTypes.find((t) => t === record.mime)
+        : inlineImageTypes.find((t) => t === req.contentType);
   if (!contentType) return fail(400, "Formato de arquivo não permitido.");
   const range = `0,${record.size_bytes}`;
   return {

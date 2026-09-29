@@ -39,6 +39,9 @@ import {
   catalogEntry,
   featureInfo,
   isJevModel,
+  isNonChatModel,
+  isTranscribeModel,
+  TRANSCRIBE_KINDS,
   keyHint as keyHintOf,
   pickRoute,
   safeBaseUrl,
@@ -134,9 +137,17 @@ export function useAiLibrary(company: string, demo = false) {
 const DEMO_OPENAI = "demo-openai";
 const DEMO_DEFAULTS: ServerDefaults = {
   claudeKey: true,
+  openaiKey: true,
   features: Object.fromEntries(
-    FEATURES.map((f) => [f.id, { model: "claude-opus-5-5", env: f.env }]),
+    FEATURES.map((f) => [
+      f.id,
+      {
+        model: f.transcription ? "gpt-4o-mini-transcribe" : "claude-opus-5-5",
+        env: f.env,
+      },
+    ]),
   ),
+  embedding: { model: "text-embedding-3-small", env: "AI_EMBEDDING_MODEL" },
 };
 function demoLibrary(): AiLibrary {
   const now = new Date().toISOString();
@@ -963,6 +974,7 @@ export function AiRoutesPanel({
   error,
   reload,
   notify,
+  canManageProviders = true,
 }: {
   api: LibraryApi;
   data: Snapshot;
@@ -972,6 +984,11 @@ export function AiRoutesPanel({
   error: string;
   reload: () => Promise<void>;
   notify: (message: string) => void;
+  /**
+   * Administrador: cadastra provedores e API Keys. Gestores editam as
+   * regras entre os provedores já cadastrados.
+   */
+  canManageProviders?: boolean;
 }) {
   const [tab, setTab] = useState<PersonScope>("user");
   const [problem, setProblem] = useState("");
@@ -1052,12 +1069,28 @@ export function AiRoutesPanel({
       {`${p.name} · ${m.label || m.id}${p.active ? "" : " (desligado)"}`}
     </SelectOption>
   );
+  // Conversa: sem o Jev e sem os modelos que só transcrevem ou geram vetores.
   const choices = (
     <>
       {providers.map((p) =>
-        p.models.filter((m) => !isJevModel(m.id)).map((m) => option(p, m)),
+        p.models
+          .filter((m) => !isJevModel(m.id) && !isNonChatModel(m.id))
+          .map((m) => option(p, m)),
       )}
     </>
+  );
+  // Transcrição: provedores com o endpoint de transcrição e os modelos que transcrevem.
+  const transcribeOptions = providers
+    .filter((p) => TRANSCRIBE_KINDS.includes(p.kind))
+    .flatMap((p) =>
+      p.models.filter((m) => isTranscribeModel(m.id)).map((m) => option(p, m)),
+    );
+  const transcribeChoices = transcribeOptions.length ? (
+    <>{transcribeOptions}</>
+  ) : (
+    <SelectOption value="none" disabled>
+      Cadastre um modelo de transcrição (ex.: Whisper)
+    </SelectOption>
   );
   const jevChoices = (
     <>
@@ -1100,7 +1133,11 @@ export function AiRoutesPanel({
       {!providers.length && (
         <p className="panel ai-route-empty">
           Nenhum provedor na biblioteca ainda: tudo usa o padrão do servidor.{" "}
-          <a href="#provedores">Adicionar um provedor</a>
+          {canManageProviders ? (
+            <a href="#provedores">Adicionar um provedor</a>
+          ) : (
+            "Peça a um administrador para cadastrar um provedor."
+          )}
         </p>
       )}
 
@@ -1132,6 +1169,8 @@ export function AiRoutesPanel({
         serverLabel={serverLabel}
         choices={choices}
         jevChoices={jevChoices}
+        transcribeChoices={transcribeChoices}
+        embedding={defaults?.embedding}
         onSet={(feature, choice) => void set("feature", feature, choice)}
       />
 
@@ -1243,6 +1282,8 @@ function FeatureRoutes({
   serverLabel,
   choices,
   jevChoices,
+  transcribeChoices,
+  embedding,
   onSet,
 }: {
   routes: AiRoute[];
@@ -1254,6 +1295,10 @@ function FeatureRoutes({
   choices: ReactNode;
   /** Os modelos do Jev nos provedores OpenRouter (funcionalidades de decisão). */
   jevChoices: ReactNode;
+  /** Os modelos de transcrição (OpenAI, Groq, Mistral, endereço próprio). */
+  transcribeChoices: ReactNode;
+  /** O modelo de vetores do servidor (só para leitura). */
+  embedding?: { model: string; env: string };
   onSet: (feature: AiFeature, choice: string) => void;
 }) {
   return (
@@ -1262,9 +1307,10 @@ function FeatureRoutes({
         <strong>Por funcionalidade</strong>
         <small>
           O provedor e o modelo de cada funcionalidade com a MAVI. Sem escolha,
-          vale o padrão da empresa (ou o do servidor). Nas conversas
-          (assistente e gravações), as regras de pessoa, cliente, produto e
-          projeto vencem a da funcionalidade.
+          vale o padrão da empresa (ou o do servidor); a transcrição de áudio
+          não herda o padrão da empresa, que é um modelo de conversa. Nas
+          conversas (assistente e gravações), as regras de pessoa, cliente,
+          produto e projeto vencem a da funcionalidade.
         </small>
       </header>
       <div className="drive-table-wrap">
@@ -1283,7 +1329,7 @@ function FeatureRoutes({
               // Quem responde de fato: a escolha dela ou a da empresa.
               const provider = r
                 ? byId.get(r.provider_id)
-                : f.decisions
+                : f.decisions || f.transcription
                   ? undefined
                   : companyProvider;
               const outsideClaude =
@@ -1294,8 +1340,12 @@ function FeatureRoutes({
                     <div className="ai-feature-name">
                       <span className="ai-feature-group">{f.group}</span>
                       <span className="ai-usage-name">{f.label}</span>
-                      {outsideClaude && f.note && (
-                        <small className="ai-feature-note">{f.note}</small>
+                      {(outsideClaude || f.transcription) && f.note && (
+                        <small
+                          className={`ai-feature-note${f.transcription ? " info" : ""}`}
+                        >
+                          {f.note}
+                        </small>
                       )}
                     </div>
                   </td>
@@ -1308,16 +1358,43 @@ function FeatureRoutes({
                       <SelectOption value={SERVER}>
                         {f.decisions
                           ? "Automático · o Jev cadastrado num provedor OpenRouter"
-                          : companyLabel
-                            ? `Padrão da empresa · ${companyLabel}`
-                            : serverLabel(f.id)}
+                          : f.transcription
+                            ? `${serverLabel(f.id)} (OpenAI)`
+                            : companyLabel
+                              ? `Padrão da empresa · ${companyLabel}`
+                              : serverLabel(f.id)}
                       </SelectOption>
-                      {f.decisions ? jevChoices : choices}
+                      {f.decisions
+                        ? jevChoices
+                        : f.transcription
+                          ? transcribeChoices
+                          : choices}
                     </Select>
                   </td>
                 </tr>
               );
             })}
+            <tr>
+              <td>
+                <div className="ai-feature-name">
+                  <span className="ai-feature-group">MAVI</span>
+                  <span className="ai-usage-name">
+                    Vetores da busca e do RAG
+                  </span>
+                  <small className="ai-feature-note info">
+                    Leem reuniões, tarefas, Whatsapp e arquivos para a busca,
+                    os Relacionados e o dossiê. Fixo: trocar o modelo exige
+                    refazer o índice inteiro.
+                  </small>
+                </div>
+              </td>
+              <td>
+                <span className="ai-feature-fixed">
+                  Padrão do servidor · {embedding?.model ?? "text-embedding-3-small"}{" "}
+                  (OpenAI)
+                </span>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
