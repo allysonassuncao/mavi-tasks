@@ -1270,3 +1270,22 @@
 .mavi-action-fields dd {
   overflow-wrap: anywhere;
 }
+.mavi-action-done {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 14px 0 54px;
+  font-size: 0.78rem;
+  color: #3f6b1f;
+}
+.mavi-action-details {
+  margin: 6px 14px 0 54px;
+  font-size: 0.76rem;
+}
+.mavi-action-details summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.mavi-action-details .mavi-action-result {
+  margin: 6px 0 0;
+}

@@ -1,4 +1,4 @@
-// MAVI · Conexões (MCP) (migration 20261218090000_mavi_mcp): o poder 'mcp';
+// MAVI · Conexões (MCP) (migrations 20261218090000_mavi_mcp e 20261219090000_mavi_mcp_auto): o poder 'mcp';
 // conexões da empresa (líderes criam e dizem quem usa) e pessoais; as
 // ferramentas guardadas com o liga/desliga; de quem é cada token; o OAuth
 // pelo estado; e a ação confirmada que não roda duas vezes.
@@ -115,6 +115,30 @@ await check("ferramentas: guardadas, o liga/desliga fica; o catálogo só com as
   assert.deepEqual(crmRow.tools.map((t) => t.name), ["search"]);
   assert.equal(crmRow.header_cipher, "v1:selado");
   assert.deepEqual(crmRow.tools[0].input_schema.properties.q, { type: "string" });
+});
+
+await check("rodar sem confirmar: a sugestão entra na primeira vez; a escolha de quem edita fica", async () => {
+  const tools = [
+    { name: "search", read_only: true },
+    { name: "create_deal", read_only: false },
+    { name: "wait_job", read_only: false, auto: true },
+  ];
+  await q(admin, "select public.ai_mcp_set_tools($1,$2::jsonb,null)", [crm, JSON.stringify(tools)]);
+  const auto = async () => Object.fromEntries((await list(admin)).find((s) => s.id === crm).tools.map((t) => [t.name, t.auto]));
+  // A ferramenta que já existia (sem a marca) segue pedindo; a nova entra com a sugestão.
+  assert.deepEqual(await auto(), { search: false, create_deal: false, wait_job: true });
+  await assert.rejects(() => q(ana, "select public.ai_mcp_tool_auto($1,'create_deal',true)", [crm]), /Só quem edita/);
+  await q(manager, "select public.ai_mcp_tool_auto($1,'create_deal',true)", [crm]);
+  await q(manager, "select public.ai_mcp_tool_auto($1,'wait_job',false)", [crm]);
+  // Atualizar a lista não desfaz a escolha.
+  await q(admin, "select public.ai_mcp_set_tools($1,$2::jsonb,null)", [crm, JSON.stringify(tools)]);
+  assert.deepEqual(await auto(), { search: false, create_deal: true, wait_job: false });
+  // O catálogo da resposta leva a marca (create_deal estava desligada no passo anterior).
+  await q(manager, "select public.ai_mcp_toggle_tool($1,'create_deal',true)", [crm]);
+  const c = await catalog(bia);
+  assert.equal(c.servers.find((s) => s.name === "CRM").tools.find((t) => t.name === "create_deal").auto, true);
+  await q(manager, "select public.ai_mcp_tool_auto($1,'create_deal',false)", [crm]);
+  await q(manager, "select public.ai_mcp_toggle_tool($1,'create_deal',false)", [crm]);
 });
 
 await check("quem usa: público das da empresa; desligar o poder tira tudo", async () => {

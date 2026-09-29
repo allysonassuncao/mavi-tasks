@@ -32,6 +32,7 @@ import {
   mcpStatus,
   saveMcp,
   setMcpAudience,
+  setMcpToolAuto,
   toggleMcpTool,
   type McpAuth,
   type McpDraft,
@@ -256,10 +257,23 @@ export function McpPage({
                   <li key={t.name} className={t.enabled ? "" : "off"}>
                     <span>
                       <strong>{t.title || t.name}</strong>
-                      <span className={`mcp-tool-kind ${t.read_only ? "read" : "write"}`}>
-                        {t.read_only ? "Só lê" : "Altera · pede confirmação"}
+                      <span className={`mcp-tool-kind ${t.read_only || t.auto ? "read" : "write"}`}>
+                        {t.read_only ? "Só lê" : t.auto ? "Roda sem confirmar" : "Altera · pede confirmação"}
                       </span>
                       {t.description && <small>{t.description}</small>}
+                      {!t.read_only && s.editable && (
+                        <label className="mcp-tool-auto">
+                          <input
+                            type="checkbox"
+                            checked={!t.auto}
+                            disabled={busy === `${s.id}:${t.name}:auto`}
+                            onChange={() =>
+                              void run(`${s.id}:${t.name}:auto`, () => setMcpToolAuto(s.id, t.name, !t.auto))
+                            }
+                          />
+                          Pedir confirmação antes de rodar
+                        </label>
+                      )}
                     </span>
                     {s.editable ? (
                       <button

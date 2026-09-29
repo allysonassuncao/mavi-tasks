@@ -14,6 +14,8 @@ export type McpToolInfo = {
   description?: string;
   read_only: boolean;
   enabled: boolean;
+  /** Roda sem pedir confirmação (quem edita a conexão decidiu). */
+  auto?: boolean;
 };
 export type McpServer = {
   id: string;
@@ -73,6 +75,8 @@ export const listMcp = (company: string) =>
 export const deleteMcp = (id: string) => rpc("ai_mcp_delete", { p_server: id });
 export const toggleMcpTool = (id: string, tool: string, enabled: boolean) =>
   rpc("ai_mcp_toggle_tool", { p_server: id, p_tool: tool, p_enabled: enabled });
+export const setMcpToolAuto = (id: string, tool: string, auto: boolean) =>
+  rpc("ai_mcp_tool_auto", { p_server: id, p_tool: tool, p_auto: auto });
 export const disconnectMcp = (id: string) => rpc("ai_mcp_disconnect", { p_server: id });
 export const setMcpAudience = (
   id: string,

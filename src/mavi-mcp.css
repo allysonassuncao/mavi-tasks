@@ -376,3 +376,22 @@
   color: #2d5a8c;
   text-decoration: underline;
 }
+.mcp-tools .mcp-tool-auto {
+  flex-basis: 100%;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  font-weight: 450;
+  color: #4f5c5c;
+  cursor: pointer;
+}
+.mcp-tools .mcp-tool-auto input {
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  margin: 0;
+  accent-color: #9ebf73;
+}

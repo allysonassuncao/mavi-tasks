@@ -172,6 +172,8 @@ export function askAi(
   surface?: "page",
   /** Skills escolhidas na caixa de mensagem (a versão: em teste). */
   skills?: { slug: string; version?: number }[],
+  /** A ação de conexão (MCP) que a pessoa confirmou no card: roda e a MAVI continua. */
+  confirm?: string,
 ) {
   return streamAnswer(
     "/api/ai",
@@ -183,6 +185,7 @@ export function askAi(
       conversation,
       ...(surface ? { surface } : {}),
       ...(skills?.length ? { skills } : {}),
+      ...(confirm ? { confirm } : {}),
     },
     handlers,
     signal,

@@ -130,6 +130,8 @@ export type AiDeps = {
   download?: (path: string) => Promise<Uint8Array>;
   /** O adaptador de um provedor da biblioteca (trocado nos testes). */
   providerLlm?: (config: ProviderConfig) => LlmAdapter;
+  /** Resolve o nome dos servidores das conexões (trocado nos testes). */
+  lookup?: (host: string) => Promise<{ address: string }[]>;
 };
 export function aiDeps(env: AiEnv): AiDeps {
   return {
@@ -718,7 +720,7 @@ async function ask(
           providerKey: env.providerKey,
           appOrigin: appOrigin(),
         },
-        { fetch: deps.fetch },
+        { fetch: deps.fetch, lookup: deps.lookup },
         auth,
       )
     : null;
@@ -741,7 +743,7 @@ async function ask(
     const stepId = `t${++n}`;
     const mcpTool = mcp?.meta.get(name);
     const meta = mcpTool
-      ? { kind: "mcp" as const, power: "mcp" as const, timeoutMs: 60_000 }
+      ? { kind: "mcp" as const, power: "mcp" as const, timeoutMs: 120_000 }
       : REGISTRY[name];
     const power = meta?.power ?? null;
     const kind = meta?.kind ?? "read";
@@ -918,6 +920,34 @@ async function ask(
     await logUsage("skill", out.meter, r.data.provider_id);
     return `Resultado da skill “${s.name}” (feito com ${c.model}, seguindo as instruções dela):\n${out.text}\n\nApresente este resultado à pessoa: pode ajustar a forma, mas mantenha o conteúdo e as fontes [S#].`;
   };
+  // A pessoa confirmou uma ação de conexão no card: roda agora (uma vez) e
+  // a MAVI continua a partir do resultado, como o Claude Code depois de aprovar.
+  const confirmed = typeof body.confirm === "string" ? body.confirm.slice(0, 64) : "";
+  if (confirmed) {
+    if (!onPage || !mcp)
+      throw new AiError(403, "As conexões (MCP) não estão liberadas para você nesta empresa.");
+    if (!conversationId) throw new AiError(400, "A ação confirmada é de uma conversa salva.");
+    const stepId = `c${++n}`;
+    const started = Date.now();
+    emit({ type: "step", id: stepId, label: "Executando a ação que você confirmou", state: "running" });
+    const r = await mcp.confirm(kit, conversationId, confirmed).catch((e) => {
+      emit({ type: "step", id: stepId, label: "Executando a ação que você confirmou", state: "error", detail: "falhou" });
+      throw e instanceof AiError ? e : new AiError((e as { status?: number }).status ?? 502, (e as Error).message);
+    });
+    const label = `${r.ok ? "Executado" : "Não deu certo"}: ${r.where}`;
+    steps.push({ label, detail: "confirmado por você" });
+    emit({ type: "step", id: stepId, label, state: r.ok ? "done" : "error", detail: "confirmado por você" });
+    calls.push({
+      tool: `mcp:${r.slug}/${r.tool}`,
+      power: "mcp",
+      ok: r.ok,
+      ms: Date.now() - started,
+      cost: 0,
+      ...(r.ok ? {} : { error: r.answer.slice(0, 300) }),
+    });
+    const last = messages[messages.length - 1];
+    last.content = `${last.content}\n\n[A pessoa confirmou no card a ação ${r.where}. Já foi executada; o resultado está abaixo.]\n${r.answer}\n\nContinue o pedido a partir daqui: se o serviço ainda estiver processando, espere e busque o resultado com as ferramentas de consulta dele; mostre o que ficou pronto (imagens com [[I#]]). Não proponha a mesma ação de novo.`;
+  }
   let result: Awaited<ReturnType<LlmAdapter>> | undefined;
   try {
     result = await llm({

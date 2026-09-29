@@ -59,6 +59,15 @@ describe("ação numa conexão (MCP)", () => {
       <ArtifactView artifact={{ ...action, state: "confirmed", result: { text: "Criado #12" } }} host={host} />,
     );
     expect(ran).toContain('<pre class="mavi-action-result">Criado #12</pre>');
+    expect(ran).toContain("Ver a resposta de CRM");
+    const noisy = renderToStaticMarkup(
+      <ArtifactView
+        artifact={{ ...action, state: "confirmed", result: { text: "<system_reminder>chame creations_wait</system_reminder>\n{\"ok\":1}" } }}
+        host={host}
+      />,
+    );
+    expect(noisy).not.toContain("creations_wait");
+    expect(noisy).toContain("{&quot;ok&quot;:1}");
     expect(ran).not.toContain("Confirmar e executar");
   });
 });

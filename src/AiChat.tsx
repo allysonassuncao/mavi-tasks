@@ -338,6 +338,8 @@ export type AiSend = (
   question: string,
   history: ChatTurn[],
   handlers: AiStreamHandlers,
+  /** O que vai junto com a pergunta (ex.: a ação confirmada no card). */
+  extra?: { confirm?: string },
 ) => Promise<AiAnswer>;
 
 /**
@@ -367,7 +369,7 @@ export function useAiTurns({
     );
   }
   /** Faz a pergunta; false quando não foi (para devolver o texto à caixa). */
-  async function submit(question: string) {
+  async function submit(question: string, extra?: { confirm?: string }) {
     const q = question.trim();
     if (!q || busy || readOnly) return false;
     setError("");
@@ -382,7 +384,10 @@ export function useAiTurns({
     ]);
     let notes = 0;
     try {
-      const result = await send(q, history, {
+      const result = await send(
+        q,
+        history,
+        {
         onStep: (step) =>
           patchLast((e) => {
             const steps = e.steps ?? [];
@@ -430,7 +435,9 @@ export function useAiTurns({
             ...e,
             artifacts: [...(e.artifacts ?? []), artifact],
           })),
-      });
+        },
+        extra,
+      );
       patchLast((e) => ({
         ...e,
         content: result.answer,

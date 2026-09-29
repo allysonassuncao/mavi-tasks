@@ -29,6 +29,7 @@ import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
 import { CanvasPanel } from "./MaviCanvas";
 import {
   ARTIFACT_LINE,
+  type ActionArtifact,
   type CanvasArtifact,
   type ImageArtifact,
 } from "./mavi-artifacts";
@@ -593,7 +594,7 @@ export function MaviChatPage({
               />
               </>
             }
-            send={(question, _history, handlers) =>
+            send={(question, _history, handlers, extra) =>
               askAi(
                 company,
                 { client: client || undefined, module: "assistant" },
@@ -603,6 +604,7 @@ export function MaviChatPage({
                 undefined,
                 "page",
                 picked.map(({ slug, version }) => ({ slug, version })),
+                extra?.confirm,
               )
             }
             onAnswer={answered}
@@ -712,7 +714,7 @@ function ChatThread({
   onNew: () => void;
   host: Omit<
     ArtifactHost,
-    "readOnly" | "streaming" | "onDraft" | "onOpenCanvas" | "onReply" | "answered"
+    "readOnly" | "streaming" | "onDraft" | "onOpenCanvas" | "onReply" | "answered" | "onConfirmMcp"
   >;
 }) {
   const chat = useAiTurns({ initial, send, readOnly, onAnswer });
@@ -766,6 +768,14 @@ function ChatThread({
     readOnly,
     onOpenCanvas: (a: CanvasArtifact) => setCanvas(a),
     onReply: (text: string) => void submit(text),
+    // Confirmou a ação de uma conexão: a MAVI roda e continua (nova resposta).
+    onConfirmMcp: (a: ActionArtifact) => {
+      if (busy || readOnly || a.action.kind !== "mcp_call") return Promise.resolve(false);
+      stick.current = true;
+      return chat.submit(`Confirmo: ${a.action.server_name} › ${a.action.tool_title || a.action.tool}`, {
+        confirm: a.id,
+      });
+    },
     onDraft: (text: string) => {
       setDraft(text);
       requestAnimationFrame(() => {

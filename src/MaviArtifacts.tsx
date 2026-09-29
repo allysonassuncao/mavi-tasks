@@ -73,6 +73,11 @@ export type ArtifactHost = {
   onReply: (text: string) => void;
   /** A conversa já seguiu depois desta resposta. */
   answered?: boolean;
+  /**
+   * A pessoa confirmou a ação de uma conexão (MCP): vira a próxima mensagem,
+   * a ação roda e a MAVI continua dali. false: não deu para enviar.
+   */
+  onConfirmMcp?: (artifact: ActionArtifact) => Promise<boolean>;
   notify: (message: string) => void;
 };
 
@@ -732,11 +737,26 @@ function McpActionCard({ artifact, host }: { artifact: ActionArtifact; host: Art
   const waiting = host.streaming || !host.conversation;
   const running = busy || (state === "confirmed" && !!result?.running);
   const args = Object.entries(a.arguments ?? {});
+  // Sem os recados do serviço para a IA (as respostas antigas guardaram tudo).
+  const said = (result?.text ?? "")
+    .replace(/<(system[_-]reminder|system|instructions?)>[\s\S]*?<\/\1>/gi, "")
+    .trim();
   async function confirm() {
     if (!host.conversation) return;
     setBusy(true);
     setError("");
     try {
+      // No módulo: a confirmação vira a próxima mensagem e a MAVI continua.
+      if (host.onConfirmMcp) {
+        setState("confirmed");
+        setResult({ running: true });
+        if (!(await host.onConfirmMcp(artifact))) {
+          setState("pending");
+          setResult(undefined);
+          setError("Não deu para enviar a confirmação. Tente de novo.");
+        } else setResult({ text: "" });
+        return;
+      }
       const r = await runMcpAction(host.conversation, artifact.id);
       setState(r.ok ? "confirmed" : "failed");
       setResult(r.ok ? { text: r.text } : { error: r.error });
@@ -787,7 +807,17 @@ function McpActionCard({ artifact, host }: { artifact: ActionArtifact; host: Art
         <p className="mavi-action-text">Sem informações adicionais.</p>
       )}
       {args.length > 12 && <p className="mavi-action-text">E mais {args.length - 12} campos.</p>}
-      {result?.text && !running && <pre className="mavi-action-result">{result.text}</pre>}
+      {state === "confirmed" && !running && (
+        <p className="mavi-action-done">
+          <Check size={13} aria-hidden="true" /> Enviado para {a.server_name}. A MAVI segue a partir do resultado.
+        </p>
+      )}
+      {said && !running && (
+        <details className="mavi-action-details">
+          <summary>Ver a resposta de {a.server_name}</summary>
+          <pre className="mavi-action-result">{said}</pre>
+        </details>
+      )}
       {(error || result?.error) && (
         <p className="form-error" role="alert">
           {error || result?.error}
@@ -811,7 +841,8 @@ function McpActionCard({ artifact, host }: { artifact: ActionArtifact; host: Art
           )
         ) : running ? (
           <small>
-            <Loader2 size={13} className="spin" aria-hidden="true" /> {busy ? `Enviando para ${a.server_name}…` : "Em andamento (ou interrompida). Confira no serviço."}
+            <Loader2 size={13} className="spin" aria-hidden="true" />{" "}
+            {busy || host.streaming ? `Enviando para ${a.server_name}…` : "Em andamento (ou interrompida). Confira no serviço."}
           </small>
         ) : null}
       </footer>
