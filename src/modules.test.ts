@@ -40,6 +40,7 @@ describe("módulos visíveis por pessoa", () => {
       "projects",
       "campaigns",
       "onboarding",
+      "socialMedia",
       "cases",
       "temperature",
       "hours",
@@ -59,14 +60,18 @@ describe("módulos visíveis por pessoa", () => {
     expect(firstPage("member", [])).toBe("tasks");
     expect(firstPage("manager", ["overview", "tasks"])).toBe("agenda");
     expect(firstPage("member", ["tasks", "agenda"])).toBe("onboarding");
+    // Planejamento › Social Media comes right after Social Leads.
     expect(firstPage("member", ["tasks", "agenda", "onboarding"])).toBe(
-      "cases",
+      "socialMedia",
     );
     expect(
-      firstPage("member", ["tasks", "agenda", "onboarding", "cases"]),
+      firstPage("member", ["tasks", "agenda", "onboarding", "socialMedia"]),
+    ).toBe("cases");
+    expect(
+      firstPage("member", ["tasks", "agenda", "onboarding", "socialMedia", "cases"]),
     ).toBe("temperature");
     expect(
-      firstPage("member", ["tasks", "agenda", "onboarding", "cases", "temperature"]),
+      firstPage("member", ["tasks", "agenda", "onboarding", "socialMedia", "cases", "temperature"]),
     ).toBe("drive");
   });
   it("Termômetro dos clientes: de todos os perfis, e o administrador pode esconder", () => {
@@ -90,6 +95,7 @@ describe("módulos visíveis por pessoa", () => {
       "projects",
       "campaigns",
       "onboarding",
+      "socialMedia",
       "cases",
       "temperature",
       "hours",

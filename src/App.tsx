@@ -273,6 +273,7 @@ const navigation = [
   { id: "projects", label: "Projetos", icon: FolderKanban },
   { id: "campaigns", label: "Campanhas", icon: Megaphone },
   { id: "onboarding", label: "Social Leads", icon: Rocket },
+  { id: "socialMedia", label: "Social Media", icon: Rocket },
   { id: "cases", label: "Cases de Sucesso", icon: Trophy },
   { id: "temperature", label: "Termômetro dos clientes", icon: Thermometer },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
@@ -1263,7 +1264,7 @@ export default function App() {
           .catch(() => {});
       },
       onChange: (change) => {
-        // Onboarding › Social Leads listens for its own notices.
+        // Planejamento › Social Leads and Social Media listen for their own notices.
         if (change.kind === "social_leads") {
           window.dispatchEvent(
             new CustomEvent("mavi:social-leads", { detail: change }),
@@ -2526,7 +2527,9 @@ export default function App() {
                         ? "Comunicados da agência para pessoas, equipes, clientes e projetos: popup, caixa de entrada, push e faixa no topo."
                         : "Os comunicados da agência para você, guardados em um só lugar.",
                       onboarding:
-                        "Onboarding: briefing, plano do mês com a MAVI e aprovação do cliente pelo link.",
+                        "Planejamento: briefing, plano do mês com a MAVI e aprovação do cliente pelo link.",
+                      socialMedia:
+                        "Planejamento: briefing, plano do mês com a MAVI e aprovação do cliente pelo link.",
                       hours: "Seu tempo, registrado com clareza.",
                       drive:
                         "Arquivos da equipe, privados ou compartilhados por link.",
@@ -2563,6 +2566,7 @@ export default function App() {
                   page !== "profile" &&
                   page !== "campaigns" &&
                   page !== "onboarding" &&
+                  page !== "socialMedia" &&
                   page !== "cases" &&
                   page !== "temperature" &&
                   page !== "notices" &&
@@ -3608,10 +3612,13 @@ export default function App() {
                   notify={notify}
                 />
               )}
-              {page === "onboarding" && (
+              {(page === "onboarding" || page === "socialMedia") && (
                 <Suspense fallback={<Loading compact />}>
                   <SocialLeadsPage
-                    key={company}
+                    key={`${company}:${page}`}
+                    module={
+                      page === "socialMedia" ? "social_media" : "social_leads"
+                    }
                     data={catalogData}
                     company={company}
                     user={user}

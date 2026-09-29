@@ -229,14 +229,25 @@ export function SidebarNav({
         },
         {
           key: "onboarding",
-          label: "Onboarding",
+          label: "Planejamento",
           icon: Rocket,
-          to: { page: "onboarding" },
+          // Opens the first of its modules the person has.
+          to: {
+            page:
+              allowed("onboarding") || !allowed("socialMedia")
+                ? "onboarding"
+                : "socialMedia",
+          },
           children: [
             {
               key: "onboarding-social-leads",
               label: "Social Leads",
               to: { page: "onboarding" },
+            },
+            {
+              key: "onboarding-social-media",
+              label: "Social Media",
+              to: { page: "socialMedia" },
             },
           ],
         },
@@ -389,7 +400,9 @@ export function SidebarNav({
     );
   };
   const inside = (item: Item) =>
-    page === item.to.page || (item.key === "tasks" && page === "search");
+    page === item.to.page ||
+    (item.key === "tasks" && page === "search") ||
+    (item.key === "onboarding" && page === "socialMedia");
 
   const link = (to: NavTarget, content: ReactNode, props: object = {}) => (
     <a

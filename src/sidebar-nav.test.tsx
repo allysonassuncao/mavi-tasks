@@ -13,13 +13,18 @@ const MEMBER: Page[] = [
   "drive",
   "profile",
 ];
-const render = (isLeader: boolean, page: Page = "tasks", query = "") =>
+const render = (
+  isLeader: boolean,
+  page: Page = "tasks",
+  query = "",
+  allowed = (p: Page) => isLeader || MEMBER.includes(p),
+) =>
   renderToStaticMarkup(
     <SidebarNav
       page={page}
       params={new URLSearchParams(query)}
       isLeader={isLeader}
-      allowed={(p) => isLeader || MEMBER.includes(p)}
+      allowed={allowed}
       taskCount={5}
       products={[{ id: "p1", name: "Make Ads", color: "#000" }]}
       href={(to) =>
@@ -70,5 +75,20 @@ describe("SidebarNav", () => {
     const html = render(true, "overview");
     expect(html).not.toContain("Para você");
     expect(html).toContain('aria-expanded="false"');
+  });
+  it("Planejamento reúne Social Leads e Social Media", () => {
+    const html = render(true, "socialMedia");
+    expect(html).not.toContain(">Onboarding<");
+    expect(html).toContain(">Planejamento<");
+    expect(html).toContain('href="/onboarding"');
+    // Social Media's page opens the submenu, with it marked.
+    expect(html).toMatch(
+      /href="\/socialMedia" class="active" aria-current="page"[^>]*><span>Social Media/,
+    );
+    expect(html).toContain(">Social Leads<");
+    // Without Social Leads, Planejamento opens Social Media.
+    const only = render(true, "overview", "", (p) => p !== "onboarding");
+    expect(only).toContain('href="/socialMedia"');
+    expect(only).not.toContain('href="/onboarding"');
   });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useSlModule } from "./social-leads-module";
 import {
   ArrowLeft,
   ArrowRight,
@@ -80,6 +81,7 @@ export function BriefingWizard({
   onGenerated: () => void;
   notify: (m: string) => void;
 }) {
+  const mod = useSlModule();
   const [fields, setFields] = useState<BriefingFields>(
     () => briefing?.fields ?? { clientName: item.client_name },
   );
@@ -233,6 +235,7 @@ export function BriefingWizard({
             setUploading((u) =>
               u.map((x) => (x.key === tag ? { ...x, progress } : x)),
             ),
+          mod.briefingFolder,
         );
         setMedia((m) => {
           const next = { ...m, [key]: [...(m[key] ?? []), sent] };

@@ -120,6 +120,7 @@ import { FileViewer } from "./FileViewer";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
 import { TaskCustomFieldsPanel } from "./CustomFieldsForm";
 import { postOfTask, taskPostPath, type TaskPost } from "./social-leads-task";
+import { SL_MODULES } from "./social-leads-module";
 import { navigate, routeParts } from "./router";
 import { canOpenPage } from "./modules";
 import { CopilotBadge, TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
@@ -1753,7 +1754,7 @@ export function TaskDetail({
               />
               {slPost &&
                 (canOpenPage(
-                  "onboarding",
+                  SL_MODULES[slPost.module].page,
                   member?.role,
                   member?.hidden_pages,
                 ) ? (
@@ -1774,7 +1775,8 @@ export function TaskDetail({
                 ) : (
                   <p className="detail-post-hint">
                     Para subir as artes no post, peça acesso ao módulo
-                    Onboarding a um administrador.
+                    Planejamento › {SL_MODULES[slPost.module].name} a um
+                    administrador.
                   </p>
                 ))}
             </section>

@@ -9,6 +9,7 @@ import {
   uploadDriveFile,
 } from "./drive";
 import type { Snapshot } from "./types";
+import { SL_MODULES, type SlModule } from "./social-leads-module";
 import {
   fullContent,
   type BriefingFields,
@@ -36,7 +37,9 @@ import {
 } from "./social-leads";
 
 /**
- * Onboarding › Social Leads: the calls the page makes. Reads go straight to
+ * Planejamento › Social Leads and Social Media (the same module, each with
+ * its product: the calls that start from the company take the module).
+ * The calls the page makes. Reads go straight to
  * the tables (RLS); writes go through the database functions of migration
  * 20261013090000_social_leads, and the AI through /api/social-leads. The demo
  * keeps everything in memory, with a sample plan instead of the AI.
@@ -87,7 +90,7 @@ export interface BrandColorsFound {
   cost_usd: number;
 }
 /** The Drive folder, under the Social Leads product, that holds the briefing's files. */
-export const BRIEFING_FOLDER = "Briefing Social Leads";
+export const BRIEFING_FOLDER = SL_MODULES.social_leads.briefingFolder;
 export interface ContractBundle {
   briefing: SlBriefing | null;
   plans: SlPlan[];
@@ -109,7 +112,7 @@ export interface AddableClient {
   hidden_contract?: string | null;
 }
 export interface SocialLeadsBackend {
-  portfolio(company: string): Promise<Portfolio>;
+  portfolio(company: string, module?: SlModule): Promise<Portfolio>;
   /**
    * Adds the Social Leads product to a registered client (an archived one
    * comes back with its history). Anyone active may, for the clients a team
@@ -121,9 +124,10 @@ export interface SocialLeadsBackend {
     product: { id: string; name: string },
     team: string | null,
     clientName: string,
+    module?: SlModule,
   ): Promise<string>;
   /** The clients the person may add, read fresh from the database. */
-  addableClients(company: string): Promise<AddableClient[]>;
+  addableClients(company: string, module?: SlModule): Promise<AddableClient[]>;
   /** Takes the client out of the portfolio (history kept), or back. */
   archive(company: string, contract: string, archived: boolean): Promise<void>;
   /** Removes for good a client added by mistake (no plan, task or file). */
@@ -163,6 +167,7 @@ export interface SocialLeadsBackend {
     team: string | null,
     designTeam: string | null,
     artDays: number,
+    module?: SlModule,
   ): Promise<void>;
   /**
    * One art task per approved post without one, for the team or person
@@ -301,25 +306,28 @@ const PLAN_COLUMNS =
   "id,company_id,contract_id,month_number,label,content,summary,source,share_enabled,shared_at,version,created_by,updated_by,created_at,updated_at";
 
 export const serverSocialLeads: SocialLeadsBackend = {
-  async portfolio(company) {
+  async portfolio(company, module = "social_leads") {
     return (await rpc("social_leads_portfolio", {
       p_company: company,
+      p_module: module,
     })) as Portfolio;
   },
-  async addClient(company, who) {
+  async addClient(company, who, _product, _team, _name, module = "social_leads") {
     const contract = (await rpc("social_leads_add_client", {
       p_company: company,
       p_client: who.client,
       p_name: null,
       p_teams: null,
+      p_module: module,
     })) as string;
     // Clientes and Produtos show the new client and contract too.
     invalidateLookupsCache(company);
     return contract;
   },
-  async addableClients(company) {
+  async addableClients(company, module = "social_leads") {
     return ((await rpc("social_leads_addable_clients", {
       p_company: company,
+      p_module: module,
     })) ?? []) as AddableClient[];
   },
   async archive(company, contract, archived) {
@@ -409,13 +417,21 @@ export const serverSocialLeads: SocialLeadsBackend = {
       p_enabled: enabled,
     });
   },
-  async setSettings(company, product, team, designTeam, artDays) {
+  async setSettings(
+    company,
+    product,
+    team,
+    designTeam,
+    artDays,
+    module = "social_leads",
+  ) {
     await rpc("set_social_leads_settings", {
       p_company: company,
       p_product: product,
       p_team: team,
       p_design_team: designTeam,
       p_art_days: artDays,
+      p_module: module,
     });
   },
   async release(plan, assign, cycle) {
@@ -778,13 +794,14 @@ export function shareUrl(token: string) {
 // ------------------------------------------------------------ demo
 const now = () => new Date().toISOString();
 const id = () => `demo-${Math.random().toString(36).slice(2, 10)}`;
+type DemoSettings = {
+  product: string;
+  team: string | null;
+  designTeam?: string | null;
+  artDays?: number;
+};
 type DemoState = {
-  settings: {
-    product: string;
-    team: string | null;
-    designTeam?: string | null;
-    artDays?: number;
-  } | null;
+  settings: Partial<Record<SlModule, DemoSettings>>;
   tasks: SlTask[];
   /** Contracts whose follow-up cycle was opened. */
   cycles: Record<string, boolean>;
@@ -958,12 +975,18 @@ export function demoSocialLeads(
   data: Snapshot,
   user: string,
 ): SocialLeadsBackend {
-  const product = data.products.find((p) => /social leads/i.test(p.name));
+  const seeded = (name: RegExp) => {
+    const product = data.products.find((p) => name.test(p.name));
+    return product
+      ? { product: product.id, team: data.teams[0]?.id ?? null }
+      : undefined;
+  };
   if (!demoState)
     demoState = {
-      settings: product
-        ? { product: product.id, team: data.teams[0]?.id ?? null }
-        : null,
+      settings: {
+        social_leads: seeded(/social leads/i),
+        social_media: seeded(/social media/i),
+      },
       briefings: {},
       plans: [],
       posts: [],
@@ -1030,6 +1053,12 @@ export function demoSocialLeads(
   const contractOf = (k: string) => data.contracts.find((c) => c.id === k)!;
   const clientOf = (k: string) =>
     data.clients.find((c) => c.id === contractOf(k).client_id)!;
+  // The module of a contract is the one of its product.
+  const moduleOf = (k: string): SlModule =>
+    (Object.keys(s.settings) as SlModule[]).find(
+      (m) => s.settings[m]?.product === contractOf(k).product_id,
+    ) ?? "social_leads";
+  const settingsOf = (k: string) => s.settings[moduleOf(k)];
   const putPlan = (contract: string, content: PlanContent, planId?: string) => {
     const existing = planId ? s.plans.find((p) => p.id === planId) : undefined;
     const { posts, ...rest } = content;
@@ -1105,10 +1134,11 @@ export function demoSocialLeads(
     return plan;
   };
   return {
-    async portfolio() {
-      if (!s.settings) return { configured: false, items: [] };
+    async portfolio(_c, module = "social_leads") {
+      const settings = s.settings[module];
+      if (!settings) return { configured: false, items: [] };
       const items: PortfolioItem[] = data.contracts
-        .filter((k) => k.product_id === s.settings!.product && !k.archived)
+        .filter((k) => k.product_id === settings.product && !k.archived)
         .map((k) => {
           const cl = data.clients.find((c) => c.id === k.client_id)!;
           const plans = s.plans.filter((p) => p.contract_id === k.id);
@@ -1173,15 +1203,15 @@ export function demoSocialLeads(
         .sort((a, b) => a.client_name.localeCompare(b.client_name));
       return {
         configured: true,
-        product_id: s.settings.product,
-        team_id: s.settings.team,
-        design_team_id: s.settings.designTeam ?? null,
-        art_days: s.settings.artDays ?? 5,
+        product_id: settings.product,
+        team_id: settings.team,
+        design_team_id: settings.designTeam ?? null,
+        art_days: settings.artDays ?? 5,
         items,
       };
     },
-    async addableClients() {
-      const product = s.settings?.product;
+    async addableClients(_c, module = "social_leads") {
+      const product = s.settings[module]?.product;
       return data.clients
         .filter(
           (c) =>
@@ -1218,7 +1248,14 @@ export function demoSocialLeads(
       delete s.briefings[contract];
       emit();
     },
-    async addClient(company, who, product, _team, clientName) {
+    async addClient(
+      company,
+      who,
+      product,
+      _team,
+      clientName,
+      module = "social_leads",
+    ) {
       if (
         data.contracts.some(
           (k) =>
@@ -1227,7 +1264,7 @@ export function demoSocialLeads(
             !k.archived,
         )
       )
-        throw new Error("Este cliente já está no Social Leads.");
+        throw new Error(`Este cliente já está no ${SL_MODULES[module].name}.`);
       const archived = data.contracts.find(
         (k) =>
           k.client_id === who.client &&
@@ -1252,14 +1289,29 @@ export function demoSocialLeads(
       emit();
       return contract;
     },
-    async setSettings(_c, productId, team, designTeam, artDays) {
-      s.settings = { product: productId, team, designTeam, artDays };
+    async setSettings(
+      _c,
+      productId,
+      team,
+      designTeam,
+      artDays,
+      module = "social_leads",
+    ) {
+      const other = (Object.keys(s.settings) as SlModule[]).find(
+        (m) => m !== module && s.settings[m]?.product === productId,
+      );
+      if (other)
+        throw new Error(
+          `Este produto já é o do ${SL_MODULES[other].name}. Escolha outro produto.`,
+        );
+      s.settings[module] = { product: productId, team, designTeam, artDays };
       emit();
     },
     async release(planId, assign) {
       const plan = s.plans.find((p) => p.id === planId)!;
       const client = clientOf(plan.contract_id).name;
-      const team = s.settings?.designTeam ?? s.settings?.team ?? null;
+      const settings = settingsOf(plan.contract_id);
+      const team = settings?.designTeam ?? settings?.team ?? null;
       const people = data.teamMembers
         .filter((t) => t.team_id === team)
         .map((t) => t.user_id);
@@ -1267,7 +1319,7 @@ export function demoSocialLeads(
         (x) => x.plan_id === planId && x.decision === "approved" && !x.task_id,
       );
       if (!todo.length) throw new Error("Nenhum post aprovado sem tarefa.");
-      const due = new Date(Date.now() + (s.settings?.artDays ?? 5) * 86_400_000)
+      const due = new Date(Date.now() + (settings?.artDays ?? 5) * 86_400_000)
         .toISOString()
         .slice(0, 10);
       todo.forEach((x, i) => {
@@ -1311,7 +1363,7 @@ export function demoSocialLeads(
       const plan = s.plans.find((p) => p.id === planId)!;
       const campaign = {
         id: id(),
-        name: `Social Leads · ${clientOf(plan.contract_id).name}`,
+        name: `${SL_MODULES[moduleOf(plan.contract_id)].name} · ${clientOf(plan.contract_id).name}`,
         active: false,
       };
       s.campaigns[plan.contract_id] = campaign;

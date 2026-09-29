@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { Avatar, Empty, Modal } from "./components";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
-import { useUrlState } from "./router";
+import { navigate, pagePaths, useUrlState } from "./router";
 import type { Snapshot } from "./types";
 import {
   demoSocialLeads,
@@ -38,16 +38,35 @@ import {
 } from "./social-leads";
 import { BriefingWizard } from "./SocialLeadsBriefing";
 import { PlanView, type PlanIntent, type Production } from "./SocialLeadsPlan";
+import {
+  SL_MODULES,
+  SlModuleContext,
+  useSlModule,
+  type SlModule,
+} from "./social-leads-module";
+import { moduleOfContract } from "./social-leads-task";
 import "./social-leads-onboarding.css";
 
 /**
- * Onboarding › Social Leads. The portfolio (clients with the Social Leads
+ * Planejamento › Social Leads, and Social Media (the same module with its
+ * own product, `module`). The portfolio (clients with the module's
  * product, the next action of each) and, for one client, the briefing and
  * the plan of each month. The URL keeps the client (contrato), the tab (aba)
  * and the month (mes). Changes arrive live: App relays the company's
  * "social_leads" notices as the "mavi:social-leads" window event.
  */
 export function SocialLeadsPage({
+  module = "social_leads",
+  ...props
+}: Parameters<typeof ModulePage>[0] & { module?: SlModule }) {
+  return (
+    <SlModuleContext.Provider value={module}>
+      <ModulePage {...props} />
+    </SlModuleContext.Provider>
+  );
+}
+
+function ModulePage({
   data,
   company,
   user,
@@ -74,18 +93,40 @@ export function SocialLeadsPage({
   const [tab, setTab] = useUrlState<string>("aba", "plano");
   const [intent, setIntent] = useState<PlanIntent>(null);
   const [adding, setAdding] = useState(false);
+  const mod = useSlModule();
 
   const load = useCallback(() => {
     backend
-      .portfolio(company)
+      .portfolio(company, mod.id)
       .then((p) => {
         setPortfolio(p);
         setError("");
       })
       .catch((e) => setError((e as Error).message));
-  }, [backend, company]);
+  }, [backend, company, mod.id]);
   useEffect(load, [load]);
   useLiveSocialLeads(null, load);
+  // A link to a client of the other module (a notice, a source the MAVI
+  // cited, an old link) opens it there.
+  const missing =
+    !!contract &&
+    !!portfolio?.configured &&
+    !portfolio.items.some((i) => i.contract_id === contract);
+  useEffect(() => {
+    if (!missing || demo) return;
+    let alive = true;
+    moduleOfContract(company, contract).then((m) => {
+      if (!alive || !m || m === mod.id) return;
+      const path = window.location.pathname.replace(
+        pagePaths[mod.page],
+        pagePaths[SL_MODULES[m].page],
+      );
+      navigate(path + window.location.search, true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [missing, demo, company, contract, mod.id, mod.page]);
 
   const open = (
     item: PortfolioItem,
@@ -98,7 +139,9 @@ export function SocialLeadsPage({
   };
 
   if (error && !portfolio)
-    return <Empty title="Não foi possível abrir o Social Leads" body={error} />;
+    return (
+      <Empty title={`Não foi possível abrir o ${mod.name}`} body={error} />
+    );
   if (!portfolio) return <Loading />;
   if (!portfolio.configured)
     return (
@@ -186,8 +229,8 @@ export function SocialLeadsPage({
             setAdding(false);
             notify(
               restored
-                ? "Cliente na carteira do Social Leads, com o histórico que já havia."
-                : "Cliente adicionado ao Social Leads. Comece pelo briefing.",
+                ? `Cliente na carteira do ${mod.name}, com o histórico que já havia.`
+                : `Cliente adicionado ao ${mod.name}. Comece pelo briefing.`,
             );
             load();
             setIntent(null);
@@ -226,6 +269,7 @@ function AddClient({
   onClose: () => void;
   onAdded: (contract: string, restored: boolean) => void;
 }) {
+  const mod = useSlModule();
   const product = data.products.find((p) => p.id === portfolio.product_id);
   const [candidates, setCandidates] = useState<AddableClient[] | null>(null);
   const [client, setClient] = useState("");
@@ -234,7 +278,7 @@ function AddClient({
   useEffect(() => {
     let alive = true;
     backend
-      .addableClients(company)
+      .addableClients(company, mod.id)
       .then((list) => alive && setCandidates(list))
       .catch((e) => {
         if (!alive) return;
@@ -244,7 +288,7 @@ function AddClient({
     return () => {
       alive = false;
     };
-  }, [backend, company]);
+  }, [backend, company, mod.id]);
   const picked = candidates?.find((c) => c.id === client);
   // Clients already in the portfolio stay in the list, disabled, so that
   // searching for one never answers "Nada encontrado".
@@ -259,7 +303,7 @@ function AddClient({
   const squad = data.teams.find((t) => t.id === portfolio.team_id)?.name;
   return (
     <Modal
-      title="Adicionar cliente ao Social Leads"
+      title={`Adicionar cliente ao ${mod.name}`}
       onClose={onClose}
       busy={busy}
     >
@@ -277,6 +321,7 @@ function AddClient({
               product,
               portfolio.team_id ?? null,
               picked.name,
+              mod.id,
             )
             .then((k) =>
               onAdded(
@@ -320,25 +365,26 @@ function AddClient({
         ) : (
           <p className="sl-alert info-soft">
             {isLeader
-              ? "Todos os clientes cadastrados já estão no Social Leads. Cadastre o cliente novo em Clientes e volte aqui."
-              : "Nenhum cliente das suas equipes está fora do Social Leads. Peça a um administrador ou gestor para cadastrar o cliente em Clientes, com uma equipe sua, e volte aqui."}
+              ? `Todos os clientes cadastrados já estão no ${mod.name}. Cadastre o cliente novo em Clientes e volte aqui.`
+              : `Nenhum cliente das suas equipes está fora do ${mod.name}. Peça a um administrador ou gestor para cadastrar o cliente em Clientes, com uma equipe sua, e volte aqui.`}
           </p>
         )}
         {picked?.hidden_contract ? (
           <p className="sl-muted">
-            {picked.name} já tem o produto Social Leads, mas nenhuma equipe sua
+            {picked.name} já tem o produto {product?.name ?? mod.name}, mas
+            nenhuma equipe sua
             atende o cliente, por isso ele não aparecia na carteira. Ao
             adicionar, {squad ? `a equipe ${squad}` : "o squad"} passa a
             atendê-lo, com o mesmo produto e o que já houver nele.
           </p>
         ) : picked?.archived_contract ? (
           <p className="sl-muted">
-            {picked.name} já esteve no Social Leads e volta com o briefing, os
+            {picked.name} já esteve no {mod.name} e volta com o briefing, os
             planos e o histórico de antes.
           </p>
         ) : (
           <p className="sl-muted">
-            O cliente recebe o produto {product?.name ?? "Social Leads"}
+            O cliente recebe o produto {product?.name ?? mod.name}
             {squad ? ` e passa a ser atendido pela equipe ${squad}` : ""}.
             Depois é só preencher o briefing. Clientes novos são cadastrados em
             Clientes.
@@ -391,7 +437,10 @@ function Setup({
   onDone: () => void;
   notify: (m: string) => void;
 }) {
-  const guess = data.products.find((p) => /social\s*leads/i.test(p.name));
+  const mod = useSlModule();
+  const guess = data.products.find((p) =>
+    new RegExp(mod.name.replace(" ", "\\s*"), "i").test(p.name),
+  );
   const [product, setProduct] = useState(current?.product ?? guess?.id ?? "");
   const squad = data.teams.find((t) => /social/i.test(t.name));
   const [team, setTeam] = useState(
@@ -406,15 +455,15 @@ function Setup({
   if (!isLeader)
     return (
       <Empty
-        title="Social Leads ainda não configurado"
-        body="Um administrador ou gestor precisa escolher qual produto do catálogo é o Social Leads."
+        title={`${mod.name} ainda não configurado`}
+        body={`Um administrador ou gestor precisa escolher qual produto do catálogo é o ${mod.name}.`}
       />
     );
   return (
     <section className="panel sl-setup">
       <div className="panel-heading">
         <div>
-          <h2>Configurar o Social Leads</h2>
+          <h2>Configurar o {mod.name}</h2>
           <p>
             A carteira reúne os clientes com este produto contratado. O squad é
             a equipe de onde saem os responsáveis.
@@ -433,9 +482,10 @@ function Setup({
               team || null,
               designTeam || null,
               Math.min(60, Math.max(1, Number(artDays) || 5)),
+              mod.id,
             )
             .then(() => {
-              notify("Social Leads configurado.");
+              notify(`${mod.name} configurado.`);
               onDone();
             })
             .catch((err) => notify((err as Error).message))
@@ -553,6 +603,7 @@ function PortfolioView({
   onAdd?: () => void;
   onSettings?: () => void;
 }) {
+  const mod = useSlModule();
   const items = portfolio.items;
   const mineCount = items.filter(
     (i) => i.briefing?.responsible_id === user,
@@ -570,10 +621,10 @@ function PortfolioView({
   const [restoring, setRestoring] = useState("");
   const loadArchived = useCallback(() => {
     backend
-      .addableClients(company)
+      .addableClients(company, mod.id)
       .then((list) => setArchived(list.filter((c) => c.archived_contract)))
       .catch(() => setArchived([]));
-  }, [backend, company]);
+  }, [backend, company, mod.id]);
   useEffect(loadArchived, [loadArchived, portfolio]);
   const member = (id: string | null | undefined) =>
     data.members.find((m) => m.user_id === id);
@@ -582,7 +633,7 @@ function PortfolioView({
     backend
       .archive(company, c.archived_contract!, false)
       .then(() => {
-        notify(`${c.name} voltou ao Social Leads, com o histórico de antes.`);
+        notify(`${c.name} voltou ao ${mod.name}, com o histórico de antes.`);
         onChanged();
         loadArchived();
       })
@@ -628,11 +679,11 @@ function PortfolioView({
   if (!items.length && !archived.length)
     return (
       <Empty
-        title="Nenhum cliente no Social Leads ainda"
+        title={`Nenhum cliente no ${mod.name} ainda`}
         body={
           onAdd
             ? "Adicione o primeiro cliente (um já cadastrado em Clientes). Em seguida vem o briefing."
-            : "Quando alguém adicionar um cliente ao Social Leads, ele aparece aqui."
+            : `Quando alguém adicionar um cliente ao ${mod.name}, ele aparece aqui.`
         }
         action={
           onAdd && (
@@ -776,7 +827,7 @@ function PortfolioView({
             <Button
               className="btn secondary"
               onClick={onSettings}
-              title="Produto e equipe do Social Leads"
+              title={`Produto e equipe do ${mod.name}`}
             >
               <Users size={15} /> Configurar
             </Button>
@@ -791,7 +842,7 @@ function PortfolioView({
           !archived.length ? (
             <Empty
               title="Nenhum cliente arquivado"
-              body="Clientes tirados do Social Leads aparecem aqui, para trazer de volta com o histórico."
+              body={`Clientes tirados do ${mod.name} aparecem aqui, para trazer de volta com o histórico.`}
             />
           ) : (
             <div className="sl-table-wrap">
@@ -937,8 +988,8 @@ function PortfolioView({
                           <button
                             type="button"
                             className="icon-btn"
-                            aria-label={`Tirar ${i.client_name} do Social Leads`}
-                            title="Arquivar ou excluir do Social Leads"
+                            aria-label={`Tirar ${i.client_name} do ${mod.name}`}
+                            title={`Arquivar ou excluir do ${mod.name}`}
                             onClick={(e) => {
                               e.stopPropagation();
                               setLeaving(i);
@@ -1201,6 +1252,7 @@ function LeaveModal({
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
+  const mod = useSlModule();
   const [busy, setBusy] = useState<"" | "archive" | "remove">("");
   const [error, setError] = useState("");
   const run = (kind: "archive" | "remove") => {
@@ -1213,8 +1265,8 @@ function LeaveModal({
       .then(() =>
         onDone(
           kind === "archive"
-            ? `${name} saiu do Social Leads. Para trazer de volta, abra “Arquivados”.`
-            : `${name} foi excluído do Social Leads.`,
+            ? `${name} saiu do ${mod.name}. Para trazer de volta, abra “Arquivados”.`
+            : `${name} foi excluído do ${mod.name}.`,
         ),
       )
       .catch((e) => setError((e as Error).message))
@@ -1222,7 +1274,7 @@ function LeaveModal({
   };
   return (
     <Modal
-      title={`Tirar ${name} do Social Leads?`}
+      title={`Tirar ${name} do ${mod.name}?`}
       onClose={onClose}
       busy={!!busy}
     >
@@ -1238,7 +1290,7 @@ function LeaveModal({
         {empty && (
           <p className="sl-muted">
             Adicionou por engano? Sem plano, tarefa nem arquivo, dá para{" "}
-            <strong>excluir de vez</strong>: o produto Social Leads sai do
+            <strong>excluir de vez</strong>: o produto {mod.name} sai do
             cliente e o briefing é apagado.
           </p>
         )}

@@ -1,3 +1,4 @@
+import { useSlModule } from "./social-leads-module";
 import {
   lazy,
   Suspense,
@@ -118,7 +119,7 @@ const appPath = (path: string) => {
 
 /** Why the plan was opened from the portfolio. */
 export type PlanIntent = "share" | "next-month" | "release" | "campaign" | null;
-/** Who produces the arts and in how many days (Social Leads settings). */
+/** Who produces the arts and in how many days (the module's settings). */
 export type Production = {
   /** The creative team (or the squad): the default receiver of the arts. */
   teamId: string | null;
@@ -184,6 +185,7 @@ export function PlanView({
   onMonth: (n: number) => void;
   notify: (m: string) => void;
 }) {
+  const mod = useSlModule();
   const [bundle, setBundle] = useState<PlanBundle | null>(null);
   const [error, setError] = useState("");
   const [section, setSection] = useState<
@@ -855,7 +857,11 @@ export function PlanView({
         >
           <div className="entity-form">
             <p>
-              A campanha <strong>Social Leads · {clientName}</strong> é criada
+              A campanha{" "}
+              <strong>
+                {mod.name} · {clientName}
+              </strong>{" "}
+              é criada
               em Campanhas, ainda inativa, com o objetivo, a região, o público,
               o orçamento e o post que vira anúncio nas observações. Lá você
               completa o ciclo (verba, datas, conta de anúncio) e ativa. Quando
