@@ -20,6 +20,8 @@ import {
   type AppNotification,
   type TaskTemplate,
   type SuggestionSettings,
+  type TaskDueRule,
+  type CalendarDay,
 } from "./types";
 
 export interface Filters {
@@ -70,6 +72,8 @@ export interface CompanyLookups {
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
   taskTemplates: TaskTemplate[];
   suggestionSettings: SuggestionSettings[];
+  dueRules?: TaskDueRule[];
+  calendarDays?: CalendarDay[];
 }
 
 /**
@@ -201,6 +205,8 @@ export async function companyLookups(
         clientTeams: [],
         taskTemplates: [],
         suggestionSettings: [],
+        dueRules: [],
+        calendarDays: [],
       };
 
       // Order for stable paging: by name where there is one (the order the
@@ -216,6 +222,8 @@ export async function companyLookups(
         ["clientTeams", "client_teams", ["client_id", "team_id"]],
         ["taskTemplates", "task_templates", ["name", "id"]],
         ["suggestionSettings", "suggestion_settings", ["company_id"]],
+        ["dueRules", "task_due_rules", ["id"]],
+        ["calendarDays", "company_calendar_days", ["day", "id"]],
       ] as const;
 
       await Promise.all(
@@ -228,10 +236,13 @@ export async function companyLookups(
             for (const column of keyColumns) query = query.order(column);
             return query;
           });
-          // Templates and suggestions are optional: until their migrations
-          // run (or if they can't be read) the app works without them.
+          // Templates, suggestions and due rules are optional: until their
+          // migrations run (or if they can't be read) the app works without them.
           (result[key] as unknown) =
-            key === "taskTemplates" || key === "suggestionSettings"
+            key === "taskTemplates" ||
+            key === "suggestionSettings" ||
+            key === "dueRules" ||
+            key === "calendarDays"
               ? await rows.catch(() => [])
               : await rows;
         }),
@@ -701,6 +712,8 @@ export async function snapshot(
     clientTeams: lookups.clientTeams,
     taskTemplates: lookups.taskTemplates ?? [],
     suggestionSettings: lookups.suggestionSettings ?? [],
+    dueRules: lookups.dueRules ?? [],
+    calendarDays: lookups.calendarDays ?? [],
     tasks: taskQueryResult.tasks,
     hours,
   };
@@ -731,6 +744,8 @@ export function getCachedSnapshot(company: string): Snapshot | null {
     clientTeams: lookups.clientTeams,
     taskTemplates: lookups.taskTemplates ?? [],
     suggestionSettings: lookups.suggestionSettings ?? [],
+    dueRules: lookups.dueRules ?? [],
+    calendarDays: lookups.calendarDays ?? [],
     tasks: [],
     hours,
   };

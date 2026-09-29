@@ -28,6 +28,9 @@ import {
   recurrenceFrequencies,
 } from "./types";
 import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
+import { suggestDue } from "./dueRules";
+import { DueRuleHint } from "./DueRuleHint";
+import { dayLabel } from "./task-bulk";
 import {
   attachmentAccept,
   validateAttachment,
@@ -70,6 +73,7 @@ const dueShortcuts = [
  * everything else lives behind "Adicionar detalhes". The assignee can be a
  * team instead of a person: the database hands the task to the team member
  * with the fewest open tasks (supervisors only when there is nobody else).
+ * The due date follows the due rules (dueRules.ts) until picked by hand.
  */
 export function TaskCreateForm({
   initialContract,
@@ -124,7 +128,14 @@ export function TaskCreateForm({
   const [assignee, setAssignee] = useState(user);
   const [assignMode, setAssignMode] = useState<"person" | "team">("person");
   const [assignTeam, setAssignTeam] = useState("");
-  const [due, setDue] = useState(initialDue || dateKey());
+  // The due date follows the rule until picked by hand (a date handed in
+  // from elsewhere counts as picked).
+  const [pickedDue, setPickedDue] = useState(initialDue || dateKey());
+  const [dueByHand, setDueByHand] = useState(!!initialDue);
+  const [dueReason, setDueReason] = useState("");
+  const [start, setStart] = useState("");
+  const [clientApproval, setClientApproval] = useState(false);
+  const [parent, setParent] = useState("");
   const [repeat, setRepeat] = useState<RecurrenceFrequency | "">("");
   const [showDetails, setShowDetails] = useState(false);
   const [detailsMounted, setDetailsMounted] = useState(false);
@@ -175,6 +186,31 @@ export function TaskCreateForm({
   )
     ? assignTeam
     : "";
+  const dueSuggestion = useMemo(
+    () =>
+      contract
+        ? suggestDue(data, {
+            contract,
+            project: project || null,
+            team: byTeam ? team || null : null,
+            assignee: byTeam ? null : assignee,
+            base: start || dateKey(),
+            approval: clientApproval,
+          })
+        : null,
+    [data, contract, project, byTeam, team, assignee, start, clientApproval],
+  );
+  const due = dueByHand || !dueSuggestion ? pickedDue : dueSuggestion.due;
+  const setDue = (value: string) => {
+    setPickedDue(value);
+    setDueByHand(true);
+  };
+  // The date the rule gives is still the rule's, even if picked by hand.
+  const dueManual = dueByHand && due !== dueSuggestion?.due;
+  // A main task chosen for another product no longer applies.
+  const parentTask = parent
+    ? data.tasks.find((t) => t.id === parent && t.contract_id === contract)
+    : null;
   // Template fields for this product and assignee (or team): they change as
   // either does (values typed for fields still shown are kept).
   const customFields = useMemo(
@@ -257,6 +293,10 @@ export function TaskCreateForm({
     setTitle("");
     setRepeat("");
     setCustomValues({});
+    setStart("");
+    setClientApproval(false);
+    setParent("");
+    setDueReason("");
     setFormKey((v) => v + 1);
     setCreated((v) => v + 1);
     redrawUploads();
@@ -284,14 +324,18 @@ export function TaskCreateForm({
       // Without an assignee, the database picks one from the team.
       p_assignee: byTeam ? null : assignee,
       p_due: due,
-      p_start: s("start_date") || null,
+      // Without it the database counts the rule's date itself (in a team,
+      // for whoever receives the task).
+      p_due_manual: dueManual,
+      ...(dueManual && dueReason.trim() ? { p_due_reason: dueReason.trim() } : {}),
+      p_start: start || null,
       p_project: project || null,
       p_team: byTeam ? team : null,
       p_description: s("description"),
       p_priority: s("priority") || "normal",
       p_estimated: Number(s("estimated")) * 60,
-      p_client_approval: f.has("client_approval"),
-      p_parent: s("parent") || null,
+      p_client_approval: clientApproval,
+      p_parent: parentTask?.id ?? null,
       // The database opens a copy of the task on each date of the series.
       ...(repeat ? { p_repeat: repeat } : {}),
       // Only the fields shown now; the database checks them against the
@@ -508,6 +552,24 @@ export function TaskCreateForm({
                     );
                   })}
                 </div>
+                <DueRuleHint
+                  data={data}
+                  suggestion={dueSuggestion}
+                  due={due}
+                  following={!dueManual}
+                  byTeam={byTeam}
+                  reason={dueReason}
+                  onReason={setDueReason}
+                  onApply={() => setDueByHand(false)}
+                />
+                {parentTask &&
+                  parentTask.status !== "done" &&
+                  parentTask.due_date < due && (
+                    <small className="due-rule-note differs" role="status">
+                      A tarefa principal passa a vencer em {dayLabel(due)},
+                      junto com esta subtarefa.
+                    </small>
+                  )}
               </div>
             </div>
             <CustomFieldsForm
@@ -616,7 +678,11 @@ export function TaskCreateForm({
                   <div className="details-grid">
                     <label>
                       Tarefa principal
-                      <Select name="parent" key={contract}>
+                      <Select
+                        key={contract}
+                        value={parent}
+                        onValueChange={setParent}
+                      >
                         <SelectOption value="">Nenhuma</SelectOption>
                         {data.tasks
                           .filter((t) => t.contract_id === contract)
@@ -655,7 +721,11 @@ export function TaskCreateForm({
                     </label>
                     <label>
                       Início planejado
-                      <Input name="start_date" type="date" />
+                      <Input
+                        type="date"
+                        value={start}
+                        onChange={(e) => setStart(e.target.value)}
+                      />
                     </label>
                     <label>
                       Programar repetição
@@ -681,8 +751,11 @@ export function TaskCreateForm({
                 <section className="details-section" aria-label="Aprovação">
                   <h4>Aprovação</h4>
                   <label className="checkbox-label">
-                    <Checkbox name="client_approval" /> Exigir aprovação do
-                    cliente além da aprovação interna
+                    <Checkbox
+                      checked={clientApproval}
+                      onCheckedChange={(v) => setClientApproval(v === true)}
+                    />{" "}
+                    Exigir aprovação do cliente além da aprovação interna
                   </label>
                 </section>
               </div>

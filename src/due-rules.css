@@ -1,0 +1,212 @@
+/* Prazo padrão: the note under due date fields (DueRuleHint) and the
+   "Prazos" settings tab (DueRulesPanel). */
+
+.due-rule-note {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 5px 6px;
+  color: #6f8360;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+.due-rule-note > svg {
+  flex: none;
+  margin-top: 1px;
+  color: #8fb062;
+}
+.due-rule-note > span {
+  flex: 1;
+  min-width: 0;
+}
+.due-rule-note.differs {
+  color: #8a6a1e;
+}
+.due-rule-note.differs > svg {
+  color: #c28a1e;
+}
+.due-rule-note button {
+  border: 1px solid #e7d3a2;
+  background: #fbf4e4;
+  border-radius: 999px;
+  padding: 1px 9px;
+  font: inherit;
+  font-weight: 650;
+  color: #7a5a12;
+  cursor: pointer;
+}
+.due-rule-note button:hover {
+  background: #f6ead0;
+}
+.entity-form .due-rule-reason,
+.due-rule-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #efd9a8;
+  border-radius: 10px;
+  background: #fdf8ec;
+  color: #6b5317;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.due-rule-reason > small {
+  color: #9a8250;
+  font-weight: 400;
+}
+.due-rule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Settings. */
+.due-rules-order {
+  margin: 0;
+  padding: 0 20px 14px;
+  color: #6f7d6a;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.due-rules .template-row.off strong,
+.due-rules .template-row.off small {
+  opacity: 0.55;
+}
+.due-rule-editor {
+  gap: 16px;
+}
+.due-rule-criteria {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.due-rule-criteria legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: #839970;
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.due-rule-numbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
+}
+@media (max-width: 600px) {
+  .due-rule-numbers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.due-calendar {
+  margin-top: 18px;
+}
+.due-calendar-years {
+  display: flex;
+  gap: 6px;
+}
+.due-calendar-years button {
+  border: 1px solid #dfe6d8;
+  background: #fff;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 0.78rem;
+  color: #5e6f52;
+  cursor: pointer;
+}
+.due-calendar-years button.selected {
+  background: #e7f5d0;
+  border-color: #bddf85;
+  color: #2d3e27;
+  font-weight: 600;
+}
+.due-calendar-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 28px;
+  padding: 4px 20px 20px;
+}
+@media (max-width: 760px) {
+  .due-calendar-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.due-calendar-columns h3 {
+  margin: 8px 0 8px;
+  color: #839970;
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.due-calendar-columns .template-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 12px;
+}
+.due-calendar-list {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.due-calendar-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+.due-calendar-list li > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.due-calendar-list li small {
+  color: #7f8f72;
+}
+.due-calendar-list li.worked > span {
+  color: #9aa597;
+  text-decoration: line-through;
+}
+.due-calendar-list .checkbox-label {
+  font-size: 0.76rem;
+  color: #6f7d6a;
+}
+.due-calendar-day {
+  flex: none;
+  width: 84px;
+  color: #56793a;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+/* Day and name on one row; "Todo ano" and the button below. */
+.due-calendar-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: center;
+  gap: 8px;
+}
+.due-calendar-add > button {
+  justify-self: end;
+}
+@media (max-width: 600px) {
+  .due-calendar-add {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .due-calendar-add > button {
+    justify-self: start;
+  }
+}

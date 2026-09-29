@@ -297,6 +297,11 @@ export function SidebarNav({
               to: { page: "settings", hash: "config-templates" },
             },
             {
+              key: "settings-due",
+              label: "Prazos",
+              to: { page: "settings", hash: "config-prazos" },
+            },
+            {
               key: "settings-suggestions",
               label: "Sugestões",
               to: { page: "settings", hash: "config-sugestoes" },

@@ -60,6 +60,7 @@ export const SETTINGS_TABS = [
   "config-pessoas",
   "config-equipes",
   "config-templates",
+  "config-prazos",
   "config-sugestoes",
   "config-whatsapp",
   "config-api",

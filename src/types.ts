@@ -105,6 +105,12 @@ export interface Task {
   custom_fields?: TaskCustomField[];
   /** The repetition this task started or was opened by (see TaskRecurrence). */
   recurrence_id?: string | null;
+  /** False when the due date came from a rule (TaskDueRule), so it follows it. */
+  due_manual?: boolean;
+  /** The rule that set the due date (only when due_manual is false). */
+  due_rule_id?: string | null;
+  /** Why the due date is before the rule's minimum ("prazo apertado"). */
+  due_tight_reason?: string | null;
   revision: number;
   version: number;
   archived: boolean;
@@ -221,6 +227,47 @@ export interface Snapshot {
   taskTemplates: TaskTemplate[];
   /** Where suggestions become tasks (one row at most; see Suggestions). */
   suggestionSettings?: SuggestionSettings[];
+  /** Default due dates, by project, client, product, team and person. */
+  dueRules?: TaskDueRule[];
+  /** The company's own days off and worked national holidays. */
+  calendarDays?: CalendarDay[];
+}
+/**
+ * A default due date: N business days for tasks matching every criterion
+ * set (null = any). The most specific rule wins: Projeto › Cliente ›
+ * Produto › Equipe › Pessoa; one with no criteria is the company default.
+ */
+export interface TaskDueRule {
+  id: string;
+  company_id: string;
+  /** With a project, client and product are the project's (left null). */
+  project_id: string | null;
+  client_id: string | null;
+  product_id: string | null;
+  team_id: string | null;
+  /** Whoever executes the task. */
+  user_id: string | null;
+  business_days: number;
+  /** Earlier than this only with a reason (null: no minimum). */
+  min_days: number | null;
+  /** Added (to the due date and the minimum) when the client approves too. */
+  approval_days: number;
+  active: boolean;
+  created_by?: string | null;
+  updated_at?: string;
+}
+/**
+ * A day in the company calendar: "off" (local holiday, recess) or
+ * "workday" (a national holiday the company works). Yearly ones repeat
+ * on the same day and month from `day` on.
+ */
+export interface CalendarDay {
+  id: string;
+  company_id: string;
+  day: string;
+  yearly: boolean;
+  kind: "off" | "workday";
+  name: string;
 }
 /** The P&D team that receives suggestions, and where its tasks live. */
 export interface SuggestionSettings {

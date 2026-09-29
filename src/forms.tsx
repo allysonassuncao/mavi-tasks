@@ -104,6 +104,7 @@ import { postOfTask, taskPostPath, type TaskPost } from "./social-leads-task";
 import { navigate, routeParts } from "./router";
 import { canOpenPage } from "./modules";
 import { TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
+import { TaskDueEdit } from "./DueRuleHint";
 import { MIN_REVIEW, useTaskCopilot } from "./copilot";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
@@ -515,6 +516,12 @@ function eventLabel(e: TaskEvent) {
   if (e.action === "due_changed")
     return `Prazo alterado · ${dateLabel(String(e.detail.old_due))} → ${dateLabel(String(e.detail.new_due))}`;
   if (e.action === "bulk_undone") return "Alteração em massa desfeita";
+  // Prazo padrão: antes do mínimo da regra (com o motivo), e a subtarefa
+  // que empurrou o prazo da principal.
+  if (e.action === "due_below_minimum")
+    return `Prazo antes do mínimo da regra (${dateLabel(String(e.detail.min))}) · ${String(e.detail.reason ?? "")}`;
+  if (e.action === "due_extended_by_subtask")
+    return `Prazo acompanhou a subtarefa “${String(e.detail.title ?? "")}” · ${dateLabel(String(e.detail.old_due))} → ${dateLabel(String(e.detail.new_due))}`;
   if (to === "done" && from !== "done") return "Tarefa entregue";
   if (e.action === "move")
     return from === to ? "Responsável alterado" : `Status: ${statusLabel(to)}`;
@@ -735,6 +742,8 @@ export function TaskDetail({
   const [commentRevision, setCommentRevision] = useState(0);
   // Assistente MAVI na edição: confere só o que a pessoa mudar.
   const [editTitle, setEditTitle] = useState(task.title);
+  // The count of the due rule starts at the start date being edited.
+  const [editStart, setEditStart] = useState<string | null>(null);
   const [editText, setEditText] = useState<string | null>(null);
   const appendToDescription = useRef<((text: string) => void) | null>(null);
   const copilotOn =
@@ -1064,6 +1073,9 @@ export function TaskDetail({
         p_title: fd.get("title"),
         p_description: fd.get("description"),
         p_due: fd.get("due"),
+        // "Aplicar" the rule: the database counts the date and it follows the rule.
+        p_due_manual: fd.get("due_rule") === "1" ? false : null,
+        p_due_reason: String(fd.get("due_reason") ?? "").trim() || null,
         p_start: fd.get("start_date") || null,
         p_estimated: Number(fd.get("estimated")) * 60,
         p_priority: fd.get("priority"),
@@ -1167,6 +1179,7 @@ export function TaskDetail({
                   onClick={() => {
                     setEditTitle(task.title);
                     setEditText(null);
+                    setEditStart(null);
                     setEditing(true);
                   }}
                 >
@@ -1445,18 +1458,15 @@ export function TaskDetail({
                     type="date"
                     name="start_date"
                     defaultValue={task.start_date ?? ""}
+                    onChange={(e) => setEditStart(e.target.value)}
                   />
                 </label>
                 <div className="form-columns">
-                  <label>
-                    Prazo
-                    <Input
-                      type="date"
-                      name="due"
-                      defaultValue={task.due_date}
-                      required
-                    />
-                  </label>
+                  <TaskDueEdit
+                    data={data}
+                    task={task}
+                    start={editStart ?? task.start_date ?? ""}
+                  />
                   <label>
                     Estimativa em horas
                     <Input

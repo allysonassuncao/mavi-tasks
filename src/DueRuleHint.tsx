@@ -1,0 +1,150 @@
+import { useState } from "react";
+import { CalendarCheck } from "lucide-react";
+import { Input, Textarea } from "./ui";
+import { dateKey } from "./domain";
+import {
+  businessDaysLabel,
+  ruleScope,
+  suggestDue,
+  type DueSuggestion,
+} from "./dueRules";
+import { dayLabel } from "./task-bulk";
+import type { Snapshot, Task } from "./types";
+import "./due-rules.css";
+
+/**
+ * Under a due date field: the rule behind the suggested date, a way back to
+ * it once the date was changed by hand and, when the date is before the
+ * rule's minimum, the reason the history keeps ("prazo apertado").
+ */
+export function DueRuleHint({
+  data,
+  suggestion,
+  due,
+  following,
+  byTeam = false,
+  shortening = true,
+  reason,
+  onReason,
+  onApply,
+}: {
+  data: Pick<Snapshot, "projects" | "clients" | "products" | "teams" | "members">;
+  suggestion: DueSuggestion | null;
+  due: string;
+  /** The date is the rule's (not picked by hand). */
+  following: boolean;
+  /** Sent to a team: the database counts again for whoever receives it. */
+  byTeam?: boolean;
+  /** Only a date moved earlier asks the reason (editing a task). */
+  shortening?: boolean;
+  reason: string;
+  onReason: (value: string) => void;
+  onApply: () => void;
+}) {
+  if (!suggestion) return null;
+  const why = `${businessDaysLabel(suggestion.days)} · ${ruleScope(data, suggestion.rule)}`;
+  const tight =
+    !following && shortening && !!suggestion.min && !!due && due < suggestion.min;
+  return (
+    <>
+      {following || due === suggestion.due ? (
+        <small className="due-rule-note" title="Prazo padrão configurado em Equipe e configurações › Prazos">
+          <CalendarCheck size={13} aria-hidden="true" />
+          <span>
+            Pela regra: {why}
+            {byTeam && " — conta de novo para quem receber"}
+          </span>
+        </small>
+      ) : (
+        <small className="due-rule-note differs" role="status">
+          <CalendarCheck size={13} aria-hidden="true" />
+          <span>
+            A regra sugere {dayLabel(suggestion.due)} ({why}).
+          </span>
+          <button type="button" onClick={onApply}>
+            Aplicar
+          </button>
+        </small>
+      )}
+      {tight && (
+        <label className="due-rule-reason">
+          Por que antes do mínimo da regra, {dayLabel(suggestion.min!)}?
+          <Textarea
+            value={reason}
+            onChange={(e) => onReason(e.target.value)}
+            placeholder="Ex.: o cliente antecipou o lançamento"
+            required
+            minLength={5}
+            maxLength={500}
+            rows={2}
+          />
+          <small>O motivo fica no histórico da tarefa.</small>
+        </label>
+      )}
+    </>
+  );
+}
+
+/**
+ * The due date when editing a task: the rule's date is one click away
+ * ("Aplicar" sends due_rule, so the database counts it and the date follows
+ * the rule again); shortening it to before the minimum asks the reason.
+ * Hidden fields carry both to the form's submit.
+ */
+export function TaskDueEdit({
+  data,
+  task,
+  start,
+}: {
+  data: Parameters<typeof suggestDue>[0] &
+    Pick<Snapshot, "projects" | "clients" | "products" | "teams" | "members">;
+  task: Task;
+  /** The start date being edited (the count starts there). */
+  start: string;
+}) {
+  const [due, setDue] = useState(task.due_date);
+  const [byRule, setByRule] = useState(false);
+  const [reason, setReason] = useState("");
+  const suggestion = suggestDue(data, {
+    contract: task.contract_id,
+    project: task.project_id,
+    team: task.team_id,
+    assignee: task.assignee_id,
+    base: start || dateKey(new Date(task.created_at)),
+    approval: task.requires_client_approval,
+  });
+  const following = byRule || (due === task.due_date && task.due_manual === false);
+  return (
+    <div className="due-rule-field">
+      <label>
+        Prazo
+        <Input
+          type="date"
+          name="due"
+          value={due}
+          onChange={(e) => {
+            setDue(e.target.value);
+            setByRule(false);
+          }}
+          required
+        />
+      </label>
+      <DueRuleHint
+        data={data}
+        suggestion={suggestion}
+        due={due}
+        following={following}
+        shortening={due < task.due_date}
+        reason={reason}
+        onReason={setReason}
+        onApply={() => {
+          if (!suggestion) return;
+          setDue(suggestion.due);
+          setByRule(true);
+        }}
+      />
+      {byRule && <input type="hidden" name="due_rule" value="1" />}
+      <input type="hidden" name="due_reason" value={reason} />
+    </div>
+  );
+}

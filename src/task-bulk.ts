@@ -3,14 +3,17 @@ import { statuses, type Status } from "./types";
 /**
  * One change applied to many tasks at once (public.bulk_update_tasks):
  * another responsible (a person, or the team's least busy member), another
- * status, a fixed due date or the due dates moved by N business days.
+ * status, a fixed due date, the due dates moved by N business days, or each
+ * due date counted again by its due rule. A date before the rule's minimum
+ * needs `reason` (tasks without it are left out).
  */
 export type BulkChange =
   | { kind: "assignee"; value: string }
   | { kind: "team"; value: string }
   | { kind: "status"; value: Status; note?: string }
-  | { kind: "due"; value: string }
-  | { kind: "shift"; value: number };
+  | { kind: "due"; value: string; reason?: string }
+  | { kind: "shift"; value: number; reason?: string }
+  | { kind: "rule" };
 
 interface BulkSide {
   status: Status;
@@ -79,6 +82,8 @@ export function describeChange(
       const n = Math.abs(change.value);
       return `${change.value > 0 ? "Adiar" : "Antecipar"} o prazo em ${plural(n, "dia útil", "dias úteis")}, a partir do prazo de cada tarefa.`;
     }
+    case "rule":
+      return "Recalcular o prazo de cada tarefa pela regra de prazo que vale para ela, contando do início planejado ou do dia em que foi criada.";
   }
 }
 

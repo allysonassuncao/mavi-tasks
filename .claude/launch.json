@@ -18,6 +18,19 @@
         "preview"
       ],
       "port": 4173
+    },
+    {
+      "name": "mavi-dev-prazos",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5181",
+        "--strictPort"
+      ],
+      "port": 5181
     }
   ]
 }

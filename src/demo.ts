@@ -344,6 +344,36 @@ export function demoSnapshot(): Snapshot {
     suggestionSettings: [
       { company_id, team_id: "team-3", contract_id: "ct-1", project_id: null },
     ],
+    // Shows the due rules: a company default and a product that takes longer.
+    dueRules: [
+      {
+        id: "due-company",
+        company_id,
+        project_id: null,
+        client_id: null,
+        product_id: null,
+        team_id: null,
+        user_id: null,
+        business_days: 3,
+        min_days: 1,
+        approval_days: 2,
+        active: true,
+      },
+      {
+        id: "due-ads",
+        company_id,
+        project_id: null,
+        client_id: null,
+        product_id: "pd-1",
+        team_id: null,
+        user_id: null,
+        business_days: 5,
+        min_days: 2,
+        approval_days: 2,
+        active: true,
+      },
+    ],
+    calendarDays: [],
     // Shows the template builder and the extra fields in the demo.
     taskTemplates: [
       {

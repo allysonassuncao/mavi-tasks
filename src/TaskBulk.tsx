@@ -363,31 +363,34 @@ function AssigneePanel({
 }
 
 function DuePanel({ onPick }: { onPick: (change: BulkChange) => void }) {
-  const [mode, setMode] = useState<"shift" | "due">("shift");
+  const [mode, setMode] = useState<"shift" | "due" | "rule">("shift");
   const [days, setDays] = useState(1);
   const [date, setDate] = useState("");
+  const [reason, setReason] = useState("");
   const n = Math.abs(days);
+  const why = reason.trim() ? { reason: reason.trim() } : {};
   return (
     <>
       <h3>Mudar prazo</h3>
       <p className="bulk-panel-sub">Só a data muda. Aprovações e status continuam como estão.</p>
       <div className="bulk-seg" role="group" aria-label="Como mudar o prazo">
-        <button
-          type="button"
-          aria-pressed={mode === "shift"}
-          className={mode === "shift" ? "on" : ""}
-          onClick={() => setMode("shift")}
-        >
-          Adiar ou antecipar
-        </button>
-        <button
-          type="button"
-          aria-pressed={mode === "due"}
-          className={mode === "due" ? "on" : ""}
-          onClick={() => setMode("due")}
-        >
-          Data fixa
-        </button>
+        {(
+          [
+            ["shift", "Adiar ou antecipar"],
+            ["due", "Data fixa"],
+            ["rule", "Pela regra"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={mode === id}
+            className={mode === id ? "on" : ""}
+            onClick={() => setMode(id)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
       {mode === "shift" ? (
         <>
@@ -413,10 +416,10 @@ function DuePanel({ onPick }: { onPick: (change: BulkChange) => void }) {
           </div>
           <p className="bulk-hint">
             Cada tarefa anda a partir do próprio prazo, então o espaçamento entre elas se mantém.
-            Sábados e domingos são pulados.
+            Fins de semana e feriados são pulados.
           </p>
         </>
-      ) : (
+      ) : mode === "due" ? (
         <>
           <label className="bulk-field">
             Novo prazo para todas
@@ -426,13 +429,36 @@ function DuePanel({ onPick }: { onPick: (change: BulkChange) => void }) {
             Tarefas que começam depois dessa data ficam de fora, e a revisão mostra quais.
           </p>
         </>
+      ) : (
+        <p className="bulk-hint">
+          Cada tarefa ganha o prazo da regra que vale para ela (Prazos, em Equipe e configurações),
+          e o prazo volta a seguir a regra. As que não têm regra ficam de fora.
+        </p>
+      )}
+      {mode !== "rule" && (
+        <label className="bulk-field">
+          Motivo, se algum prazo ficar antes do mínimo da regra
+          <Textarea
+            rows={2}
+            maxLength={500}
+            value={reason}
+            placeholder="Opcional. Sem ele, essas tarefas ficam de fora."
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
       )}
       <div className="bulk-panel-foot">
         <Button
           className="btn primary"
-          disabled={mode === "due" ? !date : days === 0}
+          disabled={mode === "due" ? !date : mode === "shift" ? days === 0 : false}
           onClick={() =>
-            onPick(mode === "due" ? { kind: "due", value: date } : { kind: "shift", value: days })
+            onPick(
+              mode === "due"
+                ? { kind: "due", value: date, ...why }
+                : mode === "shift"
+                  ? { kind: "shift", value: days, ...why }
+                  : { kind: "rule" },
+            )
           }
         >
           Revisar alterações
@@ -539,7 +565,7 @@ function BulkReview({
   };
   const changed = result?.results.filter((r) => r.ok) ?? [];
   const skipped = result?.results.filter((r) => !r.ok) ?? [];
-  const dueOnly = change.kind === "due" || change.kind === "shift";
+  const dueOnly = change.kind === "due" || change.kind === "shift" || change.kind === "rule";
   return (
     <Modal title="Revisar alterações" onClose={onBack} busy={applying} className="bulk-review">
       <div className="bulk-review-head">

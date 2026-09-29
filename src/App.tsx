@@ -145,6 +145,7 @@ import {
 import { useNow } from "./useClock";
 import { Expandable, Paged, Pagination } from "./Pagination";
 import { TaskTemplatesPanel } from "./TaskTemplates";
+import { DueRulesPanel } from "./DueRulesPanel";
 import { WhatsappGroupsPanel } from "./WhatsappGroups";
 import { SuggestionDialog, SuggestionSettingsPanel } from "./SuggestionDialog";
 import { SidebarNav, type NavTarget } from "./SidebarNav";
@@ -1456,6 +1457,10 @@ export default function App() {
           name === "save_task_template" ||
           name === "save_suggestion_settings" ||
           name === "delete_task_template" ||
+          name === "save_task_due_rule" ||
+          name === "delete_task_due_rule" ||
+          name === "save_calendar_day" ||
+          name === "delete_calendar_day" ||
           name === "update_my_profile" ||
           name === "update_member" ||
           name === "set_member_pages" ||
@@ -3633,6 +3638,11 @@ export default function App() {
                           "Templates de tarefa",
                           data.taskTemplates?.length ?? 0,
                         ],
+                        [
+                          "config-prazos",
+                          "Prazos",
+                          data.dueRules?.length ?? 0,
+                        ],
                         ["config-sugestoes", "Sugestões", null],
                         ["config-whatsapp", "Grupos do Whatsapp", null],
                         ...(isAdmin
@@ -3887,6 +3897,15 @@ export default function App() {
                       <TaskTemplatesPanel
                         data={data}
                         company={company}
+                        mutate={mutate}
+                        notify={notify}
+                      />
+                    )}
+                    {settingsView === "config-prazos" && (
+                      <DueRulesPanel
+                        data={data}
+                        company={company}
+                        user={user}
                         mutate={mutate}
                         notify={notify}
                       />

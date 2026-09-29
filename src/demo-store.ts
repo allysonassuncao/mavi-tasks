@@ -30,17 +30,16 @@ import {
 import { MODULES } from "./modules";
 import type { TaskView } from "./api";
 import type { BulkChange, BulkItem, BulkResult, BulkUndo } from "./task-bulk";
+import {
+  addBusinessDays,
+  canManageDueScope,
+  nationalHoliday,
+  suggestDue,
+} from "./dueRules";
 
 /** N business days after (or before, when negative) — mavi_private.add_business_days. */
-function addBusinessDays(day: string, n: number) {
-  const d = new Date(day + "T12:00:00Z");
-  let left = Math.abs(n);
-  while (left > 0) {
-    d.setUTCDate(d.getUTCDate() + Math.sign(n));
-    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) left--;
-  }
-  return d.toISOString().slice(0, 10);
-}
+/** Where a task's due rule starts counting: its start or the day it was created. */
+const dueBase = (t: Task) => t.start_date || dateKey(new Date(t.created_at));
 export class DemoStore {
   data: Snapshot = demoSnapshot();
   comments: Comment[] = [];
@@ -73,7 +72,9 @@ export class DemoStore {
     const leader = me?.role === "admin" || me?.role === "manager";
     const name = (id: string) =>
       this.data.members.find((m) => m.user_id === id)?.name ?? "—";
-    const team = this.data.teams.find((t) => t.id === change.value);
+    const team = this.data.teams.find(
+      (t) => "value" in change && t.id === change.value,
+    );
     const results: BulkItem[] = [];
     const before = new Map<string, Task>();
     const afterVersion = new Map<string, number>();
@@ -127,15 +128,47 @@ export class DemoStore {
         } else if (t.creator_id !== demoUser && !leader)
           reason = "Só quem criou a tarefa ou um gestor muda o prazo";
         else {
+          // Mirrors the due branch of public.bulk_update_tasks.
+          const byRule = change.kind === "rule";
+          const rule = suggestDue(this.data, {
+            contract: t.contract_id,
+            project: t.project_id,
+            team: t.team_id,
+            assignee: t.assignee_id,
+            base: dueBase(t),
+            approval: t.requires_client_approval,
+          });
           const due =
             change.kind === "due"
               ? change.value
-              : addBusinessDays(t.due_date, change.value);
-          if (due === t.due_date) reason = "Já tem esse prazo";
+              : change.kind === "shift"
+                ? addBusinessDays(this.data.calendarDays, t.due_date, change.value)
+                : (rule?.due ?? t.due_date);
+          const why = change.kind === "rule" ? "" : (change.reason ?? "");
+          const short = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+          if (byRule && !rule)
+            reason = "Nenhuma regra de prazo vale para esta tarefa";
+          else if (byRule && due === t.due_date && t.due_manual === false)
+            reason = "Já está no prazo da regra";
+          else if (!byRule && due === t.due_date) reason = "Já tem esse prazo";
           else if (t.start_date && due < t.start_date)
-            reason = `O prazo ficaria antes do início (${t.start_date.slice(8, 10)}/${t.start_date.slice(5, 7)})`;
+            reason = `O prazo ficaria antes do início (${short(t.start_date)})`;
+          else if (
+            !byRule &&
+            rule?.min &&
+            due < rule.min &&
+            due < t.due_date &&
+            !why
+          )
+            reason = `Fica antes do mínimo da regra (${short(rule.min)}): informe o motivo`;
           else {
+            const tight = !byRule && !!rule?.min && due < rule.min;
+            t.due_tight_reason = tight
+              ? (due < t.due_date ? why : "") || t.due_tight_reason || null
+              : null;
             t.due_date = due;
+            t.due_manual = !byRule;
+            t.due_rule_id = byRule ? rule!.rule.id : null;
             t.version++;
           }
         }
@@ -624,7 +657,38 @@ export class DemoStore {
         const problem =
           name === "create_task" && customFieldsError(fields, a.p_custom ?? {});
         if (problem) throw Error(problem);
+        // Mirrors mavi_private.choose_due: without p_due_manual, the rule's
+        // date for whoever receives the task.
+        const dueRule =
+          name === "create_task"
+            ? suggestDue(this.data, {
+                contract: a.p_contract,
+                project: a.p_project,
+                team: a.p_team,
+                assignee,
+                base: a.p_start || dateKey(),
+                approval: a.p_client_approval,
+              })
+            : null;
+        const dueManual = name !== "create_task" || (a.p_due_manual ?? true);
+        const due: string =
+          !dueManual && dueRule ? dueRule.due : a.p_due;
+        if (!due) throw Error("Escolha o prazo");
+        const tight = dueManual && !!dueRule?.min && due < dueRule.min;
+        if (tight && String(a.p_due_reason ?? "").trim().length < 5)
+          throw Error(
+            `Este prazo fica antes do mínimo da regra (${dueRule!.min!.split("-").reverse().join("/")}). Explique o motivo para continuar.`,
+          );
+        // The main task never ends before a subtask.
+        const parentTask = this.data.tasks.find((t) => t.id === a.p_parent);
+        if (parentTask && parentTask.status !== "done" && parentTask.due_date < due) {
+          parentTask.due_date = due;
+          parentTask.version++;
+        }
         this.data.tasks.unshift({
+          due_manual: dueManual,
+          due_rule_id: !dueManual && dueRule ? dueRule.rule.id : null,
+          due_tight_reason: tight ? String(a.p_due_reason).trim() : null,
           custom_fields: fillDemoFields(fields, a.p_custom ?? {}),
           id,
           company_id,
@@ -639,8 +703,8 @@ export class DemoStore {
           priority: a.p_priority ?? "normal",
           creator_id: demoUser,
           assignee_id: assignee,
-          due_date: a.p_due,
-          original_due_date: a.p_due,
+          due_date: due,
+          original_due_date: due,
           start_date: a.p_start ?? null,
           estimated_minutes: a.p_estimated ?? 0,
           requires_client_approval: a.p_client_approval ?? false,
@@ -740,6 +804,81 @@ export class DemoStore {
           : [...this.data.taskTemplates, template];
         return template.id;
       }
+      case "save_task_due_rule": {
+        // Mirrors public.save_task_due_rule.
+        const scope = {
+          project_id: a.p_project ?? null,
+          client_id: a.p_project ? null : (a.p_client ?? null),
+          product_id: a.p_project ? null : (a.p_product ?? null),
+          team_id: a.p_team ?? null,
+          user_id: a.p_user ?? null,
+        };
+        const role = this.data.members.find((m) => m.user_id === demoUser)?.role;
+        if (role !== "admin" && role !== "manager")
+          throw Error("Somente administradores e gestores configuram prazos");
+        const old = (this.data.dueRules ?? []).find((r) => r.id === a.p_id);
+        if (
+          !canManageDueScope(this.data, demoUser, scope) ||
+          (old && !canManageDueScope(this.data, demoUser, old))
+        )
+          throw Error(
+            "Gestores configuram só regras das suas equipes, dos clientes que elas atendem e das pessoas delas",
+          );
+        if (a.p_min != null && (a.p_min < 0 || a.p_min > a.p_days))
+          throw Error(`O mínimo vai de 0 até o próprio prazo (${a.p_days} dias úteis)`);
+        const same = (this.data.dueRules ?? []).find(
+          (r) =>
+            r.id !== a.p_id &&
+            (Object.keys(scope) as (keyof typeof scope)[]).every((k) => r[k] === scope[k]),
+        );
+        if (same) throw Error("Já existe uma regra para essa mesma combinação");
+        const saved = {
+          id: a.p_id ?? id,
+          company_id,
+          ...scope,
+          business_days: a.p_days,
+          min_days: a.p_min ?? null,
+          approval_days: a.p_approval_days ?? 0,
+          active: a.p_active ?? true,
+          created_by: old?.created_by ?? demoUser,
+        };
+        this.data.dueRules = old
+          ? (this.data.dueRules ?? []).map((r) => (r.id === old.id ? saved : r))
+          : [...(this.data.dueRules ?? []), saved];
+        return saved.id;
+      }
+      case "delete_task_due_rule":
+        this.data.dueRules = (this.data.dueRules ?? []).filter(
+          (r) => r.id !== a.p_rule,
+        );
+        break;
+      case "save_calendar_day": {
+        const role = this.data.members.find((m) => m.user_id === demoUser)?.role;
+        if (role !== "admin")
+          throw Error("Somente administradores configuram o calendário da empresa");
+        if (a.p_kind === "workday" && !nationalHoliday(a.p_day))
+          throw Error("Só dá para marcar como dia de trabalho um feriado nacional");
+        if ((this.data.calendarDays ?? []).some((c) => c.day === a.p_day && c.id !== a.p_id))
+          throw Error("Este dia já está no calendário da empresa");
+        const day = {
+          id: a.p_id ?? id,
+          company_id,
+          day: a.p_day,
+          name: String(a.p_name).trim(),
+          kind: a.p_kind,
+          yearly: !!a.p_yearly,
+        };
+        this.data.calendarDays = [
+          ...(this.data.calendarDays ?? []).filter((c) => c.id !== day.id),
+          day,
+        ].sort((x, y) => (x.day < y.day ? -1 : 1));
+        return day.id;
+      }
+      case "delete_calendar_day":
+        this.data.calendarDays = (this.data.calendarDays ?? []).filter(
+          (c) => c.id !== a.p_id,
+        );
+        break;
       case "delete_task_template":
         this.data.taskTemplates = this.data.taskTemplates.filter(
           (t) => t.id !== a.p_template,
@@ -753,10 +892,36 @@ export class DemoStore {
         const isLeader = callerRole === "admin" || callerRole === "manager";
         if (task.creator_id !== demoUser && !isLeader)
           throw Error("Sem permissão para editar");
+        // Mirrors public.update_task: "Aplicar" the rule, or a date by hand
+        // that asks the reason when moved to before the rule's minimum.
+        const rule = suggestDue(this.data, {
+          contract: task.contract_id,
+          project: task.project_id,
+          team: task.team_id,
+          assignee: task.assignee_id,
+          base: a.p_start || dueBase(task),
+          approval: task.requires_client_approval,
+        });
+        const byRule = a.p_due_manual === false && !!rule;
+        const due: string = byRule ? rule!.due : a.p_due;
+        if (due !== task.due_date || byRule) {
+          const tight = !byRule && !!rule?.min && due < rule.min;
+          if (tight && due < task.due_date && String(a.p_due_reason ?? "").trim().length < 5)
+            throw Error(
+              `Este prazo fica antes do mínimo da regra (${rule!.min!.split("-").reverse().join("/")}). Explique o motivo para continuar.`,
+            );
+          task.due_tight_reason = tight
+            ? (due < task.due_date ? String(a.p_due_reason ?? "").trim() : "") ||
+              task.due_tight_reason ||
+              null
+            : null;
+          task.due_manual = !byRule;
+          task.due_rule_id = byRule ? rule!.rule.id : null;
+        }
         Object.assign(task, {
           title: a.p_title,
           description: a.p_description,
-          due_date: a.p_due,
+          due_date: due,
           start_date: a.p_start ?? null,
           estimated_minutes: a.p_estimated,
           priority: a.p_priority,
