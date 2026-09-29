@@ -29,7 +29,7 @@ import {
 } from "./types";
 import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
 import { suggestDue } from "./dueRules";
-import { DueRuleHint } from "./DueRuleHint";
+import { AbsenceNote, DueRuleHint } from "./DueRuleHint";
 import { dayLabel } from "./task-bulk";
 import {
   attachmentAccept,
@@ -517,7 +517,8 @@ export function TaskCreateForm({
                   <small className="assign-team-hint">
                     Vai para quem da equipe tem menos tarefas em aberto.
                     Supervisores só recebem quando a equipe não tem mais
-                    ninguém.
+                    ninguém, e quem está de férias ou de folga hoje, só se a
+                    equipe inteira estiver fora.
                   </small>
                 )}
               </div>
@@ -562,6 +563,9 @@ export function TaskCreateForm({
                   onReason={setDueReason}
                   onApply={() => setDueByHand(false)}
                 />
+                {!byTeam && (
+                  <AbsenceNote data={data} assignee={assignee} due={due} />
+                )}
                 {parentTask &&
                   parentTask.status !== "done" &&
                   parentTask.due_date < due && (

@@ -874,6 +874,67 @@ export class DemoStore {
         ].sort((x, y) => (x.day < y.day ? -1 : 1));
         return day.id;
       }
+      case "set_company_work_minutes": {
+        const role = this.data.members.find((m) => m.user_id === demoUser)?.role;
+        if (role !== "admin")
+          throw Error("Somente administradores mudam a jornada da empresa");
+        this.data.companies = this.data.companies.map((c) =>
+          c.id === a.p_company ? { ...c, work_minutes: a.p_minutes } : c,
+        );
+        break;
+      }
+      case "set_member_workload": {
+        // Mirrors public.set_member_workload.
+        if (!canManageDueScope(this.data, demoUser, { project_id: null, client_id: null, team_id: null, user_id: a.p_user }))
+          throw Error("Gestores mudam só a jornada das pessoas das suas equipes");
+        const days = a.p_days?.length ? [...new Set<number>(a.p_days)].sort() : null;
+        this.data.members = this.data.members.map((m) =>
+          m.user_id === a.p_user
+            ? { ...m, work_minutes: a.p_minutes ?? null, work_days: days?.length === 5 ? null : days }
+            : m,
+        );
+        break;
+      }
+      case "save_member_absence": {
+        // Mirrors public.save_member_absence.
+        if (!canManageDueScope(this.data, demoUser, { project_id: null, client_id: null, team_id: null, user_id: a.p_user }))
+          throw Error("Gestores registram só ausências das pessoas das suas equipes");
+        if (a.p_ends < a.p_starts) throw Error("O último dia vem antes do primeiro");
+        if (
+          (this.data.absences ?? []).some(
+            (x) => x.user_id === a.p_user && x.id !== a.p_id && x.starts_on <= a.p_ends && x.ends_on >= a.p_starts,
+          )
+        )
+          throw Error("Já há uma ausência dessa pessoa nesse período");
+        const absence = {
+          id: a.p_id ?? id,
+          company_id,
+          user_id: a.p_user,
+          starts_on: a.p_starts,
+          ends_on: a.p_ends,
+          kind: a.p_kind,
+        };
+        this.data.absences = [
+          ...(this.data.absences ?? []).filter((x) => x.id !== absence.id),
+          absence,
+        ];
+        return {
+          id: absence.id,
+          open_tasks: this.data.tasks.filter(
+            (t) =>
+              t.assignee_id === a.p_user &&
+              t.status !== "done" &&
+              !t.archived &&
+              t.due_date >= a.p_starts &&
+              t.due_date <= a.p_ends,
+          ).length,
+        };
+      }
+      case "delete_member_absence":
+        this.data.absences = (this.data.absences ?? []).filter(
+          (x) => x.id !== a.p_id,
+        );
+        break;
       case "delete_calendar_day":
         this.data.calendarDays = (this.data.calendarDays ?? []).filter(
           (c) => c.id !== a.p_id,

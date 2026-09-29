@@ -13,6 +13,8 @@ export interface Company {
   timezone: string;
   /** Workspace image (public URL); initials are shown when absent. */
   logo_url?: string | null;
+  /** The company's working day, in minutes (480 = 8 h). */
+  work_minutes?: number;
 }
 export interface Member {
   company_id: string;
@@ -27,6 +29,10 @@ export interface Member {
   hidden_pages?: string[];
   /** IA externa (MCP): 'default' libera para administradores e gestores. */
   mcp_access?: "default" | "on" | "off";
+  /** Their working day in minutes (null: the company's). */
+  work_minutes?: number | null;
+  /** The weekdays they work, 1 = Monday … 5 = Friday (null: all five). */
+  work_days?: number[] | null;
 }
 export interface Client {
   id: string;
@@ -231,6 +237,23 @@ export interface Snapshot {
   dueRules?: TaskDueRule[];
   /** The company's own days off and worked national holidays. */
   calendarDays?: CalendarDay[];
+  /** Vacations, days off and leaves (recent and upcoming). */
+  absences?: MemberAbsence[];
+}
+export type AbsenceKind = "vacation" | "day_off" | "leave";
+export const absenceKinds: Record<AbsenceKind, string> = {
+  vacation: "Férias",
+  day_off: "Folga",
+  leave: "Afastamento",
+};
+/** A person away from one day to another (both included). */
+export interface MemberAbsence {
+  id: string;
+  company_id: string;
+  user_id: string;
+  starts_on: string;
+  ends_on: string;
+  kind: AbsenceKind;
 }
 /**
  * A default due date: N business days for tasks matching every criterion

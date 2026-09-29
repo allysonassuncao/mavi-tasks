@@ -31,6 +31,7 @@
     "test:db:bulk": "node scripts/test-task-bulk.mjs",
     "test:db:recurrence": "node scripts/test-task-recurrence.mjs",
     "test:db:due-rules": "node scripts/test-task-due-rules.mjs",
+    "test:db:workload": "node scripts/test-workload-absences.mjs",
     "test:db:replies": "node scripts/test-comment-replies.mjs",
     "test:db:suggestions": "node scripts/test-suggestions.mjs",
     "test:db:inbox": "node scripts/test-inbox-broadcast.mjs",

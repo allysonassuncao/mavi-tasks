@@ -1461,6 +1461,9 @@ export default function App() {
           name === "delete_task_due_rule" ||
           name === "save_calendar_day" ||
           name === "delete_calendar_day" ||
+          name === "set_member_workload" ||
+          name === "save_member_absence" ||
+          name === "delete_member_absence" ||
           name === "update_my_profile" ||
           name === "update_member" ||
           name === "set_member_pages" ||
@@ -1469,7 +1472,10 @@ export default function App() {
           api.invalidateLookupsCache(company);
           const lookups = await api.companyLookups(company, true);
           setData((d) => ({ ...d, ...lookups }));
-        } else if (name === "set_company_logo") {
+        } else if (
+          name === "set_company_logo" ||
+          name === "set_company_work_minutes"
+        ) {
           const companies = await api.companies(true);
           setData((d) => ({ ...d, companies }));
         } else if (name === "log_time") {
@@ -3640,7 +3646,7 @@ export default function App() {
                         ],
                         [
                           "config-prazos",
-                          "Prazos",
+                          "Prazos e jornada",
                           data.dueRules?.length ?? 0,
                         ],
                         ["config-sugestoes", "Sugestões", null],

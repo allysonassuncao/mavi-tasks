@@ -298,7 +298,7 @@ export function SidebarNav({
             },
             {
               key: "settings-due",
-              label: "Prazos",
+              label: "Prazos e jornada",
               to: { page: "settings", hash: "config-prazos" },
             },
             {

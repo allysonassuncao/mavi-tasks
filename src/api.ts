@@ -22,6 +22,7 @@ import {
   type SuggestionSettings,
   type TaskDueRule,
   type CalendarDay,
+  type MemberAbsence,
 } from "./types";
 
 export interface Filters {
@@ -74,6 +75,7 @@ export interface CompanyLookups {
   suggestionSettings: SuggestionSettings[];
   dueRules?: TaskDueRule[];
   calendarDays?: CalendarDay[];
+  absences?: MemberAbsence[];
 }
 
 /**
@@ -207,6 +209,7 @@ export async function companyLookups(
         suggestionSettings: [],
         dueRules: [],
         calendarDays: [],
+        absences: [],
       };
 
       // Order for stable paging: by name where there is one (the order the
@@ -224,7 +227,12 @@ export async function companyLookups(
         ["suggestionSettings", "suggestion_settings", ["company_id"]],
         ["dueRules", "task_due_rules", ["id"]],
         ["calendarDays", "company_calendar_days", ["day", "id"]],
+        ["absences", "member_absences", ["starts_on", "id"]],
       ] as const;
+      // Absences that ended long ago no longer change any date.
+      const absencesFrom = new Date(Date.now() - 60 * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
 
       await Promise.all(
         tables.map(async ([key, table, keyColumns]) => {
@@ -233,6 +241,7 @@ export async function companyLookups(
               .from(table)
               .select("*", count ? { count } : undefined)
               .eq("company_id", company);
+            if (key === "absences") query = query.gte("ends_on", absencesFrom);
             for (const column of keyColumns) query = query.order(column);
             return query;
           });
@@ -242,7 +251,8 @@ export async function companyLookups(
             key === "taskTemplates" ||
             key === "suggestionSettings" ||
             key === "dueRules" ||
-            key === "calendarDays"
+            key === "calendarDays" ||
+            key === "absences"
               ? await rows.catch(() => [])
               : await rows;
         }),
@@ -714,6 +724,7 @@ export async function snapshot(
     suggestionSettings: lookups.suggestionSettings ?? [],
     dueRules: lookups.dueRules ?? [],
     calendarDays: lookups.calendarDays ?? [],
+    absences: lookups.absences ?? [],
     tasks: taskQueryResult.tasks,
     hours,
   };
@@ -746,6 +757,7 @@ export function getCachedSnapshot(company: string): Snapshot | null {
     suggestionSettings: lookups.suggestionSettings ?? [],
     dueRules: lookups.dueRules ?? [],
     calendarDays: lookups.calendarDays ?? [],
+    absences: lookups.absences ?? [],
     tasks: [],
     hours,
   };

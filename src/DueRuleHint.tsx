@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { CalendarCheck } from "lucide-react";
+import { CalendarCheck, Palmtree } from "lucide-react";
 import { Input, Textarea } from "./ui";
 import { dateKey } from "./domain";
 import {
+  absencesIn,
   businessDaysLabel,
+  personOff,
   ruleScope,
   suggestDue,
   type DueSuggestion,
 } from "./dueRules";
 import { dayLabel } from "./task-bulk";
-import type { Snapshot, Task } from "./types";
+import { absenceKinds, type Snapshot, type Task } from "./types";
 import "./due-rules.css";
 
 /**
@@ -143,8 +145,48 @@ export function TaskDueEdit({
           setByRule(true);
         }}
       />
+      <AbsenceNote data={data} assignee={task.assignee_id} due={due} />
       {byRule && <input type="hidden" name="due_rule" value="1" />}
       <input type="hidden" name="due_reason" value={reason} />
     </div>
+  );
+}
+
+/**
+ * Whoever executes is away before the due date: when, and whether the date
+ * lands on a day they don't work (the rule's dates already skip those).
+ */
+export function AbsenceNote({
+  data,
+  assignee,
+  due,
+}: {
+  data: Pick<Snapshot, "members" | "absences">;
+  assignee: string | null | undefined;
+  due: string;
+}) {
+  const today = dateKey();
+  if (!assignee || !due) return null;
+  const away = absencesIn(data, assignee, today, due);
+  const offOnDue = personOff(data, assignee)?.(due);
+  if (!away.length && !offOnDue) return null;
+  const name = data.members.find((m) => m.user_id === assignee)?.name ?? "A pessoa";
+  const periods = away
+    .map((a) =>
+      a.starts_on === a.ends_on
+        ? `${absenceKinds[a.kind].toLowerCase()} em ${dayLabel(a.starts_on)}`
+        : `${absenceKinds[a.kind].toLowerCase()} de ${dayLabel(a.starts_on)} a ${dayLabel(a.ends_on)}`,
+    )
+    .join("; ");
+  return (
+    <small className={`due-rule-note absence${offOnDue ? " differs" : ""}`} role="status">
+      <Palmtree size={13} aria-hidden="true" />
+      <span>
+        {periods && `${name}: ${periods}. `}
+        {offOnDue
+          ? `O prazo cai num dia em que ${name.split(" ")[0]} não trabalha.`
+          : "Os prazos pela regra já pulam esses dias."}
+      </span>
+    </small>
   );
 }

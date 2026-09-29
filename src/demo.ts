@@ -374,6 +374,17 @@ export function demoSnapshot(): Snapshot {
       },
     ],
     calendarDays: [],
+    // Marina goes on vacation soon: her rule dates skip those days.
+    absences: [
+      {
+        id: "abs-marina",
+        company_id,
+        user_id: "user-marina",
+        starts_on: day(2),
+        ends_on: day(9),
+        kind: "vacation",
+      },
+    ],
     // Shows the template builder and the extra fields in the demo.
     taskTemplates: [
       {

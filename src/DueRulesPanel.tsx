@@ -14,6 +14,7 @@ import {
 } from "./dueRules";
 import { dayLabel } from "./task-bulk";
 import type { CalendarDay, Snapshot, TaskDueRule } from "./types";
+import { WorkloadPanel } from "./WorkloadPanel";
 import "./due-rules.css";
 
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -158,6 +159,13 @@ export function DueRulesPanel({
         data={data}
         company={company}
         canEdit={isAdmin}
+        mutate={mutate}
+        notify={notify}
+      />
+      <WorkloadPanel
+        data={data}
+        company={company}
+        user={user}
         mutate={mutate}
         notify={notify}
       />

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  absencesIn,
   addBusinessDays,
   canManageDueScope,
   dueRuleFor,
@@ -143,5 +144,29 @@ describe("regras", () => {
     expect(can("gil", { team_id: "design", user_id: "caio" })).toBe(false);
     expect(can("gil", { client_id: "padaria" })).toBe(false);
     expect(can("ana", { client_id: "clinica" })).toBe(false);
+  });
+});
+
+describe("jornada e ausências", () => {
+  const base = {
+    ...data,
+    dueRules: [rule({ business_days: 3 })],
+    members: [{ user_id: "bia", role: "member", active: true, name: "Bia" }],
+  } as unknown as Snapshot;
+  const dueFor = (d: Partial<Snapshot>) =>
+    suggestDue({ ...base, ...d } as Snapshot, { contract: "k1", assignee: "bia", base: "2026-11-18" })?.due;
+  it("conta só os dias da semana em que a pessoa trabalha", () => {
+    expect(dueFor({})).toBe("2026-11-24");
+    expect(
+      dueFor({ members: [{ user_id: "bia", work_days: [1, 3] }] as Snapshot["members"] }),
+    ).toBe("2026-11-30");
+  });
+  it("pula folgas e começa a contar na volta das férias", () => {
+    const away = (starts_on: string, ends_on: string) =>
+      [{ id: "a", company_id: "c", user_id: "bia", starts_on, ends_on, kind: "vacation" }] as Snapshot["absences"];
+    expect(dueFor({ absences: away("2026-11-23", "2026-11-24") })).toBe("2026-11-26");
+    expect(dueFor({ absences: away("2026-11-16", "2026-11-27") })).toBe("2026-12-03");
+    expect(absencesIn({ absences: away("2026-11-16", "2026-11-27") }, "bia", "2026-11-27", "2026-12-01")).toHaveLength(1);
+    expect(absencesIn({ absences: away("2026-11-16", "2026-11-27") }, "bia", "2026-11-28", "2026-12-01")).toHaveLength(0);
   });
 });

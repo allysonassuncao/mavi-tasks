@@ -308,8 +308,8 @@ export function canCreateTaskIn(
 /**
  * Who receives a task sent to a team — mirrors mavi_private.team_assignee:
  * the active member with the fewest open tasks, supervisors only when the
- * team has nobody else; ties go to whoever received a task longest ago, then
- * by name.
+ * team has nobody else and whoever is away today only when everyone is;
+ * ties go to whoever received a task longest ago, then by name.
  * Only the database sees everyone's tasks, so outside the demo it decides.
  */
 export function teamAssignee(data: Snapshot, teamId: string) {
@@ -323,16 +323,29 @@ export function teamAssignee(data: Snapshot, teamId: string) {
       ),
     };
   };
+  const today = dateKey();
+  const away = (userId: string) =>
+    (data.absences ?? []).some(
+      (a) => a.user_id === userId && a.starts_on <= today && a.ends_on >= today,
+    );
   return data.teamMembers
     .filter((tm) => tm.team_id === teamId)
     .flatMap((tm) => {
       const m = data.members.find((x) => x.user_id === tm.user_id && x.active);
       return m
-        ? [{ member: m, supervisor: !!tm.supervisor, ...load(m.user_id) }]
+        ? [
+            {
+              member: m,
+              away: away(m.user_id),
+              supervisor: !!tm.supervisor,
+              ...load(m.user_id),
+            },
+          ]
         : [];
     })
     .sort(
       (a, b) =>
+        Number(a.away) - Number(b.away) ||
         Number(a.supervisor) - Number(b.supervisor) ||
         a.open - b.open ||
         a.last.localeCompare(b.last) ||

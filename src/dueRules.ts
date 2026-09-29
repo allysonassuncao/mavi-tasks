@@ -1,4 +1,4 @@
-import type { CalendarDay, Snapshot, TaskDueRule } from "./types";
+import type { CalendarDay, MemberAbsence, Snapshot, TaskDueRule } from "./types";
 
 /**
  * Default due dates, as the database computes them (migration
@@ -87,10 +87,21 @@ export function isBusinessDay(calendar: CalendarDay[] | undefined, day: string) 
   return !nationalHoliday(day) || !!calendarEntry(calendar, day, "workday");
 }
 
-/** `day` when it is a business day; otherwise the next one. */
-export function nextBusinessDay(calendar: CalendarDay[] | undefined, day: string) {
+/** Days a person doesn't work, on top of the company calendar. */
+export type OffDay = (day: string) => boolean;
+
+/** `day` when it is a business day (for the person); otherwise the next one. */
+export function nextBusinessDay(
+  calendar: CalendarDay[] | undefined,
+  day: string,
+  off?: OffDay,
+) {
   let d = day;
-  while (!isBusinessDay(calendar, d)) d = addDays(d, 1);
+  for (let i = 0; !isBusinessDay(calendar, d) || off?.(d); i++) {
+    // As the database: no working day in two years is a setup problem.
+    if (i > 800) return d;
+    d = addDays(d, 1);
+  }
   return d;
 }
 
@@ -99,14 +110,47 @@ export function addBusinessDays(
   calendar: CalendarDay[] | undefined,
   day: string,
   n: number,
+  off?: OffDay,
 ) {
   let d = day;
   const step = n < 0 ? -1 : 1;
-  for (let left = Math.abs(n); left > 0; ) {
+  for (let left = Math.abs(n), i = 0; left > 0 && i < 800 + Math.abs(n); i++) {
     d = addDays(d, step);
-    if (isBusinessDay(calendar, d)) left--;
+    if (isBusinessDay(calendar, d) && !off?.(d)) left--;
   }
   return d;
+}
+
+/** The person's absences touching the period (both days included). */
+export function absencesIn(
+  data: Pick<Snapshot, "absences">,
+  user: string | null | undefined,
+  from: string,
+  to: string,
+): MemberAbsence[] {
+  if (!user) return [];
+  return (data.absences ?? [])
+    .filter((a) => a.user_id === user && a.starts_on <= to && a.ends_on >= from)
+    .sort((a, b) => (a.starts_on < b.starts_on ? -1 : 1));
+}
+
+/**
+ * Days the person doesn't work (as mavi_private.person_off): outside their
+ * weekdays or away. Undefined when nothing takes days off for them.
+ */
+export function personOff(
+  data: Pick<Snapshot, "members" | "absences">,
+  user: string | null | undefined,
+): OffDay | undefined {
+  if (!user) return undefined;
+  const days = data.members.find((m) => m.user_id === user)?.work_days;
+  const away = (data.absences ?? []).filter((a) => a.user_id === user);
+  if (!days?.length && !away.length) return undefined;
+  return (day) => {
+    const weekday = new Date(toTime(day)).getUTCDay();
+    if (days?.length && weekday >= 1 && weekday <= 5 && !days.includes(weekday)) return true;
+    return away.some((a) => day >= a.starts_on && day <= a.ends_on);
+  };
 }
 
 /** Business days from `from` to `to` (negative when `to` comes first). */
@@ -147,7 +191,13 @@ export interface DueTarget {
 
 type RuleData = Pick<
   Snapshot,
-  "contracts" | "teamMembers" | "clientTeams" | "dueRules" | "calendarDays"
+  | "contracts"
+  | "teamMembers"
+  | "clientTeams"
+  | "dueRules"
+  | "calendarDays"
+  | "members"
+  | "absences"
 >;
 
 /**
@@ -193,22 +243,26 @@ export interface DueSuggestion {
   days: number;
 }
 
-/** What a rule gives, counting from `base` (a day off counts as the next business day). */
+/**
+ * What a rule gives, counting from `base` (a day off counts as the next
+ * business day), on the days the person works when `off` is given.
+ */
 export function ruleDue(
   calendar: CalendarDay[] | undefined,
   rule: TaskDueRule,
   base: string,
   approval: boolean,
+  off?: OffDay,
 ): DueSuggestion {
-  const start = nextBusinessDay(calendar, base);
+  const start = nextBusinessDay(calendar, base, off);
   const extra = approval ? rule.approval_days : 0;
   return {
     rule,
-    due: addBusinessDays(calendar, start, rule.business_days + extra),
+    due: addBusinessDays(calendar, start, rule.business_days + extra, off),
     min:
       rule.min_days == null
         ? null
-        : addBusinessDays(calendar, start, rule.min_days + extra),
+        : addBusinessDays(calendar, start, rule.min_days + extra, off),
     days: rule.business_days + extra,
   };
 }
@@ -220,7 +274,13 @@ export function suggestDue(
 ): DueSuggestion | null {
   const rule = dueRuleFor(data, target);
   return rule
-    ? ruleDue(data.calendarDays, rule, target.base, !!target.approval)
+    ? ruleDue(
+        data.calendarDays,
+        rule,
+        target.base,
+        !!target.approval,
+        personOff(data, target.assignee),
+      )
     : null;
 }
 
