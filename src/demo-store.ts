@@ -435,6 +435,25 @@ export class DemoStore {
         );
         break;
       }
+      case "remove_contract": {
+        const role = this.data.members.find(
+          (m) => m.user_id === demoUser,
+        )?.role;
+        if (role !== "admin" && role !== "manager")
+          throw Error("Sem permissão");
+        const k = a.p_contract;
+        if (!this.data.contracts.some((x) => x.id === k))
+          throw Error("Cadastro não encontrado");
+        const history =
+          this.data.projects.some((p) => p.contract_id === k) ||
+          this.data.tasks.some((t) => t.contract_id === k);
+        this.data.contracts = history
+          ? this.data.contracts.map((x) =>
+              x.id === k ? { ...x, archived: true } : x,
+            )
+          : this.data.contracts.filter((x) => x.id !== k);
+        return history ? "archived" : "deleted";
+      }
       case "set_client_archived": {
         const role = this.data.members.find(
           (m) => m.user_id === demoUser,

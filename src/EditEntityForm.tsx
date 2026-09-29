@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Save } from "lucide-react";
+import { Save, Trash2 } from "lucide-react";
 import { Modal } from "./components";
 import { Input, Select, SelectOption, Button, Checkbox } from "./ui";
 import type { Client, Contract, Product, Project, Snapshot } from "./types";
@@ -27,6 +27,7 @@ export function EditEntityForm({
   onClose: () => void;
 }) {
   const [error, setError] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [contract, setContract] = useState(
     edit.kind === "project" ? edit.entity.contract_id : "",
   );
@@ -99,6 +100,16 @@ export function EditEntityForm({
     }
     try {
       await mutate(`update_${edit.kind}`, args);
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  // Deleted when added by mistake; archived when it already has history
+  // (see remove_contract, migration 20261206090000).
+  async function removeContract() {
+    try {
+      await mutate("remove_contract", { p_contract: edit.entity.id });
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -249,6 +260,38 @@ export function EditEntityForm({
           </p>
         )}
         <div className="form-footer">
+          {edit.kind === "contract" &&
+            (confirmRemove ? (
+              <span className="template-delete-confirm">
+                Remover do cliente? Se já tiver projetos, tarefas ou arquivos,
+                o produto é arquivado e esse histórico fica guardado.
+                <Button
+                  type="button"
+                  className="btn secondary"
+                  disabled={busy}
+                  onClick={() => setConfirmRemove(false)}
+                >
+                  Não
+                </Button>
+                <Button
+                  type="button"
+                  className="btn danger"
+                  loading={busy}
+                  onClick={() => void removeContract()}
+                >
+                  Remover
+                </Button>
+              </span>
+            ) : (
+              <Button
+                type="button"
+                className="btn secondary template-delete"
+                disabled={busy}
+                onClick={() => setConfirmRemove(true)}
+              >
+                <Trash2 size={15} /> Remover do cliente
+              </Button>
+            ))}
           <Button
             type="button"
             className="btn secondary"

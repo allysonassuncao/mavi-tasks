@@ -1450,6 +1450,7 @@ export default function App() {
           name.startsWith("update_product") ||
           name.startsWith("create_contract") ||
           name.startsWith("update_contract") ||
+          name === "remove_contract" ||
           name.startsWith("create_project") ||
           name.startsWith("update_project") ||
           name.startsWith("create_team") ||
@@ -1499,7 +1500,11 @@ export default function App() {
       notify(
         receiver
           ? `Tarefa enviada para ${receiver.name}, quem tinha menos tarefas na equipe.`
-          : demo
+          : name === "remove_contract"
+            ? result === "archived"
+              ? "Produto removido do cliente. Como já tinha histórico, ficou arquivado."
+              : "Produto removido do cliente."
+            : demo
             ? "Alteração feita na demonstração."
             : "Alteração salva.",
       );
