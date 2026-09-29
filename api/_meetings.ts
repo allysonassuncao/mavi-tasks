@@ -221,7 +221,7 @@ export async function claudeAsk(
       maxRounds: 0,
       onEvent: onEvent
         ? (e) => {
-            if (e.type !== "round_end") onEvent(e);
+            if (e.type === "thinking" || e.type === "text") onEvent(e);
           }
         : undefined,
     });

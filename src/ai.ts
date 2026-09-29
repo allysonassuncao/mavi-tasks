@@ -30,7 +30,16 @@ export type AiScope = {
 export type AiSource = {
   ref: string;
   type:
-    "meeting" | "task" | "file" | "social" | "campaign" | "case" | "whatsapp";
+    | "meeting"
+    | "task"
+    | "file"
+    | "social"
+    | "campaign"
+    | "case"
+    | "whatsapp"
+    | "web";
+  /** Página da internet (busca na internet do módulo MAVI). */
+  url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
   id: string;
   group?: string;
@@ -538,6 +547,13 @@ const shortDate = (iso: string | null) =>
 
 /** O rótulo curto de uma citação: "Reunião 16/09 · 12:34", "Tarefa". */
 export function sourceLabel(s: AiSource) {
+  if (s.type === "web") {
+    try {
+      return new URL(s.url ?? s.id).hostname.replace(/^www\./, "");
+    } catch {
+      return "Internet";
+    }
+  }
   if (s.type === "meeting")
     return [
       `Reunião ${shortDate(s.date)}`,
@@ -594,5 +610,11 @@ export function sourceUrl(s: AiSource) {
 
 /** Abre uma fonte citada no lugar dela. */
 export function openAiSource(s: AiSource) {
+  // Uma página da internet abre fora do sistema.
+  if (s.type === "web") {
+    const url = s.url ?? s.id;
+    if (/^https?:\/\//.test(url)) window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
   navigate(sourceUrl(s));
 }

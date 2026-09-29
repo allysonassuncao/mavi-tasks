@@ -61,7 +61,9 @@ await check("tudo vem desligado; só líderes configuram", async () => {
     ["visuals", false],
     ["images", false],
     ["actions", false],
-    // A migração 20261214090000_mavi_skills acrescenta as skills.
+    // As migrações 20261214090000 (skills) e 20261216090000 (canvas e web) acrescentam poderes.
+    ["canvas", false],
+    ["web", false],
     ["skills", false],
   ]);
   await assert.rejects(() => setPower(ana, "visuals", true, true), /Só administradores e gestores/);

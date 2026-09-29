@@ -742,7 +742,7 @@ function SourceChip({
   source: AiSource;
   onOpen: () => void;
 }) {
-  const Icon = SOURCE_ICONS[s.type] ?? FileText;
+  const Icon = SOURCE_ICONS[s.type as keyof typeof SOURCE_ICONS] ?? FileText;
   if (s.restricted)
     return (
       <span

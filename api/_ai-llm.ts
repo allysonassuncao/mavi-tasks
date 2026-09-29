@@ -29,7 +29,9 @@ export type ChatTurn = { role: "user" | "assistant"; content: string };
 export type AgentEvent =
   | { type: "thinking"; text: string }
   | { type: "text"; text: string }
-  | { type: "round_end"; tools: number };
+  | { type: "round_end"; tools: number }
+  /** A Claude buscou na internet ou leu uma página (ferramenta do servidor dela). */
+  | { type: "server_tool"; name: string; input: unknown };
 export type AgentRequest = {
   /** Instruções fixas (ficam em cache). */
   instructions: string;
@@ -49,8 +51,57 @@ export type AgentRequest = {
   maxTokens?: number;
   signal?: AbortSignal;
   onEvent?: (event: AgentEvent) => void;
+  /** Busca na internet e leitura de páginas (só na Claude). */
+  webSearch?: boolean;
+  /** Uma página citada vira uma fonte: devolve a referência (ex.: "S7"). */
+  onCitation?: (page: { url: string; title: string }) => string;
 };
-export type AgentResult = { text: string; meter: Meter; rounds: number };
+export type AgentResult = {
+  text: string;
+  meter: Meter;
+  rounds: number;
+  /** Buscas feitas na internet (US$ 0,01 cada, já no custo). */
+  webSearches?: number;
+};
+
+/** Preço da busca na internet da Claude (US$ 10 por mil). */
+export const WEB_SEARCH_PRICE = 0.01;
+
+type Block = { type: string; text?: string; citations?: unknown };
+/**
+ * O texto final: depois da última busca (antes dela é comentário de
+ * trabalho) e com cada página citada virando uma fonte [S#].
+ */
+export function answerText(
+  content: Block[],
+  cite?: (page: { url: string; title: string }) => string,
+) {
+  const lastTool = content.reduce(
+    (at, b, i) => (/_tool_result$/.test(b.type) ? i : at),
+    -1,
+  );
+  const after = content.slice(lastTool + 1).filter((b) => b.type === "text");
+  const blocks = after.some((b) => b.text?.trim())
+    ? after
+    : content.filter((b) => b.type === "text");
+  return blocks
+    .map((b) => {
+      const list = Array.isArray(b.citations) ? b.citations : [];
+      const refs = cite
+        ? [
+            ...new Set(
+              list
+                .map((c) => c as { url?: unknown; title?: unknown })
+                .filter((c) => typeof c.url === "string" && /^https?:\/\//.test(c.url))
+                .map((c) => cite({ url: c.url as string, title: String(c.title ?? c.url) })),
+            ),
+          ]
+        : [];
+      return (b.text ?? "") + refs.map((r) => `[${r}]`).join("");
+    })
+    .join("")
+    .trim();
+}
 export type LlmAdapter = (request: AgentRequest) => Promise<AgentResult>;
 
 export class LlmError extends Error {
@@ -111,13 +162,31 @@ export function anthropicAdapter(
       });
     const meter = newMeter(env.model);
     const features = claudeFeatures(env.model);
-    const tools: Anthropic.Beta.BetaToolUnion[] = request.tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.parameters as Anthropic.Beta.BetaTool.InputSchema,
-      // As entradas chegam em streaming; cada executor confere os campos.
-      eager_input_streaming: true,
-    }));
+    const tools: Anthropic.Beta.BetaToolUnion[] = [
+      ...request.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.parameters as Anthropic.Beta.BetaTool.InputSchema,
+        // As entradas chegam em streaming; cada executor confere os campos.
+        eager_input_streaming: true,
+      })),
+      // Busca e leitura de páginas: rodam no servidor da Claude.
+      ...(request.webSearch
+        ? [
+            {
+              type: "web_search_20260209",
+              name: "web_search",
+              max_uses: 6,
+            } satisfies Anthropic.Beta.BetaWebSearchTool20260209,
+            {
+              type: "web_fetch_20260209",
+              name: "web_fetch",
+              max_uses: 4,
+            } satisfies Anthropic.Beta.BetaWebFetchTool20260209,
+          ]
+        : []),
+    ];
+    let webSearches = 0;
     const messages: Anthropic.Beta.BetaMessageParam[] = request.messages.map(
       (m) => ({ role: m.role, content: m.content }),
     );
@@ -176,9 +245,20 @@ export function anthropicAdapter(
           emit({ type: "thinking", text: delta }),
         );
         stream.on("text", (delta) => emit({ type: "text", text: delta }));
+        stream.on("contentBlock", (block) => {
+          if (block.type === "server_tool_use")
+            emit({ type: "server_tool", name: block.name, input: block.input });
+        });
       }
       const message = await stream.finalMessage();
       addUsage(meter, message.model, message.usage, env.price);
+      const searches =
+        Number(
+          (message.usage as { server_tool_use?: { web_search_requests?: number } })
+            .server_tool_use?.web_search_requests,
+        ) || 0;
+      webSearches += searches;
+      meter.cost += searches * WEB_SEARCH_PRICE;
       if (message.stop_reason === "refusal")
         throw new LlmError(
           422,
@@ -215,11 +295,7 @@ export function anthropicAdapter(
         messages.push({ role: "user", content: results });
         continue;
       }
-      const text = message.content
-        .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text")
-        .map((b) => b.text)
-        .join("")
-        .trim();
+      const text = answerText(message.content as Block[], request.onCitation);
       if (!text) {
         // Terminou só raciocinando (ou sem espaço): pede a resposta com o
         // que já encontrou, sem novas ferramentas.
@@ -251,6 +327,7 @@ export function anthropicAdapter(
             : text,
         meter,
         rounds: round,
+        webSearches,
       };
     }
   };

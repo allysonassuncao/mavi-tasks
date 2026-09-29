@@ -14,8 +14,12 @@ import {
   IMAGE_SIZES,
   PRIORITIES,
   VISUAL_UNITS,
+  SLIDE_LAYOUTS,
+  SLIDE_THEMES,
   artifactSummary,
+  sanitizeCanvas,
   sanitizeVisual,
+  type CanvasArtifact,
   type ActionArtifact,
   type AiArtifact,
   type ImageArtifact,
@@ -42,7 +46,8 @@ import type { ProviderModel } from "../src/ai-providers.js";
  * cada chamada.
  */
 
-export type ToolKind = "read" | "visual" | "image" | "action" | "skill";
+export type ToolKind =
+  "read" | "visual" | "image" | "action" | "skill" | "canvas" | "web";
 export type ToolMeta = { kind: ToolKind; power?: Power; timeoutMs: number };
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -219,6 +224,103 @@ export const POWER_TOOLS: ToolSpec[] = [
     ),
   },
   {
+    name: "create_document",
+    description:
+      "Escreve um documento no canvas ao lado da conversa (relatório, proposta, briefing, ata, plano, roteiro, e-mail longo), que a pessoa lê e baixa em Word ou PDF. Use Markdown completo: títulos (#, ##), listas, tabelas, negrito. Para ajustar um documento desta conversa, leia com read_canvas e mande a versão nova inteira com revises. Devolve a referência (ex.: D1).",
+    parameters: obj(
+      {
+        title: { type: "string", description: "O título do documento." },
+        markdown: { type: "string", description: "O documento inteiro, em Markdown." },
+        revises: { type: "string", description: "Opcional: a referência do documento que esta versão ajusta (ex.: D1)." },
+      },
+      ["title", "markdown"],
+    ),
+  },
+  {
+    name: "create_presentation",
+    description:
+      "Monta uma apresentação (slides) no canvas, que a pessoa navega e baixa em PowerPoint ou PDF. Use quando pedirem apresentação, slides, deck ou pitch. Uma ideia por slide, tópicos curtos (até 6, com até 12 palavras), layouts variados e notas do apresentador com o que falar. Para ajustar, leia com read_canvas e mande a versão nova inteira com revises. Devolve a referência (ex.: D2).",
+    parameters: obj(
+      {
+        title: { type: "string" },
+        theme: { type: "string", enum: SLIDE_THEMES, description: "claro (padrão), escuro ou verde." },
+        slides: {
+          type: "array",
+          description: "De 1 a 40 slides, na ordem.",
+          items: obj(
+            {
+              layout: {
+                type: "string",
+                enum: SLIDE_LAYOUTS,
+                description:
+                  "title (capa), section (abertura de seção), bullets (título e tópicos), two_columns (comparação), stats (2 a 4 números em destaque), quote (citação), image (uma imagem desta conversa, ex.: I1, com tópicos opcionais), closing (encerramento).",
+              },
+              title: { type: "string" },
+              subtitle: { type: "string" },
+              bullets: { type: "array", items: { type: "string" } },
+              left_title: { type: "string" },
+              left: { type: "array", items: { type: "string" } },
+              right_title: { type: "string" },
+              right: { type: "array", items: { type: "string" } },
+              stats: {
+                type: "array",
+                items: obj({ value: { type: "string" }, label: { type: "string" } }, ["value", "label"]),
+              },
+              quote: { type: "string" },
+              author: { type: "string" },
+              image: { type: "string", description: "A referência de uma imagem desta conversa (ex.: I1)." },
+              notes: { type: "string", description: "O que falar neste slide." },
+            },
+            ["layout", "title"],
+          ),
+        },
+        revises: { type: "string", description: "Opcional: a apresentação que esta versão ajusta (ex.: D2)." },
+      },
+      ["title", "slides"],
+    ),
+  },
+  {
+    name: "create_spreadsheet",
+    description:
+      "Monta uma planilha no canvas (uma ou mais abas), que a pessoa baixa em Excel ou CSV. Use quando pedirem planilha, tabela para editar, lista para importar ou controle. Números como números (sem R$ ou % no valor; diga a unidade da coluna). Até 1.000 linhas por aba. Devolve a referência (ex.: D3).",
+    parameters: obj(
+      {
+        title: { type: "string" },
+        sheets: {
+          type: "array",
+          items: obj(
+            {
+              name: { type: "string", description: "O nome da aba." },
+              columns: {
+                type: "array",
+                items: obj(
+                  {
+                    label: { type: "string" },
+                    unit: { type: "string", enum: ["text", ...VISUAL_UNITS] },
+                  },
+                  ["label"],
+                ),
+              },
+              rows: {
+                type: "array",
+                items: { type: "array", items: { type: ["string", "number", "null"] } },
+              },
+            },
+            ["name", "columns", "rows"],
+          ),
+        },
+        revises: { type: "string", description: "Opcional: a planilha que esta versão ajusta (ex.: D3)." },
+      },
+      ["title", "sheets"],
+    ),
+  },
+  {
+    name: "read_canvas",
+    description:
+      "Lê o conteúdo atual de um documento, apresentação ou planilha desta conversa (D1, D2…), para ajustar sem perder o que já estava.",
+    parameters: obj({ ref: { type: "string", description: "A referência (ex.: D1)." } }, ["ref"]),
+  },
+  {
     name: "propose_task",
     description:
       "Propõe criar uma tarefa. NÃO cria: aparece um card para a pessoa revisar e confirmar no formulário de sempre. Use quando a pessoa pedir para criar uma tarefa. Precisa do cliente (id, de find_clients ou do contexto) e, se ele tiver mais de um produto contratado, do produto.",
@@ -267,6 +369,13 @@ export const REGISTRY: Record<string, ToolMeta> = {
   generate_image: { kind: "image", power: "images", timeoutMs: 170_000 },
   propose_task: { kind: "action", power: "actions", timeoutMs: 20_000 },
   propose_comment: { kind: "action", power: "actions", timeoutMs: 20_000 },
+  create_document: { kind: "canvas", power: "canvas", timeoutMs: 10_000 },
+  create_presentation: { kind: "canvas", power: "canvas", timeoutMs: 10_000 },
+  create_spreadsheet: { kind: "canvas", power: "canvas", timeoutMs: 10_000 },
+  read_canvas: { kind: "canvas", power: "canvas", timeoutMs: 5_000 },
+  // A busca da Claude roda no servidor dela: só para o registro.
+  web_search: { kind: "web", power: "web", timeoutMs: 0 },
+  web_fetch: { kind: "web", power: "web", timeoutMs: 0 },
   use_skill: { kind: "skill", power: "skills", timeoutMs: 15_000 },
   read_skill_file: { kind: "skill", power: "skills", timeoutMs: 15_000 },
 };
@@ -282,9 +391,24 @@ export function toolsFor(powers: ReadonlySet<Power>): ToolSpec[] {
   ];
 }
 
+const POWER_NAMES: Record<Power, string> = {
+  visuals: "visualizações (gráficos, tabelas, indicadores)",
+  images: "imagens",
+  actions: "ações (criar tarefa, comentar)",
+  skills: "skills",
+  canvas: "documentos, apresentações e planilhas",
+  web: "busca na internet",
+};
+
 /** O que muda nas instruções da MAVI quando ela tem poderes. */
-export function powerInstructions(powers: ReadonlySet<Power>) {
-  if (!powers.size) return "";
+export function powerInstructions(powers: ReadonlySet<Power>, onPage = false) {
+  // No módulo, a MAVI sabe o que está desligado (e diz, em vez de improvisar).
+  const off = (Object.keys(POWER_NAMES) as Power[]).filter((p) => !powers.has(p));
+  const offLine =
+    onPage && off.length
+      ? `\nPoderes desligados para esta pessoa: ${off.map((p) => POWER_NAMES[p]).join(", ")}. Se o pedido precisar de um deles, faça o que der e diga que um administrador ou gestor liga em Painel da MAVI › Poderes.`
+      : "";
+  if (!powers.size) return offLine ? `\n${offLine}` : "";
   const lines = [
     "",
     "Poderes liberados nesta conversa (além de consultar):",
@@ -297,6 +421,14 @@ export function powerInstructions(powers: ReadonlySet<Power>) {
     lines.push(
       "- Imagens (generate_image): quando pedirem uma imagem, arte, ilustração, mockup ou foto conceitual. Escreva um prompt detalhado; o texto que deve aparecer na arte vai entre aspas, em português. Para ajustar uma imagem desta conversa, use edit_ref (ex.: I1). Não gere pessoas reais identificáveis nem logos e marcas de terceiros; para a marca do cliente, peça os arquivos dele.",
     );
+  if (powers.has("canvas"))
+    lines.push(
+      "- Documentos, apresentações e planilhas (create_document, create_presentation, create_spreadsheet): quando pedirem um relatório, proposta, briefing, ata, plano, roteiro, apresentação, slides, deck, pitch, planilha ou tabela para editar, crie no canvas em vez de escrever tudo na conversa. Antes, busque os dados que o conteúdo precisa. Para ajustar um que já existe nesta conversa, leia com read_canvas e mande a versão inteira com revises. Na resposta, só [[D1]] e um resumo curto do que foi feito; não repita o conteúdo.",
+    );
+  if (powers.has("web"))
+    lines.push(
+      "- Busca na internet (web_search e web_fetch): para o que não está no sistema — notícias, concorrentes, tendências, dados públicos, referências, a página de um link. Busque antes de afirmar algo recente e diga de onde veio (as páginas citadas viram fontes). Deixe claro o que veio da internet e o que veio do sistema da agência.",
+    );
   if (powers.has("actions"))
     lines.push(
       "- Ações (propose_task, propose_comment): quando a pessoa pedir para criar uma tarefa ou comentar numa. Você só propõe: a pessoa confirma no card. Nunca diga que a tarefa foi criada ou o comentário enviado; diga que está pronto para ela revisar e confirmar. Antes, confirme o cliente com find_clients quando não estiver no contexto.",
@@ -304,7 +436,7 @@ export function powerInstructions(powers: ReadonlySet<Power>) {
   lines.push(
     "- Cada ferramenta dessas devolve uma referência (V1, I1, A1). Na resposta, escreva a referência entre colchetes duplos sozinha numa linha (ex.: [[V1]]) no ponto em que ela deve aparecer, e comente o essencial em texto, sem repetir todos os números. As citações [S#] continuam valendo no texto.",
   );
-  return lines.join("\n");
+  return lines.join("\n") + offLine;
 }
 
 // ------------------------------------------------------------ execução
@@ -325,8 +457,10 @@ export type PowerKit = {
   artifacts: AiArtifact[];
   /** Imagens das respostas anteriores da conversa (ref → caminho). */
   priorImages: Map<string, string>;
-  /** O próximo número de cada tipo de referência (V, I, A). */
-  next: Record<"V" | "I" | "A", number>;
+  /** O próximo número de cada tipo de referência (V, I, A, D). */
+  next: Record<"V" | "I" | "A" | "D", number>;
+  /** Documentos, apresentações e planilhas das respostas anteriores (ref → anexo). */
+  priorCanvas: Map<string, CanvasArtifact>;
   emit: (artifact: AiArtifact) => void;
   /** Gasto com imagens nesta resposta (para o consumo). */
   imageCost: { usd: number; model: string; provider: string | null };
@@ -340,7 +474,7 @@ const fold = (s: string) =>
 
 function add<T extends AiArtifact>(
   kit: PowerKit,
-  letter: "V" | "I" | "A",
+  letter: "V" | "I" | "A" | "D",
   a: Omit<T, "id" | "ref">,
 ) {
   const artifact = {
@@ -455,24 +589,27 @@ async function gcsGet(env: ImageEnv, fetchImpl: typeof fetch, path: string) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-async function generateImage(kit: PowerKit, input: Record<string, unknown>) {
+type Made =
+  | {
+      bytes: Uint8Array;
+      usage?: { input_tokens?: number; output_tokens?: number };
+      cost?: number;
+    }
+  | string;
+const refused = (why: string, code = "") =>
+  /safety|policy|moderation|content/i.test(`${why} ${code}`)
+    ? "O provedor recusou gerar esta imagem pelas regras de conteúdo dele. Explique à pessoa e sugira outro caminho."
+    : null;
+
+/** OpenAI e compatíveis (Google Imagen, xAI): /images/generations e /images/edits. */
+async function openAiImage(
+  kit: PowerKit,
+  provider: ProviderConfig,
+  prompt: string,
+  size: ImageSize,
+  source: string | undefined,
+): Promise<Made> {
   const { ctx, env } = kit;
-  const prompt = str(input.prompt).slice(0, 4000);
-  if (prompt.length < 3) return "Descreva a imagem no prompt.";
-  const size = (["square", "portrait", "landscape"] as const).includes(input.size as ImageSize)
-    ? (input.size as ImageSize)
-    : "square";
-  const editRef = str(input.edit_ref).toUpperCase();
-  const source = editRef
-    ? (kit.artifacts.find(
-        (a): a is ImageArtifact => a.type === "image" && a.ref === editRef,
-      )?.path ?? kit.priorImages.get(editRef))
-    : undefined;
-  if (editRef && !source)
-    return `Não achei a imagem ${editRef} nesta conversa. Gere uma nova com o prompt completo.`;
-  if (!env.credentials || !env.bucket)
-    throw new Error("Credenciais do GCS não configuradas para guardar a imagem.");
-  const provider = await imageProvider(kit);
   const headers = { Authorization: `Bearer ${provider.apiKey}` };
   const gptImage = /gpt-image/i.test(provider.model);
   let res: Response;
@@ -517,18 +654,112 @@ async function generateImage(kit: PowerKit, input: Record<string, unknown>) {
   };
   if (!res.ok) {
     const why = body.error?.message ?? `erro ${res.status}`;
-    if (/safety|policy|moderation/i.test(`${why} ${body.error?.code ?? ""}`))
-      return "O provedor recusou gerar esta imagem pelas regras de conteúdo dele. Explique à pessoa e sugira outro caminho.";
+    const no = refused(why, body.error?.code);
+    if (no) return no;
     throw new Error(`O provedor de imagem respondeu: ${why.slice(0, 200)}`);
   }
   const first = body.data?.[0];
-  let bytes: Uint8Array;
-  if (first?.b64_json) bytes = Buffer.from(first.b64_json, "base64");
-  else if (first?.url && /^https:\/\//.test(first.url)) {
+  if (first?.b64_json) return { bytes: Buffer.from(first.b64_json, "base64"), usage: body.usage };
+  if (first?.url && /^https:\/\//.test(first.url)) {
     const img = await ctx.fetch(first.url, { signal: AbortSignal.timeout(60_000) });
     if (!img.ok) throw new Error("Não foi possível baixar a imagem gerada.");
+    return { bytes: new Uint8Array(await img.arrayBuffer()), usage: body.usage };
+  }
+  throw new Error("O provedor não devolveu a imagem.");
+}
+
+/**
+ * OpenRouter: os modelos de imagem (Gemini, GPT, Flux…) respondem pelo chat,
+ * com modalities ["image", "text"]; para editar, a imagem vai junto.
+ */
+async function openRouterImage(
+  kit: PowerKit,
+  provider: ProviderConfig,
+  prompt: string,
+  size: ImageSize,
+  source: string | undefined,
+): Promise<Made> {
+  const { ctx, env } = kit;
+  const content: unknown[] = [{ type: "text", text: prompt }];
+  if (source)
+    content.push({
+      type: "image_url",
+      image_url: {
+        url: `data:image/png;base64,${Buffer.from(await gcsGet(env, ctx.fetch, source)).toString("base64")}`,
+      },
+    });
+  const res = await ctx.fetch(`${provider.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${provider.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: provider.model,
+      messages: [{ role: "user", content }],
+      modalities: ["image", "text"],
+      image_config: { aspect_ratio: { square: "1:1", portrait: "2:3", landscape: "3:2" }[size] },
+      usage: { include: true },
+    }),
+    signal: AbortSignal.timeout(160_000),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    choices?: {
+      message?: { content?: string | null; images?: { image_url?: { url?: string } }[] };
+    }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+    error?: { message?: string; code?: string | number };
+  };
+  if (!res.ok) {
+    const why = body.error?.message ?? `erro ${res.status}`;
+    const no = refused(why, String(body.error?.code ?? ""));
+    if (no) return no;
+    throw new Error(`O OpenRouter respondeu: ${why.slice(0, 200)}`);
+  }
+  const url = body.choices?.[0]?.message?.images?.[0]?.image_url?.url ?? "";
+  const data = url.match(/^data:image\/[a-z+]+;base64,(.+)$/i);
+  let bytes: Uint8Array;
+  if (data) bytes = Buffer.from(data[1], "base64");
+  else if (/^https:\/\//.test(url)) {
+    const img = await ctx.fetch(url, { signal: AbortSignal.timeout(60_000) });
+    if (!img.ok) throw new Error("Não foi possível baixar a imagem gerada.");
     bytes = new Uint8Array(await img.arrayBuffer());
-  } else throw new Error("O provedor não devolveu a imagem.");
+  } else {
+    const said = body.choices?.[0]?.message?.content?.trim();
+    return `O modelo ${provider.model} não devolveu uma imagem${said ? ` (respondeu: “${said.slice(0, 200)}”)` : ""}. Confira se ele gera imagens no OpenRouter, ou gere de novo com outro prompt.`;
+  }
+  const usage = {
+    input_tokens: Number(body.usage?.prompt_tokens) || 0,
+    output_tokens: Number(body.usage?.completion_tokens) || 0,
+  };
+  const cost = Number(body.usage?.cost);
+  return { bytes, usage, ...(Number.isFinite(cost) && cost >= 0 ? { cost } : {}) };
+}
+
+async function generateImage(kit: PowerKit, input: Record<string, unknown>) {
+  const { ctx, env } = kit;
+  const prompt = str(input.prompt).slice(0, 4000);
+  if (prompt.length < 3) return "Descreva a imagem no prompt.";
+  const size = (["square", "portrait", "landscape"] as const).includes(input.size as ImageSize)
+    ? (input.size as ImageSize)
+    : "square";
+  const editRef = str(input.edit_ref).toUpperCase();
+  const source = editRef
+    ? (kit.artifacts.find(
+        (a): a is ImageArtifact => a.type === "image" && a.ref === editRef,
+      )?.path ?? kit.priorImages.get(editRef))
+    : undefined;
+  if (editRef && !source)
+    return `Não achei a imagem ${editRef} nesta conversa. Gere uma nova com o prompt completo.`;
+  if (!env.credentials || !env.bucket)
+    throw new Error("Credenciais do GCS não configuradas para guardar a imagem.");
+  const provider = await imageProvider(kit);
+  const made =
+    provider.kind === "openrouter"
+      ? await openRouterImage(kit, provider, prompt, size, source)
+      : await openAiImage(kit, provider, prompt, size, source);
+  if (typeof made === "string") return made;
+  const { bytes, usage } = made;
   const path = `ai-images/${ctx.company}/${crypto.randomUUID()}.png`;
   const put = await ctx.fetch(
     signGcsUrl(env.credentials, env.bucket, path, "PUT", { contentType: "image/png" }),
@@ -540,7 +771,8 @@ async function generateImage(kit: PowerKit, input: Record<string, unknown>) {
     },
   );
   if (!put.ok) throw new Error(`Não foi possível guardar a imagem (${put.status}).`);
-  const cost = imageCost(provider.model, provider.price, body.usage);
+  // O OpenRouter diz o custo; senão, pelos tokens ou pela tabela.
+  const cost = made.cost ?? imageCost(provider.model, provider.price, usage);
   kit.imageCost.usd += cost;
   kit.imageCost.model = provider.model;
   kit.imageCost.provider = provider.providerId;
@@ -553,8 +785,8 @@ async function generateImage(kit: PowerKit, input: Record<string, unknown>) {
     p_project: ctx.scope.project ?? null,
     p_recording: null,
     p_model: provider.model,
-    p_input: Number(body.usage?.input_tokens) || 0,
-    p_output: Number(body.usage?.output_tokens) || 0,
+    p_input: Number(usage?.input_tokens) || 0,
+    p_output: Number(usage?.output_tokens) || 0,
     p_cache_read: 0,
     p_cache_write: 0,
     p_embedding: 0,
@@ -571,6 +803,48 @@ async function generateImage(kit: PowerKit, input: Record<string, unknown>) {
     url: signGcsUrl(env.credentials, env.bucket, path, "GET", { expiresInSeconds: 3600 }),
   });
   return `Imagem pronta, mostrada para a pessoa como ${a.ref}. Na resposta, escreva [[${a.ref}]] sozinho numa linha e diga em uma frase o que foi feito (sem descrever o prompt inteiro).`;
+}
+
+// ------------------------------------------------------------ canvas
+function findCanvas(kit: PowerKit, ref: string) {
+  const r = ref.toUpperCase();
+  return (
+    [...kit.artifacts].reverse().find(
+      (a): a is CanvasArtifact => a.type === "canvas" && a.ref === r,
+    ) ?? kit.priorCanvas.get(r)
+  );
+}
+function createCanvas(kit: PowerKit, name: string, input: Record<string, unknown>) {
+  const kind =
+    name === "create_document" ? "document" : name === "create_presentation" ? "slides" : "sheet";
+  const canvas = sanitizeCanvas({ ...input, kind });
+  if (!canvas)
+    return kind === "document"
+      ? "Não deu para criar: mande o documento inteiro em markdown."
+      : kind === "slides"
+        ? "Não deu para criar: mande pelo menos um slide com título."
+        : "Não deu para criar: cada aba precisa de colunas e linhas.";
+  const revises = str(input.revises).toUpperCase();
+  const previous = revises ? findCanvas(kit, revises) : undefined;
+  if (canvas.kind === "slides") {
+    const missing = canvas.slides
+      .map((s) => s.image)
+      .filter((i): i is string => !!i)
+      .filter((i) => !kit.priorImages.has(i) && !kit.artifacts.some((a) => a.type === "image" && a.ref === i));
+    if (missing.length)
+      return `As imagens ${missing.join(", ")} não existem nesta conversa: gere antes com generate_image ou tire dos slides.`;
+  }
+  const a = add<CanvasArtifact>(kit, "D", {
+    type: "canvas",
+    canvas,
+    ...(previous ? { revision_of: previous.ref } : {}),
+  });
+  return `Pronto no canvas como ${a.ref} (${artifactSummary(a)}), aberto ao lado da conversa. Na resposta, escreva [[${a.ref}]] sozinho numa linha e um resumo curto (não repita o conteúdo).`;
+}
+function readCanvas(kit: PowerKit, input: Record<string, unknown>) {
+  const a = findCanvas(kit, str(input.ref));
+  if (!a) return `Não há ${str(input.ref) || "esse documento"} nesta conversa.`;
+  return `${artifactSummary(a)} (${a.ref}), no formato em que foi criado:\n${JSON.stringify(a.canvas).slice(0, 80_000)}`;
 }
 
 // ------------------------------------------------------------ ações
@@ -673,6 +947,8 @@ export async function runPowerTool(kit: PowerKit, name: string, raw: unknown) {
       ? (raw as Record<string, unknown>)
       : {};
   if (name.startsWith("show_")) return showVisual(kit, name, input);
+  if (name === "read_canvas") return readCanvas(kit, input);
+  if (name.startsWith("create_")) return createCanvas(kit, name, input);
   if (name === "generate_image") return generateImage(kit, input);
   if (name === "propose_task") return proposeTask(kit, input);
   if (name === "propose_comment") return proposeComment(kit, input);
@@ -688,12 +964,16 @@ export function describePowerStep(name: string, raw: unknown) {
   if (name === "show_timeline") return `Montando a linha do tempo${t ? ` “${t}”` : ""}`;
   if (name === "generate_image")
     return str(input.edit_ref) ? `Editando a imagem ${str(input.edit_ref).toUpperCase()}` : "Gerando a imagem";
+  if (name === "create_document") return `Escrevendo o documento${t ? ` “${t}”` : ""}`;
+  if (name === "create_presentation") return `Montando a apresentação${t ? ` “${t}”` : ""}`;
+  if (name === "create_spreadsheet") return `Montando a planilha${t ? ` “${t}”` : ""}`;
+  if (name === "read_canvas") return `Lendo ${str(input.ref).toUpperCase() || "o documento"}`;
   if (name === "propose_task") return `Preparando a tarefa${t ? ` “${t}”` : ""} para você confirmar`;
   if (name === "propose_comment") return "Preparando o comentário para você confirmar";
   return "Trabalhando";
 }
 export function summarizePowerStep(name: string, output: string) {
-  if (/^(Mostrado|Imagem pronta|Proposta pronta)/.test(output))
+  if (/^(Mostrado|Imagem pronta|Proposta pronta|Pronto no canvas)/.test(output))
     return name.startsWith("propose_") ? "aguardando sua confirmação" : "pronto";
   return "não deu";
 }

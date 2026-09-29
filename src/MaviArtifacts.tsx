@@ -29,9 +29,11 @@ import { Modal } from "./components";
 import { imageUrls, setActionState } from "./ai";
 import { priorities } from "./types";
 import type { FormPreset } from "./forms";
+import { CanvasCard } from "./MaviCanvas";
 import type {
   ActionArtifact,
   AiArtifact,
+  CanvasArtifact,
   ChartVisual,
   ImageArtifact,
   KpisVisual,
@@ -61,6 +63,8 @@ export type ArtifactHost = {
   taskHref: (task: string) => string;
   /** Escreve na caixa de mensagem (ex.: pedir um ajuste da imagem). */
   onDraft: (text: string) => void;
+  /** Abre o documento, a apresentação ou a planilha no canvas. */
+  onOpenCanvas: (artifact: CanvasArtifact) => void;
   notify: (message: string) => void;
 };
 
@@ -75,6 +79,8 @@ export function ArtifactView({
     return <VisualCard visual={artifact.visual} refName={artifact.ref} />;
   if (artifact.type === "image")
     return <ImageCard image={artifact} host={host} />;
+  if (artifact.type === "canvas")
+    return <CanvasCard artifact={artifact} onOpen={() => host.onOpenCanvas(artifact)} />;
   return <ActionCard artifact={artifact} host={host} />;
 }
 
@@ -388,10 +394,20 @@ function TimelineBody({ visual }: { visual: TimelineVisual }) {
 }
 
 // ------------------------------------------------------------ imagens
+/** O link (ou null) de uma imagem da conversa, fora dos componentes (exportar). */
+export async function imageLink(company: string, image: ImageArtifact) {
+  if (image.url) return image.url;
+  const cached = imageCache.get(image.path);
+  if (cached && Date.now() - cached.at < 50 * 60_000) return cached.url;
+  const urls = await imageUrls(company, [image.path]);
+  const u = urls[image.path];
+  if (u) imageCache.set(image.path, { url: u, at: Date.now() });
+  return u ?? null;
+}
 /** Links assinados valem uma hora: guardados por 50 minutos. */
 const imageCache = new Map<string, { url: string; at: number }>();
 const pending = new Map<string, Promise<Record<string, string>>>();
-function useImageUrl(company: string, image: ImageArtifact) {
+export function useImageUrl(company: string, image: ImageArtifact) {
   const cached = imageCache.get(image.path);
   const fresh = cached && Date.now() - cached.at < 50 * 60_000;
   const [url, setUrl] = useState(image.url ?? (fresh ? cached!.url : ""));

@@ -22,6 +22,7 @@ import { Modal } from "./components";
 import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import { AudienceFields, type Audience } from "./AiPowersPanel";
+import { myPowers } from "./ai";
 import {
   LIMITS,
   STATE_LABELS,
@@ -83,11 +84,14 @@ export function SkillsPage({
   onOpen,
   onTest,
   onChanged,
+  powersHref,
   notify,
 }: {
   company: string;
   data: Snapshot;
   isLeader: boolean;
+  /** Painel da MAVI › Poderes. */
+  powersHref: string;
   /** A skill do endereço (/mavi/skills/<id>). */
   skillId: string | null;
   href: (id: string | null) => string;
@@ -104,7 +108,14 @@ export function SkillsPage({
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Editing | null>(null);
   const [tick, setTick] = useState(0);
+  // Sem o poder Skills, ninguém usa nem testa: a tela avisa.
+  const [skillsOn, setSkillsOn] = useState(true);
   const importer = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    myPowers(company)
+      .then((p) => setSkillsOn(Array.isArray(p) && p.includes("skills")))
+      .catch(() => {});
+  }, [company]);
 
   useEffect(() => {
     listSkills(company)
@@ -147,6 +158,14 @@ export function SkillsPage({
     }
   }
 
+  const off = !skillsOn && (
+    <p className="panel skill-note skills-off">
+      O poder <strong>Skills</strong> está desligado para você: dá para criar e
+      editar, mas a MAVI só usa (e você só testa) depois que um administrador
+      ou gestor ligar em{" "}
+      <a href={powersHref}>Painel da MAVI › Poderes</a>.
+    </p>
+  );
   if (editing)
     return (
       <SkillEditor
@@ -164,6 +183,8 @@ export function SkillsPage({
     );
   if (skillId)
     return (
+      <>
+      {off}
       <SkillView
         key={`${skillId}-${tick}`}
         id={skillId}
@@ -192,6 +213,7 @@ export function SkillsPage({
         }}
         notify={notify}
       />
+      </>
     );
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
@@ -206,6 +228,7 @@ export function SkillsPage({
   ];
   return (
     <div className="skills-page">
+      {off}
       <div className="skills-toolbar">
         <div className="drive-view drive-tabs" role="tablist">
           {tabs.map((t) => (
@@ -474,18 +497,18 @@ function SkillView({
           </span>
         </div>
         <div className="skill-actions">
-          {detail.available && detail.published && (
+          {detail.available && detail.published && !detail.editable && (
             <Button className="btn secondary" onClick={() => onTest(detail.slug)}>
               <MessageSquare size={15} /> Usar na conversa
             </Button>
           )}
-          {detail.editable && detail.published !== v.version && !detail.archived && (
+          {detail.editable && !detail.archived && (
             <Button
               className="btn secondary"
               onClick={() => onTest(detail.slug, v.version)}
-              title="Abre uma conversa nova com esta versão (só você vê)"
+              title="Abre uma conversa nova com esta versão (só quem edita a skill usa assim)"
             >
-              <FlaskConical size={15} /> Testar esta versão
+              <FlaskConical size={15} /> Testar na conversa
             </Button>
           )}
           {detail.editable && viewingLatest && !detail.archived && (

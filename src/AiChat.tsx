@@ -11,6 +11,7 @@ import {
   CheckSquare,
   ChevronRight,
   FileText,
+  Globe,
   Loader2,
   Megaphone,
   MessageCircle,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import { answerPieces, type ChatTurn } from "./meetings";
 import { ARTIFACT_LINE, type AiArtifact } from "./mavi-artifacts";
+import { MaviMarkdown } from "./MaviMarkdown";
 import {
   sourceLabel,
   type AiAnswer,
@@ -61,6 +63,7 @@ export function AnswerText({
   onSource,
   showSources = true,
   renderArtifact,
+  rich = false,
 }: {
   text: string;
   onTime?: (seconds: number) => void;
@@ -72,6 +75,8 @@ export function AnswerText({
    * vira um aviso de que o anexo está no módulo.
    */
   renderArtifact?: (ref: string) => ReactNode;
+  /** Markdown completo (títulos, tabelas, código): o módulo MAVI. */
+  rich?: boolean;
 }) {
   const byRef = new Map(sources.map((s) => [s.ref, s]));
   const render = (line: string) =>
@@ -105,6 +110,15 @@ export function AnswerText({
         </button>
       ) : null,
     );
+  if (rich)
+    return (
+      <div className="answer-text rich">
+        <MaviMarkdown text={text} inline={render} renderArtifact={renderArtifact} />
+        {showSources && sources.length > 0 && (
+          <AnswerSources sources={sources} onSource={onSource} />
+        )}
+      </div>
+    );
   const out: ReactNode[] = [];
   let list: ReactNode[] = [];
   const flush = () => {
@@ -130,7 +144,7 @@ export function AnswerText({
       return;
     }
     // Uma referência no meio da frase não aparece (o anexo tem o seu lugar).
-    const line = raw.replace(/\s?\[\[[VIA]\d{1,2}\]\]/g, "");
+    const line = raw.replace(/\s?\[\[[VIAD]\d{1,2}\]\]/g, "");
     const item = line.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/);
     if (item) list.push(<li key={i}>{render(item[1])}</li>);
     else {
@@ -144,26 +158,38 @@ export function AnswerText({
     <div className="answer-text">
       {out}
       {showSources && sources.length > 0 && (
-        <div className="answer-sources">
-          <small>Fontes</small>
-          <ul>
-            {sources.map((s) => (
-              <li key={s.ref}>
-                <button
-                  type="button"
-                  onClick={() => onSource?.(s)}
-                  disabled={!onSource}
-                  title={sourceLabel(s)}
-                >
-                  <SourceIcon type={s.type} />
-                  <span>{s.title}</span>
-                  <small>{sourceLabel(s)}</small>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <AnswerSources sources={sources} onSource={onSource} />
       )}
+    </div>
+  );
+}
+
+function AnswerSources({
+  sources,
+  onSource,
+}: {
+  sources: AiSource[];
+  onSource?: (source: AiSource) => void;
+}) {
+  return (
+    <div className="answer-sources">
+      <small>Fontes</small>
+      <ul>
+        {sources.map((s) => (
+          <li key={s.ref}>
+            <button
+              type="button"
+              onClick={() => onSource?.(s)}
+              disabled={!onSource}
+              title={sourceLabel(s)}
+            >
+              <SourceIcon type={s.type} />
+              <span>{s.title}</span>
+              <small>{sourceLabel(s)}</small>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -176,6 +202,7 @@ const SOURCE_ICONS = {
   campaign: Megaphone,
   case: Trophy,
   whatsapp: MessageCircle,
+  web: Globe,
 };
 function SourceIcon({ type }: { type: AiSource["type"] }) {
   const Icon = SOURCE_ICONS[type] ?? FileText;
@@ -205,7 +232,7 @@ export function useTypewriter(target: string, animate: boolean) {
 
 /** Esconde o fim ainda incompleto: "[S1" ou "[[V1]" sem fechar, "**" sem par, "*" solto. */
 export function hidePartial(text: string) {
-  let t = text.replace(/\[\[[VIA]?\d{0,2}\]?$/, "").replace(/\[[^\]\n]*$/, "");
+  let t = text.replace(/\[\[[VIAD]?\d{0,2}\]?$/, "").replace(/\[[^\]\n]*$/, "");
   if ((t.match(/\*\*/g) ?? []).length % 2) t = t.slice(0, t.lastIndexOf("**"));
   return t.replace(/(^|[^*])\*$/, "$1");
 }

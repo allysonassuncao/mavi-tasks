@@ -26,7 +26,12 @@ import {
 } from "lucide-react";
 import { Loading, Select, SelectOption } from "./ui";
 import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
-import { ARTIFACT_LINE } from "./mavi-artifacts";
+import { CanvasPanel } from "./MaviCanvas";
+import {
+  ARTIFACT_LINE,
+  type CanvasArtifact,
+  type ImageArtifact,
+} from "./mavi-artifacts";
 import type { FormPreset } from "./forms";
 import { skillCatalog } from "./mavi-skills";
 
@@ -705,7 +710,7 @@ function ChatThread({
   send: AiSend;
   onAnswer: (answer: AiAnswer, question: string) => void;
   onNew: () => void;
-  host: Omit<ArtifactHost, "readOnly" | "streaming" | "onDraft">;
+  host: Omit<ArtifactHost, "readOnly" | "streaming" | "onDraft" | "onOpenCanvas">;
 }) {
   const chat = useAiTurns({ initial, send, readOnly, onAnswer });
   const { turns, busy } = chat;
@@ -737,9 +742,26 @@ function ChatThread({
     if (!(await chat.submit(question))) setDraft(question.trim());
     input.current?.focus();
   }
+  // O canvas: abre sozinho quando a MAVI cria ou ajusta um documento.
+  const [canvas, setCanvas] = useState<CanvasArtifact | null>(null);
+  const seen = useRef(
+    new Set(initial.flatMap((t) => (t.artifacts ?? []).map((a) => a.id))),
+  );
+  useEffect(() => {
+    const last = turns[turns.length - 1];
+    const fresh = (last?.artifacts ?? []).filter(
+      (a): a is CanvasArtifact => a.type === "canvas" && !seen.current.has(a.id),
+    );
+    for (const a of last?.artifacts ?? []) seen.current.add(a.id);
+    if (fresh.length) setCanvas(fresh[fresh.length - 1]);
+  }, [turns]);
+  const images = new Map<string, ImageArtifact>();
+  for (const t of turns)
+    for (const a of t.artifacts ?? []) if (a.type === "image") images.set(a.ref, a);
   const artifactHost = {
     ...host,
     readOnly,
+    onOpenCanvas: (a: CanvasArtifact) => setCanvas(a),
     onDraft: (text: string) => {
       setDraft(text);
       requestAnimationFrame(() => {
@@ -847,7 +869,8 @@ function ChatThread({
     );
 
   return (
-    <div className="mavi-thread">
+    <div className={`mavi-thread${canvas ? " with-canvas" : ""}`}>
+      <div className="mavi-convo">
       <div
         ref={log}
         className="mavi-log"
@@ -888,6 +911,7 @@ function ChatThread({
                           text={text}
                           sources={typing ? [] : (t.sources ?? [])}
                           onSource={openAiSource}
+                          rich
                           renderArtifact={(ref) => {
                             const a = t.artifacts?.find((x) => x.ref === ref);
                             return a ? (
@@ -928,6 +952,16 @@ function ChatThread({
           A MAVI pode errar. Confira as fontes citadas em cada resposta.
         </p>
       </div>
+      </div>
+      {canvas && (
+        <CanvasPanel
+          key={canvas.id}
+          artifact={canvas}
+          host={{ ...artifactHost, streaming: false }}
+          images={images}
+          onClose={() => setCanvas(null)}
+        />
+      )}
     </div>
   );
 }

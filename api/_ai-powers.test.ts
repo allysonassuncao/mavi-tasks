@@ -98,7 +98,9 @@ describe("registro de ferramentas", () => {
       "show_kpis",
       "show_timeline",
     ]);
-    expect(toolsFor(new Set(["visuals", "images", "actions"]))).toHaveLength(
+    // 4 visualizações, 1 de imagem, 2 ações; o canvas tem as suas 4.
+    expect(toolsFor(new Set(["visuals", "images", "actions"]))).toHaveLength(TOOLS.length + 7);
+    expect(toolsFor(new Set(["visuals", "images", "actions", "canvas"]))).toHaveLength(
       TOOLS.length + POWER_TOOLS.length,
     );
     expect(powerInstructions(new Set())).toBe("");
@@ -427,5 +429,207 @@ describe("campanhas dia a dia", () => {
     expect(calls.filter((c) => c.url.includes("ad_daily_metrics"))).toHaveLength(1);
     const step = events.find((e) => e.type === "step" && e.id === "t1") as { label: string };
     expect(step.label).toBe("Conferindo os resultados diários das campanhas (de 23/09/2026 até 29/09/2026)");
+  });
+});
+
+import { answerText } from "./_ai-llm";
+import { seal } from "./_google";
+
+describe("canvas: documentos, apresentações e planilhas", () => {
+  it("cria no canvas, lê o anterior da conversa e registra o ajuste", async () => {
+    const { fetchImpl, calls } = world({
+      ...base(["canvas"]),
+      "ai_conversations?": [{ owner_id: me }],
+      "ai_messages?": [
+        {
+          role: "assistant",
+          content: "[[D1]]",
+          artifacts: [
+            {
+              id: "canvas-0001",
+              ref: "D1",
+              type: "canvas",
+              canvas: { kind: "document", title: "Proposta", markdown: "# Proposta\nTexto antigo da proposta." },
+            },
+          ],
+        },
+        { role: "user", content: "Faz a proposta" },
+      ],
+    });
+    const outputs: string[] = [];
+    let request: AgentRequest | undefined;
+    const llm: LlmAdapter = async (r) => {
+      request = r;
+      outputs.push(await r.execute("read_canvas", { ref: "d1" }));
+      outputs.push(
+        await r.execute("create_document", {
+          title: "Proposta v2",
+          markdown: "# Proposta\nTexto novo da proposta, com o preço.",
+          revises: "D1",
+        }),
+      );
+      outputs.push(
+        await r.execute("create_presentation", {
+          title: "Pitch",
+          slides: [
+            { layout: "title", title: "Pitch da Make" },
+            { layout: "image", title: "Arte", image: "I4" },
+          ],
+        }),
+      );
+      outputs.push(
+        await r.execute("create_spreadsheet", {
+          title: "Leads",
+          sheets: [{ name: "Setembro", columns: [{ label: "Dia" }, { label: "Leads", unit: "number" }], rows: [["01/09", 12]] }],
+        }),
+      );
+      return answer("[[D2]]\n[[D3]]");
+    };
+    const events: AiStreamEvent[] = [];
+    await streamAi(
+      { action: "ai-ask", company, scope: {}, question: "Ajusta?", conversation, surface: "page" },
+      token(me),
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+      (e) => events.push(e),
+    );
+    expect(request!.tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining(["create_document", "create_presentation", "create_spreadsheet", "read_canvas"]),
+    );
+    expect(outputs[0]).toContain('documento “Proposta” (D1)');
+    expect(outputs[0]).toContain("Texto antigo da proposta.");
+    expect(outputs[1]).toMatch(/^Pronto no canvas como D2 \(documento “Proposta v2” \(ajuste de D1\)\)/);
+    expect(outputs[2]).toBe("As imagens I4 não existem nesta conversa: gere antes com generate_image ou tire dos slides.");
+    expect(outputs[3]).toMatch(/^Pronto no canvas como D3 \(planilha \(Setembro\) “Leads”\)/);
+    const done = events.at(-1) as Extract<AiStreamEvent, { type: "done" }>;
+    expect(done.artifacts.map((a) => [a.ref, a.type])).toEqual([
+      ["D2", "canvas"],
+      ["D3", "canvas"],
+    ]);
+    expect((done.artifacts[0] as any).revision_of).toBe("D1");
+    const save = calls.find((c) => c.url.includes("ai_save_turn"))!;
+    expect(save.body.p_artifacts).toHaveLength(2);
+  });
+});
+
+describe("busca na internet", () => {
+  it("cada busca vira um passo e custa; as páginas citadas viram fontes", async () => {
+    const { fetchImpl, calls } = world(base(["web"]));
+    let request: AgentRequest | undefined;
+    const llm: LlmAdapter = async (r) => {
+      request = r;
+      r.onEvent?.({ type: "server_tool", name: "web_search", input: { query: "tendências tráfego pago 2026" } });
+      r.onEvent?.({ type: "server_tool", name: "web_fetch", input: { url: "https://exemplo.com/artigo" } });
+      const s1 = r.onCitation!({ url: "https://exemplo.com/artigo", title: "Artigo" });
+      const again = r.onCitation!({ url: "https://exemplo.com/artigo", title: "Artigo" });
+      expect(again).toBe(s1);
+      return answer(`O CPM caiu [${s1}].`);
+    };
+    const events: AiStreamEvent[] = [];
+    await streamAi(
+      { action: "ai-ask", company, scope: {}, question: "Tendências?", surface: "page" },
+      token(me),
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+      (e) => events.push(e),
+    );
+    expect(request!.webSearch).toBe(true);
+    expect(request!.instructions).toContain("Busca na internet (web_search e web_fetch)");
+    expect(events).toContainEqual({ type: "step", id: "w1", label: "Pesquisando na internet “tendências tráfego pago 2026”", state: "done" });
+    expect(events).toContainEqual({ type: "step", id: "w2", label: "Lendo https://exemplo.com/artigo", state: "done" });
+    const done = events.at(-1) as Extract<AiStreamEvent, { type: "done" }>;
+    expect(done.sources).toEqual([
+      { ref: "S1", type: "web", id: "https://exemplo.com/artigo", url: "https://exemplo.com/artigo", title: "Artigo", date: null, client_id: null },
+    ]);
+    const log = calls.find((c) => c.url.includes("ai_log_tool_calls"))!;
+    expect(log.body.p_calls.map((c: any) => [c.tool, c.power, c.cost])).toEqual([
+      ["web_search", "web", 0.01],
+      ["web_fetch", "web", 0],
+    ]);
+  });
+
+  it("sem o poder, nada de busca; a MAVI sabe o que está desligado", async () => {
+    const { fetchImpl } = world(base([]));
+    let request: AgentRequest | undefined;
+    const llm: LlmAdapter = async (r) => {
+      request = r;
+      return answer("Ok.");
+    };
+    await handleAi(
+      { action: "ai-ask", company, scope: {}, question: "Notícias?", surface: "page" },
+      token(me),
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+    );
+    expect(request!.webSearch).toBe(false);
+    expect(request!.instructions).toContain("Poderes desligados para esta pessoa:");
+    expect(request!.instructions).toContain("busca na internet");
+  });
+
+  it("o texto final: depois da última busca, com as citações como fontes", () => {
+    const cite = (p: { url: string }) => (p.url.includes("a.com") ? "S1" : "S2");
+    expect(
+      answerText(
+        [
+          { type: "text", text: "Vou pesquisar." },
+          { type: "server_tool_use" },
+          { type: "web_search_tool_result" },
+          { type: "text", text: "O mercado cresceu", citations: [{ url: "https://a.com/x", title: "A" }, { url: "https://a.com/x", title: "A" }] },
+          { type: "text", text: " e segue.", citations: [{ url: "https://b.com", title: "B" }] },
+        ],
+        cite,
+      ),
+    ).toBe("O mercado cresceu[S1] e segue.[S2]");
+    expect(answerText([{ type: "text", text: " Só texto. " }])).toBe("Só texto.");
+  });
+});
+
+describe("imagens pelo OpenRouter", () => {
+  it("gera pelo chat com modalities e usa o custo que o OpenRouter informa", async () => {
+    const key = crypto.randomBytes(32);
+    const png = Buffer.from("fake-png").toString("base64");
+    const { fetchImpl, calls } = world({
+      ...base(["images"]),
+      "rpc/ai_resolve_route": (c: Call) =>
+        c.body.p_feature === "image_generation"
+          ? {
+              scope: "feature",
+              provider_id: "00000000-0000-4000-8000-0000000000b1",
+              provider: "OpenRouter",
+              kind: "openrouter",
+              base_url: null,
+              key_cipher: seal(key, "sk-or"),
+              model: "google/gemini-2.5-flash-image",
+              price: null,
+            }
+          : null,
+      "openrouter.ai/api/v1/chat/completions": {
+        choices: [{ message: { content: "", images: [{ image_url: { url: `data:image/png;base64,${png}` } }] } }],
+        usage: { prompt_tokens: 20, completion_tokens: 1290, cost: 0.039 },
+      },
+      "storage.googleapis.com": new Response("", { status: 200 }),
+    });
+    const outputs: string[] = [];
+    const llm: LlmAdapter = async (r) => {
+      outputs.push(await r.execute("generate_image", { prompt: "um banner verde", size: "landscape" }));
+      return answer("[[I1]]");
+    };
+    await handleAi(
+      { action: "ai-ask", company, scope: {}, question: "Banner?", surface: "page" },
+      token(me),
+      { ...env, providerKey: key },
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+    );
+    expect(outputs[0]).toMatch(/^Imagem pronta, mostrada para a pessoa como I1/);
+    const req = calls.find((c) => c.url.includes("openrouter.ai"))!;
+    expect(req.body).toMatchObject({
+      model: "google/gemini-2.5-flash-image",
+      modalities: ["image", "text"],
+      image_config: { aspect_ratio: "3:2" },
+      messages: [{ role: "user", content: [{ type: "text", text: "um banner verde" }] }],
+    });
+    const usage = calls.find((c) => c.url.includes("ai_log_usage") && c.body.p_kind === "image")!;
+    expect(usage.body.p_cost).toBe(0.039);
+    expect(usage.body.p_model).toBe("google/gemini-2.5-flash-image");
   });
 });

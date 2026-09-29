@@ -104,8 +104,34 @@ export function catalogContext(catalog: CatalogSkill[], loaded: LoadedSkill[]) {
     if (catalog.length > CATALOG_MAX)
       lines.push(`(Há mais ${catalog.length - CATALOG_MAX} skills; se nenhuma acima servir, peça para a pessoa escolher na caixa de mensagem.)`);
   }
-  for (const s of loaded) lines.push("", skillBlock(s, "A pessoa escolheu usar esta skill nesta pergunta"));
+  if (loaded.length)
+    lines.push(
+      "",
+      `A pessoa escolheu ${loaded.length === 1 ? "a skill" : "as skills"} ${loaded.map((s) => `“${s.name}” (${s.slug})`).join(", ")} para esta pergunta: as instruções estão na mensagem dela.`,
+    );
   return lines.join("\n");
+}
+
+/**
+ * As skills escolhidas vão na última mensagem, logo antes do pedido: perto
+ * dele, a skill pesa mais que o jeito padrão de responder.
+ */
+export function withSkills<T extends { role: string; content: string }>(
+  messages: T[],
+  skills: LoadedSkill[],
+): T[] {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user" || !skills.length) return messages;
+  const blocks = skills
+    .map((s) => skillBlock(s, "Skill escolhida por mim para este pedido"))
+    .join("\n\n");
+  return [
+    ...messages.slice(0, -1),
+    {
+      ...last,
+      content: `${blocks}\n\nSiga a skill acima neste pedido (leia antes os arquivos que ela citar e confira cada passo antes de responder).\n\n<pedido>\n${last.content}\n</pedido>`,
+    },
+  ];
 }
 
 function skillBlock(s: LoadedSkill, lead: string) {

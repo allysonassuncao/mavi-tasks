@@ -9,7 +9,13 @@
  * Uma ação é só uma proposta: nada muda até a pessoa confirmar.
  */
 
-export type Power = "visuals" | "images" | "actions" | "skills";
+export type Power =
+  | "visuals"
+  | "images"
+  | "actions"
+  | "skills"
+  | "canvas"
+  | "web";
 export const POWERS: { id: Power; label: string; description: string }[] = [
   {
     id: "visuals",
@@ -28,6 +34,18 @@ export const POWERS: { id: Power; label: string; description: string }[] = [
     label: "Ações com confirmação",
     description:
       "A MAVI propõe criar uma tarefa ou comentar numa tarefa. Nada muda até a pessoa confirmar no card.",
+  },
+  {
+    id: "canvas",
+    label: "Documentos, apresentações e planilhas",
+    description:
+      "A MAVI escreve documentos, monta apresentações e planilhas num canvas ao lado da conversa, que baixam em Word, PowerPoint, Excel ou PDF.",
+  },
+  {
+    id: "web",
+    label: "Busca na internet",
+    description:
+      "A MAVI pesquisa na internet e lê páginas (notícias, concorrentes, dados públicos) e cita os links. Funciona com os modelos da Claude; cada busca custa US$ 0,01.",
   },
   {
     id: "skills",
@@ -135,7 +153,66 @@ export type ActionArtifact = Base & {
   result?: { task_id?: string; comment_id?: string; error?: string };
   decided_at?: string;
 };
-export type AiArtifact = VisualArtifact | ImageArtifact | ActionArtifact;
+// ------------------------------------------------------------ canvas
+export type SlideLayout =
+  | "title"
+  | "section"
+  | "bullets"
+  | "two_columns"
+  | "stats"
+  | "quote"
+  | "image"
+  | "closing";
+export const SLIDE_LAYOUTS: SlideLayout[] = [
+  "title",
+  "section",
+  "bullets",
+  "two_columns",
+  "stats",
+  "quote",
+  "image",
+  "closing",
+];
+export type Slide = {
+  layout: SlideLayout;
+  title: string;
+  subtitle?: string;
+  bullets?: string[];
+  left_title?: string;
+  left?: string[];
+  right_title?: string;
+  right?: string[];
+  stats?: { value: string; label: string }[];
+  quote?: string;
+  author?: string;
+  /** Uma imagem desta conversa (I1). */
+  image?: string;
+  /** O que falar neste slide. */
+  notes?: string;
+};
+export type SlideTheme = "claro" | "escuro" | "verde";
+export const SLIDE_THEMES: SlideTheme[] = ["claro", "escuro", "verde"];
+export type SheetTab = {
+  name: string;
+  columns: TableColumn[];
+  rows: (string | number | null)[][];
+};
+export type Canvas =
+  | { kind: "document"; title: string; markdown: string }
+  | { kind: "slides"; title: string; theme: SlideTheme; slides: Slide[] }
+  | { kind: "sheet"; title: string; sheets: SheetTab[] };
+export type CanvasArtifact = Base & {
+  type: "canvas";
+  canvas: Canvas;
+  /** A versão anterior (D1), quando é um ajuste. */
+  revision_of?: string;
+};
+
+export type AiArtifact =
+  | VisualArtifact
+  | ImageArtifact
+  | ActionArtifact
+  | CanvasArtifact;
 
 export type ImageSize = "square" | "portrait" | "landscape";
 export const IMAGE_SIZES: Record<ImageSize, string> = {
@@ -145,12 +222,12 @@ export const IMAGE_SIZES: Record<ImageSize, string> = {
 };
 
 /** Uma linha só com [[V1]]: o lugar do anexo na resposta. */
-export const ARTIFACT_LINE = /^\s*\[\[([VIA]\d{1,2})\]\]\s*$/;
+export const ARTIFACT_LINE = /^\s*\[\[([VIAD]\d{1,2})\]\]\s*$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ID = /^[A-Za-z0-9_-]{4,64}$/;
-const REF = /^[VIA]\d{1,2}$/;
+const REF = /^[VIAD]\d{1,2}$/;
 
 const text = (v: unknown, max: number) =>
   typeof v === "string"
@@ -289,6 +366,101 @@ export function sanitizeVisual(raw: unknown): Visual | null {
   return null;
 }
 
+const strings = (v: unknown, max: number, len: number) =>
+  list(v, max)
+    .map((x) => text(x, len))
+    .filter(Boolean);
+
+/** Um documento, apresentação ou planilha no formato fechado (null: não dá). */
+export function sanitizeCanvas(raw: unknown): Canvas | null {
+  const v = obj(raw);
+  if (!v) return null;
+  const title = text(v.title, 120);
+  if (v.kind === "document") {
+    const markdown =
+      typeof v.markdown === "string"
+        ? v.markdown.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, 60_000)
+        : "";
+    return markdown.length >= 20
+      ? { kind: "document", title: title || "Documento", markdown }
+      : null;
+  }
+  if (v.kind === "slides") {
+    const slides = list(v.slides, 40)
+      .map((x): Slide | null => {
+        const o = obj(x);
+        if (!o) return null;
+        const layout = pick(o.layout, SLIDE_LAYOUTS, "bullets");
+        const slide: Slide = { layout, title: text(o.title, 140) };
+        const add = <K extends keyof Slide>(k: K, val: Slide[K] | "" | undefined) => {
+          if (val !== undefined && val !== "" && !(Array.isArray(val) && !val.length))
+            slide[k] = val as Slide[K];
+        };
+        add("subtitle", text(o.subtitle, 240));
+        add("bullets", strings(o.bullets, 8, 300));
+        add("left_title", text(o.left_title, 80));
+        add("left", strings(o.left, 6, 240));
+        add("right_title", text(o.right_title, 80));
+        add("right", strings(o.right, 6, 240));
+        add(
+          "stats",
+          list(o.stats, 4)
+            .map((st) => {
+              const so = obj(st);
+              const value = so ? text(so.value, 24) : "";
+              return value ? { value, label: text(so!.label, 80) } : null;
+            })
+            .filter((st): st is { value: string; label: string } => !!st),
+        );
+        add("quote", text(o.quote, 400));
+        add("author", text(o.author, 80));
+        const image = text(o.image, 4).toUpperCase();
+        add("image", /^I\d{1,2}$/.test(image) ? image : "");
+        add("notes", text(o.notes, 2000));
+        return slide.title || slide.bullets || slide.quote || slide.stats ? slide : null;
+      })
+      .filter((x): x is Slide => !!x);
+    return slides.length
+      ? {
+          kind: "slides",
+          title: title || "Apresentação",
+          theme: pick(v.theme, SLIDE_THEMES, "claro"),
+          slides,
+        }
+      : null;
+  }
+  if (v.kind === "sheet") {
+    const sheets = list(v.sheets, 5)
+      .map((x, i): SheetTab | null => {
+        const table = sanitizeVisual({ ...(obj(x) ?? {}), kind: "table", title: "x" });
+        if (!table || table.kind !== "table") return null;
+        return {
+          name: text(obj(x)?.name, 31).replace(/[\\/?*[\]:]/g, " ") || `Planilha ${i + 1}`,
+          columns: table.columns,
+          rows: list(obj(x)?.rows, 1000).length > 200
+            ? sheetRows(obj(x)!.rows, table.columns)
+            : table.rows,
+        };
+      })
+      .filter((x): x is SheetTab => !!x);
+    return sheets.length ? { kind: "sheet", title: title || "Planilha", sheets } : null;
+  }
+  return null;
+}
+/** As linhas de uma planilha grande (até 1.000, além das 200 de uma tabela). */
+function sheetRows(raw: unknown, columns: TableColumn[]) {
+  return list(raw, 1000)
+    .filter(Array.isArray)
+    .map((r) =>
+      columns.map((c, k) => {
+        const cell = (r as unknown[])[k];
+        if (cell === null || cell === undefined || cell === "") return null;
+        if (c.unit && c.unit !== "text") return num(cell) ?? text(cell, 200);
+        return typeof cell === "number" && Number.isFinite(cell) ? cell : text(cell, 200);
+      }),
+    );
+}
+
 function sanitizeAction(raw: unknown): ActionProposal | null {
   const a = obj(raw);
   if (!a) return null;
@@ -366,6 +538,13 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       ...(/^https:\/\//.test(url) ? { url } : {}),
     };
   }
+  if (a.type === "canvas") {
+    const canvas = sanitizeCanvas(a.canvas);
+    const prev = text(a.revision_of, 4);
+    return canvas
+      ? { id, ref, type: "canvas", canvas, ...(REF.test(prev) ? { revision_of: prev } : {}) }
+      : null;
+  }
   if (a.type === "action") {
     const action = sanitizeAction(a.action);
     if (!action) return null;
@@ -416,6 +595,16 @@ export function artifactSummary(a: AiArtifact): string {
   }
   if (a.type === "image")
     return `imagem${a.edited_from ? ` (edição de ${a.edited_from})` : ""}: ${a.prompt.slice(0, 120)}`;
+  if (a.type === "canvas") {
+    const c = a.canvas;
+    const what =
+      c.kind === "document"
+        ? "documento"
+        : c.kind === "slides"
+          ? `apresentação de ${c.slides.length} slides`
+          : `planilha (${c.sheets.map((x) => x.name).join(", ")})`;
+    return `${what} “${c.title}”${a.revision_of ? ` (ajuste de ${a.revision_of})` : ""}`;
+  }
   const state = {
     pending: "aguardando a confirmação da pessoa",
     confirmed: "confirmada pela pessoa",

@@ -9,6 +9,7 @@ import {
   type Embedder,
 } from "./_ai-embeddings.js";
 import {
+  WEB_SEARCH_PRICE,
   anthropicAdapter,
   llmFriendlyError,
   type ChatTurn,
@@ -46,6 +47,7 @@ import {
 import {
   sanitizeArtifacts,
   type AiArtifact,
+  type CanvasArtifact,
   type Power,
 } from "../src/mavi-artifacts.js";
 import {
@@ -55,7 +57,9 @@ import {
   pickedSkills,
   runSkillTool,
   summarizeSkillStep,
+  withSkills,
   type CatalogSkill,
+  type LoadedSkill,
   type SkillKit,
 } from "./_ai-skills.js";
 
@@ -157,6 +161,27 @@ Como responder:
 - Transcrições são automáticas: nomes e palavras podem sair errados. Quando algo for ambíguo, avise.
 - Quando houver datas, diga quando foi. Se informações se contradizem ao longo do tempo, mostre a mais recente e o que mudou.
 - Português do Brasil, direto: frases curtas, listas com "-" quando ajudar, negrito com ** só no essencial. Sem títulos (#) e sem tabelas.`;
+
+/**
+ * No módulo MAVI a resposta aparece em Markdown completo (títulos, tabelas,
+ * listas numeradas): o jeito de responder muda, o resto das regras não.
+ */
+export const PAGE_STYLE = `
+
+Como responder no módulo MAVI (esta conversa aparece em tela cheia, com Markdown completo):
+- Ajuste o tamanho ao pedido: pergunta rápida, resposta curta; relatório, análise, plano ou roteiro, resposta completa e organizada.
+- Use títulos (## e ###) para separar seções de respostas longas, tabelas Markdown para comparar itens com várias colunas, listas numeradas para passos e negrito só no essencial.
+- Esta regra vale no lugar da de "sem títulos e sem tabelas" acima; todas as outras continuam.`;
+
+/** Quando há skills: a skill manda no jeito de fazer o trabalho. */
+export const SKILL_RULES = `
+
+Skills (jeitos de trabalhar definidos pela agência):
+- Quando o pedido se encaixar na descrição de uma skill do catálogo, carregue-a com use_skill antes de começar. Uma skill escolhida pela pessoa já vem carregada na mensagem dela.
+- A skill ativa é o roteiro do trabalho: siga os passos na ordem, sem pular nem resumir. Antes de começar, leia com read_skill_file os arquivos de referência que as instruções citarem (modelos, exemplos, regras).
+- O formato, a estrutura, o tom, as seções e o tamanho que a skill pede valem mais que o jeito padrão de responder.
+- Antes de escrever a resposta final, confira cada passo e cada exigência de formato da skill. Se um passo pedir um poder ou uma informação que você não tem, diga qual e faça o resto.
+- Continuam valendo: buscar antes de afirmar, citar as fontes, respeitar o que a pessoa pode ver e ações só com confirmação.`;
 
 type Row = Record<string, unknown>;
 async function rest<T = Row>(
@@ -479,7 +504,7 @@ async function ask(
   ]);
   const powers = new Set(
     powerList.filter((p): p is Power =>
-      ["visuals", "images", "actions", "skills"].includes(p),
+      ["visuals", "images", "actions", "skills", "canvas", "web"].includes(p),
     ),
   );
   // O assistente (o balão de todas as telas) é um módulo que o
@@ -510,12 +535,14 @@ async function ask(
   // O que as respostas anteriores mostraram (as imagens podem ser editadas).
   const past = history ? [...history[1]].reverse() : [];
   const priorImages = new Map<string, string>();
-  const next = { V: 1, I: 1, A: 1 };
+  const priorCanvas = new Map<string, CanvasArtifact>();
+  const next = { V: 1, I: 1, A: 1, D: 1 };
   for (const m of past)
     for (const a of sanitizeArtifacts(m.artifacts)) {
       const letter = a.ref[0] as keyof typeof next;
       next[letter] = Math.max(next[letter], Number(a.ref.slice(1)) + 1);
       if (a.type === "image") priorImages.set(a.ref, a.path);
+      if (a.type === "canvas") priorCanvas.set(a.ref, a);
     }
   const messages = conversation(
     question,
@@ -557,6 +584,7 @@ async function ask(
     env: { ...env, credentials: env.credentials, bucket: env.bucket },
     artifacts: [],
     priorImages,
+    priorCanvas,
     next,
     emit: (artifact) => emit({ type: "artifact", artifact }),
     imageCost: { usd: 0, model: "", provider: null },
@@ -582,7 +610,9 @@ async function ask(
     skill?: string;
     skill_version?: number;
   }[] = [];
-  // As skills escolhidas na caixa de mensagem entram já carregadas.
+  // As skills escolhidas na caixa de mensagem entram já carregadas (na
+  // mensagem da pessoa, perto do pedido).
+  const picked: LoadedSkill[] = [];
   if (powers.has("skills"))
     for (const pick of pickedSkills(body.skills)) {
       const started = Date.now();
@@ -599,6 +629,7 @@ async function ask(
         emit({ type: "warning", text: `A skill “${pick.slug}” não está disponível para você.` });
         continue;
       }
+      picked.push(s);
       const label = `Usando a skill “${s.name}”${s.test ? ` (versão ${s.version} em teste)` : ""}`;
       steps.push({ label, detail: "escolhida por você" });
       emit({ type: "step", id: `skill-${s.slug}`, label, state: "done", detail: "escolhida por você" });
@@ -680,19 +711,75 @@ async function ask(
       throw e;
     }
   };
+  // Busca na internet: a da Claude (no servidor dela). Com outro provedor
+  // da biblioteca, o poder fica de fora e a MAVI diz por quê.
+  const webOn = powers.has("web") && (!provider || provider.kind === "anthropic");
+  if (powers.has("web") && !webOn) powers.delete("web");
+  const webNote =
+    onPage && !webOn && powerList.includes("web")
+      ? `\nA busca na internet está liberada para esta pessoa, mas só funciona com os modelos da Claude, e esta conversa usa ${provider?.name ?? "outro provedor"}. Se o pedido precisar da internet, diga isso.`
+      : "";
+  // Cada página citada vira uma fonte, como as do sistema.
+  const citeWeb = (page: { url: string; title: string }) => {
+    const same = ctx.sources.find((x) => x.type === "web" && x.url === page.url);
+    if (same) return same.ref;
+    const ref = `S${ctx.sources.length + 1}`;
+    ctx.sources.push({
+      ref,
+      type: "web",
+      id: page.url,
+      url: page.url,
+      title: page.title.slice(0, 200) || page.url,
+      date: null,
+      client_id: null,
+    });
+    return ref;
+  };
+  const webStep = (name: string, input: unknown) => {
+    const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+    const label =
+      name === "web_search"
+        ? `Pesquisando na internet “${String(i.query ?? "").slice(0, 80)}”`
+        : name === "web_fetch"
+          ? `Lendo ${String(i.url ?? "a página").slice(0, 90)}`
+          : "Consultando a internet";
+    const id = `w${++n}`;
+    emit({ type: "step", id, label, state: "done" });
+    steps.push({ label });
+    calls.push({
+      tool: name,
+      power: "web",
+      ok: true,
+      ms: 0,
+      cost: name === "web_search" ? WEB_SEARCH_PRICE : 0,
+    });
+  };
   let result: Awaited<ReturnType<LlmAdapter>> | undefined;
   try {
     result = await llm({
-      instructions: INSTRUCTIONS + powerInstructions(powers),
+      instructions:
+        INSTRUCTIONS +
+        (onPage ? PAGE_STYLE : "") +
+        powerInstructions(powers, onPage) +
+        webNote +
+        (skills.catalog.size || picked.length ? SKILL_RULES : ""),
       context:
-        base.context +
-        catalogContext([...skills.catalog.values()], [...skills.loaded.values()]),
-      messages,
+        base.context + catalogContext([...skills.catalog.values()], picked),
+      messages: picked.length
+        ? withSkills(messages, picked)
+        : messages,
       tools,
       execute,
-      maxRounds: powers.size ? 8 : 6,
-      onEvent: (e) =>
-        e.type === "round_end" ? emit({ type: "round_end" }) : emit(e),
+      // Uma skill é um roteiro com vários passos: mais rodadas e mais raciocínio.
+      maxRounds: picked.length ? 14 : skills.catalog.size ? 12 : powers.size ? 8 : 6,
+      ...(picked.length ? { effort: "high" as const } : {}),
+      onEvent: (e) => {
+        if (e.type === "round_end") emit({ type: "round_end" });
+        else if (e.type === "server_tool") webStep(e.name, e.input);
+        else emit(e);
+      },
+      webSearch: webOn,
+      onCitation: citeWeb,
     });
   } finally {
     // O custo entra mesmo quando a resposta falha no meio.

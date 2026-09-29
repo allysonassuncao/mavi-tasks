@@ -22,7 +22,16 @@ export type AiScope = {
 export type AiSource = {
   ref: string;
   type:
-    "meeting" | "task" | "file" | "social" | "campaign" | "case" | "whatsapp";
+    | "meeting"
+    | "task"
+    | "file"
+    | "social"
+    | "campaign"
+    | "case"
+    | "whatsapp"
+    | "web";
+  /** Página da internet (busca da Claude). */
+  url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
   id: string;
   group?: string;

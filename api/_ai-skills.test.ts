@@ -152,9 +152,20 @@ describe("skills da MAVI", () => {
       { fetch: fetchImpl, llm, embed: vi.fn() },
       (e) => events.push(e),
     );
-    expect(request!.context).toContain(
-      "A pessoa escolheu usar esta skill nesta pergunta: Relatório mensal (relatorio-mensal, versão 4, EM TESTE: ainda não aprovada).",
+    // A skill vai na mensagem da pessoa, logo antes do pedido.
+    const last = request!.messages.at(-1)!.content;
+    expect(last).toContain(
+      "Skill escolhida por mim para este pedido: Relatório mensal (relatorio-mensal, versão 4, EM TESTE: ainda não aprovada).",
     );
+    expect(last).toMatch(/<\/skill>[\s\S]*<pedido>\nTesta a skill\?\n<\/pedido>$/);
+    expect(request!.context).toContain(
+      "A pessoa escolheu a skill “Relatório mensal” (relatorio-mensal) para esta pergunta",
+    );
+    // A skill manda no formato; mais rodadas e mais raciocínio.
+    expect(request!.instructions).toContain("O formato, a estrutura, o tom");
+    expect(request!.instructions).toContain("Como responder no módulo MAVI");
+    expect(request!.maxRounds).toBe(14);
+    expect(request!.effort).toBe("high");
     expect(request!.tools.map((t) => t.name)).toContain("read_skill_file");
     expect(events).toContainEqual({
       type: "step",

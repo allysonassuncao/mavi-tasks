@@ -3759,6 +3759,7 @@ export default function App() {
                         )
                       }
                       onChanged={() => setSkillsTick((v) => v + 1)}
+                      powersHref={`${pageUrl("aiUsage", companyPath)}#poderes`}
                       notify={notify}
                     />
                   </Suspense>

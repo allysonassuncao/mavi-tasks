@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { BarChart3, Check, ImageIcon, ListChecks, Puzzle } from "lucide-react";
+import {
+  BarChart3,
+  Check,
+  Globe,
+  ImageIcon,
+  ListChecks,
+  Presentation,
+  Puzzle,
+} from "lucide-react";
 import { Button, Loading } from "./ui";
 import { MultiPick } from "./MultiPick";
 import type { Snapshot } from "./types";
@@ -12,6 +20,8 @@ const ICONS = {
   images: ImageIcon,
   actions: ListChecks,
   skills: Puzzle,
+  canvas: Presentation,
+  web: Globe,
 };
 const blank = (power: Power): PowerSetting => ({
   power,

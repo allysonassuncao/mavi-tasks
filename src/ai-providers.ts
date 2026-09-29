@@ -376,7 +376,7 @@ export const FEATURES: FeatureInfo[] = [
     conversation: false,
     env: "IMAGE_MODEL",
     images: true,
-    note: "Só modelos de imagem (gpt-image-1, Imagen, grok-2-image…). Editar uma imagem já gerada pede o gpt-image-1 ou um endereço compatível.",
+    note: "Só modelos de imagem: gpt-image-1, Imagen, grok-2-image ou os do OpenRouter (ex.: google/gemini-2.5-flash-image, openai/gpt-5-image). Editar uma imagem já gerada funciona com o gpt-image-1, o OpenRouter ou um endereço compatível.",
   },
   {
     id: "client_temperature",
@@ -410,7 +410,7 @@ export const isTranscribeModel = (id: string) => /(whisper|transcri|voxtral)/i.t
  * (/images/generations) e os modelos que geram imagens. A mesma regra de
  * mavi_private.ai_image_model no banco.
  */
-export const IMAGE_KINDS: ProviderKind[] = ["openai", "google", "xai", "custom"];
+export const IMAGE_KINDS: ProviderKind[] = ["openai", "google", "xai", "openrouter", "custom"];
 export const isImageModel = (id: string) => /(image|dall-e|imagen|flux)/i.test(id);
 /** Vetores, transcrição ou imagem: não servem para conversar. */
 export const isNonChatModel = (id: string) =>
