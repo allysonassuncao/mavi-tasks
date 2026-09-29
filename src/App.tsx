@@ -186,6 +186,7 @@ import {
 } from "./notificationPrefs";
 import { BulkEditor, SelectBox, selectState } from "./TaskBulk";
 import { TaskViewsMenu } from "./TaskViews";
+import { readFilters, writeFilters } from "./remembered-filters";
 import type { BulkChange, BulkResult, BulkUndo } from "./task-bulk";
 import {
   GROUP_OPTIONS,
@@ -2003,21 +2004,38 @@ export default function App() {
     setTaskViewList((list) => (list ?? []).filter((x) => x.id !== v.id));
     notify(`Visão “${v.name}” excluída.`);
   }
+  // Reaching the list without filters opens it with the person's last
+  // filters (kept in this browser); only without those, the default view.
   const defaultViewDone = useRef(false);
+  // Whose filters the list shows ("company:user"), once restored.
+  const [listFiltersFor, setListFiltersFor] = useState("");
   useEffect(() => {
-    if (page !== "tasks") {
-      defaultViewDone.current = false;
-      return;
-    }
-    if (defaultViewDone.current || !taskViewList) return;
-    defaultViewDone.current = true;
+    defaultViewDone.current = false;
+    setListFiltersFor("");
+  }, [page, company, user]);
+  useEffect(() => {
+    if (page !== "tasks" || defaultViewDone.current) return;
     // A link with its own filters (or a page of the list) opens as it is.
     const params = new URLSearchParams(window.location.search);
-    if (LIST_PARAMS.some((k) => params.has(k))) return;
-    const preferred = taskViewList.find((v) => v.is_default);
-    if (preferred) applyViewConfig(preferred.config);
-    // Runs once per visit to the list, when the views are known.
-  }, [page, taskViewList]);
+    const linked = LIST_PARAMS.some((k) => params.has(k));
+    const remembered = linked
+      ? null
+      : readFilters<TaskViewConfig>("tasks", company, user);
+    if (!linked && !remembered && !taskViewList) return;
+    defaultViewDone.current = true;
+    if (remembered) applyViewConfig(remembered);
+    else if (!linked) {
+      const preferred = taskViewList?.find((v) => v.is_default);
+      if (preferred) applyViewConfig(preferred.config);
+    }
+    setListFiltersFor(`${company}:${user}`);
+    // Runs once per visit to the list.
+  }, [page, company, user, taskViewList]);
+  const listFiltersKey = JSON.stringify(currentViewConfig);
+  useEffect(() => {
+    if (page === "tasks" && listFiltersFor === `${company}:${user}`)
+      writeFilters("tasks", company, user, JSON.parse(listFiltersKey));
+  }, [page, listFiltersFor, listFiltersKey, company, user]);
   // Collaborators only see their own entries and tasks (RLS already scopes
   // them; this keeps demo mode and cached data consistent with that).
   const visibleHours = useMemo(

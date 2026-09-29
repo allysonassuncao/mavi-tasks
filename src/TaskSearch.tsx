@@ -4,7 +4,8 @@ import { Button, Input, Select, SelectOption } from "./ui";
 import { BULK_LIMIT } from "./api";
 import { Avatar, Badge, Empty, Loading } from "./components";
 import { dateLabel } from "./domain";
-import { useUrlState } from "./router";
+import { navigate, useUrlState } from "./router";
+import { readFilters, writeFilters } from "./remembered-filters";
 import { BulkEditor, SelectBox, selectState } from "./TaskBulk";
 import type { BulkChange, BulkResult, BulkUndo } from "./task-bulk";
 import { listedStatuses, statuses, type Comment, type Snapshot } from "./types";
@@ -18,6 +19,18 @@ import {
   type TaskSearchHit,
   type TaskSearchParams,
 } from "./task-search";
+
+/** The search's filters (URL params) kept for the next visit; not the term. */
+const FILTER_PARAMS = [
+  "em",
+  "cli",
+  "proj",
+  "resp",
+  "criador",
+  "situacao",
+  "de",
+  "ate",
+] as const;
 
 const MATCH_LABEL: Record<TaskSearchHit["match_in"], string> = {
   title: "Título",
@@ -74,6 +87,38 @@ export function TaskSearch({
   const [more, setMore] = useState(false);
   const [error, setError] = useState("");
   const request = useRef(0);
+
+  // Opened without filters, the search brings back the person's last ones.
+  // Whose filters are on screen ("company:user"), once restored.
+  const [filtersFor, setFiltersFor] = useState("");
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const has = FILTER_PARAMS.some((k) => url.searchParams.has(k));
+    const saved = has
+      ? null
+      : readFilters<Record<string, string>>("search", company, user);
+    if (saved) {
+      for (const k of FILTER_PARAMS)
+        if (typeof saved[k] === "string" && saved[k])
+          url.searchParams.set(k, saved[k]);
+      navigate(url.pathname + url.search + url.hash, true);
+    }
+    setFiltersFor(`${company}:${user}`);
+  }, [company, user]);
+  const savedFilters = JSON.stringify({
+    em: fieldsParam,
+    cli: client,
+    proj: project,
+    resp: assignee,
+    criador: creator,
+    situacao: status,
+    de: from,
+    ate: to,
+  });
+  useEffect(() => {
+    if (filtersFor === `${company}:${user}`)
+      writeFilters("search", company, user, JSON.parse(savedFilters));
+  }, [filtersFor, savedFilters, company, user]);
 
   // Typing updates the URL (and so the search) after a short pause.
   useEffect(() => {

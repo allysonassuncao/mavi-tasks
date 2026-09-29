@@ -159,7 +159,8 @@ export function SidebarNav({
           to: tasks(),
           count: taskCount,
           children: [
-            { key: "tasks-all", label: "Todas", to: tasks() },
+            // "Todas" clears the list's filters; "Tarefas" reopens the last ones.
+            { key: "tasks-all", label: "Todas", to: tasks({ escopo: "all" }) },
             {
               key: "tasks-mine",
               label: "Para você",
@@ -373,8 +374,11 @@ export function SidebarNav({
       );
     }
     if (to.page !== "tasks") return true;
+    // "escopo=all" is the same list as no scope.
+    const value = (key: string, v: string | null | undefined) =>
+      key === "escopo" && v === "all" ? "" : (v ?? "");
     return FILTERS.every(
-      (key) => (params.get(key) ?? "") === (to.query?.[key] ?? ""),
+      (key) => value(key, params.get(key)) === value(key, to.query?.[key]),
     );
   };
   const inside = (item: Item) =>
