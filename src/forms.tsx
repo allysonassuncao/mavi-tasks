@@ -1742,9 +1742,11 @@ export function TaskDetail({
                 <h3>Descrição</h3>
               </div>
               <RichTextContent value={task.description} />
+              {/* Gravar é de quem escreve o pedido: só ao criar ou editar. */}
               <TaskAudioList
                 state={audio}
                 canManage={canEdit}
+                canRecord={false}
                 demo={demo}
                 disabled={busy}
                 nameOf={memberName}

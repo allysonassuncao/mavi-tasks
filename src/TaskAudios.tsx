@@ -169,24 +169,32 @@ export function useTaskAudios({
 }
 export type TaskAudiosState = ReturnType<typeof useTaskAudios>;
 
-/** The description's audios, with the recorder for whoever may add one. */
+/**
+ * The description's audios. Recording belongs to writing the request: the
+ * recorder shows only where the task is created or edited (`canRecord`);
+ * on the task itself the audios are there to listen to.
+ */
 export function TaskAudioList({
   state,
   canManage,
+  canRecord = canManage,
   demo,
   disabled,
   nameOf,
   onRecording,
 }: {
   state: TaskAudiosState;
+  /** Correct the transcript, try again and remove. */
   canManage: boolean;
+  /** Record a new audio (creation and edit forms). */
+  canRecord?: boolean;
   demo?: boolean;
   disabled?: boolean;
   nameOf: (user: string) => string;
   onRecording?: (active: boolean) => void;
 }) {
   const { items, pending } = state;
-  if (!items.length && !pending.length && !canManage) return null;
+  if (!items.length && !pending.length && !canRecord) return null;
   return (
     <section className="task-audios" aria-label="Áudios da descrição">
       {items.map((a, i) => (
@@ -221,7 +229,7 @@ export function TaskAudioList({
           )}
         </div>
       ))}
-      {canManage &&
+      {canRecord &&
         (demo ? (
           <small className="audio-hint">
             A gravação de áudios funciona no ambiente conectado.
