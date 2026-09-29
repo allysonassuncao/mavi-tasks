@@ -144,14 +144,15 @@ function sectionOf(
   }
 }
 
-/** "2 atrasadas · 14h estimadas" — what a section's header adds. */
-export function groupHint(tasks: Task[], today: string, lead = "") {
-  const late = tasks.filter((t) => isLate(t, today)).length;
+/**
+ * "14h estimadas" — what a section's header adds in its fine print. The late
+ * ones get their own mark beside the count (TaskTable), seen even closed.
+ */
+export function groupHint(tasks: Task[], _today: string, lead = "") {
   const minutes = tasks.reduce((sum, t) => sum + (t.estimated_minutes || 0), 0);
   const hours = Math.round(minutes / 6) / 10;
   return [
     lead,
-    late ? `${late} ${late === 1 ? "atrasada" : "atrasadas"}` : "",
     hours ? `${String(hours).replace(".", ",")}h estimadas` : "",
   ]
     .filter(Boolean)

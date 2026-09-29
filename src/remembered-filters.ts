@@ -40,3 +40,27 @@ export function writeFilters(
     // Blocked storage: the filters just won't be remembered.
   }
 }
+
+/** Up to this many closed sections are kept per split (newest last). */
+const CLOSED_LIMIT = 300;
+
+/** Sections of the list the person left closed, for one way of splitting it. */
+export function readClosedGroups(split: string, company: string, user: string) {
+  const saved = readFilters<{ closed?: unknown }>(`groups:${split}`, company, user);
+  return new Set(
+    Array.isArray(saved?.closed)
+      ? saved.closed.filter((k): k is string => typeof k === "string")
+      : [],
+  );
+}
+
+export function writeClosedGroups(
+  split: string,
+  company: string,
+  user: string,
+  closed: Set<string>,
+) {
+  writeFilters(`groups:${split}`, company, user, {
+    closed: [...closed].slice(-CLOSED_LIMIT),
+  });
+}

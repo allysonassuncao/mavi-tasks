@@ -70,7 +70,7 @@ describe("Agrupar a lista de tarefas", () => {
     expect(groups[0].tasks.map((t) => t.id)).toEqual(["late"]);
   });
 
-  it("mostra no cabeçalho as atrasadas e as horas estimadas", () => {
+  it("mostra no cabeçalho as horas estimadas (as atrasadas têm selo próprio)", () => {
     expect(
       groupHint(
         [
@@ -79,7 +79,7 @@ describe("Agrupar a lista de tarefas", () => {
         ],
         "2026-09-28",
       ),
-    ).toBe("1 atrasada · 2h estimadas");
+    ).toBe("2h estimadas");
     expect(groupHint([task({ estimated_minutes: 0 })], "2026-09-28")).toBe("");
   });
 

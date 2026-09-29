@@ -7677,6 +7677,23 @@ label .input-control .ui-input {
   color: #6e8060;
   text-align: center;
 }
+/* Late tasks in a section: seen at a glance, even with it closed. */
+.task-group-late {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  background: #fcebe4;
+  border: 1px solid #f3cfc0;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: #b4573a;
+  white-space: nowrap;
+}
+.task-group-head .task-group-late svg {
+  color: currentColor;
+}
 .task-group-head small {
   font-size: 0.68rem;
   font-weight: 400;

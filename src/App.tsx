@@ -191,7 +191,12 @@ import {
 } from "./notificationPrefs";
 import { BulkEditor, SelectBox, selectState } from "./TaskBulk";
 import { TaskViewsMenu } from "./TaskViews";
-import { readFilters, writeFilters } from "./remembered-filters";
+import {
+  readClosedGroups,
+  readFilters,
+  writeClosedGroups,
+  writeFilters,
+} from "./remembered-filters";
 import type { BulkChange, BulkResult, BulkUndo } from "./task-bulk";
 import {
   GROUP_OPTIONS,
@@ -3198,6 +3203,11 @@ export default function App() {
                           toggle: togglePicked,
                         }}
                         parentTitle={(id) => taskLookup.get(id)?.title}
+                        rememberGroups={{
+                          company,
+                          user,
+                          split: `${groupBy === "auto" ? `auto-${listScope || "all"}` : groupBy}>${thenBy}`,
+                        }}
                       />
                     </>
                   ) : view === "board" ? (
@@ -4418,6 +4428,7 @@ function TaskTable({
   onSelect,
   selection,
   parentTitle,
+  rememberGroups,
 }: {
   tasks: Task[];
   /** Sections (e.g. "Para você", a pack), each maybe with a second level. */
@@ -4438,8 +4449,30 @@ function TaskTable({
   };
   /** Name of a main task that is in another section or page. */
   parentTitle?: (id: string) => string | undefined;
+  /**
+   * Keeps the closed sections in this browser, per company, person and way
+   * of splitting, so pages, reloads and live updates keep them as left.
+   */
+  rememberGroups?: { company: string; user: string; split: string };
 }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const memory = rememberGroups
+    ? `${rememberGroups.company}|${rememberGroups.user}|${rememberGroups.split}`
+    : "";
+  const loadClosed = () =>
+    rememberGroups
+      ? readClosedGroups(
+          rememberGroups.split,
+          rememberGroups.company,
+          rememberGroups.user,
+        )
+      : new Set<string>();
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadClosed);
+  // Another split (or person): its own closed sections.
+  const [loadedMemory, setLoadedMemory] = useState(memory);
+  if (loadedMemory !== memory) {
+    setLoadedMemory(memory);
+    setCollapsed(loadClosed());
+  }
   // Main tasks whose subtasks are hidden.
   const [folded, setFolded] = useState<Set<string>>(() => new Set());
   const flip =
@@ -4453,6 +4486,18 @@ function TaskTable({
       });
   const toggle = flip(setCollapsed),
     fold = flip(setFolded);
+  // Only what the person changed is written (a new split just reads).
+  const touched = useRef(false);
+  useEffect(() => {
+    if (!touched.current || !rememberGroups) return;
+    writeClosedGroups(
+      rememberGroups.split,
+      rememberGroups.company,
+      rememberGroups.user,
+      collapsed,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed]);
   const check = (ids: string[], label: string) =>
     selection ? (
       <SelectBox
@@ -4616,7 +4661,8 @@ function TaskTable({
     });
   };
   const head = (g: TaskGroup, level: 0 | 1) => {
-    const closed = collapsed.has(g.key);
+    const closed = collapsed.has(g.key),
+      late = g.tasks.filter((t) => isLate(t, today)).length;
     return (
       <tr className={`task-group-head level-${level}`} key={`head:${g.key}`}>
         {selection && (
@@ -4631,7 +4677,10 @@ function TaskTable({
           <button
             type="button"
             aria-expanded={!closed}
-            onClick={() => toggle(g.key)}
+            onClick={() => {
+              touched.current = true;
+              toggle(g.key);
+            }}
           >
             <ChevronRight
               size={15}
@@ -4640,6 +4689,12 @@ function TaskTable({
             />
             <strong>{g.label}</strong>
             <span className="task-group-count">{g.tasks.length}</span>
+            {late > 0 && (
+              <span className="task-group-late">
+                <TriangleAlert size={12} aria-hidden="true" />
+                {late} {late === 1 ? "atrasada" : "atrasadas"}
+              </span>
+            )}
             <small>{g.hint}</small>
           </button>
         </th>
