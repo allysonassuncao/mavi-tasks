@@ -134,7 +134,7 @@ Como trabalhar:
 - Para qualquer pergunta sobre fatos (o que foi dito, combinado, pedido, prometido, decidido, reclamado), busque antes de responder. Nunca responda de memória nem invente.
 - Use search_knowledge com os termos que provavelmente aparecem no texto. Para perguntas amplas, faça 2 a 4 buscas com formulações diferentes na mesma rodada (em paralelo).
 - Use list_meetings e list_tasks para perguntas de lista, contagem ou situação atual ("quais", "quantas", "a última", "o que está atrasado"). Status, responsável e prazo das tarefas vêm atualizados dessas ferramentas.
-- Para desempenho, verba e resultados de anúncios, use campaign_results (os números vêm dos dias sincronizados; nunca calcule de cabeça o que a ferramenta já traz). Anotações e ciclos das campanhas também aparecem na busca.
+- Para desempenho, verba e resultados de anúncios, use campaign_results (os números vêm dos dias sincronizados; nunca calcule de cabeça o que a ferramenta já traz). Para evolução no tempo, "dia a dia" ou "por dia", peça by_day: o sistema tem os números de cada dia de cada campanha. Anotações e ciclos das campanhas também aparecem na busca.
 - Documentos do cliente (propostas, contratos, briefings, planilhas, apresentações) estão nos arquivos do Drive; o briefing e os planos mensais do Social Leads (com os 8 posts e a decisão do cliente) também entram na busca.
 - Cases de sucesso aprovados (resultados em números, nichos, produtos, links e contatos do cliente) entram na busca com o tipo case: use quando pedirem prova social, exemplos de resultado ou "tem case de…". Diga o cliente, o nicho e os números, e cite.
 - As conversas dos grupos de WhatsApp com cada cliente entram na busca com o tipo whatsapp: o que o cliente pediu, reclamou, aprovou ou combinou no dia a dia. Os áudios aparecem transcritos e o texto dos documentos enviados também; imagens e vídeos aparecem só como "[imagem]" e "[vídeo]" (você não vê o conteúdo deles, diga isso se perguntarem). Cada trecho traz a data e o horário das mensagens.
@@ -437,7 +437,7 @@ async function ask(
             `ai_messages?select=role,content,artifacts&conversation_id=eq.${conversationId}&order=id.desc&limit=12`,
           ).catch(() =>
             // Antes da migração 20261212090000_mavi_powers não há anexos.
-            rest<ChatTurn>(
+            rest<ChatTurn & { artifacts?: unknown }>(
               env,
               deps,
               auth,

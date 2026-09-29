@@ -172,11 +172,16 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "campaign_results",
     description:
-      "Números das campanhas de tráfego pago no período (gasto, resultados, custo por resultado, impressões, cliques, verba e meta de cada ciclo). Só administradores e gestores veem campanhas. Use para perguntas sobre desempenho, verba ou resultados de anúncios.",
+      "Números das campanhas de tráfego pago no período (gasto, resultados, custo por resultado, impressões, cliques, verba e meta de cada ciclo). Com by_day, traz também os números de cada dia de cada campanha e o total do dia somando as campanhas: use para evolução, 'dia a dia', 'por dia', tendência ou gráfico no tempo. Só administradores e gestores veem campanhas. Use para perguntas sobre desempenho, verba ou resultados de anúncios.",
     parameters: obj({
       client_id: { type: "string", description: "Cliente (id)." },
       from: dateField("Início do período (padrão: primeiro dia do mês)"),
       to: dateField("Fim do período (padrão: hoje)"),
+      by_day: {
+        type: "boolean",
+        description:
+          "Também os números de cada dia (até 93 dias). Use para evolução no tempo e gráficos dia a dia.",
+      },
     }),
   },
   {
@@ -606,7 +611,7 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "find_clients")
     return `Procurando o cliente “${str(input.query).slice(0, 40)}”`;
   if (name === "campaign_results")
-    return `Conferindo os resultados das campanhas${inClient}${period}`;
+    return `Conferindo os resultados ${input.by_day ? "diários " : ""}das campanhas${inClient}${period}`;
   if (name === "client_temperature")
     return ctx.scope.client || client
       ? `Olhando o termômetro${inClient || " do cliente"}`
@@ -699,6 +704,7 @@ async function campaignResults(
   const withCycles = r.data.filter((c) => c.cycles.length);
   if (!withCycles.length)
     return `Nenhuma campanha com ciclo entre ${brDate(from)} e ${brDate(to)} (campanhas só aparecem para administradores e gestores).`;
+  const days = input.by_day ? await dailyResults(ctx, withCycles, from, to) : null;
   const body = withCycles
     .map((c) => {
       const ref = cite(ctx, {
@@ -717,10 +723,87 @@ async function campaignResults(
           return `  - ciclo ${brDate(y.start)} a ${brDate(y.end)} (${y.objective}): verba ${brl(y.budget)}, meta ${y.goal_results} resultados → gasto ${brl(y.spend)}, ${Number(y.results).toLocaleString("pt-BR")} resultados${cpr}, ${Number(y.impressions).toLocaleString("pt-BR")} impressões, ${Number(y.clicks).toLocaleString("pt-BR")} cliques`;
         })
         .join("\n");
-      return `[${ref}] Campanha "${c.name}" · ${PLATFORM[c.platform] ?? c.platform} · ${c.status === "active" ? "ativa" : "inativa"}${ctx.scope.client ? "" : ` · cliente ${ctx.clients.get(c.client) ?? "?"}`}\n${cycles}`;
+      const daily = days?.byCampaign.get(c.campaign);
+      return `[${ref}] Campanha "${c.name}" · ${PLATFORM[c.platform] ?? c.platform} · ${c.status === "active" ? "ativa" : "inativa"}${ctx.scope.client ? "" : ` · cliente ${ctx.clients.get(c.client) ?? "?"}`}\n${cycles}${
+        days
+          ? `\n  Por dia:\n${daily?.length ? daily.map((d) => `  - ${dayLine(d)}`).join("\n") : "  - sem números por dia no período"}`
+          : ""
+      }`;
     })
     .join("\n\n");
-  return `${body}\n(Período: ${brDate(from)} a ${brDate(to)}; números somados dos dias dentro do período.)`;
+  const totals =
+    days && withCycles.length > 1 && days.totals.length
+      ? `\n\nTotal do dia (todas as campanhas acima):\n${days.totals.map((d) => `- ${dayLine(d)}`).join("\n")}`
+      : "";
+  return `${body}${totals}${days?.note ?? ""}\n(Período: ${brDate(from)} a ${brDate(to)}; números somados dos dias dentro do período.)`;
+}
+
+type DayRow = {
+  day: string;
+  spend: number;
+  results: number;
+  impressions: number;
+  clicks: number;
+};
+const dayLine = (d: DayRow) =>
+  `${brDate(d.day)}: gasto ${brl(d.spend)}, ${Number(d.results).toLocaleString("pt-BR")} resultados${d.results > 0 ? ` (custo por resultado ${brl(d.spend / d.results)})` : ""}, ${Number(d.impressions).toLocaleString("pt-BR")} impressões, ${Number(d.clicks).toLocaleString("pt-BR")} cliques`;
+
+/**
+ * Os números de cada dia das campanhas (RLS: só líderes), por campanha e o
+ * total do dia. No máximo 93 dias, para caber na conversa.
+ */
+async function dailyResults(
+  ctx: ToolContext,
+  campaigns: CampaignRow[],
+  from: string,
+  to: string,
+) {
+  const span =
+    (Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000;
+  const start =
+    span > 92
+      ? new Date(Date.parse(`${to}T12:00:00Z`) - 92 * 86_400_000).toISOString().slice(0, 10)
+      : from;
+  const ids = campaigns.map((c) => c.campaign).filter((id) => UUID.test(id));
+  const rows = ids.length
+    ? await rest<{
+        campaign_id: string;
+        day: string;
+        spend: number;
+        impressions: number;
+        clicks: number;
+        conversions: number;
+      }>(
+        ctx,
+        `ad_daily_metrics?select=campaign_id,day,spend,impressions,clicks,conversions&company_id=eq.${ctx.company}&campaign_id=in.(${ids.join(",")})&day=gte.${start}&day=lte.${to}&order=day.asc&limit=5000`,
+      )
+    : [];
+  const add = (map: Map<string, DayRow>, r: (typeof rows)[number]) => {
+    const d = map.get(r.day) ?? { day: r.day, spend: 0, results: 0, impressions: 0, clicks: 0 };
+    d.spend += Number(r.spend) || 0;
+    d.results += Number(r.conversions) || 0;
+    d.impressions += Number(r.impressions) || 0;
+    d.clicks += Number(r.clicks) || 0;
+    map.set(r.day, d);
+  };
+  const perCampaign = new Map<string, Map<string, DayRow>>();
+  const total = new Map<string, DayRow>();
+  for (const r of rows) {
+    const m = perCampaign.get(r.campaign_id) ?? new Map<string, DayRow>();
+    add(m, r);
+    perCampaign.set(r.campaign_id, m);
+    add(total, r);
+  }
+  const sorted = (m: Map<string, DayRow>) =>
+    [...m.values()].sort((a, b) => a.day.localeCompare(b.day));
+  return {
+    byCampaign: new Map([...perCampaign].map(([id, m]) => [id, sorted(m)])),
+    totals: sorted(total),
+    note:
+      start !== from
+        ? `\n(Por dia: só os últimos 93 dias, de ${brDate(start)} a ${brDate(to)}; para antes, peça outro período.)`
+        : "",
+  };
 }
 
 type TemperatureBand = { name: string; min: number; alert: boolean };

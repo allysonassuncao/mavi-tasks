@@ -288,7 +288,7 @@ export function powerInstructions(powers: ReadonlySet<Power>) {
   ];
   if (powers.has("visuals"))
     lines.push(
-      "- Visualizações (show_chart, show_table, show_kpis, show_timeline): quando comparar, mostrar evolução, listar com várias colunas ou destacar números fica mais claro visualmente, desenhe. Use só números que vieram das ferramentas; nunca invente nem arredonde para caber. Tabelas vão por show_table (não escreva tabelas em texto).",
+      "- Visualizações (show_chart, show_table, show_kpis, show_timeline): quando comparar, mostrar evolução, listar com várias colunas ou destacar números fica mais claro visualmente, desenhe. Use só números que vieram das ferramentas; nunca invente nem arredonde para caber. Para gráficos no tempo (dia a dia, evolução), busque antes os números de cada dia (campaign_results com by_day). Tabelas vão por show_table (não escreva tabelas em texto).",
     );
   if (powers.has("images"))
     lines.push(

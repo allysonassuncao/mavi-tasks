@@ -370,3 +370,62 @@ describe("links das imagens", () => {
     expect(calls.filter((c) => c.url.includes("ai_messages"))).toHaveLength(2);
   });
 });
+
+describe("campanhas dia a dia", () => {
+  it("com by_day, cada dia de cada campanha e o total do dia", async () => {
+    const c1 = "00000000-0000-4000-8000-0000000000a1";
+    const c2 = "00000000-0000-4000-8000-0000000000a2";
+    const cycle = (spend: number, results: number) => ({
+      start: "2026-09-23",
+      end: "2026-09-29",
+      objective: "lead",
+      goal_results: 100,
+      budget: 3000,
+      spend,
+      impressions: 1000,
+      clicks: 50,
+      results,
+    });
+    const { fetchImpl, calls } = world({
+      ...base(["visuals"]),
+      "rpc/ai_campaign_results": [
+        { campaign: c1, name: "Lead (Faceforms)", platform: "meta", status: "active", client, cycles: [cycle(300, 15)] },
+        { campaign: c2, name: "Mensagem (WhatsApp)", platform: "meta", status: "active", client, cycles: [cycle(200, 10)] },
+      ],
+      "ad_daily_metrics?": [
+        { campaign_id: c1, day: "2026-09-23", spend: 100, impressions: 400, clicks: 20, conversions: 5 },
+        { campaign_id: c1, day: "2026-09-24", spend: 200, impressions: 600, clicks: 30, conversions: 10 },
+        { campaign_id: c2, day: "2026-09-23", spend: 120, impressions: 500, clicks: 25, conversions: 6 },
+        { campaign_id: c2, day: "2026-09-24", spend: 80, impressions: 500, clicks: 25, conversions: 4 },
+      ],
+    });
+    const outputs: string[] = [];
+    const llm: LlmAdapter = async (r) => {
+      outputs.push(await r.execute("campaign_results", { from: "2026-09-23", to: "2026-09-29", by_day: true }));
+      outputs.push(await r.execute("campaign_results", { from: "2026-09-23", to: "2026-09-29" }));
+      return answer("Ok.");
+    };
+    const events: AiStreamEvent[] = [];
+    await streamAi(
+      { action: "ai-ask", company, scope: { client }, question: "Gráfico dia a dia?", surface: "page" },
+      token(me),
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+      (e) => events.push(e),
+    );
+    const daily = calls.find((c) => c.url.includes("ad_daily_metrics"))!;
+    expect(daily.url).toContain(`campaign_id=in.(${c1},${c2})`);
+    expect(daily.url).toContain("day=gte.2026-09-23&day=lte.2026-09-29");
+    expect(outputs[0]).toContain(
+      "  Por dia:\n  - 23/09/2026: gasto R$ 100,00, 5 resultados (custo por resultado R$ 20,00), 400 impressões, 20 cliques",
+    );
+    expect(outputs[0]).toContain(
+      "Total do dia (todas as campanhas acima):\n- 23/09/2026: gasto R$ 220,00, 11 resultados (custo por resultado R$ 20,00), 900 impressões, 45 cliques\n- 24/09/2026: gasto R$ 280,00, 14 resultados (custo por resultado R$ 20,00)",
+    );
+    // Sem by_day, como antes: só a soma do período, sem consultar os dias.
+    expect(outputs[1]).not.toContain("Por dia");
+    expect(calls.filter((c) => c.url.includes("ad_daily_metrics"))).toHaveLength(1);
+    const step = events.find((e) => e.type === "step" && e.id === "t1") as { label: string };
+    expect(step.label).toBe("Conferindo os resultados diários das campanhas (de 23/09/2026 até 29/09/2026)");
+  });
+});
