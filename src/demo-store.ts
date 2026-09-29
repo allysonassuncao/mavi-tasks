@@ -962,7 +962,7 @@ export class DemoStore {
             );
           const target: Status = a.p_status ?? from;
           if (target === "done") {
-            if (review)
+            if (review && !acts.deliver)
               throw Error(
                 "Este projeto exige validação: a entrega é aprovada por quem valida",
               );

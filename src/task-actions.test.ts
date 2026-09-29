@@ -62,6 +62,15 @@ describe("Entrega", () => {
     expect(as("user-lucas", task("progress")).deliver).toBe(true);
     project.requires_review = true;
   });
+  it("quem criou a tarefa para si entrega sem passar pela validação", () => {
+    const own = task("progress", {
+      creator_id: "user-lucas",
+      assignee_id: "user-lucas",
+    });
+    expect(as("user-lucas", own).deliver).toBe(true);
+    expect(as("user-lucas", { ...own, status: "review" }).deliver).toBe(true);
+    expect(as("user-marina", own).deliver).toBe(false);
+  });
 });
 
 describe("Validação", () => {

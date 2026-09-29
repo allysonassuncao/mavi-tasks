@@ -959,7 +959,9 @@ export function TaskDetail({
     setError("");
     if (next === "done") {
       if (task.status === "done") return;
-      if (acts.approveInternal) {
+      // Whoever created the task for themselves just delivers it.
+      const ownTask = task.creator_id === user && task.assignee_id === user;
+      if (acts.approveInternal && !ownTask) {
         setTarget(null);
         setAction("approve_internal");
         return;
