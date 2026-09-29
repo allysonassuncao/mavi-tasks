@@ -381,17 +381,24 @@ function filteredTasks(
 /**
  * Mirrors domain.taskScope on the server: assigned to the person, created by
  * them for someone else, in their teams (the task's team, or the client's
- * teams when it has none), or everything else.
+ * teams when it has none — tasks.scope_teams, kept by the database), or
+ * everything else. Only the person's own team ids go in the URL, so it stays
+ * short however many clients those teams serve.
  */
 export function applyScope<
   Q extends {
     eq: (c: string, v: string) => Q;
     neq: (c: string, v: string) => Q;
-    or: (f: string) => Q;
     contains: (c: string, v: string[]) => Q;
+    overlaps: (c: string, v: string[]) => Q;
     not: (c: string, op: string, v: string) => Q;
   },
->(query: Q, scope: TaskScope, user: string, lookups: TaskLookups): Q {
+>(
+  query: Q,
+  scope: TaskScope,
+  user: string,
+  lookups: Pick<TaskLookups, "teamMembers">,
+): Q {
   if (scope === "mine") return query.eq("assignee_id", user);
   if (scope === "created")
     return query.eq("creator_id", user).neq("assignee_id", user);
@@ -402,38 +409,19 @@ export function applyScope<
         .map((tm) => tm.team_id),
     ),
   ];
-  const clients = new Set(
-    lookups.clientTeams
-      .filter((ct) => teams.includes(ct.team_id))
-      .map((ct) => ct.client_id),
-  );
-  const contracts = lookups.contracts
-    .filter((k) => clients.has(k.client_id))
-    .map((k) => k.id);
   const rest = query.neq("assignee_id", user).neq("creator_id", user);
   if (scope === "participating")
     return rest.contains("participant_ids", [user]);
   // Tasks the person takes part in have their own tab.
   const others = rest.not("participant_ids", "cs", `{${user}}`);
-  if (scope === "teams") {
-    const parts = [
-      ...(teams.length ? [`team_id.in.(${teams.join(",")})`] : []),
-      ...(contracts.length
-        ? [`and(team_id.is.null,contract_id.in.(${contracts.join(",")}))`]
-        : []),
-    ];
+  if (scope === "teams")
     // No team at all: nothing can match.
-    return parts.length
-      ? others.or(parts.join(","))
+    return teams.length
+      ? others.overlaps("scope_teams", teams)
       : others.eq("id", "00000000-0000-0000-0000-000000000000");
-  }
-  const withTeam = teams.length
-    ? `and(team_id.not.is.null,team_id.not.in.(${teams.join(",")}))`
-    : "team_id.not.is.null";
-  const withoutTeam = contracts.length
-    ? `and(team_id.is.null,contract_id.not.in.(${contracts.join(",")}))`
-    : "team_id.is.null";
-  return others.or(`${withTeam},${withoutTeam}`);
+  return teams.length
+    ? others.not("scope_teams", "ov", `{${teams.join(",")}}`)
+    : others;
 }
 
 /** The list's order: its split first (packs newest first), then due date. */

@@ -80,9 +80,12 @@ describe("De quem é a tarefa (abas da lista)", () => {
     const q = {
       eq: (c: string, v: string) => (calls.push(`${c}=eq.${v}`), q),
       neq: (c: string, v: string) => (calls.push(`${c}=neq.${v}`), q),
-      or: (f: string) => (calls.push(`or=(${f})`), q),
       contains: (c: string, v: string[]) => (
         calls.push(`${c}=cs.{${v.join(",")}}`),
+        q
+      ),
+      overlaps: (c: string, v: string[]) => (
+        calls.push(`${c}=ov.{${v.join(",")}}`),
         q
       ),
       not: (c: string, op: string, v: string) => (
@@ -92,18 +95,8 @@ describe("De quem é a tarefa (abas da lista)", () => {
     };
     return { q, calls };
   }
-  const lookups = {
-    contracts: data.contracts,
-    clients: data.clients,
-    projects: data.projects,
-    teamMembers: data.teamMembers,
-    clientTeams: data.clientTeams,
-  };
-  const contractsOfMyClient = data.contracts
-    .filter((k) => k.client_id === data.clients[0].id)
-    .map((k) => k.id)
-    .join(",");
-  it("monta no servidor os mesmos critérios", () => {
+  const lookups = { teamMembers: data.teamMembers };
+  it("monta no servidor os mesmos critérios, só com as equipes da pessoa", () => {
     const f = (scope: Parameters<typeof applyScope>[1]) => {
       const r = recorder();
       applyScope(r.q, scope, ME, lookups);
@@ -120,13 +113,13 @@ describe("De quem é a tarefa (abas da lista)", () => {
       "assignee_id=neq.me",
       "creator_id=neq.me",
       "participant_ids=not.cs.{me}",
-      `or=(team_id.in.(t-mine),and(team_id.is.null,contract_id.in.(${contractsOfMyClient})))`,
+      "scope_teams=ov.{t-mine}",
     ]);
     expect(f("others")).toEqual([
       "assignee_id=neq.me",
       "creator_id=neq.me",
       "participant_ids=not.cs.{me}",
-      `or=(and(team_id.not.is.null,team_id.not.in.(t-mine)),and(team_id.is.null,contract_id.not.in.(${contractsOfMyClient})))`,
+      "scope_teams=not.ov.{t-mine}",
     ]);
   });
   it("sem equipe, 'Suas equipes' fica vazia e 'Outras' é todo o resto", () => {
@@ -135,6 +128,6 @@ describe("De quem é a tarefa (abas da lista)", () => {
     expect(r.calls.at(-1)).toBe("id=eq.00000000-0000-0000-0000-000000000000");
     const o = recorder();
     applyScope(o.q, "others", "sem-equipe", lookups);
-    expect(o.calls.at(-1)).toBe("or=(team_id.not.is.null,team_id.is.null)");
+    expect(o.calls.at(-1)).toBe("participant_ids=not.cs.{sem-equipe}");
   });
 });
