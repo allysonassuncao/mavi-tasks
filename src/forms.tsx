@@ -47,6 +47,7 @@ import {
   Pencil,
   X,
   ArrowUpRight,
+  ChevronRight,
 } from "lucide-react";
 import { Modal, Avatar, Empty, Loading } from "./components";
 import {
@@ -65,7 +66,9 @@ import {
 } from "./types";
 import {
   canApproveTask,
+  canCreateTaskIn,
   contractOpen,
+  contractProductLabel,
   dateLabel,
   defaultContractName,
   isLate,
@@ -543,6 +546,9 @@ function eventLabel(e: TaskEvent) {
   if (e.action === "due_changed")
     return `Prazo alterado · ${dateLabel(String(e.detail.old_due))} → ${dateLabel(String(e.detail.new_due))}`;
   if (e.action === "bulk_undone") return "Alteração em massa desfeita";
+  // Editar tarefa: o cliente (produto contratado) trocado.
+  if (e.action === "edited" && e.detail.new_client)
+    return `Cliente alterado · ${String(e.detail.old_client)} (${String(e.detail.old_product)}) → ${String(e.detail.new_client)} (${String(e.detail.new_product)})`;
   // Prazo padrão: antes do mínimo da regra (com o motivo), e a subtarefa
   // que empurrou o prazo da principal.
   if (e.action === "due_below_minimum")
@@ -777,6 +783,10 @@ export function TaskDetail({
   const [editTitle, setEditTitle] = useState(task.title);
   // The count of the due rule starts at the start date being edited.
   const [editStart, setEditStart] = useState<string | null>(null);
+  // Trocar o cliente (produto contratado) e o projeto dele; as subtarefas
+  // seguem a principal (public.update_task).
+  const [editContract, setEditContract] = useState(task.contract_id);
+  const [editProject, setEditProject] = useState(task.project_id ?? "");
   // Prazos (Fase 4): replanning the assignee's tasks from the risk warning.
   const [replanning, setReplanning] = useState(false);
   const canReplan = canManageDueScope(data, user, {
@@ -809,7 +819,7 @@ export function TaskDetail({
   const copilot = useTaskCopilot(
     {
       company: task.company_id,
-      contract: task.contract_id,
+      contract: editContract,
       task: task.id,
       title: editTitle,
       description: editText ?? "",
@@ -859,6 +869,15 @@ export function TaskDetail({
     canEdit = isLeader || task.creator_id === user,
     acts = taskActions(data, task, user),
     creator = data.members.find((m) => m.user_id === task.creator_id);
+  // Subtasks stay in their main task's client; a Social Leads post's task in
+  // its plan's client (public.update_task says the same).
+  const clientLocked = task.parent_id
+    ? "Subtarefa fica no cliente da tarefa principal. Para trocar, edite a principal."
+    : slPost
+      ? "Tarefa de post do Social Leads fica no cliente do plano."
+      : "";
+  const movedClient = !clientLocked && editContract !== task.contract_id;
+  const hasSubtasks = data.tasks.some((t) => t.parent_id === task.id);
   const review = projectReview(
     data.projects.find((p) => p.id === task.project_id),
   );
@@ -1254,11 +1273,17 @@ export function TaskDetail({
         p_start: fd.get("start_date") || null,
         p_estimated: Number(fd.get("estimated")) * 60,
         p_priority: fd.get("priority"),
+        // Only when it changes: the database moves the subtasks along.
+        ...(movedClient && {
+          p_contract: editContract,
+          p_project: editProject || null,
+        }),
       });
       setEditing(false);
+      if (movedClient) notify("Cliente da tarefa alterado.");
       copilotFeedback.flush(
         task.company_id,
-        data.contracts.find((c) => c.id === task.contract_id)?.client_id ??
+        data.contracts.find((c) => c.id === editContract)?.client_id ??
           null,
         task.id,
       );
@@ -1355,6 +1380,8 @@ export function TaskDetail({
                     setEditTitle(task.title);
                     setEditText(null);
                     setEditStart(null);
+                    setEditContract(task.contract_id);
+                    setEditProject(task.project_id ?? "");
                     setEditing(true);
                   }}
                 >
@@ -1624,6 +1651,31 @@ export function TaskDetail({
                     required
                   />
                 </label>
+                {clientLocked ? (
+                  <div className="task-client-locked">
+                    <p className="contract-path">
+                      <span>{n.client?.name}</span>
+                      <ChevronRight size={14} aria-hidden="true" />
+                      <span>{contractProductLabel(data, task.contract_id)}</span>
+                    </p>
+                    <small>{clientLocked}</small>
+                  </div>
+                ) : (
+                  <>
+                    <ContractPicker
+                      data={data}
+                      contract={editContract}
+                      onContractChange={setEditContract}
+                      project={editProject}
+                      onProjectChange={setEditProject}
+                      disabled={busy}
+                      allowed={(id) => canCreateTaskIn(data, id, user)}
+                    />
+                    {movedClient && hasSubtasks && (
+                      <small>As subtarefas vão junto para o novo cliente.</small>
+                    )}
+                  </>
+                )}
                 <Suspense
                   fallback={
                     <>

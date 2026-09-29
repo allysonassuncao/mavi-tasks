@@ -4806,6 +4806,10 @@ label .input-control .ui-input {
   color: var(--ink);
   font-weight: 600;
 }
+.task-client-locked {
+  display: grid;
+  gap: 4px;
+}
 .project-group + .project-group {
   margin-top: 28px;
 }

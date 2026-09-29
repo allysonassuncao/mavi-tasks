@@ -1012,6 +1012,44 @@ export class DemoStore {
         const isLeader = callerRole === "admin" || callerRole === "manager";
         if (task.creator_id !== demoUser && !isLeader)
           throw Error("Sem permissão para editar");
+        // Mirrors public.update_task: another client takes the subtasks along.
+        let moved: Record<string, unknown> = {};
+        if (a.p_contract && a.p_contract !== task.contract_id) {
+          if (task.parent_id)
+            throw Error(
+              "Subtarefa fica no cliente da tarefa principal. Troque o cliente da principal.",
+            );
+          const label = (id: string) => {
+            const k = this.data.contracts.find((c) => c.id === id);
+            return {
+              client: this.data.clients.find((c) => c.id === k?.client_id)?.name,
+              product: this.data.products.find((p) => p.id === k?.product_id)?.name,
+            };
+          };
+          const before = label(task.contract_id),
+            after = label(a.p_contract);
+          const clientId = this.data.contracts.find(
+            (c) => c.id === a.p_contract,
+          )?.client_id;
+          for (const t of this.data.tasks)
+            if (t.id === task.id || t.parent_id === task.id) {
+              t.contract_id = a.p_contract;
+              t.project_id = a.p_project ?? null;
+              if (
+                t.team_id &&
+                !this.data.clientTeams.some(
+                  (ct) => ct.client_id === clientId && ct.team_id === t.team_id,
+                )
+              )
+                t.team_id = null;
+            }
+          moved = {
+            old_client: before.client,
+            old_product: before.product,
+            new_client: after.client,
+            new_product: after.product,
+          };
+        }
         // Mirrors public.update_task: "Aplicar" the rule, or a date by hand
         // that asks the reason when moved to before the rule's minimum.
         const rule = suggestDue(this.data, {
@@ -1057,7 +1095,7 @@ export class DemoStore {
             : task.status,
           delivered_at: null,
         });
-        event("edited");
+        event("edited", moved);
         break;
       }
       case "transition_task": {
