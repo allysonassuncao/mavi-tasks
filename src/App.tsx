@@ -1692,6 +1692,13 @@ export default function App() {
   }
   function openNav(to: NavTarget) {
     navigate(navHref(to));
+    // A shortcut of the list ("Para você", "Atrasadas", a product) reopens
+    // the last filters made from it, e.g. "Para você" + "Atrasadas".
+    const saved =
+      to.page === "tasks" && to.query && Object.keys(to.query).length
+        ? readFilters<TaskViewConfig>("tasks", company, user)
+        : null;
+    if (saved && shortcutOf(to.query!, saved)) applyViewConfig(saved);
     setSidebar(false);
     setForm(null);
     setQuery("");
@@ -4299,6 +4306,22 @@ function PlayingBadge({ playing }: { playing: Playing }) {
   );
 }
 /** Query params of the task list: a link with any of them opens as it is. */
+/**
+ * Whether the saved list filters were made from this menu shortcut: the
+ * same tab, and the shortcut's own filter among them. "Todas" (escopo=all)
+ * clears instead.
+ */
+function shortcutOf(query: Record<string, string>, saved: TaskViewConfig) {
+  const keys = Object.keys(query);
+  if (!keys.every((k) => ["escopo", "atrasadas", "produto"].includes(k)))
+    return false;
+  if (query.escopo === "all") return false;
+  return (
+    (query.escopo ?? "") === (saved.scope ?? "") &&
+    (!("atrasadas" in query) || !!saved.late) &&
+    (!("produto" in query) || saved.product === query.produto)
+  );
+}
 const LIST_PARAMS = [
   "visualizacao",
   "busca",

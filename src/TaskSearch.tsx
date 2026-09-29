@@ -20,7 +20,7 @@ import {
   type TaskSearchParams,
 } from "./task-search";
 
-/** The search's filters (URL params) kept for the next visit; not the term. */
+/** The search's filters (URL params) kept for the next visit, with the term. */
 const FILTER_PARAMS = [
   "em",
   "cli",
@@ -88,24 +88,29 @@ export function TaskSearch({
   const [error, setError] = useState("");
   const request = useRef(0);
 
-  // Opened without filters, the search brings back the person's last ones.
+  // Opened without filters, the search brings back the person's last ones;
+  // without a term, the last term too (a term typed in the list's quick
+  // search, carried here, wins over it).
   // Whose filters are on screen ("company:user"), once restored.
   const [filtersFor, setFiltersFor] = useState("");
   useEffect(() => {
     const url = new URL(window.location.href);
-    const has = FILTER_PARAMS.some((k) => url.searchParams.has(k));
-    const saved = has
-      ? null
-      : readFilters<Record<string, string>>("search", company, user);
+    const saved = readFilters<Record<string, string>>("search", company, user);
     if (saved) {
-      for (const k of FILTER_PARAMS)
-        if (typeof saved[k] === "string" && saved[k])
-          url.searchParams.set(k, saved[k]);
+      if (!FILTER_PARAMS.some((k) => url.searchParams.has(k)))
+        for (const k of FILTER_PARAMS)
+          if (typeof saved[k] === "string" && saved[k])
+            url.searchParams.set(k, saved[k]);
+      if (!url.searchParams.get("termo") && typeof saved.termo === "string") {
+        if (saved.termo) url.searchParams.set("termo", saved.termo);
+        setText(saved.termo);
+      }
       navigate(url.pathname + url.search + url.hash, true);
     }
     setFiltersFor(`${company}:${user}`);
   }, [company, user]);
   const savedFilters = JSON.stringify({
+    termo: query,
     em: fieldsParam,
     cli: client,
     proj: project,
