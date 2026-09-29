@@ -25,6 +25,11 @@ export type GoogleEnv = {
   tokenKey: Buffer | null;
   /** Registered in Google Cloud: <origin>/api/google-callback. */
   redirectUri: string;
+  /**
+   * AI_WORKER_SECRET: lets this server read the busy times of whoever will
+   * execute a task (prazo inteligente), never the browser.
+   */
+  workerSecret?: string;
 };
 
 export function googleEnv(
@@ -43,6 +48,7 @@ export function googleEnv(
     tokenKey: key && key.length === 32 ? key : null,
     redirectUri:
       env.GOOGLE_REDIRECT_URI || `${appOrigin(env)}/api/google-callback`,
+    workerSecret: env.AI_WORKER_SECRET?.trim() ?? "",
   };
 }
 
@@ -422,6 +428,18 @@ export type GoogleRequest =
       event: EventInput;
     }
   | {
+      /**
+       * Prazo inteligente: reads the busy times (only the total per day) of
+       * whoever will execute a task, `from`–`to` in the company's time zone.
+       */
+      action: "busy";
+      company: string;
+      user: string;
+      from: string;
+      to: string;
+      timeZone: string;
+    }
+  | {
       action: "delete";
       calendarId: string;
       eventId: string;
@@ -498,6 +516,9 @@ export async function handleGoogle(
       await callRpc(env, fetchImpl, authorization, "google_disconnect", {});
       return { status: 200, body: { disconnected: true } };
     }
+
+    if (req.action === "busy")
+      return await readBusy(env, fetchImpl, authorization, req);
 
     const call = calendarClient(env, fetchImpl, authorization);
 
@@ -810,4 +831,176 @@ export async function handleGoogleCallback(
     },
   );
   return back(stored.ok ? "conectado" : "expirado");
+}
+
+// ------------------------------------------------------------ busy times
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The local day ("AAAA-MM-DD") and minutes since local midnight of `t`. */
+function localClock(t: number, timeZone: string) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(t))
+      .map((p) => [p.type, p.value]),
+  );
+  return {
+    day: `${parts.year}-${parts.month}-${parts.day}`,
+    ms:
+      ((Number(parts.hour) * 60 + Number(parts.minute)) * 60 +
+        Number(parts.second)) *
+      1000,
+  };
+}
+
+/**
+ * Busy minutes per local day: overlapping blocks count once, and a block
+ * crossing midnight is split between the days.
+ */
+export function busyMinutesByDay(
+  blocks: { start: string; end: string }[],
+  timeZone: string,
+) {
+  const spans = blocks
+    .map((b) => [Date.parse(b.start), Date.parse(b.end)] as const)
+    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b > a)
+    .sort((x, y) => x[0] - y[0]);
+  const merged: [number, number][] = [];
+  for (const [a, b] of spans) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  const out: Record<string, number> = {};
+  for (const [a, b] of merged) {
+    for (let t = a; t < b; ) {
+      const { day, ms } = localClock(t, timeZone);
+      const next = Math.min(b, t + 86_400_000 - ms);
+      out[day] = (out[day] ?? 0) + (next - t) / 60_000;
+      t = next;
+    }
+  }
+  for (const day of Object.keys(out))
+    out[day] = Math.min(1440, Math.round(out[day]));
+  return out;
+}
+
+/**
+ * Reads the busy times of another person of the company (their own Google
+ * connection, through the server's secret) and keeps only the minutes per
+ * day in the database. Nobody connected: nothing to read.
+ */
+async function readBusy(
+  env: GoogleEnv,
+  fetchImpl: Fetch,
+  authorization: string,
+  req: Record<string, unknown>,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const { company, user, from, to, timeZone } = req as Record<string, string>;
+  if (!env.workerSecret)
+    return { status: 500, body: { error: "AI_WORKER_SECRET não configurado no servidor." } };
+  if (
+    !UUID_RE.test(company ?? "") ||
+    !UUID_RE.test(user ?? "") ||
+    !DAY_RE.test(from ?? "") ||
+    !DAY_RE.test(to ?? "") ||
+    to < from ||
+    Date.parse(to) - Date.parse(from) > 120 * 86_400_000
+  )
+    return { status: 400, body: { error: "Período inválido." } };
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone });
+  } catch {
+    return { status: 400, body: { error: "Fuso horário inválido." } };
+  }
+  const found = await callRpc<
+    {
+      refresh_token_cipher: string;
+      access_token_cipher: string | null;
+      access_expires_at: string | null;
+    }[]
+  >(env, fetchImpl, authorization, "google_busy_tokens", {
+    p_secret: env.workerSecret,
+    p_company: company,
+    p_user: user,
+  });
+  if (!found.ok) throw new GoogleError(found.status, found.error);
+  const row = found.data[0];
+  if (!row) return { status: 200, body: { busy: "none" } };
+  const key = env.tokenKey!;
+  let token: string;
+  let saved: { cipher: string; expires: string } | null = null;
+  if (
+    row.access_token_cipher &&
+    row.access_expires_at &&
+    Date.parse(row.access_expires_at) > Date.now() + 60_000
+  )
+    token = unseal(key, row.access_token_cipher);
+  else {
+    const res = await fetchImpl(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: env.clientId,
+        client_secret: env.clientSecret,
+        refresh_token: unseal(key, row.refresh_token_cipher),
+        grant_type: "refresh_token",
+      }),
+    });
+    // Consent revoked or expired: the person reconnects on their own
+    // Agenda; here the suggestion just goes without their meetings.
+    if (!res.ok) return { status: 200, body: { busy: "none" } };
+    const t = (await res.json()) as { access_token: string; expires_in: number };
+    token = t.access_token;
+    saved = {
+      cipher: seal(key, t.access_token),
+      expires: new Date(Date.now() + t.expires_in * 1000).toISOString(),
+    };
+  }
+  const offset = (day: string) => {
+    // The instant of local midnight: guessed from UTC, corrected by the zone.
+    const guess = Date.parse(`${day}T00:00:00Z`);
+    return guess - localClock(guess, timeZone).ms +
+      (localClock(guess, timeZone).day < day ? 86_400_000 : 0);
+  };
+  const res = await fetchImpl(`${API}/freeBusy`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      timeMin: new Date(offset(from)).toISOString(),
+      timeMax: new Date(offset(to) + 86_400_000).toISOString(),
+      timeZone,
+      items: [{ id: "primary" }],
+    }),
+  });
+  if (!res.ok) return { status: 200, body: { busy: "none" } };
+  const data = (await res.json()) as {
+    calendars?: Record<string, { busy?: { start: string; end: string }[] }>;
+  };
+  const days = busyMinutesByDay(data.calendars?.primary?.busy ?? [], timeZone);
+  const stored = await callRpc(env, fetchImpl, authorization, "google_busy_save", {
+    p_secret: env.workerSecret,
+    p_company: company,
+    p_user: user,
+    p_from: from,
+    p_to: to,
+    p_days: days,
+    p_access_cipher: saved?.cipher ?? null,
+    p_expires_at: saved?.expires ?? null,
+  });
+  if (!stored.ok) throw new GoogleError(stored.status, stored.error);
+  return { status: 200, body: { busy: "fresh" } };
 }

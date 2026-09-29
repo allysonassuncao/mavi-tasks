@@ -15,6 +15,8 @@ export interface Company {
   logo_url?: string | null;
   /** The company's working day, in minutes (480 = 8 h). */
   work_minutes?: number;
+  /** Prazo inteligente: off, suggest (beside the rule) or fill (the date itself). */
+  smart_due?: "off" | "suggest" | "fill";
 }
 export interface Member {
   company_id: string;
@@ -117,6 +119,11 @@ export interface Task {
   due_rule_id?: string | null;
   /** Why the due date is before the rule's minimum ("prazo apertado"). */
   due_tight_reason?: string | null;
+  /** The due date is the MAVI's suggestion (prazo inteligente). */
+  due_smart?: boolean;
+  /** What the rule and the MAVI gave when the task was created. */
+  due_rule_date?: string | null;
+  due_smart_date?: string | null;
   revision: number;
   version: number;
   archived: boolean;

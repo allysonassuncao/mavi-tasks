@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CalendarCheck, Palmtree } from "lucide-react";
+import { CalendarCheck, Palmtree, Sparkles } from "lucide-react";
 import { Input, Textarea } from "./ui";
 import { dateKey } from "./domain";
 import {
@@ -11,6 +11,7 @@ import {
   type DueSuggestion,
 } from "./dueRules";
 import { dayLabel } from "./task-bulk";
+import { smartReasons, type SmartDue } from "./smartDue";
 import { absenceKinds, type Snapshot, type Task } from "./types";
 import "./due-rules.css";
 
@@ -26,6 +27,7 @@ export function DueRuleHint({
   following,
   byTeam = false,
   shortening = true,
+  alternative = false,
   reason,
   onReason,
   onApply,
@@ -39,6 +41,8 @@ export function DueRuleHint({
   byTeam?: boolean;
   /** Only a date moved earlier asks the reason (editing a task). */
   shortening?: boolean;
+  /** The date is the MAVI's: the rule's is just the other option. */
+  alternative?: boolean;
   reason: string;
   onReason: (value: string) => void;
   onApply: () => void;
@@ -58,10 +62,10 @@ export function DueRuleHint({
           </span>
         </small>
       ) : (
-        <small className="due-rule-note differs" role="status">
+        <small className={`due-rule-note${alternative ? "" : " differs"}`} role="status">
           <CalendarCheck size={13} aria-hidden="true" />
           <span>
-            A regra sugere {dayLabel(suggestion.due)} ({why}).
+            A regra {alternative ? "daria" : "sugere"} {dayLabel(suggestion.due)} ({why}).
           </span>
           <button type="button" onClick={onApply}>
             Aplicar
@@ -188,5 +192,73 @@ export function AbsenceNote({
           : "Os prazos pela regra já pulam esses dias."}
       </span>
     </small>
+  );
+}
+
+/**
+ * The MAVI's due date (prazo inteligente): the date, a way to use it and,
+ * on request, why — history, workload, meetings, approval, rework.
+ */
+export function SmartDueHint({
+  data,
+  smart,
+  using,
+  due,
+  byTeam = false,
+  priority,
+  onUse,
+}: {
+  data: Pick<Snapshot, "members">;
+  smart: SmartDue | null;
+  /** The date shown is the MAVI's. */
+  using: boolean;
+  due: string;
+  byTeam?: boolean;
+  priority: Task["priority"];
+  onUse: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!smart?.available || !smart.due) return null;
+  const who = data.members.find((m) => m.user_id === smart.assignee)?.name.split(" ")[0];
+  const same = smart.due === due;
+  return (
+    <div className="smart-due-note" role="status">
+      <Sparkles size={13} aria-hidden="true" />
+      <span>
+        {using ? (
+          <>
+            Prazo sugerido pela MAVI
+            {byTeam && who ? `, para ${who} (quem a equipe daria agora)` : ""}.
+          </>
+        ) : same ? (
+          <>A MAVI também sugere esta data.</>
+        ) : (
+          <>
+            A MAVI sugere <strong>{dayLabel(smart.due)}</strong>
+            {byTeam && who ? ` para ${who} (quem a equipe daria agora)` : ""}.
+          </>
+        )}
+      </span>
+      {!using && !same && (
+        <button type="button" className="smart-due-use" onClick={onUse}>
+          Usar
+        </button>
+      )}
+      <button
+        type="button"
+        className="smart-due-why"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        Por quê?
+      </button>
+      {open && (
+        <ul>
+          {smartReasons(smart, data, priority).map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

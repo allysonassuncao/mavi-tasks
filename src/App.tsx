@@ -1474,7 +1474,8 @@ export default function App() {
           setData((d) => ({ ...d, ...lookups }));
         } else if (
           name === "set_company_logo" ||
-          name === "set_company_work_minutes"
+          name === "set_company_work_minutes" ||
+          name === "set_company_smart_due"
         ) {
           const companies = await api.companies(true);
           setData((d) => ({ ...d, companies }));

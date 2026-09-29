@@ -29,7 +29,8 @@ import {
 } from "./types";
 import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
 import { suggestDue } from "./dueRules";
-import { AbsenceNote, DueRuleHint } from "./DueRuleHint";
+import { AbsenceNote, DueRuleHint, SmartDueHint } from "./DueRuleHint";
+import { useSmartDue } from "./smartDue";
 import { dayLabel } from "./task-bulk";
 import {
   attachmentAccept,
@@ -136,6 +137,11 @@ export function TaskCreateForm({
   const [start, setStart] = useState("");
   const [clientApproval, setClientApproval] = useState(false);
   const [parent, setParent] = useState("");
+  const [priority, setPriority] = useState<keyof typeof priorities>("normal");
+  const [estimated, setEstimated] = useState("");
+  // Which suggestion the date follows: "auto" is the company's choice (the
+  // rule, or the MAVI in "fill" mode); "Aplicar"/"Usar" pick one.
+  const [duePick, setDuePick] = useState<"auto" | "rule" | "smart">("auto");
   const [repeat, setRepeat] = useState<RecurrenceFrequency | "">("");
   const [showDetails, setShowDetails] = useState(false);
   const [detailsMounted, setDetailsMounted] = useState(false);
@@ -200,13 +206,48 @@ export function TaskCreateForm({
         : null,
     [data, contract, project, byTeam, team, assignee, start, clientApproval],
   );
-  const due = dueByHand || !dueSuggestion ? pickedDue : dueSuggestion.due;
+  // Prazo inteligente: the MAVI's date beside the rule's (smartDue.ts).
+  const companyRow = data.companies.find((c) => c.id === company);
+  const smartMode = companyRow?.smart_due ?? "suggest";
+  const smart = useSmartDue(
+    contract && smartMode !== "off" && (!byTeam || team)
+      ? {
+          company,
+          contract,
+          project: project || null,
+          team: byTeam ? team || null : null,
+          assignee: byTeam ? null : assignee,
+          start: start || null,
+          approval: clientApproval,
+          priority,
+          estimated: Math.round(Number(estimated || 0) * 60),
+          timezone: companyRow?.timezone ?? "America/Sao_Paulo",
+          today: dateKey(),
+        }
+      : null,
+    demo,
+    data,
+  ).state;
+  const smartDate = smart?.available ? (smart.due ?? null) : null;
+  const followSmart =
+    !!smartDate &&
+    (duePick === "smart" || (duePick === "auto" && smartMode === "fill"));
+  const due = dueByHand
+    ? pickedDue
+    : followSmart
+      ? smartDate!
+      : (dueSuggestion?.due ?? pickedDue);
   const setDue = (value: string) => {
     setPickedDue(value);
     setDueByHand(true);
   };
-  // The date the rule gives is still the rule's, even if picked by hand.
-  const dueManual = dueByHand && due !== dueSuggestion?.due;
+  // The MAVI's date, followed or picked by hand (when it isn't also the rule's).
+  const usingSmart =
+    !!smartDate &&
+    due === smartDate &&
+    (dueByHand ? due !== dueSuggestion?.due : followSmart);
+  // The date the rule (or the MAVI) gives is still theirs, even if picked by hand.
+  const dueManual = dueByHand && due !== dueSuggestion?.due && !usingSmart;
   // A main task chosen for another product no longer applies.
   const parentTask = parent
     ? data.tasks.find((t) => t.id === parent && t.contract_id === contract)
@@ -307,6 +348,9 @@ export function TaskCreateForm({
     setClientApproval(false);
     setParent("");
     setDueReason("");
+    setPriority("normal");
+    setEstimated("");
+    setDuePick("auto");
     setFormKey((v) => v + 1);
     setCreated((v) => v + 1);
     redrawUploads();
@@ -337,13 +381,18 @@ export function TaskCreateForm({
       // Without it the database counts the rule's date itself (in a team,
       // for whoever receives the task).
       p_due_manual: dueManual,
-      ...(dueManual && dueReason.trim() ? { p_due_reason: dueReason.trim() } : {}),
+      // The database counts the MAVI's date again (in a team, for whoever
+      // receives the task).
+      p_due_smart: usingSmart,
+      ...(dueManual && dueReason.trim()
+        ? { p_due_reason: dueReason.trim() }
+        : {}),
       p_start: start || null,
       p_project: project || null,
       p_team: byTeam ? team : null,
       p_description: s("description"),
-      p_priority: s("priority") || "normal",
-      p_estimated: Number(s("estimated")) * 60,
+      p_priority: priority,
+      p_estimated: Math.round(Number(estimated || 0) * 60),
       p_client_approval: clientApproval,
       p_parent: parentTask?.id ?? null,
       // The database opens a copy of the task on each date of the series.
@@ -567,11 +616,27 @@ export function TaskCreateForm({
                   data={data}
                   suggestion={dueSuggestion}
                   due={due}
-                  following={!dueManual}
+                  following={!dueManual && !usingSmart}
+                  alternative={usingSmart}
                   byTeam={byTeam}
                   reason={dueReason}
                   onReason={setDueReason}
-                  onApply={() => setDueByHand(false)}
+                  onApply={() => {
+                    setDueByHand(false);
+                    setDuePick("rule");
+                  }}
+                />
+                <SmartDueHint
+                  data={data}
+                  smart={smart}
+                  using={usingSmart}
+                  due={due}
+                  byTeam={byTeam}
+                  priority={priority}
+                  onUse={() => {
+                    setDueByHand(false);
+                    setDuePick("smart");
+                  }}
                 />
                 {!byTeam && (
                   <AbsenceNote data={data} assignee={assignee} due={due} />
@@ -714,7 +779,12 @@ export function TaskCreateForm({
                   <div className="details-grid">
                     <label>
                       Prioridade
-                      <Select name="priority" defaultValue="normal">
+                      <Select
+                        value={priority}
+                        onValueChange={(v) =>
+                          setPriority(v as keyof typeof priorities)
+                        }
+                      >
                         {Object.entries(priorities).map(([id, label]) => (
                           <SelectOption key={id} value={id}>
                             {label}
@@ -726,11 +796,12 @@ export function TaskCreateForm({
                       Estimativa em horas
                       <Input
                         type="number"
-                        name="estimated"
                         min="0"
                         max="10000"
                         step="0.25"
                         placeholder="0"
+                        value={estimated}
+                        onChange={(e) => setEstimated(e.target.value)}
                       />
                     </label>
                     <label>

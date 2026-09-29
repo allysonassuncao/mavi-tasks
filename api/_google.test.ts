@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   GOOGLE_SCOPE,
+  busyMinutesByDay,
   eventBody,
   handleGoogle,
   handleGoogleCallback,
@@ -509,5 +510,95 @@ describe("handleGoogleCallback", () => {
       status: 302,
       location: "https://workspace.example.com/agenda?google=conectado",
     });
+  });
+});
+
+describe("horários ocupados (prazo inteligente)", () => {
+  it("soma por dia local, sem contar sobreposição, e divide a meia-noite", () => {
+    expect(
+      busyMinutesByDay(
+        [
+          { start: "2026-10-01T12:00:00-03:00", end: "2026-10-01T13:00:00-03:00" },
+          { start: "2026-10-01T12:30:00-03:00", end: "2026-10-01T14:00:00-03:00" },
+          { start: "2026-10-01T23:00:00-03:00", end: "2026-10-02T01:30:00-03:00" },
+          { start: "2026-10-05T03:00:00Z", end: "2026-10-06T03:00:00Z" },
+        ],
+        "America/Sao_Paulo",
+      ),
+    ).toEqual({ "2026-10-01": 180, "2026-10-02": 90, "2026-10-05": 1440 });
+  });
+
+  it("lê os horários de quem vai executar e guarda só o total por dia", async () => {
+    const net = network([
+      [
+        /POST .*rpc\/google_busy_tokens/,
+        (init) => {
+          expect(JSON.parse(String(init.body)).p_secret).toBe("segredo");
+          return json([
+            {
+              refresh_token_cipher: seal(key, "refresh-ana"),
+              access_token_cipher: null,
+              access_expires_at: null,
+            },
+          ]);
+        },
+      ],
+      [
+        /POST https:\/\/oauth2.googleapis.com\/token/,
+        () => json({ access_token: "acesso-ana", expires_in: 3600 }),
+      ],
+      [
+        /POST https:\/\/www.googleapis.com\/calendar\/v3\/freeBusy/,
+        (init) => {
+          const body = JSON.parse(String(init.body));
+          expect(body.timeMin).toBe("2026-10-01T03:00:00.000Z");
+          expect(body.timeMax).toBe("2026-10-03T03:00:00.000Z");
+          return json({
+            calendars: {
+              primary: {
+                busy: [
+                  { start: "2026-10-01T13:00:00Z", end: "2026-10-01T15:00:00Z" },
+                ],
+              },
+            },
+          });
+        },
+      ],
+      [/POST .*rpc\/google_busy_save/, () => json(null, 204)],
+    ]);
+    const req = {
+      action: "busy",
+      company: "00000000-0000-4000-8000-000000000001",
+      user: "00000000-0000-4000-8000-000000000012",
+      from: "2026-10-01",
+      to: "2026-10-02",
+      timeZone: "America/Sao_Paulo",
+    };
+    const res = await handleGoogle(req, "Bearer t", { ...env, workerSecret: "segredo" }, net.fetch);
+    expect(res).toEqual({ status: 200, body: { busy: "fresh" } });
+    const save = JSON.parse(net.calls.find((c) => c.url.includes("google_busy_save"))!.body!);
+    expect(save.p_days).toEqual({ "2026-10-01": 120 });
+    expect(save.p_access_cipher).not.toContain("acesso-ana");
+    // Sem o segredo configurado, não lê nada.
+    const none = await handleGoogle(req, "Bearer t", env, net.fetch);
+    expect(none.status).toBe(500);
+  });
+
+  it("quem não conectou a agenda fica sem o desconto", async () => {
+    const net = network([[/POST .*rpc\/google_busy_tokens/, () => json([])]]);
+    const res = await handleGoogle(
+      {
+        action: "busy",
+        company: "00000000-0000-4000-8000-000000000001",
+        user: "00000000-0000-4000-8000-000000000012",
+        from: "2026-10-01",
+        to: "2026-10-02",
+        timeZone: "America/Sao_Paulo",
+      },
+      "Bearer t",
+      { ...env, workerSecret: "segredo" },
+      net.fetch,
+    );
+    expect(res.body).toEqual({ busy: "none" });
   });
 });

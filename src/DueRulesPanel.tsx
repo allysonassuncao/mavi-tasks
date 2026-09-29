@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CalendarCheck, CalendarX2, Pencil, Plus, Trash2 } from "lucide-react";
+import { CalendarCheck, CalendarX2, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Modal } from "./components";
 import { Button, Checkbox, Input, Select, SelectOption } from "./ui";
 import { dateKey } from "./domain";
@@ -155,6 +155,20 @@ export function DueRulesPanel({
           </p>
         )}
       </section>
+      <SmartDueMode
+        mode={data.companies.find((c) => c.id === company)?.smart_due ?? "suggest"}
+        canEdit={isAdmin}
+        onChange={async (mode) => {
+          await mutate("set_company_smart_due", { p_company: company, p_mode: mode });
+          notify(
+            mode === "off"
+              ? "Prazo inteligente desligado."
+              : mode === "fill"
+                ? "A MAVI passa a preencher o prazo das novas tarefas."
+                : "A MAVI passa a sugerir o prazo ao lado da regra.",
+          );
+        }}
+      />
       <CompanyCalendar
         data={data}
         company={company}
@@ -661,6 +675,83 @@ function CompanyCalendar({
           )}
         </div>
       </div>
+      {error && (
+        <p className="form-error template-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+const SMART_MODES = [
+  ["suggest", "Sugerir ao lado", "A data da regra preenche o prazo; a da MAVI aparece ao lado, com “Usar” e o porquê."],
+  ["fill", "Preencher sozinha", "A data da MAVI já preenche o prazo (quando há histórico); a da regra fica ao lado."],
+  ["off", "Desligado", "Só as regras de prazo."],
+] as const;
+
+/**
+ * Prazo inteligente: how the MAVI's date shows up when creating tasks
+ * (admins choose; companies.smart_due).
+ */
+function SmartDueMode({
+  mode,
+  canEdit,
+  onChange,
+}: {
+  mode: "off" | "suggest" | "fill";
+  canEdit: boolean;
+  onChange: (mode: "off" | "suggest" | "fill") => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <section className="panel smart-due-mode" aria-labelledby="smart-due-title">
+      <div className="panel-heading">
+        <div>
+          <h2 id="smart-due-title">
+            <Sparkles size={17} aria-hidden="true" /> Prazo inteligente da MAVI
+          </h2>
+          <p>
+            A MAVI olha quanto tarefas parecidas levaram de verdade (com 5 ou
+            mais entregas), a carga de quem executa contra a jornada, as
+            reuniões da agenda, a aprovação do cliente e o retrabalho. Nunca
+            fica antes do mínimo da regra.
+          </p>
+        </div>
+      </div>
+      <div className="smart-due-options" role="radiogroup" aria-label="Como a MAVI sugere o prazo">
+        {SMART_MODES.map(([id, label, hint]) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={mode === id}
+            className={mode === id ? "selected" : ""}
+            disabled={!canEdit || busy}
+            onClick={async () => {
+              if (id === mode) return;
+              setBusy(true);
+              setError("");
+              try {
+                await onChange(id);
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <strong>{label}</strong>
+            <small>{hint}</small>
+          </button>
+        ))}
+      </div>
+      {!canEdit && (
+        <small className="template-scope-hint smart-due-admin">
+          Só administradores mudam como a MAVI sugere o prazo.
+        </small>
+      )}
       {error && (
         <p className="form-error template-error" role="alert">
           {error}

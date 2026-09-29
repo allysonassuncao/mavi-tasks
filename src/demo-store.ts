@@ -671,8 +671,10 @@ export class DemoStore {
               })
             : null;
         const dueManual = name !== "create_task" || (a.p_due_manual ?? true);
+        // Prazo inteligente: the demo has no history, so the form's date stands.
+        const dueSmart = name === "create_task" && !dueManual && !!a.p_due_smart;
         const due: string =
-          !dueManual && dueRule ? dueRule.due : a.p_due;
+          dueSmart ? a.p_due : !dueManual && dueRule ? dueRule.due : a.p_due;
         if (!due) throw Error("Escolha o prazo");
         const tight = dueManual && !!dueRule?.min && due < dueRule.min;
         if (tight && String(a.p_due_reason ?? "").trim().length < 5)
@@ -687,6 +689,7 @@ export class DemoStore {
         }
         this.data.tasks.unshift({
           due_manual: dueManual,
+          due_smart: dueSmart,
           due_rule_id: !dueManual && dueRule ? dueRule.rule.id : null,
           due_tight_reason: tight ? String(a.p_due_reason).trim() : null,
           custom_fields: fillDemoFields(fields, a.p_custom ?? {}),
@@ -880,6 +883,15 @@ export class DemoStore {
           throw Error("Somente administradores mudam a jornada da empresa");
         this.data.companies = this.data.companies.map((c) =>
           c.id === a.p_company ? { ...c, work_minutes: a.p_minutes } : c,
+        );
+        break;
+      }
+      case "set_company_smart_due": {
+        const role = this.data.members.find((m) => m.user_id === demoUser)?.role;
+        if (role !== "admin")
+          throw Error("Somente administradores mudam o prazo inteligente");
+        this.data.companies = this.data.companies.map((c) =>
+          c.id === a.p_company ? { ...c, smart_due: a.p_mode } : c,
         );
         break;
       }
