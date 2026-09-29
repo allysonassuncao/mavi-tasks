@@ -19,6 +19,7 @@ export const pagePaths = {
   drive: "/drive",
   storage: "/armazenamento",
   aiUsage: "/mavi",
+  mavi: "/mavi/conversas",
   dashboards: "/dashboards",
   profile: "/perfil",
   settings: "/configuracoes",
@@ -182,6 +183,7 @@ export function resolvePage(path: string): Page | null {
   if (normalized === "/consumo-ia" || normalized === "/ia") return "aiUsage";
   if (taskIdFromPath(path)) return "tasks";
   if (dashboardIdFromPath(path)) return "dashboards";
+  if (maviChatIdFromPath(path)) return "mavi";
   return (
     (Object.keys(pagePaths) as Page[]).find(
       (page) => pagePaths[page] === normalized,
@@ -287,6 +289,15 @@ export function dashboardIdFromPath(path: string) {
   return (
     routeParts(path).path.match(
       /^\/dashboards\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|demo-[0-9a-z-]{1,60})$/i,
+    )?.[1] ?? null
+  );
+}
+
+/** A conversa aberta no módulo MAVI: /mavi/conversas/<id>. */
+export function maviChatIdFromPath(path: string) {
+  return (
+    routeParts(path).path.match(
+      /^\/mavi\/conversas\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
     )?.[1] ?? null
   );
 }

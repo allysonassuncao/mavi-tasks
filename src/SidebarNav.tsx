@@ -55,7 +55,8 @@ function readOpen(): Record<string, boolean> {
 const PRODUCTS_SHOWN = 8;
 
 /**
- * The main menu, grouped by what people do: work (tasks, campaigns), files
+ * The main menu, grouped by what people do: the overview and the MAVI chat
+ * on top, work (tasks, campaigns), files
  * and analyses, and administration (clients, products, projects, hours,
  * team and settings, storage). Collaborators, who have no administration,
  * find their clients, projects and hours under work. Tasks and settings
@@ -139,6 +140,12 @@ export function SidebarNav({
           label: "Visão geral",
           icon: LayoutDashboard,
           to: { page: "overview" },
+        },
+        {
+          key: "mavi",
+          label: "MAVI",
+          icon: Sparkles,
+          to: { page: "mavi" },
         },
         {
           key: "notices",

@@ -33,12 +33,12 @@ import {
   type AiSource,
 } from "./ai";
 
-const SUGGESTIONS_ALL = [
+export const SUGGESTIONS_ALL = [
   "Quais clientes tiveram reunião esta semana e o que ficou combinado?",
   "O que está atrasado e com quem?",
   "Algum cliente reclamou de algo recentemente?",
 ];
-const SUGGESTIONS_CLIENT = [
+export const SUGGESTIONS_CLIENT = [
   "Resuma a situação deste cliente: reuniões recentes e tarefas em aberto.",
   "O que já foi prometido a este cliente e ainda não foi entregue?",
   "Quais foram as últimas decisões com este cliente?",
@@ -428,7 +428,7 @@ export function AiAssistant({
   );
 }
 
-function ShareDialog({
+export function ShareDialog({
   conversation,
   data,
   user,

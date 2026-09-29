@@ -26,11 +26,13 @@ export const MEMBER_PAGES: readonly Page[] = [
   "hours",
   "reports",
   "drive",
+  "mavi",
   "profile",
 ];
 /**
- * Modules that aren't pages: the AI assistant, the bubble over every page.
- * Everyone has it by profile; an administrator turns it off per person.
+ * Modules that aren't pages: the AI assistant, the bubble over every page
+ * (and its full page, MAVI in the menu). Everyone has it by profile; an
+ * administrator turns it off per person.
  */
 export const WIDGET_MODULES = ["assistant"] as const;
 export type WidgetModule = (typeof WIDGET_MODULES)[number];
@@ -57,7 +59,7 @@ export const MODULES = [
   { id: "hours", label: "Controle de horas" },
   { id: "storage", label: "Armazenamento" },
   { id: "aiUsage", label: "Painel da MAVI" },
-  { id: "assistant", label: "Assistente MAVI" },
+  { id: "assistant", label: "MAVI (conversas e bolinha)" },
 ] as const satisfies readonly { id: Page | WidgetModule; label: string }[];
 export type ModuleId = (typeof MODULES)[number]["id"];
 
@@ -65,6 +67,7 @@ export type ModuleId = (typeof MODULES)[number]["id"];
 export function moduleOf(page: Page): ModuleId | null {
   if (page === "search") return "tasks";
   if (page === "contracts") return "products";
+  if (page === "mavi") return "assistant";
   return MODULES.some((m) => m.id === page) ? (page as ModuleId) : null;
 }
 

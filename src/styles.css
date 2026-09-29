@@ -24747,3 +24747,583 @@ label.drive-pick-file {
     padding-left: 16px;
   }
 }
+
+/* Módulo MAVI: a conversa em tela cheia, como no ChatGPT e no Claude — as
+   conversas à esquerda, a conversa numa coluna central e a caixa de mensagem
+   embaixo. Ocupa a janela sob a barra do topo; só a lista e a conversa rolam. */
+.main-shell:has(> main > .mavi-chat) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+main:has(> .mavi-chat) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+main:has(> .mavi-chat) > .app-footer {
+  display: none;
+}
+main:has(> .mavi-chat) > .error-banner {
+  margin: 12px 16px 0;
+}
+.mavi-chat {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: #fff;
+  overflow: hidden;
+}
+
+/* Lista de conversas. */
+.mavi-side {
+  width: 268px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #f7f8f7;
+  border-right: 1px solid var(--border);
+}
+.mavi-chat.side-closed .mavi-side {
+  display: none;
+}
+.mavi-side-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 10px 10px 12px;
+}
+.mavi-new {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+  box-shadow: 0 1px 2px #152c200d;
+}
+.mavi-new:hover {
+  background: #f4f8ef;
+  border-color: #d5e2c6;
+}
+.mavi-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: 0 12px 6px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: #eceeec;
+  color: var(--muted);
+}
+.mavi-search:focus-within {
+  background: #fff;
+  box-shadow: 0 0 0 2px #a5c780;
+}
+.mavi-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+.mavi-search input:focus {
+  outline: none;
+}
+.mavi-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 8px 18px;
+}
+.mavi-list h3 {
+  margin: 16px 8px 4px;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--muted);
+}
+.mavi-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mavi-list li {
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+}
+.mavi-list li:hover {
+  background: #eceeec;
+}
+.mavi-list li.active {
+  background: #e3ebd8;
+}
+.mavi-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 4px 7px 9px;
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+.mavi-item span,
+.mavi-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mavi-item small {
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+.mavi-item-more {
+  width: 28px;
+  height: 28px;
+  margin-right: 3px;
+  opacity: 0;
+  color: #5d6a68;
+}
+.mavi-list li:hover .mavi-item-more,
+.mavi-list li:focus-within .mavi-item-more,
+.mavi-list li.active .mavi-item-more,
+.mavi-item-more[data-state="open"] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .mavi-item-more {
+    opacity: 1;
+  }
+}
+.mavi-rename {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  margin: 2px;
+  padding: 0 8px;
+  border: 1px solid #a5c780;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 0.8rem;
+}
+.mavi-list-empty {
+  margin: 18px 10px;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.mavi-item-menu {
+  width: 180px;
+}
+.mavi-item-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  text-align: left;
+}
+.mavi-item-menu button:hover {
+  background: #f3f6f1;
+}
+.mavi-item-menu button.danger {
+  color: #b3372f;
+}
+.mavi-item-menu button.danger:hover {
+  background: #fcefed;
+}
+.mavi-scrim {
+  display: none;
+}
+
+/* A conversa. */
+.mavi-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mavi-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 56px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.mavi-head-toggle,
+.mavi-head-new {
+  display: none !important;
+}
+.mavi-chat.side-closed .mavi-head-toggle,
+.mavi-chat.side-closed .mavi-head-new {
+  display: inline-flex !important;
+}
+.mavi-head-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding-left: 6px;
+}
+.mavi-head-title strong,
+.mavi-head-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mavi-head-title strong {
+  font-size: 0.9rem;
+  font-weight: 620;
+}
+.mavi-head-title small {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.mavi-share {
+  min-height: 34px;
+  padding: 7px 12px;
+  gap: 7px;
+}
+.mavi-thread {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mavi-thread.empty {
+  justify-content: center;
+  overflow: auto;
+  padding: 24px;
+}
+.mavi-hero {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding-bottom: 6vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.mavi-hero-mark,
+.mavi-avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #263334;
+  color: #c8ec8e;
+}
+.mavi-hero-mark {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  box-shadow: 0 8px 24px #1c272829;
+}
+.mavi-hero h2 {
+  font-size: 1.75rem;
+  font-weight: 620;
+  letter-spacing: -0.6px;
+  color: var(--ink);
+}
+.mavi-hero > p {
+  max-width: 560px;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #6b7775;
+}
+.mavi-hero .mavi-composer,
+.mavi-hero .mavi-readonly {
+  width: 100%;
+  margin-top: 12px;
+  text-align: left;
+}
+.mavi-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.mavi-suggestions button {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: #3c4948;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.mavi-suggestions button:hover {
+  border-color: #cfdcc0;
+  background: #f6faf1;
+}
+.mavi-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.mavi-col {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.mavi-msg.user {
+  display: flex;
+  justify-content: flex-end;
+}
+.mavi-msg.user p {
+  max-width: 78%;
+  padding: 10px 16px;
+  border-radius: 20px;
+  background: #f0f2ef;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.mavi-msg.ai {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.mavi-avatar {
+  width: 28px;
+  height: 28px;
+  margin-top: 1px;
+}
+.mavi-msg-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #26302f;
+  font-size: 0.92rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.mavi-msg-body .answer-text {
+  gap: 10px;
+}
+.mavi-msg-body .answer-text ul {
+  gap: 6px;
+  padding-left: 20px;
+}
+.mavi-msg-body .answer-sources {
+  margin-top: 10px;
+}
+.mavi-msg-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: -7px;
+  color: var(--muted);
+}
+.mavi-error {
+  align-self: stretch;
+  text-align: left;
+}
+.mavi-dock {
+  flex-shrink: 0;
+  padding: 0 24px 12px;
+}
+.mavi-dock > * {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.mavi-disclaimer {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+/* Caixa de mensagem. */
+.mavi-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 10px 10px 16px;
+  border: 1px solid #dfe4e2;
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 6px 24px #1c27280f;
+  cursor: text;
+  transition:
+    border-color 150ms,
+    box-shadow 150ms;
+}
+.mavi-composer:focus-within {
+  border-color: #c3d6ad;
+  box-shadow: 0 6px 28px #1c272817;
+}
+.mavi-composer textarea {
+  width: 100%;
+  max-height: 220px;
+  padding: 4px 6px 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  resize: none;
+}
+.mavi-composer textarea:focus {
+  outline: none;
+}
+.mavi-composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: default;
+}
+.mavi-composer .ui-select.mavi-scope {
+  width: auto;
+  max-width: min(280px, 100%);
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 10px;
+  gap: 6px;
+  border-radius: 999px;
+  box-shadow: none;
+  color: #4f5c5c;
+  font-size: 0.76rem;
+}
+.mavi-composer .ui-select.mavi-scope .select-leading-icon {
+  width: 14px;
+  height: 14px;
+}
+.mavi-composer .ui-select.mavi-scope:disabled {
+  background: #f6f7f6;
+  opacity: 0.8;
+}
+.mavi-send {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #263334;
+  color: #c8ec8e;
+  transition:
+    background 150ms,
+    transform 150ms;
+}
+.mavi-send:hover:not(:disabled) {
+  background: #1c2728;
+  transform: translateY(-1px);
+}
+.mavi-send:disabled {
+  background: #d9dedc;
+  color: #fff;
+  opacity: 1;
+}
+.mavi-readonly {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 16px;
+  border: 1px dashed #d7dedb;
+  border-radius: 18px;
+  background: #f8f9f8;
+  color: #57645f;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.mavi-readonly > span {
+  flex: 1;
+}
+.mavi-readonly .btn {
+  min-height: 34px;
+  padding: 7px 12px;
+}
+
+@media (max-width: 900px) {
+  .mavi-chat .mavi-side,
+  .mavi-chat.side-closed .mavi-side {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 21;
+    display: flex;
+    width: min(300px, 86vw);
+    transform: translateX(-100%);
+    transition: transform 0.18s;
+    box-shadow: 0 18px 50px #1c272833;
+  }
+  .mavi-chat.drawer-open .mavi-side {
+    transform: none;
+  }
+  .mavi-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    background: #1c272833;
+  }
+  .mavi-head-toggle,
+  .mavi-head-new {
+    display: inline-flex !important;
+  }
+  .mavi-head {
+    padding: 8px 10px;
+  }
+  .mavi-share {
+    padding: 7px 10px;
+  }
+}
+@media (max-width: 600px) {
+  .mavi-share span,
+  .mavi-hero > p {
+    display: none;
+  }
+  .mavi-hero h2 {
+    font-size: 1.35rem;
+  }
+  .mavi-col {
+    padding: 20px 16px;
+  }
+  /* A bolinha da MAVI fica no canto: a caixa abre espaço para ela. */
+  .mavi-dock {
+    padding: 0 76px 10px 12px;
+  }
+  .mavi-thread.empty {
+    padding: 16px 16px 84px;
+  }
+  .mavi-msg.user p {
+    max-width: 88%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mavi-chat .mavi-side,
+  .mavi-send {
+    transition: none;
+  }
+}

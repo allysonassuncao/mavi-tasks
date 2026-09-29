@@ -182,7 +182,7 @@ export function hidePartial(text: string) {
   return t.replace(/(^|[^*])\*$/, "$1");
 }
 
-function Typed({
+export function Typed({
   text,
   streaming,
   render,
@@ -208,7 +208,7 @@ function lastSentence(text: string) {
   return last.length > 180 ? `…${last.slice(-180)}` : last;
 }
 
-function Steps({
+export function Steps({
   steps,
   thinking,
   streaming,
@@ -276,48 +276,30 @@ function Steps({
 }
 
 // ------------------------------------------------------------ chat
-export function AiChat({
-  intro,
-  placeholder,
-  suggestions,
-  send,
-  renderAnswer,
+export type AiSend = (
+  question: string,
+  history: ChatTurn[],
+  handlers: AiStreamHandlers,
+) => Promise<AiAnswer>;
+
+/**
+ * A conversa em andamento: a pergunta, os passos e a resposta chegando.
+ * O balão e o módulo MAVI desenham a mesma conversa de jeitos diferentes.
+ */
+export function useAiTurns({
   initial,
+  send,
   readOnly,
-  readOnlyNote,
   onAnswer,
 }: {
-  intro: ReactNode;
-  placeholder: string;
-  suggestions: string[];
-  /** Faz a pergunta, repassando os eventos do trabalho da IA. */
-  send: (
-    question: string,
-    history: ChatTurn[],
-    handlers: AiStreamHandlers,
-  ) => Promise<AiAnswer>;
-  renderAnswer: (
-    text: string,
-    sources: AiSource[],
-    typing: boolean,
-  ) => ReactNode;
-  /** Uma conversa salva, aberta de novo. */
   initial?: ChatEntry[];
+  send: AiSend;
   readOnly?: boolean;
-  readOnlyNote?: ReactNode;
-  onAnswer?: (answer: AiAnswer) => void;
+  onAnswer?: (answer: AiAnswer, question: string) => void;
 }) {
   const [turns, setTurns] = useState<ChatEntry[]>(initial ?? []);
-  const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const log = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
-  // Acompanha o fim da conversa enquanto a pessoa não rolar para cima.
-  useEffect(() => {
-    const el = log.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  });
 
   function patchLast(patch: (e: ChatEntry) => ChatEntry) {
     setTurns((t) =>
@@ -326,13 +308,12 @@ export function AiChat({
         : t,
     );
   }
+  /** Faz a pergunta; false quando não foi (para devolver o texto à caixa). */
   async function submit(question: string) {
     const q = question.trim();
-    if (!q || busy || readOnly) return;
+    if (!q || busy || readOnly) return false;
     setError("");
     setBusy(true);
-    setDraft("");
-    stick.current = true;
     const history = turns
       .filter((t) => !t.streaming && t.content)
       .map(({ role, content }) => ({ role, content }));
@@ -394,14 +375,62 @@ export function AiChat({
         streaming: false,
         thinking: "",
       }));
-      onAnswer?.(result);
+      onAnswer?.(result, q);
+      return true;
     } catch (e) {
       setError((e as Error).message);
       setTurns(turns);
-      setDraft(q);
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+  return { turns, busy, error, submit };
+}
+
+export function AiChat({
+  intro,
+  placeholder,
+  suggestions,
+  send,
+  renderAnswer,
+  initial,
+  readOnly,
+  readOnlyNote,
+  onAnswer,
+}: {
+  intro: ReactNode;
+  placeholder: string;
+  suggestions: string[];
+  /** Faz a pergunta, repassando os eventos do trabalho da IA. */
+  send: AiSend;
+  renderAnswer: (
+    text: string,
+    sources: AiSource[],
+    typing: boolean,
+  ) => ReactNode;
+  /** Uma conversa salva, aberta de novo. */
+  initial?: ChatEntry[];
+  readOnly?: boolean;
+  readOnlyNote?: ReactNode;
+  onAnswer?: (answer: AiAnswer) => void;
+}) {
+  const chat = useAiTurns({ initial, send, readOnly, onAnswer });
+  const { turns, busy, error } = chat;
+  const [draft, setDraft] = useState("");
+  const log = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
+  // Acompanha o fim da conversa enquanto a pessoa não rolar para cima.
+  useEffect(() => {
+    const el = log.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  });
+
+  async function submit(question: string) {
+    if (!question.trim() || busy || readOnly) return;
+    setDraft("");
+    stick.current = true;
+    if (!(await chat.submit(question))) setDraft(question.trim());
   }
 
   return (

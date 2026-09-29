@@ -1,6 +1,11 @@
 import { calendarDays, monthRange } from "./schedule";
 import { EditEntityForm, type EntityEdit } from "./EditEntityForm";
-import { dashboardIdFromPath, taskIdFromPath, taskUrl } from "./router";
+import {
+  dashboardIdFromPath,
+  maviChatIdFromPath,
+  taskIdFromPath,
+  taskUrl,
+} from "./router";
 import {
   usePage,
   useUrlState,
@@ -234,6 +239,9 @@ const ScheduleNavigation = lazy(() =>
   import("./TaskSchedule").then((m) => ({ default: m.ScheduleNavigation })),
 );
 const Reports = lazy(() => import("./Reports"));
+const MaviChatPage = lazy(() =>
+  import("./MaviChatPage").then((m) => ({ default: m.MaviChatPage })),
+);
 const AgendaPage = lazy(() =>
   import("./AgendaPage").then((m) => ({ default: m.AgendaPage })),
 );
@@ -256,6 +264,7 @@ const DashboardsPage = lazy(() =>
 
 const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
+  { id: "mavi", label: "MAVI", icon: Sparkles },
   { id: "notices", label: "Mural de avisos", icon: BellRing },
   { id: "tasks", label: "Tarefas", icon: CheckCheck },
   { id: "agenda", label: "Agenda", icon: CalendarDays },
@@ -400,7 +409,18 @@ export default function App() {
     return () =>
       navigator.serviceWorker.removeEventListener("message", onMessage);
   }, []);
+  // The MAVI opens with the menu folded, like ChatGPT, without touching the
+  // saved choice; expanding it there lasts until the person leaves the page.
+  const [maviMenu, setMaviMenu] = useState(false);
+  useEffect(() => {
+    if (page !== "mavi") setMaviMenu(false);
+  }, [page]);
+  const menuCollapsed = page === "mavi" ? !maviMenu : collapsed;
   function toggleCollapsed() {
+    if (page === "mavi") {
+      setMaviMenu((open) => !open);
+      return;
+    }
     setCollapsed((was) => {
       try {
         localStorage.setItem(SIDEBAR_KEY, was ? "0" : "1");
@@ -457,6 +477,7 @@ export default function App() {
   // People a dashboard is shared with open it by its link (the module itself
   // is for leaders).
   const openDashboard = dashboardIdFromPath(location.split("?")[0]);
+  const openChat = maviChatIdFromPath(location.split("?")[0]);
   const taskBackground = useRef<string | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -2211,7 +2232,7 @@ export default function App() {
       />
     );
   return (
-    <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
+    <div className={`app-shell ${menuCollapsed ? "sidebar-collapsed" : ""}`}>
       {sidebar && (
         <Button
           className="sidebar-backdrop"
@@ -2240,7 +2261,7 @@ export default function App() {
           companies={data.companies}
           current={currentCompany}
           isAdmin={isAdmin}
-          collapsed={collapsed}
+          collapsed={menuCollapsed}
           onSelect={(value) => {
             setData({ ...emptySnapshot, companies: data.companies });
             setCompany(value);
@@ -2289,11 +2310,11 @@ export default function App() {
           <button
             type="button"
             className="sidebar-collapse"
-            aria-expanded={!collapsed}
-            title={collapsed ? "Expandir menu" : "Recolher menu"}
+            aria-expanded={!menuCollapsed}
+            title={menuCollapsed ? "Expandir menu" : "Recolher menu"}
             onClick={toggleCollapsed}
           >
-            {collapsed ? (
+            {menuCollapsed ? (
               <ChevronsRight size={18} />
             ) : (
               <ChevronsLeft size={18} />
@@ -2454,8 +2475,9 @@ export default function App() {
           />
         )}
         <main>
-          {/* The Agenda uses the whole page, like Google Agenda: no heading. */}
-          {page !== "agenda" && (
+          {/* The Agenda uses the whole page, like Google Agenda, and the MAVI
+              like ChatGPT: no heading. */}
+          {page !== "agenda" && page !== "mavi" && (
             <div className="page-heading">
               <div>
                 <div className="eyebrow">
@@ -2481,6 +2503,7 @@ export default function App() {
                       overview:
                         "Uma visão clara do trabalho. Mais espaço para criar.",
                       tasks: "Organize prioridades e acompanhe cada entrega.",
+                      mavi: "Converse com a MAVI sobre os seus clientes.",
                       agenda:
                         "Seu Google Agenda: veja, crie e edite eventos sem sair do workspace.",
                       search:
@@ -3645,6 +3668,34 @@ export default function App() {
                   onNewTask={(preset) => openForm("task", preset)}
                 />
               )}
+              {page === "mavi" &&
+                allowed("mavi") &&
+                (demo ? (
+                  <Empty
+                    title="MAVI indisponível na demonstração"
+                    body="No ambiente demonstrativo não há conversas com a MAVI. Entre na sua conta para usar."
+                  />
+                ) : (
+                  <Suspense fallback={<Loading compact />}>
+                    <MaviChatPage
+                      key={company}
+                      company={company}
+                      data={catalogData}
+                      user={user}
+                      conversationId={openChat}
+                      href={(id) =>
+                        pageUrl("mavi", companyPath) + (id ? `/${id}` : "")
+                      }
+                      onOpen={(id, replace) =>
+                        navigate(
+                          pageUrl("mavi", companyPath) + (id ? `/${id}` : ""),
+                          replace,
+                        )
+                      }
+                      notify={notify}
+                    />
+                  </Suspense>
+                ))}
               {page === "agenda" && (
                 <Suspense fallback={<Loading compact />}>
                   <AgendaPage

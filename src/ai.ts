@@ -170,16 +170,28 @@ export type AiStoredMessage = {
 };
 
 /** As conversas que a pessoa vê (as dela e as compartilhadas com ela). */
-export async function listConversations(company: string) {
+export async function listConversations(company: string, limit = 100) {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from("ai_conversations")
     .select("id,owner_id,title,scope,module,updated_at")
     .eq("company_id", company)
     .order("updated_at", { ascending: false })
-    .limit(100);
+    .limit(limit);
   if (error) throw error;
   return (data ?? []) as AiConversation[];
+}
+/** Uma conversa que a pessoa vê (null quando não existe ou não tem acesso). */
+export async function getConversation(company: string, id: string) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("ai_conversations")
+    .select("id,owner_id,title,scope,module,updated_at")
+    .eq("company_id", company)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as AiConversation | null) ?? null;
 }
 export async function conversationMessages(id: string) {
   if (!supabase) return [];
