@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   NO_CLIENT,
+  storageKinds,
   summarizeClients,
   summarizeStorage,
   type StorageUsageRow,
@@ -97,5 +98,28 @@ describe("Uso de armazenamento", () => {
       last_upload_at: "2026-09-21T10:00:00Z",
     });
     expect(clients.get(NO_CLIENT)).toMatchObject({ bytes: 80, avatar: 30 });
+  });
+  it("áudios das tarefas somam no próprio tipo, com cor própria", () => {
+    const clients = summarizeClients([
+      {
+        client_id: "aurora",
+        kind: "audio",
+        files: 3,
+        bytes: 4_500_000,
+        last_upload_at: "2026-09-28T10:00:00Z",
+      },
+    ]);
+    expect(clients.get("aurora")).toMatchObject({
+      bytes: 4_500_000,
+      files: 3,
+      audio: 4_500_000,
+      attachment: 0,
+    });
+    const colors = storageKinds.map((k) => k.color);
+    expect(new Set(colors).size).toBe(colors.length);
+    expect(storageKinds.at(-1)).toMatchObject({
+      kind: "audio",
+      label: "Áudios de tarefas",
+    });
   });
 });

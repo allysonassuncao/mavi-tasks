@@ -29,6 +29,10 @@ import { waitUntil } from "@vercel/functions";
 import { appOrigin } from "./_origin.js";
 import { handlePublicApi } from "./_public-api.js";
 import { handleTaskAudio, taskAudioEnv } from "./_task-audio.js";
+import {
+  handleTaskAudioCleanup,
+  taskAudioCleanupEnv,
+} from "./_task-audio-cleanup.js";
 
 function credentials(): GcsCredentials | null {
   if (process.env.GCS_CREDENTIALS)
@@ -334,6 +338,14 @@ export default async function handler(
         authorization,
         taskAudioEnv(driveEnv()),
         { fetch, ask: claudeAsk },
+      );
+    // A limpeza dos rascunhos e dos arquivos que ninguém usa mais: o worker
+    // do pg_cron (mavi_private.task_audio_cleanup_kick).
+    else if (action === "task-audio-cleanup")
+      result = await handleTaskAudioCleanup(
+        authorization,
+        taskAudioCleanupEnv(driveEnv()),
+        { fetch },
       );
     else if (action.startsWith("whatsapp-"))
       result = await handleWhatsapp(

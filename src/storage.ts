@@ -3,10 +3,11 @@ import { supabase } from "./supabase";
 /**
  * Space used by uploads (migration 20260930100000_storage_uploads): every
  * upload is a row of storage_uploads; storage_usage sums what still exists
- * per person and kind.
+ * per person and kind. Task audio (20261203090000_task_audio_cleanup) is one
+ * row per file: the copies of a repeating task share it and count once.
  */
 export type StorageKind =
-  "drive" | "attachment" | "inline_image" | "avatar" | "logo";
+  "drive" | "attachment" | "inline_image" | "avatar" | "logo" | "audio";
 
 /** Fixed order and colors (validated for color-vision deficiency). */
 export const storageKinds: {
@@ -19,6 +20,7 @@ export const storageKinds: {
   { kind: "inline_image", label: "Imagens em textos", color: "#1baf7a" },
   { kind: "avatar", label: "Fotos de perfil", color: "#eda100" },
   { kind: "logo", label: "Logo da empresa", color: "#e87ba4" },
+  { kind: "audio", label: "Áudios de tarefas", color: "#008300" },
 ];
 export const storageKindLabel = (kind: StorageKind) =>
   storageKinds.find((k) => k.kind === kind)?.label ?? kind;
@@ -58,6 +60,7 @@ export const emptyUsage = (): UsageTotals => ({
   inline_image: 0,
   avatar: 0,
   logo: 0,
+  audio: 0,
   last_upload_at: null,
 });
 export type PersonUsage = UsageTotals & { user_id: string };
@@ -106,7 +109,10 @@ export function summarizeStorage(rows: StorageUsageRow[]) {
   };
 }
 
-/** Uploads with no client: Drive outside client folders, loose images, photos. */
+/**
+ * Uploads with no client: Drive outside client folders, loose images, audio
+ * not yet in a task, photos.
+ */
 export const NO_CLIENT = "";
 
 export type ClientUsageRow = Omit<StorageUsageRow, "user_id"> & {
@@ -232,6 +238,7 @@ export function demoStorageRows(userIds: string[]): StorageUsageRow[] {
     ["drive", 38, 4200 * MB],
     ["attachment", 64, 310 * MB],
     ["inline_image", 120, 95 * MB],
+    ["audio", 26, 21 * MB],
     ["avatar", 1, 28 * 1024],
   ];
   return userIds.flatMap((user_id, i) =>
@@ -256,6 +263,7 @@ export function demoStorageUploads(user: string): StorageUpload[] {
     ["attachment", "Relatório de performance.pdf", 4.2 * MB, false],
     ["drive", "Rascunho antigo.mp4", 240 * MB, true],
     ["inline_image", "print-painel.png", 0.4 * MB, false],
+    ["audio", "Áudio da descrição (3:12)", 1.5 * MB, false],
   ];
   return files.map(([kind, name, size, deleted], i) => {
     const at = new Date(Date.UTC(2026, 8, 22 - i, 13)).toISOString();
@@ -280,6 +288,7 @@ export function demoClientRows(clientIds: string[]): ClientUsageRow[] {
     ["drive", 30, 3100 * MB],
     ["attachment", 48, 260 * MB],
     ["inline_image", 90, 80 * MB],
+    ["audio", 20, 16 * MB],
   ];
   const rows = clientIds.flatMap((client_id, i) =>
     plan.map(([kind, files, bytes]) => {
@@ -324,6 +333,7 @@ export function demoClientFiles(
         ["drive", "Fotos do produto - sessão completa.zip", 210 * MB],
         ["attachment", "Plano de mídia aprovado.pdf", 6.1 * MB],
         ["inline_image", "referencia-criativo.png", 0.9 * MB],
+        ["audio", "Áudio da descrição (4:05)", 1.9 * MB],
       ]
     : [
         ["drive", "Manual da marca da agência.pdf", 48 * MB],

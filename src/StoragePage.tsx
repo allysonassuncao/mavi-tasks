@@ -415,7 +415,7 @@ export function StoragePage({
             <ClientLogo />
             <span>
               <strong>Sem cliente</strong>
-              <small>Drive geral, imagens soltas, fotos e logo</small>
+              <small>Drive geral, imagens e áudios soltos, fotos e logo</small>
             </span>
           </>
         ),
@@ -563,7 +563,9 @@ type ActionFile = { source_id: string; kind: StorageKind; name: string };
  * What can be done with a listed file: Drive files are made public or
  * private (with a link to copy) and deleted; task attachments are deleted.
  * Images in texts and profile photos are only listed — deleting them would
- * leave holes in descriptions and comments, or remove someone's photo.
+ * leave holes in descriptions and comments, or remove someone's photo. So is
+ * task audio: one file may play in every copy of a repeating task, and it is
+ * removed from the task itself.
  */
 function useFileActions<F extends ActionFile>(
   files: F[] | null,
@@ -674,6 +676,10 @@ const accessNote: Record<StorageKind, [string, string]> = {
   inline_image: ["Pelo texto", "Aparece na descrição ou no comentário"],
   avatar: ["Perfil", "Foto exibida para toda a equipe"],
   logo: ["Empresa", "Imagem do espaço de trabalho, vista por toda a equipe"],
+  audio: [
+    "Pela tarefa",
+    "Quem tem acesso à tarefa ouve o áudio (as cópias da repetição usam o mesmo arquivo)",
+  ],
 };
 
 /** Public or private (Drive files), or how the file is reached. */
@@ -995,7 +1001,9 @@ function ClientStorage({
             ? "Foto de perfil"
             : f.kind === "logo"
               ? "Logo da empresa"
-              : "Imagem fora de tarefas";
+              : f.kind === "audio"
+                ? "Áudio ainda sem tarefa"
+                : "Imagem fora de tarefas";
   const shownError = error || actions.error;
   return (
     <Modal
@@ -1011,7 +1019,8 @@ function ClientStorage({
         {clientId === NO_CLIENT && (
           <p className="muted storage-note">
             Arquivos do Drive fora das pastas de clientes, imagens coladas em
-            textos que ainda não estão em uma tarefa, fotos de perfil e o logo
+            textos e áudios gravados que ainda não estão em uma tarefa (os
+            áudios saem sozinhos depois de 24 horas), fotos de perfil e o logo
             da empresa.
           </p>
         )}
