@@ -252,6 +252,59 @@ describe("adaptador da API de chat (OpenAI e compatíveis)", () => {
     ).rejects.toThrow('A API Key do provedor "OpenAI da agência" foi recusada');
   });
 
+  it("OpenRouter: manda um teto; sem crédito para ele, tenta com o que cabe", async () => {
+    const router: ProviderConfig = { ...config, kind: "openrouter", name: "OpenRouter" };
+    const bodies: any[] = [];
+    const replies = [
+      new Response(
+        JSON.stringify({
+          error: {
+            message:
+              "This request requires more credits, or fewer max_tokens. You requested up to 32000 tokens, but can only afford 20000.",
+          },
+        }),
+        { status: 402 },
+      ),
+      sse([{ choices: [{ delta: { content: "ok" } }] }]),
+    ];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init!.body)));
+      return replies.shift()!;
+    }) as unknown as typeof fetch;
+    const ask = (f: typeof fetch) =>
+      openAiChatAdapter(router, f)({
+        instructions: "",
+        context: "",
+        messages: [{ role: "user", content: "Oi" }],
+        tools: [],
+        execute: vi.fn(),
+      });
+    expect((await ask(fetchImpl)).text).toBe("ok");
+    expect(bodies.map((b) => b.max_tokens)).toEqual([32000, 19000]);
+    // A OpenAI não recebe o teto (reserva nenhuma).
+    const openai = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(JSON.parse(String(init!.body)).max_tokens).toBeUndefined();
+      return sse([{ choices: [{ delta: { content: "ok" } }] }]);
+    }) as unknown as typeof fetch;
+    await openAiChatAdapter(config, openai)({
+      instructions: "",
+      context: "",
+      messages: [{ role: "user", content: "Oi" }],
+      tools: [],
+      execute: vi.fn(),
+    });
+    // Sem crédito nenhum: mensagem clara, sem o link da chave.
+    const broke = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: { message: "Insufficient credits. Visit https://openrouter.ai/keys/abc" } }), {
+          status: 402,
+        }),
+    ) as unknown as typeof fetch;
+    const err = ask(broke);
+    await expect(err).rejects.toThrow('Os créditos do provedor "OpenRouter" acabaram');
+    await expect(err).rejects.not.toThrow("openrouter.ai");
+  });
+
   it("custo sem preço de cache usa o de entrada", () => {
     expect(
       priceCost({ id: "m", input: 1, output: 2 }, { input: 10, output: 5, cached: 10 }),

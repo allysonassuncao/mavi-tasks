@@ -182,6 +182,11 @@ async function providerError(res: Response, name: string) {
       429,
       `Limite de uso do provedor "${name}" atingido. Tente de novo em alguns minutos.`,
     );
+  if (res.status === 402)
+    return new LlmError(
+      402,
+      `Os créditos do provedor "${name}" acabaram ou a API Key chegou ao limite de gasto. Adicione créditos ou aumente o limite da chave no site do provedor.`,
+    );
   return new LlmError(
     502,
     `O provedor "${name}" respondeu com erro (${res.status})${detail ? `: ${detail}` : "."}`,
@@ -206,6 +211,20 @@ function addChatUsage(
     config.kind === "openrouter" && typeof usage.cost === "number" && usage.cost >= 0
       ? usage.cost
       : priceCost(config.price, { input, output, cached });
+}
+
+/** O teto da resposta no OpenRouter (sem ele, reserva o máximo do modelo nos créditos). */
+export const ROUTER_MAX_TOKENS = 32_000;
+
+/**
+ * O OpenRouter recusa (402) quando os créditos não cobrem o teto pedido e diz
+ * quanto cabe: devolve um teto menor que caiba, ou 0 se não der para seguir.
+ */
+export async function affordableTokens(res: Response, current: number) {
+  if (res.status !== 402) return 0;
+  const text = await res.clone().text().catch(() => "");
+  const n = Number(text.match(/can only afford (\d+)/i)?.[1]);
+  return n >= 2000 && n < current ? Math.floor(n * 0.95) : 0;
 }
 
 const authHeaders = (apiKey: string) => ({
@@ -247,6 +266,7 @@ export function openAiChatAdapter(
     // Busca na internet pelo plugin web do OpenRouter; as páginas viram fontes.
     const web = !!request.webSearch && router;
     const cited = new Map<string, string>();
+    let maxTokens = request.maxTokens ?? ROUTER_MAX_TOKENS;
     for (let round = 0; ; round++) {
       const last = round >= maxRounds;
       const body = {
@@ -257,7 +277,7 @@ export function openAiChatAdapter(
           : {}),
         stream: true,
         ...(usageOption ? { stream_options: { include_usage: true } } : {}),
-        ...(router ? { usage: { include: true } } : {}),
+        ...(router ? { max_tokens: maxTokens, usage: { include: true } } : {}),
         ...(web ? { plugins: [{ id: "web", max_results: 5 }] } : {}),
       };
       const res = await fetchImpl(`${config.baseUrl}/chat/completions`, {
@@ -274,6 +294,12 @@ export function openAiChatAdapter(
             round--;
             continue;
           }
+        }
+        const fits = router ? await affordableTokens(res, maxTokens) : 0;
+        if (fits) {
+          maxTokens = fits;
+          round--;
+          continue;
         }
         throw await providerError(res, config.name);
       }
@@ -417,6 +443,8 @@ export async function openAiJsonComplete(
     { type: "json_object" },
     null,
   ];
+  const router = config.kind === "openrouter";
+  let maxTokens = ROUTER_MAX_TOKENS;
   for (let i = 0; ; i++) {
     const format = formats[i];
     const res = await fetchImpl(`${config.baseUrl}/chat/completions`, {
@@ -429,10 +457,17 @@ export async function openAiJsonComplete(
           { role: "user", content },
         ],
         ...(format ? { response_format: format } : {}),
+        ...(router ? { max_tokens: maxTokens } : {}),
       }),
       signal,
     });
     if (!res.ok) {
+      const fits = router ? await affordableTokens(res, maxTokens) : 0;
+      if (fits) {
+        maxTokens = fits;
+        i--;
+        continue;
+      }
       if (res.status === 400 && i < formats.length - 1) {
         const text = await res.clone().text().catch(() => "");
         if (/response_format|json_schema|json_object|structured/i.test(text))
@@ -859,6 +894,7 @@ async function testProvider(
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content: "Responda apenas: ok" }],
+        ...(c.entry.kind === "openrouter" ? { max_tokens: 256 } : {}),
       }),
     });
     if (!res.ok) {

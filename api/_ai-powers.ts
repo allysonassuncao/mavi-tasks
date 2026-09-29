@@ -409,9 +409,10 @@ export const REGISTRY: Record<string, ToolMeta> = {
   generate_image: { kind: "image", power: "images", timeoutMs: 170_000 },
   propose_task: { kind: "action", power: "actions", timeoutMs: 20_000 },
   propose_comment: { kind: "action", power: "actions", timeoutMs: 20_000 },
-  create_document: { kind: "canvas", power: "canvas", timeoutMs: 10_000 },
-  create_presentation: { kind: "canvas", power: "canvas", timeoutMs: 10_000 },
-  create_spreadsheet: { kind: "canvas", power: "canvas", timeoutMs: 10_000 },
+  // Com escritor, outro modelo escreve o conteúdo inteiro: pode demorar.
+  create_document: { kind: "canvas", power: "canvas", timeoutMs: 170_000 },
+  create_presentation: { kind: "canvas", power: "canvas", timeoutMs: 170_000 },
+  create_spreadsheet: { kind: "canvas", power: "canvas", timeoutMs: 170_000 },
   read_canvas: { kind: "canvas", power: "canvas", timeoutMs: 5_000 },
   // A busca da Claude roda no servidor dela: só para o registro.
   web_search: { kind: "web", power: "web", timeoutMs: 0 },
@@ -808,6 +809,8 @@ async function openRouterImage(
       messages: [{ role: "user", content }],
       modalities: ["image", "text"],
       image_config: { aspect_ratio: { square: "1:1", portrait: "2:3", landscape: "3:2" }[size] },
+      // Sem teto, o OpenRouter reserva o máximo do modelo nos créditos.
+      max_tokens: 8192,
       usage: { include: true },
     }),
     signal: AbortSignal.timeout(160_000),
@@ -823,6 +826,10 @@ async function openRouterImage(
     const why = body.error?.message ?? `erro ${res.status}`;
     const no = refused(why, String(body.error?.code ?? ""));
     if (no) return no;
+    if (res.status === 402)
+      throw new Error(
+        "Os créditos do OpenRouter acabaram ou a API Key chegou ao limite de gasto. Adicione créditos ou aumente o limite da chave no site do OpenRouter.",
+      );
     throw new Error(`O OpenRouter respondeu: ${why.slice(0, 200)}`);
   }
   const url = body.choices?.[0]?.message?.images?.[0]?.image_url?.url ?? "";
