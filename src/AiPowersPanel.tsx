@@ -5,6 +5,7 @@ import {
   Globe,
   ImageIcon,
   ListChecks,
+  Plug,
   Presentation,
   Puzzle,
 } from "lucide-react";
@@ -22,6 +23,7 @@ const ICONS = {
   skills: Puzzle,
   canvas: Presentation,
   web: Globe,
+  mcp: Plug,
 };
 const blank = (power: Power): PowerSetting => ({
   power,
@@ -147,6 +149,12 @@ function PowerCard({
         <div>
           <strong>{info.label}</strong>
           <small>{info.description}</small>
+          {initial.power === "mcp" && (
+            <small>
+              As conexões ficam em MAVI › Conexões: administradores e gestores
+              cadastram as da empresa e dizem quem usa cada uma.
+            </small>
+          )}
           {initial.power === "images" && (
             <small>
               O modelo sai de{" "}

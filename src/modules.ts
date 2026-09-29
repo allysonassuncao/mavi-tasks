@@ -29,6 +29,7 @@ export const MEMBER_PAGES: readonly Page[] = [
   "drive",
   "mavi",
   "skills",
+  "connections",
   "profile",
 ];
 /**
@@ -70,7 +71,7 @@ export type ModuleId = (typeof MODULES)[number]["id"];
 export function moduleOf(page: Page): ModuleId | null {
   if (page === "search") return "tasks";
   if (page === "contracts") return "products";
-  if (page === "mavi" || page === "skills") return "assistant";
+  if (page === "mavi" || page === "skills" || page === "connections") return "assistant";
   return MODULES.some((m) => m.id === page) ? (page as ModuleId) : null;
 }
 

@@ -153,6 +153,7 @@ export function SidebarNav({
           children: [
             { key: "mavi-chat", label: "Conversas", to: { page: "mavi" } },
             { key: "mavi-skills", label: "Skills", to: { page: "skills" } },
+            { key: "mavi-connections", label: "Conexões", to: { page: "connections" } },
           ],
         },
         {
@@ -416,7 +417,7 @@ export function SidebarNav({
     page === item.to.page ||
     (item.key === "tasks" && page === "search") ||
     (item.key === "onboarding" && page === "socialMedia") ||
-    (item.key === "mavi" && page === "skills");
+    (item.key === "mavi" && (page === "skills" || page === "connections"));
 
   const link = (to: NavTarget, content: ReactNode, props: object = {}) => (
     <a

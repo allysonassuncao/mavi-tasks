@@ -22,6 +22,7 @@ export const pagePaths = {
   aiUsage: "/mavi",
   mavi: "/mavi/conversas",
   skills: "/mavi/skills",
+  connections: "/mavi/conexoes",
   dashboards: "/dashboards",
   profile: "/perfil",
   settings: "/configuracoes",

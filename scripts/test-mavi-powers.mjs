@@ -61,10 +61,11 @@ await check("tudo vem desligado; só líderes configuram", async () => {
     ["visuals", false],
     ["images", false],
     ["actions", false],
-    // As migrações 20261214090000 (skills) e 20261216090000 (canvas e web) acrescentam poderes.
+    // As migrações 20261214090000 (skills), 20261216090000 (canvas e web) e 20261218090000 (mcp) acrescentam poderes.
     ["canvas", false],
     ["web", false],
     ["skills", false],
+    ["mcp", false],
   ]);
   await assert.rejects(() => setPower(ana, "visuals", true, true), /Só administradores e gestores/);
   await assert.rejects(() => one(ana, "select public.ai_powers_admin($1)", [A]), /Só administradores e gestores/);

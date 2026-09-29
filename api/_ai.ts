@@ -64,6 +64,8 @@ import {
   type LoadedSkill,
   type SkillKit,
 } from "./_ai-skills.js";
+import { MCP_RULES, handleMcpAction, mcpTurn, type McpCatalog } from "./_ai-mcp.js";
+import { appOrigin } from "./_origin.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -445,7 +447,8 @@ async function ask(
   const now = (deps.now ?? Date.now)();
   // Os poderes (visualizações, imagens, ações) só no módulo MAVI.
   const onPage = body.surface === "page";
-  const [base, limits, history, route, powerList, catalog] = await Promise.all([
+  const noMcp: McpCatalog = { servers: [], missing: [] };
+  const [base, limits, history, route, powerList, catalog, mcpCatalog] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
       env,
@@ -508,10 +511,18 @@ async function ask(
           p_company: company,
         }).then((r) => (r.ok && Array.isArray(r.data) ? r.data : []))
       : Promise.resolve([] as CatalogSkill[]),
+    // As conexões (MCP) prontas para a pessoa (vazio sem o poder 'mcp').
+    onPage
+      ? callRpc<McpCatalog>(env, deps.fetch, auth, "ai_mcp_catalog", {
+          p_company: company,
+        })
+          .then((r) => (r.ok && r.data?.servers ? r.data : noMcp))
+          .catch(() => noMcp)
+      : Promise.resolve(noMcp),
   ]);
   const powers = new Set(
     powerList.filter((p): p is Power =>
-      ["visuals", "images", "actions", "skills", "canvas", "web"].includes(p),
+      ["visuals", "images", "actions", "skills", "canvas", "web", "mcp"].includes(p),
     ),
   );
   // O assistente (o balão de todas as telas) é um módulo que o
@@ -697,13 +708,30 @@ async function ask(
     emit({ type: "step", id: `skill-model-${s.slug}`, label, state: "done" });
     break;
   }
+  // As ferramentas das conexões (MCP): as que leem rodam, as outras viram proposta.
+  const mcp = powers.has("mcp")
+    ? mcpTurn(
+        mcpCatalog,
+        {
+          supabaseUrl: env.supabaseUrl,
+          supabaseKey: env.supabaseKey,
+          providerKey: env.providerKey,
+          appOrigin: appOrigin(),
+        },
+        { fetch: deps.fetch },
+        auth,
+      )
+    : null;
   // Sem catálogo e sem skill escolhida, as ferramentas das skills não entram.
-  const tools = toolsFor(powers, { writer: !!kit.writer, webResearch: !!webRoute }).filter(
-    (t) =>
-      REGISTRY[t.name]?.kind !== "skill" ||
-      skills.catalog.size > 0 ||
-      skills.loaded.size > 0,
-  );
+  const tools = [
+    ...toolsFor(powers, { writer: !!kit.writer, webResearch: !!webRoute }).filter(
+      (t) =>
+        REGISTRY[t.name]?.kind !== "skill" ||
+        skills.catalog.size > 0 ||
+        skills.loaded.size > 0,
+    ),
+    ...(mcp?.tools ?? []),
+  ];
   const allowed = new Set(tools.map((t) => t.name));
   let n = 0;
   const execute = async (name: string, input: unknown): Promise<string> => {
@@ -711,11 +739,16 @@ async function ask(
     if (kit.asked && name !== "ask_user")
       return "Você fez perguntas à pessoa: espere as respostas antes de seguir. Escreva só uma frase curta e pare.";
     const stepId = `t${++n}`;
-    const meta = REGISTRY[name];
+    const mcpTool = mcp?.meta.get(name);
+    const meta = mcpTool
+      ? { kind: "mcp" as const, power: "mcp" as const, timeoutMs: 60_000 }
+      : REGISTRY[name];
     const power = meta?.power ?? null;
     const kind = meta?.kind ?? "read";
     const skillTool = kind === "skill";
-    const label = skillTool
+    const label = mcpTool
+      ? `${mcpTool.write ? "Preparando" : "Consultando"} ${mcp!.label(name)}`
+      : skillTool
       ? describeSkillStep(skills, name, input)
       : name === "web_research"
         ? `Pesquisando na internet “${String((input as Record<string, unknown>)?.question ?? "").slice(0, 80)}”`
@@ -723,12 +756,16 @@ async function ask(
           ? describeStep(ctx, name, input)
           : describePowerStep(name, input);
     emit({ type: "step", id: stepId, label, state: "running" });
+    // No registro, a conexão e a ferramenta dela (mcp:<conexão>/<ferramenta>).
+    const logName = mcpTool ? `mcp:${mcpTool.server.slug}/${mcpTool.tool.name}` : name;
     const started = Date.now();
     const spent = kit.imageCost.usd + (kit.extraCost?.usd ?? 0);
     try {
       // Só as ferramentas oferecidas nesta pergunta (os poderes da pessoa).
       if (!allowed.has(name)) throw Error(`Ferramenta indisponível: ${name}.`);
-      const work = skillTool
+      const work = mcpTool
+        ? mcp!.run(kit, name, input)
+        : skillTool
         ? runSkillTool(skills, name, input)
         : name === "web_research"
           ? research(input)
@@ -745,7 +782,13 @@ async function ask(
           );
         }),
       ]).finally(() => clearTimeout(timer));
-      const detail = skillTool
+      const detail = mcpTool
+        ? out.startsWith("Proposta")
+          ? "proposta para você confirmar"
+          : out.startsWith("Erro")
+            ? "o serviço devolveu um erro"
+            : "resposta recebida"
+        : skillTool
         ? summarizeSkillStep(name, out)
         : name === "web_research"
           ? `${new Set(out.match(/\[S\d+\]/g) ?? []).size} páginas`
@@ -754,7 +797,7 @@ async function ask(
             : summarizePowerStep(name, out);
       steps.push({ label, detail });
       calls.push({
-        tool: name,
+        tool: logName,
         power,
         ok: true,
         ms: Date.now() - started,
@@ -767,7 +810,7 @@ async function ask(
       return out;
     } catch (e) {
       calls.push({
-        tool: name,
+        tool: logName,
         power,
         ok: false,
         ms: Date.now() - started,
@@ -884,16 +927,19 @@ async function ask(
         ASK_RULES +
         powerInstructions(powers, onPage) +
         webNote +
-        (skills.catalog.size || picked.length ? SKILL_RULES : ""),
+        (skills.catalog.size || picked.length ? SKILL_RULES : "") +
+        (mcp?.tools.length ? MCP_RULES : ""),
       context:
-        base.context + catalogContext([...skills.catalog.values()], picked),
+        base.context +
+        catalogContext([...skills.catalog.values()], picked) +
+        (mcp?.context ?? ""),
       messages: picked.length
         ? withSkills(messages, picked)
         : messages,
       tools,
       execute,
       // Uma skill é um roteiro com vários passos: mais rodadas e mais raciocínio.
-      maxRounds: picked.length ? 14 : skills.catalog.size ? 12 : powers.size ? 8 : 6,
+      maxRounds: picked.length ? 14 : skills.catalog.size || mcp?.tools.length ? 12 : powers.size ? 8 : 6,
       ...(picked.length ? { effort: "high" as const } : {}),
       onEvent: (e) => {
         if (e.type === "round_end") emit({ type: "round_end" });
@@ -904,6 +950,7 @@ async function ask(
       onCitation: citeWeb,
     });
   } finally {
+    await mcp?.close().catch(() => {});
     // O custo entra mesmo quando a resposta falha no meio.
     const m = result?.meter;
     const embedCost = embeddingCost(
@@ -1222,6 +1269,18 @@ export async function handleAi(
     }
     if (typeof req.action === "string" && req.action.startsWith("ai-provider-"))
       return handleProviders(req, authorization, env, deps);
+    if (typeof req.action === "string" && req.action.startsWith("ai-mcp-"))
+      return handleMcpAction(
+        req,
+        authorization,
+        {
+          supabaseUrl: env.supabaseUrl,
+          supabaseKey: env.supabaseKey,
+          providerKey: env.providerKey,
+          appOrigin: appOrigin(),
+        },
+        { fetch: deps.fetch },
+      );
     if (req.action === "ai-image-urls") {
       if (!authorization?.startsWith("Bearer "))
         return { status: 401, body: { error: "Entre na sua conta." } };

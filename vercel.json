@@ -34,6 +34,10 @@
       "destination": "/api/drive?mcp=1"
     },
     {
+      "source": "/api/mavi-mcp/callback",
+      "destination": "/api/drive?mcpcb=1"
+    },
+    {
       "source": "/.well-known/oauth-protected-resource/:path*",
       "destination": "/api/drive?wk=1"
     },

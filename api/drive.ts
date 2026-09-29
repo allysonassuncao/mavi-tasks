@@ -18,6 +18,7 @@ import { handleLearningWorker } from "./_copilot-learning.js";
 import { handleTemperatureWorker } from "./_temperature.js";
 import { serverModel } from "../src/ai-providers.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
+import { handleMcpCallback } from "./_ai-mcp.js";
 import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
 import { handleNotices } from "./_notices.js";
@@ -211,6 +212,30 @@ export default async function handler(
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: (err as Error).message }));
     }
+    return;
+  }
+  // A volta do login (OAuth) de uma conexão da MAVI (/api/mavi-mcp/callback).
+  if (url.pathname === "/api/mavi-mcp/callback" || url.searchParams.get("mcpcb") === "1") {
+    res.setHeader("Cache-Control", "no-store");
+    const env = aiEnv(driveEnv());
+    let location = `${appOrigin()}/?mcp=erro`;
+    try {
+      location = await handleMcpCallback(
+        url.searchParams,
+        {
+          supabaseUrl: env.supabaseUrl,
+          supabaseKey: env.supabaseKey,
+          providerKey: env.providerKey,
+          appOrigin: appOrigin(),
+        },
+        { fetch },
+      );
+    } catch {
+      /* volta com erro */
+    }
+    res.statusCode = 302;
+    res.setHeader("Location", location);
+    res.end();
     return;
   }
   if (

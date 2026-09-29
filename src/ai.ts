@@ -432,7 +432,7 @@ export const setAiRoute = (
   });
 
 /** Ações que passam pelo servidor (a chave é selada lá, nunca no navegador). */
-async function providerAction<T>(body: Record<string, unknown>): Promise<T> {
+export async function providerAction<T>(body: Record<string, unknown>): Promise<T> {
   const t = await token();
   const res = await fetch("/api/ai", {
     method: "POST",

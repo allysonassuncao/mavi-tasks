@@ -15,7 +15,8 @@ export type Power =
   | "actions"
   | "skills"
   | "canvas"
-  | "web";
+  | "web"
+  | "mcp";
 export const POWERS: { id: Power; label: string; description: string }[] = [
   {
     id: "visuals",
@@ -52,6 +53,12 @@ export const POWERS: { id: Power; label: string; description: string }[] = [
     label: "Skills",
     description:
       "Jeitos de trabalhar que a agência ensina à MAVI (instruções e arquivos de referência). Qualquer pessoa cria; administradores e gestores aprovam em MAVI › Skills.",
+  },
+  {
+    id: "mcp",
+    label: "Conexões (MCP)",
+    description:
+      "A MAVI usa serviços externos conectados por MCP (Notion, Linear, um sistema próprio…): os da empresa, cadastrados em MAVI › Conexões, e os pessoais de cada um. O que altera algo no serviço pede confirmação no card.",
   },
 ];
 
@@ -124,6 +131,15 @@ export type ActionProposal =
       task_id: string;
       task_title: string;
       text: string;
+    }
+  | {
+      /** Uma ferramenta de uma conexão (MCP) que altera algo no serviço. */
+      kind: "mcp_call";
+      server_id: string;
+      server_name: string;
+      tool: string;
+      tool_title?: string;
+      arguments: Record<string, unknown>;
     };
 export type ActionState = "pending" | "confirmed" | "cancelled" | "failed";
 
@@ -150,7 +166,15 @@ export type ActionArtifact = Base & {
   type: "action";
   action: ActionProposal;
   state: ActionState;
-  result?: { task_id?: string; comment_id?: string; error?: string };
+  result?: {
+    task_id?: string;
+    comment_id?: string;
+    error?: string;
+    /** O que a conexão (MCP) respondeu. */
+    text?: string;
+    /** A conexão está rodando a ação confirmada. */
+    running?: boolean;
+  };
   decided_at?: string;
 };
 // ------------------------------------------------------------ canvas
@@ -535,6 +559,22 @@ function sanitizeAction(raw: unknown): ActionProposal | null {
       text: body,
     };
   }
+  if (a.kind === "mcp_call") {
+    const server_id = text(a.server_id, 40);
+    const tool = text(a.tool, 128);
+    const args = obj(a.arguments) ?? {};
+    if (!UUID.test(server_id) || !/^[A-Za-z0-9_./-]{1,128}$/.test(tool) || JSON.stringify(args).length > 8000)
+      return null;
+    const title = text(a.tool_title, 120);
+    return {
+      kind: "mcp_call",
+      server_id,
+      server_name: text(a.server_name, 60) || "Conexão",
+      tool,
+      ...(title ? { tool_title: title } : {}),
+      arguments: args,
+    };
+  }
   return null;
 }
 
@@ -588,6 +628,8 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
           ...(UUID.test(text(r.task_id, 40)) ? { task_id: text(r.task_id, 40) } : {}),
           ...(text(r.comment_id, 40) ? { comment_id: text(r.comment_id, 40) } : {}),
           ...(text(r.error, 300) ? { error: text(r.error, 300) } : {}),
+          ...(text(r.text, 1600) ? { text: text(r.text, 1600) } : {}),
+          ...(r.running === true ? { running: true } : {}),
         }
       : undefined;
     const decided = text(a.decided_at, 40);
@@ -650,6 +692,13 @@ export function artifactSummary(a: AiArtifact): string {
   const what =
     a.action.kind === "create_task"
       ? `criar a tarefa “${a.action.title}”`
-      : `comentar na tarefa “${a.action.task_title}”`;
-  return `ação: ${what} — ${state}`;
+      : a.action.kind === "mcp_call"
+        ? `${a.action.server_name} › ${a.action.tool_title || a.action.tool}`
+        : `comentar na tarefa “${a.action.task_title}”`;
+  const said = a.result?.text
+    ? ` (resposta: ${a.result.text.slice(0, 400)})`
+    : a.result?.error
+      ? ` (erro: ${a.result.error})`
+      : "";
+  return `ação: ${what} — ${state}${said}`;
 }

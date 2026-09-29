@@ -1253,3 +1253,20 @@
     padding: 24px 20px;
   }
 }
+
+/* Ação numa conexão (MCP): o que o serviço respondeu. */
+.mavi-action-result {
+  margin: 6px 14px 0 54px;
+  padding: 8px 12px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: 10px;
+  background: var(--surface-soft, #f6f7f5);
+  border: 1px solid var(--border);
+  font: 0.76rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.mavi-action-fields dd {
+  overflow-wrap: anywhere;
+}

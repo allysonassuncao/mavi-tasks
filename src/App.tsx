@@ -46,6 +46,7 @@ import {
   Database,
   Sparkles,
   Puzzle,
+  Plug,
   HardDrive,
   PanelsTopLeft,
   Megaphone,
@@ -248,6 +249,9 @@ const ScheduleNavigation = lazy(() =>
   import("./TaskSchedule").then((m) => ({ default: m.ScheduleNavigation })),
 );
 const Reports = lazy(() => import("./Reports"));
+const McpPage = lazy(() =>
+  import("./McpPage").then((m) => ({ default: m.McpPage })),
+);
 const SkillsPage = lazy(() =>
   import("./SkillsPage").then((m) => ({ default: m.SkillsPage })),
 );
@@ -278,6 +282,7 @@ const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
   { id: "mavi", label: "MAVI", icon: Sparkles },
   { id: "skills", label: "Skills da MAVI", icon: Puzzle },
+  { id: "connections", label: "Conexões da MAVI", icon: Plug },
   { id: "notices", label: "Mural de avisos", icon: BellRing },
   { id: "tasks", label: "Tarefas", icon: CheckCheck },
   { id: "agenda", label: "Agenda", icon: CalendarDays },
@@ -2552,6 +2557,8 @@ export default function App() {
                         "Uma visão clara do trabalho. Mais espaço para criar.",
                       tasks: "Organize prioridades e acompanhe cada entrega.",
                       mavi: "Converse com a MAVI sobre os seus clientes.",
+                      connections:
+                        "Serviços externos que a MAVI usa pelo protocolo MCP: os da empresa e os seus. O que altera algo no serviço pede a sua confirmação.",
                       skills:
                         "Jeitos de trabalhar que a agência ensina à MAVI: instruções e arquivos de referência. Qualquer pessoa cria; administradores e gestores aprovam.",
                       agenda:
@@ -2622,6 +2629,7 @@ export default function App() {
                   page !== "storage" &&
                   page !== "aiUsage" &&
                   page !== "skills" &&
+                  page !== "connections" &&
                   page !== "dashboards" &&
                   page !== "settings" &&
                   (!["products", "contracts", "clients", "projects"].includes(
@@ -3759,6 +3767,25 @@ export default function App() {
                         )
                       }
                       onChanged={() => setSkillsTick((v) => v + 1)}
+                      powersHref={`${pageUrl("aiUsage", companyPath)}#poderes`}
+                      notify={notify}
+                    />
+                  </Suspense>
+                ))}
+              {page === "connections" &&
+                allowed("connections") &&
+                (demo ? (
+                  <Empty
+                    title="Conexões indisponíveis na demonstração"
+                    body="No ambiente demonstrativo não há conexões da MAVI. Entre na sua conta para usar."
+                  />
+                ) : (
+                  <Suspense fallback={<Loading compact />}>
+                    <McpPage
+                      key={company}
+                      company={company}
+                      data={catalogData}
+                      isLeader={isLeader}
                       powersHref={`${pageUrl("aiUsage", companyPath)}#poderes`}
                       notify={notify}
                     />

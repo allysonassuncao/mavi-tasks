@@ -15,6 +15,7 @@ import {
   MessageSquare,
   Minus,
   Pencil,
+  Plug,
   Sparkles,
   X,
 } from "lucide-react";
@@ -31,8 +32,10 @@ import { priorities } from "./types";
 import type { FormPreset } from "./forms";
 import { CanvasCard } from "./MaviCanvas";
 import { QuestionCard } from "./MaviQuestions";
+import { runMcpAction } from "./mavi-mcp";
 import type {
   ActionArtifact,
+  ActionProposal,
   AiArtifact,
   CanvasArtifact,
   ChartVisual,
@@ -95,6 +98,8 @@ export function ArtifactView({
         onReply={host.onReply}
       />
     );
+  if (artifact.action.kind === "mcp_call")
+    return <McpActionCard artifact={artifact} host={host} />;
   return <ActionCard artifact={artifact} host={host} />;
 }
 
@@ -546,7 +551,7 @@ function ActionCard({ artifact, host }: { artifact: ActionArtifact; host: Artifa
   const [error, setError] = useState("");
   // "Criar e continuar" no formulário: só a primeira tarefa responde à proposta.
   const decided = useRef(false);
-  const a = artifact.action;
+  const a = artifact.action as Exclude<ActionProposal, { kind: "mcp_call" }>;
   const waiting = host.streaming || !host.conversation;
   const decide = async (
     next: "confirmed" | "cancelled",
@@ -702,6 +707,113 @@ function ActionCard({ artifact, host }: { artifact: ActionArtifact; host: Artifa
             </a>
           )
         )}
+      </footer>
+    </section>
+  );
+}
+
+/** Um valor dos argumentos, em texto curto. */
+const argText = (v: unknown) => {
+  const t = typeof v === "string" ? v : JSON.stringify(v);
+  return (t ?? "").length > 400 ? `${t.slice(0, 400)}…` : t;
+};
+
+/**
+ * A ação numa conexão (MCP): o que a MAVI vai mandar ao serviço, com os
+ * argumentos à vista. Só roda quando a pessoa confirma (uma vez só, no
+ * servidor, com o que foi gravado); o que o serviço respondeu fica no card.
+ */
+function McpActionCard({ artifact, host }: { artifact: ActionArtifact; host: ArtifactHost }) {
+  const a = artifact.action as Extract<ActionProposal, { kind: "mcp_call" }>;
+  const [state, setState] = useState(artifact.state);
+  const [result, setResult] = useState(artifact.result);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const waiting = host.streaming || !host.conversation;
+  const running = busy || (state === "confirmed" && !!result?.running);
+  const args = Object.entries(a.arguments ?? {});
+  async function confirm() {
+    if (!host.conversation) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await runMcpAction(host.conversation, artifact.id);
+      setState(r.ok ? "confirmed" : "failed");
+      setResult(r.ok ? { text: r.text } : { error: r.error });
+      if (r.ok) host.notify(`${a.server_name}: pronto.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function cancel() {
+    if (!host.conversation) return;
+    setBusy(true);
+    setError("");
+    try {
+      await setActionState(host.conversation, artifact.id, "cancelled");
+      setState("cancelled");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className={`mavi-card mavi-action ${state}`} aria-label={`Ação em ${a.server_name} proposta pela MAVI`}>
+      <header className="mavi-action-head">
+        <span className="mavi-action-icon" aria-hidden="true">
+          <Plug size={16} />
+        </span>
+        <span>
+          <small>
+            <Sparkles size={11} aria-hidden="true" /> Ação em {a.server_name} · proposta da MAVI
+          </small>
+          <strong>{a.tool_title || a.tool}</strong>
+        </span>
+        <StateChip state={state} />
+      </header>
+      {args.length ? (
+        <dl className="mavi-action-fields">
+          {args.slice(0, 12).map(([k, v]) => (
+            <div key={k}>
+              <dt>{k}</dt>
+              <dd>{argText(v)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mavi-action-text">Sem informações adicionais.</p>
+      )}
+      {args.length > 12 && <p className="mavi-action-text">E mais {args.length - 12} campos.</p>}
+      {result?.text && !running && <pre className="mavi-action-result">{result.text}</pre>}
+      {(error || result?.error) && (
+        <p className="form-error" role="alert">
+          {error || result?.error}
+        </p>
+      )}
+      <footer className="mavi-action-foot">
+        {state === "pending" ? (
+          host.readOnly ? (
+            <small>Só quem começou a conversa decide.</small>
+          ) : (
+            <>
+              <button type="button" className="btn primary" disabled={waiting || busy} onClick={() => void confirm()}>
+                {busy ? <Loader2 size={15} className="spin" /> : <Check size={15} />}
+                Confirmar e executar
+              </button>
+              <button type="button" className="btn secondary" disabled={waiting || busy} onClick={() => void cancel()}>
+                <X size={15} /> Cancelar
+              </button>
+              {waiting && <small>Aguardando a MAVI terminar…</small>}
+            </>
+          )
+        ) : running ? (
+          <small>
+            <Loader2 size={13} className="spin" aria-hidden="true" /> {busy ? `Enviando para ${a.server_name}…` : "Em andamento (ou interrompida). Confira no serviço."}
+          </small>
+        ) : null}
       </footer>
     </section>
   );

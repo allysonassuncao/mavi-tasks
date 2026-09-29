@@ -49,7 +49,7 @@ import type { ProviderModel } from "../src/ai-providers.js";
  */
 
 export type ToolKind =
-  "read" | "visual" | "image" | "action" | "skill" | "canvas" | "web" | "ask";
+  "read" | "visual" | "image" | "action" | "skill" | "canvas" | "web" | "ask" | "mcp";
 export type ToolMeta = { kind: ToolKind; power?: Power; timeoutMs: number };
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -502,6 +502,7 @@ const POWER_NAMES: Record<Power, string> = {
   skills: "skills",
   canvas: "documentos, apresentações e planilhas",
   web: "busca na internet",
+  mcp: "conexões com serviços externos (MCP)",
 };
 
 /** O que muda nas instruções da MAVI quando ela tem poderes. */
@@ -582,7 +583,7 @@ const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const fold = (s: string) =>
   s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 
-function add<T extends AiArtifact>(
+export function add<T extends AiArtifact>(
   kit: PowerKit,
   letter: "V" | "I" | "A" | "D" | "Q",
   a: Omit<T, "id" | "ref">,
