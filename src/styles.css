@@ -6469,9 +6469,11 @@ label .input-control .ui-input {
   box-shadow: 0 12px 38px #152c2026;
   z-index: 101;
 }
+/* Above the avatars (position: relative) that scroll under it. */
 .online-panel header {
   position: sticky;
   top: 0;
+  z-index: 1;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
