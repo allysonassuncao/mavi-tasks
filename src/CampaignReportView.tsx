@@ -1,12 +1,26 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { CalendarRange, ExternalLink, Image as ImageIcon, Play, Target } from "lucide-react";
-import { Input } from "./ui";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  CalendarRange,
+  ExternalLink,
+  GitCompareArrows,
+  Image as ImageIcon,
+  Play,
+  Target,
+} from "lucide-react";
+import { Input, Select, SelectOption } from "./ui";
 import { PanelChart } from "./DashboardCharts";
 import type { Display, PanelSpec, Unit } from "./dashboards";
 import { addDays, shortDate } from "./campaigns";
 import {
   CHARTS,
   daysIn,
+  deltaOf,
+  lowerIsBetter,
+  previousRange,
+  rangeLabel,
+  reachOf,
   formatMetric,
   goalOf,
   itemsIn,
@@ -26,6 +40,8 @@ import "./campaign-reports.css";
  * agency previews it: the period (narrowed inside the report's, when
  * allowed), the chosen numbers, the goal, the charts, the analysis and the
  * ads with their creative. The numbers already come with or without M.
+ * With a second period (saved, or chosen inside what the report keeps), the
+ * numbers show the change and the charts draw both periods day by day.
  */
 export function CampaignReportView({
   company,
@@ -35,6 +51,8 @@ export function CampaignReportView({
   analysis,
   periodStart,
   periodEnd,
+  compareStart = null,
+  compareEnd = null,
   analysisSlot,
   topSlot,
 }: {
@@ -45,6 +63,9 @@ export function CampaignReportView({
   analysis: string;
   periodStart: string;
   periodEnd: string;
+  /** The comparison period saved with the report. */
+  compareStart?: string | null;
+  compareEnd?: string | null;
   /** Inside the MAVI: the analysis with its editor. */
   analysisSlot?: ReactNode;
   topSlot?: ReactNode;
@@ -53,7 +74,43 @@ export function CampaignReportView({
   const whole = range.from === periodStart && range.to === periodEnd;
   const days = useMemo(() => daysIn(view, range.from, range.to), [view, range]);
   const t = useMemo(() => totalsOf(days), [days]);
-  const reach = whole ? view.reach : null;
+  const saved = { start: periodStart, end: periodEnd, compareStart, compareEnd };
+  const reach = reachOf(view, range, saved);
+  // The comparison: the saved period, the one right before, or chosen
+  // dates, always inside the days the report keeps.
+  const first = compareStart && compareStart < periodStart ? compareStart : periodStart;
+  const last = compareEnd && compareEnd > periodEnd ? compareEnd : periodEnd;
+  const [cmpMode, setCmpMode] = useState<"none" | "saved" | "previous" | "custom">(
+    compareStart ? "saved" : "none",
+  );
+  const [cmpCustom, setCmpCustom] = useState(() =>
+    compareStart && compareEnd
+      ? { from: compareStart, to: compareEnd }
+      : previousRange(periodStart, periodEnd).from >= first
+        ? previousRange(periodStart, periodEnd)
+        : { from: first, to: periodStart },
+  );
+  const previous = previousRange(range.from, range.to);
+  const hasPrevious = previous.from >= first;
+  const cmp =
+    cmpMode === "saved" && compareStart && compareEnd
+      ? { from: compareStart, to: compareEnd }
+      : cmpMode === "previous" && hasPrevious
+        ? previous
+        : cmpMode === "custom"
+          ? cmpCustom
+          : null;
+  const cmpDays = useMemo(
+    () => (cmp ? daysIn(view, cmp.from, cmp.to) : []),
+    // The range is a new object each render: its dates are the key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view, cmp?.from, cmp?.to],
+  );
+  const c = useMemo(() => totalsOf(cmpDays), [cmpDays]);
+  const cmpReach = cmp ? reachOf(view, cmp, saved) : null;
+  // The client chooses the comparison when the report lets them narrow the
+  // period; otherwise the saved one (if any) is fixed.
+  const canCompare = config.allow_filter;
   const goal = config.sections.goal ? goalOf(view) : null;
   const currency = view.currency || "BRL";
   const result = resultName(view);
@@ -104,6 +161,9 @@ export function CampaignReportView({
             {[view.client_name, view.product_name].filter(Boolean).join(" · ")}
             {" · "}
             {shortDate(periodStart)} a {shortDate(periodEnd)}
+            {compareStart && compareEnd && (
+              <> · comparado com {shortDate(compareStart)} a {shortDate(compareEnd)}</>
+            )}
           </p>
         </div>
         {topSlot}
@@ -152,10 +212,77 @@ export function CampaignReportView({
         </section>
       )}
 
+      {canCompare ? (
+        <section className="creport-filter creport-compare" aria-label="Comparação">
+          <GitCompareArrows size={16} aria-hidden="true" />
+          <span className="creport-compare-label">Comparar com</span>
+          <Select
+            aria-label="Comparar com"
+            value={cmpMode === "previous" && !hasPrevious ? "none" : cmpMode}
+            onValueChange={(v) => setCmpMode(v as typeof cmpMode)}
+          >
+            <SelectOption value="none">Sem comparação</SelectOption>
+            {compareStart && compareEnd ? (
+              <SelectOption value="saved">
+                {`Período de comparação (${rangeLabel({ from: compareStart, to: compareEnd })})`}
+              </SelectOption>
+            ) : null}
+            {hasPrevious ? (
+              <SelectOption value="previous">
+                {`Período anterior (${rangeLabel(previous)})`}
+              </SelectOption>
+            ) : null}
+            <SelectOption value="custom">Outras datas</SelectOption>
+          </Select>
+          {cmpMode === "custom" && (
+            <span className="creport-dates">
+              <Input
+                type="date"
+                aria-label="Comparar de"
+                value={cmpCustom.from}
+                min={first}
+                max={cmpCustom.to}
+                onChange={(e) =>
+                  e.target.value &&
+                  setCmpCustom((r) => ({ ...r, from: e.target.value < first ? first : e.target.value }))
+                }
+              />
+              <span>a</span>
+              <Input
+                type="date"
+                aria-label="Comparar até"
+                value={cmpCustom.to}
+                min={cmpCustom.from}
+                max={last}
+                onChange={(e) =>
+                  e.target.value &&
+                  setCmpCustom((r) => ({ ...r, to: e.target.value > last ? last : e.target.value }))
+                }
+              />
+            </span>
+          )}
+          {cmp && (
+            <small className="creport-compare-note">
+              {rangeLabel(range)} contra {rangeLabel(cmp)}
+            </small>
+          )}
+        </section>
+      ) : cmp ? (
+        <p className="creport-compare-note">
+          <GitCompareArrows size={14} aria-hidden="true" /> Comparando {rangeLabel(range)} com{" "}
+          {rangeLabel(cmp)}
+        </p>
+      ) : null}
+
       {metrics.length > 0 && (
         <section className="creport-kpis" aria-label="Números do período">
           {metrics.map((id) => {
             const value = metricValue(id, t, reach);
+            const before = cmp ? metricValue(id, c, cmpReach) : null;
+            const delta = cmp ? deltaOf(value, before) : null;
+            // Spending more is neither good nor bad by itself.
+            const good =
+              delta === null || id === "spend" ? null : lowerIsBetter(id) ? delta < 0 : delta > 0;
             return (
               <div
                 key={id}
@@ -168,8 +295,30 @@ export function CampaignReportView({
               >
                 <span>{metricLabel(id, view)}</span>
                 <strong>{formatMetric(metricKind(id), value, currency)}</strong>
-                {(id === "reach" || id === "frequency") && !whole && (
+                {(id === "reach" || id === "frequency") && reach === null && (
                   <small>Só no período todo</small>
+                )}
+                {cmp && !(value === null && before === null) && (
+                  <small
+                    className={`creport-delta ${
+                      delta === null || good === null || Math.abs(delta) < 0.05 ? "" : good ? "good" : "bad"
+                    }`}
+                    title={`No período comparado: ${formatMetric(metricKind(id), before, currency)}`}
+                  >
+                    {delta !== null && Math.abs(delta) >= 0.05 ? (
+                      delta > 0 ? (
+                        <ArrowUpRight size={13} aria-hidden="true" />
+                      ) : (
+                        <ArrowDownRight size={13} aria-hidden="true" />
+                      )
+                    ) : null}
+                    {delta === null
+                      ? "Sem base para comparar"
+                      : `${delta > 0 ? "+" : ""}${delta.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
+                    {before !== null && (
+                      <span> vs {formatMetric(metricKind(id), before, currency)}</span>
+                    )}
+                  </small>
                 )}
               </div>
             );
@@ -214,6 +363,7 @@ export function CampaignReportView({
               goalResults={goal?.results ?? null}
               ads={ads}
               result={result}
+              compare={cmp ? cmpDays : null}
             />
           ))}
         </section>
@@ -397,6 +547,7 @@ function ReportChartView({
   goalResults,
   ads,
   result,
+  compare,
 }: {
   id: ReportChart;
   view: ReportView;
@@ -405,6 +556,8 @@ function ReportChartView({
   goalResults: number | null;
   ads: ReturnType<typeof itemsIn>;
   result: string;
+  /** The comparison's days, drawn day by day under the period's. */
+  compare: ReportView["days"] | null;
 }) {
   void view;
   void currency;
@@ -414,11 +567,18 @@ function ReportChartView({
   );
   const keys = days.map((d) => d.day);
   const labels = keys.map((d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`);
+  // The comparison's n-th day under the period's n-th day.
+  const cmpValues = (pick: (d: ReportView["days"][number]) => number | null) =>
+    compare ? keys.map((_, i) => (compare[i] ? pick(compare[i]) : null)) : null;
   const time = (
     unit: Unit,
     series: { name: string; values: (number | null)[] }[],
     viz: "bar" | "line",
-  ) => (
+    pick?: (d: ReportView["days"][number]) => number | null,
+  ) => {
+    const other = pick ? cmpValues(pick) : null;
+    if (other) series = [...series, { name: "Período comparado", values: other }];
+    return (
     <Chart
       title={label}
       viz={viz}
@@ -436,12 +596,13 @@ function ReportChartView({
         interval: "day",
       }}
     />
-  );
+    );
+  };
   switch (id) {
     case "results":
-      return time("number", [{ name: result, values: days.map((d) => d.conversions) }], "bar");
+      return time("number", [{ name: result, values: days.map((d) => d.conversions) }], "bar", (d) => d.conversions);
     case "spend":
-      return time("money", [{ name: "Investimento", values: days.map((d) => d.spend) }], "bar");
+      return time("money", [{ name: "Investimento", values: days.map((d) => d.spend) }], "bar", (d) => d.spend);
     case "cpa":
       return time(
         "money",
@@ -452,11 +613,12 @@ function ReportChartView({
           },
         ],
         "line",
+        (d) => (d.conversions ? d.spend / d.conversions : null),
       );
     case "impressions":
-      return time("number", [{ name: "Impressões", values: days.map((d) => d.impressions) }], "bar");
+      return time("number", [{ name: "Impressões", values: days.map((d) => d.impressions) }], "bar", (d) => d.impressions);
     case "clicks":
-      return time("number", [{ name: "Cliques no link", values: days.map((d) => d.clicks) }], "bar");
+      return time("number", [{ name: "Cliques no link", values: days.map((d) => d.clicks) }], "bar", (d) => d.clicks);
     case "ctr":
       return time(
         "percent",
@@ -467,10 +629,15 @@ function ReportChartView({
           },
         ],
         "line",
+        (d) => (d.impressions ? (d.clicks / d.impressions) * 100 : null),
       );
     case "cumulative": {
       let sum = 0;
       const acc = days.map((d) => (sum += d.conversions));
+      let before = 0;
+      const accBefore = compare
+        ? keys.map((_, i) => (compare[i] ? (before += compare[i].conversions) : null))
+        : null;
       // The goal spread evenly over the days shown.
       const pace = goalResults
         ? days.map((_, i) => Math.round((goalResults * (i + 1)) / days.length))
@@ -479,7 +646,8 @@ function ReportChartView({
         "number",
         [
           { name: `${result} acumulados`, values: acc },
-          ...(pace ? [{ name: "Ritmo da meta", values: pace }] : []),
+          ...(pace && !accBefore ? [{ name: "Ritmo da meta", values: pace }] : []),
+          ...(accBefore ? [{ name: "Período comparado", values: accBefore }] : []),
         ],
         "line",
       );

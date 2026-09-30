@@ -965,6 +965,8 @@ type ReportItem = {
 export type ReportMeta = {
   currency: string;
   reach: number | null;
+  /** The comparison period's deduplicated reach. */
+  compare_reach?: number | null;
   ad_results: boolean;
   ads: ReportItem[];
   adsets: ReportItem[];
@@ -1007,8 +1009,10 @@ export async function reportMeta(
   start: string,
   end: string,
   adsLimit: number,
+  compare?: { start: string; end: string } | null,
 ): Promise<ReportMeta> {
   checkRange(start, end);
+  if (compare) checkRange(compare.start, compare.end);
   const cycleOn = (day: string) =>
     [...sources.cycles].reverse().find((c) => c.start_date <= day && day <= c.end_date) ??
     sources.cycles[sources.cycles.length - 1];
@@ -1033,6 +1037,12 @@ export async function reportMeta(
   let reach: number | null = null;
   let currency = "BRL";
   const range = { time_range: JSON.stringify({ since: start, until: end }) };
+  // The comparison's days come in their own read (the periods may be far
+  // apart: the days between them are not needed).
+  const compareRange = compare
+    ? { time_range: JSON.stringify({ since: compare.start, until: compare.end }) }
+    : null;
+  let compareReach: number | null = null;
   for (const [account, campaigns] of accounts) {
     const token = await tokenFor(account);
     const filter: Record<string, string> = campaigns?.size
@@ -1043,16 +1053,18 @@ export async function reportMeta(
         }
       : {};
     const act = `/act_${account}`;
-    const [info, daily, adReach, adsetReach, total] = await Promise.all([
-      graph<{ currency?: string }>(env, fetchImpl, token, act, { fields: "currency" }),
+    const dailyOf = (r: Record<string, string>) =>
       graphAll<InsightRow>(env, fetchImpl, token, `${act}/insights`, {
-        ...range,
+        ...r,
         ...filter,
         level: "ad",
         time_increment: "1",
         fields: "ad_id,ad_name,adset_id,adset_name,campaign_name,spend,impressions,inline_link_clicks,actions",
         limit: "500",
-      }),
+      });
+    const [info, main, adReach, adsetReach, total, compared, compareTotal] = await Promise.all([
+      graph<{ currency?: string }>(env, fetchImpl, token, act, { fields: "currency" }),
+      dailyOf(range),
       graphAll<InsightRow>(env, fetchImpl, token, `${act}/insights`, {
         ...range,
         ...filter,
@@ -1073,9 +1085,25 @@ export async function reportMeta(
         level: "account",
         fields: "reach",
       }),
+      compareRange ? dailyOf(compareRange) : Promise.resolve([] as InsightRow[]),
+      compareRange
+        ? graphAll<InsightRow>(env, fetchImpl, token, `${act}/insights`, {
+            ...compareRange,
+            ...filter,
+            level: "account",
+            fields: "reach",
+          })
+        : Promise.resolve([] as InsightRow[]),
     ]);
     currency = info.currency ?? currency;
     reach = (reach ?? 0) + num(total[0]?.reach);
+    if (compareRange) compareReach = (compareReach ?? 0) + num(compareTotal[0]?.reach);
+    // A day in both periods (overlapping choices) counts once.
+    const seen = new Set(main.map((r) => `${r.ad_id}|${r.date_start}`));
+    const daily = [
+      ...main,
+      ...compared.filter((r) => !seen.has(`${r.ad_id}|${r.date_start}`)),
+    ];
     for (const row of daily) {
       const day = String(row.date_start ?? "");
       const cycle = cycleOn(day);
@@ -1181,6 +1209,7 @@ export async function reportMeta(
   return {
     currency,
     reach: accounts.size ? reach : null,
+    ...(compare ? { compare_reach: accounts.size ? compareReach : null } : {}),
     ad_results,
     ads: sortItems([...ads.values()]).slice(0, 200),
     adsets: sortItems([...adsets.values()]).slice(0, 100),

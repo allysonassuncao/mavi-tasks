@@ -289,6 +289,43 @@ await check("só quem criou ou um líder altera, desativa e exclui", async () =>
   assert.deepEqual(actions.slice(-3), ["report_unshared", "report_shared", "report_deleted"]);
 });
 
+await check("período de comparação: os dois períodos guardados, no link também", async () => {
+  await as(trafego);
+  const cmp = await rpc("create_ad_report", [
+    campaign, "Setembro contra agosto", "2026-09-01", "2026-09-02", config({ with_m: true }),
+    JSON.stringify({ ...meta, reach: 5500, compare_reach: 2300 }), "", true, null, null,
+    "2026-08-30", "2026-08-31",
+  ]);
+  assert.equal(cmp.compare_start, "2026-08-30");
+  assert.equal(cmp.compare_end, "2026-08-31");
+  // Both periods' days, with M (August 1.5, September 2).
+  assert.deepEqual(cmp.view.days.map((d) => [d.day, d.spend]), [
+    ["2026-08-30", 150], ["2026-08-31", 300], ["2026-09-01", 600], ["2026-09-02", 1998],
+  ]);
+  assert.equal(cmp.view.cycles.length, 2);
+  assert.equal(cmp.view.compare_reach, 2300);
+  await as(null);
+  const page = await rpc("ad_report_public", [cmp.link.token, null]);
+  assert.equal(page.compare_start, "2026-08-30");
+  assert.equal(page.view.compare_reach, 2300);
+  assert.doesNotMatch(JSON.stringify(page), /"m"|multiplier/);
+  await as(trafego);
+  await assert.rejects(
+    rpc("create_ad_report", [campaign, "Errado", "2026-09-01", "2026-09-02", config(), "{}", "", true, null, null, "2026-08-31", null]),
+    /período de comparação/,
+  );
+  await assert.rejects(
+    rpc("create_ad_report", [campaign, "Errado", "2026-09-01", "2026-09-02", config(), "{}", "", true, null, null, "2026-08-31", "2026-08-01"]),
+    /período de comparação/,
+  );
+  const [event] = await sql(
+    "select detail from ad_campaign_events where campaign_id=$1 and action='report_created' order by id desc limit 1",
+    [campaign],
+  );
+  assert.equal(event.detail.compare_start, "2026-08-30");
+  await rpc("delete_ad_report", [cmp.id]);
+});
+
 await check("a MAVI na análise: funcionalidade 'campaign_report' no Painel", async () => {
   const [{ ok }] = await sql(
     `select pg_get_constraintdef(oid) like '%campaign_report%' as ok from pg_constraint

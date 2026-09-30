@@ -115,6 +115,8 @@ export function PublicCampaignReport({ token }: { token: string }) {
         analysis={state.analysis}
         periodStart={state.period_start}
         periodEnd={state.period_end}
+        compareStart={state.compare_start}
+        compareEnd={state.compare_end}
       />
     </main>
   );

@@ -500,3 +500,92 @@
     padding-left: 0;
   }
 }
+
+/* The wide sheet doesn't scroll itself: the form does, with the save bar
+   always in view (as the cycle form). */
+.modal.sheet > .creport-form {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 0;
+}
+.creport-form > .form-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 0 -24px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--border);
+  background: #fff;
+}
+
+/* The comparison. */
+.creport-compare .ui-select {
+  width: auto;
+  min-width: 220px;
+}
+.creport-compare-label {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+.creport-compare-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.creport-kpi .creport-delta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.creport-kpi .creport-delta span {
+  font-weight: 400;
+}
+.creport-kpi .creport-delta.good {
+  color: #3b7a1c;
+}
+.creport-kpi .creport-delta.bad {
+  color: #b3261e;
+}
+
+/* "Sem M": the second confirmation. */
+.creport-form-footer {
+  flex-wrap: wrap;
+}
+.creport-confirm {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #f0c2bd;
+  border-radius: 10px;
+  background: #fdf1ef;
+  color: #7a1f16;
+}
+.creport-confirm > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.creport-confirm strong {
+  display: block;
+}
+.creport-confirm p {
+  margin: 4px 0 8px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.creports-compare {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+}

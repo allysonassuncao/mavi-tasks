@@ -25,6 +25,8 @@ import {
   metricsFor,
   numbersForMavi,
   reportPeriods,
+  comparePeriods,
+  rangeLabel,
   reportUrl,
   type CampaignReport,
   type ReportConfig,
@@ -167,6 +169,11 @@ export function CampaignReports({
                   </td>
                   <td>
                     {shortDate(r.period_start)} a {shortDate(r.period_end)}
+                    {r.compare_start && r.compare_end && (
+                      <small className="creports-compare">
+                        vs {shortDate(r.compare_start)} a {shortDate(r.compare_end)}
+                      </small>
+                    )}
                   </td>
                   <td>{r.config.with_m ? "Com M" : "Sem M"}</td>
                   <td>
@@ -211,6 +218,8 @@ export function CampaignReports({
               link: values.link,
               expires_at: values.expiresAt,
               password: values.password || null,
+              compare_start: values.compare?.start ?? null,
+              compare_end: values.compare?.end ?? null,
             });
             setCreating(false);
             if (created.link)
@@ -389,6 +398,8 @@ function ReportDetail({
           analysis={report.analysis}
           periodStart={report.period_start}
           periodEnd={report.period_end}
+          compareStart={report.compare_start}
+          compareEnd={report.compare_end}
           analysisSlot={
             config.sections.analysis ? (
               <AnalysisEditor
@@ -478,7 +489,16 @@ function AnalysisEditor({
           period: `${shortDate(report.period_start)} a ${shortDate(report.period_end)}`,
           client: clientName,
           focus,
-          numbers: numbersForMavi(report.view, report.config, report.period_start, report.period_end),
+          numbers: numbersForMavi(
+            report.view,
+            report.config,
+            report.period_start,
+            report.period_end,
+            report.compare_start && report.compare_end
+              ? { from: report.compare_start, to: report.compare_end }
+              : null,
+            report.view.compare_reach ?? null,
+          ),
         });
         if (save) {
           const saved = await backend.update(report.id, report.title, report.config, text);
@@ -600,6 +620,7 @@ type FormValues = {
   link: boolean;
   expiresAt: string | null;
   password: string;
+  compare: { start: string; end: string } | null;
 };
 function ReportForm({
   mode,
@@ -644,6 +665,23 @@ function ReportForm({
   const [usePassword, setUsePassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // A second period to compare with (create only).
+  const [comparing, setComparing] = useState(false);
+  const compareChoices = useMemo(
+    () => comparePeriods(chosen.start, chosen.end, cycles),
+    [chosen.start, chosen.end, cycles],
+  );
+  const [comparePick, setComparePick] = useState("previous");
+  const [compareCustom, setCompareCustom] = useState({ start: "", end: "" });
+  const compare = !comparing
+    ? null
+    : comparePick === "custom"
+      ? compareCustom
+      : (compareChoices.find((p) => p.id === comparePick) ?? compareChoices[0]);
+  // "Sem M": the client will see the platform's values; asked twice.
+  const needsNoMConfirm = !config.with_m && (mode === "create" || report?.config.with_m !== false);
+  const [askNoM, setAskNoM] = useState(false);
+  const [noMChecked, setNoMChecked] = useState(false);
   const toggle = <T extends string>(list: T[], id: T, on: boolean) =>
     on ? [...list.filter((x) => x !== id), id] : list.filter((x) => x !== id);
   const expiresAt = () => {
@@ -666,6 +704,14 @@ function ReportForm({
       setError("Escolha pelo menos uma métrica, um gráfico ou os anúncios.");
       return;
     }
+    if (compare && (!compare.start || !compare.end || compare.end < compare.start)) {
+      setError("Escolha o período de comparação.");
+      return;
+    }
+    if (needsNoMConfirm && !(askNoM && noMChecked)) {
+      setAskNoM(true);
+      return;
+    }
     setBusy(true);
     try {
       await onSubmit({
@@ -676,6 +722,7 @@ function ReportForm({
         link,
         expiresAt: link ? expiresAt() : null,
         password: link && usePassword ? password : "",
+        compare: mode === "create" && compare ? { start: compare.start, end: compare.end } : null,
       });
     } catch (e) {
       setError((e as Error).message);
@@ -751,6 +798,55 @@ function ReportForm({
             Os números não mudam; crie outro relatório para outro período.
           </p>
         )}
+        {mode === "create" ? (
+          <fieldset className="share-block">
+            <label className="share-toggle">
+              <Checkbox checked={comparing} onCheckedChange={(v) => setComparing(v === true)} />
+              <span>
+                <strong>Comparar com outro período</strong>
+                <small>
+                  Os números dos dois períodos ficam guardados; o relatório e o
+                  link mostram a variação de cada métrica e os dois nos gráficos.
+                </small>
+              </span>
+            </label>
+            {comparing && (
+              <div className="creport-form-row creport-indent">
+                <Select aria-label="Período de comparação" value={comparePick} onValueChange={setComparePick}>
+                  {compareChoices.map((p) => (
+                    <SelectOption key={p.id} value={p.id}>
+                      {`${p.label} (${rangeLabel({ from: p.start, to: p.end })})`}
+                    </SelectOption>
+                  ))}
+                  <SelectOption value="custom">Personalizado</SelectOption>
+                </Select>
+                {comparePick === "custom" && (
+                  <>
+                    <DateInput
+                      type="date"
+                      aria-label="Comparar de"
+                      value={compareCustom.start}
+                      max={compareCustom.end || today}
+                      onChange={(e) => setCompareCustom((c) => ({ ...c, start: e.target.value }))}
+                    />
+                    <DateInput
+                      type="date"
+                      aria-label="Comparar até"
+                      value={compareCustom.end}
+                      min={compareCustom.start}
+                      max={today}
+                      onChange={(e) => setCompareCustom((c) => ({ ...c, end: e.target.value }))}
+                    />
+                  </>
+                )}
+              </div>
+            )}
+          </fieldset>
+        ) : report?.compare_start && report.compare_end ? (
+          <p className="share-hint">
+            Comparado com {shortDate(report.compare_start)} a {shortDate(report.compare_end)}.
+          </p>
+        ) : null}
         <fieldset className="share-block">
           <strong className="share-title">Valores</strong>
           <div className="creport-radio">
@@ -765,7 +861,11 @@ function ReportForm({
                   type="radio"
                   name="with_m"
                   checked={config.with_m === value}
-                  onChange={() => setConfig((c) => ({ ...c, with_m: value }))}
+                  onChange={() => {
+                    setConfig((c) => ({ ...c, with_m: value }));
+                    setAskNoM(false);
+                    setNoMChecked(false);
+                  }}
                 />
                 <span>
                   <strong>{label}</strong>
@@ -974,16 +1074,47 @@ function ReportForm({
             {error}
           </p>
         )}
-        <div className="form-footer">
-          <Button type="button" className="btn secondary" onClick={onClose} disabled={busy}>
-            Cancelar
+        <div className="form-footer creport-form-footer">
+          {askNoM && needsNoMConfirm && (
+            <div className="creport-confirm" role="alertdialog" aria-label="Confirmar valores sem M">
+              <TriangleAlert size={18} aria-hidden="true" />
+              <div>
+                <strong>Relatório sem M</strong>
+                <p>
+                  O cliente vai ver o valor investido na plataforma, e não o
+                  valor contratado (com M). Isso vale para o relatório e para o
+                  link público.
+                </p>
+                <label className="mplat-check">
+                  <Checkbox checked={noMChecked} onCheckedChange={(v) => setNoMChecked(v === true)} />
+                  Confirmo que este relatório deve mostrar os valores sem M
+                </label>
+              </div>
+            </div>
+          )}
+          <Button
+            type="button"
+            className="btn secondary"
+            onClick={askNoM && needsNoMConfirm ? () => setAskNoM(false) : onClose}
+            disabled={busy}
+          >
+            {askNoM && needsNoMConfirm ? "Voltar" : "Cancelar"}
           </Button>
-          <Button type="submit" className="btn primary" loading={busy}>
-            {mode === "create"
-              ? meta && config.sections.ads
-                ? "Criar relatório (lê os anúncios no Meta)"
-                : "Criar relatório"
-              : "Salvar"}
+          <Button
+            type="submit"
+            className={`btn ${askNoM && needsNoMConfirm ? "danger" : "primary"}`}
+            loading={busy}
+            disabled={askNoM && needsNoMConfirm && !noMChecked}
+          >
+            {askNoM && needsNoMConfirm
+              ? mode === "create"
+                ? "Confirmar e criar sem M"
+                : "Confirmar e salvar sem M"
+              : mode === "create"
+                ? meta && config.sections.ads
+                  ? "Criar relatório (lê os anúncios no Meta)"
+                  : "Criar relatório"
+                : "Salvar"}
           </Button>
         </div>
       </form>
@@ -1016,6 +1147,9 @@ function LinkDialog({
   const [busy, setBusy] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
   const [error, setError] = useState("");
+  // A report without M: creating its link is confirmed once more.
+  const noM = report.config.with_m === false;
+  const [noMChecked, setNoMChecked] = useState(false);
   const askPassword = usePassword && (!l?.has_password || changePassword);
   const expiresAt = () => {
     if (validity === "keep") return l?.expires_at ?? null;
@@ -1028,6 +1162,10 @@ function LinkDialog({
     setError("");
     if (askPassword && password.length < 4) {
       setError("A senha precisa ter pelo menos 4 caracteres.");
+      return;
+    }
+    if (noM && !l && !noMChecked) {
+      setError("Confirme que o link vai mostrar os valores sem M.");
       return;
     }
     setBusy(true);
@@ -1154,6 +1292,22 @@ function LinkDialog({
             />
           ) : null}
         </fieldset>
+        {noM && !l && (
+          <div className="creport-confirm" role="alertdialog" aria-label="Confirmar valores sem M">
+            <TriangleAlert size={18} aria-hidden="true" />
+            <div>
+              <strong>Relatório sem M</strong>
+              <p>
+                Quem abrir o link vai ver o valor investido na plataforma, e não
+                o valor contratado (com M).
+              </p>
+              <label className="mplat-check">
+                <Checkbox checked={noMChecked} onCheckedChange={(v) => setNoMChecked(v === true)} />
+                Confirmo que o link deve mostrar os valores sem M
+              </label>
+            </div>
+          </div>
+        )}
         {error && (
           <p className="form-error" role="alert">
             {error}
@@ -1178,7 +1332,13 @@ function LinkDialog({
           <Button type="button" className="btn secondary" onClick={onClose} disabled={busy}>
             Cancelar
           </Button>
-          <Button type="button" className="btn primary" onClick={() => void save()} loading={busy && !confirmOff}>
+          <Button
+            type="button"
+            className="btn primary"
+            onClick={() => void save()}
+            loading={busy && !confirmOff}
+            disabled={noM && !l && !noMChecked}
+          >
             {l ? "Salvar alterações" : "Criar link público"}
           </Button>
         </div>

@@ -924,6 +924,9 @@ export type AdsRequest =
       link?: boolean;
       expires_at?: string | null;
       password?: string | null;
+      /** A second period to compare with (both or neither). */
+      compare_start?: string | null;
+      compare_end?: string | null;
     };
 
 export async function handleAds(
@@ -1214,12 +1217,24 @@ export async function handleAds(
       const end = String(req.end ?? "");
       const config =
         req.config && typeof req.config === "object" ? req.config : {};
+      const day = /^\d{4}-\d{2}-\d{2}$/;
+      const compare =
+        req.compare_start || req.compare_end
+          ? { start: String(req.compare_start ?? ""), end: String(req.compare_end ?? "") }
+          : null;
+      if (compare && (!day.test(compare.start) || !day.test(compare.end) || compare.end < compare.start))
+        return fail(400, "Escolha o período de comparação.");
+      // The cycles and links of both periods.
       const sources = await rpc<ReportSources>(
         env,
         fetchImpl,
         authorization,
         "ad_report_sources",
-        { p_campaign: req.campaign, p_start: start, p_end: end },
+        {
+          p_campaign: req.campaign,
+          p_start: compare && compare.start < start ? compare.start : start,
+          p_end: compare && compare.end > end ? compare.end : end,
+        },
       );
       // The campaign's numbers are the database's; Meta adds the ads. If
       // Meta fails, the report is still made and says why the ads are out.
@@ -1234,6 +1249,7 @@ export async function handleAds(
           start,
           end,
           Math.min(30, Math.max(0, Number(config.ads_limit) || 10)),
+          compare,
         ).catch((e: unknown) => ({
           error:
             e instanceof Error
@@ -1256,6 +1272,8 @@ export async function handleAds(
           p_link: req.link !== false,
           p_expires_at: req.expires_at || null,
           p_password: req.password || null,
+          p_compare_start: compare?.start ?? null,
+          p_compare_end: compare?.end ?? null,
         },
       );
       return { status: 200, body: { report } };

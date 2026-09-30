@@ -101,6 +101,8 @@ export type ReportView = {
   cycles: ReportCycle[];
   /** The period's deduplicated reach (Meta), when read. */
   reach: number | null;
+  /** The comparison period's reach (Meta), when there is one. */
+  compare_reach?: number | null;
   /** False: the results come from the Make pages, not per ad. */
   ad_results: boolean;
   ads?: ReportItem[];
@@ -119,6 +121,9 @@ export type CampaignReport = {
   title: string;
   period_start: string;
   period_end: string;
+  /** The saved comparison period (both or neither). */
+  compare_start: string | null;
+  compare_end: string | null;
   config: ReportConfig;
   analysis: string;
   created_by: string;
@@ -136,6 +141,8 @@ export type PublicReport =
       title: string;
       period_start: string;
       period_end: string;
+      compare_start: string | null;
+      compare_end: string | null;
       expires_at: string | null;
       config: PublicConfig;
       analysis: string;
@@ -153,6 +160,8 @@ export type ReportInput = {
   link: boolean;
   expires_at?: string | null;
   password?: string | null;
+  compare_start?: string | null;
+  compare_end?: string | null;
 };
 export type AnalysisInput = {
   campaign: string;
@@ -424,12 +433,44 @@ export function goalOf(view: ReportView) {
   };
 }
 
+/** The change from B to A, in percent (null: nothing to compare). */
+export function deltaOf(a: number | null, b: number | null) {
+  if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b) || b === 0)
+    return null;
+  return ((a - b) / Math.abs(b)) * 100;
+}
+/** Costs are better when they go down. */
+export const lowerIsBetter = (id: ReportMetric) =>
+  id === "cpa" || id === "cpc" || id === "cpm";
+/** Reach of a period: Meta's exact number only for the saved periods. */
+export function reachOf(
+  view: ReportView,
+  range: { from: string; to: string },
+  report: { start: string; end: string; compareStart: string | null; compareEnd: string | null },
+) {
+  if (range.from === report.start && range.to === report.end) return view.reach;
+  if (report.compareStart && range.from === report.compareStart && range.to === report.compareEnd)
+    return view.compare_reach ?? null;
+  return null;
+}
+/** The same number of days right before a period. */
+export function previousRange(from: string, to: string) {
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
+  return { from: addDays(from, -days), to: addDays(from, -1) };
+}
+export const rangeLabel = (r: { from: string; to: string }) => {
+  const f = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+  return `${f(r.from)} a ${f(r.to)}`;
+};
+
 /** What the MAVI reads to write the analysis (the numbers the client sees). */
 export function numbersForMavi(
   view: ReportView,
   config: ReportConfig,
   from: string,
   to: string,
+  compare?: { from: string; to: string } | null,
+  compareReach?: number | null,
 ) {
   const days = daysIn(view, from, to);
   const t = totalsOf(days);
@@ -495,6 +536,29 @@ export function numbersForMavi(
             cliques: a.clicks,
           })),
         }
+      : {}),
+    ...(compare
+      ? (() => {
+          const c = totalsOf(daysIn(view, compare.from, compare.to));
+          const pct = (a: number | null, b: number | null) => round(deltaOf(a, b));
+          return {
+            comparacao: {
+              periodo: { de: compare.from, ate: compare.to },
+              investimento: round(c.spend),
+              resultados: c.conversions,
+              custo_por_resultado: round(ratio(c.spend, c.conversions)),
+              impressoes: c.impressions,
+              alcance: compareReach ?? null,
+              cliques_no_link: c.clicks,
+              variacao_percentual: {
+                investimento: pct(t.spend, c.spend),
+                resultados: pct(t.conversions, c.conversions),
+                custo_por_resultado: pct(ratio(t.spend, t.conversions), ratio(c.spend, c.conversions)),
+                cliques_no_link: pct(t.clicks, c.clicks),
+              },
+            },
+          };
+        })()
       : {}),
     ...(view.ad_results ? {} : { observacao: "Os resultados vêm das páginas de captura; por anúncio só há investimento e cliques." }),
   };
@@ -577,7 +641,7 @@ export function demoReports(deps: {
   user: string;
 }): ReportsBackend {
   type Stored = Omit<CampaignReport, "view" | "can_manage"> & {
-    raw: { days: (ReportDay & { m: number })[]; cycles: AdCycle[]; ads: ReportItem[]; adsets: ReportItem[]; reach: number };
+    raw: { days: (ReportDay & { m: number })[]; cycles: AdCycle[]; ads: ReportItem[]; adsets: ReportItem[]; reach: number; compare_reach: number | null };
     company: string;
     password: string | null;
   };
@@ -621,6 +685,7 @@ export function demoReports(deps: {
         budget: withM ? c.budget : Math.round((c.budget / c.multiplier) * 100) / 100,
       })),
       reach: r.raw.reach,
+      compare_reach: r.raw.compare_reach,
       ad_results: true,
       ads: items(r.raw.ads),
       adsets: items(r.raw.adsets),
@@ -632,6 +697,8 @@ export function demoReports(deps: {
     title: r.title,
     period_start: r.period_start,
     period_end: r.period_end,
+    compare_start: r.compare_start,
+    compare_end: r.compare_end,
     config: r.config,
     analysis: r.analysis,
     created_by: r.created_by,
@@ -658,7 +725,13 @@ export function demoReports(deps: {
         throw Error("Escolha o período do relatório.");
       const metrics = await deps.metrics.load(company, input.campaign);
       const days = metrics.daily
-        .filter((d) => d.day >= input.start && d.day <= input.end)
+        .filter(
+          (d) =>
+            (d.day >= input.start && d.day <= input.end) ||
+            (!!input.compare_start &&
+              d.day >= input.compare_start &&
+              d.day <= (input.compare_end ?? input.compare_start)),
+        )
         .map((d) => ({
           day: d.day,
           m: d.multiplier,
@@ -673,7 +746,13 @@ export function demoReports(deps: {
         }));
       const cycles = deps
         .cycles(input.campaign)
-        .filter((y) => y.start_date <= input.end && y.end_date >= input.start);
+        .filter(
+          (y) =>
+            (y.start_date <= input.end && y.end_date >= input.start) ||
+            (!!input.compare_start &&
+              y.start_date <= (input.compare_end ?? input.compare_start) &&
+              y.end_date >= input.compare_start),
+        );
       // A few ads sharing the days' numbers.
       const names = ["Vídeo depoimento", "Carrossel benefícios", "Imagem oferta", "Reels bastidores", "Story pergunta"];
       const weights = [0.34, 0.26, 0.18, 0.14, 0.08];
@@ -716,6 +795,8 @@ export function demoReports(deps: {
         title: input.title.trim(),
         period_start: input.start,
         period_end: input.end,
+        compare_start: input.compare_start ?? null,
+        compare_end: input.compare_end ?? null,
         config: configFrom(input.config),
         analysis: input.analysis ?? "",
         created_by: deps.user,
@@ -731,7 +812,18 @@ export function demoReports(deps: {
           cycles,
           ads: ads.slice(0, Math.max(input.config.ads_limit, 5)),
           adsets,
-          reach: Math.round(days.reduce((s, d) => s + d.reach, 0) * 0.62),
+          reach: Math.round(
+            days
+              .filter((d) => d.day >= input.start && d.day <= input.end)
+              .reduce((s, d) => s + d.reach, 0) * 0.62,
+          ),
+          compare_reach: input.compare_start
+            ? Math.round(
+                days
+                  .filter((d) => d.day >= input.compare_start! && d.day <= input.compare_end!)
+                  .reduce((s, d) => s + d.reach, 0) * 0.62,
+              )
+            : null,
         },
       };
       store.push(r);
@@ -790,6 +882,33 @@ export function demoReports(deps: {
       );
     },
   };
+}
+
+/** The comparison periods offered for a report's period. */
+export function comparePeriods(
+  start: string,
+  end: string,
+  cycles: AdCycle[],
+) {
+  const prev = previousRange(start, end);
+  const out: { id: string; label: string; start: string; end: string }[] = [
+    { id: "previous", label: "Período anterior (mesma duração)", start: prev.from, end: prev.to },
+  ];
+  const cycle = [...cycles]
+    .filter((y) => y.end_date < start)
+    .sort((a, b) => b.start_date.localeCompare(a.start_date))[0];
+  if (cycle)
+    out.push({ id: "cycle", label: "Ciclo anterior", start: cycle.start_date, end: cycle.end_date });
+  // The same days of the month before (clamped to the month's end).
+  const shift = (d: string) => {
+    const [y, m, day] = d.split("-").map(Number);
+    const month = m === 1 ? 12 : m - 1;
+    const year = m === 1 ? y - 1 : y;
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return `${year}-${String(month).padStart(2, "0")}-${String(Math.min(day, last)).padStart(2, "0")}`;
+  };
+  out.push({ id: "month", label: "Mesmo período do mês anterior", start: shift(start), end: shift(end) });
+  return out;
 }
 
 /** The periods offered when creating a report. */

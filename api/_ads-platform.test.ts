@@ -345,6 +345,46 @@ describe("o que o relatório guarda do Meta", () => {
     expect(JSON.parse(param(daily, "filtering"))[0].value).toEqual(["c1", "c2"]);
   });
 
+  it("com comparação: os dias dos dois períodos e o alcance de cada um", async () => {
+    const { fetch, calls } = network([
+      [/\/act_111\?/, () => json({ currency: "BRL" })],
+      [
+        /\/act_111\/insights/,
+        (c) => {
+          const since = JSON.parse(param(c, "time_range")).since;
+          if (param(c, "level") === "account")
+            return json({ data: [{ reach: since === "2026-08-01" ? "700" : "900" }] });
+          if (param(c, "time_increment"))
+            return json({
+              data: [
+                { ad_id: "a1", ad_name: "Vídeo", adset_id: "s1", adset_name: "Aberto", date_start: since, spend: since === "2026-08-01" ? "5" : "8", impressions: "10", inline_link_clicks: "1", actions: [{ action_type: "leadgen_grouped", value: "1" }] },
+              ],
+            });
+          return json({ data: [] });
+        },
+      ],
+      [/graph\.facebook\.com\/v23\.0\/\?/, () => json({})],
+    ]);
+    const meta = await reportMeta(env, fetch, async () => "tok", sources, "2026-09-01", "2026-09-07", 5, {
+      start: "2026-08-01",
+      end: "2026-08-07",
+    });
+    expect(meta.reach).toBe(900);
+    expect(meta.compare_reach).toBe(700);
+    expect(meta.ads[0].days.map((d) => [d.d, d.s])).toEqual([
+      ["2026-08-01", 5],
+      ["2026-09-01", 8],
+    ]);
+    // Two separate reads of days: the gap between the periods is skipped.
+    const ranges = calls
+      .filter((c) => param(c, "time_increment") === "1")
+      .map((c) => JSON.parse(param(c, "time_range")));
+    expect(ranges).toEqual([
+      { since: "2026-09-01", until: "2026-09-07" },
+      { since: "2026-08-01", until: "2026-08-07" },
+    ]);
+  });
+
   it("imagens só do Facebook, pequenas e de tipos de imagem", async () => {
     const big = new Response(Buffer.alloc(200_000), { headers: { "content-type": "image/jpeg" } });
     const { fetch } = network([
@@ -389,6 +429,8 @@ describe("/api/ads: report-create", () => {
         config: { with_m: true, ads_limit: 5 },
         link: true,
         password: "segredo",
+        compare_start: "2026-08-25",
+        compare_end: "2026-08-31",
       },
       "Bearer user",
       env,
@@ -405,7 +447,13 @@ describe("/api/ads: report-create", () => {
       p_link: true,
       p_password: "segredo",
       p_config: { with_m: true, ads_limit: 5 },
+      p_compare_start: "2026-08-25",
+      p_compare_end: "2026-08-31",
     });
+    // The sources cover both periods.
+    const sources = calls.find((c) => c.url.pathname.endsWith("ad_report_sources"))!;
+    expect(JSON.parse(sources.body!)).toMatchObject({ p_start: "2026-08-25", p_end: "2026-09-07" });
+    expect(args.p_meta.compare_reach).toBe(0);
     expect(args.p_meta).toMatchObject({ currency: "BRL", ads: [], reach: 0 });
     // The Meta token is the database's (as the person), never the browser's.
     const token = calls.find((c) => c.url.pathname.endsWith("ad_meta_token"))!;

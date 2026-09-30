@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  comparePeriods,
   configFrom,
+  deltaOf,
+  previousRange,
+  reachOf,
   daysIn,
   defaultConfig,
   demoReports,
@@ -154,6 +158,63 @@ describe("a página do relatório", () => {
     const html = renderToStaticMarkup(<AnalysisText text={'<img src=x onerror="alert(1)">'} />);
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img");
+  });
+});
+
+describe("a comparação entre períodos", () => {
+  const withCompare: ReportView = {
+    ...view,
+    days: [day("2026-08-30", 50, 2), day("2026-08-31", 150, 3), ...view.days],
+    compare_reach: 900,
+  };
+  it("variação, custo que cai é bom e o alcance só nos períodos guardados", () => {
+    expect(deltaOf(150, 100)).toBe(50);
+    expect(deltaOf(5, 0)).toBeNull();
+    expect(previousRange("2026-09-01", "2026-09-03")).toEqual({ from: "2026-08-29", to: "2026-08-31" });
+    const saved = { start: "2026-09-01", end: "2026-09-03", compareStart: "2026-08-30", compareEnd: "2026-08-31" };
+    expect(reachOf(withCompare, { from: "2026-08-30", to: "2026-08-31" }, saved)).toBe(900);
+    expect(reachOf(withCompare, { from: "2026-09-01", to: "2026-09-03" }, saved)).toBe(1800);
+    expect(reachOf(withCompare, { from: "2026-09-02", to: "2026-09-03" }, saved)).toBeNull();
+  });
+  it("os períodos oferecidos para comparar", () => {
+    const cycles = [{ id: "y1", start_date: "2026-08-01", end_date: "2026-08-31" }] as AdCycle[];
+    const list = comparePeriods("2026-09-01", "2026-09-30", cycles);
+    expect(list.map((p) => [p.id, p.start, p.end])).toEqual([
+      ["previous", "2026-08-02", "2026-08-31"],
+      ["cycle", "2026-08-01", "2026-08-31"],
+      ["month", "2026-08-01", "2026-08-30"],
+    ]);
+    // The month before clamps the day (31/03 → 28/02).
+    expect(comparePeriods("2026-03-01", "2026-03-31", []).find((p) => p.id === "month")).toMatchObject({
+      start: "2026-02-01",
+      end: "2026-02-28",
+    });
+  });
+  it("a página mostra a variação e o que a MAVI lê traz a comparação", () => {
+    const html = renderToStaticMarkup(
+      <CampaignReportView
+        title="Setembro contra agosto"
+        view={withCompare}
+        config={{ metrics: ["spend", "results", "cpa", "reach"], charts: ["results"], sections: { ads: false, adsets: false, analysis: false, goal: false }, ads_limit: 5, allow_filter: true }}
+        analysis=""
+        periodStart="2026-09-01"
+        periodEnd="2026-09-03"
+        compareStart="2026-08-30"
+        compareEnd="2026-08-31"
+      />,
+    ).replace(/\u00a0/g, " ");
+    expect(html).toContain("comparado com 30/08/2026 a 31/08/2026");
+    // Spend 600 vs 200 (+200%), results 15 vs 5, cost 40 vs 40.
+    expect(html).toContain("+200%");
+    expect(html).toContain("vs R$ 200,00");
+    // More results is good; spending more has no color.
+    expect(html).toMatch(/creport-delta good[^>]*>(?:(?!creport-delta).)*\+200%/);
+    expect(html).toMatch(/class="creport-delta "[^>]*>(?:(?!creport-delta).)*\+200%/);
+    expect(html).toContain("vs 900");
+    expect(html).toContain("Período de comparação");
+    const n = numbersForMavi(withCompare, defaultConfig("lead"), "2026-09-01", "2026-09-03", { from: "2026-08-30", to: "2026-08-31" }, 900);
+    expect(n.comparacao).toMatchObject({ investimento: 200, resultados: 5, alcance: 900 });
+    expect(n.comparacao?.variacao_percentual).toMatchObject({ investimento: 200, resultados: 200, custo_por_resultado: 0 });
   });
 });
 

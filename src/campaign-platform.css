@@ -598,3 +598,9 @@
 .mplat-toolbar .ui-select {
   min-width: 150px;
 }
+.modal.sheet > .mplat-chooser {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
