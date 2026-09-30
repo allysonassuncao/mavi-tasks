@@ -15,6 +15,7 @@ import {
   type LlmAdapter,
 } from "./_ai-llm";
 import { newMeter } from "./_social-leads";
+import { outputText } from "./_ai-llm.js";
 
 const company = "00000000-0000-4000-8000-000000000001";
 const client = "00000000-0000-4000-8000-000000000002";
@@ -199,7 +200,8 @@ describe("pergunta à IA", () => {
   });
 
   it("dá contexto, deixa o modelo buscar e devolve só as fontes citadas", async () => {
-    const { fetchImpl, calls } = database(routes());
+    const saved = "00000000-0000-4000-8000-0000000000c9";
+    const { fetchImpl, calls } = database({ ...routes(), "rpc/ai_save_turn": saved, "rpc/ai_usage_close_turn": 2 });
     let seen: AgentRequest | undefined;
     const results: string[] = [];
     const llm: LlmAdapter = async (request) => {
@@ -210,7 +212,7 @@ describe("pergunta à IA", () => {
           client_id: "00000000-0000-4000-8000-00000000ffff",
         }),
       );
-      results.push(await request.execute("list_tasks", { overdue_only: true }));
+      results.push(outputText(await request.execute("list_tasks", { overdue_only: true })));
       const meter = newMeter("claude-opus-5");
       meter.input = 2000;
       meter.output = 100;
@@ -296,15 +298,20 @@ describe("pergunta à IA", () => {
         client_id: client,
       },
     ]);
-    const usage = calls.find((c) => c.url.includes("ai_log_usage"))!;
-    expect(usage.body).toMatchObject({
-      p_company: company,
-      p_module: "meetings",
-      p_client: client,
-      p_input: 2000,
-      p_embedding: 5,
-      p_cost: 0.0125,
-    });
+    // A resposta e a busca nos vetores ficam em linhas próprias, cada uma com o seu modelo.
+    const usage = calls.filter((c) => c.url.includes("ai_log_usage")).map((c) => c.body);
+    const ask = usage.find((u) => u.p_kind === "ask")!;
+    const vectors = usage.find((u) => u.p_kind === "search")!;
+    expect(ask).toMatchObject({ p_company: company, p_module: "meetings", p_client: client, p_input: 2000, p_embedding: 0 });
+    expect(vectors).toMatchObject({ p_module: "meetings", p_model: "text-embedding-3-small", p_embedding: 5, p_input: 0 });
+    expect(Math.round((ask.p_cost + vectors.p_cost) * 1e6) / 1e6).toBe(0.0125);
+    // Tudo da mesma vez (para ligar à resposta depois de salvar).
+    expect(ask.p_turn).toMatch(/^[0-9a-f-]{36}$/);
+    expect(vectors.p_turn).toBe(ask.p_turn);
+    // Salva a resposta: os gastos da vez passam a ser dela, e a tela recebe o custo por modelo.
+    const close = calls.find((c) => c.url.includes("rpc/ai_usage_close_turn"))!;
+    expect(close.body).toEqual({ p_conversation: saved, p_turn: ask.p_turn });
+    expect((res.body as any).cost.models.map((m: any) => m.model)).toEqual(["claude-opus-5", "text-embedding-3-small"]);
   });
 
   it("cliente fora do alcance da pessoa: recusa sem chamar a IA", async () => {
@@ -870,7 +877,7 @@ describe("fase 3: arquivos, Social Leads e campanhas", () => {
           types: ["file"],
         }),
       );
-      outputs.push(await request.execute("campaign_results", {}));
+      outputs.push(outputText(await request.execute("campaign_results", {})));
       return {
         text: "Proposta de 5 mil [S1]; campanha gastou 1.500 [S2].",
         meter: newMeter("claude-opus-5"),

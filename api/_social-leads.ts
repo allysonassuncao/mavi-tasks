@@ -185,14 +185,37 @@ const PRICES: Record<string, [number, number]> = {
 const CACHE_READ_PRICES: Record<string, number> = {
   "claude-opus-5-5": 0.2,
 };
-export type Meter = {
-  model: string;
+export type ModelUsage = {
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
   cost: number;
 };
+export type Meter = ModelUsage & {
+  model: string;
+  /**
+   * O gasto de cada modelo que respondeu (a Claude troca de modelo no meio
+   * quando um fallback assume): para o custo da conversa por modelo.
+   */
+  byModel?: Record<string, ModelUsage>;
+};
+/** Soma um gasto no medidor, no total e no modelo que gastou. */
+export function meterAdd(meter: Meter, model: string, u: Partial<ModelUsage>) {
+  const add = (m: ModelUsage) => {
+    m.input += u.input ?? 0;
+    m.output += u.output ?? 0;
+    m.cacheRead += u.cacheRead ?? 0;
+    m.cacheWrite += u.cacheWrite ?? 0;
+    m.cost += u.cost ?? 0;
+  };
+  if (model) meter.model = model;
+  add(meter);
+  const key = model || meter.model;
+  if (!key) return;
+  meter.byModel ??= {};
+  add((meter.byModel[key] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }));
+}
 export const newMeter = (model = ""): Meter => ({
   model,
   input: 0,
@@ -225,17 +248,13 @@ export function addUsage(
   const output = usage.output_tokens ?? 0;
   const read = usage.cache_read_input_tokens ?? 0;
   const write = usage.cache_creation_input_tokens ?? 0;
-  meter.model = model;
-  meter.input += input;
-  meter.output += output;
-  meter.cacheRead += read;
-  meter.cacheWrite += write;
-  meter.cost +=
-    (input * inPrice +
-      write * inPrice * 1.25 +
-      read * readPrice +
-      output * outPrice) /
-    1e6;
+  meterAdd(meter, model, {
+    input,
+    output,
+    cacheRead: read,
+    cacheWrite: write,
+    cost: (input * inPrice + write * inPrice * 1.25 + read * readPrice + output * outPrice) / 1e6,
+  });
 }
 /** Records what the AI cost; never blocks the answer. */
 async function logUsage(

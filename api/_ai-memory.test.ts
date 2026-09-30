@@ -4,6 +4,7 @@ import { openAiChatAdapter, type ProviderConfig } from "./_ai-providers";
 import { streamAi, type AiEnv, type AiStreamEvent, type Live } from "./_ai";
 import { newMeter } from "./_social-leads";
 import { seal } from "./_google";
+import { outputText } from "./_ai-llm.js";
 
 const company = "00000000-0000-4000-8000-000000000001";
 const me = "00000000-0000-4000-8000-000000000003";
@@ -247,7 +248,7 @@ describe("reordenação da busca", () => {
     await streamAi({ action: "ai-ask", company, scope: {}, question: "O que foi combinado?" }, token, { ...env, providerKey: key }, {
       fetch: fetchImpl,
       llm: async (r) => {
-        found = await r.execute("search_knowledge", { query: "combinado verba", limit: 5 });
+        found = outputText(await r.execute("search_knowledge", { query: "combinado verba", limit: 5 }));
         return answer("Veja [S1].");
       },
       embed: vi.fn(async (t: string[]) => ({ vectors: t.map(() => [0.1]), tokens: 1, model: "m" })),

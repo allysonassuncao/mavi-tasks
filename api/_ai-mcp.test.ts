@@ -26,6 +26,7 @@ import { streamAi, type AiEnv, type AiStreamEvent } from "./_ai";
 import type { AgentRequest, LlmAdapter } from "./_ai-llm";
 import type { PowerKit } from "./_ai-powers";
 import { newMeter } from "./_social-leads";
+import { outputText } from "./_ai-llm.js";
 
 const key = crypto.randomBytes(32);
 const { privateKey } = crypto.generateKeyPairSync("rsa", {
@@ -570,7 +571,7 @@ describe("imagens e continuação depois de confirmar", () => {
     const llm: LlmAdapter = async (r) => {
       request = r;
       // "Wait For Creations" roda sem card (quem edita marcou).
-      outputs.push(await r.execute("mcp_magnific_creations_wait", { identifiers: ["8ajs"] }));
+      outputs.push(outputText(await r.execute("mcp_magnific_creations_wait", { identifiers: ["8ajs"] })));
       return { text: "Pronto:\n[[I1]]", meter: newMeter("claude-opus-5"), rounds: 2 };
     };
     const events: AiStreamEvent[] = [];

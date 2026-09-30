@@ -1,4 +1,5 @@
 import { callRpc } from "./_drive.js";
+import type { CostTurn } from "./_ai-cost.js";
 import { vectorLiteral, type Embedder } from "./_ai-embeddings.js";
 import type { ToolSpec } from "./_ai-llm.js";
 
@@ -261,6 +262,8 @@ export type ToolContext = {
    * ordem dos trechos mais úteis (índices), ou null para ficar como veio.
    */
   rerank?: (query: string, texts: string[], keep: number) => Promise<number[] | null>;
+  /** O gasto desta resposta, ligado à conversa (custo da conversa por modelo). */
+  cost?: CostTurn;
 };
 
 /** Os trechos na ordem da reordenação (o que ela não citou fica de fora). */

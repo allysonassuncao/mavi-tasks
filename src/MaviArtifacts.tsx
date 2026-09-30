@@ -469,8 +469,15 @@ function ImageCard({ image, host }: { image: ImageArtifact; host: ArtifactHost }
   const { url, failed } = useImageUrl(host.company, image);
   const [big, setBig] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A arte por código tem o tamanho exato (ex.: 1080 × 1350).
   const ratio =
-    image.size === "portrait" ? "2 / 3" : image.size === "landscape" ? "3 / 2" : "1 / 1";
+    image.width && image.height
+      ? `${image.width} / ${image.height}`
+      : image.size === "portrait"
+        ? "2 / 3"
+        : image.size === "landscape"
+          ? "3 / 2"
+          : "1 / 1";
   async function save() {
     if (!url) return;
     setSaving(true);
@@ -509,7 +516,8 @@ function ImageCard({ image, host }: { image: ImageArtifact; host: ArtifactHost }
       <figcaption className="mavi-image-bar">
         <small title={image.prompt}>
           {image.ref}
-          {image.edited_from ? ` · edição de ${image.edited_from}` : ""}
+          {image.edited_from ? ` · ${image.art ? "ajuste" : "edição"} de ${image.edited_from}` : ""}
+          {image.art && image.width ? ` · ${image.width}×${image.height}` : ""}
           {image.model ? ` · ${image.model}` : ""}
         </small>
         <span className="mavi-card-tools">

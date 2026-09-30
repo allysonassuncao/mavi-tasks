@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { logCost } from "./_ai-cost.js";
 import { callRpc, signGcsUrl, type GcsCredentials } from "./_drive.js";
 import { extractFileText } from "./_ai-extract.js";
 import { embeddingCost, vectorLiteral, type Embedder } from "./_ai-embeddings.js";
@@ -289,24 +290,35 @@ async function rpc<T>(env: AttachEnv, fetchImpl: Fetch, auth: string, name: stri
   return r.data;
 }
 
-const logUsage = (env: AttachEnv, fetchImpl: Fetch, auth: string, company: string, c: Cost, embedding = 0) =>
-  callRpc(env, fetchImpl, auth, "ai_log_usage", {
-    p_company: company,
-    p_module: "assistant",
-    p_kind: c.kind,
-    p_client: null,
-    p_contract: null,
-    p_project: null,
-    p_recording: null,
-    p_model: c.model,
-    p_input: c.input,
-    p_output: c.output,
-    p_cache_read: 0,
-    p_cache_write: 0,
-    p_embedding: embedding,
-    p_cost: Math.round(c.usd * 1e6) / 1e6,
-    ...(c.provider ? { p_provider: c.provider } : {}),
-  }).catch(() => null);
+/** O gasto de ler o anexo: fica no anexo e, por ele, na conversa em que foi usado. */
+const logUsage = (
+  env: AttachEnv,
+  fetchImpl: Fetch,
+  auth: string,
+  company: string,
+  c: Cost,
+  embedding = 0,
+  attachment: string | null = null,
+) =>
+  logCost(
+    env,
+    fetchImpl,
+    auth,
+    { company, module: "assistant" },
+    {
+      kind: c.kind,
+      model: c.model,
+      provider: c.provider,
+      input: c.input,
+      output: c.output,
+      cacheRead: 0,
+      cacheWrite: 0,
+      embedding,
+      cost: c.usd,
+    },
+    null,
+    attachment,
+  );
 
 /** Vetoriza os trechos que faltam (em lotes) e guarda. */
 async function embedPending(
@@ -338,6 +350,7 @@ async function embedPending(
       company,
       { usd: embeddingCost(model, tokens), model, input: 0, output: 0, provider: null, kind: "attachment_index" },
       tokens,
+      attachment,
     );
 }
 
@@ -356,7 +369,7 @@ async function processAttachment(env: AttachEnv, deps: AttachDeps, auth: string,
   if (a.status === "ready") return a;
   try {
     const { pages, cost } = await read(env, deps, auth, a, seconds);
-    if (cost) await logUsage(env, deps.fetch, auth, a.company, cost);
+    if (cost) await logUsage(env, deps.fetch, auth, a.company, cost, 0, a.id);
     const useful = pages.filter((p) => p.text.trim().length >= 3);
     if (!useful.length) {
       await rpc(env, deps.fetch, auth, "ai_attachment_finish", {

@@ -157,6 +157,7 @@ export async function listDriveFolders(
   company: string,
 ): Promise<DriveFolder[]> {
   if (!supabase) throw Error("Supabase não configurado");
+  // As pastas do sistema (a da marca) aparecem pelas telas delas, não na lista.
   return fetchAllRows<DriveFolder>((count) =>
     supabase!
       .from("drive_folders")
@@ -164,7 +165,7 @@ export async function listDriveFolders(
       .eq("company_id", company)
       .order("name")
       .order("id"),
-  );
+  ).then((rows) => rows.filter((f) => !f.system));
 }
 
 export function createDriveFolder(

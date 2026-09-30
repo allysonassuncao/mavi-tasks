@@ -9,11 +9,15 @@ import {
   type Embedder,
 } from "./_ai-embeddings.js";
 import {
+  EFFORTS,
   WEB_SEARCH_PRICE,
   anthropicAdapter,
   llmFriendlyError,
+  outputText,
   type ChatTurn,
+  type Effort,
   type LlmAdapter,
+  type ToolOutput,
 } from "./_ai-llm.js";
 import {
   TOOLS,
@@ -50,6 +54,7 @@ import {
   sanitizeArtifacts,
   type AiArtifact,
   type CanvasArtifact,
+  type ImageArtifact,
   type Power,
 } from "../src/mavi-artifacts.js";
 import {
@@ -65,6 +70,8 @@ import {
   type SkillKit,
 } from "./_ai-skills.js";
 import { MCP_RULES, handleMcpAction, mcpTurn, type McpCatalog } from "./_ai-mcp.js";
+import { logCost, meterEntries, newTurn, turnCost, whereOf, type TurnCost } from "./_ai-cost.js";
+import type { Meter } from "./_social-leads.js";
 import { pageForMavi, scrapePage } from "./_ai-scrape.js";
 import {
   ATTACH_RULES,
@@ -202,6 +209,29 @@ Skills (jeitos de trabalhar definidos pela agência):
 - Continuam valendo: buscar antes de afirmar, citar as fontes, respeitar o que a pessoa pode ver e ações só com confirmação.`;
 
 type Row = Record<string, unknown>;
+/** O esforço escolhido no painel para uma funcionalidade (o módulo segue a bolinha). */
+export function effortOf(efforts: Record<string, string>, key: string): Effort | undefined {
+  const e = efforts[key] ?? (key === "mavi_page" ? efforts.assistant : undefined);
+  return EFFORTS.includes(e as Effort) ? (e as Effort) : undefined;
+}
+const higher = (a: Effort, b: Effort) => (EFFORTS.indexOf(a) >= EFFORTS.indexOf(b) ? a : b);
+/**
+ * O esforço desta rodada: o do painel (sem escolha, o padrão do modelo); com
+ * uma skill carregada, o dela — sem escolha para a skill, pelo menos "high"
+ * (uma skill é um roteiro com vários passos).
+ */
+export function turnEffort(
+  efforts: Record<string, string>,
+  feature: string,
+  loaded: { id: string }[],
+): Effort | undefined {
+  const base = effortOf(efforts, feature);
+  if (!loaded.length) return base;
+  return loaded
+    .map((s) => effortOf(efforts, `skill:${s.id}`) ?? higher(base ?? "medium", "high"))
+    .reduce(higher);
+}
+
 async function rest<T = Row>(
   env: AiEnv,
   deps: AiDeps,
@@ -315,23 +345,13 @@ async function summarize(
       p_summary: text,
       p_upto: upto,
     });
-  await callRpc(env, deps.fetch, auth, "ai_log_usage", {
-    p_company: company,
-    p_module: scope.module ?? "assistant",
-    p_kind: "summary",
-    p_client: scope.client ?? null,
-    p_contract: scope.contract ?? null,
-    p_project: scope.project ?? null,
-    p_recording: null,
-    p_model: out.meter.model || config?.model || env.model,
-    p_input: out.meter.input,
-    p_output: out.meter.output,
-    p_cache_read: out.meter.cacheRead,
-    p_cache_write: out.meter.cacheWrite,
-    p_embedding: 0,
-    p_cost: Math.round(out.meter.cost * 1e6) / 1e6,
-    ...(route ? { p_provider: route.provider_id } : {}),
-  }).catch(() => {});
+  // O resumo é da conversa (não de uma resposta).
+  const turn = newTurn(conversationId);
+  await Promise.all(
+    meterEntries("summary", out.meter, route?.provider_id ?? null, config?.model || env.model).map((e) =>
+      logCost(env, deps.fetch, auth, { company, ...scope }, e, turn),
+    ),
+  );
 }
 
 function conversation(question: unknown, history: unknown): ChatTurn[] {
@@ -526,6 +546,8 @@ export type AiStreamEvent =
       sources: AiSource[];
       artifacts: AiArtifact[];
       conversation: string | null;
+      /** O custo desta resposta, por modelo. */
+      cost?: TurnCost;
     }
   | { type: "error"; error: string; status: number };
 type Emit = (event: AiStreamEvent) => void;
@@ -575,8 +597,11 @@ async function ask(
   const now = (deps.now ?? Date.now)();
   // Os poderes (visualizações, imagens, ações) só no módulo MAVI.
   const onPage = body.surface === "page";
+  // A MAVI do módulo e a da bolinha têm regras (modelo e esforço) próprias no painel.
+  const feature =
+    scope.module === "meetings" ? "meetings_history" : onPage ? "mavi_page" : "assistant";
   const noMcp: McpCatalog = { servers: [], missing: [] };
-  const [base, limits, history, route, powerList, catalog, mcpCatalog] = await Promise.all([
+  const [base, limits, history, route, powerList, catalog, mcpCatalog, efforts] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
       env,
@@ -619,19 +644,7 @@ async function ask(
         ])
       : Promise.resolve(null),
     // Qual provedor e modelo respondem (biblioteca de provedores).
-    resolveRoute(
-      env,
-      deps.fetch,
-      auth,
-      company,
-      scope,
-      // A MAVI do módulo e a da bolinha têm regras próprias no painel.
-      scope.module === "meetings"
-        ? "meetings_history"
-        : body.surface === "page"
-          ? "mavi_page"
-          : "assistant",
-    ),
+    resolveRoute(env, deps.fetch, auth, company, scope, feature),
     onPage
       ? callRpc<string[]>(env, deps.fetch, auth, "ai_my_powers", {
           p_company: company,
@@ -651,6 +664,10 @@ async function ask(
           .then((r) => (r.ok && r.data?.servers ? r.data : noMcp))
           .catch(() => noMcp)
       : Promise.resolve(noMcp),
+    // O esforço escolhido no painel (antes da migração 20261223090000, nenhum).
+    callRpc<Record<string, string>>(env, deps.fetch, auth, "ai_efforts", { p_company: company })
+      .then((r) => (r.ok && r.data && typeof r.data === "object" ? r.data : {}))
+      .catch(() => ({}) as Record<string, string>),
   ]);
   const powers = new Set(
     powerList.filter((p): p is Power =>
@@ -742,6 +759,7 @@ async function ask(
   const summaryUpto = summary ? Number(convRow?.summary_upto) || 0 : 0;
   const past = history ? [...history[1]].reverse().filter((m) => !summaryUpto || Number(m.id) > summaryUpto) : [];
   const priorImages = new Map<string, string>();
+  const priorArts = new Map<string, ImageArtifact>();
   const priorCanvas = new Map<string, CanvasArtifact>();
   const next = { V: 1, I: 1, A: 1, D: 1, Q: 1 };
   for (const m of past)
@@ -749,6 +767,7 @@ async function ask(
       const letter = a.ref[0] as keyof typeof next;
       next[letter] = Math.max(next[letter], Number(a.ref.slice(1)) + 1);
       if (a.type === "image") priorImages.set(a.ref, a.path);
+      if (a.type === "image" && a.html) priorArts.set(a.ref, a);
       if (a.type === "canvas") priorCanvas.set(a.ref, a);
     }
   const messages = conversation(
@@ -794,12 +813,15 @@ async function ask(
     usage: { embeddingTokens: 0, embeddingModel: env.embeddingModel },
     sources: [],
     chunks: new Map(),
+    // O gasto desta resposta fica na conversa (a nova já nasceu com a execução).
+    cost: newTurn(live?.run?.conversation ?? conversationId),
   };
   const kit: PowerKit = {
     ctx,
     env: { ...env, credentials: env.credentials, bucket: env.bucket },
     artifacts: [],
     priorImages,
+    priorArts,
     priorCanvas,
     next,
     emit: (artifact) => emit({ type: "artifact", artifact }),
@@ -808,33 +830,23 @@ async function ask(
     writer: writerRoute
       ? (() => {
           const c = routeConfig(env, writerRoute);
-          return { llm: makeLlm(c), model: c.model, name: c.name, providerId: writerRoute.provider_id };
+          return {
+            llm: makeLlm(c),
+            model: c.model,
+            name: c.name,
+            providerId: writerRoute.provider_id,
+            effort: effortOf(efforts, "canvas_writer"),
+          };
         })()
       : null,
   };
-  /** O gasto de outro modelo desta resposta (busca, skill) no consumo. */
-  const logUsage = (
-    kind: string,
-    meter: { model: string; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number },
-    providerId: string | null,
-  ) =>
-    callRpc(env, deps.fetch, auth, "ai_log_usage", {
-      p_company: company,
-      p_module: scope.module ?? "assistant",
-      p_kind: kind,
-      p_client: scope.client ?? null,
-      p_contract: scope.contract ?? null,
-      p_project: scope.project ?? null,
-      p_recording: null,
-      p_model: meter.model,
-      p_input: meter.input,
-      p_output: meter.output,
-      p_cache_read: meter.cacheRead,
-      p_cache_write: meter.cacheWrite,
-      p_embedding: 0,
-      p_cost: Math.round(meter.cost * 1e6) / 1e6,
-      ...(providerId ? { p_provider: providerId } : {}),
-    }).catch(() => {});
+  /** O gasto de outro modelo desta resposta (busca, skill) no consumo e na conversa. */
+  const logUsage = (kind: string, meter: Meter, providerId: string | null, providerName: string | null = null) =>
+    Promise.all(
+      meterEntries(kind, meter, providerId, meter.model, providerName).map((e) =>
+        logCost(env, deps.fetch, auth, whereOf(ctx), e, ctx.cost),
+      ),
+    );
   const skills: SkillKit = {
     ctx,
     env,
@@ -879,7 +891,7 @@ async function ask(
         }),
       ]).finally(() => clearTimeout(timer));
       kit.extraCost!.usd += out.meter.cost;
-      void logUsage("rerank", out.meter, rerankRoute.provider_id);
+      void logUsage("rerank", out.meter, rerankRoute.provider_id, rc.name);
       const order = [...new Set([...out.text.matchAll(/\d+/g)].map((m) => Number(m[0]) - 1))].filter(
         (i) => i >= 0 && i < texts.length,
       );
@@ -992,7 +1004,7 @@ async function ask(
   ];
   const allowed = new Set(tools.map((t) => t.name));
   let n = 0;
-  const execute = async (name: string, input: unknown): Promise<string> => {
+  const execute = async (name: string, input: unknown): Promise<ToolOutput> => {
     await checkStop();
     if (stop.signal.aborted) throw new AiError(499, "A resposta foi interrompida.");
     // Depois das perguntas, nada mais roda: a MAVI espera as respostas.
@@ -1043,7 +1055,7 @@ async function ask(
             ? runTool(ctx, name, input)
             : runPowerTool(kit, name, input);
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const out = await Promise.race([
+      const result: ToolOutput = await Promise.race([
         work,
         new Promise<never>((_, reject) => {
           timer = setTimeout(
@@ -1052,6 +1064,7 @@ async function ask(
           );
         }),
       ]).finally(() => clearTimeout(timer));
+      const out = outputText(result);
       const detail = mcpTool
         ? out.startsWith("Proposta")
           ? "proposta para você confirmar"
@@ -1083,7 +1096,7 @@ async function ask(
           : {}),
       });
       emit({ type: "step", id: stepId, label, state: "done", detail });
-      return out;
+      return result;
     } catch (e) {
       calls.push({
         tool: logName,
@@ -1182,6 +1195,7 @@ async function ask(
       tools: [],
       execute: async () => "",
       maxRounds: 0,
+      effort: effortOf(efforts, "web_search"),
       webSearch: true,
       onCitation: citeWeb,
       onEvent: (e) => {
@@ -1189,7 +1203,7 @@ async function ask(
       },
     });
     kit.extraCost!.usd += out.meter.cost;
-    await logUsage("web", out.meter, webRoute!.provider_id);
+    await logUsage("web", out.meter, webRoute!.provider_id, c.name);
     return `Resultado da pesquisa na internet (feita com ${c.model}; as páginas são as fontes [S#]):\n${out.text}`;
   };
   // A skill com modelo próprio, carregada pela MAVI, roda nele como ajudante.
@@ -1212,7 +1226,7 @@ async function ask(
       maxRounds: 12,
     });
     kit.extraCost!.usd += out.meter.cost;
-    await logUsage("skill", out.meter, r.data.provider_id);
+    await logUsage("skill", out.meter, r.data.provider_id, c.name);
     return `Resultado da skill “${s.name}” (feito com ${c.model}, seguindo as instruções dela):\n${out.text}\n\nApresente este resultado à pessoa: pode ajustar a forma, mas mantenha o conteúdo e as fontes [S#].`;
   };
   // A pessoa confirmou uma ação de conexão no card: roda agora (uma vez) e
@@ -1268,7 +1282,9 @@ async function ask(
       execute,
       // Uma skill é um roteiro com vários passos: mais rodadas e mais raciocínio.
       maxRounds: picked.length ? 14 : skills.catalog.size || mcp?.tools.length ? 12 : powers.size ? 8 : 6,
-      ...(picked.length ? { effort: "high" as const } : {}),
+      // O esforço do painel; com uma skill carregada (escolhida ou pela MAVI),
+      // o dela dali em diante.
+      effort: () => turnEffort(efforts, feature, [...skills.loaded.values()]),
       onEvent: (e) => {
         if (e.type === "round_end") {
           // O texto antes das ferramentas vira nota de trabalho.
@@ -1294,30 +1310,27 @@ async function ask(
     if (!stop.signal.aborted) throw e;
   } finally {
     await mcp?.close().catch(() => {});
-    // O custo entra mesmo quando a resposta falha no meio.
+    // O custo entra mesmo quando a resposta falha no meio: uma linha por
+    // modelo que respondeu (o fallback da Claude conta à parte) e a busca nos
+    // vetores com o modelo dela.
     const m = result?.meter;
-    const embedCost = embeddingCost(
-      ctx.usage.embeddingModel,
-      ctx.usage.embeddingTokens,
-    );
-    if (m || ctx.usage.embeddingTokens)
-      await callRpc(env, deps.fetch, auth, "ai_log_usage", {
-        p_company: company,
-        p_module: scope.module ?? "assistant",
-        p_kind: "ask",
-        p_client: scope.client ?? null,
-        p_contract: scope.contract ?? null,
-        p_project: scope.project ?? null,
-        p_recording: null,
-        p_model: m?.model || provider?.model || env.model,
-        p_input: m?.input ?? 0,
-        p_output: m?.output ?? 0,
-        p_cache_read: m?.cacheRead ?? 0,
-        p_cache_write: m?.cacheWrite ?? 0,
-        p_embedding: ctx.usage.embeddingTokens,
-        p_cost: Math.round(((m?.cost ?? 0) + embedCost) * 1e6) / 1e6,
-        ...(turnRoute ? { p_provider: turnRoute.provider_id } : {}),
-      }).catch(() => {});
+    const providerName = turnRoute ? (provider?.name ?? null) : null;
+    const lines = m
+      ? meterEntries("ask", m, turnRoute?.provider_id ?? null, provider?.model || env.model, providerName)
+      : [];
+    if (ctx.usage.embeddingTokens)
+      lines.push({
+        kind: "search",
+        model: ctx.usage.embeddingModel,
+        provider: null,
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        embedding: ctx.usage.embeddingTokens,
+        cost: embeddingCost(ctx.usage.embeddingModel, ctx.usage.embeddingTokens),
+      });
+    await Promise.all(lines.map((e) => logCost(env, deps.fetch, auth, whereOf(ctx), e, ctx.cost)));
   }
   const cancelled = !result && stop.signal.aborted;
   const answer = result
@@ -1349,6 +1362,13 @@ async function ask(
   if (!saved?.ok)
     emit({ type: "warning", text: "Não foi possível salvar esta conversa." });
   const savedId = saved?.ok ? saved.data : (live?.run?.conversation ?? conversationId);
+  // Os gastos desta vez passam a ser desta resposta (e da conversa, se nasceu agora).
+  await Promise.all(ctx.cost!.pending).catch(() => null);
+  if (saved?.ok && savedId && ctx.cost!.entries.length)
+    await callRpc(env, deps.fetch, auth, "ai_usage_close_turn", {
+      p_conversation: savedId,
+      p_turn: ctx.cost!.turn,
+    }).catch(() => null);
   if (calls.length)
     await callRpc(env, deps.fetch, auth, "ai_log_tool_calls", {
       p_company: company,
@@ -1386,6 +1406,7 @@ async function ask(
     sources,
     artifacts,
     conversation: savedId,
+    cost: turnCost(ctx.cost!.entries),
   };
 }
 
@@ -1702,6 +1723,7 @@ export async function handleAi(
           sources: done.sources,
           artifacts: done.artifacts,
           conversation: done.conversation,
+          cost: done.cost,
         },
       };
     }

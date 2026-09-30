@@ -32,6 +32,7 @@ import {
   providerLibrary,
   saveProvider,
   serverDefaults,
+  setAiEffort,
   setAiRoute,
   setProviderActive,
   testProvider,
@@ -86,6 +87,8 @@ export type LibraryApi = {
     provider: string | null,
     model: string | null,
   ) => Promise<unknown>;
+  /** O esforço de uma funcionalidade ou skill ("skill:<id>"); nulo: automático. */
+  setEffort: (key: string, effort: string | null) => Promise<unknown>;
   save: (draft: ProviderDraft) => Promise<{ id: string }>;
   models: (
     args: Parameters<typeof fetchProviderModels>[1],
@@ -135,6 +138,7 @@ export function useAiLibrary(company: string, demo = false) {
             remove: (id) => deleteProvider(company, id),
             setRoute: (type, id, provider, model) =>
               setAiRoute(company, type, id, provider, model),
+            setEffort: (key, effort) => setAiEffort(company, key, effort),
             save: (draft) => saveProvider(company, draft),
             models: (args) => fetchProviderModels(company, args),
             test: (args) => testProvider(company, args),
@@ -233,9 +237,17 @@ function demoApi(
       })),
     remove: (id) =>
       change((l) => ({
+        ...l,
         providers: l.providers.filter((p) => p.id !== id),
         routes: l.routes.filter((r) => r.provider_id !== id),
       })),
+    setEffort: (key, effort) =>
+      change((l) => {
+        const efforts = { ...(l.efforts ?? {}) };
+        if (effort) efforts[key] = effort;
+        else delete efforts[key];
+        return { ...l, efforts };
+      }),
     setRoute: (type, id, provider, model) =>
       change((l) => {
         const feature = type === "feature" ? (id as AiFeature) : null;
@@ -1022,6 +1034,7 @@ function fixedRow(row: (typeof FIXED_ROWS)[number]) {
       <td>
         <span className="ai-feature-fixed">{row.value}</span>
       </td>
+      <td />
     </tr>
   );
 }
@@ -1037,16 +1050,61 @@ const MAVI_ROWS = FEATURES.filter((f) => f.group.startsWith("MAVI")).length;
  * resposta inteira usa ele; carregada pela MAVI, a skill roda nele como
  * ajudante e o resultado volta para a conversa.
  */
+/** O esforço (quanto a IA raciocina) que dá para escolher. */
+export const EFFORT_OPTIONS: { id: string; label: string }[] = [
+  { id: "low", label: "Baixo · mais rápido e barato" },
+  { id: "medium", label: "Médio" },
+  { id: "high", label: "Alto" },
+  { id: "xhigh", label: "Muito alto" },
+  { id: "max", label: "Máximo · mais lento e caro" },
+];
+/** As funcionalidades de conversa em que o esforço muda a resposta. */
+export const EFFORT_FEATURES = new Set(["assistant", "mavi_page", "meetings_history", "canvas_writer", "web_search"]);
+const effortName = (id: string | undefined) =>
+  EFFORT_OPTIONS.find((o) => o.id === id)?.label.split(" · ")[0] ?? "";
+
+function EffortSelect({
+  label,
+  value,
+  auto,
+  onChange,
+}: {
+  label: string;
+  value: string | undefined;
+  /** O que vale sem escolha. */
+  auto: string;
+  onChange: (effort: string | null) => void;
+}) {
+  return (
+    <Select
+      aria-label={`Esforço de ${label}`}
+      value={value ?? "auto"}
+      onValueChange={(v) => onChange(v === "auto" ? null : v)}
+    >
+      <SelectOption value="auto">{auto}</SelectOption>
+      {EFFORT_OPTIONS.map((o) => (
+        <SelectOption key={o.id} value={o.id}>
+          {o.label}
+        </SelectOption>
+      ))}
+    </Select>
+  );
+}
+
 function SkillRoutes({
   skills,
   routes,
   choices,
   onSet,
+  efforts,
+  onEffort,
 }: {
   skills: SkillSummary[];
   routes: AiRoute[];
   choices: ReactNode;
   onSet: (skill: string, choice: string) => void;
+  efforts: Record<string, string>;
+  onEffort: (key: string, effort: string | null) => void;
 }) {
   const shown = skills.filter((s) => s.published && !s.archived);
   return (
@@ -1057,7 +1115,8 @@ function SkillRoutes({
           O modelo que roda cada skill. Escolhida na caixa de mensagem, a
           resposta inteira usa este modelo; carregada pela MAVI, a skill roda
           nele como ajudante e o resultado volta para a conversa. Sem escolha,
-          vale o modelo da conversa.
+          vale o modelo da conversa. O esforço vale desde o momento em que a
+          skill é carregada; no automático, pelo menos Alto.
         </small>
       </header>
       {!shown.length ? (
@@ -1069,6 +1128,7 @@ function SkillRoutes({
               <tr>
                 <th>Skill</th>
                 <th>Provedor e modelo</th>
+                <th>Esforço</th>
               </tr>
             </thead>
             <tbody>
@@ -1091,6 +1151,14 @@ function SkillRoutes({
                         <SelectOption value={SERVER}>O modelo da conversa</SelectOption>
                         {choices}
                       </Select>
+                    </td>
+                    <td>
+                      <EffortSelect
+                        label={s.current?.name ?? s.slug}
+                        value={efforts[`skill:${s.id}`]}
+                        auto="Automático · pelo menos Alto"
+                        onChange={(e) => onEffort(`skill:${s.id}`, e)}
+                      />
                     </td>
                   </tr>
                 );
@@ -1193,6 +1261,18 @@ export function AiRoutesPanel({
       );
       if (!quiet)
         notify(provider ? "Regra salva." : "Regra removida: vale a mais geral.");
+      await reload();
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
+  }
+
+  const efforts = library?.efforts ?? {};
+  async function setEffort(key: string, effort: string | null) {
+    setProblem("");
+    try {
+      await api.setEffort(key, effort);
+      notify(effort ? `Esforço salvo: ${effortName(effort)}.` : "Esforço no automático.");
       await reload();
     } catch (e) {
       setProblem((e as Error).message);
@@ -1350,6 +1430,8 @@ export function AiRoutesPanel({
         routeLabel={(r) => choiceLabel(r)}
         embedding={defaults?.embedding}
         onSet={(feature, choice) => void set("feature", feature, choice)}
+        efforts={efforts}
+        onEffort={(key, effort) => void setEffort(key, effort)}
       />
       {skills && (
         <SkillRoutes
@@ -1357,6 +1439,8 @@ export function AiRoutesPanel({
           routes={routes}
           choices={choices}
           onSet={(skill, choice) => void set("skill", skill, choice)}
+          efforts={efforts}
+          onEffort={(key, effort) => void setEffort(key, effort)}
         />
       )}
 
@@ -1474,6 +1558,8 @@ function FeatureRoutes({
   routeLabel,
   embedding,
   onSet,
+  efforts,
+  onEffort,
 }: {
   routes: AiRoute[];
   byId: ReadonlyMap<string, AiProvider>;
@@ -1494,6 +1580,8 @@ function FeatureRoutes({
   /** O modelo de vetores do servidor (só para leitura). */
   embedding?: { model: string; env: string };
   onSet: (feature: AiFeature, choice: string) => void;
+  efforts: Record<string, string>;
+  onEffort: (key: string, effort: string | null) => void;
 }) {
   return (
     <section className="panel ai-features" aria-label="Por funcionalidade">
@@ -1505,7 +1593,10 @@ function FeatureRoutes({
           as imagens não herdam o padrão da empresa, que é um modelo de
           conversa. Nas
           conversas (assistente e gravações), as regras de pessoa, cliente,
-          produto e projeto vencem a da funcionalidade.
+          produto e projeto vencem a da funcionalidade. O esforço diz quanto a
+          IA raciocina antes de responder: mais esforço, respostas mais
+          cuidadosas (artes, análises, skills), mais lentas e mais caras. Nos
+          modelos fora da Claude, vai até Alto.
         </small>
       </header>
       <div className="drive-table-wrap">
@@ -1514,6 +1605,7 @@ function FeatureRoutes({
             <tr>
               <th>Funcionalidade</th>
               <th>Provedor e modelo</th>
+              <th>Esforço</th>
             </tr>
           </thead>
           <tbody>
@@ -1585,6 +1677,22 @@ function FeatureRoutes({
                               : choices}
                     </Select>
                   </td>
+                  <td>
+                    {EFFORT_FEATURES.has(f.id) ? (
+                      <EffortSelect
+                        label={f.label}
+                        value={efforts[f.id]}
+                        auto={
+                          f.id === "mavi_page" && efforts.assistant
+                            ? `Segue a bolinha · ${effortName(efforts.assistant)}`
+                            : "Automático · padrão do modelo"
+                        }
+                        onChange={(e) => onEffort(f.id, e)}
+                      />
+                    ) : (
+                      <span className="ai-feature-fixed">—</span>
+                    )}
+                  </td>
                 </tr>
                 {/* As partes da MAVI sem modelo, logo depois das dela. */}
                 {fi === MAVI_ROWS - 1 && FIXED_ROWS.map(fixedRow)}
@@ -1611,6 +1719,7 @@ function FeatureRoutes({
                   (OpenAI)
                 </span>
               </td>
+              <td />
             </tr>
           </tbody>
         </table>

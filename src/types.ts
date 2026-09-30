@@ -437,6 +437,8 @@ export interface DriveFolder {
   share_token?: string;
   /** The public link also accepts uploads (the client sends files). */
   public_upload?: boolean;
+  /** Pasta do sistema ("brand": Drive › cliente › Marca), fora da lista de pastas. */
+  system?: "brand" | null;
 }
 /** Who a folder is shared with, as the sharing dialog edits it. */
 export interface DriveFolderSharing {
@@ -476,6 +478,8 @@ export interface DriveLocation {
   dossier?: boolean;
   /** The client's "Termômetro" (virtual, next to the products). */
   temperature?: boolean;
+  /** The client's "Marca" (logos, fonts, colors), next to the products. */
+  brand?: boolean;
 }
 export interface DriveAuditEntry {
   id: number;

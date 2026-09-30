@@ -31,6 +31,7 @@ import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
 import { AttachButton, AttachmentTray, FileChip, useAttachmentTray } from "./MaviAttachments";
 import { conversationAttachments, type Attachment } from "./mavi-attachments";
 import { CanvasPanel } from "./MaviCanvas";
+import { AnswerCost, ConversationCostButton, messageCost } from "./MaviCost";
 import {
   ARTIFACT_LINE,
   type ActionArtifact,
@@ -63,7 +64,9 @@ import {
   askAi,
   myPowers,
   cancelRun,
+  conversationCost,
   conversationMessages,
+  type ConversationCost,
   deleteConversation,
   getConversation,
   listConversations,
@@ -342,6 +345,21 @@ export function MaviChatPage({
       alive = false;
     };
   }, [openId, filesTick, reload]);
+  // O custo da conversa, por modelo (quem começou e os gestores veem).
+  const [costs, setCosts] = useState<ConversationCost | null>(null);
+  useEffect(() => {
+    if (!openId) {
+      setCosts(null);
+      return;
+    }
+    let alive = true;
+    conversationCost(openId)
+      .then((c) => alive && setCosts(c))
+      .catch(() => alive && setCosts(null));
+    return () => {
+      alive = false;
+    };
+  }, [openId, filesTick, reload]);
 
   function toggleSide() {
     if (narrow()) {
@@ -613,6 +631,7 @@ export function MaviChatPage({
               </small>
             )}
           </div>
+          {conv && costs && <ConversationCostButton costs={costs} />}
           {conv && !readOnly && (
             <button
               type="button"
@@ -687,6 +706,7 @@ export function MaviChatPage({
             }
             onAnswer={answered}
             onRun={started}
+            costs={costs}
             background={runs.find((r) => r.conversation === (conv?.id ?? null)) ?? null}
             host={{
               company,
@@ -784,6 +804,7 @@ function ChatThread({
   files,
   onNew,
   host,
+  costs,
 }: {
   initial: ChatEntry[];
   readOnly: boolean;
@@ -803,6 +824,8 @@ function ChatThread({
   canAttach: boolean;
   files: Attachment[];
   onNew: () => void;
+  /** O custo da conversa (as respostas salvas mostram o delas). */
+  costs: ConversationCost | null;
   host: Omit<
     ArtifactHost,
     "readOnly" | "streaming" | "onDraft" | "onOpenCanvas" | "onReply" | "answered" | "onConfirmMcp"
@@ -903,7 +926,12 @@ function ChatThread({
         .map((l) => l.match(ARTIFACT_LINE)?.[1])
         .filter(Boolean),
     );
-    return (t.artifacts ?? []).filter((a) => !placed.has(a.ref));
+    // As versões de uma arte que a própria MAVI corrigiu nesta resposta ficam
+    // de fora: aparece a final.
+    const revised = new Set(
+      (t.artifacts ?? []).flatMap((a) => (a.type === "image" && a.art && a.edited_from ? [a.edited_from] : [])),
+    );
+    return (t.artifacts ?? []).filter((a) => !placed.has(a.ref) && !revised.has(a.ref));
   };
 
   const composer = readOnly ? (
@@ -1147,6 +1175,10 @@ function ChatThread({
                   {!t.streaming && t.content && (
                     <div className="mavi-msg-actions">
                       <CopyButton text={plainAnswer(t.content)} />
+                      {(() => {
+                        const cost = t.cost ?? messageCost(costs, t.id);
+                        return cost ? <AnswerCost cost={cost} /> : null;
+                      })()}
                     </div>
                   )}
                 </div>

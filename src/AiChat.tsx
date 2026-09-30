@@ -35,6 +35,7 @@ import {
   type AiSource,
   type AiStep,
   type AiStreamHandlers,
+  type TurnCost,
 } from "./ai";
 
 /**
@@ -44,8 +45,12 @@ import {
  */
 
 export type ChatEntry = {
+  /** A mensagem gravada (as da conversa salva). */
+  id?: number;
   role: "user" | "assistant";
   content: string;
+  /** O custo desta resposta, por modelo (a que acabou de chegar). */
+  cost?: TurnCost;
   sources?: AiSource[];
   steps?: AiStep[];
   thinking?: string;
@@ -488,6 +493,7 @@ export function useAiTurns({
         content: result.answer,
         sources: result.sources,
         artifacts: result.artifacts?.length ? result.artifacts : e.artifacts,
+        ...(result.cost ? { cost: result.cost } : {}),
         streaming: false,
         thinking: "",
       }));
@@ -692,6 +698,7 @@ export function AiChat({
 /** Uma conversa salva no formato do chat. */
 export function entriesFrom(
   messages: {
+    id?: number;
     role: "user" | "assistant";
     content: string;
     sources?: AiSource[];
@@ -700,6 +707,7 @@ export function entriesFrom(
   }[],
 ): ChatEntry[] {
   return messages.map((m) => ({
+    ...(typeof m.id === "number" ? { id: m.id } : {}),
     role: m.role,
     content: m.content,
     sources: m.sources ?? [],

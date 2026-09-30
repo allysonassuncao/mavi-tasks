@@ -4,6 +4,7 @@ import { attachmentKind, findAttachment, handleAttachments, type AttachEnv } fro
 import { streamAi, type AiEnv, type AiStreamEvent } from "./_ai";
 import type { AgentRequest, LlmAdapter } from "./_ai-llm";
 import { newMeter } from "./_social-leads";
+import { outputText } from "./_ai-llm.js";
 
 const { privateKey } = crypto.generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -220,7 +221,7 @@ describe("anexos na conversa da MAVI", () => {
     let found = "";
     const llm: LlmAdapter = async (r) => {
       request = r;
-      found = await r.execute("search_attachments", { query: "multa rescisão", attachment: "contrato" });
+      found = outputText(await r.execute("search_attachments", { query: "multa rescisão", attachment: "contrato" }));
       return { text: "O investimento é R$ 12.000 [S1] e a multa, 20% [S2].", meter: newMeter("claude-opus-5"), rounds: 2 };
     };
     const events: AiStreamEvent[] = [];

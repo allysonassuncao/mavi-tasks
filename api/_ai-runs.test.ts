@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { handleAi, streamAi, type AiEnv, type AiStreamEvent, type Live } from "./_ai";
 import type { AgentRequest, LlmAdapter } from "./_ai-llm";
 import { newMeter } from "./_social-leads";
+import { outputText } from "./_ai-llm.js";
 
 const company = "00000000-0000-4000-8000-000000000001";
 const me = "00000000-0000-4000-8000-000000000003";
@@ -82,7 +83,7 @@ describe("sair no meio: a resposta continua e avisa", () => {
       request = r;
       drop();
       await tick();
-      read = await r.execute("scrape_pages", { urls: ["https://concorrente.com.br/planos"] });
+      read = outputText(await r.execute("scrape_pages", { urls: ["https://concorrente.com.br/planos"] }));
       return { text: "O Pro custa R$ 199 [S1].", meter: newMeter("claude-opus-5"), rounds: 2 };
     };
     const events: AiStreamEvent[] = [];

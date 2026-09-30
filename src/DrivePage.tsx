@@ -27,6 +27,7 @@ import {
   Package,
   Pencil,
   Search,
+  Palette,
   Thermometer,
   Trash2,
   Video,
@@ -56,6 +57,7 @@ import { countMeetingRecordings, meetingRecording } from "./meetings";
 import { WhatsappFolder } from "./WhatsappFolder";
 import { ClientDossier } from "./ClientDossier";
 import { ClientTemperature } from "./ClientTemperature";
+import { BrandKit } from "./BrandKit";
 import {
   countClientGroups,
   whatsappGroupById,
@@ -255,7 +257,7 @@ function DriveTree({
   // Pastas virtuais (Gravações da MAVI, Whatsapp, Dossiê da MAVI,
   // Termômetro): sem arquivos próprios.
   const virtual =
-    !!at.recordings || !!at.whatsapp || !!at.dossier || !!at.temperature;
+    !!at.recordings || !!at.whatsapp || !!at.dossier || !!at.temperature || !!at.brand;
   const canWrite =
     !virtual &&
     (isLeader ||
@@ -270,7 +272,7 @@ function DriveTree({
   );
   const loadFiles = useCallback(() => {
     // Gravações da MAVI and Whatsapp have no files of their own.
-    if (at.recordings || at.whatsapp || at.dossier || at.temperature)
+    if (at.recordings || at.whatsapp || at.dossier || at.temperature || at.brand)
       return setFiles([]);
     setFiles(null);
     listDriveFiles(company, at)
@@ -467,6 +469,7 @@ function DriveTree({
     at.whatsapp,
     at.dossier,
     at.temperature,
+    at.brand,
   ].join("|");
   const clients =
     !at.client && !at.folder
@@ -966,7 +969,8 @@ function DriveTree({
       | "recordings"
       | "whatsapp"
       | "dossier"
-      | "temperature",
+      | "temperature"
+      | "brand",
     open: () => void,
     color?: string,
     actions?: {
@@ -990,7 +994,9 @@ function DriveTree({
                 ? BookMarked
                 : icon === "temperature"
                   ? Thermometer
-                  : Folder;
+                  : icon === "brand"
+                    ? Palette
+                    : Folder;
     return (
       <div className="drive-folder-card" key={key}>
         <button type="button" className="drive-folder" onClick={open}>
@@ -1015,7 +1021,9 @@ function DriveTree({
                         ? "Gostos, regras e histórico"
                         : icon === "temperature"
                           ? "Temperatura da relação"
-                          : "Pasta"}
+                          : icon === "brand"
+                            ? "Logos, fontes e cores"
+                            : "Pasta"}
               {isPublic && (
                 <span className="drive-folder-badge" title="Link público ativo">
                   {" · "}
@@ -1239,6 +1247,12 @@ function DriveTree({
             <span>Dossiê da MAVI</span>
           </>
         )}
+        {!searching && at.brand && (
+          <>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>Marca</span>
+          </>
+        )}
         {!searching && at.temperature && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
@@ -1295,7 +1309,15 @@ function DriveTree({
         </div>
       )}
 
-      {at.temperature && at.client ? (
+      {at.brand && at.client ? (
+        <BrandKit
+          key={at.client}
+          company={company}
+          client={at.client}
+          clientName={clientName(at.client)}
+          notify={notify}
+        />
+      ) : at.temperature && at.client ? (
         <ClientTemperature
           key={at.client}
           company={company}
@@ -1432,6 +1454,18 @@ function DriveTree({
                             "dossier",
                             () => go({ client: at.client, dossier: true }),
                             "#6b52b3",
+                          ),
+                      ]
+                    : []),
+                  ...(showsProducts
+                    ? [
+                        () =>
+                          folderCard(
+                            "brand",
+                            "Marca",
+                            "brand",
+                            () => go({ client: at.client, brand: true }),
+                            "#d9761c",
                           ),
                       ]
                     : []),

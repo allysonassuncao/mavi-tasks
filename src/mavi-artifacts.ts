@@ -30,7 +30,7 @@ export const POWERS: { id: Power; label: string; description: string }[] = [
     id: "images",
     label: "Imagens",
     description:
-      "Gerar e editar imagens pelo modelo escolhido em Quem usa qual modelo › Geração e edição de imagens.",
+      "Artes com a marca do cliente (posts, cards, banners: montadas como página e conferidas pela MAVI antes de mostrar, com os logos, fontes e cores de Drive › cliente › Marca) e fotos ou ilustrações pelo modelo de Quem usa qual modelo › Geração e edição de imagens.",
   },
   {
     id: "actions",
@@ -175,6 +175,13 @@ export type ImageArtifact = Base & {
   edited_from?: string;
   /** Link assinado, só durante a resposta (não é gravado). */
   url?: string;
+  /** Arte por código (render_art): o tamanho exato e a página que a desenhou. */
+  art?: boolean;
+  width?: number;
+  height?: number;
+  html?: string;
+  /** O cliente cuja marca a arte usa. */
+  client?: string;
 };
 export type ActionArtifact = Base & {
   type: "action";
@@ -610,6 +617,12 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
     const url = text(a.url, 4000);
     const edited = text(a.edited_from, 4);
     const model = text(a.model, 80);
+    const side = (v: unknown) =>
+      typeof v === "number" && Number.isInteger(v) && v >= 100 && v <= 4000 ? v : undefined;
+    const width = side(a.width);
+    const height = side(a.height);
+    const html = typeof a.html === "string" ? a.html.slice(0, 200_000) : "";
+    const client = text(a.client, 40);
     return {
       id,
       ref,
@@ -620,6 +633,10 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       ...(model ? { model } : {}),
       ...(REF.test(edited) ? { edited_from: edited } : {}),
       ...(/^https:\/\//.test(url) ? { url } : {}),
+      ...(a.art === true ? { art: true } : {}),
+      ...(width && height ? { width, height } : {}),
+      ...(html ? { html } : {}),
+      ...(UUID.test(client) ? { client } : {}),
     };
   }
   if (a.type === "question") {
@@ -683,6 +700,8 @@ export function artifactSummary(a: AiArtifact): string {
     const v = a.visual;
     return `${names[v.kind]}${"title" in v && v.title ? ` “${v.title}”` : ""}`;
   }
+  if (a.type === "image" && a.art)
+    return `arte ${a.width ?? "?"}×${a.height ?? "?"}${a.edited_from ? ` (ajuste de ${a.edited_from})` : ""}: ${a.prompt.slice(0, 120)} (para ajustar, leia o HTML com read_art)`;
   if (a.type === "image")
     return `imagem${a.edited_from ? ` (edição de ${a.edited_from})` : ""}: ${a.prompt.slice(0, 120)}`;
   if (a.type === "question")

@@ -11,6 +11,7 @@ import {
 } from "./_ai-powers";
 import { TOOLS } from "./_ai-tools";
 import { newMeter } from "./_social-leads";
+import { outputText } from "./_ai-llm.js";
 
 const { privateKey } = crypto.generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -100,10 +101,10 @@ describe("registro de ferramentas", () => {
       "show_kpis",
       "show_timeline",
     ]);
-    // 4 visualizações, 1 de imagem, 2 ações; o canvas tem as suas 4.
-    expect(toolsFor(new Set(["visuals", "images", "actions"]))).toHaveLength(TOOLS.length + 8);
+    // 4 visualizações, 4 de imagem (gerar e as 3 da arte por código), 2 ações; o canvas tem as suas 4.
+    expect(toolsFor(new Set(["visuals", "images", "actions"]))).toHaveLength(TOOLS.length + 11);
     expect(toolsFor(new Set(["visuals", "images", "actions", "canvas"]))).toHaveLength(
-      TOOLS.length + POWER_TOOLS.length + 1,
+      TOOLS.length + POWER_TOOLS.length + 1 + 3,
     );
     expect(powerInstructions(new Set())).toBe("");
     expect(powerInstructions(new Set(["actions"]))).toContain("Nunca diga que a tarefa foi criada");
@@ -260,9 +261,9 @@ describe("poderes no módulo MAVI", () => {
     const outputs: string[] = [];
     const llm: LlmAdapter = async (r) => {
       history = r.messages;
-      outputs.push(await r.execute("generate_image", { prompt: "um gato laranja", size: "portrait" }));
-      outputs.push(await r.execute("generate_image", { prompt: "agora de chapéu", edit_ref: "I1" }));
-      outputs.push(await r.execute("generate_image", { prompt: "mais escuro", edit_ref: "I9" }));
+      outputs.push(outputText(await r.execute("generate_image", { prompt: "um gato laranja", size: "portrait" })));
+      outputs.push(outputText(await r.execute("generate_image", { prompt: "agora de chapéu", edit_ref: "I1" })));
+      outputs.push(outputText(await r.execute("generate_image", { prompt: "mais escuro", edit_ref: "I9" })));
       return answer("[[I2]]\n[[I3]]");
     };
     const events: AiStreamEvent[] = [];
@@ -323,7 +324,7 @@ describe("poderes no módulo MAVI", () => {
     });
     const outputs: string[] = [];
     const llm: LlmAdapter = async (r) => {
-      outputs.push(await r.execute("propose_comment", { task_ref: task, text: "Cliente aprovou." }));
+      outputs.push(outputText(await r.execute("propose_comment", { task_ref: task, text: "Cliente aprovou." })));
       outputs.push(
         await r.execute("propose_comment", {
           task_ref: "00000000-0000-4000-8000-0000000000ff",
@@ -405,8 +406,8 @@ describe("campanhas dia a dia", () => {
     });
     const outputs: string[] = [];
     const llm: LlmAdapter = async (r) => {
-      outputs.push(await r.execute("campaign_results", { from: "2026-09-23", to: "2026-09-29", by_day: true }));
-      outputs.push(await r.execute("campaign_results", { from: "2026-09-23", to: "2026-09-29" }));
+      outputs.push(outputText(await r.execute("campaign_results", { from: "2026-09-23", to: "2026-09-29", by_day: true })));
+      outputs.push(outputText(await r.execute("campaign_results", { from: "2026-09-23", to: "2026-09-29" })));
       return answer("Ok.");
     };
     const events: AiStreamEvent[] = [];
@@ -462,7 +463,7 @@ describe("canvas: documentos, apresentações e planilhas", () => {
     let request: AgentRequest | undefined;
     const llm: LlmAdapter = async (r) => {
       request = r;
-      outputs.push(await r.execute("read_canvas", { ref: "d1" }));
+      outputs.push(outputText(await r.execute("read_canvas", { ref: "d1" })));
       outputs.push(
         await r.execute("create_document", {
           title: "Proposta v2",
@@ -613,7 +614,7 @@ describe("imagens pelo OpenRouter", () => {
     });
     const outputs: string[] = [];
     const llm: LlmAdapter = async (r) => {
-      outputs.push(await r.execute("generate_image", { prompt: "um banner verde", size: "landscape" }));
+      outputs.push(outputText(await r.execute("generate_image", { prompt: "um banner verde", size: "landscape" })));
       return answer("[[I1]]");
     };
     await handleAi(
@@ -696,7 +697,7 @@ describe("um modelo para cada parte", () => {
     const llm: LlmAdapter = async (r) => {
       tools = r.tools.map((t) => t.name);
       schema = r.tools.find((t) => t.name === "create_presentation")!.parameters;
-      outputs.push(await r.execute("create_presentation", { title: "Pitch", brief: "6 slides para o cliente", material: "Leads 612 [S1]" }));
+      outputs.push(outputText(await r.execute("create_presentation", { title: "Pitch", brief: "6 slides para o cliente", material: "Leads 612 [S1]" })));
       return answer("[[D1]]");
     };
     const events: AiStreamEvent[] = [];
@@ -733,7 +734,7 @@ describe("um modelo para cada parte", () => {
     const outputs: string[] = [];
     const llm: LlmAdapter = async (r) => {
       request = r;
-      outputs.push(await r.execute("web_research", { question: "Como está o CPM da Meta em 2026?" }));
+      outputs.push(outputText(await r.execute("web_research", { question: "Como está o CPM da Meta em 2026?" })));
       return answer("Subiu [S1].");
     };
     const events: AiStreamEvent[] = [];
@@ -786,13 +787,13 @@ describe("um modelo para cada parte", () => {
     const { providerLlm } = models({
       "skill-model": async (r) => {
         expect(r.messages.at(-1)!.content).toContain("<skill>\nSiga o modelo.\n</skill>");
-        expect(await r.execute("show_chart", {})).toBe("Ferramenta indisponível: show_chart.");
+        expect(outputText(await r.execute("show_chart", {}))).toBe("Ferramenta indisponível: show_chart.");
         return answer("Relatório pronto pelo ajudante.");
       },
     });
     const outputs: string[] = [];
     const llm: LlmAdapter = async (r) => {
-      outputs.push(await r.execute("use_skill", { skill: "relatorio" }));
+      outputs.push(outputText(await r.execute("use_skill", { skill: "relatorio" })));
       return answer("Aqui está.");
     };
     await handleAi(
@@ -821,7 +822,7 @@ describe("perguntas antes de seguir", () => {
           ],
         }),
       );
-      outputs.push(await r.execute("list_tasks", {}));
+      outputs.push(outputText(await r.execute("list_tasks", {})));
       return answer("Assim que responder, eu monto.\n[[Q1]]");
     };
     const events: AiStreamEvent[] = [];

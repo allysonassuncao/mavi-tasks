@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { handleAi, type AiEnv } from "./_ai";
 import type { LlmAdapter } from "./_ai-llm";
-import { claudeFeatures } from "./_ai-llm";
+import { claudeFeatures, effortFor } from "./_ai-llm";
 import {
   handleProviders,
   openAiChatAdapter,
@@ -318,20 +318,28 @@ describe("recursos da Claude por modelo", () => {
     expect(claudeFeatures("claude-haiku-4-5")).toEqual({
       adaptive: false,
       fallbacks: false,
+      xhigh: false,
     });
     expect(claudeFeatures("claude-sonnet-5")).toEqual({
       adaptive: true,
       fallbacks: false,
+      xhigh: true,
     });
     expect(claudeFeatures("claude-opus-5")).toEqual({
       adaptive: true,
       fallbacks: true,
+      xhigh: true,
     });
+    // O "xhigh" chegou com o Opus 4.7: nos 4.6, vira "high".
+    expect(effortFor("claude-sonnet-4-6", "xhigh")).toBe("high");
+    expect(effortFor("claude-opus-5-5", () => "xhigh")).toBe("xhigh");
+    expect(effortFor("claude-opus-5-5", undefined)).toBe("medium");
     expect(claudeFeatures("claude-fable-5-1").fallbacks).toBe(true);
     // O padrão do servidor: raciocínio adaptativo e fallback.
     expect(claudeFeatures("claude-opus-5-5")).toEqual({
       adaptive: true,
       fallbacks: true,
+      xhigh: true,
     });
   });
 });

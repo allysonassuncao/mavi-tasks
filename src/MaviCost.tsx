@@ -1,0 +1,224 @@
+import { useState } from "react";
+import * as Popover from "@radix-ui/react-popover";
+import { Coins } from "lucide-react";
+import type { ConversationCost, TurnCost } from "./ai";
+
+/**
+ * MAVI · o custo de cada resposta e da conversa inteira, por modelo
+ * (migração 20261224090000_mavi_conversation_cost). Só quem começou a
+ * conversa e os gestores veem (o banco confere).
+ */
+
+/** Dólares com as casas que importam (respostas custam frações de centavo). */
+export function usd(v: number) {
+  const n = Number(v) || 0;
+  if (n === 0) return "US$ 0,00";
+  if (n < 0.0001) return "< US$ 0,0001";
+  return `US$ ${n.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: n >= 1 ? 2 : 4,
+  })}`;
+}
+const tokens = (v: number) => {
+  const n = Number(v) || 0;
+  return n >= 1_000_000
+    ? `${(n / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mi`
+    : n >= 1000
+      ? `${(n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil`
+      : n.toLocaleString("pt-BR");
+};
+
+/** Para que o modelo foi usado. */
+const KIND: Record<string, string> = {
+  ask: "resposta",
+  search: "busca nos vetores",
+  image: "imagem",
+  canvas: "documento/apresentação",
+  web: "busca na internet",
+  skill: "skill",
+  rerank: "reordenação da busca",
+  summary: "resumo da conversa",
+  attachment_index: "anexos (vetores)",
+  attachment_image: "anexos (imagem)",
+  attachment_transcription: "anexos (transcrição)",
+};
+export const kindLabel = (k: string) => KIND[k] ?? k;
+
+type Row = {
+  key: string;
+  model: string;
+  provider: string | null;
+  kinds: string[];
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  embedding: number;
+  cost: number;
+};
+
+/** O custo de uma resposta salva, no formato da que acabou de chegar. */
+export function messageCost(costs: ConversationCost | null, id: number | undefined): TurnCost | null {
+  const m = id ? costs?.by_message.find((x) => Number(x.message) === id) : undefined;
+  if (!m) return null;
+  const rows = new Map<string, TurnCost["models"][number]>();
+  for (const i of m.items) {
+    const key = `${i.provider}|${i.model}`;
+    const r = rows.get(key) ?? {
+      model: i.model,
+      provider: i.provider || null,
+      kinds: [],
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      embedding: 0,
+      cost: 0,
+    };
+    r.input += Number(i.input_tokens) || 0;
+    r.output += Number(i.output_tokens) || 0;
+    r.cacheRead += Number(i.cache_read_tokens) || 0;
+    r.cacheWrite += Number(i.cache_write_tokens) || 0;
+    r.embedding += Number(i.embedding_tokens) || 0;
+    r.cost += Number(i.cost) || 0;
+    if (!r.kinds.includes(i.kind)) r.kinds.push(i.kind);
+    rows.set(key, r);
+  }
+  return { cost: Number(m.cost) || 0, models: [...rows.values()].sort((a, b) => b.cost - a.cost) };
+}
+
+function ModelTable({ rows }: { rows: Row[] }) {
+  return (
+    <table className="mavi-cost-table">
+      <thead>
+        <tr>
+          <th>Modelo</th>
+          <th className="num">Entrada</th>
+          <th className="num">Saída</th>
+          <th className="num">Custo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.key}>
+            <td>
+              <strong>{r.model}</strong>
+              <small>
+                {[r.provider || "Padrão do servidor", r.kinds.map(kindLabel).join(", ")].filter(Boolean).join(" · ")}
+              </small>
+            </td>
+            <td className="num">
+              {r.embedding && !r.input ? (
+                <span title="Tokens de vetores">{tokens(r.embedding)}</span>
+              ) : (
+                <>
+                  {tokens(r.input + r.cacheRead + r.cacheWrite)}
+                  {r.cacheRead > 0 && (
+                    <small title="Lidos do cache do prompt (custam ~10% da entrada)">
+                      {tokens(r.cacheRead)} do cache
+                    </small>
+                  )}
+                </>
+              )}
+            </td>
+            <td className="num">{tokens(r.output)}</td>
+            <td className="num">{usd(r.cost)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+const turnRows = (c: TurnCost): Row[] =>
+  c.models.map((m) => ({ ...m, key: `${m.provider ?? ""}|${m.model}` }));
+
+/** O custo de uma resposta (no rodapé dela), com os modelos ao clicar. */
+export function AnswerCost({ cost }: { cost: TurnCost }) {
+  const [open, setOpen] = useState(false);
+  const n = cost.models.length;
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="mavi-cost-chip"
+          title="O custo desta resposta, por modelo"
+          aria-label={`Custo desta resposta: ${usd(cost.cost)}`}
+        >
+          <Coins size={13} aria-hidden="true" />
+          {usd(cost.cost)}
+          {n > 1 && <span className="mavi-cost-models">· {n} modelos</span>}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="mavi-cost-pop" align="start" sideOffset={6}>
+          <strong>Custo desta resposta</strong>
+          <ModelTable rows={turnRows(cost)} />
+          <p className="mavi-cost-total">
+            Total <strong>{usd(cost.cost)}</strong>
+          </p>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+/** O custo da conversa inteira (no topo): total, por modelo e por uso. */
+export function ConversationCostButton({ costs }: { costs: ConversationCost }) {
+  const [open, setOpen] = useState(false);
+  const t = costs.total;
+  const rows: Row[] = costs.by_model.map((m) => ({
+    key: `${m.provider}|${m.model}`,
+    model: m.model,
+    provider: m.provider || null,
+    kinds: m.kinds ?? [],
+    input: Number(m.input_tokens) || 0,
+    output: Number(m.output_tokens) || 0,
+    cacheRead: Number(m.cache_read_tokens) || 0,
+    cacheWrite: Number(m.cache_write_tokens) || 0,
+    embedding: Number(m.embedding_tokens) || 0,
+    cost: Number(m.cost) || 0,
+  }));
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="btn secondary mavi-cost-btn"
+          title="Quanto esta conversa custou, por modelo"
+        >
+          <Coins size={15} aria-hidden="true" /> <span>{usd(t.cost)}</span>
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="mavi-cost-pop wide" align="end" sideOffset={6}>
+          <strong>Custo desta conversa</strong>
+          <p className="mavi-cost-sub">
+            {Number(t.answers) || 0} {Number(t.answers) === 1 ? "resposta" : "respostas"} ·{" "}
+            {rows.length} {rows.length === 1 ? "modelo" : "modelos"} · entrada{" "}
+            {tokens(Number(t.input_tokens) + Number(t.cache_read_tokens) + Number(t.cache_write_tokens))} · saída{" "}
+            {tokens(Number(t.output_tokens))} tokens
+          </p>
+          {rows.length ? (
+            <ModelTable rows={rows} />
+          ) : (
+            <p className="muted">Nenhum gasto registrado ainda.</p>
+          )}
+          {costs.by_kind.length > 1 && (
+            <div className="mavi-cost-kinds">
+              {costs.by_kind.map((k) => (
+                <span key={k.kind}>
+                  {kindLabel(k.kind)} <strong>{usd(Number(k.cost))}</strong>
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="mavi-cost-total">
+            Total <strong>{usd(Number(t.cost))}</strong>
+          </p>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}

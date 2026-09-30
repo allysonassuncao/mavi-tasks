@@ -25802,3 +25802,312 @@ main:has(> .mavi-chat) > .error-banner {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
+
+/* Drive › cliente › Marca: logos, fontes, cores e regras que a MAVI usa nas artes. */
+.brand-kit {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.brand-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.brand-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  margin: 0 0 4px;
+  color: #b35f12;
+}
+.brand-head p {
+  margin: 0;
+  color: #4c5a5b;
+  max-width: 62ch;
+  line-height: 1.5;
+}
+.brand-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.brand-upload {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+}
+.brand-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.brand-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+.brand-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.95rem;
+}
+.brand-section > small {
+  color: var(--muted);
+  margin-top: -6px;
+}
+.brand-wide {
+  grid-column: 1 / -1;
+}
+.brand-empty {
+  margin: 4px 0;
+}
+.brand-logos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+.brand-logo {
+  margin: 0;
+  border: 1px solid #e3e8e6;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.brand-logo-art {
+  height: 96px;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  /* Xadrez: o logo branco aparece. */
+  background: repeating-conic-gradient(#eef1f0 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+  color: var(--muted);
+}
+.brand-logo-art img {
+  max-width: 100%;
+  max-height: 76px;
+  object-fit: contain;
+}
+.brand-logo figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 4px 4px 8px;
+  font-size: 0.78rem;
+}
+.brand-logo figcaption span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brand-colors {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.brand-color {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 110px auto;
+  gap: 8px;
+  align-items: center;
+}
+.brand-color input[type="color"] {
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #d9e0de;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+.brand-hex {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+.brand-add {
+  align-self: flex-start;
+}
+.brand-fonts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+}
+.brand-font {
+  border: 1px solid #e3e8e6;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+}
+.brand-font-sample {
+  margin: 0;
+  font-size: 1.6rem;
+  line-height: 1.2;
+  color: var(--ink);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.brand-font-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.brand-font-file,
+.brand-loose,
+.brand-docs p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.brand-kit .link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #b35f12;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+@media (max-width: 720px) {
+  .brand-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .brand-color {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+  }
+  .brand-color .brand-hex {
+    grid-column: 2;
+  }
+  .brand-font-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* MAVI · o custo de cada resposta e da conversa, por modelo. */
+.mavi-msg-actions {
+  align-items: center;
+}
+.mavi-cost-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.mavi-cost-chip:hover,
+.mavi-cost-chip[data-state="open"] {
+  border-color: var(--border);
+  background: #f6f8f7;
+  color: var(--ink);
+}
+.mavi-cost-models {
+  opacity: 0.8;
+}
+.mavi-cost-btn {
+  min-height: 34px;
+  padding: 7px 12px;
+  gap: 7px;
+  font-variant-numeric: tabular-nums;
+}
+.mavi-cost-pop {
+  background: #fff;
+  color: var(--ink);
+  padding: 14px;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 38px #152c2026;
+  border-radius: 12px;
+  z-index: 101;
+  width: 420px;
+  max-width: calc(100vw - 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+.mavi-cost-pop.wide {
+  width: 520px;
+}
+.mavi-cost-sub {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.mavi-cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.mavi-cost-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 0 6px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.mavi-cost-table td {
+  padding: 7px 6px;
+  border-bottom: 1px solid #eef1f0;
+  vertical-align: top;
+}
+.mavi-cost-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+.mavi-cost-table td strong {
+  display: block;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  hyphens: none;
+}
+.mavi-cost-table td small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.mavi-cost-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.mavi-cost-kinds strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.mavi-cost-total {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+@media (max-width: 720px) {
+  .mavi-cost-btn span {
+    display: none;
+  }
+}

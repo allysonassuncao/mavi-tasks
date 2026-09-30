@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { addUsage, newMeter, type Meter } from "./_social-leads.js";
+import { addUsage, meterAdd, newMeter, type Meter } from "./_social-leads.js";
 import type { ProviderModel } from "../src/ai-providers.js";
 
 /**
@@ -19,6 +19,19 @@ export type ToolSpec = {
   parameters: Record<string, unknown>;
 };
 export type ChatTurn = { role: "user" | "assistant"; content: string };
+/** Uma imagem que a ferramenta devolve para o modelo ver (base64, até ~4 MB). */
+export type ToolImage = { mediaType: "image/png" | "image/jpeg" | "image/webp"; data: string };
+/** O resultado de uma ferramenta: texto e, quando ela produz imagens, as imagens. */
+export type ToolOutput = string | { text: string; images: ToolImage[] };
+/** O texto do resultado (para o registro e a tela). */
+export const outputText = (out: ToolOutput) => (typeof out === "string" ? out : out.text);
+/** Quanto raciocinar. Nem todo modelo aceita todos (effortFor). */
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+export const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
+/** O teto de uma imagem para o modelo (a API recusa acima de 5 MB). */
+const IMAGE_MAX_BASE64 = 4_500_000;
+export const usableImages = (images: ToolImage[]) =>
+  images.filter((i) => i.data.length <= IMAGE_MAX_BASE64).slice(0, 4);
 /**
  * O que o modelo está fazendo, em tempo real (para a tela mostrar):
  * - thinking: um pedaço do resumo do raciocínio;
@@ -39,8 +52,8 @@ export type AgentRequest = {
   context: string;
   messages: ChatTurn[];
   tools: ToolSpec[];
-  /** Executa uma ferramenta; devolve o texto do resultado. */
-  execute: (name: string, input: unknown) => Promise<string>;
+  /** Executa uma ferramenta; devolve o resultado (texto e, às vezes, imagens). */
+  execute: (name: string, input: unknown) => Promise<ToolOutput>;
   /** Rodadas de ferramentas antes de exigir a resposta. */
   maxRounds?: number;
   /** O contexto é longo e se repete (a transcrição de uma reunião): fica em cache. */
@@ -52,8 +65,12 @@ export type AgentRequest = {
   cacheConversation?: boolean;
   /** Agrupa o cache no provedor (OpenAI: prompt_cache_key), ex.: empresa + pessoa. */
   cacheKey?: string;
-  /** Quanto raciocinar (padrão "medium"); o copiloto usa "low" para responder rápido. */
-  effort?: "low" | "medium" | "high";
+  /**
+   * Quanto raciocinar (padrão "medium"); o copiloto usa "low" para responder
+   * rápido. Uma função é lida a cada rodada (a skill carregada no meio da
+   * resposta sobe o esforço dali em diante).
+   */
+  effort?: Effort | (() => Effort | undefined);
   /** Teto da resposta (padrão 32.000). */
   maxTokens?: number;
   signal?: AbortSignal;
@@ -137,7 +154,18 @@ export function claudeFeatures(model: string) {
   const adaptive =
     /^claude-(opus-(4-[6-9]|5)|sonnet-(4-6|5)|fable|mythos)/.test(model);
   const fallbacks = /^claude-(opus-5|fable-5)/.test(model);
-  return { adaptive, fallbacks };
+  // O "xhigh" chegou com o Opus 4.7: nos 4.6, vira "high".
+  const xhigh = adaptive && !/^claude-(opus|sonnet)-4-6/.test(model);
+  return { adaptive, fallbacks, xhigh };
+}
+
+/** O esforço desta rodada, no que o modelo aceita. */
+export function effortFor(
+  model: string,
+  effort: AgentRequest["effort"],
+): Effort {
+  const e = (typeof effort === "function" ? effort() : effort) ?? "medium";
+  return e === "xhigh" && !claudeFeatures(model).xhigh ? "high" : e;
 }
 
 /** O pedido quando a IA termina a vez sem escrever a resposta. */
@@ -220,7 +248,7 @@ export function anthropicAdapter(
                   type: "adaptive" as const,
                   display: "summarized" as const,
                 },
-                output_config: { effort: request.effort ?? "medium" },
+                output_config: { effort: effortFor(env.model, request.effort) },
               }
             : {}),
           system: [
@@ -267,7 +295,7 @@ export function anthropicAdapter(
             .server_tool_use?.web_search_requests,
         ) || 0;
       webSearches += searches;
-      meter.cost += searches * WEB_SEARCH_PRICE;
+      if (searches) meterAdd(meter, message.model, { cost: searches * WEB_SEARCH_PRICE });
       if (message.stop_reason === "refusal")
         throw new LlmError(
           422,
@@ -286,10 +314,21 @@ export function anthropicAdapter(
         const results = await Promise.all(
           calls.map(async (call) => {
             try {
+              const out = await request.execute(call.name, call.input);
+              const images = typeof out === "string" ? [] : usableImages(out.images);
               return {
                 type: "tool_result" as const,
                 tool_use_id: call.id,
-                content: await request.execute(call.name, call.input),
+                // As imagens vão junto do texto: o modelo vê o que a ferramenta fez.
+                content: images.length
+                  ? [
+                      { type: "text" as const, text: outputText(out) },
+                      ...images.map((i) => ({
+                        type: "image" as const,
+                        source: { type: "base64" as const, media_type: i.mediaType, data: i.data },
+                      })),
+                    ]
+                  : outputText(out),
               };
             } catch (e) {
               return {

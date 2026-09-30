@@ -144,6 +144,10 @@ export type DriveRequest =
   | { action: "sign-upload"; file: string }
   | { action: "download"; file: string; inline?: boolean }
   | { action: "delete"; file: string }
+  /** Drive › cliente › Marca: os links dos arquivos (prévia dos logos e fontes). */
+  | { action: "brand-urls"; company: string; client: string }
+  /** Tirar um arquivo da marca (quem atende o cliente). */
+  | { action: "brand-delete"; file: string }
   /**
    * What each file of a list shows instead of an icon: its thumbnail, or
    * the file itself when the browser still has to make the thumbnail.
@@ -384,12 +388,35 @@ export async function handleDrive(
     };
   }
 
-  if (req.action === "delete") {
+  if (req.action === "brand-urls") {
+    if (!isId(req.company) || !isId(req.client)) return fail(400, "Cliente inválido.");
+    const r = await callRpc<{ id: string; path: string; content_type: string }[]>(
+      env,
+      fetchImpl,
+      authorization,
+      "brand_asset_targets",
+      { p_company: req.company, p_client: req.client },
+    );
+    if (!r.ok) return fail(r.status, r.error);
+    return {
+      status: 200,
+      body: {
+        urls: Object.fromEntries(
+          (r.data ?? []).map((f) => [
+            f.id,
+            signGcsUrl(creds, env.bucket, f.path, "GET", { expiresInSeconds: 900 }),
+          ]),
+        ),
+      },
+    };
+  }
+
+  if (req.action === "delete" || req.action === "brand-delete") {
     const removed = await callRpc<string>(
       env,
       fetchImpl,
       authorization,
-      "delete_drive_file",
+      req.action === "delete" ? "delete_drive_file" : "delete_brand_file",
       { p_file: req.file },
     );
     if (!removed.ok) return fail(removed.status, removed.error);

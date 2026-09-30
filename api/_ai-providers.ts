@@ -1,12 +1,16 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { callRpc } from "./_drive.js";
 import { seal, unseal } from "./_google.js";
-import { newMeter, type Meter } from "./_social-leads.js";
+import { meterAdd, newMeter, type Meter } from "./_social-leads.js";
 import {
   ANSWER_NUDGE,
   LlmError,
   anthropicAdapter,
+  effortFor,
+  outputText,
+  usableImages,
   type LlmAdapter,
+  type ToolImage,
 } from "./_ai-llm.js";
 import {
   CATALOG,
@@ -94,6 +98,10 @@ export function priceCost(
 // ------------------------------------------------------------ OpenAI (chat)
 type ChatMessage =
   | { role: "system" | "user"; content: string }
+  | {
+      role: "user";
+      content: ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[];
+    }
   | {
       role: "assistant";
       content: string | null;
@@ -202,15 +210,16 @@ function addChatUsage(
   const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
   const input = Math.max((usage.prompt_tokens ?? 0) - cached, 0);
   const output = usage.completion_tokens ?? 0;
-  meter.model = config.model;
-  meter.input += input;
-  meter.cacheRead += cached;
-  meter.output += output;
   // O OpenRouter diz quanto cobrou (tokens e plugins); os outros, pelos preços.
-  meter.cost +=
-    config.kind === "openrouter" && typeof usage.cost === "number" && usage.cost >= 0
-      ? usage.cost
-      : priceCost(config.price, { input, output, cached });
+  meterAdd(meter, config.model, {
+    input,
+    cacheRead: cached,
+    output,
+    cost:
+      config.kind === "openrouter" && typeof usage.cost === "number" && usage.cost >= 0
+        ? usage.cost
+        : priceCost(config.price, { input, output, cached }),
+  });
 }
 
 /** O teto da resposta no OpenRouter (sem ele, reserva o máximo do modelo nos créditos). */
@@ -267,7 +276,7 @@ export function openAiChatAdapter(
             role: "system",
             content: `${request.instructions}\n\n${request.context}`,
           },
-      ...request.messages.map((m) => ({ role: m.role, content: m.content })),
+      ...request.messages.map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
     ];
     const maxRounds = request.maxRounds ?? 6;
     let nudged = false;
@@ -278,8 +287,13 @@ export function openAiChatAdapter(
     const web = !!request.webSearch && router;
     const cited = new Map<string, string>();
     let maxTokens = request.maxTokens ?? ROUTER_MAX_TOKENS;
+    // O esforço vai só quando pedido; o modelo que não raciocina recusa e segue sem.
+    let reasoningOption = request.effort !== undefined;
     for (let round = 0; ; round++) {
       const last = round >= maxRounds;
+      const effort = reasoningOption ? effortFor(config.model, request.effort) : null;
+      // Os provedores fora da Claude vão até "high".
+      const level = effort === "xhigh" || effort === "max" ? "high" : effort;
       const body = {
         model: config.model,
         messages,
@@ -292,6 +306,7 @@ export function openAiChatAdapter(
         // A OpenAI junta no mesmo cache os pedidos com a mesma chave.
         ...(config.kind === "openai" && request.cacheKey ? { prompt_cache_key: request.cacheKey } : {}),
         ...(web ? { plugins: [{ id: "web", max_results: 5 }] } : {}),
+        ...(level ? (router ? { reasoning: { effort: level } } : { reasoning_effort: level }) : {}),
       };
       const res = await fetchImpl(`${config.baseUrl}/chat/completions`, {
         method: "POST",
@@ -304,6 +319,14 @@ export function openAiChatAdapter(
           const text = await res.clone().text().catch(() => "");
           if (/stream_options/i.test(text)) {
             usageOption = false;
+            round--;
+            continue;
+          }
+        }
+        if (res.status === 400 && reasoningOption) {
+          const text = await res.clone().text().catch(() => "");
+          if (/reasoning/i.test(text)) {
+            reasoningOption = false;
             round--;
             continue;
           }
@@ -371,12 +394,15 @@ export function openAiChatAdapter(
             function: { name: c.name, arguments: c.args || "{}" },
           })),
         });
+        const seen: ToolImage[] = [];
         const results = await Promise.all(
           used.map(async (c) => {
             let content: string;
             try {
               const input = c.args.trim() ? JSON.parse(c.args) : {};
-              content = await request.execute(c.name, input);
+              const out = await request.execute(c.name, input);
+              content = outputText(out);
+              if (typeof out !== "string") seen.push(...out.images);
             } catch (e) {
               content = `Erro: ${(e as Error).message}`;
             }
@@ -384,6 +410,19 @@ export function openAiChatAdapter(
           }),
         );
         messages.push(...results);
+        // A API de chat não aceita imagens no resultado: vão logo depois, como mensagem.
+        const images = usableImages(seen);
+        if (images.length)
+          messages.push({
+            role: "user",
+            content: [
+              { type: "text", text: "Imagens que as ferramentas acima devolveram:" },
+              ...images.map((i) => ({
+                type: "image_url" as const,
+                image_url: { url: `data:${i.mediaType};base64,${i.data}` },
+              })),
+            ],
+          });
         continue;
       }
       // As páginas que o OpenRouter citou, no fim (quando o texto não citou).

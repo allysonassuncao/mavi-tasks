@@ -1,8 +1,11 @@
 import crypto from "node:crypto";
 import { callRpc, signGcsUrl, type GcsCredentials } from "./_drive.js";
-import type { LlmAdapter, ToolSpec } from "./_ai-llm.js";
+import type { Effort, LlmAdapter, ToolOutput, ToolSpec } from "./_ai-llm.js";
 import { TOOLS, type ToolContext } from "./_ai-tools.js";
 import { SKILL_TOOLS } from "./_ai-skills.js";
+import { ART_RULES, ART_TOOLS, runArtTool, summarizeArtStep } from "./_ai-art.js";
+import { logCost, meterEntries, whereOf } from "./_ai-cost.js";
+import type { RenderInput } from "./_art-render.js";
 import {
   priceCost,
   resolveRoute,
@@ -435,6 +438,10 @@ export const REGISTRY: Record<string, ToolMeta> = {
   show_kpis: { kind: "visual", power: "visuals", timeoutMs: 5_000 },
   show_timeline: { kind: "visual", power: "visuals", timeoutMs: 5_000 },
   generate_image: { kind: "image", power: "images", timeoutMs: 170_000 },
+  // Arte por código: a marca, o desenho no navegador e a leitura do HTML.
+  brand_kit: { kind: "image", power: "images", timeoutMs: 20_000 },
+  render_art: { kind: "image", power: "images", timeoutMs: 120_000 },
+  read_art: { kind: "image", power: "images", timeoutMs: 5_000 },
   propose_task: { kind: "action", power: "actions", timeoutMs: 20_000 },
   propose_comment: { kind: "action", power: "actions", timeoutMs: 20_000 },
   // Com escritor, outro modelo escreve o conteúdo inteiro: pode demorar.
@@ -516,7 +523,7 @@ export function toolsFor(
   return [
     ...TOOLS,
     ASK_TOOL,
-    ...[...POWER_TOOLS, ...SKILL_TOOLS]
+    ...[...POWER_TOOLS, ...ART_TOOLS, ...SKILL_TOOLS]
       .filter((t) => {
         const power = REGISTRY[t.name]?.power;
         return !!power && powers.has(power);
@@ -558,7 +565,8 @@ export function powerInstructions(powers: ReadonlySet<Power>, onPage = false) {
     );
   if (powers.has("images"))
     lines.push(
-      "- Imagens (generate_image): quando pedirem uma imagem, arte, ilustração, mockup ou foto conceitual. Escreva um prompt detalhado; o texto que deve aparecer na arte vai entre aspas, em português. Para ajustar uma imagem desta conversa, use edit_ref (ex.: I1). Não gere pessoas reais identificáveis nem logos e marcas de terceiros; para a marca do cliente, peça os arquivos dele.",
+      "- Imagens (generate_image): quando pedirem uma foto, ilustração, mockup ou cena sem texto. Escreva um prompt detalhado. Para ajustar uma imagem desta conversa, use edit_ref (ex.: I1). Você vê as imagens que gerar: confira se atendem ao pedido. Não gere pessoas reais identificáveis nem logos e marcas de terceiros; para a marca do cliente, use os arquivos dela.",
+      ART_RULES,
     );
   if (powers.has("canvas"))
     lines.push(
@@ -592,6 +600,8 @@ export type ImageEnv = {
   imageModel: string;
   credentials?: GcsCredentials | null;
   bucket?: string;
+  /** Desenha a arte e grava no link (trocado nos testes). */
+  renderArt?: (input: RenderInput, put: string) => Promise<{ preview: string; report: string[] }>;
 };
 export type PowerKit = {
   ctx: ToolContext;
@@ -604,11 +614,20 @@ export type PowerKit = {
   next: Record<"V" | "I" | "A" | "D" | "Q", number>;
   /** Documentos, apresentações e planilhas das respostas anteriores (ref → anexo). */
   priorCanvas: Map<string, CanvasArtifact>;
+  /** As imagens das respostas anteriores com o HTML das artes (read_art, revises). */
+  priorArts?: Map<string, ImageArtifact>;
   emit: (artifact: AiArtifact) => void;
   /** Gasto com imagens nesta resposta (para o consumo). */
   imageCost: { usd: number; model: string; provider: string | null };
   /** O escritor do canvas ("Quem usa qual modelo"), quando há. */
-  writer?: { llm: LlmAdapter; model: string; name: string; providerId: string } | null;
+  writer?: {
+    llm: LlmAdapter;
+    model: string;
+    name: string;
+    providerId: string;
+    /** O esforço escolhido no painel para o escritor. */
+    effort?: Effort;
+  } | null;
   /** A MAVI perguntou: nada mais roda nesta resposta. */
   asked?: boolean;
   /** Gasto dos outros modelos nesta resposta (escritor), para o consumo. */
@@ -891,7 +910,7 @@ async function openRouterImage(
   return { bytes, usage, ...(Number.isFinite(cost) && cost >= 0 ? { cost } : {}) };
 }
 
-async function generateImage(kit: PowerKit, input: Record<string, unknown>) {
+async function generateImage(kit: PowerKit, input: Record<string, unknown>): Promise<ToolOutput> {
   const { ctx, env } = kit;
   const prompt = str(input.prompt).slice(0, 4000);
   if (prompt.length < 3) return "Descreva a imagem no prompt.";
@@ -931,23 +950,25 @@ async function generateImage(kit: PowerKit, input: Record<string, unknown>) {
   kit.imageCost.usd += cost;
   kit.imageCost.model = provider.model;
   kit.imageCost.provider = provider.providerId;
-  await callRpc(env, ctx.fetch, ctx.auth, "ai_log_usage", {
-    p_company: ctx.company,
-    p_module: ctx.scope.module ?? "assistant",
-    p_kind: "image",
-    p_client: ctx.scope.client ?? null,
-    p_contract: ctx.scope.contract ?? null,
-    p_project: ctx.scope.project ?? null,
-    p_recording: null,
-    p_model: provider.model,
-    p_input: Number(usage?.input_tokens) || 0,
-    p_output: Number(usage?.output_tokens) || 0,
-    p_cache_read: 0,
-    p_cache_write: 0,
-    p_embedding: 0,
-    p_cost: Math.round(cost * 1e6) / 1e6,
-    ...(provider.providerId ? { p_provider: provider.providerId } : {}),
-  }).catch(() => {});
+  await logCost(
+    env,
+    ctx.fetch,
+    ctx.auth,
+    whereOf(ctx),
+    {
+      kind: "image",
+      model: provider.model,
+      provider: provider.providerId,
+      providerName: provider.providerId ? provider.name : null,
+      input: Number(usage?.input_tokens) || 0,
+      output: Number(usage?.output_tokens) || 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      embedding: 0,
+      cost,
+    },
+    ctx.cost,
+  );
   const a = add<ImageArtifact>(kit, "I", {
     type: "image",
     path,
@@ -957,7 +978,11 @@ async function generateImage(kit: PowerKit, input: Record<string, unknown>) {
     ...(source ? { edited_from: editRef } : {}),
     url: signGcsUrl(env.credentials, env.bucket, path, "GET", { expiresInSeconds: 3600 }),
   });
-  return `Imagem pronta, mostrada para a pessoa como ${a.ref}. Na resposta, escreva [[${a.ref}]] sozinho numa linha e diga em uma frase o que foi feito (sem descrever o prompt inteiro).`;
+  const text = `Imagem pronta, mostrada para a pessoa como ${a.ref}. Na resposta, escreva [[${a.ref}]] sozinho numa linha e diga em uma frase o que foi feito (sem descrever o prompt inteiro). Para usar numa arte com texto, img:${a.ref} no render_art.`;
+  // A MAVI vê a imagem que gerou (até ~3 MB; acima, só o texto).
+  return bytes.length <= 3_300_000
+    ? { text: `${text} Você a vê abaixo: confira se atende ao pedido.`, images: [{ mediaType: "image/png" as const, data: Buffer.from(bytes).toString("base64") }] }
+    : text;
 }
 
 // ------------------------------------------------------------ canvas
@@ -997,6 +1022,7 @@ async function write(
 ) {
   const writer = kit.writer!;
   const out = await writer.llm({
+    ...(writer.effort ? { effort: writer.effort } : {}),
     instructions: WRITER_FORMAT[kind],
     context: `Hoje: ${kit.ctx.today}.`,
     messages: [
@@ -1018,23 +1044,11 @@ async function write(
     maxTokens: 32_000,
   });
   if (kit.extraCost) kit.extraCost.usd += out.meter.cost;
-  await callRpc(kit.env, kit.ctx.fetch, kit.ctx.auth, "ai_log_usage", {
-    p_company: kit.ctx.company,
-    p_module: kit.ctx.scope.module ?? "assistant",
-    p_kind: "canvas",
-    p_client: kit.ctx.scope.client ?? null,
-    p_contract: kit.ctx.scope.contract ?? null,
-    p_project: kit.ctx.scope.project ?? null,
-    p_recording: null,
-    p_model: out.meter.model || writer.model,
-    p_input: out.meter.input,
-    p_output: out.meter.output,
-    p_cache_read: out.meter.cacheRead,
-    p_cache_write: out.meter.cacheWrite,
-    p_embedding: 0,
-    p_cost: Math.round(out.meter.cost * 1e6) / 1e6,
-    p_provider: writer.providerId,
-  }).catch(() => {});
+  await Promise.all(
+    meterEntries("canvas", out.meter, writer.providerId, writer.model, writer.name).map((e) =>
+      logCost(kit.env, kit.ctx.fetch, kit.ctx.auth, whereOf(kit.ctx), e, kit.ctx.cost),
+    ),
+  );
   if (kind === "document") return { title: input.title, markdown: out.text };
   const data = jsonFrom(out.text) as Record<string, unknown> | null;
   return data ? { ...data, title: input.title, theme: input.theme ?? data.theme } : null;
@@ -1180,7 +1194,7 @@ async function proposeComment(kit: PowerKit, input: Record<string, unknown>) {
   return `Proposta pronta como ${a.ref}: a pessoa confirma no card. Nada foi enviado ainda. Na resposta, escreva [[${a.ref}]] sozinho numa linha.`;
 }
 
-export async function runPowerTool(kit: PowerKit, name: string, raw: unknown) {
+export async function runPowerTool(kit: PowerKit, name: string, raw: unknown): Promise<ToolOutput> {
   const input =
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
@@ -1190,6 +1204,7 @@ export async function runPowerTool(kit: PowerKit, name: string, raw: unknown) {
   if (name === "ask_user") return askUser(kit, input);
   if (name.startsWith("create_")) return createCanvas(kit, name, input);
   if (name === "generate_image") return generateImage(kit, input);
+  if (name === "brand_kit" || name === "render_art" || name === "read_art") return runArtTool(kit, name, input);
   if (name === "propose_task") return proposeTask(kit, input);
   if (name === "propose_comment") return proposeComment(kit, input);
   return `Ferramenta desconhecida: ${name}.`;
@@ -1209,11 +1224,16 @@ export function describePowerStep(name: string, raw: unknown) {
   if (name === "create_spreadsheet") return `Montando a planilha${t ? ` “${t}”` : ""}`;
   if (name === "read_canvas") return `Lendo ${str(input.ref).toUpperCase() || "o documento"}`;
   if (name === "ask_user") return "Preparando perguntas para você";
+  if (name === "brand_kit") return "Lendo a marca do cliente";
+  if (name === "render_art")
+    return str(input.revises) ? `Corrigindo a arte ${str(input.revises).toUpperCase()}` : `Montando a arte${str(input.name) ? ` “${str(input.name).slice(0, 60)}”` : ""}`;
+  if (name === "read_art") return `Lendo a arte ${str(input.ref).toUpperCase()}`;
   if (name === "propose_task") return `Preparando a tarefa${t ? ` “${t}”` : ""} para você confirmar`;
   if (name === "propose_comment") return "Preparando o comentário para você confirmar";
   return "Trabalhando";
 }
 export function summarizePowerStep(name: string, output: string) {
+  if (name === "brand_kit" || name === "render_art" || name === "read_art") return summarizeArtStep(name, output);
   if (/^As perguntas/.test(output)) return "esperando suas respostas";
   if (/^(Mostrado|Imagem pronta|Proposta pronta|Pronto no canvas)/.test(output))
     return name.startsWith("propose_") ? "aguardando sua confirmação" : "pronto";

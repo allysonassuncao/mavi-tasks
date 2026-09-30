@@ -3,6 +3,7 @@ import { handleAi, streamAi, type AiEnv, type AiStreamEvent } from "./_ai";
 import type { AgentRequest, LlmAdapter } from "./_ai-llm";
 import { catalogContext, pickedSkills } from "./_ai-skills";
 import { newMeter } from "./_social-leads";
+import { outputText } from "./_ai-llm.js";
 
 const company = "00000000-0000-4000-8000-000000000001";
 const me = "00000000-0000-4000-8000-000000000003";
@@ -72,11 +73,11 @@ describe("skills da MAVI", () => {
     const outputs: string[] = [];
     const llm: LlmAdapter = async (r) => {
       request = r;
-      outputs.push(await r.execute("read_skill_file", { skill: "relatorio-mensal", file: "references/modelo.md" }));
-      outputs.push(await r.execute("use_skill", { skill: "relatorio-mensal" }));
-      outputs.push(await r.execute("read_skill_file", { skill: "relatorio-mensal", file: "references/modelo.md" }));
-      outputs.push(await r.execute("read_skill_file", { skill: "relatorio-mensal", file: "segredo.md" }));
-      outputs.push(await r.execute("use_skill", { skill: "outra" }));
+      outputs.push(outputText(await r.execute("read_skill_file", { skill: "relatorio-mensal", file: "references/modelo.md" })));
+      outputs.push(outputText(await r.execute("use_skill", { skill: "relatorio-mensal" })));
+      outputs.push(outputText(await r.execute("read_skill_file", { skill: "relatorio-mensal", file: "references/modelo.md" })));
+      outputs.push(outputText(await r.execute("read_skill_file", { skill: "relatorio-mensal", file: "segredo.md" })));
+      outputs.push(outputText(await r.execute("use_skill", { skill: "outra" })));
       return answer("Pronto.");
     };
     await handleAi(
@@ -165,7 +166,8 @@ describe("skills da MAVI", () => {
     expect(request!.instructions).toContain("O formato, a estrutura, o tom");
     expect(request!.instructions).toContain("Como responder no módulo MAVI");
     expect(request!.maxRounds).toBe(14);
-    expect(request!.effort).toBe("high");
+    // Sem esforço escolhido para a skill, pelo menos "high".
+    expect(typeof request!.effort === "function" ? request!.effort() : request!.effort).toBe("high");
     expect(request!.tools.map((t) => t.name)).toContain("read_skill_file");
     expect(events).toContainEqual({
       type: "step",

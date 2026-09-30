@@ -78,12 +78,79 @@ export type AiStreamHandlers = {
   /** A execução desta resposta (para parar) e a conversa em que ela fica. */
   onRun?: (run: { id: string; conversation: string }) => void;
 };
+/** O custo de uma resposta, por modelo (o servidor manda no fim). */
+export type TurnCost = {
+  cost: number;
+  models: {
+    model: string;
+    /** O nome do provedor (null: o padrão do servidor). */
+    provider: string | null;
+    kinds: string[];
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    embedding: number;
+    cost: number;
+  }[];
+};
 export type AiAnswer = {
   answer: string;
   sources: AiSource[];
   artifacts?: AiArtifact[];
   conversation: string | null;
+  cost?: TurnCost;
 };
+/** O custo de uma conversa (ai_conversation_cost). */
+export type ConversationCost = {
+  total: {
+    cost: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    embedding_tokens: number;
+    calls: number;
+    answers: number;
+  };
+  by_model: {
+    provider: string;
+    model: string;
+    cost: number;
+    calls: number;
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    embedding_tokens: number;
+    kinds: string[] | null;
+  }[];
+  by_kind: { kind: string; cost: number; calls: number }[];
+  by_message: {
+    message: number;
+    cost: number;
+    items: {
+      provider: string;
+      model: string;
+      kind: string;
+      cost: number;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_tokens: number;
+      embedding_tokens: number;
+    }[];
+  }[];
+};
+/**
+ * O custo da conversa por modelo (só quem começou e os gestores veem; antes
+ * da migração 20261224090000, ou sem acesso, null).
+ */
+export async function conversationCost(id: string): Promise<ConversationCost | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("ai_conversation_cost", { p_conversation: id });
+  return error ? null : (data as ConversationCost);
+}
 
 async function token() {
   return supabase
@@ -143,6 +210,7 @@ export async function streamAnswer(
         sources: e.sources ?? [],
         artifacts: sanitizeArtifacts(e.artifacts),
         conversation: e.conversation ?? null,
+        ...(e.cost && typeof e.cost.cost === "number" ? { cost: e.cost as TurnCost } : {}),
       };
     else if (e.type === "error")
       throw Error(e.error ?? "Não foi possível responder.");
@@ -429,7 +497,15 @@ export type AiProvider = {
   /** Quantas regras usam este provedor. */
   routes: number;
 };
-export type AiLibrary = { providers: AiProvider[]; routes: AiRoute[] };
+export type AiLibrary = {
+  providers: AiProvider[];
+  routes: AiRoute[];
+  /** O esforço escolhido (funcionalidade ou "skill:<id>" → nível); antes da migração 20261223090000, nada. */
+  efforts?: Record<string, string>;
+};
+/** O esforço de uma funcionalidade ou skill ("skill:<id>"); nulo volta ao automático. */
+export const setAiEffort = (company: string, key: string, effort: string | null) =>
+  rpc("ai_set_effort", { p_company: company, p_key: key, p_effort: effort });
 export const providerLibrary = (company: string) =>
   rpc<AiLibrary>("ai_provider_list", { p_company: company });
 export const setProviderActive = (
