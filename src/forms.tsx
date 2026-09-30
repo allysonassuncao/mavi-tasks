@@ -941,6 +941,7 @@ export function TaskDetail({
   const isRunning = running?.task_id === task.id;
   // No play (and no description blur) while the task waits on validation or
   // was returned, or for its creator — unless the creator is also doing it.
+  // A delivered task keeps play but never blurs its description.
   const canPlay =
     task.status !== "review" &&
     task.status !== "returned" &&
@@ -1633,7 +1634,9 @@ export function TaskDetail({
                       ? "Ao iniciar, sua outra tarefa em andamento é pausada automaticamente."
                       : totalSeconds > 0
                         ? "Clique em Iniciar para continuar registrando."
-                        : "Inicie para ver a descrição e registrar seu tempo."}
+                        : task.status === "done"
+                          ? "Clique em Iniciar para registrar seu tempo."
+                          : "Inicie para ver a descrição e registrar seu tempo."}
               </p>
             </div>
           </section>
@@ -1773,7 +1776,7 @@ export function TaskDetail({
                 />
               )}
             </>
-          ) : !isRunning && canPlay ? (
+          ) : !isRunning && canPlay && task.status !== "done" ? (
             <section
               className="description-locked"
               aria-label="Descrição bloqueada até iniciar"
