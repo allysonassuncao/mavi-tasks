@@ -468,6 +468,64 @@ describe("relatório do Radar", () => {
     expect(content.actions.map((a) => a.priority)).toEqual(["alta", "média", "média"]);
     expect(content.actions[0].product).toBe("Make Ads");
     expect(() => parseReport(JSON.stringify({ headline: "", summary: "" }))).toThrow(/não escreveu/);
+    expect(content.crossings).toEqual([]);
+  });
+
+  it("Radar × Campanhas: cada cliente com os itens e as campanhas, com meta, ritmo e comparação", () => {
+    const text = reportMessage({
+      ...material,
+      campaigns: {
+        money: "com M",
+        clients: [
+          {
+            client: "4282",
+            open: 3,
+            severe: 1,
+            items: [{ topic: "Problemas / reclamações", product: "Make Ads", title: "Leads caíram", severity: 3, status: "Aberto", open: true }],
+            campaigns: [
+              {
+                name: "Leads Setembro",
+                platform: "meta",
+                product: "Make Ads",
+                status: "active",
+                objective: "lead",
+                cycle: { start: "2026-09-01", end: "2026-09-30", days: 30, elapsed: 30, goal: 100, budget: 3000, spent: 2400, results: 60, cost: 40, goal_cost: 30, expected: 3000, status: "bad" },
+                period: { spend: 2400, results: 60, impressions: 50000, clicks: 900, cost: 40 },
+                previous: { spend: 2800, results: 100, cost: 28 },
+              },
+            ],
+          },
+        ],
+        without: ["5120"],
+      },
+    });
+    expect(text).toMatch(/Radar × Campanhas/);
+    expect(text).toMatch(/- 4282 \(3 em aberto, 1 sérios\)\n  No Radar: \[Make Ads · Problemas \/ reclamações\] Leads caíram \(Aberto, gravidade crítica\)/);
+    expect(text).toMatch(/Campanha "Leads Setembro" \(Meta · Make Ads · ativa · objetivo leads\): ciclo 01\/09\/2026 a 30\/09\/2026 \(dia 30 de 30\), meta 100 leads → 60/);
+    expect(text).toMatch(/CPL R\$\s40,00 × meta R\$\s30,00 — fora da meta/);
+    expect(text).toMatch(/período anterior: gasto R\$\s2\.800,00, 100 leads, CPL R\$\s28,00 \(leads -40%\)/);
+    expect(text).toMatch(/sem campanha no período: 5120\./);
+    expect(reportMessage(material)).not.toMatch(/Radar × Campanhas/);
+  });
+
+  it("os cruzamentos vêm limpos, com prioridade válida; sem cliente ou problema, saem", () => {
+    const content = parseReport(
+      JSON.stringify({
+        headline: "Leads caíram onde o CPL subiu.",
+        summary: "Resumo.",
+        crossings: [
+          { client: "4282", product: "Make Ads", problem: "Reclama de poucos leads", evidence: "60 de 100 leads, CPL R$ 40 × meta R$ 30.", solution: "Trocar os criativos.", priority: "Alta" },
+          { client: "5120", problem: "Relatório atrasado", evidence: "", solution: "Enviar hoje.", priority: "nada" },
+          { client: "", problem: "sem cliente", evidence: "x", solution: "y" },
+          { client: "9001", problem: "", evidence: "x", solution: "y" },
+        ],
+        actions: [],
+      }),
+    );
+    expect(content.crossings).toEqual([
+      { client: "4282", product: "Make Ads", problem: "Reclama de poucos leads", evidence: "60 de 100 leads, CPL R$ 40 × meta R$ 30.", solution: "Trocar os criativos.", priority: "alta" },
+      { client: "5120", problem: "Relatório atrasado", evidence: "", solution: "Enviar hoje.", priority: "média" },
+    ]);
   });
 
   it("o worker escreve o relatório antes das leituras e grava o custo", async () => {

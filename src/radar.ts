@@ -279,14 +279,94 @@ export type ReportMaterial = {
   }[];
   clients: { client: string; open: number; severe: number; new: number }[];
   new_items: { topic: string; product: string; client: string; title: string; severity: number | null; status: string }[];
+  /** Radar × Campanhas: só para quem vê Campanhas (relatórios antigos não têm). */
+  campaigns?: ReportCampaigns;
 };
+export type ReportCampaign = {
+  name: string;
+  platform: string;
+  product: string;
+  status: string;
+  objective: string;
+  /** O ciclo mais recente dentro do período, até o fim do período. */
+  cycle: {
+    start: string;
+    end: string;
+    days: number;
+    elapsed: number;
+    goal: number;
+    budget: number;
+    spent: number;
+    results: number;
+    cost: number | null;
+    goal_cost: number | null;
+    expected: number;
+    status: "good" | "bad" | null;
+  };
+  period: { spend: number; results: number; impressions: number; clicks: number; cost: number | null };
+  previous: { spend: number; results: number; cost: number | null };
+};
+export type ReportCampaigns = {
+  money: string;
+  clients: {
+    client: string;
+    open: number;
+    severe: number;
+    items: { topic: string; product: string; title: string; severity: number | null; status: string; open: boolean }[];
+    campaigns: ReportCampaign[];
+  }[];
+  without: string[];
+};
+export type ReportPriority = "alta" | "média" | "baixa";
 /** O texto da MAVI. */
 export type ReportContent = {
   headline: string;
   summary: string;
   sections: { title: string; paragraphs: string[]; bullets: string[] }[];
-  actions: { priority: "alta" | "média" | "baixa"; text: string; product?: string }[];
+  /** Radar × Campanhas: o que foi dito, o que os números mostram e a solução. */
+  crossings?: { client: string; product?: string; problem: string; evidence: string; solution: string; priority: ReportPriority }[];
+  actions: { priority: ReportPriority; text: string; product?: string }[];
 };
+
+const RESULTS: Record<string, [string, string]> = {
+  lead: ["leads", "CPL"],
+  sale: ["vendas", "CPA"],
+  message: ["conversas", "Custo por conversa"],
+  traffic: ["cliques", "CPC"],
+  engagement: ["engajamentos", "Custo por engajamento"],
+  custom: ["conversões", "CPA"],
+  video: ["visualizações", "Custo por visualização"],
+};
+const PLATFORMS: Record<string, string> = { meta: "Meta", google: "Google Ads", linkedin: "LinkedIn", tiktok: "TikTok", kwai: "Kwai" };
+const money = (n: number) => Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
+const count = (n: number) => Math.round(Number(n)).toLocaleString("pt-BR");
+/** A variação de a sobre b ("+12%", "-40%"), ou null sem base. */
+export function change(a: number, b: number) {
+  if (!(b > 0)) return null;
+  const v = Math.round(((a - b) / b) * 100);
+  return `${v > 0 ? "+" : v < 0 ? "-" : ""}${Math.abs(v)}%`;
+}
+/** Uma campanha do relatório em textos curtos (tela e PDF). */
+export function campaignCells(c: ReportCampaign) {
+  const [result, costName] = RESULTS[c.objective] ?? ["resultados", "Custo por resultado"];
+  const y = c.cycle;
+  const prev = change(c.period.results, c.previous.results);
+  return {
+    name: c.name,
+    meta: `${PLATFORMS[c.platform] ?? c.platform} · ${c.product}${c.status === "active" ? "" : " · inativa"}`,
+    goal: `${count(y.results)} de ${count(y.goal)} ${result}`,
+    cycle: `${dateBr(y.start).slice(0, 5)} a ${dateBr(y.end).slice(0, 5)} · dia ${y.elapsed} de ${y.days}`,
+    cost:
+      y.cost != null
+        ? `${costName} ${money(y.cost)}${y.goal_cost != null ? ` × ${money(y.goal_cost)}` : ""}`
+        : y.goal_cost != null
+          ? `Sem ${result} (meta ${money(y.goal_cost)})`
+          : "—",
+    spend: `${money(y.spent)} de ${money(y.budget)}${y.expected > 0 ? ` · esperado ${money(y.expected)}` : ""}`,
+    period: `${count(c.period.results)} ${result} · ${money(c.period.spend)}${prev ? ` · ${prev} vs. anterior` : ""}`,
+    status: y.status,
+  };
+}
 export type RadarReportFull = RadarReport & {
   material: ReportMaterial | null;
   content: ReportContent | null;
@@ -1331,6 +1411,39 @@ function demoMaterial(from: string, to: string, labels: ReportLabels): ReportMat
       { client: "Forma Living", open: 2, severe: 1, new: 2 },
     ],
     new_items: [],
+    campaigns: {
+      money: "com M",
+      clients: [
+        {
+          client: "Aurora Studio", open: 4, severe: 1,
+          items: [
+            { topic: "Problemas / reclamações", product: "Make Ads", title: "Leads caíram em setembro", severity: 2, status: "Aberto", open: true },
+            { topic: "Problemas / reclamações", product: "Social Leads", title: "Artes com a marca errada", severity: 1, status: "Em tratamento", open: true },
+          ],
+          campaigns: [
+            {
+              name: "Captação · Setembro", platform: "meta", product: "Make Ads", status: "active", objective: "lead",
+              cycle: { start: dayKey(29), end: dayKey(-1), days: 31, elapsed: 30, goal: 120, budget: 4500, spent: 4230, results: 71, cost: 59.58, goal_cost: 37.5, expected: 4354.84, status: "bad" },
+              period: { spend: 4230, results: 71, impressions: 182400, clicks: 3120, cost: 59.58 },
+              previous: { spend: 4410, results: 118, cost: 37.37 },
+            },
+          ],
+        },
+        {
+          client: "Norte Coffee", open: 3, severe: 1,
+          items: [{ topic: "Problemas / reclamações", product: "Make Ads", title: "Leads frios, não respondem no WhatsApp", severity: 1, status: "Aberto", open: true }],
+          campaigns: [
+            {
+              name: "Conversas · Loja", platform: "meta", product: "Make Ads", status: "active", objective: "message",
+              cycle: { start: dayKey(29), end: dayKey(-1), days: 31, elapsed: 30, goal: 300, budget: 3000, spent: 2890, results: 342, cost: 8.45, goal_cost: 10, expected: 2903.23, status: "good" },
+              period: { spend: 2890, results: 342, impressions: 96500, clicks: 2210, cost: 8.45 },
+              previous: { spend: 2950, results: 311, cost: 9.49 },
+            },
+          ],
+        },
+      ],
+      without: ["Forma Living"],
+    },
   };
 }
 function demoContent(): ReportContent {
@@ -1354,6 +1467,31 @@ function demoContent(): ReportContent {
         title: "Social Leads",
         paragraphs: ["As artes com a marca errada voltaram em 2 clientes; a agência prometeu refazer as artes sem custo, e o prazo já passou."],
         bullets: ["Norte Coffee: entregar as artes refeitas."],
+      },
+    ],
+    crossings: [
+      {
+        client: "Aurora Studio",
+        product: "Make Ads",
+        problem: "Reclamou que os leads caíram em setembro e quer entender o motivo antes da próxima verba.",
+        evidence: "Os números confirmam: 71 de 120 leads no ciclo, CPL de R$ 59,58 contra a meta de R$ 37,50, e 40% menos leads que no período anterior, com o gasto no ritmo.",
+        solution: "Trocar os criativos em fadiga e revisar a segmentação esta semana; levar o diagnóstico com os números para a reunião antes de pedir a próxima verba.",
+        priority: "alta",
+      },
+      {
+        client: "Norte Coffee",
+        product: "Make Ads",
+        problem: "Diz que os leads chegam frios e não respondem no WhatsApp.",
+        evidence: "A campanha está acima da meta: 342 conversas de 300, custo por conversa de R$ 8,45 contra R$ 10,00. O volume não é o problema.",
+        solution: "Olhar a qualidade e o atendimento: revisar com o cliente o tempo de resposta às conversas e ajustar a pergunta de qualificação do anúncio.",
+        priority: "média",
+      },
+      {
+        client: "Forma Living",
+        problem: "Cobrou dois dias sem resposta no grupo (gravidade crítica).",
+        evidence: "Não tem campanha com ciclo no período; a queixa é de atendimento, não de mídia.",
+        solution: "Responder hoje e combinar um responsável fixo pelo grupo.",
+        priority: "alta",
       },
     ],
     actions: [

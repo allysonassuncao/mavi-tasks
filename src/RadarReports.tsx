@@ -5,6 +5,7 @@ import { Empty, Modal } from "./components";
 import type { Snapshot } from "./types";
 import {
   WEEKDAYS,
+  campaignCells,
   dateBr,
   deleteReport,
   deleteSchedule,
@@ -715,6 +716,88 @@ function ReportView({
                   </section>
                 );
               })}
+              {((c?.crossings?.length ?? 0) > 0 || (m?.campaigns?.clients.length ?? 0) > 0) && (
+                <section className="radar-report-section">
+                  <h4>Radar × Campanhas</h4>
+                  <p className="muted radar-report-hint">
+                    O que foi dito nas reuniões e no WhatsApp ao lado dos números das campanhas do mesmo cliente.
+                  </p>
+                  {c?.crossings?.map((x, i) => (
+                    <article key={i} className="radar-cross" style={{ "--status": PRIORITY_COLORS[x.priority] } as CSSProperties}>
+                      <header>
+                        <strong>{x.client}</strong>
+                        {x.product && <small className="muted">{x.product}</small>}
+                        <span className="radar-status" style={{ "--status": PRIORITY_COLORS[x.priority] } as CSSProperties}>
+                          {x.priority}
+                        </span>
+                      </header>
+                      <dl>
+                        <div>
+                          <dt>O que foi dito</dt>
+                          <dd>{x.problem}</dd>
+                        </div>
+                        {x.evidence && (
+                          <div>
+                            <dt>O que as campanhas mostram</dt>
+                            <dd>{x.evidence}</dd>
+                          </div>
+                        )}
+                        {x.solution && (
+                          <div className="radar-cross-solution">
+                            <dt>Solução</dt>
+                            <dd>{x.solution}</dd>
+                          </div>
+                        )}
+                      </dl>
+                    </article>
+                  ))}
+                  {m?.campaigns && m.campaigns.clients.length > 0 && (
+                    <div className="radar-report-scroll">
+                      <table className="radar-report-table">
+                        <thead>
+                          <tr>
+                            <th>Cliente · campanha</th>
+                            <th>Ciclo</th>
+                            <th>Custo × meta</th>
+                            <th>Gasto do ciclo</th>
+                            <th>No período</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {m.campaigns.clients.flatMap((k) =>
+                            k.campaigns.map((x, n) => {
+                              const cells = campaignCells(x);
+                              return (
+                                <tr key={`${k.client}-${n}`}>
+                                  <td>
+                                    <strong>{k.client}</strong> · {cells.name}
+                                    <small className="muted">{cells.meta}</small>
+                                  </td>
+                                  <td>
+                                    {cells.goal}
+                                    <small className="muted">{cells.cycle}</small>
+                                  </td>
+                                  <td className={cells.status === "good" ? "radar-good" : cells.status === "bad" ? "radar-late" : undefined}>
+                                    {cells.cost}
+                                  </td>
+                                  <td>{cells.spend}</td>
+                                  <td>{cells.period}</td>
+                                </tr>
+                              );
+                            }),
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {m?.campaigns && (
+                    <p className="muted radar-report-note">
+                      {m.campaigns.without.length > 0 && <>Sem campanha no período: {m.campaigns.without.join(", ")}. </>}
+                      Valores como o cliente contratou.
+                    </p>
+                  )}
+                </section>
+              )}
               {c && c.actions.length > 0 && (
                 <section className="radar-report-section">
                   <h4>Ações sugeridas</h4>

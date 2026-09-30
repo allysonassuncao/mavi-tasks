@@ -27762,6 +27762,61 @@ main:has(> .mavi-chat) > .error-banner {
 .modal.sheet.radar-report-sheet {
   width: 860px;
 }
+.radar-report-hint {
+  margin: 0;
+  font-size: 0.84rem;
+}
+.radar-report-scroll {
+  overflow-x: auto;
+}
+.radar-report-scroll .radar-report-table {
+  min-width: 640px;
+}
+.radar-report-scroll small {
+  display: block;
+}
+.radar-good {
+  color: #2f8a3b;
+  font-weight: 600;
+}
+.radar-cross {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--status, #4a3aa7);
+  border-radius: 10px;
+}
+.radar-cross header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.radar-cross header .radar-status {
+  margin-left: auto;
+  text-transform: capitalize;
+}
+.radar-cross dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.radar-cross dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.radar-cross dd {
+  margin: 2px 0 0;
+  line-height: 1.5;
+}
+.radar-cross-solution dd {
+  font-weight: 600;
+}
 
 /* Radar · Fase 4: como o Radar lê, avisos e histórico */
 .radar-info {

@@ -1,9 +1,9 @@
-import { dateBr, labelsLine, type RadarReportFull } from "./radar";
+import { campaignCells, dateBr, labelsLine, type RadarReportFull } from "./radar";
 
 /**
  * O relatório do Radar em PDF (A4 em pé): o cabeçalho com o período e os
- * filtros, o que a MAVI escreveu (resumo, uma seção por produto, as ações) e
- * as tabelas com os números do banco. O jsPDF só carrega quando alguém baixa.
+ * filtros, o que a MAVI escreveu (resumo, uma seção por produto, o cruzamento
+ * com as campanhas, as ações) e as tabelas com os números do banco. O jsPDF só carrega quando alguém baixa.
  */
 
 type RGB = [number, number, number];
@@ -184,6 +184,50 @@ export async function radarReportPdf(r: RadarReportFull) {
     }
   }
 
+  const chip = (priority: string) => {
+    doc.setFillColor(...(PRIORITY[priority] ?? MUTED));
+    doc.roundedRect(M, y + 0.3, 17, 4.6, 1.2, 1.2, "F");
+    font(7.5, "bold");
+    doc.setTextColor(255, 255, 255);
+    doc.text(priority.toUpperCase(), M + 8.5, y + 3.6, { align: "center" });
+  };
+  const k = m?.campaigns;
+  if (c?.crossings?.length || k?.clients.length) {
+    heading("Radar × Campanhas");
+    for (const x of c?.crossings ?? []) {
+      ensure(22);
+      chip(x.priority);
+      font(10.5, "bold");
+      color(DARK);
+      doc.text(doc.splitTextToSize(`${x.client}${x.product ? ` · ${x.product}` : ""}`, CW - 22)[0] as string, M + 21, y + lh(10.5));
+      y += lh(10.5) + 2.2;
+      const row = (label: string, text: string, style: "normal" | "bold" = "normal") => {
+        if (!text) return;
+        para(label.toUpperCase(), 7.5, "bold", MUTED, M + 4, CW - 4);
+        para(text, 9.5, style, INK, M + 4, CW - 4);
+        y += 1;
+      };
+      row("O que foi dito", x.problem);
+      row("O que as campanhas mostram", x.evidence);
+      row("Solução", x.solution, "bold");
+      y += 2;
+    }
+    if (k?.clients.length) {
+      table(
+        ["Cliente · campanha", "Ciclo", "Custo × meta", "Gasto do ciclo", "No período"],
+        k.clients.flatMap((cl) =>
+          cl.campaigns.map((x) => {
+            const cells = campaignCells(x);
+            const mark = cells.status === "good" ? " (dentro)" : cells.status === "bad" ? " (fora)" : "";
+            return [`${cl.client} · ${cells.name} (${cells.meta})`, `${cells.goal} · ${cells.cycle}`, `${cells.cost}${mark}`, cells.spend, cells.period];
+          }),
+        ),
+        [46, 32, 36, 34, 30],
+      );
+    }
+    if (k) para(`${k.without.length ? `Sem campanha no período: ${k.without.join(", ")}. ` : ""}Valores como o cliente contratou.`, 8.5, "italic", MUTED);
+  }
+
   if (c?.actions.length) {
     heading("Ações sugeridas");
     for (const a of c.actions) {
@@ -191,11 +235,7 @@ export async function radarReportPdf(r: RadarReportFull) {
       const text = `${a.text}${a.product ? ` (${a.product})` : ""}`;
       const lines = doc.splitTextToSize(text, CW - 22) as string[];
       ensure(lines.length * (lh(10) + 0.6) + 2);
-      doc.setFillColor(...(PRIORITY[a.priority] ?? MUTED));
-      doc.roundedRect(M, y + 0.3, 17, 4.6, 1.2, 1.2, "F");
-      font(7.5, "bold");
-      doc.setTextColor(255, 255, 255);
-      doc.text(a.priority.toUpperCase(), M + 8.5, y + 3.6, { align: "center" });
+      chip(a.priority);
       font(10);
       color(INK);
       lines.forEach((line, n) => doc.text(line, M + 21, y + lh(10) + n * (lh(10) + 0.6)));

@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ClientRadarGroups } from "./ClientRadar";
 import {
   backfillCost,
+  campaignCells,
+  change,
   loadAlertRules,
   saveAlertRule,
   clientRadarPath,
@@ -193,5 +195,28 @@ describe("Radar do cliente (demonstração)", () => {
     });
     expect(after).toHaveLength(before.length + 1);
     expect(after.at(-1)!.labels!.product).toBe("Geral / Agência");
+  });
+});
+
+describe("Radar × Campanhas no relatório", () => {
+  it("a campanha em textos curtos: meta, custo × meta, gasto × esperado e o período", () => {
+    const cells = campaignCells({
+      name: "Captação",
+      platform: "meta",
+      product: "Make Ads",
+      status: "inactive",
+      objective: "lead",
+      cycle: { start: "2026-09-01", end: "2026-09-30", days: 30, elapsed: 30, goal: 120, budget: 4500, spent: 4230, results: 71, cost: 59.58, goal_cost: 37.5, expected: 4500, status: "bad" },
+      period: { spend: 4230, results: 71, impressions: 1, clicks: 1, cost: 59.58 },
+      previous: { spend: 4410, results: 118, cost: 37.37 },
+    });
+    expect(cells.meta).toBe("Meta · Make Ads · inativa");
+    expect(cells.goal).toBe("71 de 120 leads");
+    expect(cells.cycle).toBe("01/09 a 30/09 · dia 30 de 30");
+    expect(cells.cost).toMatch(/^CPL R\$\s59,58 × R\$\s37,50$/);
+    expect(cells.spend).toMatch(/^R\$\s4\.230,00 de R\$\s4\.500,00 · esperado R\$\s4\.500,00$/);
+    expect(cells.period).toMatch(/^71 leads · R\$\s4\.230,00 · -40% vs\. anterior$/);
+    expect(change(5, 0)).toBeNull();
+    expect(change(12, 10)).toBe("+20%");
   });
 });

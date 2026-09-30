@@ -13,7 +13,19 @@ describe("PDF do relatório do Radar", () => {
     expect(pdf).toContain("RADAR DO CLIENTE");
     expect(pdf).toContain("Temas com mais clientes");
     expect(pdf).toContain("sugeridas");
+    expect(pdf).toContain("Campanhas");
+    expect(pdf).toContain("O QUE AS CAMPANHAS MOSTRAM");
+    expect(pdf).toContain("Sem campanha no per");
     expect(pdf).toMatch(new RegExp(`\\(1 de ${doc.getNumberOfPages()}\\)`));
+  });
+
+  it("relatório antigo, sem campanhas nem cruzamentos, continua saindo", async () => {
+    const report = await loadReport("demo-agency", "demo-report-1");
+    const { campaigns: _k, ...material } = report.material!; // eslint-disable-line @typescript-eslint/no-unused-vars
+    const { crossings: _c, ...content } = report.content!; // eslint-disable-line @typescript-eslint/no-unused-vars
+    const pdf = (await radarReportPdf({ ...report, material, content })).output();
+    expect(pdf).not.toContain("O QUE AS CAMPANHAS MOSTRAM");
+    expect(pdf).toContain("sugeridas");
   });
 
   it("relatório sem texto (ainda na fila) não quebra", async () => {

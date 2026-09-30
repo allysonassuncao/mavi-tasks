@@ -8,6 +8,8 @@
 // por tópico e produto, a tarefa ligada ao item e a fonte nos Dashboards.
 // Fase 3 (migration 20261231090000): o relatório da MAVI, pedido e agendado.
 // Fase 4 (migration 20270101090000): os avisos por regra pessoal e o histórico.
+// Radar × Campanhas (migration 20270123090000): o relatório leva as campanhas
+// dos mesmos clientes, só para quem vê Campanhas.
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
@@ -748,6 +750,34 @@ await check("item sem tema também acorda o worker", async () => {
 });
 
 // ------------------------------------------------------------ Fase 3
+// Campanhas do cliente: Tráfego (com um ciclo antigo para o período anterior)
+// e Social (fora do filtro de produtos do relatório).
+const [{ id: kTrafego }] = await sql(`select id from contracts where client_id = $1 and product_id = $2`, [client, trafego]);
+const [{ id: kSocial }] = await sql(`select id from contracts where client_id = $1 and product_id = $2`, [client, social]);
+const [{ id: adLeads }] = await sql(
+  `insert into ad_campaigns(company_id, contract_id, name, platform, status, created_by)
+   values ($1,$2,'Leads 4282','meta','active',$3) returning id`, [A, kTrafego, admin]);
+const [{ id: adSocial }] = await sql(
+  `insert into ad_campaigns(company_id, contract_id, name, platform, status, created_by)
+   values ($1,$2,'Alcance Social','meta','active',$3) returning id`, [A, kSocial, admin]);
+const [{ id: oldCycle }] = await sql(
+  `insert into ad_cycles(company_id, campaign_id, competence_month, start_date, end_date, objective, goal_results, budget, created_by)
+   values ($1,$2,'2025-12-01','2025-12-01','2025-12-31','lead',50,1000,$3) returning id`, [A, adLeads, admin]);
+const [{ id: nowCycle, start }] = await sql(
+  `insert into ad_cycles(company_id, campaign_id, competence_month, start_date, end_date, objective, goal_results, budget, multiplier, created_by)
+   select $1, $2, date_trunc('month', d)::date, d - 10, d + 19, 'lead', 100, 3000, 1.5, $3
+   from (select (now() at time zone 'America/Sao_Paulo')::date as d) x returning id, start_date::text as start`,
+  [A, adLeads, admin]);
+const [{ id: socialCycle }] = await sql(
+  `insert into ad_cycles(company_id, campaign_id, competence_month, start_date, end_date, objective, goal_results, budget, created_by)
+   select $1, $2, date_trunc('month', d)::date, d - 10, d + 19, 'engagement', 10, 500, $3
+   from (select (now() at time zone 'America/Sao_Paulo')::date as d) x returning id`, [A, adSocial, admin]);
+await sql(
+  `insert into ad_daily_metrics(company_id, campaign_id, cycle_id, day, multiplier, spend, impressions, clicks, conversions, source)
+   values ($1,$2,$3,$4::date + 1,1.5,100,5000,80,4,'meta'),($1,$2,$3,$4::date + 2,1.5,50,2000,30,1,'meta'),
+    ($1,$2,$5,'2025-12-20',1,80,900,20,8,'meta'),($1,$6,$7,$4::date + 1,1,40,100,5,2,'meta')`,
+  [A, adLeads, nowCycle, start, oldCycle, adSocial, socialCycle]);
+
 let report;
 await check("pedir um relatório: fica na fila, acorda o worker e a tela sabe", async () => {
   await sql(`delete from net.requests`);
@@ -789,6 +819,24 @@ await check("o worker recebe os números do período e o texto vira o relatório
   assert.ok(m.severe.some((i) => i.title === "Atraso na aprovação das artes" && i.severity === 3));
   assert.ok(m.clients[0].client === "4282");
   assert.ok(m.new_items.length >= 3);
+  // Radar × Campanhas: o cliente com os itens e só a campanha do produto filtrado.
+  assert.equal(m.campaigns.money, "com M");
+  assert.deepEqual(m.campaigns.without, []);
+  const [k] = m.campaigns.clients;
+  assert.equal(k.client, "4282");
+  assert.ok(k.items.length >= 1 && k.items.length <= 6);
+  assert.ok(k.items.some((i) => i.title === "Atraso na aprovação das artes" && i.open));
+  assert.deepEqual(k.campaigns.map((x) => x.name), ["Leads 4282"]);
+  const ad = k.campaigns[0];
+  assert.deepEqual([ad.platform, ad.product, ad.status, ad.objective], ["meta", "Tráfego", "active", "lead"]);
+  assert.deepEqual(
+    [ad.cycle.start, ad.cycle.days, ad.cycle.elapsed, ad.cycle.goal, ad.cycle.budget, ad.cycle.spent, ad.cycle.results,
+      ad.cycle.cost, ad.cycle.goal_cost, ad.cycle.status],
+    [start, 30, 11, 100, 3000, 225, 5, 45, 30, "bad"],
+  );
+  assert.equal(ad.cycle.expected, 1100);
+  assert.deepEqual(ad.period, { spend: 225, results: 5, impressions: 7000, clicks: 110, cost: 45 });
+  assert.deepEqual(ad.previous, { spend: 80, results: 8, cost: 10 });
   await as(null);
   assert.deepEqual(await rpc("ai_radar_report_claim", [SECRET, 2]), [], "reservado não sai de novo");
   const [row] = await sql(`select status, attempts, material is not null as has from radar_reports where id = $1`, [report.id]);
@@ -1178,6 +1226,22 @@ await check("colaborador com o Radar ligado: tudo nos clientes dele, sem configu
       [A, client],
     );
     assert.ok(material.clients.every((c) => c.client !== "9001"));
+    // Sem o módulo Campanhas ligado, o relatório dele não leva as campanhas; o do líder leva.
+    await as(null);
+    const claimed = await rpc("ai_radar_report_claim", [SECRET, 5]);
+    const mineClaim = claimed.find((x) => x.id === mineReport.id);
+    assert.ok(mineClaim && !("campaigns" in mineClaim.material), "sem Campanhas, sem campanhas no relatório");
+    assert.ok(claimed.some((x) => x.title === "Do líder" && x.material.campaigns.clients.length > 0));
+    await as(admin);
+    await rpc("set_member_pages", [A, member, ["overview", "dashboards"]]);
+    await as(member);
+    const withAds = await rpc("request_radar_report", [A, "2026-01-01", "2026-12-31", "{}", "Com campanhas"]);
+    await as(null);
+    const again = (await rpc("ai_radar_report_claim", [SECRET, 5])).find((x) => x.id === withAds.id);
+    assert.ok(again.material.campaigns.clients.every((c) => c.client === "4282"), "com Campanhas, só nos clientes dele");
+    await as(admin);
+    await rpc("set_member_pages", [A, member, ["overview", "campaigns", "dashboards"]]);
+    await as(member);
     // Avisos: com o cliente dele, sim; com outro, não.
     await rpc("save_radar_alert_rule", [A, JSON.stringify({ name: "Meu cliente", events: ["new"], client_id: client })]);
     await rejects(
