@@ -156,6 +156,13 @@ export type DriveRequest =
   /** Where the browser stores a thumbnail it made (WebP, up to 1 MB). */
   | { action: "sign-thumb"; file: string; type?: string }
   | { action: "public"; token: string; inline?: boolean }
+  /**
+   * Thumbnails on a public link (a folder's, or a file's own: then no
+   * files are needed). No sign-in; nothing is logged.
+   */
+  | { action: "public-thumbs"; token: string; files?: string[] }
+  /** A public link storing the thumbnail still missing for one of its files. */
+  | { action: "public-sign-thumb"; token: string; file: string; type?: string }
   /** A file inside a publicly shared folder (or one of its subfolders). */
   | {
       action: "public-folder-file";
@@ -203,6 +210,85 @@ export async function handleDrive(
   const creds = env.credentials;
   const isId = (v: unknown): v is string =>
     typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
+  const isToken = (v: unknown): v is string =>
+    typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+  const thumbIds = () =>
+    Array.isArray(req.files)
+      ? [...new Set(req.files.filter(isId))].slice(0, THUMBS_PER_REQUEST)
+      : [];
+  // A thumbnail keeps the same URL for the whole hour, so the browser cache
+  // serves it again while the folder is browsed; a file still without one
+  // gets a short link for the browser to draw it.
+  const thumbsBody = (
+    sources: { id: string; path: string; ready: boolean }[],
+  ) => {
+    const now = new Date();
+    const hour = new Date(Math.floor(now.getTime() / 3600000) * 3600000);
+    return {
+      status: 200,
+      body: {
+        thumbs: Object.fromEntries(
+          sources.map((s) => [
+            s.id,
+            {
+              ready: s.ready,
+              url: signGcsUrl(
+                creds,
+                env.bucket,
+                s.path,
+                "GET",
+                s.ready
+                  ? { now: hour, expiresInSeconds: 7200 }
+                  : { now, expiresInSeconds: 900 },
+              ),
+            },
+          ]),
+        ),
+      },
+    };
+  };
+  // WebP; JPEG from browsers that cannot encode WebP.
+  const thumbUpload = (path: string) => {
+    const contentType = req.type === "image/jpeg" ? "image/jpeg" : "image/webp";
+    return {
+      status: 200,
+      body: {
+        url: signGcsUrl(creds, env.bucket, path, "PUT", {
+          contentType,
+          headers: THUMB_UPLOAD_HEADERS,
+        }),
+        headers: { "Content-Type": contentType, ...THUMB_UPLOAD_HEADERS },
+      },
+    };
+  };
+
+  if (req.action === "public-thumbs") {
+    if (!isToken(req.token)) return fail(404, "Link inválido.");
+    const sources = await callRpc<
+      { id: string; path: string; ready: boolean }[]
+    >(env, fetchImpl, null, "drive_public_thumb_sources", {
+      p_token: req.token,
+      p_files: thumbIds(),
+    });
+    if (!sources.ok) return fail(sources.status, sources.error);
+    return thumbsBody(sources.data);
+  }
+
+  if (req.action === "public-sign-thumb") {
+    if (!isToken(req.token) || !isId(req.file))
+      return fail(404, "Link inválido.");
+    const target = await callRpc<{ path: string }[]>(
+      env,
+      fetchImpl,
+      null,
+      "drive_public_thumb_target",
+      { p_token: req.token, p_file: req.file },
+    );
+    const file = target.ok ? target.data[0] : undefined;
+    if (!file) return fail(403, "Envio não autorizado.");
+    return thumbUpload(file.path);
+  }
+
 
   if (req.action === "public-upload") {
     if (typeof req.token !== "string" || !/^[0-9a-f]{64}$/.test(req.token))
@@ -279,40 +365,13 @@ export async function handleDrive(
     return fail(401, "Autenticação necessária.");
 
   if (req.action === "thumbs") {
-    const ids = Array.isArray(req.files)
-      ? [...new Set(req.files.filter(isId))].slice(0, THUMBS_PER_REQUEST)
-      : [];
+    const ids = thumbIds();
     if (!ids.length) return { status: 200, body: { thumbs: {} } };
     const sources = await callRpc<
       { id: string; path: string; ready: boolean }[]
     >(env, fetchImpl, authorization, "drive_thumb_sources", { p_files: ids });
     if (!sources.ok) return fail(sources.status, sources.error);
-    // A thumbnail keeps the same URL for the whole hour, so the browser
-    // cache serves it again while the folder is browsed.
-    const now = new Date();
-    const hour = new Date(Math.floor(now.getTime() / 3600000) * 3600000);
-    return {
-      status: 200,
-      body: {
-        thumbs: Object.fromEntries(
-          sources.data.map((s) => [
-            s.id,
-            {
-              ready: s.ready,
-              url: signGcsUrl(
-                creds,
-                env.bucket,
-                s.path,
-                "GET",
-                s.ready
-                  ? { now: hour, expiresInSeconds: 7200 }
-                  : { now, expiresInSeconds: 900 },
-              ),
-            },
-          ]),
-        ),
-      },
-    };
+    return thumbsBody(sources.data);
   }
 
   if (req.action === "brand-urls") {
@@ -350,18 +409,7 @@ export async function handleDrive(
     );
     const file = target.ok ? target.data[0] : undefined;
     if (!file) return fail(403, "Sem acesso a este arquivo.");
-    // WebP; JPEG from browsers that cannot encode WebP.
-    const contentType = req.type === "image/jpeg" ? "image/jpeg" : "image/webp";
-    return {
-      status: 200,
-      body: {
-        url: signGcsUrl(creds, env.bucket, file.path, "PUT", {
-          contentType,
-          headers: THUMB_UPLOAD_HEADERS,
-        }),
-        headers: { "Content-Type": contentType, ...THUMB_UPLOAD_HEADERS },
-      },
-    };
+    return thumbUpload(file.path);
   }
 
   if (req.action === "sign-upload") {

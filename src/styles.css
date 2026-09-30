@@ -8412,6 +8412,39 @@ label .input-control .ui-input {
   color: #8f9e80;
   font-size: 0.85rem;
 }
+/* Files of a public link as thumbnail cards (DriveThumb.tsx). */
+.public-folder-card:has(.public-folder-files) {
+  max-width: 920px;
+}
+.public-folder-files {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.public-folder-files .drive-card-name {
+  font-weight: 600;
+}
+.public-folder-file-foot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.public-folder-file-foot .drive-card-meta {
+  flex: 1;
+  min-width: 0;
+}
+.public-folder-file-foot .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+.public-file-card .drive-card-meta {
+  letter-spacing: 0;
+  font-size: 0.7rem;
+  color: #8e9a95;
+}
+.public-file-preview .drive-thumb.card {
+  border: 1px solid var(--border);
+}
 
 /* Template fields: filling in (CustomFieldsForm.tsx). */
 .custom-fields {

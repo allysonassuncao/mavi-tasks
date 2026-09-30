@@ -363,6 +363,84 @@ await check(
   },
 );
 
+// ------------------------------------- thumbnails on public links (20270108)
+const publicSources = async (token, ids) => {
+  await as(null);
+  return (
+    await db.query(
+      `select * from public.drive_public_thumb_sources($1, $2::uuid[]) order by id`,
+      [token, ids],
+    )
+  ).rows;
+};
+await check(
+  "link público: a pasta mostra as miniaturas dos seus arquivos, e só deles",
+  async () => {
+    await as(admin);
+    const shared = await rpc("set_drive_folder_sharing", [
+      deliveries,
+      true,
+      [],
+    ]);
+    const found = await publicSources(shared.share_token, [
+      photoFile,
+      siblingFile,
+      hugeVideo,
+    ]);
+    const ids = found.map((r) => r.id);
+    assert.ok(ids.includes(photoFile), "arquivo de subpasta");
+    assert.ok(ids.includes(hugeVideo));
+    assert.ok(!ids.includes(siblingFile), "pasta vizinha fica de fora");
+    assert.equal(found.find((r) => r.id === photoFile).ready, true);
+    const [before] = await sql(`select count(*)::int as n from drive_audit`);
+    await as(null);
+    // An existing thumbnail stays; the missing one can be made.
+    assert.deepEqual(
+      await rows("drive_public_thumb_target", [shared.share_token, photoFile]),
+      [],
+    );
+    assert.equal(
+      (await rows("drive_public_thumb_target", [shared.share_token, hugeVideo]))
+        .length,
+      1,
+    );
+    await rpc("set_drive_public_thumb", [shared.share_token, hugeVideo, true]);
+    await assert.rejects(
+      () =>
+        rpc("set_drive_public_thumb", [shared.share_token, siblingFile, true]),
+      /não encontrado/,
+    );
+    const [after] = await sql(`select count(*)::int as n from drive_audit`);
+    assert.equal(after.n, before.n, "nada entra no histórico");
+    await as(admin);
+    const off = await rpc("set_drive_folder_sharing", [deliveries, false, []]);
+    assert.deepEqual(await publicSources(shared.share_token, [photoFile]), []);
+    assert.deepEqual(await publicSources(off.share_token, [photoFile]), []);
+  },
+);
+
+await check(
+  "link público de um arquivo: a miniatura vem pelo token, sem ids",
+  async () => {
+    const [f] = await sql(
+      `update drive_files set visibility='public' where id=$1 returning share_token`,
+      [siblingFile],
+    );
+    const [only] = await publicSources(f.share_token, []);
+    assert.equal(only.id, siblingFile);
+    assert.equal(only.ready, false);
+    // Other files never come through a file's own link.
+    assert.deepEqual(
+      (await publicSources(f.share_token, [photoFile])).map((r) => r.id),
+      [siblingFile],
+    );
+    await sql(`update drive_files set visibility='private' where id=$1`, [
+      siblingFile,
+    ]);
+    assert.deepEqual(await publicSources(f.share_token, []), []);
+  },
+);
+
 await db.close();
 console.log(
   `\n${passed} verificações de compartilhamento de pastas aprovadas.`,

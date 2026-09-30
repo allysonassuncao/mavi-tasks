@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { rpc } from "./api";
 import { driveServer } from "./drive";
 import type { DriveFile } from "./types";
@@ -168,14 +168,32 @@ export async function makeThumb(kind: ThumbKind, source: File | string) {
   return kind === "image" ? imageThumb(blob) : pdfThumb(blob);
 }
 
-async function storeThumb(id: string, thumb: Blob) {
+/**
+ * A public link (/pasta or /arquivo) has no sign-in: its token stands for
+ * the person (20270108090000_drive_public_thumbnails).
+ */
+function markThumb(id: string, ready: boolean, token?: string) {
+  return token
+    ? rpc("set_drive_public_thumb", {
+        p_token: token,
+        p_file: id,
+        p_ready: ready,
+      })
+    : rpc("set_drive_thumb", { p_file: id, p_ready: ready });
+}
+
+async function storeThumb(id: string, thumb: Blob, token?: string) {
   const { url, headers } = await driveServer<{
     url: string;
     headers: Record<string, string>;
-  }>({ action: "sign-thumb", file: id, type: thumb.type });
+  }>(
+    token
+      ? { action: "public-sign-thumb", token, file: id, type: thumb.type }
+      : { action: "sign-thumb", file: id, type: thumb.type },
+  );
   const res = await fetch(url, { method: "PUT", headers, body: thumb });
   if (!res.ok) throw Error(`Falha ao guardar a miniatura (${res.status}).`);
-  await rpc("set_drive_thumb", { p_file: id, p_ready: true });
+  await markThumb(id, true, token);
 }
 
 // -------------------------------------------------------------------- store
@@ -184,7 +202,7 @@ const shown = new Map<string, { url: string; until: number }>();
 /** Files still without a thumbnail: the signed URL of the file itself. */
 const sources = new Map<
   string,
-  { kind: ThumbKind; url: string; until: number }
+  { kind: ThumbKind; url: string; until: number; token?: string }
 >();
 /** Asked recently and nothing to show (other types, failed ones). */
 const nothing = new Map<string, number>();
@@ -229,6 +247,7 @@ async function makeAndStore(
   id: string,
   kind: ThumbKind,
   source: File | string,
+  token?: string,
 ) {
   let thumb: Blob;
   try {
@@ -239,23 +258,22 @@ async function makeAndStore(
     // (connection, an expired link) is tried again in a minute.
     const unreadable = e instanceof Unreadable;
     nothing.set(id, Date.now() + (unreadable ? 3600000 : 60000));
-    if (unreadable)
-      await rpc("set_drive_thumb", { p_file: id, p_ready: false });
+    if (unreadable) await markThumb(id, false, token);
     throw e;
   }
   // Seen right away; stored for the next visits.
   sources.delete(id);
   show(id, URL.createObjectURL(thumb), Infinity);
-  await storeThumb(id, thumb);
+  await storeThumb(id, thumb, token);
 }
 
 /** Right after an upload, from the file still in memory. */
-export function thumbAfterUpload(id: string, file: File) {
+export function thumbAfterUpload(id: string, file: File, token?: string) {
   const kind = thumbKind({
     content_type: file.type,
     size_bytes: file.size,
   });
-  if (kind) enqueue(id, () => makeAndStore(id, kind, file));
+  if (kind) enqueue(id, () => makeAndStore(id, kind, file, token));
 }
 
 /** Whether the file has no thumbnail yet but the browser can draw one. */
@@ -266,10 +284,28 @@ export const canDraw = (id: string) =>
 export function drawWhenSeen(id: string) {
   const source = sources.get(id);
   if (source && canDraw(id) && !fresh(id))
-    enqueue(id, () => makeAndStore(id, source.kind, source.url));
+    enqueue(id, () => makeAndStore(id, source.kind, source.url, source.token));
 }
 
-async function request(files: ThumbFile[]) {
+/** One answer of /api/drive: the thumbnail, or the file to draw it from. */
+function ingest(
+  id: string,
+  kind: ThumbKind | null,
+  t: { url: string; ready: boolean } | undefined,
+  now: number,
+  token?: string,
+) {
+  // A signed thumbnail URL lasts at least an hour.
+  if (t?.ready) show(id, t.url, now + 55 * 60000);
+  // The file's own URL lasts 15 minutes.
+  else if (t && kind)
+    sources.set(id, { kind, url: t.url, until: now + 14 * 60000, token });
+  else nothing.set(id, now + 10 * 60000);
+}
+
+type Thumbs = { thumbs: Record<string, { url: string; ready: boolean }> };
+
+async function request(files: ThumbFile[], token?: string) {
   const now = Date.now();
   const wanted = files.filter(
     (f) =>
@@ -280,20 +316,15 @@ async function request(files: ThumbFile[]) {
   );
   if (!wanted.length) return;
   wanted.forEach((f) => inFlight.add(f.id));
+  const ids = wanted.map((f) => f.id);
   try {
-    const { thumbs } = await driveServer<{
-      thumbs: Record<string, { url: string; ready: boolean }>;
-    }>({ action: "thumbs", files: wanted.map((f) => f.id) });
-    for (const f of wanted) {
-      const t = thumbs[f.id];
-      const kind = thumbKind(f);
-      // A signed thumbnail URL lasts at least an hour.
-      if (t?.ready) show(f.id, t.url, now + 55 * 60000);
-      // The file's own URL lasts 15 minutes.
-      else if (t && kind)
-        sources.set(f.id, { kind, url: t.url, until: now + 14 * 60000 });
-      else nothing.set(f.id, now + 10 * 60000);
-    }
+    const { thumbs } = await driveServer<Thumbs>(
+      token
+        ? { action: "public-thumbs", token, files: ids }
+        : { action: "thumbs", files: ids },
+    );
+    for (const f of wanted)
+      ingest(f.id, thumbKind(f), thumbs[f.id], now, token);
   } catch {
     // Icons stay; the next visit tries again.
     wanted.forEach((f) => nothing.set(f.id, now + 60000));
@@ -303,20 +334,57 @@ async function request(files: ThumbFile[]) {
   }
 }
 
-/**
- * The thumbnails of a list: asks for them once per list and redraws as they
- * arrive. Returns the URL to show for a file, if there is one yet.
- */
-export function useDriveThumbs(files: ThumbFile[]) {
+/** Redraws whoever calls it when a thumbnail arrives. */
+function useThumbUpdates() {
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
     listeners.add(redraw);
     return () => void listeners.delete(redraw);
   }, []);
+}
+
+/**
+ * The thumbnails of a list: asks for them once per list and redraws as they
+ * arrive. Returns the URL to show for a file, if there is one yet. On a
+ * public folder link, `token` is the link's.
+ */
+export function useDriveThumbs(files: ThumbFile[], token?: string) {
+  useThumbUpdates();
   const candidates = files.filter((f) => thumbKind(f));
   const key = candidates.map((f) => f.id).join(",");
   useEffect(() => {
-    if (candidates.length) void request(candidates);
-  }, [key]);
+    if (candidates.length) void request(candidates, token);
+  }, [key, token]);
   return (id: string) => fresh(id);
+}
+
+/**
+ * The thumbnail of a file's own public link (/arquivo/<token>): the page
+ * does not know the file's id, the link answers with it.
+ */
+export function usePublicFileThumb(
+  token: string,
+  file: Pick<DriveFile, "content_type" | "size_bytes"> | null,
+) {
+  useThumbUpdates();
+  const [id, setId] = useState<string>();
+  const kind = file ? thumbKind(file) : null;
+  useEffect(() => {
+    if (!kind) return;
+    let alive = true;
+    const now = Date.now();
+    driveServer<Thumbs>({ action: "public-thumbs", token })
+      .then(({ thumbs }) => {
+        const [entry] = Object.entries(thumbs);
+        if (!alive || !entry) return;
+        ingest(entry[0], kind, entry[1], now, token);
+        setId(entry[0]);
+        emit();
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [token, kind]);
+  return id ? { id, url: fresh(id) } : undefined;
 }

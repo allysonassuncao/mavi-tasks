@@ -4,7 +4,6 @@ import {
   ChevronRight,
   Download,
   Eye,
-  FileText,
   Folder,
   FolderX,
   Upload,
@@ -18,6 +17,8 @@ import {
   uploadToPublicFolder,
 } from "./drive";
 import type { PublicFolderView } from "./types";
+import { DriveThumb, FileTypeIcon } from "./DriveThumb";
+import { thumbAfterUpload, useDriveThumbs } from "./drive-thumbs";
 import "./social-leads-onboarding.css";
 
 /**
@@ -25,7 +26,8 @@ import "./social-leads-onboarding.css";
  * shared folder and its subfolders; files open or download through short
  * signed links, asked for on each click. When the link accepts uploads
  * (e.g. the social proof folder of a Social Leads client), whoever has it
- * sends images, videos, audio or PDFs into the shared folder.
+ * sends images, videos, audio or PDFs into the shared folder. Files show as
+ * thumbnail cards, as in the Drive.
  */
 export function PublicFolder({ token }: { token: string }) {
   const [view, setView] = useState<PublicFolderView | null>(null);
@@ -34,6 +36,7 @@ export function PublicFolder({ token }: { token: string }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [reload, setReload] = useState(0);
+  const thumb = useDriveThumbs(view?.files ?? [], token);
   useEffect(() => {
     void logPublicFolderOpened(token).catch(() => {});
   }, [token]);
@@ -130,56 +133,82 @@ export function PublicFolder({ token }: { token: string }) {
             ) : !view.folders.length && !view.files.length ? (
               <p className="public-folder-empty">Esta pasta está vazia.</p>
             ) : (
-              <ul className="public-folder-list">
-                {view.folders.map((f) => (
-                  <li key={f.id}>
-                    <button
-                      type="button"
-                      className="public-folder-item"
-                      onClick={() => {
-                        setError("");
-                        setFolder(f.id);
-                      }}
-                    >
-                      <Folder
-                        size={18}
-                        fill="currentColor"
-                        fillOpacity={0.18}
-                        aria-hidden="true"
-                      />
-                      <strong>{f.name}</strong>
-                      <ChevronRight size={16} aria-hidden="true" />
-                    </button>
-                  </li>
-                ))}
-                {view.files.map((f) => (
-                  <li key={f.id} className="public-folder-file">
-                    <FileText size={18} aria-hidden="true" />
-                    <span>
-                      <strong>{f.name}</strong>
-                      <small>{formatBytes(f.size_bytes)}</small>
-                    </span>
-                    <Button
-                      className="icon-btn"
-                      aria-label={`Visualizar ${f.name}`}
-                      title="Visualizar"
-                      loading={busy === f.id + ":view"}
-                      onClick={() => void open(f.id, true)}
-                    >
-                      <Eye size={17} />
-                    </Button>
-                    <Button
-                      className="icon-btn"
-                      aria-label={`Baixar ${f.name}`}
-                      title="Baixar"
-                      loading={busy === f.id + ":get"}
-                      onClick={() => void open(f.id, false)}
-                    >
-                      <Download size={17} />
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+              <>
+                {view.folders.length > 0 && (
+                  <ul className="public-folder-list">
+                    {view.folders.map((f) => (
+                      <li key={f.id}>
+                        <button
+                          type="button"
+                          className="public-folder-item"
+                          onClick={() => {
+                            setError("");
+                            setFolder(f.id);
+                          }}
+                        >
+                          <Folder
+                            size={18}
+                            fill="currentColor"
+                            fillOpacity={0.18}
+                            aria-hidden="true"
+                          />
+                          <strong>{f.name}</strong>
+                          <ChevronRight size={16} aria-hidden="true" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {view.files.length > 0 && (
+                  <ul className="drive-cards public-folder-files">
+                    {view.files.map((f) => (
+                      <li key={f.id} className="drive-card">
+                        <div className="drive-card-head">
+                          <FileTypeIcon file={f} size={16} />
+                          <strong className="drive-card-name" title={f.name}>
+                            {f.name}
+                          </strong>
+                        </div>
+                        <button
+                          type="button"
+                          className="drive-card-preview"
+                          aria-label={`Visualizar ${f.name}`}
+                          onClick={() => void open(f.id, true)}
+                        >
+                          <DriveThumb
+                            file={f}
+                            url={thumb(f.id)}
+                            variant="card"
+                          />
+                        </button>
+                        <div className="public-folder-file-foot">
+                          <small className="drive-card-meta">
+                            {formatBytes(f.size_bytes)}
+                          </small>
+                          <Button
+                            className="icon-btn"
+                            aria-label={`Visualizar ${f.name}`}
+                            title="Visualizar"
+                            loading={busy === f.id + ":view"}
+                            onClick={() => void open(f.id, true)}
+                          >
+                            <Eye size={16} />
+                          </Button>
+                          <Button
+                            className="icon-btn"
+                            aria-label={`Baixar ${f.name}`}
+                            title="Baixar"
+                            loading={busy === f.id + ":get"}
+                            onClick={() => void open(f.id, false)}
+                          >
+                            <Download size={16} />
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
             )}
           </>
         )}
@@ -209,11 +238,13 @@ function PublicUpload({
       const key = `${Date.now()}-${file.name}`;
       setItems((l) => [...l, { key, name: file.name, progress: 0 }]);
       try {
-        await uploadToPublicFolder(token, file, (progress) =>
+        const id = await uploadToPublicFolder(token, file, (progress) =>
           setItems((l) =>
             l.map((x) => (x.key === key ? { ...x, progress } : x)),
           ),
         );
+        // The thumbnail comes from the file still in this browser.
+        thumbAfterUpload(id, file, token);
         setItems((l) => l.filter((x) => x.key !== key));
         setSent((n) => n + 1);
         onSent();

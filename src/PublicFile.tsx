@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Download, Eye, FileWarning } from "lucide-react";
 import { Button, Loading } from "./ui";
 import { formatBytes, openPublicFile } from "./drive";
+import { DriveThumb } from "./DriveThumb";
+import { usePublicFileThumb } from "./drive-thumbs";
 
 /** Public share page (/arquivo/<token>): works without signing in. */
 export function PublicFile({ token }: { token: string }) {
@@ -12,6 +14,7 @@ export function PublicFile({ token }: { token: string }) {
   } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const thumb = usePublicFileThumb(token, file);
   useEffect(() => {
     openPublicFile(token)
       .then((f) => {
@@ -55,6 +58,20 @@ export function PublicFile({ token }: { token: string }) {
           </div>
         ) : file ? (
           <>
+            {thumb && (
+              <button
+                type="button"
+                className="drive-card-preview public-file-preview"
+                aria-label={`Visualizar ${file.name}`}
+                onClick={() => void open(true)}
+              >
+                <DriveThumb
+                  file={{ ...file, id: thumb.id }}
+                  url={thumb.url}
+                  variant="card"
+                />
+              </button>
+            )}
             <small>ARQUIVO COMPARTILHADO</small>
             <h1>{file.name}</h1>
             <p>{formatBytes(file.size_bytes)}</p>

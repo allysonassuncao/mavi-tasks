@@ -280,9 +280,14 @@ describe("handleDrive", () => {
     expect(res.status).toBe(200);
     const [url, init] = (fetchMock as any).mock.calls[0];
     expect(url).toBe("https://db.example.com/rest/v1/rpc/brand_asset_targets");
-    expect(JSON.parse(init.body)).toEqual({ p_company: company, p_client: client });
+    expect(JSON.parse(init.body)).toEqual({
+      p_company: company,
+      p_client: client,
+    });
     const urls = res.body.urls as Record<string, string>;
-    expect(new URL(urls[fileId]).pathname).toBe(`/drive-bucket/drive/c/${fileId}`);
+    expect(new URL(urls[fileId]).pathname).toBe(
+      `/drive-bucket/drive/c/${fileId}`,
+    );
     const bad = await handleDrive(
       { action: "brand-urls", company, client: "../x" },
       "Bearer user-token",
@@ -305,5 +310,62 @@ describe("handleDrive", () => {
     expect(new URL(fetchMock.mock.calls[2][0]).pathname).toBe(
       "/drive-bucket/drive/c/f.thumb.webp",
     );
+  });
+  it("miniaturas de link público: anônimo, com o token e sem registrar nada", async () => {
+    const fetchMock = rpcReply([
+      { id: fileId, path: `drive/c/${fileId}.thumb.webp`, ready: true },
+    ]);
+    const res = await handleDrive(
+      { action: "public-thumbs", token: "c".repeat(64), files: [fileId, "x"] },
+      null,
+      env,
+      fetchMock,
+    );
+    expect(res.status).toBe(200);
+    const [url, init] = (fetchMock as any).mock.calls[0];
+    expect(url).toBe(
+      "https://db.example.com/rest/v1/rpc/drive_public_thumb_sources",
+    );
+    expect(init.headers.Authorization).toBe("Bearer publishable");
+    expect(JSON.parse(init.body)).toEqual({
+      p_token: "c".repeat(64),
+      p_files: [fileId],
+    });
+    expect(
+      (res.body.thumbs as Record<string, { ready: boolean }>)[fileId].ready,
+    ).toBe(true);
+    const bad = await handleDrive(
+      { action: "public-thumbs", token: "../x" },
+      null,
+      env,
+      fetchMock,
+    );
+    expect(bad.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("link público guarda só a miniatura que o banco autoriza", async () => {
+    const fetchMock = rpcReply([{ path: `drive/c/${fileId}.thumb.webp` }]);
+    const res = await handleDrive(
+      {
+        action: "public-sign-thumb",
+        token: "c".repeat(64),
+        file: fileId,
+        type: "image/jpeg",
+      },
+      null,
+      env,
+      fetchMock,
+    );
+    expect((fetchMock as any).mock.calls[0][0]).toBe(
+      "https://db.example.com/rest/v1/rpc/drive_public_thumb_target",
+    );
+    expect(res.body.headers).toMatchObject({ "Content-Type": "image/jpeg" });
+    const denied = await handleDrive(
+      { action: "public-sign-thumb", token: "c".repeat(64), file: fileId },
+      null,
+      env,
+      rpcReply([]),
+    );
+    expect(denied.status).toBe(403);
   });
 });
