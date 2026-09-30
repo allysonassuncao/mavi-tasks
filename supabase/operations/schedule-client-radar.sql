@@ -5,6 +5,9 @@
 -- - A cada 2 minutos: se há reunião nova (parada há 2 min) ou dia de grupo
 --   com mensagens novas (parado há 10 min, depois da busca de 2 h), acorda o
 --   worker; sem trabalho, não faz nada.
+-- - No mesmo passo, depois das 8h no fuso de cada empresa, uma vez por dia:
+--   os avisos de prazo (amanhã e vencido) e o resumo do dia de quem pediu
+--   (migration 20270101090000). Não precisa de outro agendamento.
 begin;
 create extension if not exists pg_cron;
 create extension if not exists pg_net with schema extensions;

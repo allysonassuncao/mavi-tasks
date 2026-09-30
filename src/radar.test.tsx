@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ClientRadarGroups } from "./ClientRadar";
 import {
+  backfillCost,
+  loadAlertRules,
+  saveAlertRule,
   clientRadarPath,
   loadItem,
   loadTheme,
@@ -144,5 +147,51 @@ describe("Radar do cliente (demonstração)", () => {
     expect(preset.description).toContain("/agencias/make/drive?radar=cl-1&item=demo-5");
     expect(radarTaskPreset(item, { ...data, members: [] }, "u")).toBeNull();
     delete (globalThis as { window?: unknown }).window;
+  });
+
+  it("custo do histórico: pelo custo médio das leituras feitas, ou pelo texto e o preço", () => {
+    const base = {
+      from: "2026-06-01",
+      until: "2026-08-31",
+      oldest: "2026-01-10",
+      meetings: 10,
+      whatsapp_days: 100,
+      meeting_chars: 350_000,
+      whatsapp_chars: 350_000,
+      avg_meeting_cost: 0.1,
+      avg_whatsapp_cost: 0.01,
+      samples: 50,
+      price: null,
+    };
+    const measured = backfillCost(base);
+    expect(measured.signals).toBe(110);
+    expect(measured.measured).toBe(true);
+    // (10 × 0,10 + 100 × 0,01) × 1,1 = 2,2; faixa de ±30%.
+    expect(measured.low).toBeCloseTo(1.54, 5);
+    expect(measured.high).toBeCloseTo(2.86, 5);
+    const guessed = backfillCost({ ...base, samples: 2, price: { input: 1, output: 5 } });
+    expect(guessed.measured).toBe(false);
+    // 700 mil caracteres / 3,5 + 110 × 3.500 = 585 mil de entrada; 77 mil de saída.
+    const total = ((200_000 + 385_000) / 1e6) * 1 + (77_000 / 1e6) * 5;
+    expect(guessed.low).toBeCloseTo(total * 1.1 * 0.7, 5);
+    expect(backfillCost({ ...base, meetings: 0, whatsapp_days: 0 }).high).toBe(0);
+  });
+
+  it("os avisos do Radar ficam guardados por pessoa (demonstração)", async () => {
+    const before = await loadAlertRules(DEMO);
+    const after = await saveAlertRule(DEMO, {
+      name: "Prazos da Forma",
+      topic_id: null,
+      product_id: null,
+      product_none: true,
+      client_id: null,
+      team_id: null,
+      min_severity: null,
+      events: ["due_soon", "overdue"],
+      channel: "digest",
+      active: true,
+    });
+    expect(after).toHaveLength(before.length + 1);
+    expect(after.at(-1)!.labels!.product).toBe("Geral / Agência");
   });
 });

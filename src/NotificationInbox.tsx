@@ -112,7 +112,7 @@ export function NotificationInbox({
                       <span className="inbox-system" aria-hidden="true">
                         <ListChecks size={15} />
                       </span>
-                    ) : n.kind === "radar_report" ? (
+                    ) : n.kind === "radar_report" || n.kind === "radar_alert" ? (
                       <span className="inbox-system temperature" aria-hidden="true">
                         <Radar size={15} />
                       </span>
@@ -139,6 +139,7 @@ export function NotificationInbox({
                       n.kind === "success_case" ||
                       n.kind === "temperature" ||
                       n.kind === "radar_report" ||
+                      n.kind === "radar_alert" ||
                       n.kind === "tasks_assigned" ||
                       n.kind === "due_risk" ||
                       n.kind === "notice" ? (

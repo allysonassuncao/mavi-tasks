@@ -1,14 +1,19 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Plus, Radar, RotateCcw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, History, Plus, Radar, RotateCcw, Save, Square, Trash2 } from "lucide-react";
 import { Button, Checkbox, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import type { Snapshot } from "./types";
 import {
   KIND_LABELS,
   SPEAKER_LABELS,
+  backfillCost,
   blankTopic,
+  cancelBackfill,
   dateBr,
+  estimateBackfill,
   loadRadarConfig,
   saveRadarTopics,
+  startBackfill,
+  type BackfillEstimate,
   type RadarConfig,
   type RadarField,
   type RadarFieldType,
@@ -164,6 +169,17 @@ export function RadarSettings({
           )}
         </dl>
       </section>
+
+      <BackfillBlock
+        company={company}
+        config={config}
+        notify={notify}
+        onChanged={() =>
+          void loadRadarConfig(company)
+            .then(setConfig)
+            .catch((e) => setError((e as Error).message))
+        }
+      />
 
       <section className="panel thermo-settings-block" aria-label="Tópicos">
         <header>
@@ -524,5 +540,187 @@ function TopicEditor({
         )}
       </div>
     </div>
+  );
+}
+
+const addDays = (key: string, n: number) => {
+  const d = new Date(`${key}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * Painel da MAVI › Radar › Histórico: as reuniões e os dias de grupo de antes
+ * de o Radar ligar. Mostra quantos são e o custo estimado (pelo custo médio
+ * das leituras já feitas) antes de começar; a leitura vai depois das do dia a
+ * dia e pode ser parada.
+ */
+function BackfillBlock({
+  company,
+  config,
+  notify,
+  onChanged,
+}: {
+  company: string;
+  config: RadarConfig;
+  notify: (message: string) => void;
+  onChanged: () => void;
+}) {
+  const start = config.started_at ? config.started_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const [preset, setPreset] = useState("90");
+  const [custom, setCustom] = useState(addDays(start, -90));
+  const [estimate, setEstimate] = useState<BackfillEstimate | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const b = config.backfill;
+  const from =
+    preset === "custom" ? custom : preset === "all" ? (estimate?.oldest ?? addDays(start, -3650)) : addDays(start, -Number(preset));
+  const cost = estimate ? backfillCost(estimate) : null;
+
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="panel thermo-settings-block radar-backfill" aria-label="Histórico">
+      <header>
+        <strong>
+          <History size={15} aria-hidden="true" /> Histórico
+        </strong>
+        <small>
+          O Radar lê o que acontece desde {dateBr(config.started_at)}. As reuniões gravadas e os dias de WhatsApp de
+          antes podem ser lidos também: a MAVI lê um por um, depois das leituras do dia a dia, e o histórico não manda
+          avisos.
+        </small>
+      </header>
+      {b && b.pending > 0 ? (
+        <div className="radar-backfill-status">
+          <p>
+            <strong>Lendo o histórico desde {dateBr(b.from)}</strong>
+            {b.by_name && ` (pedido por ${b.by_name})`}: {b.done} lidas, {b.pending} na fila
+            {b.failed ? `, ${b.failed} com falha` : ""} · custo até agora {money(b.cost)}.
+          </p>
+          <progress max={b.done + b.pending} value={b.done} />
+          <Button
+            className="btn secondary"
+            loading={busy}
+            onClick={() =>
+              run(async () => {
+                const n = await cancelBackfill(company);
+                notify(`Leitura do histórico parada: ${n} ${n === 1 ? "saiu" : "saíram"} da fila.`);
+                onChanged();
+              })
+            }
+          >
+            <Square size={14} aria-hidden="true" /> Parar
+          </Button>
+        </div>
+      ) : (
+        <>
+          {b?.from && (
+            <p className="muted radar-report-note">
+              Histórico desde {dateBr(b.from)} lido ({b.done} leituras, {money(b.cost)}).
+            </p>
+          )}
+          <div className="radar-backfill-form">
+            <label className="thermo-field">
+              <span>Ler desde</span>
+              <Select
+                aria-label="Ler desde"
+                value={preset}
+                onValueChange={(v) => {
+                  setPreset(v);
+                  setEstimate(null);
+                }}
+              >
+                <SelectOption value="30">30 dias antes</SelectOption>
+                <SelectOption value="90">90 dias antes</SelectOption>
+                <SelectOption value="180">6 meses antes</SelectOption>
+                <SelectOption value="365">1 ano antes</SelectOption>
+                <SelectOption value="all">Tudo o que existe</SelectOption>
+                <SelectOption value="custom">Escolher a data</SelectOption>
+              </Select>
+            </label>
+            {preset === "custom" && (
+              <label className="thermo-field">
+                <span>Data</span>
+                <Input
+                  type="date"
+                  value={custom}
+                  max={addDays(start, -1)}
+                  onChange={(e) => {
+                    setCustom(e.target.value);
+                    setEstimate(null);
+                  }}
+                />
+              </label>
+            )}
+            <Button
+              className="btn secondary"
+              loading={busy && !estimate}
+              onClick={() => run(async () => setEstimate(await estimateBackfill(company, preset === "all" ? "1900-01-01" : from)))}
+            >
+              Calcular o custo
+            </Button>
+          </div>
+          {estimate && cost && (
+            <div className="radar-backfill-estimate">
+              <p>
+                <strong>
+                  {estimate.meetings} {estimate.meetings === 1 ? "reunião" : "reuniões"} e {estimate.whatsapp_days}{" "}
+                  {estimate.whatsapp_days === 1 ? "dia" : "dias"} de grupo
+                </strong>{" "}
+                entre {dateBr(preset === "all" ? estimate.oldest : estimate.from)} e {dateBr(estimate.until)}.
+              </p>
+              {cost.signals > 0 ? (
+                <p>
+                  Custo estimado: <strong>{money(cost.low)} a {money(cost.high)}</strong>{" "}
+                  <small className="muted">
+                    (
+                    {cost.measured
+                      ? `pelo custo médio das ${estimate.samples} leituras já feitas`
+                      : "pelo tamanho do texto e o preço do modelo; fica mais preciso depois das primeiras leituras"}
+                    , com os temas e a conferência)
+                  </small>
+                </p>
+              ) : (
+                <p className="muted">Não há nada para ler nesse período.</p>
+              )}
+              {cost.signals > 0 && (
+                <Button
+                  className="btn primary"
+                  loading={busy}
+                  onClick={() =>
+                    run(async () => {
+                      const n = await startBackfill(
+                        company,
+                        preset === "all" ? (estimate.oldest ?? from) : from,
+                      );
+                      notify(`${n} ${n === 1 ? "leitura entrou" : "leituras entraram"} na fila do histórico.`);
+                      setEstimate(null);
+                      onChanged();
+                    })
+                  }
+                >
+                  <History size={15} aria-hidden="true" /> Ler o histórico
+                </Button>
+              )}
+            </div>
+          )}
+        </>
+      )}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }

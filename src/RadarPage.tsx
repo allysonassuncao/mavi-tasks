@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { AlertTriangle, CalendarClock, FileText, Layers, List, RefreshCw, Settings2, X } from "lucide-react";
+import { AlertTriangle, BellRing, CalendarClock, ChevronDown, ChevronUp, FileText, Info, Layers, List, RefreshCw, Settings2, X } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { Empty } from "./components";
 import type { Snapshot } from "./types";
@@ -7,6 +7,7 @@ import { appPath, openInApp } from "./temperature";
 import { RadarItemPanel, SeverityDot } from "./RadarItemPanel";
 import { RadarThemes } from "./RadarThemes";
 import { RadarReports } from "./RadarReports";
+import { RadarAlerts } from "./RadarAlerts";
 import { navigate, useLocation } from "./router";
 import type { FormPreset } from "./forms";
 import {
@@ -90,11 +91,36 @@ export function RadarPage({
   const location = useLocation();
   const [reportLink, setReportLink] = useState<string | null>(null);
   const [view, setView] = useState<View>(initial.view ?? "items");
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  // A explicação de como o Radar lê: aberta até a pessoa fechar.
+  const infoKey = `mavi:radar-info:${company}:${user}`;
+  const [infoOpen, setInfoOpen] = useState(() => {
+    try {
+      return localStorage.getItem(infoKey) !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const toggleInfo = () =>
+    setInfoOpen((v) => {
+      try {
+        localStorage.setItem(infoKey, v ? "closed" : "open");
+      } catch {
+        /* sem armazenamento: só não fica guardado */
+      }
+      return !v;
+    });
   useEffect(() => {
-    const id = new URLSearchParams(location.split("?")[1] ?? "").get("relatorio");
-    if (!id) return;
-    setReportLink(id);
-    setView("reports");
+    const params = new URLSearchParams(location.split("?")[1] ?? "");
+    const id = params.get("relatorio");
+    // ?item=<id>: o aviso de um item do Radar.
+    const item = params.get("item");
+    if (!id && !item) return;
+    if (id) {
+      setReportLink(id);
+      setView("reports");
+    }
+    if (item) setOpen(item);
     navigate(window.location.pathname, true);
   }, [location]);
   // Os itens de um tema (vindo da visão de temas); não fica guardado.
@@ -202,6 +228,7 @@ export function RadarPage({
 
   return (
     <div className="radar-page">
+      <RadarInfo overview={overview} open={infoOpen} onToggle={toggleInfo} />
       <section className="radar-topics" aria-label="Tópicos">
         {overview.topics.map((t) => (
           <button
@@ -234,6 +261,7 @@ export function RadarPage({
         ))}
       </section>
 
+      <div className="radar-view-row">
       <nav className="drive-view radar-view" aria-label="Como ver">
         <button
           type="button"
@@ -260,6 +288,10 @@ export function RadarPage({
           <FileText size={15} aria-hidden="true" /> Relatórios
         </button>
       </nav>
+        <Button className="btn secondary" onClick={() => setAlertsOpen(true)}>
+          <BellRing size={15} aria-hidden="true" /> Meus avisos
+        </Button>
+      </div>
 
       {view === "reports" ? (
         <RadarReports
@@ -517,6 +549,15 @@ export function RadarPage({
         </>
       )}
 
+      {alertsOpen && (
+        <RadarAlerts
+          company={company}
+          data={data}
+          topics={overview.topics}
+          notify={notify}
+          onClose={() => setAlertsOpen(false)}
+        />
+      )}
       {open && (
         <RadarItemPanel
           company={company}
@@ -537,3 +578,100 @@ export function RadarPage({
   );
 }
 
+const ago = (iso: string) => {
+  const min = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  if (min < 60) return min <= 1 ? "há 1 minuto" : `há ${min} minutos`;
+  const h = Math.round(min / 60);
+  if (h < 24) return h === 1 ? "há 1 hora" : `há ${h} horas`;
+  const d = Math.round(h / 24);
+  return d === 1 ? "ontem" : `há ${d} dias`;
+};
+
+/**
+ * Como o Radar lê (e por que há poucos itens no começo): desde quando ele
+ * lê, de quanto em quanto tempo cada fonte entra, o que já foi lido e o
+ * histórico, que pode ser lido no Painel da MAVI.
+ */
+function RadarInfo({
+  overview,
+  open,
+  onToggle,
+}: {
+  overview: RadarOverview;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const r = overview.reading;
+  const queue = Math.max(0, overview.pending - (r?.backfill_pending ?? 0));
+  return (
+    <section className={`panel radar-info${open ? " open" : ""}`} aria-label="Como o Radar lê">
+      <button type="button" className="radar-info-toggle" aria-expanded={open} onClick={onToggle}>
+        <Info size={16} aria-hidden="true" />
+        <span>
+          <strong>Como o Radar lê</strong>
+          <small>
+            {overview.started_at ? `Lendo desde ${dateBr(overview.started_at)}` : "Ainda não começou"}
+            {r && ` · ${r.meetings} ${r.meetings === 1 ? "reunião" : "reuniões"} e ${r.whatsapp} ${r.whatsapp === 1 ? "dia" : "dias"} de grupo lidos`}
+            {r?.last_at && ` · última leitura ${ago(r.last_at)}`}
+          </small>
+        </span>
+        {open ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
+      </button>
+      {open && (
+        <div className="radar-info-body">
+          <ul>
+            <li>
+              <strong>Só entra o que aconteceu depois de o Radar ligar</strong>
+              {overview.started_at ? ` (${dateBr(overview.started_at)})` : ""}. Por isso, nos primeiros dias, aparecem
+              poucos itens: eles vão chegando conforme as reuniões e as conversas acontecem.
+            </li>
+            <li>
+              <strong>Reuniões gravadas:</strong> lidas alguns minutos depois que a transcrição fica pronta.
+            </li>
+            <li>
+              <strong>Grupos de WhatsApp:</strong> lidos a cada busca dos grupos (a cada 2 horas), só nas mensagens
+              novas. Áudio esperando transcrição entra na leitura seguinte.
+            </li>
+            <li>
+              <strong>Temas:</strong> a MAVI junta os itens parecidos de clientes diferentes logo depois das leituras.
+            </li>
+            <li>
+              <strong>Nem toda conversa vira item:</strong> a MAVI só anota o que se encaixa nos tópicos (e quem falou
+              precisa bater: reclamação do cliente, promessa do time).
+            </li>
+            <li>
+              <strong>Histórico:</strong>{" "}
+              {r && r.backfill_pending > 0 ? (
+                <>
+                  a leitura do histórico está em andamento ({r.backfill_pending}{" "}
+                  {r.backfill_pending === 1 ? "leitura na fila" : "leituras na fila"}), depois das do dia a dia.
+                </>
+              ) : overview.backfill_from ? (
+                <>o histórico desde {dateBr(overview.backfill_from)} já foi lido.</>
+              ) : (
+                <>
+                  as reuniões e conversas de antes podem ser lidas em{" "}
+                  <a
+                    href={appPath("/mavi#radar")}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      openInApp("/mavi#radar");
+                    }}
+                  >
+                    Painel da MAVI › Radar
+                  </a>
+                  , com o custo estimado antes de começar.
+                </>
+              )}
+            </li>
+          </ul>
+          {queue > 0 && (
+            <p className="muted">
+              Agora: {queue} {queue === 1 ? "reunião ou conversa na fila" : "reuniões e conversas na fila"} da MAVI.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}

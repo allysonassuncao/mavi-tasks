@@ -7,6 +7,7 @@
 // configuração dos tópicos. Fase 2 (migration 20261230090000): os temas
 // por tópico e produto, a tarefa ligada ao item e a fonte nos Dashboards.
 // Fase 3 (migration 20261231090000): o relatório da MAVI, pedido e agendado.
+// Fase 4 (migration 20270101090000): os avisos por regra pessoal e o histórico.
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
@@ -901,6 +902,176 @@ await check("agendamentos: a próxima vez no fuso, o pedido do período e quem d
   await sql(`update memberships set role = 'manager' where user_id = $1`, [manager]);
   await as(manager);
   assert.deepEqual(await rpc("delete_radar_report_schedule", [A, sched]), []);
+});
+
+// ------------------------------------------------------------ Fase 4
+const newSignal = async (extra = {}) => {
+  const [g] = await sql(`insert into radar_signals(company_id, client_id, source_type, source_id, group_id, title,
+    occurred_at, day, status, dirty_at, claimed_at, backfill)
+    values ($1,$2,'whatsapp',gen_random_uuid(),$3,'Grupo',$4,current_date,'pending',now() - interval '1 hour',now(),$5)
+    returning *`, [A, client, GROUP, extra.at ?? new Date(), extra.backfill ?? false]);
+  return g;
+};
+const alerts = async () => sql(`select user_id, title, body, link from notifications where kind = 'radar_alert' order by created_at, title`);
+let ruleNow;
+await check("avisos por regra pessoal: cada gestor cria os seus, com validação", async () => {
+  // Um teste da Fase 1 escondeu o módulo do gestor.
+  await as(admin);
+  await rpc("set_member_pages", [A, manager, []]);
+  await as(manager);
+  let list = await rpc("save_radar_alert_rule", [A, JSON.stringify({ name: "Reclamações de Tráfego",
+    topic_id: topics.problemas.id, product_id: trafego, events: ["new", "recurring", "reopened"], channel: "now" })]);
+  ruleNow = list[0];
+  assert.deepEqual([ruleNow.labels.topic, ruleNow.labels.product, ruleNow.channel], ["Problemas / reclamações", "Tráfego", "now"]);
+  await as(manager);
+  list = await rpc("save_radar_alert_rule", [A, JSON.stringify({ name: "Prazos (resumo)", topic_id: topics.promessas.id,
+    events: ["due_soon", "overdue", "lixo"], channel: "digest" })]);
+  assert.deepEqual(list[1].events.sort(), ["due_soon", "overdue"]);
+  await as(admin);
+  await rpc("save_radar_alert_rule", [A, JSON.stringify({ name: "Só crítico", min_severity: 3, events: ["new"] })]);
+  await as(manager);
+  await rejects(() => rpc("save_radar_alert_rule", [A, JSON.stringify({ name: "Sem evento", events: [] })]), /ao menos um evento/);
+  await as(manager);
+  await rejects(() => rpc("save_radar_alert_rule", [A, JSON.stringify({ name: "Filtro", client_id: uid(4), events: ["new"] })]),
+    /não encontrado/);
+  await as(member);
+  await rejects(() => rpc("radar_alert_rules", [A]), /Sem permissão/);
+  await as(admin);
+  assert.equal((await rpc("radar_alert_rules", [A])).length, 1, "cada pessoa vê as suas");
+  await sql(`update radar_topics set active = true where company_id = $1`, [A]);
+  await sql(`update radar_topics set off_products = '{}' where company_id = $1`, [A]);
+});
+
+let alertItem;
+await check("item novo, fala nova e reaberto avisam na hora; sem repetir no mesmo dia", async () => {
+  await sql(`delete from notifications where kind = 'radar_alert'`);
+  const g = await newSignal();
+  await store(g.id, { items: [{ topic_id: topics.problemas.id, title: "Relatório atrasado de novo", product_id: trafego,
+    severity: 2, mentions: [{ quote: "cadê o relatório?", role: "client" }] }] });
+  alertItem = (await sql(`select id from radar_items where title = 'Relatório atrasado de novo'`))[0].id;
+  let got = await alerts();
+  assert.equal(got.length, 1, "o administrador pediu só crítico");
+  assert.equal(got[0].user_id, manager);
+  assert.equal(got[0].title, "Problemas / reclamações: Relatório atrasado de novo");
+  assert.match(got[0].body, /^Novo · 4282 · Tráfego · Alta$/);
+  assert.equal(got[0].link, `/radar?item=${alertItem}`);
+  const g2 = await newSignal();
+  await store(g2.id, { items: [{ topic_id: topics.problemas.id, item_id: alertItem, title: "x",
+    mentions: [{ quote: "e o relatório?", role: "client" }] }] });
+  const g3 = await newSignal();
+  await store(g3.id, { items: [{ topic_id: topics.problemas.id, item_id: alertItem, title: "x",
+    mentions: [{ quote: "ainda nada do relatório", role: "client" }] }] });
+  got = await alerts();
+  assert.deepEqual(got.map((n) => n.body.split(" · ")[0]), ["Novo", "Voltou a aparecer"]);
+  await as(manager);
+  await rpc("update_radar_item", [A, alertItem, JSON.stringify({ status: "resolvido" })]);
+  const g4 = await newSignal();
+  await store(g4.id, { items: [{ topic_id: topics.problemas.id, item_id: alertItem, title: "x",
+    mentions: [{ quote: "voltou o atraso", role: "client" }] }] });
+  got = await alerts();
+  assert.equal(got.at(-1).body.split(" · ")[0], "Reabriu");
+});
+
+await check("histórico, fala antiga e módulo escondido não avisam", async () => {
+  await sql(`delete from notifications where kind = 'radar_alert'`);
+  const b = await newSignal({ backfill: true });
+  await store(b.id, { items: [{ topic_id: topics.problemas.id, title: "Problema do histórico", product_id: trafego,
+    mentions: [{ quote: "coisa antiga", role: "client" }] }] });
+  const old = await newSignal({ at: new Date(Date.now() - 5 * 864e5) });
+  await store(old.id, { items: [{ topic_id: topics.problemas.id, title: "Problema de 5 dias", product_id: trafego,
+    mentions: [{ quote: "faz tempo", role: "client" }] }] });
+  assert.deepEqual(await alerts(), []);
+  await as(admin);
+  await rpc("set_member_pages", [A, manager, ["radar"]]);
+  const g = await newSignal();
+  await store(g.id, { items: [{ topic_id: topics.problemas.id, title: "Com o módulo escondido", product_id: trafego,
+    mentions: [{ quote: "hoje", role: "client" }] }] });
+  assert.deepEqual(await alerts(), []);
+  await as(admin);
+  await rpc("set_member_pages", [A, manager, []]);
+});
+
+await check("prazo amanhã e vencido vão para o resumo do dia, que sai uma vez", async () => {
+  await sql(`delete from notifications where kind = 'radar_alert'`);
+  const today = `(now() at time zone 'America/Sao_Paulo')::date`;
+  await sql(`insert into radar_items(company_id, client_id, topic_id, product_id, title, status, due_date, theme_pending)
+    values ($1,$2,$3,$4,'Mandar as artes','pendente',${today} + 1,false),
+           ($1,$2,$3,$4,'Ligar com os números','pendente',${today} - 1,false),
+           ($1,$2,$3,$4,'Já cumprida','cumprida',${today} - 1,false)`,
+    [A, client, topics.promessas.id, trafego]);
+  await sql(`select mavi_private.radar_daily($1)`, [A]);
+  const got = await alerts();
+  assert.equal(got.length, 1);
+  assert.equal(got[0].user_id, manager);
+  assert.equal(got[0].title, "Radar: 2 novidades desde o último resumo");
+  assert.deepEqual(got[0].body.split(" · ").sort(), ["1 prazo amanhã", "1 prazo vencido"]);
+  assert.equal(got[0].link, "/radar");
+  assert.equal((await sql(`select count(*)::int as n from mavi_private.radar_alert_digest`))[0].n, 0);
+  const [{ d }] = await sql(`select daily_on = ${today} as d from radar_settings where company_id = $1`, [A]);
+  assert.equal(d, true);
+  // O tick não roda de novo no mesmo dia.
+  await sql(`select mavi_private.radar_tick()`);
+  assert.equal((await alerts()).length, 1);
+  // No dia seguinte (depois das 8h), roda de novo; antes das 8h, espera.
+  await sql(`update radar_settings set daily_on = ${today} - 1 where company_id = $1`, [A]);
+  await sql(`select mavi_private.radar_tick()`);
+  const [{ h }] = await sql(`select extract(hour from now() at time zone 'America/Sao_Paulo') >= 8 as h`);
+  const [{ ran }] = await sql(`select daily_on = ${today} as ran from radar_settings where company_id = $1`, [A]);
+  assert.equal(ran, h);
+});
+
+await check("histórico: a estimativa, a leitura depois do dia a dia e parar", async () => {
+  // Uma reunião de 20 dias atrás e o dia de grupo de 3 dias atrás existem, de antes do Radar ligar.
+  await sql(`update radar_settings set started_at = now() where company_id = $1`, [A]);
+  const OLD = uid(950);
+  await sql(`insert into meeting_recordings(id, company_id, client_id, source_id, title, recorded_at, recorded_by_email)
+    values ($1,$2,$3,'m-old','Reunião antiga',now() - interval '20 days','gabi@make.com')`, [OLD, A, client]);
+  await sql(`insert into meeting_transcripts(recording_id, company_id, speakers, segments)
+    values ($1,$2,'{Carlos Cliente}','[[0,5,0,"Os leads estão fracos há meses."]]')`, [OLD, A]);
+  await index();
+  assert.equal((await sql(`select count(*)::int as n from radar_signals where source_id = $1`, [OLD]))[0].n, 0,
+    "antes de o Radar ligar, fica para o histórico");
+  // O custo médio vem das leituras já feitas.
+  await sql(`update radar_signals set status = 'done', cost_usd = 0.02 where company_id = $1`, [A]);
+  await as(manager);
+  const from = (await sql(`select ((now() at time zone 'America/Sao_Paulo')::date - 30)::text as d`))[0].d;
+  const est = await rpc("radar_backfill_estimate", [A, from]);
+  assert.equal(est.meetings, 1);
+  assert.ok(est.whatsapp_days >= 1, JSON.stringify(est));
+  assert.ok(est.meeting_chars > 10 && est.whatsapp_chars > 0);
+  assert.ok(est.samples >= 1);
+  assert.equal(Number(est.avg_whatsapp_cost), 0.02);
+  assert.equal(est.price.id, "openai/gpt-5.6");
+  await as(member);
+  await rejects(() => rpc("start_radar_backfill", [A, from]), /Sem permissão/);
+  await as(manager);
+  const today = (await sql(`select ((now() at time zone 'America/Sao_Paulo')::date + 1)::text as d`))[0].d;
+  await rejects(() => rpc("start_radar_backfill", [A, today]), /Escolha uma data antes/);
+  await as(manager);
+  const n = await rpc("start_radar_backfill", [A, from]);
+  assert.equal(n, est.meetings + est.whatsapp_days);
+  const [s] = await sql(`select started_at, backfill_from, backfill_by from radar_settings where company_id = $1`, [A]);
+  assert.ok(s.started_at < new Date(Date.now() - 25 * 864e5));
+  assert.equal(s.backfill_by, manager);
+  // Uma leitura do dia a dia vai antes das do histórico.
+  await sql(`update radar_signals set status = 'done' where not backfill`);
+  const live = await newSignal();
+  await sql(`update radar_signals set claimed_at = null where id = $1`, [live.id]);
+  await as(null);
+  const claimed = await rpc("ai_radar_claim", [SECRET, 1]);
+  assert.deepEqual(claimed.map((c) => c.id), [live.id]);
+  await as(manager);
+  const cfg = await rpc("radar_settings", [A]);
+  assert.equal(cfg.backfill.pending, n);
+  assert.equal(cfg.backfill.by_name, "Gabi Gestora");
+  const ov = await rpc("radar_overview", [A]);
+  assert.equal(ov.reading.backfill_pending, n);
+  assert.ok(ov.reading.done >= 1 && ov.reading.last_at);
+  assert.equal(ov.backfill_from.slice(0, 10), from);
+  await as(manager);
+  assert.equal(await rpc("cancel_radar_backfill", [A]), n);
+  await as(manager);
+  assert.equal((await rpc("radar_settings", [A])).backfill.pending, 0);
 });
 
 console.log(`\n${passed} checks passed`);

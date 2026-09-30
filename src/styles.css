@@ -27286,3 +27286,124 @@ main:has(> .mavi-chat) > .error-banner {
 .modal.sheet.radar-report-sheet {
   width: 860px;
 }
+
+/* Radar · Fase 4: como o Radar lê, avisos e histórico */
+.radar-info {
+  padding: 0;
+  border-left: 4px solid #4a3aa7;
+}
+.radar-info-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.radar-info-toggle > svg:first-child {
+  flex-shrink: 0;
+  color: #4a3aa7;
+}
+.radar-info-toggle > span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.radar-info-toggle small {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.radar-info-body {
+  padding: 0 16px 14px 40px;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.radar-info-body ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+}
+.radar-info-body p {
+  margin: 8px 0 0;
+}
+.radar-view-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.radar-alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.radar-alert-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.radar-alert-list li.off {
+  opacity: 0.6;
+}
+.radar-alert-list li > svg {
+  flex-shrink: 0;
+  color: #4a3aa7;
+}
+.radar-alert-list li > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.radar-alert-list small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.radar-backfill > header strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.radar-backfill-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+.radar-backfill-form .thermo-field {
+  min-width: 200px;
+}
+.radar-backfill-estimate,
+.radar-backfill-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: #f6f7f8;
+}
+.radar-backfill-estimate p,
+.radar-backfill-status p {
+  margin: 0;
+}
+.radar-backfill-status progress {
+  width: 100%;
+  max-width: 420px;
+  accent-color: #4a3aa7;
+}

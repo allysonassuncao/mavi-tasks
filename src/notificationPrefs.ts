@@ -46,6 +46,11 @@ export const NOTICE_TYPES: {
     hint: "Quando um cliente seu esfria ou dá um sinal de alerta.",
   },
   {
+    key: "radar_alert",
+    label: "Avisos do Radar",
+    hint: "Os avisos que você criou no Radar do cliente (Meus avisos), na hora ou no resumo das 8h.",
+  },
+  {
     key: "radar_report",
     label: "Relatório do Radar",
     hint: "Quando um relatório do Radar que você pediu ou agendou fica pronto.",

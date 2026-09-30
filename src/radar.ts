@@ -67,6 +67,15 @@ export type RadarOverview = {
   topics: TopicCounts[];
   pending: number;
   started_at: string | null;
+  /** O que já foi lido (para explicar como o Radar lê). */
+  reading?: {
+    done: number;
+    meetings: number;
+    whatsapp: number;
+    last_at: string | null;
+    backfill_pending: number;
+  };
+  backfill_from?: string | null;
   can_configure: boolean;
 };
 export type RadarItem = {
@@ -346,7 +355,79 @@ export type RadarConfig = {
   model: { provider: string; model: string } | null;
   stats: { done: number; pending: number; failed: number; skipped: number };
   cost_30d: number;
+  /** A leitura do histórico (antes de o Radar ligar). */
+  backfill?: {
+    from: string | null;
+    started_at: string | null;
+    by_name: string | null;
+    pending: number;
+    done: number;
+    failed: number;
+    cost: number;
+  } | null;
 };
+export type AlertEvent = "new" | "recurring" | "reopened" | "due_soon" | "overdue";
+export const ALERT_EVENTS: { key: AlertEvent; label: string; hint: string }[] = [
+  { key: "new", label: "Item novo", hint: "a MAVI anotou um assunto novo" },
+  { key: "recurring", label: "Voltou a aparecer", hint: "o assunto foi falado de novo" },
+  { key: "reopened", label: "Reabriu", hint: "um item resolvido voltou" },
+  { key: "due_soon", label: "Prazo amanhã", hint: "nos tópicos com prazo" },
+  { key: "overdue", label: "Prazo vencido", hint: "venceu ontem e segue em aberto" },
+];
+export type AlertRule = {
+  id?: string;
+  name: string;
+  topic_id: string | null;
+  product_id: string | null;
+  /** Só os itens sem produto (Geral / Agência). */
+  product_none: boolean;
+  client_id: string | null;
+  team_id: string | null;
+  /** 0 a 3; nulo: qualquer gravidade. */
+  min_severity: number | null;
+  events: AlertEvent[];
+  /** now: na hora (caixa de entrada e push); digest: resumo por dia às 8h. */
+  channel: "now" | "digest";
+  active: boolean;
+  labels?: { topic: string | null; product: string | null; client: string | null; team: string | null };
+};
+export type BackfillEstimate = {
+  from: string | null;
+  until: string;
+  oldest: string | null;
+  meetings: number;
+  whatsapp_days: number;
+  meeting_chars: number;
+  whatsapp_chars: number;
+  avg_meeting_cost: number | null;
+  avg_whatsapp_cost: number | null;
+  samples: number;
+  price: { input?: number; output?: number } | null;
+};
+
+/**
+ * O custo do histórico: pelo custo médio das leituras já feitas (a partir de
+ * 5), ou pelo tamanho do texto e o preço do modelo (sem modelo escolhido, o
+ * da Claude Opus 5.5). Mais 10% dos temas e da conferência; faixa de ±30%.
+ */
+export function backfillCost(e: BackfillEstimate, fallback = { input: 4, output: 20 }) {
+  const signals = e.meetings + e.whatsapp_days;
+  const m = e.avg_meeting_cost != null ? Number(e.avg_meeting_cost) : null;
+  const w = e.avg_whatsapp_cost != null ? Number(e.avg_whatsapp_cost) : null;
+  let base: number;
+  let measured = false;
+  if (e.samples >= 5 && (m !== null || w !== null)) {
+    measured = true;
+    base = e.meetings * (m ?? (w ?? 0) * 4) + e.whatsapp_days * (w ?? (m ?? 0) / 4);
+  } else {
+    const price = { input: e.price?.input ?? fallback.input, output: e.price?.output ?? fallback.output };
+    const input = (Number(e.meeting_chars) + Number(e.whatsapp_chars)) / 3.5 + signals * 3500;
+    const output = signals * 700;
+    base = (input / 1e6) * price.input + (output / 1e6) * price.output;
+  }
+  const total = base * 1.1;
+  return { signals, low: total * 0.7, high: total * 1.3, measured };
+}
 export type RadarPatch = Partial<{
   status: string;
   assignee_id: string | null;
@@ -667,6 +748,57 @@ export async function deleteSchedule(company: string, id: string) {
     return structuredClone(demoSchedules);
   }
   return rpc<ReportSchedule[]>("delete_radar_report_schedule", { p_company: company, p_schedule: id });
+}
+export async function loadAlertRules(company: string) {
+  if (offline(company)) return structuredClone(demoRules);
+  return rpc<AlertRule[]>("radar_alert_rules", { p_company: company });
+}
+export async function saveAlertRule(company: string, rule: AlertRule) {
+  if (offline(company)) {
+    const next = { ...rule, id: rule.id ?? `demo-rule-${Date.now()}`, labels: demoRuleLabels(rule) };
+    demoRules = [...demoRules.filter((r) => r.id !== next.id), next];
+    return structuredClone(demoRules);
+  }
+  return rpc<AlertRule[]>("save_radar_alert_rule", { p_company: company, p_rule: rule });
+}
+export async function deleteAlertRule(company: string, id: string) {
+  if (offline(company)) {
+    demoRules = demoRules.filter((r) => r.id !== id);
+    return structuredClone(demoRules);
+  }
+  return rpc<AlertRule[]>("delete_radar_alert_rule", { p_company: company, p_rule: id });
+}
+export async function estimateBackfill(company: string, from: string) {
+  if (offline(company))
+    return {
+      from,
+      until: dayKey(31),
+      oldest: dayKey(420),
+      meetings: 96,
+      whatsapp_days: 1830,
+      meeting_chars: 96 * 42000,
+      whatsapp_chars: 1830 * 2600,
+      avg_meeting_cost: 0.085,
+      avg_whatsapp_cost: 0.012,
+      samples: 412,
+      price: null,
+    } satisfies BackfillEstimate;
+  return rpc<BackfillEstimate>("radar_backfill_estimate", { p_company: company, p_from: from });
+}
+export async function startBackfill(company: string, from: string) {
+  if (offline(company)) {
+    demoBackfill = { from, started_at: new Date().toISOString(), by_name: "Você", pending: 1926, done: 0, failed: 0, cost: 0 };
+    return 1926;
+  }
+  return rpc<number>("start_radar_backfill", { p_company: company, p_from: from });
+}
+export async function cancelBackfill(company: string) {
+  if (offline(company)) {
+    const n = demoBackfill?.pending ?? 0;
+    if (demoBackfill) demoBackfill = { ...demoBackfill, pending: 0 };
+    return n;
+  }
+  return rpc<number>("cancel_radar_backfill", { p_company: company });
 }
 export async function loadClientRadar(company: string, client: string) {
   if (offline(company)) return demoClient(client);
@@ -1031,6 +1163,14 @@ function demoOverview(): RadarOverview {
     }),
     pending: 2,
     started_at: daysAgo(30),
+    reading: {
+      done: 412,
+      meetings: 38,
+      whatsapp: 374,
+      last_at: new Date(Date.now() - 40 * 60000).toISOString(),
+      backfill_pending: demoBackfill?.pending ?? 0,
+    },
+    backfill_from: demoBackfill?.from ?? null,
     can_configure: true,
   };
 }
@@ -1110,6 +1250,32 @@ function demoConfig(): RadarConfig {
     model: null,
     stats: { done: 412, pending: 2, failed: 0, skipped: 37 },
     cost_30d: 3.84,
+    backfill: demoBackfill,
+  };
+}
+let demoBackfill: NonNullable<RadarConfig["backfill"]> | null = null;
+let demoRules: AlertRule[] = [
+  {
+    id: "demo-rule-1",
+    name: "Problemas sérios de Make Ads",
+    topic_id: PROBLEMS,
+    product_id: "pd-1",
+    product_none: false,
+    client_id: null,
+    team_id: null,
+    min_severity: 2,
+    events: ["new", "reopened"],
+    channel: "now",
+    active: true,
+    labels: { topic: "Problemas / reclamações", product: "Make Ads", client: null, team: null },
+  },
+];
+function demoRuleLabels(r: AlertRule): NonNullable<AlertRule["labels"]> {
+  return {
+    topic: demo.topics.find((t) => t.id === r.topic_id)?.name ?? null,
+    product: r.product_none ? "Geral / Agência" : (demoLabels({ products: r.product_id ? [r.product_id] : [] }).products[0] ?? null),
+    client: null,
+    team: null,
   };
 }
 
