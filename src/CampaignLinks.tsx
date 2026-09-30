@@ -963,7 +963,11 @@ export function MetaAccountChooser({
   );
 }
 
-/** Connections of the company with Facebook and Google Ads (admins). */
+/**
+ * Connections of the company with Facebook and Google Ads. A collaborator
+ * with Campanhas on sees only the clients of their teams and uses the
+ * agency's Google connection without connecting or disconnecting it.
+ */
 export function AdConnections({
   company,
   ads,
@@ -972,6 +976,7 @@ export function AdConnections({
   onOpenCampaign,
   onPending,
   refresh = 0,
+  agency = true,
 }: {
   company: string;
   ads: AdsBackend;
@@ -983,6 +988,8 @@ export function AdConnections({
   onPending?: (id: string) => void;
   /** Bumped when a connection changed elsewhere (the chooser). */
   refresh?: number;
+  /** False: a collaborator, who doesn't manage the agency's Google. */
+  agency?: boolean;
 }) {
   const [status, setStatus] = useState<AdsStatus | null>(null);
   const [clients, setClients] = useState<MetaClient[] | null>(null);
@@ -1233,6 +1240,7 @@ export function AdConnections({
                       </small>
                     )}
                   </div>
+                  {agency ? (
                   <span className="campaign-row-actions">
                     <Button
                       type="button"
@@ -1261,6 +1269,11 @@ export function AdConnections({
                       </Button>
                     )}
                   </span>
+                  ) : (
+                    <small className="cell-note">
+                      Quem conecta o Google é um administrador ou gestor.
+                    </small>
+                  )}
                 </div>
               )}
             </section>

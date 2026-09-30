@@ -202,8 +202,8 @@ export function MemberModulesMenu({
                     </small>
                   )}
                   {optInFor(m.id, member.role) && (
-                    <small title="Desligado por padrão para colaboradores. Ligado, mostra só os clientes das equipes da pessoa, sem editar">
-                      só leitura
+                    <small title="Desligado por padrão para colaboradores. Ligado, a pessoa usa tudo do módulo, só nos clientes das equipes dela">
+                      clientes dela
                     </small>
                   )}
                 </label>

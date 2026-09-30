@@ -196,6 +196,7 @@ export function DashboardsPage({
         company={company}
         demo={demo}
         isLeader={isLeader}
+        canCreate={canList}
         user={user}
         notify={notify}
         onBack={isLeader || canList ? () => onOpen(null) : undefined}
@@ -218,7 +219,8 @@ export function DashboardsPage({
       user={user}
       notify={notify}
       onOpen={onOpen}
-      canEdit={isLeader}
+      canEdit={isLeader || canList}
+      isLeader={isLeader}
     />
   );
 }
@@ -232,6 +234,7 @@ function DashboardList({
   notify,
   onOpen,
   canEdit,
+  isLeader,
 }: {
   data: Snapshot;
   company: string;
@@ -239,8 +242,10 @@ function DashboardList({
   user: string;
   notify: Notify;
   onOpen: (id: string) => void;
-  /** False: a collaborator, who only sees what was shared with them. */
+  /** Creates dashboards: leaders and collaborators with the module on. */
   canEdit: boolean;
+  /** Leaders manage every dashboard; the others, the ones they created. */
+  isLeader: boolean;
 }) {
   const [list, setList] = useState<Dashboard[] | null>(null);
   const [error, setError] = useState("");
@@ -334,7 +339,7 @@ function DashboardList({
                   </span>
                 </button>
                 <footer>
-                  {canEdit ? (
+                  {isLeader || d.created_by === user ? (
                     <span
                       className={`visibility-badge ${d.link_access === "public" ? "public" : ""}`}
                     >
@@ -361,14 +366,16 @@ function DashboardList({
                     >
                       <Copy size={15} />
                     </Button>
-                    <Button
-                      className="icon-btn danger"
-                      aria-label={`Excluir ${d.name}`}
-                      title="Excluir"
-                      onClick={() => void remove(d)}
-                    >
-                      <Trash2 size={15} />
-                    </Button>
+                    {(isLeader || d.created_by === user) && (
+                      <Button
+                        className="icon-btn danger"
+                        aria-label={`Excluir ${d.name}`}
+                        title="Excluir"
+                        onClick={() => void remove(d)}
+                      >
+                        <Trash2 size={15} />
+                      </Button>
+                    )}
                   </span>
                   )}
                 </footer>
@@ -398,6 +405,7 @@ function DashboardList({
       )}
       {creating && (
         <CreateDashboard
+          noNotices={!isLeader}
           onClose={() => setCreating(false)}
           onCreate={async (name, description, template) => {
             const d = {
@@ -445,7 +453,10 @@ type Template =
 function CreateDashboard({
   onClose,
   onCreate,
+  noNotices = false,
 }: {
+  /** Collaborators: the Mural de avisos has no client, so no template. */
+  noNotices?: boolean;
   onClose: () => void;
   onCreate: (
     name: string,
@@ -553,6 +564,7 @@ function CreateDashboard({
               até a aprovação e clientes por etapa.
             </small>
           </label>
+          {!noNotices && (
           <label className={template === "notices" ? "selected" : ""}>
             <input
               type="radio"
@@ -566,6 +578,7 @@ function CreateDashboard({
               leitura por aviso e quem mais deixa avisos pendentes.
             </small>
           </label>
+          )}
           <label className={template === "temperature" ? "selected" : ""}>
             <input
               type="radio"
@@ -626,6 +639,7 @@ function useLookups(
   data: Snapshot,
   indicators: PickOption[] = [],
   radar: { topics: PickOption[]; themes: PickOption[] } = { topics: [], themes: [] },
+  noNotices = false,
 ) {
   return useMemo(() => {
     const byName = (a: PickOption, b: PickOption) =>
@@ -683,8 +697,13 @@ function useLookups(
         { value: "closed", label: "Fechado" },
       ],
       indicators,
-    } satisfies Record<FilterField, PickOption[]> & { indicators: PickOption[] };
-  }, [data, indicators, radar]);
+      // Dashboards de colaboradores ficam nos clientes dele: sem o Mural.
+      sources: noNotices ? sourceOrder.filter((k) => k !== "notices") : sourceOrder,
+    } satisfies Record<FilterField, PickOption[]> & {
+      indicators: PickOption[];
+      sources: Source[];
+    };
+  }, [data, indicators, radar, noNotices]);
 }
 
 function DashboardView({
@@ -693,6 +712,7 @@ function DashboardView({
   company,
   demo,
   isLeader,
+  canCreate = false,
   user,
   notify,
   onBack,
@@ -704,6 +724,8 @@ function DashboardView({
   company: string;
   demo: boolean;
   isLeader: boolean;
+  /** A collaborator with the module on: edits the dashboards they created. */
+  canCreate?: boolean;
   user: string;
   notify: Notify;
   onBack?: () => void;
@@ -742,7 +764,7 @@ function DashboardView({
     themes: [],
   });
   useEffect(() => {
-    if (!isLeader) return;
+    if (!isLeader && !canCreate) return;
     loadThemeOptions(company)
       .then((o) =>
         setRadarOptions({
@@ -754,8 +776,8 @@ function DashboardView({
         }),
       )
       .catch(() => setRadarOptions({ topics: [], themes: [] }));
-  }, [company, isLeader]);
-  const lookups = useLookups(data, indicators, radarOptions);
+  }, [company, isLeader, canCreate]);
+  const lookups = useLookups(data, indicators, radarOptions, !isLeader);
 
   useEffect(() => {
     let current = true;
@@ -789,10 +811,12 @@ function DashboardView({
   }, [auto]);
 
   const dash = draft ?? saved;
+  // Edits: leaders, and the collaborator who created it (module on).
+  const editor = isLeader || (canCreate && !!saved && saved.created_by === user);
   const range = useMemo(() => resolveRange(vars.range, tz), [vars.range, tz]);
   const filters = vars.filters ?? {};
   const editing = !!draft;
-  const loadKey = JSON.stringify([range, isLeader ? filters : null, editing]);
+  const loadKey = JSON.stringify([range, editor ? filters : null, editing]);
   const loader: PanelLoader = useCallback(
     (panel, fresh) => {
       if (demo)
@@ -801,7 +825,7 @@ function DashboardView({
             data,
             panel.spec,
             range,
-            isLeader ? filters : (saved?.variables.filters ?? {}),
+            editor ? filters : (saved?.variables.filters ?? {}),
             tz,
           ),
         );
@@ -812,7 +836,7 @@ function DashboardView({
         { kind: "app", dashboard: id },
         panel.id,
         range,
-        isLeader ? vars : null,
+        editor ? vars : null,
         fresh,
       );
     },
@@ -906,7 +930,7 @@ function DashboardView({
             </>
           )}
         </div>
-        {isLeader && (
+        {editor && (
           <div className="dash-view-actions">
             {editing ? (
               <>
@@ -954,7 +978,7 @@ function DashboardView({
         vars={vars}
         tz={tz}
         onChange={setVars}
-        canFilter={isLeader}
+        canFilter={editor}
         lookups={lookups}
         onRefresh={() => setRefresh((v) => v + 1)}
         auto={auto}
@@ -1008,7 +1032,7 @@ function DashboardView({
           <Empty
             title="Nenhum painel ainda"
             body={
-              isLeader
+              editor
                 ? "Clique em Editar e adicione o primeiro painel."
                 : "Este dashboard ainda não tem painéis."
             }
@@ -1658,7 +1682,7 @@ function QueryEditor({
               });
             }}
           >
-            {sourceOrder.map((k) => (
+            {lookups.sources.map((k) => (
               <SelectOption key={k} value={k}>
                 {sources[k].label}
               </SelectOption>

@@ -53,9 +53,9 @@ function readSaved(key: string): Saved {
  * e nos grupos de WhatsApp. Um cartão por tópico com os números, a lista com
  * os filtros resolvidos no banco e o item aberto num painel. Os filtros
  * ficam guardados neste navegador, por empresa e pessoa. Administradores e
- * gestores veem tudo; um colaborador com o módulo ligado vê só os itens dos
- * clientes das equipes dele, sem temas, relatórios, avisos nem edição
- * (can_configure falso).
+ * gestores veem tudo; um colaborador com o módulo ligado usa itens, temas,
+ * relatórios e avisos só nos clientes das equipes dele (can_use), e a
+ * configuração segue dos líderes (can_configure).
  */
 export function RadarPage({
   company,
@@ -219,6 +219,18 @@ export function RadarPage({
     );
 
   const members = data.members.filter((m) => m.active);
+  // Itens, temas, relatórios e avisos: líderes e o colaborador com o módulo
+  // ligado; a configuração, só líderes.
+  const full = !!(overview.can_use || overview.can_configure);
+  // O colaborador filtra pelas equipes dele (os clientes já vêm recortados).
+  const scoped = overview.can_configure
+    ? data
+    : {
+        ...data,
+        teams: data.teams.filter((t) =>
+          data.teamMembers.some((tm) => tm.team_id === t.id && tm.user_id === user),
+        ),
+      };
   const changeTopic = (id: string) => {
     setTopicId(id);
     setStatus(OPEN);
@@ -264,7 +276,7 @@ export function RadarPage({
         ))}
       </section>
 
-      {overview.can_configure && (
+      {full && (
       <div className="radar-view-row">
       <nav className="drive-view radar-view" aria-label="Como ver">
         <button
@@ -298,21 +310,21 @@ export function RadarPage({
       </div>
       )}
 
-      {view === "reports" && overview.can_configure ? (
+      {view === "reports" && full ? (
         <RadarReports
           company={company}
-          data={data}
+          data={scoped}
           topics={overview.topics}
           notify={notify}
           openReport={reportLink}
           onOpened={() => setReportLink(null)}
         />
-      ) : view === "themes" && overview.can_configure ? (
+      ) : view === "themes" && full ? (
         <RadarThemes
           key={topic.id}
           company={company}
           topic={topic}
-          data={data}
+          data={scoped}
           user={user}
           onNewTask={onNewTask}
           notify={notify}
@@ -372,7 +384,7 @@ export function RadarPage({
           <span className="thermo-filter">
             <Select aria-label="Equipe" value={team} onValueChange={setTeam}>
               <SelectOption value={ALL}>Todas as equipes</SelectOption>
-              {data.teams.map((t) => (
+              {scoped.teams.map((t) => (
                 <SelectOption key={t.id} value={t.id}>
                   {t.name}
                 </SelectOption>
@@ -556,10 +568,10 @@ export function RadarPage({
         </>
       )}
 
-      {alertsOpen && overview.can_configure && (
+      {alertsOpen && full && (
         <RadarAlerts
           company={company}
-          data={data}
+          data={scoped}
           topics={overview.topics}
           notify={notify}
           onClose={() => setAlertsOpen(false)}

@@ -16,8 +16,11 @@ import type { Role } from "./types";
 
 /**
  * Modules a collaborator only sees when an administrator turns them on for
- * the person: off by default, read-only and limited to the clients they serve
- * (Visão geral with their own numbers, Dashboards shared with them).
+ * the person: off by default; on, they use everything the module has, but
+ * only on the clients of their teams (Visão geral with their own numbers;
+ * Radar and Campanhas configuration of the agency stays with leaders;
+ * Dashboards they create show only their clients). Migrations
+ * 20270105090000 and 20270107090000.
  */
 export const MEMBER_OPT_IN = [
   "overview",

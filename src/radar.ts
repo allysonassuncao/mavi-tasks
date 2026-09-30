@@ -76,7 +76,13 @@ export type RadarOverview = {
     backfill_pending: number;
   };
   backfill_from?: string | null;
+  /** Tópicos, histórico e modelos: só administradores e gestores. */
   can_configure: boolean;
+  /**
+   * Itens, temas, relatórios e avisos: também o colaborador com o módulo
+   * ligado, recortados pelos clientes das equipes dele (20270107090000).
+   */
+  can_use?: boolean;
 };
 export type RadarItem = {
   id: string;
@@ -186,6 +192,8 @@ export type RadarThemeDetail = {
   topic: RadarTopic & { id: string };
   items: RadarItem[];
   others: { id: string; title: string }[];
+  /** Renomear e juntar: quando todos os itens do tema são de clientes seus. */
+  can_edit?: boolean;
 };
 export type ReportFilters = {
   topics?: string[];
@@ -1120,6 +1128,7 @@ function demoTheme(id: string): RadarThemeDetail {
     others: demo.themes
       .filter((o) => o.id !== id && o.topic_id === t.topic_id && o.product_id === t.product_id)
       .map((o) => ({ id: o.id, title: o.title })),
+    can_edit: true,
   });
 }
 function demoMove(id: string, move: ThemeMove): RadarItemDetail {
@@ -1172,6 +1181,7 @@ function demoOverview(): RadarOverview {
     },
     backfill_from: demoBackfill?.from ?? null,
     can_configure: true,
+    can_use: true,
   };
 }
 function demoItems(f: RadarFilters): RadarPage {

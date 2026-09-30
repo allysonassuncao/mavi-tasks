@@ -91,8 +91,13 @@ type Props = {
   company: string;
   user: string;
   notify: (message: string) => void;
-  /** False: a collaborator with the module on, read-only. */
+  /** False: read-only (kept for callers that only show the numbers). */
   canEdit?: boolean;
+  /**
+   * Leaders: the agency's connections too (Google Ads). A collaborator with
+   * the module on works on the clients of their teams (the database checks).
+   */
+  agency?: boolean;
 };
 type CampaignFormState = { campaign?: AdCampaign } | null;
 type CycleFormState = {
@@ -107,9 +112,9 @@ const emptyData: CampaignData = { campaigns: [], cycles: [] };
 
 /**
  * Campanhas: cadastro de campanhas (por produto contratado) e de seus ciclos.
- * Administradores e gestores editam; um colaborador com o módulo ligado
- * (Módulos visíveis) só vê as campanhas dos clientes das equipes dele, sem
- * editar, sincronizar nem conectar contas (o banco repete a regra).
+ * Administradores e gestores usam tudo; um colaborador com o módulo ligado
+ * (Módulos visíveis) usa tudo nas campanhas dos clientes das equipes dele,
+ * menos a conexão do Google da agência (o banco repete a regra).
  * A troca do ciclo atual é sempre manual; a tela só aponta quando o ciclo
  * atual terminou ou quando o próximo investimento precisa entrar.
  */
@@ -120,6 +125,7 @@ export function CampaignsPage({
   user,
   notify,
   canEdit = true,
+  agency = true,
 }: Props) {
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -321,6 +327,7 @@ export function CampaignsPage({
           }}
           onPending={setPending}
           refresh={connectionTick}
+          agency={agency}
         />
       )}
       {canEdit && pending && (

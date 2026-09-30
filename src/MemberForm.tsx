@@ -255,8 +255,8 @@ export function MemberForm({
                         )}
                         {optInFor(m.id, role) && (
                           <small className="member-module-note">
-                            desligado por padrão · só leitura, dos clientes das
-                            equipes da pessoa
+                            desligado por padrão · ligado, tudo do módulo, só nos
+                            clientes das equipes da pessoa
                           </small>
                         )}
                       </span>

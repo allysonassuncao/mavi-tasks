@@ -3677,7 +3677,7 @@ export default function App() {
                   company={company}
                   user={user}
                   notify={notify}
-                  canEdit={isLeader}
+                  agency={isLeader}
                 />
               )}
               {(page === "onboarding" || page === "socialMedia") && (
@@ -4047,7 +4047,7 @@ export default function App() {
                                     !!m.shown_pages?.length && (
                                       <span
                                         className="member-email"
-                                        title={`Ligados só para esta pessoa (só leitura): ${MODULES.filter(
+                                        title={`Ligados para esta pessoa (só nos clientes das equipes dela): ${MODULES.filter(
                                           (x) => m.shown_pages?.includes(x.id),
                                         )
                                           .map((x) => x.label)

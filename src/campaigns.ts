@@ -837,7 +837,7 @@ export function connectionResult(value: string) {
       "sem-contas": `${name} conectado, mas este perfil não tem acesso a nenhuma conta de anúncio. Entre no Facebook com o perfil do cliente e conecte de novo.`,
       cancelado: `Conexão com o ${name} cancelada.`,
       "sem-permissao": `O ${name} não concedeu a permissão necessária. Conecte de novo e aceite o acesso ao Google Ads.`,
-      expirado: `A conexão demorou demais ou você não é mais administrador nem gestor. Tente de novo.`,
+      expirado: `A conexão demorou demais ou você não tem mais acesso a Campanhas deste cliente. Tente de novo.`,
     }[result] ?? `Não foi possível conectar o ${name}. Tente de novo.`
   );
 }

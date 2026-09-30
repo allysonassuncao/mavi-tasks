@@ -483,10 +483,16 @@ describe("Google Ads", () => {
           },
         ]),
     ] as [RegExp, () => Response];
+  // A leader: every account of the agency's connection (ad_google_scope).
+  const scope = [/rpc\/ad_google_scope/, () => json(null)] as [
+    RegExp,
+    () => Response,
+  ];
 
   it("contas: as da MCC, com login-customer-id, sem duplicar", async () => {
     const { fetch, calls } = network([
       tokens("access-1", future),
+      scope,
       [
         /GET .*v25\/customers:listAccessibleCustomers/,
         () => json({ resourceNames: ["customers/111", "customers/222"] }),
@@ -591,6 +597,7 @@ describe("Google Ads", () => {
   it("campanhas pela MCC; token vencido é renovado e salvo", async () => {
     const { fetch, calls } = network([
       tokens("old", "2020-01-01T00:00:00Z"),
+      scope,
       [
         /POST https:\/\/oauth2\.googleapis\.com\/token/,
         () => json({ access_token: "access-2", expires_in: 3600 }),
@@ -659,9 +666,30 @@ describe("Google Ads", () => {
     expect(JSON.parse(search.body!).query).toContain("FROM campaign");
   });
 
+  it("colaborador: só as contas vinculadas às campanhas dos clientes dele", async () => {
+    const { fetch, calls } = network([
+      [/rpc\/ad_google_scope/, () => json(["2223334444"])],
+    ]);
+    const result = await handleAds(
+      {
+        action: "campaigns",
+        company,
+        provider: "google",
+        account: "999-888-7777",
+        manager: "",
+      },
+      auth,
+      env,
+      fetch,
+    );
+    expect(result.status).toBe(403);
+    expect(calls.some((c) => c.url.includes("googleads"))).toBe(false);
+  });
+
   it("consentimento revogado desconecta e pede nova conexão", async () => {
     const { fetch, calls } = network([
       tokens(null, null),
+      scope,
       [
         /oauth2\.googleapis\.com\/token/,
         () => json({ error: "invalid_grant" }, 400),

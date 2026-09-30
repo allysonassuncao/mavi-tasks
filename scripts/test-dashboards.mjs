@@ -579,4 +579,68 @@ await check(
   },
 );
 
+// Migration 20270107090000: um colaborador com o módulo ligado cria, edita,
+// compartilha e exclui os seus dashboards; os dados ficam nos clientes das
+// equipes de quem criou, para quem quer que abra.
+await check(
+  "colaborador com Dashboards ligado: os seus, só com os clientes dele",
+  async () => {
+    // Bia atende só a Aurora.
+    const only = uid(900);
+    await sql("insert into teams(id, company_id, name) values ($1, $2, 'Só Aurora')", [only, A]);
+    await sql("insert into team_members(company_id, team_id, user_id) values ($1, $2, $3)", [A, only, member]);
+    await sql("insert into client_teams(company_id, client_id, team_id) values ($1, $2, $3)", [A, aurora, only]);
+    const spec = { viz: "stat", groupBy: "none", queries: [q("A", "tasks", "count")] };
+    const mine = [{ ...panels[0], spec }];
+    await as(manager);
+    const lead = await rpc("save_dashboard", [A, null, "Do gestor", "", mine, {}, null]);
+    await assert.rejects(preview(spec, {}, member), /Sem permissão/);
+    await as(member);
+    await assert.rejects(rpc("save_dashboard", [A, null, "Meu", "", mine, {}, null]), /Sem permissão/);
+    await as(admin);
+    await rpc("set_member_pages", [A, member, ["overview", "campaigns", "radar"]]);
+
+    assert.equal(total(await preview(spec, {}, member)), 3, "só as tarefas da Aurora");
+    // Nem pedindo o recorte de fora ele abre.
+    assert.equal(total(await preview(spec, { filters: { __scope: [norte] } }, member)), 3);
+    await as(member);
+    const own = await rpc("save_dashboard", [A, null, "Meu", "", mine, { filters: { __scope: [norte] } }, null]);
+    assert.equal(own.created_by, member);
+    assert.equal(own.variables.filters.__scope, undefined, "o recorte nunca é salvo");
+    await assert.rejects(
+      rpc("save_dashboard", [A, null, "Avisos", "", [{ ...panels[0], spec: { ...spec,
+        queries: [q("A", "notices", "sent")] } }], {}, null]),
+      /Mural de avisos/,
+    );
+    // Não edita nem exclui o dos outros.
+    await assert.rejects(rpc("save_dashboard", [A, lead.id, "Do gestor", "", mine, {}, null]), /Sem permissão/);
+    await assert.rejects(rpc("delete_dashboard", [lead.id]), /Sem permissão/);
+    // Vê o seu na lista e compartilha.
+    assert.ok((await db.query("select id from dashboards")).rows.some((r) => r.id === own.id));
+    await rpc("set_dashboard_sharing", [own.id, "public", null, [viewer], [], false]);
+    const run = async (who, token = null) => {
+      await as(who);
+      return total(await rpc("dashboard_panel_data", [token ? null : own.id, "entregas", ...range,
+        null, token, null, true]));
+    };
+    assert.equal(await run(member), 3);
+    // Quem abre vê o recorte de quem criou: o gestor, a Vera e o link.
+    assert.equal(await run(manager), 3);
+    assert.equal(await run(viewer), 3);
+    const [{ share_token }] = await sql("select share_token from dashboards where id = $1", [own.id]);
+    assert.equal(await run(null, share_token), 3);
+    // O cache não mistura: o dashboard do gestor segue com as 4.
+    await as(admin);
+    assert.equal(total(await rpc("dashboard_panel_data", [lead.id, "entregas", ...range, null, null, null, false])), 4);
+    // Desligado o módulo, some a edição.
+    await rpc("set_member_pages", [A, member, ["overview", "campaigns", "radar", "dashboards"]]);
+    await as(member);
+    await assert.rejects(rpc("delete_dashboard", [own.id]), /Sem permissão/);
+    await as(admin);
+    await rpc("set_member_pages", [A, member, ["overview", "campaigns", "radar"]]);
+    await as(member);
+    await rpc("delete_dashboard", [own.id]);
+  },
+);
+
 console.log(`\n${passed} verificações de dashboards passaram.`);

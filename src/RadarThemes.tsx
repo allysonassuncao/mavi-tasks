@@ -350,6 +350,7 @@ function RadarThemePanel({
             <Input
               value={title}
               maxLength={160}
+              disabled={theme.can_edit === false}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={() =>
                 title.trim().length >= 3 &&
@@ -363,6 +364,7 @@ function RadarThemePanel({
             <Textarea
               rows={2}
               maxLength={1000}
+              disabled={theme.can_edit === false}
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
               onBlur={() =>
@@ -371,7 +373,13 @@ function RadarThemePanel({
               }
             />
           </label>
-          {theme.others.length > 0 && (
+          {theme.can_edit === false && (
+            <p className="muted">
+              Este tema também tem itens de clientes que não são das suas equipes: só um administrador ou gestor o renomeia
+              ou junta com outro.
+            </p>
+          )}
+          {theme.others.length > 0 && theme.can_edit !== false && (
             <div className="radar-detail-field wide radar-merge">
               <span>Juntar com outro tema (os itens dele vêm para este)</span>
               <div>

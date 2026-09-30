@@ -579,7 +579,7 @@ await check(
       await as(user);
       await assert.rejects(
         rpc("ad_begin_connect", [A, "meta", client, null]),
-        /exclusivo de administradores/,
+        /Sem permissão/,
       );
     }
     await as(admin);
@@ -657,7 +657,7 @@ await check(
     await as(trafego);
     await assert.rejects(
       rpc("ad_meta_pending", [pendingId]),
-      /exclusivo de administradores/,
+      /Sem permissão/,
     );
     await as(admin);
     await assert.rejects(
@@ -785,8 +785,8 @@ await check(
     const status = await rpc("ad_connections", [A]);
     assert.equal(status.google.email, "agencia@make.com");
     await as(trafego);
-    await assert.rejects(rows("ad_google_tokens", [A]), /exclusivo/);
-    await assert.rejects(rpc("ad_connections", [A]), /exclusivo/);
+    await assert.rejects(rows("ad_google_tokens", [A]), /Sem permissão/);
+    await assert.rejects(rpc("ad_connections", [A]), /Sem permissão/);
     await as(admin);
     await rpc("ad_disconnect", [A, "google"]);
     assert.equal((await rpc("ad_connections", [A])).google, null);
@@ -1362,11 +1362,11 @@ await check(
     await as(trafego);
     await assert.rejects(
       rpc("ad_meta_clients", [A]),
-      /exclusivo de administradores/,
+      /Sem permissão/,
     );
     await assert.rejects(
       rpc("ad_disconnect_meta_client", [A, client]),
-      /exclusivo de administradores/,
+      /Sem permissão/,
     );
   },
 );
@@ -1394,7 +1394,7 @@ await check(
     await as(trafego);
     await assert.rejects(
       rpc("ad_sync_overview", [A]),
-      /exclusivo de administradores/,
+      /Sem permissão/,
     );
   },
 );
@@ -1774,7 +1774,7 @@ await check(
       ["google", "message", ["11"], "3329986472"],
     );
     await as(trafego);
-    await assert.rejects(rpc("ad_cycle_conversion_context", [y]), /exclusivo/);
+    await assert.rejects(rpc("ad_cycle_conversion_context", [y]), /Sem permissão/);
     await as(admin);
     const targets = await rpc("ad_sync_targets", [null, google, 15]);
     // An April cycle is out of the sync's window; the column is there for the running ones.
@@ -1785,7 +1785,7 @@ await check(
 // Migration 20270105090000_member_opt_in_modules: an administrator turns
 // Campanhas on for a collaborator; read-only, only the clients of their teams.
 await check(
-  "colaborador com Campanhas ligado: só leitura, só os clientes das equipes dele",
+  "colaborador com Campanhas ligado: faz tudo, só nos clientes das equipes dele",
   async () => {
     // A client no team of Tiago's serves.
     await as(admin);
@@ -1845,12 +1845,41 @@ await check(
         table,
       );
     assert.ok((await visible(trafego, "ad_cycles")).length > 0);
-    // Still read-only.
-    await assert.rejects(campaign(trafego), /exclusivo/);
+    // Migration 20270107090000: everything, but only on his clients.
+    const mine = await campaign(trafego, { name: "Tiago - Meta" });
+    const y = await cycle(trafego, mine, { current: true, links: [] });
+    assert.ok(y);
+    await as(trafego);
+    await rpc("set_ad_campaign_status", [mine, "active", "Começou"]);
+    assert.ok(Array.isArray(await rpc("ad_sync_targets", [null, mine, 15])));
+    // Nothing on a client no team of his serves, not even through the tables.
+    await assert.rejects(
+      campaign(trafego, { contract: farContract, name: "Invasão" }),
+      /Sem permissão/,
+    );
+    await assert.rejects(cycle(trafego, other, { links: [] }), /Sem permissão/);
     await as(trafego);
     await assert.rejects(
-      rpc("set_ad_campaign_status", [rows[0].id, "inactive", "Teste"]),
+      rpc("set_ad_campaign_status", [other, "active", "Teste"]),
+      /Sem permissão/,
     );
+    await assert.rejects(rpc("ad_sync_targets", [null, other, 15]), /Sem permissão/);
+    // The Facebook of his client, yes; of another, or the agency's Google, no.
+    assert.ok(await rpc("ad_begin_connect", [A, "meta", client, mine]));
+    await assert.rejects(
+      rpc("ad_begin_connect", [A, "meta", farClient, null]),
+      /Sem permissão/,
+    );
+    await assert.rejects(
+      rpc("ad_begin_connect", [A, "google", null, null]),
+      /exclusivo de administradores/,
+    );
+    const clients = await rpc("ad_meta_clients", [A]);
+    assert.ok(clients.every((c) => c.client_id !== farClient));
+    // Google accounts: only the ones linked to his clients' campaigns.
+    assert.ok(Array.isArray(await rpc("ad_google_scope", [A])));
+    await as(manager);
+    assert.equal(await rpc("ad_google_scope", [A]), null);
     // Hiding wins over turning on; a manager keeps the module by profile.
     await as(admin);
     await rpc("set_member_pages", [A, trafego, ["campaigns"]]);

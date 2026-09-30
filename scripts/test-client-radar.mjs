@@ -1074,9 +1074,10 @@ await check("histórico: a estimativa, a leitura depois do dia a dia e parar", a
   assert.equal((await rpc("radar_settings", [A])).backfill.pending, 0);
 });
 
-// Migration 20270105090000_member_opt_in_modules: um administrador liga o
-// Radar para um colaborador; ele vê só os itens dos clientes das equipes dele.
-await check("colaborador com o Radar ligado: só os clientes dele, sem configurar", async () => {
+// Migrations 20270105090000 e 20270107090000: um administrador liga o Radar
+// para um colaborador; ele usa tudo, menos a configuração, só nos clientes
+// das equipes dele.
+await check("colaborador com o Radar ligado: tudo nos clientes dele, sem configurar", async () => {
   const [moved] = await sql(`select id from radar_items where client_id = $1 limit 1`, [client]);
   await sql(`update radar_items set client_id = $1 where id = $2`, [other, moved.id]);
   try {
@@ -1099,12 +1100,48 @@ await check("colaborador com o Radar ligado: só os clientes dele, sem configura
     assert.ok(!r.items.some((i) => i.id === moved.id));
     // Pedir o outro cliente pelo filtro não abre nada.
     assert.equal((await rpc("radar_items", [A, JSON.stringify({ client: other })])).total, 0);
-    // Temas, relatórios e configuração seguem dos líderes; editar também.
+    assert.equal(ov.can_use, true);
+    // A configuração segue dos líderes.
     await rejects(() => rpc("radar_settings", [A]), /Sem permissão/);
-    await rejects(() => rpc("radar_reports", [A]), /Sem permissão/);
+    // Edita os itens dos clientes dele; o do outro cliente, não.
+    const own = await rpc("radar_item", [A, r.items[0].id]);
+    assert.equal(own.can_edit, true);
+    const edited = await rpc("update_radar_item", [A, r.items[0].id, JSON.stringify({ severity: 2 })]);
+    assert.equal(edited.severity, 2);
     await rejects(
-      () => rpc("update_radar_item", [A, r.items[0].id, JSON.stringify({ status: "resolvido" })]),
+      () => rpc("update_radar_item", [A, moved.id, JSON.stringify({ severity: 1 })]),
       /Sem permissão/,
+    );
+    await rejects(() => rpc("set_radar_item_theme", [A, moved.id, null, "Tema alheio", false]), /Sem permissão/);
+    // Temas: só os que têm itens dos clientes dele, contados nesses itens.
+    for (const t of ov.topics) {
+      const themes = await rpc("radar_themes", [A, JSON.stringify({ topic: t.id, open_only: false, limit: 200 })]);
+      for (const th of themes.themes) {
+        const [{ n }] = await sql(
+          `select count(*)::int as n from radar_items where theme_id = $1 and client_id = $2`,
+          [th.id, client],
+        );
+        assert.equal(th.items, n);
+        assert.ok(n > 0);
+      }
+    }
+    // Relatórios: pede e vê os seus; o material fica nos clientes dele.
+    await as(admin);
+    await rpc("request_radar_report", [A, "2026-01-01", "2026-12-31", "{}", "Do líder"]);
+    await as(member);
+    const mineReport = await rpc("request_radar_report", [A, "2026-01-01", "2026-12-31", "{}", "Meu"]);
+    const reports = await rpc("radar_reports", [A]);
+    assert.deepEqual(reports.reports.map((x) => x.id), [mineReport.id]);
+    const [{ material }] = await sql(
+      `select mavi_private.radar_report_material($1, '2026-01-01', '2026-12-31', '{}', array[$2]::uuid[]) as material`,
+      [A, client],
+    );
+    assert.ok(material.clients.every((c) => c.client !== "9001"));
+    // Avisos: com o cliente dele, sim; com outro, não.
+    await rpc("save_radar_alert_rule", [A, JSON.stringify({ name: "Meu cliente", events: ["new"], client_id: client })]);
+    await rejects(
+      () => rpc("save_radar_alert_rule", [A, JSON.stringify({ name: "Outro", events: ["new"], client_id: other })]),
+      /Filtro não encontrado/,
     );
     // O líder continua vendo tudo, e configurando.
     await as(manager);
@@ -1117,6 +1154,7 @@ await check("colaborador com o Radar ligado: só os clientes dele, sem configura
   } finally {
     await sql(`update radar_items set client_id = $1 where id = $2`, [client, moved.id]);
     await sql(`update memberships set shown_pages = '{}' where user_id = $1`, [member]);
+    await sql(`delete from radar_alert_rules where user_id = $1`, [member]);
   }
 });
 
