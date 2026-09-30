@@ -66,7 +66,13 @@ import {
   whatsappMessageById,
   type WhatsappMessage,
 } from "./whatsapp";
-import { navigate, useLocation } from "./router";
+import {
+  driveLocationFromPath,
+  driveUrl,
+  navigate,
+  routeParts,
+  useLocation,
+} from "./router";
 import { setAiPlace } from "./ai";
 import type { FormPreset } from "./forms";
 import {
@@ -207,8 +213,14 @@ function DriveTree({
 }: DriveProps) {
   // Rooted trees start at (and never leave) the client's folder.
   const base: DriveLocation = root ? { client: root.client } : {};
-  const [at, setAt] = useState<DriveLocation>(base);
+  // No Drive, a pasta aberta vive na URL: cada pasta tem o seu endereço, que
+  // pode ser compartilhado, e o Voltar do navegador volta à pasta anterior.
+  // A aba Drive da tarefa não mexe na URL.
+  const location = useLocation();
+  const routePath = root ? "" : location.split("?")[0];
+  const [localAt, setLocalAt] = useState<DriveLocation>(base);
   const [folders, setFolders] = useState<DriveFolder[]>([]);
+  const [foldersReady, setFoldersReady] = useState(false);
   const [files, setFiles] = useState<DriveFile[] | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DriveFile[] | null>(null);
@@ -248,8 +260,31 @@ function DriveTree({
     () => new Map(folders.map((f) => [f.id, f])),
     [folders],
   );
-  // A custom folder carries its own client/product.
+  // A custom folder carries its own client/product (the URL has only the folder).
+  const routeFolder = routePath
+    ? driveLocationFromPath(routePath)?.folder
+    : undefined;
+  const routeFolderRow = routeFolder ? folderById.get(routeFolder) : undefined;
+  const at = useMemo<DriveLocation>(() => {
+    if (root) return localAt;
+    const routed = driveLocationFromPath(routePath) ?? {};
+    return routed.folder
+      ? {
+          folder: routed.folder,
+          client: routeFolderRow?.client_id ?? undefined,
+          contract: routeFolderRow?.contract_id ?? undefined,
+        }
+      : routed;
+  }, [
+    root,
+    localAt,
+    routePath,
+    routeFolderRow?.client_id,
+    routeFolderRow?.contract_id,
+  ]);
   const current = at.folder ? folderById.get(at.folder) : undefined;
+  // Um link de pasta apagada ou de outra pessoa, sem compartilhamento.
+  const missingFolder = !!at.folder && foldersReady && !current;
   const place = at.folder
     ? {
         client: current?.client_id ?? undefined,
@@ -273,7 +308,10 @@ function DriveTree({
   const loadFolders = useCallback(
     () =>
       listDriveFolders(company)
-        .then(setFolders)
+        .then((list) => {
+          setFolders(list);
+          setFoldersReady(true);
+        })
         .catch((e) => setError((e as Error).message)),
     [company],
   );
@@ -371,8 +409,13 @@ function DriveTree({
   }, [company, at.client, showsProducts]);
   // Links de outras telas (fontes citadas pela IA, tarefas):
   // ?gravacao=<id>&t=<s> abre a gravação; ?arquivo=<id> abre o arquivo.
-  const location = useLocation();
   useEffect(() => {
+    // Leva à pasta pelo endereço dela, trocando o link de origem.
+    const setAt = (next: DriveLocation) =>
+      navigate(
+        driveUrl(next, routeParts(window.location.pathname).company),
+        true,
+      );
     if (root) return;
     const params = new URLSearchParams(location.split("?")[1] ?? "");
     const recording = params.get("gravacao");
@@ -426,11 +469,26 @@ function DriveTree({
   function go(next: DriveLocation) {
     setOpenRecording(null);
     setOpenWhatsapp(null);
-    setAt(root && !next.client ? base : next);
+    if (root) setLocalAt(next.client ? next : base);
+    else
+      navigate(driveUrl(next, routeParts(window.location.pathname).company));
     setEditing(null);
     setQuery("");
     setError("");
   }
+  // Voltar/Avançar do navegador troca de pasta: fecha o que estava aberto.
+  useEffect(() => {
+    if (root) return;
+    const reset = () => {
+      setOpenRecording(null);
+      setOpenWhatsapp(null);
+      setEditing(null);
+      setQuery("");
+      setError("");
+    };
+    window.addEventListener("popstate", reset);
+    return () => window.removeEventListener("popstate", reset);
+  }, [root]);
   function chainOf(folderId: string | null | undefined) {
     const chain: DriveFolder[] = [];
     let f = folderId ? folderById.get(folderId) : undefined;
@@ -1311,6 +1369,11 @@ function DriveTree({
       {error && (
         <p className="form-error" role="alert">
           {error}
+        </p>
+      )}
+      {missingFolder && !searching && (
+        <p className="form-error" role="alert">
+          Pasta não encontrada ou sem acesso.
         </p>
       )}
       {uploads.length > 0 && (

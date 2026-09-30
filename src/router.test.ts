@@ -14,6 +14,8 @@ import {
   settingsTab,
   SETTINGS_TABS,
   aiTab,
+  driveLocationFromPath,
+  driveUrl,
 } from "./router";
 
 describe("shareable routes", () => {
@@ -135,4 +137,53 @@ it("volta à tela de permissão do OAuth depois do login, e a nada mais", () => 
     "/oauth/consent?authorization_id=a%2F..",
   ])
     expect(oauthConsentReturn(bad)).toBeNull();
+});
+
+describe("Drive: cada pasta tem o seu endereço", () => {
+  const client = "11111111-1111-4111-8111-111111111111";
+  const contract = "22222222-2222-4222-8222-222222222222";
+  const folder = "33333333-3333-4333-8333-333333333333";
+  it("ida e volta entre a pasta e a URL", () => {
+    const places = [
+      {},
+      { client },
+      { client, contract },
+      { folder },
+      { client, recordings: true },
+      { client, whatsapp: true },
+      { client, dossier: true },
+      { client, brand: true },
+      { client, temperature: true },
+      { client, radar: true },
+    ];
+    for (const at of places) {
+      const url = driveUrl(at, "make");
+      expect(url.startsWith("/agencias/make/drive")).toBe(true);
+      expect(driveLocationFromPath(url)).toEqual(at);
+      expect(resolvePage(url)).toBe("drive");
+      expect(safeReturnPath(url)).toBe(url);
+    }
+    expect(driveUrl({ client, contract })).toBe(
+      `/drive/cliente/${client}/produto/${contract}`,
+    );
+    expect(driveUrl({ client, recordings: true })).toBe(
+      `/drive/cliente/${client}/gravacoes`,
+    );
+    // A pasta leva o seu cliente e produto: a URL só precisa dela.
+    expect(driveUrl({ client, contract, folder })).toBe(
+      `/drive/pasta/${folder}`,
+    );
+  });
+  it("recusa endereços que não são pastas", () => {
+    for (const bad of [
+      "/drive/pasta/abc",
+      "/drive/cliente/abc",
+      `/drive/cliente/${client}/qualquer`,
+      `/drive/cliente/${client}/produto/abc`,
+      `/drive/${folder}`,
+      "/tarefas",
+    ])
+      expect(driveLocationFromPath(bad)).toBeNull();
+    expect(resolvePage(`/drive/cliente/${client}/qualquer`)).toBeNull();
+  });
 });

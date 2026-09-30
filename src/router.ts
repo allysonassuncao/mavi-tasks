@@ -193,6 +193,7 @@ export function resolvePage(path: string): Page | null {
   if (dashboardIdFromPath(path)) return "dashboards";
   if (maviChatIdFromPath(path)) return "mavi";
   if (skillIdFromPath(path)) return "skills";
+  if (driveLocationFromPath(path)) return "drive";
   return (
     (Object.keys(pagePaths) as Page[]).find(
       (page) => pagePaths[page] === normalized,
@@ -247,9 +248,13 @@ export function useUrlState<T extends string | number | boolean>(
       const value = typeof next === "function" ? next(previous) : next;
       if (key === "empresa") {
         const path = routeParts(current.pathname).path;
-        current.pathname = value
-          ? `/agencias/${encodeURIComponent(String(value))}${path === "/" ? "/visao-geral" : path}`
+        // As pastas do Drive são de uma agência: na outra, volta à raiz.
+        const kept = path.startsWith(`${pagePaths.drive}/`)
+          ? pagePaths.drive
           : path;
+        current.pathname = value
+          ? `/agencias/${encodeURIComponent(String(value))}${kept === "/" ? "/visao-geral" : kept}`
+          : kept;
         current.searchParams.delete("empresa");
         navigate(current.pathname + current.search + current.hash, true);
         return;
@@ -318,4 +323,62 @@ export function skillIdFromPath(path: string) {
       /^\/mavi\/skills\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
     )?.[1] ?? null
   );
+}
+
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+/** As pastas virtuais do cliente, pelo nome que aparece na URL. */
+const DRIVE_VIRTUAL = {
+  gravacoes: "recordings",
+  whatsapp: "whatsapp",
+  dossie: "dossier",
+  marca: "brand",
+  termometro: "temperature",
+  radar: "radar",
+} as const;
+type DriveVirtual = (typeof DRIVE_VIRTUAL)[keyof typeof DRIVE_VIRTUAL];
+export type DriveRoute = {
+  client?: string;
+  contract?: string;
+  folder?: string;
+} & { [K in DriveVirtual]?: boolean };
+
+/**
+ * A pasta aberta no Drive, pela URL (cada pasta tem o seu endereço):
+ * /drive/cliente/<id>, /drive/cliente/<id>/produto/<id>,
+ * /drive/cliente/<id>/gravacoes (e as outras pastas virtuais) e
+ * /drive/pasta/<id> (a pasta leva o seu cliente e produto).
+ * A raiz (/drive) é {}; fora do Drive, null.
+ */
+export function driveLocationFromPath(path: string): DriveRoute | null {
+  const normalized = routeParts(path).path;
+  if (normalized === pagePaths.drive) return {};
+  const folder = normalized.match(
+    new RegExp(`^/drive/pasta/(${UUID})(?:/[a-z0-9-]+)?$`, "i"),
+  );
+  if (folder) return { folder: folder[1].toLowerCase() };
+  const client = normalized.match(
+    new RegExp(
+      `^/drive/cliente/(${UUID})(?:/produto/(${UUID})|/(${Object.keys(DRIVE_VIRTUAL).join("|")}))?$`,
+      "i",
+    ),
+  );
+  if (!client) return null;
+  const at: DriveRoute = { client: client[1].toLowerCase() };
+  if (client[2]) at.contract = client[2].toLowerCase();
+  if (client[3])
+    at[DRIVE_VIRTUAL[client[3].toLowerCase() as keyof typeof DRIVE_VIRTUAL]] =
+      true;
+  return at;
+}
+/** O endereço de uma pasta do Drive (o inverso de driveLocationFromPath). */
+export function driveUrl(at: DriveRoute, company = "") {
+  const base = pageUrl("drive", company);
+  if (at.folder) return `${base}/pasta/${at.folder}`;
+  if (!at.client) return base;
+  const client = `${base}/cliente/${at.client}`;
+  if (at.contract) return `${client}/produto/${at.contract}`;
+  const virtual = (
+    Object.entries(DRIVE_VIRTUAL) as [string, DriveVirtual][]
+  ).find(([, key]) => at[key]);
+  return virtual ? `${client}/${virtual[0]}` : client;
 }
