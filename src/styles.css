@@ -27029,3 +27029,260 @@ main:has(> .mavi-chat) > .error-banner {
     grid-template-columns: 1fr;
   }
 }
+
+/* Radar · Fase 3: relatórios */
+.radar-reports {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.radar-reports-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.radar-reports-head .radar-caption {
+  margin: 0;
+  max-width: 640px;
+}
+.radar-schedules {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+.radar-schedules > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.radar-schedules > header strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.radar-schedules > p {
+  margin: 0;
+  font-size: 0.84rem;
+}
+.radar-schedules ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.radar-schedules li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.radar-schedules li.off {
+  opacity: 0.65;
+}
+.radar-schedules li > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.radar-schedules li small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.radar-report-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.radar-report-list button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.radar-report-list button:hover {
+  background: #f7f9f9;
+}
+.radar-report-list button > svg {
+  flex-shrink: 0;
+  color: #4a3aa7;
+}
+.radar-report-headline {
+  margin-top: 3px;
+  font-size: 0.86rem;
+}
+.radar-report-status {
+  flex-shrink: 0;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #f1f4f4;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.radar-report-status.done {
+  background: #e7f5d0;
+  color: #2d3e27;
+}
+.radar-report-status.running,
+.radar-report-status.pending {
+  background: #ece8f7;
+  color: #4a3aa7;
+}
+.radar-report-status.failed {
+  background: #fdecec;
+  color: #b8403e;
+}
+.radar-report-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.radar-report-dates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.radar-report-filter {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.radar-report-filter legend {
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.radar-report-filter > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.radar-report-note {
+  margin: 0;
+  font-size: 0.8rem;
+}
+.radar-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.radar-report-waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.radar-report-title {
+  margin: 4px 0 0;
+  font-size: 1.2rem;
+  line-height: 1.35;
+}
+.radar-report-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.radar-report-kpis > .panel {
+  padding: 12px 14px;
+}
+.radar-report-kpis dl {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 8px 0 0;
+}
+.radar-report-kpis dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.radar-report-kpis dd {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.radar-report-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.radar-report-section h4 {
+  margin: 8px 0 0;
+  padding-bottom: 4px;
+  border-bottom: 2px solid #c8ed8d;
+  font-size: 1rem;
+}
+.radar-report-section p {
+  margin: 0;
+  line-height: 1.55;
+}
+.radar-report-section ul {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+.radar-report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+.radar-report-table th {
+  padding: 6px 8px;
+  background: #f6f7f8;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-align: left;
+}
+.radar-report-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.radar-report-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.radar-report-todo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.radar-report-todo li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  line-height: 1.45;
+}
+.radar-report-todo .radar-status {
+  flex-shrink: 0;
+  min-width: 62px;
+  justify-content: center;
+  text-transform: capitalize;
+}
+.modal.sheet.radar-report-sheet {
+  width: 860px;
+}

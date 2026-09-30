@@ -178,6 +178,140 @@ export type RadarThemeDetail = {
   items: RadarItem[];
   others: { id: string; title: string }[];
 };
+export type ReportFilters = {
+  topics?: string[];
+  /** "none": Geral / Agência. */
+  products?: string[];
+  teams?: string[];
+  clients?: string[];
+};
+export type ReportLabels = { topics: string[]; products: string[]; teams: string[]; clients: string[] };
+export type RadarReport = {
+  id: string;
+  title: string;
+  period_from: string;
+  period_to: string;
+  filters: ReportFilters;
+  labels: ReportLabels;
+  status: "pending" | "running" | "done" | "failed";
+  error: string | null;
+  requested_by: string | null;
+  requested_by_name: string | null;
+  schedule_id: string | null;
+  schedule_name: string | null;
+  headline: string | null;
+  created_at: string;
+  finished_at: string | null;
+  cost_usd: number;
+};
+/** Os números do período (calculados pelo banco). */
+export type ReportMaterial = {
+  period: { from: string; to: string };
+  today: string;
+  company: string;
+  filters: ReportLabels;
+  topics: {
+    topic: string;
+    has_due: boolean;
+    new: number;
+    active: number;
+    open: number;
+    closed: number;
+    severe: number;
+    overdue: number;
+    mentions: number;
+    clients: number;
+  }[];
+  products: {
+    product: string;
+    clients: number;
+    topics: { topic: string; new: number; open: number; severe: number; overdue: number; closed: number }[];
+  }[];
+  themes: {
+    title: string;
+    summary: string;
+    topic: string;
+    product: string;
+    clients: number;
+    items: number;
+    open: number;
+    mentions: number;
+    max_severity: number | null;
+    client_names: string[];
+    quotes: string[];
+  }[];
+  severe: {
+    topic: string;
+    product: string;
+    client: string;
+    title: string;
+    summary: string;
+    severity: number;
+    status: string;
+    mentions: number;
+    last_seen: string;
+  }[];
+  overdue: {
+    topic: string;
+    product: string;
+    client: string;
+    title: string;
+    due_date: string;
+    status: string;
+    assignee: string | null;
+  }[];
+  clients: { client: string; open: number; severe: number; new: number }[];
+  new_items: { topic: string; product: string; client: string; title: string; severity: number | null; status: string }[];
+};
+/** O texto da MAVI. */
+export type ReportContent = {
+  headline: string;
+  summary: string;
+  sections: { title: string; paragraphs: string[]; bullets: string[] }[];
+  actions: { priority: "alta" | "média" | "baixa"; text: string; product?: string }[];
+};
+export type RadarReportFull = RadarReport & {
+  material: ReportMaterial | null;
+  content: ReportContent | null;
+  model: string | null;
+};
+export type ReportSchedule = {
+  id?: string;
+  name: string;
+  frequency: "weekly" | "monthly";
+  /** 1 = segunda … 7 = domingo. */
+  weekday: number;
+  month_day: number;
+  hour: number;
+  period_days: number;
+  filters: ReportFilters;
+  labels?: ReportLabels;
+  active: boolean;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+};
+export const WEEKDAYS = ["", "segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"];
+/** "Toda segunda às 8h · últimos 7 dias". */
+export function scheduleLabel(s: Pick<ReportSchedule, "frequency" | "weekday" | "month_day" | "hour" | "period_days">) {
+  const when =
+    s.frequency === "weekly"
+      ? `${s.weekday >= 6 ? "Todo" : "Toda"} ${WEEKDAYS[s.weekday]} às ${s.hour}h`
+      : `Todo dia ${s.month_day} às ${s.hour}h`;
+  return `${when} · últimos ${s.period_days} dias`;
+}
+/** Os filtros do relatório numa linha ("Todos os tópicos · Make Ads"). */
+export function labelsLine(l: ReportLabels | undefined) {
+  if (!l) return "";
+  const parts = [
+    l.topics.length ? l.topics.join(", ") : "Todos os tópicos",
+    l.products.length ? l.products.join(", ") : "Todos os produtos",
+    ...(l.teams.length ? [l.teams.join(", ")] : []),
+    ...(l.clients.length ? [l.clients.join(", ")] : []),
+  ];
+  return parts.join(" · ");
+}
+export const reportPath = (id: string) => `/radar?relatorio=${id}`;
+
 /** Para onde o item vai: um tema, um tema novo, "sem tema" ou a MAVI escolher. */
 export type ThemeMove = { theme: string } | { title: string } | { none: true } | { auto: true };
 export type RadarFilters = {
@@ -462,6 +596,77 @@ export async function loadThemeOptions(company: string): Promise<ThemeOptions> {
       })),
     };
   return rpc<ThemeOptions>("radar_theme_options", { p_company: company });
+}
+export async function requestReport(
+  company: string,
+  from: string,
+  to: string,
+  filters: ReportFilters,
+  title?: string,
+) {
+  if (offline(company)) return demoRequest(from, to, filters, title);
+  return rpc<RadarReport>("request_radar_report", {
+    p_company: company,
+    p_from: from,
+    p_to: to,
+    p_filters: filters,
+    p_title: title ?? null,
+  });
+}
+export async function loadReports(company: string) {
+  if (offline(company)) return { total: demoReports.length, reports: demoReports.map(({ material: _m, content: _c, model: _o, ...r }) => r) }; // eslint-disable-line @typescript-eslint/no-unused-vars
+  return rpc<{ total: number; reports: RadarReport[] }>("radar_reports", {
+    p_company: company,
+    p_limit: 50,
+    p_offset: 0,
+  });
+}
+export async function loadReport(company: string, id: string) {
+  if (offline(company)) {
+    const r = demoReports.find((x) => x.id === id);
+    if (!r) throw Error("Relatório não encontrado.");
+    return structuredClone(r);
+  }
+  return rpc<RadarReportFull>("radar_report", { p_company: company, p_report: id });
+}
+export async function retryReport(company: string, id: string) {
+  if (offline(company)) {
+    const r = demoReports.find((x) => x.id === id)!;
+    r.status = "pending";
+    return r;
+  }
+  return rpc<RadarReport>("retry_radar_report", { p_company: company, p_report: id });
+}
+export async function deleteReport(company: string, id: string) {
+  if (offline(company)) {
+    demoReports = demoReports.filter((x) => x.id !== id);
+    return;
+  }
+  await rpc("delete_radar_report", { p_company: company, p_report: id });
+}
+export async function loadSchedules(company: string) {
+  if (offline(company)) return structuredClone(demoSchedules);
+  return rpc<ReportSchedule[]>("radar_report_schedules", { p_company: company });
+}
+export async function saveSchedule(company: string, schedule: ReportSchedule) {
+  if (offline(company)) {
+    const next = {
+      ...schedule,
+      id: schedule.id ?? `demo-schedule-${Date.now()}`,
+      labels: demoLabels(schedule.filters),
+      next_run_at: daysAgo(-3, 8),
+    };
+    demoSchedules = [...demoSchedules.filter((x) => x.id !== next.id), next];
+    return structuredClone(demoSchedules);
+  }
+  return rpc<ReportSchedule[]>("save_radar_report_schedule", { p_company: company, p_schedule: schedule });
+}
+export async function deleteSchedule(company: string, id: string) {
+  if (offline(company)) {
+    demoSchedules = demoSchedules.filter((x) => x.id !== id);
+    return structuredClone(demoSchedules);
+  }
+  return rpc<ReportSchedule[]>("delete_radar_report_schedule", { p_company: company, p_schedule: id });
 }
 export async function loadClientRadar(company: string, client: string) {
   if (offline(company)) return demoClient(client);
@@ -906,4 +1111,169 @@ function demoConfig(): RadarConfig {
     stats: { done: 412, pending: 2, failed: 0, skipped: 37 },
     cost_30d: 3.84,
   };
+}
+
+// ------------------------------------------------------------ demonstração: relatórios
+function demoMaterial(from: string, to: string, labels: ReportLabels): ReportMaterial {
+  return {
+    period: { from, to },
+    today: dayKey(0),
+    company: "Make Agency",
+    filters: labels,
+    topics: [
+      { topic: "Problemas / reclamações", has_due: false, new: 14, active: 19, open: 11, closed: 6, severe: 4, overdue: 0, mentions: 41, clients: 9 },
+      { topic: "Promessas", has_due: true, new: 9, active: 10, open: 5, closed: 4, severe: 2, overdue: 2, mentions: 12, clients: 7 },
+    ],
+    products: [
+      { product: "Make Ads", clients: 6, topics: [
+        { topic: "Problemas / reclamações", new: 9, open: 7, severe: 3, overdue: 0, closed: 3 },
+        { topic: "Promessas", new: 5, open: 3, severe: 1, overdue: 1, closed: 2 },
+      ] },
+      { product: "Social Leads", clients: 4, topics: [
+        { topic: "Problemas / reclamações", new: 4, open: 3, severe: 1, overdue: 0, closed: 2 },
+        { topic: "Promessas", new: 3, open: 2, severe: 1, overdue: 1, closed: 1 },
+      ] },
+      { product: "Geral / Agência", clients: 2, topics: [
+        { topic: "Problemas / reclamações", new: 1, open: 1, severe: 0, overdue: 0, closed: 1 },
+      ] },
+    ],
+    themes: [
+      { title: "Queda na quantidade e na qualidade dos leads", summary: "Clientes de Make Ads reclamam de menos leads e de leads frios.", topic: "Problemas / reclamações", product: "Make Ads", clients: 5, items: 6, open: 5, mentions: 14, max_severity: 3, client_names: ["Aurora Studio", "Norte Coffee", "Forma Living"], quotes: ["Os leads caíram de novo essa semana, o que está acontecendo?"] },
+      { title: "Artes com a marca errada", summary: "Artes publicadas com logo ou cores antigas.", topic: "Problemas / reclamações", product: "Social Leads", clients: 2, items: 2, open: 1, mentions: 3, max_severity: 1, client_names: ["Norte Coffee", "Aurora Studio"], quotes: ["De novo o logo antigo na arte de hoje."] },
+    ],
+    severe: [
+      { topic: "Problemas / reclamações", product: "Geral / Agência", client: "Forma Living", title: "Demora para responder no grupo", summary: "Esperou dois dias por uma resposta.", severity: 3, status: "Aberto", mentions: 1, last_seen: dayKey(0) },
+      { topic: "Problemas / reclamações", product: "Make Ads", client: "Aurora Studio", title: "Leads caíram em setembro", summary: "Quer entender o motivo antes da próxima verba.", severity: 2, status: "Aberto", mentions: 2, last_seen: dayKey(1) },
+    ],
+    overdue: [
+      { topic: "Promessas", product: "Social Leads", client: "Norte Coffee", title: "Refazer as artes sem custo", due_date: dayKey(1), status: "Em andamento", assignee: "Bruno Lima" },
+      { topic: "Promessas", product: "Geral / Agência", client: "Forma Living", title: "Ligar com os números do mês", due_date: dayKey(7), status: "Pendente", assignee: null },
+    ],
+    clients: [
+      { client: "Aurora Studio", open: 4, severe: 1, new: 3 },
+      { client: "Norte Coffee", open: 3, severe: 1, new: 2 },
+      { client: "Forma Living", open: 2, severe: 1, new: 2 },
+    ],
+    new_items: [],
+  };
+}
+function demoContent(): ReportContent {
+  return {
+    headline: "A queda de leads em Make Ads virou padrão: 5 clientes reclamaram no período.",
+    summary:
+      "Foram 14 reclamações novas e 9 promessas no período. O tema que mais se repete é a queda na quantidade e na qualidade dos leads em Make Ads. Duas promessas estão vencidas e um cliente cobrou demora no atendimento com gravidade crítica.",
+    sections: [
+      {
+        title: "Make Ads",
+        paragraphs: [
+          "A queda de leads aparece em 5 clientes, com falas de leads frios e de menos contatos pelos anúncios. Aurora Studio quer entender o motivo antes de aprovar a próxima verba.",
+          "Das 5 promessas novas, 3 seguem em aberto e 1 está vencida.",
+        ],
+        bullets: [
+          "Aurora Studio: explicar a queda de leads antes da próxima verba.",
+          "Revisar a segmentação dos clientes com leads frios.",
+        ],
+      },
+      {
+        title: "Social Leads",
+        paragraphs: ["As artes com a marca errada voltaram em 2 clientes; a agência prometeu refazer as artes sem custo, e o prazo já passou."],
+        bullets: ["Norte Coffee: entregar as artes refeitas."],
+      },
+    ],
+    actions: [
+      { priority: "alta", text: "Responder hoje a Forma Living, que cobrou dois dias sem retorno no grupo.", product: "Geral / Agência" },
+      { priority: "alta", text: "Revisar as campanhas dos 5 clientes de Make Ads com queda de leads e levar um diagnóstico para cada um.", product: "Make Ads" },
+      { priority: "média", text: "Criar um checklist de marca antes de publicar as artes do Social Leads.", product: "Social Leads" },
+      { priority: "baixa", text: "Combinar prazos das promessas com responsável em todas as reuniões." },
+    ],
+  };
+}
+let demoReports: RadarReportFull[] = [
+  {
+    id: "demo-report-1",
+    title: `Radar do cliente · ${dateBr(dayKey(30))} a ${dateBr(dayKey(0))}`,
+    period_from: dayKey(30),
+    period_to: dayKey(0),
+    filters: {},
+    labels: { topics: [], products: [], teams: [], clients: [] },
+    status: "done",
+    error: null,
+    requested_by: null,
+    requested_by_name: "Allyson Assunção",
+    schedule_id: null,
+    schedule_name: null,
+    headline: demoContent().headline,
+    created_at: daysAgo(0, 9),
+    finished_at: daysAgo(0, 9),
+    cost_usd: 0.14,
+    material: demoMaterial(dayKey(30), dayKey(0), { topics: [], products: [], teams: [], clients: [] }),
+    content: demoContent(),
+    model: "claude-opus-5-5",
+  },
+];
+let demoSchedules: ReportSchedule[] = [
+  {
+    id: "demo-schedule-1",
+    name: "Semanal da carteira",
+    frequency: "weekly",
+    weekday: 1,
+    month_day: 1,
+    hour: 8,
+    period_days: 7,
+    filters: {},
+    labels: { topics: [], products: [], teams: [], clients: [] },
+    active: true,
+    next_run_at: daysAgo(-5, 8),
+    last_run_at: daysAgo(2, 8),
+  },
+];
+function demoLabels(filters: ReportFilters): ReportLabels {
+  return {
+    topics: (filters.topics ?? []).map((id) => demo.topics.find((t) => t.id === id)?.name ?? id),
+    products: (filters.products ?? []).map((id) =>
+      id === "none" ? "Geral / Agência" : id === "pd-1" ? "Make Ads" : id === "pd-2" ? "Make CRM" : id === "pd-3" ? "Social Leads" : id,
+    ),
+    teams: [],
+    clients: [],
+  };
+}
+function demoRequest(from: string, to: string, filters: ReportFilters, title?: string): RadarReport {
+  const labels = demoLabels(filters);
+  const report: RadarReportFull = {
+    id: `demo-report-${Date.now()}`,
+    title: title || `Radar do cliente · ${dateBr(from)} a ${dateBr(to)}`,
+    period_from: from,
+    period_to: to,
+    filters,
+    labels,
+    status: "running",
+    error: null,
+    requested_by: null,
+    requested_by_name: "Você",
+    schedule_id: null,
+    schedule_name: null,
+    headline: null,
+    created_at: new Date().toISOString(),
+    finished_at: null,
+    cost_usd: 0,
+    material: null,
+    content: null,
+    model: null,
+  };
+  demoReports = [report, ...demoReports];
+  // Na demonstração, a MAVI "escreve" em alguns segundos.
+  setTimeout(() => {
+    Object.assign(report, {
+      status: "done",
+      material: demoMaterial(from, to, labels),
+      content: demoContent(),
+      headline: demoContent().headline,
+      finished_at: new Date().toISOString(),
+      model: "claude-opus-5-5",
+    });
+    if (typeof window !== "undefined")
+      window.dispatchEvent(new CustomEvent("mavi:radar", { detail: { kind: "radar", report: report.id, status: "done" } }));
+  }, 2500);
+  const { material: _m, content: _c, model: _o, ...rest } = report; // eslint-disable-line @typescript-eslint/no-unused-vars
+  return rest;
 }

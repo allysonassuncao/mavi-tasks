@@ -178,7 +178,9 @@ O que os clientes reclamam e o que o time promete, anotado pela MAVI nas reuniõ
 - **Tarefa a partir do item**: o item abre o formulário de tarefa com o título, o que a MAVI entendeu, as falas com o link do momento e o link do item (`/drive?radar=<cliente>&item=<item>`); a tarefa fica ligada ao item (`radar_item_tasks`).
 - **Dashboards**: a fonte `radar` (itens, em aberto, fechados, sérios, vencidos, que voltaram, ocorrências, clientes, gravidade média, dias para fechar), agrupada por tópico, tema, gravidade, status, produto, cliente, equipe e responsável, e o modelo "Radar do cliente".
 
-Para ligar: aplicar as migrações e rodar `supabase/operations/schedule-client-radar.sql` (usa a mesma `mavi_private.ai_config` da indexação). Testes: `npm run test:db:radar`, `npx vitest run api/_radar.test.ts` e `npx vitest run src/radar.test.tsx`.
+- **Relatório da MAVI** (migração `20261231090000_client_radar_reports`): na visão **Relatórios** do `/radar`, o gestor escolhe o período e os filtros (tópicos, produtos, equipes) e pede; o banco calcula os números (`radar_report_material`: por tópico, por produto, temas com mais clientes, itens sérios, promessas vencidas, clientes com mais itens em aberto) e a funcionalidade `client_radar_report` (`CLIENT_RADAR_REPORT_MODEL`) escreve o resumo, uma seção por produto e as ações sugeridas. O worker escreve os relatórios antes das leituras. **Agendamentos** pessoais (`radar_report_schedules`: toda semana ou todo mês, numa hora, com os últimos N dias até a véspera; quem deixa de ser líder perde o agendamento). Pronto (ou falhou 3 vezes): aviso `radar_report` na caixa de entrada e no push, e a tela sabe pelo Realtime (`kind: 'radar'`). O PDF sai no navegador com o jsPDF (`src/radar-pdf.ts`), com os números do banco.
+
+Para ligar: aplicar as migrações e rodar `supabase/operations/schedule-client-radar.sql` (usa a mesma `mavi_private.ai_config` da indexação). Testes: `npm run test:db:radar`, `npx vitest run api/_radar.test.ts`, `npx vitest run src/radar.test.tsx` e `npx vitest run src/radar-pdf.test.ts`.
 
 ### Agenda (Google Agenda)
 

@@ -11,6 +11,7 @@ import {
   Thermometer,
   Trophy,
   Puzzle,
+  Radar,
 } from "lucide-react";
 import "./due-rules.css";
 import { useState } from "react";
@@ -111,6 +112,10 @@ export function NotificationInbox({
                       <span className="inbox-system" aria-hidden="true">
                         <ListChecks size={15} />
                       </span>
+                    ) : n.kind === "radar_report" ? (
+                      <span className="inbox-system temperature" aria-hidden="true">
+                        <Radar size={15} />
+                      </span>
                     ) : n.kind === "ai_skill" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <Puzzle size={15} />
@@ -133,6 +138,7 @@ export function NotificationInbox({
                       n.kind === "ai_answer" ||
                       n.kind === "success_case" ||
                       n.kind === "temperature" ||
+                      n.kind === "radar_report" ||
                       n.kind === "tasks_assigned" ||
                       n.kind === "due_risk" ||
                       n.kind === "notice" ? (

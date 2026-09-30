@@ -6,6 +6,7 @@
 // do módulo, a aba do cliente pela regra do Drive, a edição por líderes e a
 // configuração dos tópicos. Fase 2 (migration 20261230090000): os temas
 // por tópico e produto, a tarefa ligada ao item e a fonte nos Dashboards.
+// Fase 3 (migration 20261231090000): o relatório da MAVI, pedido e agendado.
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
@@ -743,6 +744,163 @@ await check("item sem tema também acorda o worker", async () => {
   await sql(`update radar_items set theme_pending = true, theme_attempts = 0, theme_locked = false where id = $1`, [i3.id]);
   await sql(`select mavi_private.ai_radar_kick()`);
   assert.equal((await sql(`select count(*)::int as n from net.requests`))[0].n, 1);
+});
+
+// ------------------------------------------------------------ Fase 3
+let report;
+await check("pedir um relatório: fica na fila, acorda o worker e a tela sabe", async () => {
+  await sql(`delete from net.requests`);
+  await sql(`delete from realtime.messages`);
+  const today = (await sql(`select (now() at time zone 'America/Sao_Paulo')::date::text as d`))[0].d;
+  await as(manager);
+  report = await rpc("request_radar_report", [A, "2026-01-01", today, JSON.stringify({
+    topics: [topics.problemas.id, uid(9)], products: [trafego, "none", "lixo"], clients: [client] })]);
+  assert.equal(report.status, "pending");
+  assert.match(report.title, /^Radar do cliente · 01\/01\/2026 a /);
+  assert.deepEqual(report.filters.topics, [topics.problemas.id]);
+  assert.deepEqual(report.filters.products.sort(), [trafego, "none"].sort());
+  assert.deepEqual(report.labels.products.sort(), ["Geral / Agência", "Tráfego"]);
+  assert.deepEqual(report.labels.clients, ["4282"]);
+  assert.equal((await sql(`select count(*)::int as n from net.requests`))[0].n, 1);
+  const [msg] = await sql(`select payload from realtime.messages order by id desc limit 1`);
+  assert.deepEqual([msg.payload.kind, msg.payload.status], ["radar", "pending"]);
+  await as(manager);
+  await rejects(() => rpc("request_radar_report", [A, today, "2026-01-01", "{}"]), /período válido/);
+  await as(manager);
+  await rejects(() => rpc("request_radar_report", [A, "2024-01-01", today, "{}"]), /até um ano/);
+  await as(member);
+  await rejects(() => rpc("request_radar_report", [A, "2026-01-01", today, "{}"]), /Sem permissão/);
+});
+
+await check("o worker recebe os números do período e o texto vira o relatório com aviso", async () => {
+  await as(null);
+  const [c] = await rpc("ai_radar_report_claim", [SECRET, 2]);
+  assert.equal(c.id, report.id);
+  const m = c.material;
+  assert.equal(m.company, "Make");
+  assert.deepEqual(m.filters.topics, ["Problemas / reclamações"]);
+  assert.deepEqual(m.topics.map((t) => t.topic), ["Problemas / reclamações"]);
+  const t = m.topics[0];
+  assert.ok(t.new >= 3 && t.open >= 3, JSON.stringify(t));
+  assert.ok(m.products.some((p) => p.product === "Tráfego"));
+  assert.ok(m.products.some((p) => p.product === "Geral / Agência"));
+  assert.ok(m.themes.some((th) => th.title === "Aprovação de criativos atrasada" && th.clients === 1));
+  assert.ok(m.severe.some((i) => i.title === "Atraso na aprovação das artes" && i.severity === 3));
+  assert.ok(m.clients[0].client === "4282");
+  assert.ok(m.new_items.length >= 3);
+  await as(null);
+  assert.deepEqual(await rpc("ai_radar_report_claim", [SECRET, 2]), [], "reservado não sai de novo");
+  const [row] = await sql(`select status, attempts, material is not null as has from radar_reports where id = $1`, [report.id]);
+  assert.deepEqual([row.status, row.attempts, row.has], ["running", 1, true]);
+  await as(null);
+  await rpc("ai_radar_report_store", [SECRET, report.id, JSON.stringify({
+    headline: "Atraso na aprovação é o tema do mês.", summary: "Resumo.",
+    sections: [{ title: "Tráfego", paragraphs: ["Texto."], bullets: ["Ponto."] }],
+    actions: [{ priority: "alta", text: "Revisar a aprovação." }],
+  }), JSON.stringify({ model: "claude-opus-5-5", input: 5000, output: 900, cost: 0.12 })]);
+  await as(manager);
+  const full = await rpc("radar_report", [A, report.id]);
+  assert.equal(full.status, "done");
+  assert.equal(full.content.actions[0].priority, "alta");
+  assert.equal(full.headline, "Atraso na aprovação é o tema do mês.");
+  assert.equal(full.requested_by_name, "Gabi Gestora");
+  assert.equal(Number(full.cost_usd), 0.12);
+  const [n] = await sql(`select * from notifications where kind = 'radar_report'`);
+  assert.equal(n.user_id, manager);
+  assert.equal(n.link, `/radar?relatorio=${report.id}`);
+  assert.match(n.title, /^Relatório do Radar pronto: /);
+  assert.equal((await sql(`select count(*)::int as n from ai_usage where kind = 'radar_report'`))[0].n, 1);
+  const list = await rpc("radar_reports", [A, 50, 0]);
+  assert.equal(list.total, 1);
+  assert.equal(list.reports[0].material, undefined, "a lista não traz os números");
+  assert.ok((await sql(`select mavi_private.notification_pref_keys() @> array['radar_report'] as ok`))[0].ok);
+  await as(null);
+  await rpc("ai_radar_report_store", [SECRET, report.id, JSON.stringify({ headline: "outra" }), "{}"]);
+  assert.equal((await sql(`select content->>'headline' as h from radar_reports where id = $1`, [report.id]))[0].h,
+    "Atraso na aprovação é o tema do mês.", "pronto não é reescrito");
+});
+
+await check("falhas tentam de novo até 3 vezes e avisam; tentar de novo e excluir", async () => {
+  const today = (await sql(`select (now() at time zone 'America/Sao_Paulo')::date::text as d`))[0].d;
+  await as(manager);
+  const r = await rpc("request_radar_report", [A, today, today, "{}"]);
+  for (let i = 0; i < 3; i++) {
+    await sql(`update radar_reports set claimed_until = null where id = $1`, [r.id]);
+    await as(null);
+    const got = await rpc("ai_radar_report_claim", [SECRET, 2]);
+    assert.deepEqual(got.map((x) => x.id), [r.id]);
+    await as(null);
+    await rpc("ai_radar_report_fail", [SECRET, r.id, "modelo fora do ar"]);
+  }
+  const [row] = await sql(`select status, attempts, error from radar_reports where id = $1`, [r.id]);
+  assert.deepEqual([row.status, row.attempts, row.error], ["failed", 3, "modelo fora do ar"]);
+  assert.equal((await sql(`select count(*)::int as n from notifications where kind = 'radar_report'
+    and title like 'Não deu%'`))[0].n, 1);
+  await as(manager);
+  assert.equal((await rpc("retry_radar_report", [A, r.id])).status, "pending");
+  await as(manager);
+  await rejects(() => rpc("retry_radar_report", [A, r.id]), /que falhou/);
+  // Outro gestor não exclui o pedido de alguém; o administrador exclui.
+  await sql(`update memberships set role = 'manager' where user_id = $1`, [member]);
+  await as(member);
+  await rejects(() => rpc("delete_radar_report", [A, r.id]), /Só quem pediu/);
+  await sql(`update memberships set role = 'member' where user_id = $1`, [member]);
+  await as(admin);
+  await rpc("delete_radar_report", [A, r.id]);
+  assert.equal((await sql(`select count(*)::int as n from radar_reports where id = $1`, [r.id]))[0].n, 0);
+});
+
+await check("agendamentos: a próxima vez no fuso, o pedido do período e quem deixa de ser líder", async () => {
+  // Quarta-feira 30/09/2026 10h em São Paulo: a próxima segunda às 8h é 05/10.
+  const [{ next }] = await sql(`select mavi_private.radar_schedule_next('weekly', 1, 1, 8, 'America/Sao_Paulo',
+    '2026-09-30 13:00+00') as next`);
+  assert.equal(next.toISOString(), "2026-10-05T11:00:00.000Z");
+  const [{ same }] = await sql(`select mavi_private.radar_schedule_next('weekly', 3, 1, 11, 'America/Sao_Paulo',
+    '2026-09-30 13:00+00') as same`);
+  assert.equal(same.toISOString(), "2026-09-30T14:00:00.000Z", "hoje, mais tarde");
+  const [{ month }] = await sql(`select mavi_private.radar_schedule_next('monthly', 1, 5, 9, 'America/Sao_Paulo',
+    '2026-09-30 13:00+00') as month`);
+  assert.equal(month.toISOString(), "2026-10-05T12:00:00.000Z");
+  await as(manager);
+  let list = await rpc("save_radar_report_schedule", [A, JSON.stringify({ name: "Semanal de Tráfego",
+    frequency: "weekly", weekday: 1, hour: 8, period_days: 7, filters: { products: [trafego] } })]);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].labels.products[0], "Tráfego");
+  assert.ok(list[0].next_run_at);
+  await as(manager);
+  await rejects(() => rpc("save_radar_report_schedule", [A, JSON.stringify({ name: "x", frequency: "weekly" })]), /nome/);
+  await as(manager);
+  await rejects(() => rpc("save_radar_report_schedule", [A, JSON.stringify({ name: "Ok", frequency: "daily" })]), /Frequência/);
+  await as(admin);
+  assert.deepEqual(await rpc("radar_report_schedules", [A]), [], "cada pessoa vê os seus");
+  // Venceu: vira pedido dos últimos 7 dias até ontem, e a próxima vez anda.
+  const sched = list[0].id;
+  await sql(`update radar_report_schedules set next_run_at = now() - interval '1 minute' where id = $1`, [sched]);
+  await sql(`delete from net.requests`);
+  await sql(`select mavi_private.ai_radar_kick()`);
+  assert.equal((await sql(`select count(*)::int as n from net.requests`))[0].n, 1, "agendamento vencido acorda");
+  await as(null);
+  const got = await rpc("ai_radar_report_claim", [SECRET, 5]);
+  assert.equal(got.length, 1);
+  const [r] = await sql(`select * from radar_reports where schedule_id = $1`, [sched]);
+  const [{ y }] = await sql(`select ((now() at time zone 'America/Sao_Paulo')::date - 1) as y`);
+  assert.equal(r.period_to.getTime(), y.getTime());
+  assert.equal((r.period_to - r.period_from) / 864e5, 6);
+  assert.equal(r.requested_by, manager);
+  assert.match(r.title, /^Semanal de Tráfego · /);
+  assert.deepEqual(r.filters.products, [trafego]);
+  const [s2] = await sql(`select next_run_at, last_run_at from radar_report_schedules where id = $1`, [sched]);
+  assert.ok(s2.next_run_at > new Date() && s2.last_run_at);
+  // Quem deixa de ser líder perde o agendamento.
+  await sql(`update radar_report_schedules set next_run_at = now() - interval '1 minute' where id = $1`, [sched]);
+  await sql(`update memberships set role = 'member' where user_id = $1`, [manager]);
+  await as(null);
+  await rpc("ai_radar_report_claim", [SECRET, 5]);
+  const [s3] = await sql(`select active, next_run_at from radar_report_schedules where id = $1`, [sched]);
+  assert.deepEqual([s3.active, s3.next_run_at], [false, null]);
+  await sql(`update memberships set role = 'manager' where user_id = $1`, [manager]);
+  await as(manager);
+  assert.deepEqual(await rpc("delete_radar_report_schedule", [A, sched]), []);
 });
 
 console.log(`\n${passed} checks passed`);

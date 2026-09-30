@@ -1353,6 +1353,11 @@ export default function App() {
             live.current.loadInbox();
           return;
         }
+        // Radar do cliente › Relatórios listens for its own notices.
+        if (change.kind === "radar") {
+          window.dispatchEvent(new CustomEvent("mavi:radar", { detail: change }));
+          return;
+        }
         // Cases de Sucesso listens for its own notices.
         if (change.kind === "cases") {
           window.dispatchEvent(

@@ -156,7 +156,9 @@ export interface AppNotification {
     /** Skills da MAVI: uma para aprovar, ou a da pessoa aprovada/devolvida (link /mavi/skills/<id>). */
     | "ai_skill"
     /** A MAVI terminou (ou não conseguiu terminar) uma resposta depois que a pessoa saiu (link /mavi/conversas/<id>). */
-    | "ai_answer";
+    | "ai_answer"
+    /** Radar do cliente: o relatório pedido ou agendado ficou pronto (ou falhou) (link /radar?relatorio=<id>). */
+    | "radar_report";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

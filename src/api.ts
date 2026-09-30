@@ -1232,7 +1232,9 @@ export type LiveChange =
    * Mural de avisos: um aviso entregue ou mudado. `users`: quem acabou de
    * recebê-lo, quando são poucos (null: todos recarregam).
    */
-  | { kind: "notice"; notice: string; users: string[] | null };
+  | { kind: "notice"; notice: string; users: string[] | null }
+  /** Radar do cliente: um relatório entrou na fila, ficou pronto, falhou ou saiu. */
+  | { kind: "radar"; report?: string; status?: string };
 
 /**
  * Whether a task notice concerns the person: always for leaders (they see

@@ -11,8 +11,11 @@ import {
   extractionMessage,
   handleRadarWorker,
   parseCandidates,
+  parseReport,
   parseThemes,
+  reportMessage,
   runRadar,
+  type ReportMaterial,
   themesMessage,
   type ThemeGroup,
   type RadarMaterial,
@@ -288,7 +291,7 @@ describe("worker do Radar", () => {
         now: () => (t += 60_000),
       },
     );
-    expect(stats).toEqual({ signals: 2, items: 2, skipped: 0, failed: 0, themed: 0 });
+    expect(stats).toEqual({ signals: 2, items: 2, skipped: 0, failed: 0, themed: 0, reports: 0 });
     const stores = calls.filter((c) => c.url.includes("rpc/ai_radar_store"));
     expect(stores).toHaveLength(2);
     const [first, second] = stores.map((s) => s.body.p_result);
@@ -409,5 +412,96 @@ describe("temas do Radar", () => {
       usage: { cost: 0.002 },
     });
     expect(store.body.p_result.assign).toHaveLength(2);
+  });
+});
+
+describe("relatório do Radar", () => {
+  const material: ReportMaterial = {
+    period: { from: "2026-09-01", to: "2026-09-30" },
+    today: "2026-09-30",
+    company: "Make",
+    filters: { topics: [], products: ["Make Ads"], teams: [], clients: [] },
+    topics: [
+      { topic: "Problemas / reclamações", has_due: false, new: 12, active: 15, open: 9, closed: 4, severe: 3, overdue: 0, mentions: 30, clients: 8 },
+      { topic: "Promessas", has_due: true, new: 6, active: 6, open: 4, closed: 2, severe: 1, overdue: 2, mentions: 7, clients: 5 },
+    ],
+    products: [{ product: "Make Ads", clients: 8, topics: [{ topic: "Promessas", new: 6, open: 4, severe: 1, overdue: 2, closed: 2 }] }],
+    themes: [
+      { title: "Atraso na aprovação", summary: "Esperam dias.", topic: "Problemas / reclamações", product: "Make Ads", clients: 5, items: 6, open: 4, mentions: 11, max_severity: 3, client_names: ["4282", "5120"], quotes: ["cadê a arte?"] },
+    ],
+    severe: [{ topic: "Problemas / reclamações", product: "Make Ads", client: "4282", title: "Leads caíram", summary: "", severity: 3, status: "Aberto", mentions: 2, last_seen: "2026-09-29" }],
+    overdue: [{ topic: "Promessas", product: "Make Ads", client: "5120", title: "Enviar relatório", due_date: "2026-09-20", status: "Pendente", assignee: null }],
+    clients: [{ client: "4282", open: 3, severe: 1, new: 2 }],
+    new_items: [],
+  };
+
+  it("a mensagem traz os números, os temas, os sérios e os vencidos", () => {
+    const text = reportMessage(material);
+    expect(text).toMatch(/Período: 01\/09\/2026 a 30\/09\/2026 \(hoje é 30\/09\/2026\)/);
+    expect(text).toMatch(/Filtros: produtos: Make Ads\./);
+    expect(text).toMatch(/- Promessas: 6 novos · 6 ativos · 4 em aberto · 2 fechados · 1 sérios · 2 vencidos/);
+    expect(text).toMatch(/\[Make Ads · Problemas \/ reclamações\] Atraso na aprovação — 5 clientes.*gravidade até crítica.*"cadê a arte\?"/);
+    expect(text).toMatch(/5120: Enviar relatório \(prazo 20\/09\/2026, Pendente, sem responsável\)/);
+    expect(text).toMatch(/Itens novos no período \(amostra\):\n\(nenhum\)/);
+  });
+
+  it("o texto da MAVI é limpo e limitado; sem nada, falha", () => {
+    const content = parseReport(
+      JSON.stringify({
+        headline: "  Atraso na aprovação   é o tema.  ",
+        summary: "Resumo do mês.",
+        sections: [
+          { title: "Make Ads", paragraphs: ["Um.", "", "Dois."], bullets: ["A"] },
+          { title: "", paragraphs: ["sem título"] },
+          { title: "Vazio", paragraphs: [], bullets: [] },
+        ],
+        actions: [
+          { priority: "Alta", text: "Revisar a aprovação", product: "Make Ads" },
+          { priority: "media", text: "Ligar para o 4282" },
+          { priority: "urgente", text: "Outra" },
+          { priority: "alta", text: "" },
+        ],
+      }),
+    );
+    expect(content.headline).toBe("Atraso na aprovação é o tema.");
+    expect(content.sections).toEqual([{ title: "Make Ads", paragraphs: ["Um.", "Dois."], bullets: ["A"] }]);
+    expect(content.actions.map((a) => a.priority)).toEqual(["alta", "média", "média"]);
+    expect(content.actions[0].product).toBe("Make Ads");
+    expect(() => parseReport(JSON.stringify({ headline: "", summary: "" }))).toThrow(/não escreveu/);
+  });
+
+  it("o worker escreve o relatório antes das leituras e grava o custo", async () => {
+    let claims = 0;
+    const order: string[] = [];
+    const { fetchImpl, calls } = database({
+      "rpc/ai_radar_report_claim": () => {
+        order.push("relatório");
+        return claims++ === 0
+          ? [{ id: "00000000-0000-4000-8000-0000000003c1", company_id: company, title: "R", period_from: "2026-09-01", period_to: "2026-09-30", material }]
+          : [];
+      },
+      "rpc/ai_radar_claim": () => {
+        order.push("leituras");
+        return [];
+      },
+      "rpc/ai_worker_route": null,
+      "rpc/ai_radar_report_store": null,
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      expect(req.instructions).toMatch(/relatório do Radar/);
+      const meter = newMeter("claude-opus-5-5");
+      meter.cost = 0.2;
+      return {
+        text: JSON.stringify({ headline: "Mês de atrasos.", summary: "Resumo.", sections: [], actions: [] }),
+        meter,
+        rounds: 1,
+      };
+    });
+    const stats = await runRadar({ ...env, radarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
+    expect(stats.reports).toBe(1);
+    expect(order.indexOf("relatório")).toBeLessThan(order.indexOf("leituras"));
+    const store = calls.find((c) => c.url.includes("rpc/ai_radar_report_store"))!;
+    expect(store.body.p_content.headline).toBe("Mês de atrasos.");
+    expect(store.body.p_usage.cost).toBe(0.2);
   });
 });

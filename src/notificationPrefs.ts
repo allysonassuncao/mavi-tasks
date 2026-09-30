@@ -46,6 +46,11 @@ export const NOTICE_TYPES: {
     hint: "Quando um cliente seu esfria ou dá um sinal de alerta.",
   },
   {
+    key: "radar_report",
+    label: "Relatório do Radar",
+    hint: "Quando um relatório do Radar que você pediu ou agendou fica pronto.",
+  },
+  {
     key: "success_case",
     label: "Cases de Sucesso",
     hint: "Um case para aprovar, ou o seu aprovado ou devolvido.",

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { AlertTriangle, CalendarClock, Layers, List, RefreshCw, Settings2, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, FileText, Layers, List, RefreshCw, Settings2, X } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { Empty } from "./components";
 import type { Snapshot } from "./types";
 import { appPath, openInApp } from "./temperature";
 import { RadarItemPanel, SeverityDot } from "./RadarItemPanel";
 import { RadarThemes } from "./RadarThemes";
+import { RadarReports } from "./RadarReports";
+import { navigate, useLocation } from "./router";
 import type { FormPreset } from "./forms";
 import {
   dateBr,
@@ -32,8 +34,9 @@ type Saved = {
   assignee?: string;
   days?: string;
   sort?: RadarFilters["sort"];
-  view?: "items" | "themes";
+  view?: View;
 };
+type View = "items" | "themes" | "reports";
 const savedKey = (company: string, user: string) => `mavi:radar:${company}:${user}`;
 function readSaved(key: string): Saved {
   try {
@@ -82,7 +85,18 @@ export function RadarPage({
   const [total, setTotal] = useState(0);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  const [view, setView] = useState<"items" | "themes">(initial.view ?? "items");
+  // ?relatorio=<id>: o aviso de que o relatório ficou pronto (também com a
+  // página já aberta).
+  const location = useLocation();
+  const [reportLink, setReportLink] = useState<string | null>(null);
+  const [view, setView] = useState<View>(initial.view ?? "items");
+  useEffect(() => {
+    const id = new URLSearchParams(location.split("?")[1] ?? "").get("relatorio");
+    if (!id) return;
+    setReportLink(id);
+    setView("reports");
+    navigate(window.location.pathname, true);
+  }, [location]);
   // Os itens de um tema (vindo da visão de temas); não fica guardado.
   const [themeFilter, setThemeFilter] = useState<{ id: string; label: string } | null>(null);
   const request = useRef(0);
@@ -237,9 +251,26 @@ export function RadarPage({
         >
           <Layers size={15} aria-hidden="true" /> Temas
         </button>
+        <button
+          type="button"
+          className={view === "reports" ? "selected" : ""}
+          aria-pressed={view === "reports"}
+          onClick={() => setView("reports")}
+        >
+          <FileText size={15} aria-hidden="true" /> Relatórios
+        </button>
       </nav>
 
-      {view === "themes" ? (
+      {view === "reports" ? (
+        <RadarReports
+          company={company}
+          data={data}
+          topics={overview.topics}
+          notify={notify}
+          openReport={reportLink}
+          onOpened={() => setReportLink(null)}
+        />
+      ) : view === "themes" ? (
         <RadarThemes
           key={topic.id}
           company={company}

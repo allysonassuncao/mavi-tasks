@@ -223,7 +223,8 @@ export type AiFeature =
   | "skill_coach"
   | "client_radar"
   | "client_radar_check"
-  | "client_radar_themes";
+  | "client_radar_themes"
+  | "client_radar_report";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -491,6 +492,14 @@ export const FEATURES: FeatureInfo[] = [
     env: "CLIENT_RADAR_THEMES_MODEL",
     note: "Junta os itens novos de cada tópico e produto em temas; roda em lotes, poucas vezes por dia.",
   },
+  {
+    id: "client_radar_report",
+    group: "Radar do cliente",
+    label: "Relatório da MAVI (sob demanda e agendado)",
+    conversation: false,
+    env: "CLIENT_RADAR_REPORT_MODEL",
+    note: "Poucas chamadas, texto para a gestão decidir: vale um modelo forte.",
+  },
 ];
 
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
@@ -578,6 +587,8 @@ export function serverModel(
       return env.CLIENT_TEMPERATURE_TEXT_MODEL || env.AI_MODEL || fallback;
     case "client_radar":
       return env.CLIENT_RADAR_MODEL || env.AI_MODEL || fallback;
+    case "client_radar_report":
+      return env.CLIENT_RADAR_REPORT_MODEL || env.AI_MODEL || fallback;
     case "client_radar_themes":
       return env.CLIENT_RADAR_THEMES_MODEL || env.AI_MODEL || fallback;
     case "client_radar_check":
