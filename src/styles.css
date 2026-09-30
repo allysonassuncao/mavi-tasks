@@ -16403,6 +16403,134 @@ label .sl-money .ui-input,
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* Gravação: link público (diálogo e página /gravacao/<token>). */
+.meeting-public-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e6effa;
+  color: #2d5a8c;
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+.meeting-public-badge.expired {
+  background: #f1f1ef;
+  color: #7a7a74;
+}
+.share-meeting fieldset {
+  min-width: 0;
+  margin: 0;
+}
+.share-meeting fieldset:disabled .share-toggle {
+  cursor: default;
+}
+.share-meeting-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  color: #5d6a68;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.share-meeting-intro svg {
+  flex: none;
+  margin-top: 3px;
+  color: #2d5a8c;
+}
+.share-meeting-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.share-toggle.share-inline {
+  align-items: center;
+  font-size: 0.8rem;
+}
+.share-toggle.share-inline span {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+}
+.share-meeting-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.share-meeting-validity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.share-meeting-validity > * {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.share-meeting .form-footer .share-meeting-off,
+.share-meeting .form-footer .btn.danger {
+  margin-right: auto;
+}
+.public-meeting {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: #f6f7f8;
+  color: var(--ink);
+}
+.public-meeting.centered-page {
+  display: grid;
+  place-items: center;
+  height: auto;
+  min-height: 100dvh;
+  padding: 20px;
+}
+.public-meeting-message {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  width: min(420px, 100%);
+  padding: 28px;
+  color: #6b7875;
+}
+.public-meeting-message h1 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--ink);
+}
+.public-meeting-message p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+.public-meeting-message label {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+.public-meeting-message .btn {
+  width: 100%;
+}
+.public-meeting-downloads {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.public-meeting .meeting-player-body.no-video {
+  grid-template-columns: minmax(0, 860px);
+  justify-content: center;
+}
+.public-meeting .meeting-player-body.no-side {
+  grid-template-columns: minmax(0, 1100px);
+  justify-content: center;
+}
 @media (max-width: 900px) {
   .meeting-player-body {
     display: flex;
@@ -16422,6 +16550,13 @@ label .sl-money .ui-input,
   }
   .meeting-player-actions .btn {
     padding: 8px 10px;
+  }
+  .public-meeting .meeting-player-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .public-meeting-downloads {
+    justify-content: flex-start;
   }
   .meetings-toolbar .btn {
     margin-left: 0;

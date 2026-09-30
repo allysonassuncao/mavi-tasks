@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clock, Search, Sparkles, X } from "lucide-react";
+import { Clock, Globe, Search, Sparkles, X } from "lucide-react";
 import { Input, Loading, Select, SelectOption } from "./ui";
 import { Empty } from "./components";
 import { Paged } from "./Pagination";
@@ -17,6 +17,7 @@ import {
   meetingKind,
   meetingTitle,
   searchMeetingSegments,
+  sharedRecordings,
   type MeetingHit,
   type MeetingRecording,
 } from "./meetings";
@@ -65,6 +66,10 @@ export function MeetingRecordings({
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [hits, setHits] = useState<MeetingHit[] | null>(null);
+  // Gravações com link público (e até quando valem).
+  const [shared, setShared] = useState<Map<string, string | null>>(
+    () => new Map(),
+  );
   const [asking, setAsking] = useState(false);
   const [open, setOpen] = useState<{
     recording: MeetingRecording;
@@ -90,6 +95,17 @@ export function MeetingRecordings({
     window.addEventListener("mavi:meetings", onNotice);
     return () => window.removeEventListener("mavi:meetings", onNotice);
   }, [load, client]);
+
+  const loadShared = useCallback(
+    () =>
+      sharedRecordings(company, client)
+        .then(setShared)
+        .catch(() => {}),
+    [company, client],
+  );
+  useEffect(() => {
+    void loadShared();
+  }, [loadShared]);
 
   // O link de um momento abre a gravação assim que a lista chega.
   useEffect(() => {
@@ -281,7 +297,8 @@ export function MeetingRecordings({
         >
           <header>
             <strong>
-              <Sparkles size={15} /> Perguntar à MAVI sobre o histórico de {clientName}
+              <Sparkles size={15} /> Perguntar à MAVI sobre o histórico de{" "}
+              {clientName}
             </strong>
             <button
               type="button"
@@ -386,6 +403,9 @@ export function MeetingRecordings({
                         <span className="meeting-kind">
                           {meetingKind(r.title)}
                         </span>
+                        {shared.has(r.id) && (
+                          <PublicBadge expires={shared.get(r.id) ?? null} />
+                        )}
                       </span>
                       {r.summary.overview && (
                         <span className="meeting-row-overview">
@@ -434,10 +454,31 @@ export function MeetingRecordings({
           clientName={clientName}
           notify={notify}
           onNewTask={onNewTask}
+          onShareChange={() => void loadShared()}
           onClose={() => setOpen(null)}
         />
       )}
     </div>
+  );
+}
+
+/** O selo de uma gravação com link público (ou com o link vencido). */
+function PublicBadge({ expires }: { expires: string | null }) {
+  const expired = !!expires && new Date(expires).getTime() <= Date.now();
+  return (
+    <span
+      className={`meeting-public-badge ${expired ? "expired" : ""}`}
+      title={
+        expired
+          ? "O link público venceu e não abre mais"
+          : expires
+            ? `Link público válido até ${new Date(expires).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}`
+            : "Tem link público"
+      }
+    >
+      <Globe size={11} aria-hidden="true" />
+      {expired ? "Link vencido" : "Link público"}
+    </span>
   );
 }
 

@@ -133,6 +133,163 @@ export async function meetingVideoUrl(recording: string) {
   });
   return url;
 }
+// ------------------------------------------------------------ link público
+/**
+ * O link público de uma gravação (migration 20270104090000): um por
+ * gravação, com o que mostra, download, validade e senha opcional.
+ */
+export interface MeetingShare {
+  token: string;
+  show_video: boolean;
+  show_transcript: boolean;
+  show_summary: boolean;
+  allow_download: boolean;
+  expires_at: string | null;
+  expired: boolean;
+  has_password: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  opens: number;
+  downloads: number;
+  last_opened_at: string | null;
+  /** Quem criou o link ou um líder. */
+  can_manage: boolean;
+}
+export type MeetingShareInput = {
+  video: boolean;
+  transcript: boolean;
+  summary: boolean;
+  download: boolean;
+  expiresAt: string | null;
+  /** undefined mantém a senha atual; "" tira a senha. */
+  password?: string;
+};
+
+export async function meetingShare(recording: string) {
+  return (await rpc("meeting_share", {
+    p_recording: recording,
+  })) as MeetingShare | null;
+}
+export async function saveMeetingShare(
+  recording: string,
+  input: MeetingShareInput,
+) {
+  return (await rpc("set_meeting_share", {
+    p_recording: recording,
+    p_video: input.video,
+    p_transcript: input.transcript,
+    p_summary: input.summary,
+    p_download: input.download,
+    p_expires_at: input.expiresAt,
+    p_password: input.password ?? null,
+    p_keep_password: input.password === undefined,
+  })) as MeetingShare;
+}
+export async function deleteMeetingShare(recording: string) {
+  await rpc("delete_meeting_share", { p_recording: recording });
+}
+/** As gravações do cliente com link público (e até quando valem). */
+export async function sharedRecordings(company: string, client: string) {
+  const rows = (await rpc("meeting_shared_recordings", {
+    p_company: company,
+    p_client: client,
+  })) as { recording_id: string; expires_at: string | null }[] | null;
+  return new Map((rows ?? []).map((r) => [r.recording_id, r.expires_at]));
+}
+export function publicRecordingUrl(token: string, seconds?: number) {
+  const url = new URL(`/gravacao/${token}`, window.location.origin);
+  if (seconds && seconds > 0)
+    url.searchParams.set("t", String(Math.floor(seconds)));
+  return url.toString();
+}
+
+/** O que a página pública recebe (só o que o link mostra). */
+export type PublicMeeting =
+  | { status: "expired" | "password" | "wrong" | "locked" }
+  | {
+      status: "ok";
+      company: string;
+      title: string;
+      recorded_at: string;
+      duration_seconds: number | null;
+      speakers: string[];
+      video: boolean;
+      download: boolean;
+      expires_at: string | null;
+      show_transcript: boolean;
+      show_summary: boolean;
+      summary: MeetingSummary | null;
+      transcript: MeetingTranscript | null;
+    };
+/** Nulo: o link não existe (ou foi desativado). `opened` conta a visita. */
+export async function publicMeeting(
+  token: string,
+  password: string | null,
+  opened: boolean,
+) {
+  return (await rpc("meeting_public", {
+    p_token: token,
+    p_password: password,
+    p_opened: opened,
+  })) as PublicMeeting | null;
+}
+export async function publicMeetingVideo(
+  token: string,
+  password: string | null,
+  download: boolean,
+) {
+  const { url } = await driveServer<{ url: string }>({
+    action: "meeting-public-video",
+    token,
+    password: password ?? undefined,
+    download,
+  });
+  return url;
+}
+
+/** A transcrição em texto (o download do link público). */
+export function transcriptPlainText(title: string, t: MeetingTranscript) {
+  const name = (i: number | null) =>
+    i != null && t.speakers[i] ? t.speakers[i] : `Falante ${(i ?? 0) + 1}`;
+  const lines: string[] = [title, ""];
+  let speaker: number | null | undefined;
+  for (const [start, , who, text] of t.segments) {
+    if (who !== speaker) {
+      speaker = who;
+      lines.push(
+        "",
+        `${start != null ? `[${clock(start)}] ` : ""}${name(who)}:`,
+      );
+    }
+    lines.push(text);
+  }
+  return (
+    lines
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim() + "\n"
+  );
+}
+/** O resumo em texto (o download do link público). */
+export function summaryPlainText(title: string, s: MeetingSummary) {
+  const parts = [title];
+  if (s.overview) parts.push(s.overview);
+  if (s.notes?.length)
+    parts.push(
+      "Assuntos discutidos:\n" +
+        s.notes
+          .map(
+            (n, i) =>
+              `${i + 1}. ${n.title}${n.description ? `\n   ${n.description}` : ""}`,
+          )
+          .join("\n"),
+    );
+  const tags = [...(s.tone ?? []), ...(s.keywords ?? [])];
+  if (tags.length) parts.push(`Temas: ${tags.join(", ")}`);
+  return parts.join("\n\n") + "\n";
+}
+
 /** Pergunta sobre uma reunião (a transcrição inteira), em tempo real. */
 export function askMeeting(
   recording: string,

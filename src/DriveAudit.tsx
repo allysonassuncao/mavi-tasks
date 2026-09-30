@@ -25,6 +25,10 @@ export const auditActions: Record<string, string> = {
   public_upload_started: "Envio iniciado pelo link público",
   public_upload_completed: "Arquivo enviado pelo link público",
   recording_view: "Gravação da MAVI assistida",
+  recording_shared: "Link público da gravação criado ou alterado",
+  recording_unshared: "Link público da gravação desativado",
+  recording_public_opened: "Gravação aberta pelo link público",
+  recording_public_downloaded: "Vídeo da gravação baixado pelo link público",
   whatsapp_media_opened: "Mídia do Whatsapp aberta",
 };
 const visibilityLabel = (v: unknown) =>

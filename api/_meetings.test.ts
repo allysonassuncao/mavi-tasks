@@ -5,6 +5,7 @@ import {
   clock,
   handleMeetings,
   transcriptText,
+  videoFileName,
   type MeetingsDeps,
   type MeetingsEnv,
 } from "./_meetings";
@@ -137,6 +138,91 @@ describe("meeting-video", () => {
       { fetch: vi.fn() as any, ask: vi.fn() },
     );
     expect(res.status).toBe(401);
+  });
+});
+
+describe("meeting-public-video", () => {
+  const token = "a".repeat(64);
+  const video = [
+    {
+      bucket: "meet_recording",
+      path: "k/reuniao.mp4",
+      content_type: "video/mp4",
+      title: "R2: 4282/Setembro",
+    },
+  ];
+  it("assiste sem login: o banco confere o link e a senha", async () => {
+    const { fetchImpl, calls } = database({
+      "rpc/meeting_public_video": video,
+    });
+    const res = await handleMeetings(
+      { action: "meeting-public-video", token, password: "segredo" },
+      null,
+      env,
+      { fetch: fetchImpl, ask: vi.fn() },
+      { ip: "1.2.3.4" },
+    );
+    expect(res.status).toBe(200);
+    const url = new URL(String(res.body.url));
+    expect(url.searchParams.get("X-Goog-Expires")).toBe("21600");
+    expect(url.searchParams.get("response-content-disposition")).toBe("inline");
+    expect(calls[0].body).toEqual({
+      p_token: token,
+      p_password: "segredo",
+      p_download: false,
+      p_origin: { ip: "1.2.3.4" },
+    });
+    // Anônimo: vai com a chave pública, não com o token de alguém.
+    const headers = (fetchImpl as any).mock.calls[0][1].headers;
+    expect(headers.Authorization).toBe("Bearer publishable");
+  });
+  it("baixa com o nome da reunião, por um link curto", async () => {
+    const { fetchImpl, calls } = database({
+      "rpc/meeting_public_video": video,
+    });
+    const res = await handleMeetings(
+      { action: "meeting-public-video", token, download: true },
+      "Bearer de-alguem",
+      env,
+      { fetch: fetchImpl, ask: vi.fn() },
+    );
+    const url = new URL(String(res.body.url));
+    expect(url.searchParams.get("X-Goog-Expires")).toBe("600");
+    expect(url.searchParams.get("response-content-disposition")).toContain(
+      'attachment; filename="R2- 4282-Setembro.mp4"',
+    );
+    expect(calls[0].body.p_download).toBe(true);
+    expect(calls[0].body.p_password).toBeNull();
+  });
+  it("link inválido, negado pelo banco ou bucket fora da lista: 404", async () => {
+    const bad = await handleMeetings(
+      { action: "meeting-public-video", token: "x" },
+      null,
+      env,
+      { fetch: vi.fn() as any, ask: vi.fn() },
+    );
+    expect(bad).toEqual({
+      status: 404,
+      body: { error: "Link inválido ou vídeo indisponível." },
+    });
+    for (const answer of [
+      [],
+      [{ ...video[0], bucket: "outro" }],
+      new Response("{}", { status: 400 }),
+    ]) {
+      const { fetchImpl } = database({ "rpc/meeting_public_video": answer });
+      const res = await handleMeetings(
+        { action: "meeting-public-video", token },
+        null,
+        env,
+        { fetch: fetchImpl, ask: vi.fn() },
+      );
+      expect(res.status).toBe(404);
+    }
+  });
+  it("nome do arquivo sem caracteres proibidos e com a extensão do tipo", () => {
+    expect(videoFileName('a/b:c*"d', "video/webm")).toBe("a-b-c-d.webm");
+    expect(videoFileName("  ", "video/mp4")).toBe("Gravação.mp4");
   });
 });
 

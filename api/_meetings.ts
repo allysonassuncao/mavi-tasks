@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
   callRpc,
+  disposition,
   signGcsUrl,
   type GcsCredentials,
   type RequestOrigin,
@@ -20,6 +21,9 @@ import { serverModel } from "../src/ai-providers.js";
  *
  * - "meeting-video": link assinado do vídeo (o banco confere o acesso,
  *   devolve o caminho e registra a abertura no histórico do Drive);
+ * - "meeting-public-video": o vídeo de um link público (/gravacao/<token>),
+ *   sem login: o banco confere o link, a validade, a senha e se o download
+ *   está liberado;
  * - "meeting-ask": pergunta sobre uma reunião; a MAVI responde lendo a
  *   transcrição e cita os momentos como [mm:ss] (o provedor e o modelo vêm
  *   do Painel da MAVI, funcionalidade "meetings_ask"; sem regra, a Claude
@@ -81,6 +85,12 @@ export type MeetingsDeps = {
 
 export type MeetingsRequest =
   | { action: "meeting-video"; recording: string }
+  | {
+      action: "meeting-public-video";
+      token: string;
+      password?: string;
+      download?: boolean;
+    }
   | {
       action: "meeting-ask";
       recording: string;
@@ -369,6 +379,8 @@ export async function handleMeetings(
   const req = (body ?? {}) as Partial<MeetingsRequest> &
     Record<string, unknown>;
   const fail = (status: number, error: string) => ({ status, body: { error } });
+  if (req.action === "meeting-public-video")
+    return publicVideo(req, env, deps, origin);
   if (!authorization?.startsWith("Bearer "))
     return fail(401, "Autenticação necessária.");
 
@@ -417,6 +429,79 @@ export async function handleMeetings(
   } catch (err) {
     return fail(statusOf(err), friendly(err));
   }
+}
+
+/** O nome do arquivo baixado: "R2/4282" → "R2-4282.mp4". */
+export function videoFileName(title: string, type: string) {
+  const ext = /webm/i.test(type)
+    ? "webm"
+    : /quicktime/i.test(type)
+      ? "mov"
+      : "mp4";
+  const base =
+    title
+      .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 120) || "Gravação";
+  return `${base}.${ext}`;
+}
+
+/**
+ * O vídeo de um link público: anônimo (o banco confere o token, a
+ * validade, a senha e o download, e registra o download). Assistir vale por
+ * 6 horas, como no Drive; baixar abre o arquivo com o nome da reunião.
+ */
+async function publicVideo(
+  req: Record<string, unknown>,
+  env: MeetingsEnv,
+  deps: MeetingsDeps,
+  origin: RequestOrigin,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const unavailable = {
+    status: 404,
+    body: { error: "Link inválido ou vídeo indisponível." },
+  };
+  if (typeof req.token !== "string" || !/^[0-9a-f]{64}$/.test(req.token))
+    return unavailable;
+  if (!env.credentials?.client_email || !env.credentials.private_key)
+    return {
+      status: 500,
+      body: { error: "Credenciais do Google Cloud Storage não configuradas." },
+    };
+  const download = req.download === true;
+  const target = await callRpc<
+    {
+      bucket: string;
+      path: string;
+      content_type: string | null;
+      title: string;
+    }[]
+  >(env, deps.fetch, null, "meeting_public_video", {
+    p_token: req.token,
+    p_password:
+      typeof req.password === "string" ? req.password.slice(0, 200) : null,
+    p_download: download,
+    p_origin: origin,
+  });
+  const video = target.ok ? target.data[0] : undefined;
+  if (!video || !env.buckets.includes(video.bucket)) return unavailable;
+  const type = video.content_type || "video/mp4";
+  return {
+    status: 200,
+    body: {
+      url: signGcsUrl(env.credentials, video.bucket, video.path, "GET", {
+        expiresInSeconds: download ? 600 : 6 * 3600,
+        query: {
+          "response-content-type": type,
+          "response-content-disposition": download
+            ? disposition("attachment", videoFileName(video.title, type))
+            : "inline",
+        },
+      }),
+      content_type: type,
+    },
+  };
 }
 
 type MeetingEvent =

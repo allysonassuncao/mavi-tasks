@@ -27,11 +27,13 @@ import {
   AlignLeft,
   Rewind,
   FastForward,
+  Globe,
 } from "lucide-react";
 import { Loading } from "./ui";
 import { canCreateTaskIn } from "./domain";
 import { AiChat, AnswerText } from "./AiChat";
 import { fold } from "./task-search";
+import { ShareMeetingDialog } from "./ShareMeetingDialog";
 import type { Snapshot } from "./types";
 import type { FormPreset } from "./forms";
 import {
@@ -53,7 +55,7 @@ import {
 } from "./meetings";
 
 type Tab = "transcript" | "summary" | "steps" | "ask";
-const SPEEDS = [1, 1.25, 1.5, 2];
+export const SPEEDS = [1, 1.25, 1.5, 2];
 const SPEAKER_COLORS = [
   "#2d5a8c",
   "#7a4fb3",
@@ -80,6 +82,8 @@ type Props = {
   clientName: string;
   notify: (message: string) => void;
   onNewTask?: (preset: FormPreset) => void;
+  /** O link público foi criado, alterado ou desativado. */
+  onShareChange?: () => void;
   onClose: () => void;
 };
 
@@ -95,6 +99,7 @@ export function MeetingPlayer({
   clientName,
   notify,
   onNewTask,
+  onShareChange,
   onClose,
 }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -111,6 +116,7 @@ export function MeetingPlayer({
   const [duration, setDuration] = useState(recording.duration_seconds ?? 0);
   const [rate, setRate] = useState(1);
   const [error, setError] = useState("");
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     const d = dialog.current;
@@ -244,6 +250,14 @@ export function MeetingPlayer({
             title="Copiar o link desta reunião para enviar a outra pessoa"
           >
             <Share2 size={15} /> Copiar link
+          </button>
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={() => setSharing(true)}
+            title="Criar ou gerenciar o link público, que abre sem login"
+          >
+            <Globe size={15} /> Link público
           </button>
           {time > 0 && (
             <button
@@ -408,6 +422,17 @@ export function MeetingPlayer({
           </div>
         </section>
       </div>
+      {sharing && (
+        <ShareMeetingDialog
+          recording={recording.id}
+          title={title}
+          hasVideo={!!recording.video_type}
+          time={time}
+          notify={notify}
+          onChange={onShareChange}
+          onClose={() => setSharing(false)}
+        />
+      )}
     </dialog>,
     document.body,
   );
@@ -508,7 +533,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
   );
 });
 
-function TranscriptPanel({
+export function TranscriptPanel({
   transcript,
   time,
   synced,
@@ -656,7 +681,7 @@ const initials = (name: string) =>
     .map((w) => w[0]?.toUpperCase())
     .join("");
 
-function SummaryPanel({
+export function SummaryPanel({
   recording,
   transcript,
   duration,
@@ -884,8 +909,7 @@ function SummaryPanel({
       )}
 
       <p className="meeting-ai-note">
-        Resumo gerado automaticamente pela MAVI; confira na
-        transcrição.
+        Resumo gerado automaticamente pela MAVI; confira na transcrição.
       </p>
     </div>
   );

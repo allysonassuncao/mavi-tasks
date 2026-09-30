@@ -34,6 +34,12 @@ const PublicCase = lazy(() =>
 const publicCase = window.location.pathname.match(
   /^\/cases\/([0-9a-f]{64})\/?$/,
 );
+const PublicMeeting = lazy(() =>
+  import("./PublicMeeting").then((m) => ({ default: m.PublicMeeting })),
+);
+const publicMeeting = window.location.pathname.match(
+  /^\/gravacao\/([0-9a-f]{64})\/?$/,
+);
 const approvalLink = window.location.pathname.match(
   /^\/aprovacao\/([0-9a-f]{64})\/?$/,
 );
@@ -60,6 +66,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     ) : publicCase ? (
       <Suspense fallback={null}>
         <PublicCase token={publicCase[1]} />
+      </Suspense>
+    ) : publicMeeting ? (
+      <Suspense fallback={null}>
+        <PublicMeeting token={publicMeeting[1]} />
       </Suspense>
     ) : approvalLink ? (
       <Suspense fallback={null}>
