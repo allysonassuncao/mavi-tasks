@@ -532,29 +532,26 @@ export async function tasksQuery(
   );
 }
 
-/** How many tasks each scope tab holds under the current filters. */
+/**
+ * How many tasks each scope tab holds under the current filters — one count
+ * per tab the person sees, none for tabs they don't.
+ */
 export async function taskScopeCounts(
   company: string,
   filters: Filters,
+  scopes: TaskScope[],
   forceRefresh = false,
-): Promise<Record<TaskScope, number>> {
+): Promise<Partial<Record<TaskScope, number>>> {
   if (!supabase) throw Error("Supabase não configurado");
   const lookups = await companyLookups(company, forceRefresh);
   const base = { ...filters, scope: undefined, page: 0 };
-  const cacheKey = `task_scopes:${company}:${hashFilters(base)}`;
+  const cacheKey = `task_scopes:${company}:${scopes.join(",")}:${hashFilters(base)}`;
   return cache.fetchWithCache(
     cacheKey,
     async () => {
       const companyTz =
         (await companies()).find((c) => c.id === company)?.timezone ??
         "America/Sao_Paulo";
-      const scopes: TaskScope[] = [
-        "mine",
-        "created",
-        "participating",
-        "teams",
-        "others",
-      ];
       const counts = await Promise.all(
         scopes.map(async (scope) => {
           const { count, error } = await applyScope(
@@ -569,7 +566,7 @@ export async function taskScopeCounts(
       );
       return Object.fromEntries(
         scopes.map((scope, i) => [scope, counts[i]]),
-      ) as Record<TaskScope, number>;
+      ) as Partial<Record<TaskScope, number>>;
     },
     { ttlMs: CACHE_TTL.TASKS, forceRefresh },
   );

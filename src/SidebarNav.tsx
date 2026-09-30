@@ -176,8 +176,7 @@ export function SidebarNav({
           to: tasks(),
           count: taskCount,
           children: [
-            // "Todas" clears the list's filters; "Tarefas" reopens the last ones.
-            { key: "tasks-all", label: "Todas", to: tasks({ escopo: "all" }) },
+            // "Tarefas" reopens the last filters; a shortcut, its own.
             {
               key: "tasks-mine",
               label: "Para você",
@@ -418,9 +417,9 @@ export function SidebarNav({
       );
     }
     if (to.page !== "tasks") return true;
-    // "escopo=all" is the same list as no scope.
+    // No scope is the same list as "Para você".
     const value = (key: string, v: string | null | undefined) =>
-      key === "escopo" && v === "all" ? "" : (v ?? "");
+      key === "escopo" ? v || "mine" : (v ?? "");
     return FILTERS.every(
       (key) => value(key, params.get(key)) === value(key, to.query?.[key]),
     );

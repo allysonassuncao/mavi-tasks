@@ -586,21 +586,24 @@ export default function App() {
   // Who from the company has the app open (joined once the person's
   // membership is known).
   const presence = usePresence(member ? company : "", user, demo, data.members);
-  // Task list tabs (see TASK_SCOPES): "" is every task. Collaborators only
-  // see their own tasks, the ones they take part in and, when they supervise
-  // a team, that team's (the tasks policy) — so "Outras equipes" never
-  // applies to them, and "Suas equipes" only to supervisors.
+  // Task list tabs (see TASK_SCOPES). There is no tab with every task: the
+  // list always loads one scope, "Para você" when none (or an unknown one,
+  // such as an old escopo=all link) is asked. Collaborators only see their
+  // own tasks, the ones they take part in and, when they supervise a team,
+  // that team's (the tasks policy) — so "Suas equipes" only to supervisors.
   const supervises = data.teamMembers.some(
     (tm) => tm.user_id === user && tm.supervisor,
   );
-  const scopeTabs = isLeader
-    ? TASK_SCOPES
-    : TASK_SCOPES.filter(
-        (t) => t.id !== "others" && (t.id !== "teams" || supervises),
-      );
-  const listScope: TaskScope | "" = scopeTabs.some((t) => t.id === scopeParam)
+  const scopeTabs = useMemo(
+    () =>
+      isLeader || supervises
+        ? TASK_SCOPES
+        : TASK_SCOPES.filter((t) => t.id !== "teams"),
+    [isLeader, supervises],
+  );
+  const listScope: TaskScope = scopeTabs.some((t) => t.id === scopeParam)
     ? (scopeParam as TaskScope)
-    : "";
+    : "mine";
   const today = dateKey(new Date(), currentCompany?.timezone);
   const [periodValue, setPeriod] = useUrlState<string>("periodo", "");
   const [currentRunning, setCurrentRunning] = useState<
@@ -922,7 +925,7 @@ export default function App() {
           hideDone: page === "tasks" && !status,
           product: page === "tasks" ? product : "",
           mine: false,
-          scope: page === "tasks" && listScope ? listScope : undefined,
+          scope: page === "tasks" ? listScope : undefined,
           user,
           page: page === "tasks" ? offset : 0,
           late: page === "tasks" ? late : false,
@@ -988,10 +991,10 @@ export default function App() {
     page === "tasks" ? scheduleMonth : "",
   ]);
   // How many tasks each tab holds, with the list's other filters applied.
-  const [scopeCounts, setScopeCounts] = useState<Record<
-    TaskScope,
-    number
+  const [scopeCounts, setScopeCounts] = useState<Partial<
+    Record<TaskScope, number>
   > | null>(null);
+  const countedScopes = scopeTabs.map((t) => t.id).join(",");
   useEffect(() => {
     if (demo || page !== "tasks" || !company || !session) return;
     let alive = true;
@@ -1011,6 +1014,7 @@ export default function App() {
           project: projectFilter,
           onlyMineOrCreated: false,
         },
+        countedScopes.split(",") as TaskScope[],
         refresh > 0,
       )
       .then((c) => {
@@ -1037,6 +1041,7 @@ export default function App() {
     projectFilter,
     refresh,
     liveTick,
+    countedScopes,
   ]);
   useEffect(() => {
     if (demo || !company || !session) return;
@@ -1855,15 +1860,13 @@ export default function App() {
   const teamsOfMine = useMemo(() => myTeams(data, user), [data, user]);
   const filtered = useMemo(
     () =>
-      listScope
-        ? unscoped.filter(
-            (t) => taskScope(data, t, user, teamsOfMine) === listScope,
-          )
-        : unscoped,
+      unscoped.filter(
+        (t) => taskScope(data, t, user, teamsOfMine) === listScope,
+      ),
     [unscoped, listScope, data, user, teamsOfMine],
   );
   // Tab counts: from the server, or from the demo's (complete) task list.
-  const tabCounts = useMemo(() => {
+  const tabCounts = useMemo((): Partial<Record<TaskScope, number>> | null => {
     if (!demo) return scopeCounts;
     const counts: Record<TaskScope, number> = {
       mine: 0,
@@ -1875,20 +1878,9 @@ export default function App() {
     for (const t of unscoped) counts[taskScope(data, t, user, teamsOfMine)]++;
     return counts;
   }, [demo, scopeCounts, unscoped, data, user, teamsOfMine]);
-  // "Todas": the page split by scope; team tabs: split by team.
+  // "Suas equipes": split by team.
   const tabGroups = useMemo(() => {
-    if (!listScope)
-      return scopeTabs
-        .map((sc) => ({
-          key: sc.id,
-          label: sc.label,
-          hint: sc.hint,
-          tasks: filtered.filter(
-            (t) => taskScope(data, t, user, teamsOfMine) === sc.id,
-          ),
-        }))
-        .filter((g) => g.tasks.length);
-    if (listScope === "teams" || listScope === "others") {
+    if (listScope === "teams") {
       const byTeam = new Map<string, Task[]>();
       for (const t of filtered) {
         const name = taskTeamName(data, t);
@@ -1907,7 +1899,7 @@ export default function App() {
         }));
     }
     return undefined;
-  }, [scopeTabs, listScope, filtered, data, user, teamsOfMine]);
+  }, [listScope, filtered, data]);
   // The split the person chose: the tab's own ("Padrão da aba") or another,
   // plus the second level. Without a first level, the second one leads.
   const companyTimezone = currentCompany?.timezone ?? "America/Sao_Paulo";
@@ -1982,7 +1974,7 @@ export default function App() {
         client: clientFilter,
         project: projectFilter,
         onlyMineOrCreated: !isLeader,
-        scope: listScope || undefined,
+        scope: listScope,
         order: groupOrder(groupBy),
       },
       companyTimezone,
@@ -3070,25 +3062,11 @@ export default function App() {
                     role="tablist"
                     aria-label="De quem são as tarefas"
                   >
-                    {[
-                      {
-                        id: "" as const,
-                        label: "Todas",
-                        hint: "Todas as tarefas, separadas por seção",
-                      },
-                      ...scopeTabs,
-                    ].map((tab) => {
-                      const n = tabCounts
-                        ? tab.id
-                          ? tabCounts[tab.id]
-                          : scopeTabs.reduce(
-                              (sum, t) => sum + tabCounts[t.id],
-                              0,
-                            )
-                        : null;
+                    {scopeTabs.map((tab) => {
+                      const n = tabCounts?.[tab.id] ?? null;
                       return (
                         <button
-                          key={tab.id || "all"}
+                          key={tab.id}
                           type="button"
                           role="tab"
                           aria-selected={listScope === tab.id}
@@ -3267,7 +3245,7 @@ export default function App() {
                         rememberGroups={{
                           company,
                           user,
-                          split: `${groupBy === "auto" ? `auto-${listScope || "all"}` : groupBy}>${thenBy}`,
+                          split: `${groupBy === "auto" ? `auto-${listScope}` : groupBy}>${thenBy}`,
                         }}
                       />
                     </>
@@ -3723,6 +3701,8 @@ export default function App() {
                     company={company}
                     user={user}
                     data={catalogData}
+                    notify={notify}
+                    onNewTask={(preset) => openForm("task", preset)}
                   />
                 </Suspense>
               )}
@@ -4520,16 +4500,14 @@ function PlayingBadge({ playing }: { playing: Playing }) {
 /** Query params of the task list: a link with any of them opens as it is. */
 /**
  * Whether the saved list filters were made from this menu shortcut: the
- * same tab, and the shortcut's own filter among them. "Todas" (escopo=all)
- * clears instead.
+ * same tab ("Para você" when none), and the shortcut's own filter among them.
  */
 function shortcutOf(query: Record<string, string>, saved: TaskViewConfig) {
   const keys = Object.keys(query);
   if (!keys.every((k) => ["escopo", "atrasadas", "produto"].includes(k)))
     return false;
-  if (query.escopo === "all") return false;
   return (
-    (query.escopo ?? "") === (saved.scope ?? "") &&
+    (query.escopo || "mine") === (saved.scope || "mine") &&
     (!("atrasadas" in query) || !!saved.late) &&
     (!("produto" in query) || saved.product === query.produto)
   );

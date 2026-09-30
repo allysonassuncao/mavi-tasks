@@ -474,6 +474,8 @@ export type TaskActions = ReturnType<typeof taskActions>;
  * created by them for someone else, one they take part in (they were
  * responsible before, or were mentioned), in one of their teams, or
  * elsewhere. Mirrored on the server by the task list's `scope` filter.
+ * "others" has no tab: the list always opens on one of TASK_SCOPES, so it
+ * never loads the whole company's tasks.
  */
 export type TaskScope =
   "mine" | "created" | "participating" | "teams" | "others";
@@ -494,7 +496,6 @@ export const TASK_SCOPES: { id: TaskScope; label: string; hint: string }[] = [
     label: "Suas equipes",
     hint: "Das equipes de que você participa",
   },
-  { id: "others", label: "Outras equipes", hint: "Demais tarefas da empresa" },
 ];
 /** The person's teams and the clients those teams serve. */
 export function myTeams(data: Snapshot, userId: string) {
