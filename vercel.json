@@ -26,6 +26,10 @@
       "destination": "/api/drive"
     },
     {
+      "source": "/api/google-callback",
+      "destination": "/api/google"
+    },
+    {
       "source": "/api/whatsapp",
       "destination": "/api/drive"
     },

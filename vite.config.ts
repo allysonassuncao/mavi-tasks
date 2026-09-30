@@ -23,15 +23,9 @@ function gcsDevPlugin() {
           await profile(req, res);
           return;
         }
-        if (req.url?.startsWith("/api/google-callback")) {
-          const { default: callback } = await server.ssrLoadModule(
-            "/api/google-callback.ts",
-          );
-          await callback(req, res);
-          return;
-        }
         if (req.url?.startsWith("/api/google")) {
-          // Same handler as the Vercel function (api/google.ts).
+          // Same handler as the Vercel function (api/google.ts; the
+          // callback, /api/google-callback, is its GET, rewritten on Vercel).
           const { default: google } =
             await server.ssrLoadModule("/api/google.ts");
           await google(req, res);
