@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { handleAi, streamAi, type AiEnv, type AiStreamEvent } from "./_ai";
 import type { AgentRequest, LlmAdapter } from "./_ai-llm";
-import { catalogContext, pickedSkills } from "./_ai-skills";
+import { catalogContext, pickedSkills, summarizeSkillStep } from "./_ai-skills";
+import { summarizeArtStep } from "./_ai-art";
 import { newMeter } from "./_social-leads";
 import { outputText } from "./_ai-llm.js";
 
@@ -208,5 +209,13 @@ describe("skills da MAVI", () => {
       { slug: "c3" },
     ]);
     expect(catalogContext([], [])).toBe("");
+  });
+
+  it("o passo diz o que aconteceu com a skill e com a marca, não só “não deu”", () => {
+    expect(summarizeSkillStep("use_skill", "Resultado da skill “Post Make” (feito com claude-sonnet-5-5, seguindo as instruções dela):\nx")).toBe("feita com claude-sonnet-5-5");
+    expect(summarizeSkillStep("use_skill", "Skill carregada: Post Make")).toBe("instruções carregadas");
+    expect(summarizeSkillStep("use_skill", 'Não há a skill "x" no catálogo desta pessoa.')).toBe("não está no catálogo");
+    expect(summarizeArtStep("brand_kit", "Não achei o cliente “MakeCRM”. Confira com find_clients.")).toBe("cliente não encontrado");
+    expect(summarizeArtStep("brand_kit", "Diga de qual cliente é a marca (o id de find_clients ou o nome).")).toBe("sem cliente");
   });
 });

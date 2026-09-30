@@ -234,6 +234,10 @@ export function describeSkillStep(kit: SkillKit, name: string, raw: unknown) {
 }
 export function summarizeSkillStep(name: string, output: string) {
   if (/^(Skill carregada|A skill .* já está carregada)/.test(output)) return "instruções carregadas";
+  const delegated = output.match(/^Resultado da skill .*?\(feito com ([^,]+),/);
+  if (delegated) return `feita com ${delegated[1]}`;
   if (/^Arquivo /.test(output)) return "lido";
+  if (/^Não há a skill/.test(output)) return "não está no catálogo";
+  if (/não está disponível/.test(output)) return "indisponível para você";
   return "não deu";
 }

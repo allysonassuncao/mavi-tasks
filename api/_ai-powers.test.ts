@@ -776,7 +776,7 @@ describe("um modelo para cada parte", () => {
     expect((events.at(-1) as any).answer).toBe("feito por skill-model");
   });
 
-  it("a skill com modelo próprio que a MAVI carrega roda nele como ajudante", async () => {
+  it("a skill com modelo próprio que a MAVI carrega roda nele como ajudante, com as ferramentas da vez", async () => {
     const skillId = "00000000-0000-4000-8000-0000000000e1";
     const { fetchImpl } = world({
       ...base(["skills"]),
@@ -787,7 +787,13 @@ describe("um modelo para cada parte", () => {
     const { providerLlm } = models({
       "skill-model": async (r) => {
         expect(r.messages.at(-1)!.content).toContain("<skill>\nSiga o modelo.\n</skill>");
-        expect(outputText(await r.execute("show_chart", {}))).toBe("Ferramenta indisponível: show_chart.");
+        // As da vez (a skill lê os próprios arquivos), menos carregar outra skill.
+        const names = r.tools.map((t) => t.name);
+        expect(names).toContain("read_skill_file");
+        expect(names).toContain("ask_user");
+        expect(names).not.toContain("use_skill");
+        expect(r.effort).toBe("high");
+        await expect(r.execute("show_chart", {})).rejects.toThrow("Ferramenta indisponível: show_chart.");
         return answer("Relatório pronto pelo ajudante.");
       },
     });

@@ -364,7 +364,16 @@ export async function runArtTool(kit: PowerKit, name: string, raw: unknown): Pro
 }
 
 export function summarizeArtStep(name: string, output: string) {
-  if (name === "brand_kit") return /^Marca do cliente/.test(output) ? (/A marca está vazia/.test(output) ? "marca vazia" : "marca lida") : "não deu";
+  if (name === "brand_kit")
+    return /^Marca do cliente/.test(output)
+      ? /A marca está vazia/.test(output) ? "marca vazia" : "marca lida"
+      : /^Não achei o cliente/.test(output)
+        ? "cliente não encontrado"
+        : /^Há mais de um cliente/.test(output)
+          ? "mais de um cliente com esse nome"
+          : /^Diga de qual cliente/.test(output)
+            ? "sem cliente"
+            : "não deu";
   if (name === "read_art") return /^HTML da arte/.test(output) ? "lida" : "não deu";
   const found = output.match(/^- /gm)?.length ?? 0;
   return /^Arte I\d+ pronta/.test(output) ? (found ? `pronta · ${found} ${found === 1 ? "ponto" : "pontos"} para conferir` : "pronta") : "não deu";

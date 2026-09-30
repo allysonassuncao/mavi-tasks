@@ -21,7 +21,6 @@ import {
   type ToolOutput,
 } from "./_ai-llm.js";
 import {
-  TOOLS,
   describeStep,
   runTool,
   summarizeStep,
@@ -1222,7 +1221,10 @@ async function ask(
     await logUsage("web", out.meter, webRoute!.provider_id, c.name);
     return `Resultado da pesquisa na internet (feita com ${c.model}; as páginas são as fontes [S#]):\n${out.text}`;
   };
-  // A skill com modelo próprio, carregada pela MAVI, roda nele como ajudante.
+  // A skill com modelo próprio, carregada pela MAVI, roda nele como ajudante,
+  // com as mesmas ferramentas da vez (menos use_skill): uma skill de arte
+  // precisa ler a marca, desenhar e perguntar, e toda skill lê os próprios
+  // arquivos. As ações seguem virando proposta e as perguntas, card.
   skills.delegate = async (s) => {
     const r = await callRpc<ResolvedRoute | null>(env, deps.fetch, auth, "ai_skill_route", {
       p_company: company,
@@ -1231,19 +1233,27 @@ async function ask(
     if (!r?.ok || !r.data?.key_cipher || r.data.provider_id === turnRoute?.provider_id && r.data.model === turnRoute?.model)
       return null;
     const c = routeConfig(env, r.data);
-    const reads = new Set(TOOLS.map((t) => t.name));
     const out = await makeLlm(c)({
-      instructions: INSTRUCTIONS + (onPage ? PAGE_STYLE : "") + SKILL_RULES,
-      context: base.context,
+      instructions: turnInstructions,
+      context: turnContext,
       messages: withSkills(messages, [s]),
-      tools: TOOLS,
+      tools: tools.filter((t) => t.name !== "use_skill"),
       execute: (name, input) =>
-        reads.has(name) ? execute(name, input) : Promise.resolve(`Ferramenta indisponível: ${name}.`),
-      maxRounds: 12,
+        name === "use_skill"
+          ? Promise.resolve("A skill já está carregada: siga as instruções dela.")
+          : execute(name, input),
+      maxRounds: 14,
+      effort: effortOf(efforts, `skill:${s.id}`) ?? "high",
+      webSearch: powers.has("web") && !webRoute && c.kind === "anthropic",
+      onCitation: citeWeb,
+      onEvent: (e) => {
+        if (e.type === "server_tool") webStep(e.name, e.input);
+      },
+      signal: stop.signal,
     });
     kit.extraCost!.usd += out.meter.cost;
     await logUsage("skill", out.meter, r.data.provider_id, c.name);
-    return `Resultado da skill “${s.name}” (feito com ${c.model}, seguindo as instruções dela):\n${out.text}\n\nApresente este resultado à pessoa: pode ajustar a forma, mas mantenha o conteúdo e as fontes [S#].`;
+    return `Resultado da skill “${s.name}” (feito com ${c.model}, seguindo as instruções dela):\n${out.text}\n\nApresente este resultado à pessoa: pode ajustar a forma, mas mantenha o conteúdo, as fontes [S#] e as imagens [[I#]] que ele mostra. Se ele fez perguntas à pessoa, só avise que as perguntas estão abaixo e pare.`;
   };
   // A pessoa confirmou uma ação de conexão no card: roda agora (uma vez) e
   // a MAVI continua a partir do resultado, como o Claude Code depois de aprovar.
