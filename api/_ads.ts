@@ -11,6 +11,15 @@ import {
   type Destination,
   type Objective,
 } from "./_conversions.js";
+import {
+  platformDetail,
+  platformList,
+  platformPreview,
+  platformQuery,
+  reportMeta,
+  type ReportMeta,
+  type ReportSources,
+} from "./_ads-platform.js";
 
 /**
  * Campanhas: the ad accounts and campaigns of Meta and Google Ads, read live
@@ -893,6 +902,28 @@ export type AdsRequest =
       client?: string | null;
       landing_page: string;
       make_user: string;
+    }
+  /** Meta: the Ads Manager view of an account (api/_ads-platform.ts). */
+  | {
+      action: "platform" | "platform-detail" | "platform-preview";
+      company: string;
+      provider: "meta";
+      account: string;
+    }
+  /** A report of a campaign: its ads from Meta, then create_ad_report. */
+  | {
+      action: "report-create";
+      company: string;
+      provider: "meta";
+      campaign: string;
+      title: string;
+      start: string;
+      end: string;
+      config: Record<string, unknown>;
+      analysis?: string;
+      link?: boolean;
+      expires_at?: string | null;
+      password?: string | null;
     };
 
 export async function handleAds(
@@ -1147,6 +1178,87 @@ export async function handleAds(
         },
       );
       return { status: 200, body: { form: saved } };
+    }
+
+    if (
+      req.action === "platform" ||
+      req.action === "platform-detail" ||
+      req.action === "platform-preview"
+    ) {
+      if (provider !== "meta") return fail(400, "Só no Facebook.");
+      const account = accountId("meta", req.account);
+      if (!account) return fail(400, "Conta de anúncio inválida.");
+      const token = await metaAccountToken(
+        env,
+        fetchImpl,
+        authorization,
+        company,
+        account,
+      );
+      const raw = { ...req, account } as Record<string, unknown>;
+      return {
+        status: 200,
+        body:
+          req.action === "platform"
+            ? await platformList(env, fetchImpl, token, platformQuery(raw))
+            : req.action === "platform-detail"
+              ? await platformDetail(env, fetchImpl, token, raw)
+              : await platformPreview(env, fetchImpl, token, raw),
+      };
+    }
+
+    if (req.action === "report-create") {
+      if (!UUID.test(String(req.campaign ?? "")))
+        return fail(400, "Campanha inválida.");
+      const start = String(req.start ?? "");
+      const end = String(req.end ?? "");
+      const config =
+        req.config && typeof req.config === "object" ? req.config : {};
+      const sources = await rpc<ReportSources>(
+        env,
+        fetchImpl,
+        authorization,
+        "ad_report_sources",
+        { p_campaign: req.campaign, p_start: start, p_end: end },
+      );
+      // The campaign's numbers are the database's; Meta adds the ads. If
+      // Meta fails, the report is still made and says why the ads are out.
+      let meta: ReportMeta | { error: string } | Record<string, never> = {};
+      if (sources.platform === "meta" && sources.links.length)
+        meta = await reportMeta(
+          env,
+          fetchImpl,
+          (account) =>
+            metaAccountToken(env, fetchImpl, authorization, company, account),
+          sources,
+          start,
+          end,
+          Math.min(30, Math.max(0, Number(config.ads_limit) || 10)),
+        ).catch((e: unknown) => ({
+          error:
+            e instanceof Error
+              ? e.message
+              : "Não foi possível ler os anúncios no Facebook.",
+        }));
+      const report = await rpc<Record<string, unknown>>(
+        env,
+        fetchImpl,
+        authorization,
+        "create_ad_report",
+        {
+          p_campaign: req.campaign,
+          p_title: String(req.title ?? "").slice(0, 160),
+          p_start: start,
+          p_end: end,
+          p_config: config,
+          p_meta: meta,
+          p_analysis: String(req.analysis ?? "").slice(0, 20000),
+          p_link: req.link !== false,
+          p_expires_at: req.expires_at || null,
+          p_password: req.password || null,
+        },
+      );
+      return { status: 200, body: { report } };
     }
 
     if (req.action === "conversion-actions") {

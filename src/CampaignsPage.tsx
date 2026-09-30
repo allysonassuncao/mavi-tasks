@@ -82,6 +82,18 @@ import {
   accountLabel,
 } from "./CampaignLinks";
 import { CampaignDayToDay } from "./CampaignDayToDay";
+import { CampaignPlatform } from "./CampaignPlatform";
+import { CampaignReports } from "./CampaignReports";
+import {
+  demoPlatform,
+  serverPlatform,
+  type PlatformBackend,
+} from "./campaign-platform";
+import {
+  demoReports,
+  supabaseReports,
+  type ReportsBackend,
+} from "./campaign-reports";
 import { GoogleConversions } from "./CampaignConversions";
 
 type Props = {
@@ -140,6 +152,33 @@ export function CampaignsPage({
   // page at a time from the server.
   const [state, setState] = useState<CampaignData>(emptyData);
   const [loaded, setLoaded] = useState(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  // Meta: the ad account's view and the reports (live or in memory).
+  const platform: PlatformBackend = useMemo(
+    () => (demo ? demoPlatform(["23850001"]) : serverPlatform),
+    [demo],
+  );
+  const reports: ReportsBackend = useMemo(
+    () =>
+      demo
+        ? demoReports({
+            metrics: backend.metrics,
+            cycles: (id) => cyclesOf(stateRef.current, id),
+            names: (id) => {
+              const c = stateRef.current.campaigns.find((x) => x.id === id);
+              const parts = c ? contractParts(dataRef.current, c.contract_id) : null;
+              return {
+                campaign: c?.name ?? "",
+                client: parts?.client?.name ?? "",
+                product: parts?.product?.name ?? "",
+              };
+            },
+            user,
+          })
+        : supabaseReports,
+    [demo, backend, user],
+  );
   const [loadError, setLoadError] = useState("");
   const [listTick, setListTick] = useState(0);
   const [selected, setSelected] = useUrlState<string>("campanha", "");
@@ -147,6 +186,7 @@ export function CampaignsPage({
   const [, setTab] = useUrlState<string>("aba", "");
   const [, setViewedCycle] = useUrlState<string>("ciclo", "");
   const [, setTimelineTab] = useUrlState<string>("linha", "");
+  const [, setOpenReport] = useUrlState<string>("relatorio", "");
   const [campaignForm, setCampaignForm] = useState<CampaignFormState>(null);
   const [cycleForm, setCycleForm] = useState<CycleFormState>(null);
   const [statusForm, setStatusForm] = useState<StatusFormState>(null);
@@ -213,6 +253,8 @@ export function CampaignsPage({
           data={data}
           company={company}
           backend={backend}
+          platform={platform}
+          reports={reports}
           today={today}
           eventsTick={eventsTick}
           notify={notify}
@@ -223,6 +265,7 @@ export function CampaignsPage({
             setTab("");
             setViewedCycle("");
             setTimelineTab("");
+            setOpenReport("");
             setSelected("");
           }}
           onEdit={() => setCampaignForm({ campaign })}
@@ -763,6 +806,8 @@ function CampaignDetail({
   data,
   company,
   backend,
+  platform,
+  reports,
   today,
   eventsTick,
   notify,
@@ -781,6 +826,8 @@ function CampaignDetail({
   data: Snapshot;
   company: string;
   backend: CampaignsBackend;
+  platform: PlatformBackend;
+  reports: ReportsBackend;
   today: string;
   eventsTick: number;
   notify: (message: string) => void;
@@ -928,6 +975,34 @@ function CampaignDetail({
           )
         }
         metricsBackend={backend.metrics}
+        reportsTab={
+          campaign.platform === "meta" && (
+            <CampaignReports
+              company={company}
+              campaign={campaign}
+              cycles={cycles}
+              current={current}
+              today={today}
+              backend={reports}
+              clientName={parts.client?.name ?? ""}
+              memberName={(id) =>
+                data.members.find((m) => m.user_id === id)?.name ?? "—"
+              }
+              notify={notify}
+            />
+          )
+        }
+        platformTab={
+          campaign.platform === "meta" && (
+            <CampaignPlatform
+              company={company}
+              cycles={cycles}
+              current={current}
+              backend={platform}
+              today={today}
+            />
+          )
+        }
         today={today}
         events={events}
         describeEvent={(e) => describeEvent(e, state)}
@@ -1210,6 +1285,14 @@ function describeEvent(e: AdCampaignEvent, state: CampaignData) {
         .join("; ");
       return `editou o registro ${e.action === "daily_edited" ? `diário de ${shortDate(String(d.day))}` : `de ${shortDate(String(d.taken_on))}`}${changes ? ` — ${changes}` : ""}.`;
     }
+    case "report_created":
+      return `criou o relatório "${String(d.title ?? "")}" (${shortDate(String(d.start))} a ${shortDate(String(d.end))})${d.link ? ", com link público" : ""}.`;
+    case "report_shared":
+      return `${d.expires_at ? `ligou o link público do relatório "${String(d.title ?? "")}" até ${shortDate(String(d.expires_at))}` : `ligou o link público do relatório "${String(d.title ?? "")}"`}${d.password ? ", com senha" : ""}.`;
+    case "report_unshared":
+      return `desativou o link público do relatório "${String(d.title ?? "")}".`;
+    case "report_deleted":
+      return `excluiu o relatório "${String(d.title ?? "")}" (${shortDate(String(d.start))} a ${shortDate(String(d.end))}).`;
     default:
       return e.action;
   }

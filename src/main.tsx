@@ -40,6 +40,14 @@ const PublicMeeting = lazy(() =>
 const publicMeeting = window.location.pathname.match(
   /^\/gravacao\/([0-9a-f]{64})\/?$/,
 );
+const PublicCampaignReport = lazy(() =>
+  import("./PublicCampaignReport").then((m) => ({
+    default: m.PublicCampaignReport,
+  })),
+);
+const publicReport = window.location.pathname.match(
+  /^\/relatorio\/([0-9a-f]{64})\/?$/,
+);
 const approvalLink = window.location.pathname.match(
   /^\/aprovacao\/([0-9a-f]{64})\/?$/,
 );
@@ -70,6 +78,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     ) : publicMeeting ? (
       <Suspense fallback={null}>
         <PublicMeeting token={publicMeeting[1]} />
+      </Suspense>
+    ) : publicReport ? (
+      <Suspense fallback={null}>
+        <PublicCampaignReport token={publicReport[1]} />
       </Suspense>
     ) : approvalLink ? (
       <Suspense fallback={null}>

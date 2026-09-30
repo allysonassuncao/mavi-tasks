@@ -17,6 +17,7 @@
     "test:db:drive": "node scripts/test-drive-sharing.mjs",
     "test:db:meetings": "node scripts/test-meeting-recordings.mjs",
     "test:db:meeting-shares": "node scripts/test-meeting-shares.mjs",
+    "test:db:campaign-reports": "node scripts/test-campaign-reports.mjs",
     "test:db:ai": "node scripts/test-ai-knowledge.mjs",
     "test:db:ai-assistant": "node scripts/test-ai-assistant.mjs",
     "test:db:ai-sources": "node scripts/test-ai-sources.mjs",

@@ -24,6 +24,7 @@ import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
 import { handleNotices } from "./_notices.js";
 import { handleNoticeWriter } from "./_notice-writer.js";
+import { handleReportWriter } from "./_campaign-report-writer.js";
 import { handleSkillCoach } from "./_skill-coach.js";
 import { handleNoticeAnimate } from "./_notice-animation.js";
 import { claudeComplete } from "./_social-leads.js";
@@ -436,6 +437,13 @@ export default async function handler(
         model: serverModel("notice_writer", process.env),
       };
       result = await handleNoticeWriter(body, authorization, env, aiDeps(env));
+    } else if (action === "campaign-report-mavi") {
+      // A análise do relatório de campanha (funcionalidade 'campaign_report').
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("campaign_report", process.env),
+      };
+      result = await handleReportWriter(body, authorization, env, aiDeps(env));
     } else if (action === "skill-mavi") {
       // O validador e o assistente das skills (funcionalidade 'skill_coach').
       const env = {

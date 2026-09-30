@@ -96,7 +96,7 @@ function useWithM(): [boolean, (v: boolean) => void] {
   return [value, set];
 }
 
-type Tab = "dia" | "linha" | "ciclos";
+type Tab = "dia" | "linha" | "ciclos" | "relatorios" | "plataforma";
 
 export function CampaignDayToDay({
   campaign,
@@ -114,6 +114,8 @@ export function CampaignDayToDay({
   banner,
   connection,
   cyclesTab,
+  reportsTab,
+  platformTab,
   onRecordEdited,
   onConversions,
   metricsTick = 0,
@@ -138,6 +140,9 @@ export function CampaignDayToDay({
   /** The client's Facebook connection (Meta), under the ad accounts. */
   connection?: ReactNode;
   cyclesTab: ReactNode;
+  /** Meta: the reports with public links, and the ad account's view. */
+  reportsTab?: ReactNode;
+  platformTab?: ReactNode;
   /** A record was edited: the history (events) changed too. */
   onRecordEdited: () => void;
   /** Google: opens "Conversões do Google que contam" for the cycle. */
@@ -175,8 +180,11 @@ export function CampaignDayToDay({
     current ??
     cycles[cycles.length - 1] ??
     null;
+  const extra =
+    (tab === "relatorios" && !!reportsTab) ||
+    (tab === "plataforma" && !!platformTab);
   const active: Tab =
-    !cycle || (tab !== "linha" && tab !== "ciclos")
+    !cycle || (tab !== "linha" && tab !== "ciclos" && !extra)
       ? cycle
         ? "dia"
         : "ciclos"
@@ -247,6 +255,8 @@ export function CampaignDayToDay({
                 ["dia", "Dia a Dia"],
                 ["linha", "Linha do tempo"],
                 ["ciclos", "Ciclos e histórico"],
+                ...(reportsTab ? [["relatorios", "Relatórios"]] : []),
+                ...(platformTab ? [["plataforma", "Plataforma"]] : []),
               ] as [Tab, string][]
             )
               .filter(([id]) => cycle || id === "ciclos")
@@ -265,6 +275,10 @@ export function CampaignDayToDay({
           </div>
           {active === "ciclos" ? (
             <div className="campaign-tab-body flush">{cyclesTab}</div>
+          ) : active === "relatorios" ? (
+            <div className="campaign-tab-body flush">{reportsTab}</div>
+          ) : active === "plataforma" ? (
+            <div className="campaign-tab-body flush">{platformTab}</div>
           ) : !metrics ? (
             error ? (
               <p className="form-error campaign-tab-body" role="alert">

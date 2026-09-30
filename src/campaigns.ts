@@ -706,7 +706,7 @@ export class AdsApiError extends Error {
     super(message);
   }
 }
-async function adsServer<T>(body: Record<string, unknown>): Promise<T> {
+export async function adsServer<T>(body: Record<string, unknown>): Promise<T> {
   const token = supabase
     ? (await supabase.auth.getSession()).data.session?.access_token
     : undefined;
