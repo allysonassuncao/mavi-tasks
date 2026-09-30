@@ -177,18 +177,25 @@ export function AnswerText({
   );
 }
 
-function AnswerSources({
+/** Com mais fontes que isto, a lista abre recolhida (as primeiras e "Ver todas"). */
+export const SOURCES_FOLDED = 6;
+const SOURCES_SHOWN = 5;
+
+export function AnswerSources({
   sources,
   onSource,
 }: {
   sources: AiSource[];
   onSource?: (source: AiSource) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const folded = sources.length > SOURCES_FOLDED && !open;
+  const shown = folded ? sources.slice(0, SOURCES_SHOWN) : sources;
   return (
     <div className="answer-sources">
-      <small>Fontes</small>
+      <small>Fontes{sources.length > SOURCES_FOLDED ? ` (${sources.length})` : ""}</small>
       <ul>
-        {sources.map((s) => (
+        {shown.map((s) => (
           <li key={s.ref}>
             <button
               type="button"
@@ -203,6 +210,17 @@ function AnswerSources({
           </li>
         ))}
       </ul>
+      {sources.length > SOURCES_FOLDED && (
+        <button
+          type="button"
+          className="answer-sources-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <ChevronRight size={12} aria-hidden="true" className={open ? "open" : undefined} />
+          {open ? "Mostrar menos" : `Ver todas as ${sources.length} fontes`}
+        </button>
+      )}
     </div>
   );
 }

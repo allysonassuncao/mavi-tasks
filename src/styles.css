@@ -16351,6 +16351,23 @@ label .sl-money .ui-input,
   font-size: 0.68rem;
   color: var(--muted);
 }
+/* Muitas fontes: a lista abre recolhida. */
+.answer-sources .answer-sources-toggle {
+  width: auto;
+  margin-top: 2px;
+  padding: 3px 6px;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #3f6a24;
+}
+.answer-sources .answer-sources-toggle > svg {
+  color: inherit;
+  transition: transform 0.15s ease;
+}
+.answer-sources .answer-sources-toggle > svg.open {
+  transform: rotate(90deg);
+}
 .meeting-chat-form {
   display: flex;
   align-items: flex-end;
