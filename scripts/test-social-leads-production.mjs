@@ -153,7 +153,10 @@ await check(
       [planId],
     );
     assert.equal(tasks.length, 3);
-    assert.equal(tasks[0].title, "Arte do post 1 · Mês 1 · Agente Stravitta");
+    assert.equal(
+      tasks[0].title,
+      "Arte do post 1 · Imagem única · Mês 1 · Agente Stravitta",
+    );
     assert.ok(tasks.every((t) => t.team_id === design && t.days === 4));
     // Spread across the team (fewest open tasks first).
     assert.deepEqual(

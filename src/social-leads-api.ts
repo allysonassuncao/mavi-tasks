@@ -1332,7 +1332,14 @@ export function demoSocialLeads(
             : people;
         const task: SlTask = {
           id: id(),
-          title: `Arte do post ${x.number} · ${plan.label} · ${client}`,
+          title: [
+            `Arte do post ${x.number}`,
+            x.format.trim(),
+            plan.label,
+            client,
+          ]
+            .filter(Boolean)
+            .join(" · "),
           status: "progress",
           assignee_id:
             target && "user" in target
