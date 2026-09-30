@@ -217,7 +217,7 @@ export function DriveAudit({
         </p>
       )}
       {entries === null ? (
-        <Loading compact />
+        <Loading variant="table" />
       ) : entries.length ? (
         <>
           <div className="panel drive-table-wrap">

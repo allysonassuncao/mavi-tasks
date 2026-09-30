@@ -511,7 +511,7 @@ export function ShareDialog({
     <Modal title="Compartilhar conversa" onClose={onClose} busy={busy}>
       <div className="entity-form share-folder">
         {picked === null && !error ? (
-          <Loading compact />
+          <Loading variant="form" />
         ) : (
           <section className="share-block">
             <strong className="share-title">

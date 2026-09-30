@@ -1285,7 +1285,7 @@ export function AiRoutesPanel({
         {error}
       </p>
     ) : (
-      <Loading compact />
+      <Loading variant="field" />
     );
 
   const companyRoute = routes.find((r) => r.type === "company") ?? null;

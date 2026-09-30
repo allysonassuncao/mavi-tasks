@@ -293,7 +293,7 @@ export function SkillsPage({
         </p>
       )}
       {list === null ? (
-        <Loading compact />
+        <Loading variant="grid" />
       ) : !shown.length ? (
         <div className="panel skills-empty">
           <Puzzle size={22} aria-hidden="true" />
@@ -508,7 +508,7 @@ function SkillView({
         </p>
       </div>
     );
-  if (!detail) return <Loading compact />;
+  if (!detail) return <Loading variant="detail" />;
   const v = detail.version;
   const latest = detail.versions[0];
   const viewingLatest = !latest || latest.version === v.version;

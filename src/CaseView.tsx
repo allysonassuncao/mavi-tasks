@@ -157,7 +157,7 @@ export function CaseView({
         wide
         className="case-view-modal"
       >
-        <Loading compact />
+        <Loading variant="detail" />
       </Modal>
     );
   if (!detail)

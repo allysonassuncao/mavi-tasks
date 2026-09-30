@@ -198,7 +198,7 @@ export function MemberAccessLogs({
           </p>
         )}
         {items === null ? (
-          <Loading compact />
+          <Loading variant="table" />
         ) : items.length ? (
           <>
             <ol className="access-list">

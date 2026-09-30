@@ -238,7 +238,7 @@ export function ClientDossier({
         {error}
       </p>
     ) : (
-      <Loading />
+      <Loading variant="list" />
     );
   const active = dossier.items.filter((i) => !i.dismissed);
   const removed = dossier.items.filter((i) => i.dismissed);

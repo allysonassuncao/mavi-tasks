@@ -98,7 +98,7 @@ export function ShareFolderDialog({
     >
       <div className="entity-form share-folder">
         {!loaded && !error ? (
-          <Loading compact />
+          <Loading variant="form" />
         ) : (
           <>
             <section className="share-block">

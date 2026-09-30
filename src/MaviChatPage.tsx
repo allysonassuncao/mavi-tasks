@@ -644,7 +644,7 @@ export function MaviChatPage({
         </header>
         {loadingThread ? (
           <div className="mavi-thread">
-            <Loading />
+            <Loading variant="chat" />
           </div>
         ) : (
           <ChatThread

@@ -62,7 +62,7 @@ export function ClientTemperature({
         {error}
       </p>
     ) : (
-      <Loading />
+      <Loading variant="chart" />
     );
   const bands = data.settings.bands;
   const c = data.current;

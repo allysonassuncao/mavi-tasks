@@ -63,7 +63,7 @@ export function PublicDashboard({ token }: { token: string }) {
         </div>
       </main>
     );
-  if (!state) return <Loading />;
+  if (!state) return <Loading variant="chart" />;
   if (state.status === "locked")
     return (
       <main className="public-dashboard centered-page">

@@ -429,7 +429,7 @@ export function StoragePage({
         {error}
       </p>
     );
-  if (!usage) return <Loading compact />;
+  if (!usage) return <Loading variant="chart" />;
 
   const companyName = data.companies.find((c) => c.id === company)?.name;
   // A deleted file stops counting: totals are reloaded.
@@ -874,7 +874,7 @@ function PersonStorage({
           </p>
         )}
         {files === null ? (
-          !error && <Loading compact />
+          !error && <Loading variant="table" />
         ) : files.length ? (
           <FilesTable
             full={files.length === STORAGE_UPLOADS_PAGE}
@@ -1037,7 +1037,7 @@ function ClientStorage({
           </p>
         )}
         {files === null ? (
-          !error && <Loading compact />
+          !error && <Loading variant="table" />
         ) : files.length ? (
           <FilesTable
             full={files.length === STORAGE_UPLOADS_PAGE}

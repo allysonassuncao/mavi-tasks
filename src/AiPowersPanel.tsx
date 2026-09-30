@@ -79,7 +79,7 @@ export function AiPowersPanel({
         {error}
       </p>
     );
-  if (!saved) return <Loading compact />;
+  if (!saved) return <Loading variant="form" />;
   return (
     <div className="ai-powers">
       <section className="panel ai-route-order">

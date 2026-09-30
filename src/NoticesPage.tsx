@@ -517,7 +517,7 @@ function NoticeView({
   if (detail === undefined && !error)
     return (
       <Modal title="Aviso" onClose={onClose}>
-        <Loading compact />
+        <Loading variant="detail" />
       </Modal>
     );
   if (!detail)

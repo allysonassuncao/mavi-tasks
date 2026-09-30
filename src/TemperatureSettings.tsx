@@ -92,7 +92,7 @@ export function TemperatureSettings({
         {error}
       </p>
     ) : (
-      <Loading />
+      <Loading variant="form" />
     );
   const s = draft.settings;
   const setSettings = (patch: Partial<Draft["settings"]>) =>

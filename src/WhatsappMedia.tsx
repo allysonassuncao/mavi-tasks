@@ -176,7 +176,9 @@ export function WhatsappMedia({
         </p>
       )}
       {!result ? (
-        <Loading />
+        <Loading
+          variant={tab === "image" || tab === "video" ? "grid" : "list"}
+        />
       ) : !rows.length ? (
         <p className="template-empty">
           {tab === "image"

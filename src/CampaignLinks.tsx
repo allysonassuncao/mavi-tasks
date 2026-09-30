@@ -324,7 +324,7 @@ export function CycleLinks({
         />
       ))}
       {accounts === null ? (
-        <Loading compact />
+        <Loading variant="field" />
       ) : (
         available.length > 0 && (
           <label className="campaign-account-pick">
@@ -556,7 +556,7 @@ function AccountLinks({
         </p>
       )}
       {campaigns === null ? (
-        <Loading compact />
+        <Loading variant="list" />
       ) : (
         campaigns.length > 0 && (
           <>
@@ -1074,7 +1074,7 @@ export function AdConnections({
             {error}
           </div>
         )}
-        {!status && !error && <Loading compact />}
+        {!status && !error && <Loading variant="form" />}
         {status && (
           <>
             <section className="campaign-connection-block">
@@ -1096,7 +1096,7 @@ export function AdConnections({
                   <span>{missing(status.meta)}</span>
                 </p>
               ) : clients === null ? (
-                <Loading compact />
+                <Loading variant="list" />
               ) : (
                 <>
                   <div className="campaign-clients-tools">
@@ -1278,7 +1278,7 @@ export function AdConnections({
             </p>
           </header>
           {!overview ? (
-            <Loading compact />
+            <Loading variant="chart" />
           ) : (
             <SyncSummary overview={overview} onOpenCampaign={onOpenCampaign} />
           )}

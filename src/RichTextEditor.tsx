@@ -234,7 +234,7 @@ export default function RichTextEditor({
         : null,
     }),
   });
-  if (!editor) return <Loading compact />;
+  if (!editor) return <Loading variant="editor" />;
   const actions = [
     {
       label: "Negrito",
@@ -360,7 +360,7 @@ export default function RichTextEditor({
             />
           )}
         </div>
-        {uploading && <Loading compact />}
+        {uploading && <Loading variant="inline" label="Enviando imagem…" />}
         <EditorContent editor={editor} />
         <input type="hidden" name={name} value={value} />
       </div>

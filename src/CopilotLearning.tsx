@@ -556,7 +556,7 @@ export function CopilotLearning({
         </p>
       )}
       {!report ? (
-        <Loading compact />
+        <Loading variant="chart" />
       ) : (
         <>
           <section className="stats-grid" aria-label="Resumo do período">

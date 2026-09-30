@@ -735,7 +735,7 @@ export function TaskCreateForm({
               values={customValues}
               onChange={setCustomValues}
             />
-            <Suspense fallback={<Loading compact />}>
+            <Suspense fallback={<Loading variant="editor" />}>
               <RichTextEditor
                 key={formKey}
                 defaultValue={formKey === 0 ? (initialDescription ?? "") : ""}

@@ -1684,7 +1684,7 @@ export function TaskDetail({
                         name="description"
                         value={task.description}
                       />
-                      <Loading compact />
+                      <Loading variant="editor" />
                     </>
                   }
                 >
@@ -2024,7 +2024,7 @@ export function TaskDetail({
                   </fieldset>
                 </div>
               )}
-              <Suspense fallback={<Loading compact />}>
+              <Suspense fallback={<Loading variant="editor" />}>
                 <RichTextEditor
                   key={`${action}-${target ?? ""}`}
                   company={task.company_id}
@@ -2264,7 +2264,7 @@ export function TaskDetail({
                     </button>
                   </div>
                 )}
-                <Suspense fallback={<Loading compact />}>
+                <Suspense fallback={<Loading variant="editor" />}>
                   <RichTextEditor
                     key={commentRevision}
                     company={task.company_id}

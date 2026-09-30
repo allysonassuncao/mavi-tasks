@@ -232,7 +232,7 @@ export function LeadFormIntegration({
         <label>
           Página do Facebook
           {pages === null ? (
-            <Loading compact />
+            <Loading variant="field" />
           ) : (
             <Select
               value={page}
@@ -263,7 +263,7 @@ export function LeadFormIntegration({
         <label>
           Formulário do Facebook
           {pageId && forms === null ? (
-            <Loading compact />
+            <Loading variant="field" />
           ) : (
             <Select
               value={form}

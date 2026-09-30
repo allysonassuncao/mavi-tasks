@@ -161,7 +161,7 @@ export function BrandKit({
     }
   }
 
-  if (brand === undefined) return <Loading compact />;
+  if (brand === undefined) return <Loading variant="form" />;
   if (!brand)
     return (
       <Empty

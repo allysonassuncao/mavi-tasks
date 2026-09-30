@@ -264,7 +264,7 @@ export function SuggestionDialog({
               );
             })}
           </div>
-          <Suspense fallback={<Loading compact />}>
+          <Suspense fallback={<Loading variant="editor" />}>
             <RichTextEditor
               name="description"
               label="Descrição"

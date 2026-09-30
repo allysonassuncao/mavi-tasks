@@ -237,7 +237,7 @@ export function AiUsagePage({
         </p>
       )}
       {!report ? (
-        <Loading compact />
+        <Loading variant="chart" />
       ) : (
         <>
           <section

@@ -189,7 +189,7 @@ export function AgendaPage({
     }
   }
 
-  if (connection === "loading") return <Loading compact />;
+  if (connection === "loading") return <Loading variant="calendar" />;
   if (!connection)
     return (
       <div className="panel agenda-connect">
@@ -421,7 +421,7 @@ function AgendaView({
   const phone = () => window.innerWidth < 900;
 
   if (!calendars)
-    return error ? <p className="form-error">{error}</p> : <Loading compact />;
+    return error ? <p className="form-error">{error}</p> : <Loading variant="calendar" />;
   return (
     <div className={`agenda ${aside ? "with-aside" : ""}`}>
       {aside && phone() && (
@@ -562,7 +562,7 @@ function AgendaView({
         )}
         <div className="panel agenda-surface">
           {events === null ? (
-            <Loading compact />
+            <Loading variant="calendar" />
           ) : view === "month" ? (
             <MonthView
               cursor={cursor}

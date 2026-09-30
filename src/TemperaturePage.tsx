@@ -72,7 +72,7 @@ export function TemperaturePage({
         {error}
       </p>
     ) : (
-      <Loading />
+      <Loading variant="chart" />
     );
   const scored = portfolio.clients.filter((c) => c.score !== null);
   const counts = bands.map((_, i) => scored.filter((c) => c.band === i).length);

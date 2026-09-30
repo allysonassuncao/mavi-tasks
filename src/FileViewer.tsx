@@ -238,12 +238,12 @@ export function FileViewer({
           />
         ) : kind === "text" ? (
           text === null ? (
-            <Loading compact />
+            <Loading variant="text" />
           ) : (
             <pre className="file-viewer-text">{text}</pre>
           )
         ) : !url ? (
-          <Loading compact />
+          <Loading variant="media" />
         ) : kind === "image" ? (
           <img
             key={url}

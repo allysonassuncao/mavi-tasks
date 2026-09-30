@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type ComponentProps,
+  type CSSProperties,
 } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import * as Popover from "@radix-ui/react-popover";
@@ -483,41 +484,209 @@ function SearchSelect({
   );
 }
 
-export function Skeleton({ className = "" }: { className?: string }) {
-  return <span aria-hidden="true" className={`skeleton ${className}`} />;
-}
-export function Loading({ compact = false }: { compact?: boolean }) {
+export function Skeleton({
+  className = "",
+  style,
+}: {
+  className?: string;
+  style?: CSSProperties;
+}) {
   return (
-    <div
-      className={`skeleton-layout ${compact ? "compact" : ""}`}
-      role="status"
-      aria-label="Carregando conteúdo"
-      aria-busy="true"
-    >
-      <span className="sr-only">Carregando conteúdo…</span>
-      {!compact && (
+    <span aria-hidden="true" className={`skeleton ${className}`} style={style} />
+  );
+}
+/* Each loading state mirrors the shape of what is about to appear, so an
+   editor never looks like it is loading a list. */
+export type LoadingVariant =
+  | "page"
+  | "list"
+  | "table"
+  | "grid"
+  | "text"
+  | "detail"
+  | "editor"
+  | "form"
+  | "field"
+  | "chat"
+  | "media"
+  | "chart"
+  | "calendar"
+  | "inline";
+const TEXT_WIDTHS = ["96%", "88%", "93%", "72%", "90%", "58%"];
+function SkeletonLines({ count }: { count: number }) {
+  return (
+    <div className="skeleton-lines">
+      {TEXT_WIDTHS.slice(0, count).map((w, i) => (
+        <Skeleton key={i} className="skeleton-line" style={{ width: w }} />
+      ))}
+    </div>
+  );
+}
+function SkeletonRows({ count }: { count: number }) {
+  return (
+    <div className="skeleton-rows">
+      {Array.from({ length: count }, (_, i) => (
+        <div className="skeleton-row" key={i}>
+          <Skeleton className="skeleton-avatar" />
+          <div>
+            <Skeleton className="skeleton-title" />
+            <Skeleton className="skeleton-description" />
+          </div>
+          <Skeleton className="skeleton-badge" />
+        </div>
+      ))}
+    </div>
+  );
+}
+function SkeletonShape({ variant }: { variant: LoadingVariant }) {
+  const n = (count: number) => Array.from({ length: count }, (_, i) => i);
+  switch (variant) {
+    case "page":
+      return (
         <>
           <Skeleton className="skeleton-heading" />
           <div className="skeleton-cards">
-            {Array.from({ length: 4 }, (_, i) => (
+            {n(4).map((i) => (
               <Skeleton key={i} className="skeleton-card" />
             ))}
           </div>
+          <SkeletonRows count={5} />
         </>
-      )}
-      <div className="skeleton-rows">
-        {Array.from({ length: compact ? 3 : 5 }, (_, i) => (
-          <div className="skeleton-row" key={i}>
-            <Skeleton className="skeleton-avatar" />
-            <div>
+      );
+    case "list":
+      return <SkeletonRows count={3} />;
+    case "table":
+      return (
+        <div className="skeleton-table">
+          {n(6).map((r) => (
+            <div className={`skeleton-table-row ${r ? "" : "head"}`} key={r}>
+              {n(4).map((c) => (
+                <Skeleton key={c} className="skeleton-cell" />
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    case "grid":
+      return (
+        <div className="skeleton-grid">
+          {n(6).map((i) => (
+            <div className="skeleton-tile" key={i}>
+              <Skeleton className="skeleton-tile-cover" />
               <Skeleton className="skeleton-title" />
               <Skeleton className="skeleton-description" />
             </div>
-            <Skeleton className="skeleton-badge" />
+          ))}
+        </div>
+      );
+    case "text":
+      return <SkeletonLines count={6} />;
+    case "detail":
+      return (
+        <>
+          <Skeleton className="skeleton-heading" />
+          <div className="skeleton-chips">
+            {n(3).map((i) => (
+              <Skeleton key={i} className="skeleton-chip" />
+            ))}
           </div>
-        ))}
-      </div>
-    </div>
+          <SkeletonLines count={5} />
+        </>
+      );
+    case "editor":
+      return (
+        <div className="skeleton-editor">
+          <div className="skeleton-editor-bar">
+            {n(7).map((i) => (
+              <Skeleton key={i} className="skeleton-tool" />
+            ))}
+          </div>
+          <div className="skeleton-editor-body">
+            <SkeletonLines count={3} />
+          </div>
+        </div>
+      );
+    case "form":
+      return (
+        <div className="skeleton-form">
+          {n(3).map((i) => (
+            <div key={i}>
+              <Skeleton className="skeleton-label" />
+              <Skeleton className="skeleton-input" />
+            </div>
+          ))}
+        </div>
+      );
+    case "field":
+      return <Skeleton className="skeleton-input" />;
+    case "chat":
+      return (
+        <div className="skeleton-chat">
+          {["mine", "", "", "mine", ""].map((side, i) => (
+            <Skeleton
+              key={i}
+              className={`skeleton-bubble ${side}`}
+              style={{ width: ["38%", "74%", "62%", "30%", "68%"][i] }}
+            />
+          ))}
+        </div>
+      );
+    case "media":
+      return <Skeleton className="skeleton-media" />;
+    case "chart":
+      return (
+        <>
+          <div className="skeleton-cards">
+            {n(4).map((i) => (
+              <Skeleton key={i} className="skeleton-card small" />
+            ))}
+          </div>
+          <div className="skeleton-chart">
+            {[46, 70, 38, 88, 62, 76, 54, 92, 66, 80].map((h, i) => (
+              <Skeleton key={i} className="skeleton-bar" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </>
+      );
+    case "calendar":
+      return (
+        <div className="skeleton-calendar">
+          {n(35).map((i) => (
+            <Skeleton key={i} className="skeleton-day" />
+          ))}
+        </div>
+      );
+    case "inline":
+      return <Skeleton className="skeleton-inline" />;
+  }
+}
+export function Loading({
+  compact = false,
+  variant,
+  label,
+}: {
+  compact?: boolean;
+  variant?: LoadingVariant;
+  /** Short text shown beside the inline placeholder (e.g. "Enviando imagem…"). */
+  label?: string;
+}) {
+  const shape = variant ?? (compact ? "list" : "page");
+  const Tag = shape === "inline" ? "span" : "div";
+  return (
+    <Tag
+      className={`skeleton-layout skeleton-${shape}-layout`}
+      role="status"
+      aria-label={label ?? "Carregando conteúdo"}
+      aria-busy="true"
+    >
+      <span className="sr-only">{label ?? "Carregando conteúdo…"}</span>
+      <SkeletonShape variant={shape} />
+      {label && (
+        <span className="skeleton-inline-label" aria-hidden="true">
+          {label}
+        </span>
+      )}
+    </Tag>
   );
 }
 export function Button({

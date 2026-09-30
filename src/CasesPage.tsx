@@ -363,7 +363,7 @@ export function CasesPage({
 
       {error && <p className="form-error">{error}</p>}
       {rows === null && !error ? (
-        <Loading compact />
+        <Loading variant="grid" />
       ) : rows && rows.length ? (
         <>
           <p className="cases-count">

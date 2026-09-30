@@ -444,7 +444,7 @@ export function NoticeForm({
           fallback={
             <>
               <input type="hidden" name="body" value={form.body} />
-              <Loading compact />
+              <Loading variant="editor" />
             </>
           }
         >

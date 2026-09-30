@@ -375,7 +375,7 @@ export function PlanView({
     );
   if (error && !bundle)
     return <Empty title="Não foi possível abrir o plano" body={error} />;
-  if (!bundle || bundle.plan.id !== plan.id) return <Loading compact />;
+  if (!bundle || bundle.plan.id !== plan.id) return <Loading variant="detail" />;
 
   const posts = bundle.posts;
   const content = fullContent(bundle.plan, posts);
@@ -1264,7 +1264,7 @@ function PostModal({
                 Os textos exatos da peça. Formate à vontade: negrito, cores e
                 listas chegam assim à tarefa de arte e ao link do cliente.
               </p>
-              <Suspense fallback={<Loading compact />}>
+              <Suspense fallback={<Loading variant="editor" />}>
                 {POST_TEXTS.map((t) => (
                   <div key={t.key} className="sl-post-text-field">
                     <RichTextEditor
@@ -1774,7 +1774,7 @@ function ShareModal({
           error ? (
             <p className="sl-alert bad">{error}</p>
           ) : (
-            <Loading compact />
+            <Loading variant="form" />
           )
         ) : state.share_enabled ? (
           <>

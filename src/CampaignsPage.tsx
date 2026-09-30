@@ -180,7 +180,7 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
   return (
     <>
       {selected && !loaded ? (
-        <Loading compact />
+        <Loading variant="detail" />
       ) : selected && loadError ? (
         <div className="error-banner" role="alert">
           <TriangleAlert size={18} />
@@ -604,7 +604,7 @@ function CampaignList({
         </div>
       )}
       {!result && !error ? (
-        <Loading compact />
+        <Loading variant="table" />
       ) : rows.length ? (
         <section
           className={`panel ${loading ? "campaign-loading" : ""}`}

@@ -295,7 +295,7 @@ export function MeetingPlayer({
             />
           ) : recording.video_type && !videoError ? (
             <div className="meeting-stage-empty">
-              <Loading compact />
+              <Loading variant="media" />
             </div>
           ) : (
             <div className="meeting-stage-empty" role="status">
@@ -554,7 +554,7 @@ function TranscriptPanel({
     if (currentHit >= 0) scrollTo(currentHit);
   }, [currentHit]);
 
-  if (transcript === undefined) return <Loading compact />;
+  if (transcript === undefined) return <Loading variant="text" />;
   if (!transcript || !segments.length)
     return <p className="muted centered">Esta reunião não tem transcrição.</p>;
   const stepHit = (d: number) =>

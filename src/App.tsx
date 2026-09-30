@@ -3201,7 +3201,7 @@ export default function App() {
                     </Button>
                   </div>
                   {scheduleView && (
-                    <Suspense fallback={<Loading compact />}>
+                    <Suspense fallback={<Loading variant="field" />}>
                       <ScheduleNavigation
                         month={scheduleMonth}
                         onChange={setScheduleMonth}
@@ -3319,7 +3319,7 @@ export default function App() {
                         ))}
                     </div>
                   ) : (
-                    <Suspense fallback={<Loading compact />}>
+                    <Suspense fallback={<Loading variant="calendar" />}>
                       <TaskSchedule
                         view={view as "calendar" | "gantt"}
                         month={scheduleMonth}
@@ -3679,7 +3679,7 @@ export default function App() {
                 />
               )}
               {(page === "onboarding" || page === "socialMedia") && (
-                <Suspense fallback={<Loading compact />}>
+                <Suspense fallback={<Loading variant="page" />}>
                   <SocialLeadsPage
                     key={`${company}:${page}`}
                     module={
@@ -3708,7 +3708,7 @@ export default function App() {
                 </Suspense>
               )}
               {page === "temperature" && (
-                <Suspense fallback={<Loading compact />}>
+                <Suspense fallback={<Loading variant="chart" />}>
                   <TemperaturePage
                     key={company}
                     company={company}
@@ -3717,7 +3717,7 @@ export default function App() {
                 </Suspense>
               )}
               {page === "cases" && (
-                <Suspense fallback={<Loading compact />}>
+                <Suspense fallback={<Loading variant="grid" />}>
                   <CasesPage
                     key={company}
                     data={catalogData}
@@ -3749,7 +3749,7 @@ export default function App() {
                     body="No ambiente demonstrativo não há skills da MAVI. Entre na sua conta para usar."
                   />
                 ) : (
-                  <Suspense fallback={<Loading compact />}>
+                  <Suspense fallback={<Loading variant="grid" />}>
                     <SkillsPage
                       key={company}
                       company={company}
@@ -3802,7 +3802,7 @@ export default function App() {
                     body="No ambiente demonstrativo não há conversas com a MAVI. Entre na sua conta para usar."
                   />
                 ) : (
-                  <Suspense fallback={<Loading compact />}>
+                  <Suspense fallback={<Loading variant="chat" />}>
                     <MaviChatPage
                       key={company}
                       company={company}
@@ -3836,7 +3836,7 @@ export default function App() {
                   </Suspense>
                 ))}
               {page === "agenda" && (
-                <Suspense fallback={<Loading compact />}>
+                <Suspense fallback={<Loading variant="calendar" />}>
                   <AgendaPage
                     key={company}
                     data={catalogData}
@@ -3847,7 +3847,7 @@ export default function App() {
                 </Suspense>
               )}
               {page === "dashboards" && (isLeader || openDashboard) && (
-                <Suspense fallback={<Loading compact />}>
+                <Suspense fallback={<Loading variant="grid" />}>
                   <DashboardsPage
                     key={company}
                     data={catalogData}
@@ -3890,7 +3890,7 @@ export default function App() {
                 />
               )}
               {page === "reports" && (
-                <Suspense fallback={<Loading compact />}>
+                <Suspense fallback={<Loading variant="chart" />}>
                   <Reports
                     avatarOf={(id) =>
                       data.members.find((m) => m.user_id === id)?.avatar_url
@@ -4369,7 +4369,7 @@ export default function App() {
           wide
         >
           {detailLoading ? (
-            <Loading />
+            <Loading variant="detail" />
           ) : (
             <Empty title="Tarefa indisponível" body={detailError} />
           )}

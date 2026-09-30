@@ -268,7 +268,7 @@ export function CampaignDayToDay({
                 Não foi possível carregar os números: {error}
               </p>
             ) : (
-              <Loading compact />
+              <Loading variant="chart" />
             )
           ) : active === "dia" && cycle ? (
             <DayToDay
@@ -493,7 +493,7 @@ function CampaignSummary({
         </dl>
       )}
 
-      {cycle && !k && !error && <Loading compact />}
+      {cycle && !k && !error && <Loading variant="chart" />}
       {error && !metrics && (
         <p className="form-error" role="alert">
           Não foi possível carregar os números: {error}

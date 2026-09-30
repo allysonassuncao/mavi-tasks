@@ -161,7 +161,7 @@ export function WhatsappFolder({
         {error}
       </p>
     );
-  if (!groups) return <Loading />;
+  if (!groups) return <Loading variant="list" />;
   if (!groups.length)
     return (
       <div className="panel">
@@ -629,7 +629,7 @@ function Chat({
           </p>
         )}
         {!list ? (
-          <Loading />
+          <Loading variant="chat" />
         ) : (
           <>
             {older ? (
@@ -1095,7 +1095,7 @@ function AudioMessage({ m }: { m: WhatsappMessage }) {
       }}
     >
       <span className="wa-play small">
-        {busy ? <Loading compact /> : <Play size={14} />}
+        {busy ? <Loading variant="inline" /> : <Play size={14} />}
       </span>
       <Mic size={14} aria-hidden="true" />
       <span>{secondsLabel(m.media_seconds) || "Ouvir"}</span>

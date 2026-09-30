@@ -35,7 +35,7 @@ export function PublicCase({ token }: { token: string }) {
   if (state === undefined)
     return (
       <main className="public-case centered-page">
-        <Loading compact />
+        <Loading variant="detail" />
       </main>
     );
   if (!state)

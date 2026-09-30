@@ -76,7 +76,7 @@ export function PublicFile({ token }: { token: string }) {
             </div>
           </>
         ) : (
-          <Loading compact />
+          <Loading variant="media" />
         )}
       </div>
     </div>

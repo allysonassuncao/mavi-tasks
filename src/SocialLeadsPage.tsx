@@ -334,7 +334,7 @@ function AddClient({
         }}
       >
         {candidates === null ? (
-          <Loading compact />
+          <Loading variant="field" />
         ) : candidates.length || inPortfolio.length ? (
           <label>
             Cliente
@@ -1183,7 +1183,7 @@ function ClientView({
       {error && !bundle ? (
         <Empty title="Não foi possível abrir o cliente" body={error} />
       ) : !bundle ? (
-        <Loading compact />
+        <Loading variant="detail" />
       ) : tab === "briefing" ? (
         <BriefingWizard
           item={item}

@@ -298,7 +298,7 @@ function DashboardList({
         </p>
       )}
       {list === null ? (
-        !error && <Loading compact />
+        !error && <Loading variant="grid" />
       ) : list.length ? (
         <div className="dash-cards">
           {list.map((d) => {
@@ -743,7 +743,7 @@ function DashboardView({
         <Empty title="Dashboard indisponível" body={error} />
       </div>
     );
-  if (!dash) return <Loading compact />;
+  if (!dash) return <Loading variant="chart" />;
 
   const setPanels = (panels: Panel[]) =>
     setDraft((d) => (d ? { ...d, panels } : d));
@@ -1464,7 +1464,7 @@ function PanelEditor({
               ) : display ? (
                 <PanelChart display={display} spec={spec} />
               ) : (
-                <Loading compact />
+                <Loading variant="media" />
               )}
             </div>
           </div>

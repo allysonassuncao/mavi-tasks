@@ -170,7 +170,7 @@ export function OAuthConsent() {
             )}
           </>
         ) : (
-          <Loading compact />
+          <Loading variant="text" />
         )}
       </div>
     </div>
