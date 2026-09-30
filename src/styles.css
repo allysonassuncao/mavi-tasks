@@ -6098,9 +6098,11 @@ label .input-control .ui-input {
   box-shadow: 0 12px 38px #152c2026;
   z-index: 101;
 }
+/* Above the rows (position: relative) that scroll under it. */
 .inbox-panel header {
   position: sticky;
   top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -6225,6 +6227,7 @@ label .input-control .ui-input {
 .inbox-panel footer {
   position: sticky;
   bottom: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
