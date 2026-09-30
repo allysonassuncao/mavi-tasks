@@ -68,10 +68,16 @@ export function AudioRecorder({
     !!navigator.mediaDevices?.getUserMedia &&
     typeof MediaRecorder !== "undefined";
 
+  const activeChange = useRef(onActiveChange);
+  activeChange.current = onActiveChange;
   useEffect(() => {
     onActiveChange?.(phase !== "idle");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
+  // The parent often unmounts the recorder right after onUse (e.g. the
+  // comment composer swaps it for the preview), before phase goes back to
+  // idle; without this it would think a recording is still in progress.
+  useEffect(() => () => activeChange.current?.(false), []);
   useEffect(() => () => release(), []);
   useEffect(
     () => () => {
