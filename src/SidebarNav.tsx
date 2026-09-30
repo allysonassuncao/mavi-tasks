@@ -12,6 +12,7 @@ import {
   PanelsTopLeft,
   Megaphone,
   Package,
+  Radar,
   Rocket,
   Settings2,
   Sparkles,
@@ -273,6 +274,12 @@ export function SidebarNav({
           icon: Thermometer,
           to: { page: "temperature" },
         },
+        {
+          key: "radar",
+          label: "Radar",
+          icon: Radar,
+          to: { page: "radar" },
+        },
         ...(isLeader ? [] : portfolio),
       ],
     },
@@ -363,6 +370,11 @@ export function SidebarNav({
               key: "ai-temperature",
               label: "Termômetro",
               to: { page: "aiUsage", hash: "termometro" },
+            },
+            {
+              key: "ai-radar",
+              label: "Radar",
+              to: { page: "aiUsage", hash: "radar" },
             },
             {
               key: "ai-powers",

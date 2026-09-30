@@ -59,6 +59,7 @@ const MODULE_LABELS: Record<string, string> = {
   notices: "Mural de avisos",
   skills: "Skills da MAVI",
   clients: "Termômetro do cliente",
+  radar: "Radar do cliente",
 };
 
 const money = (v: number) => {

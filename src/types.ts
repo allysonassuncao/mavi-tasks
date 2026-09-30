@@ -478,6 +478,8 @@ export interface DriveLocation {
   dossier?: boolean;
   /** The client's "Termômetro" (virtual, next to the products). */
   temperature?: boolean;
+  /** The client's "Radar" (virtual, next to the products). */
+  radar?: boolean;
   /** The client's "Marca" (logos, fonts, colors), next to the products. */
   brand?: boolean;
 }

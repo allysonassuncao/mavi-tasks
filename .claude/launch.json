@@ -109,6 +109,19 @@
         "--strictPort"
       ],
       "port": 5192
+    },
+    {
+      "name": "mavi-dev-radar",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5193",
+        "--strictPort"
+      ],
+      "port": 5193
     }
   ]
 }

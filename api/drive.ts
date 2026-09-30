@@ -16,6 +16,7 @@ import {
 } from "./_copilot.js";
 import { handleLearningWorker } from "./_copilot-learning.js";
 import { handleTemperatureWorker } from "./_temperature.js";
+import { handleRadarWorker } from "./_radar.js";
 import { serverModel } from "../src/ai-providers.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleMcpCallback } from "./_ai-mcp.js";
@@ -369,6 +370,20 @@ export default async function handler(
         model: serverModel("client_temperature_text", process.env),
       };
       const result = await handleTemperatureWorker(authorization, env, aiDeps(env));
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+    // Radar do cliente: o worker do pg_cron (a MAVI tira problemas, promessas
+    // e os outros tópicos com o modelo da funcionalidade 'client_radar'; o
+    // Jev confere). Uma leitura pode levar ~90 s: o worker trabalha até 4 min.
+    if (action === "ai-radar") {
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("client_radar", process.env),
+        radarBudgetMs: Number(process.env.RADAR_WORKER_BUDGET_MS) || 240_000,
+      };
+      const result = await handleRadarWorker(authorization, env, aiDeps(env));
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

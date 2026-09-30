@@ -164,6 +164,18 @@ A temperatura da relação com cada cliente (migração `20261110090000_client_t
 
 Para ligar: aplicar a migração (ela põe todo o histórico na fila), ter o modelo `~typesafe/jev-latest` num provedor **OpenRouter** ligado em Provedores e modelos (sem regra em "Por funcionalidade", o worker usa o primeiro Jev cadastrado) e rodar `supabase/operations/schedule-client-temperature.sql` (usa a mesma `mavi_private.ai_config` da indexação). Opcional: `CLIENT_TEMPERATURE_TEXT_MODEL` para o padrão do servidor do texto. Testes: `npm run test:db:temperature` e `npx vitest run api/_temperature.test.ts`.
 
+### Radar do cliente
+
+O que os clientes reclamam e o que o time promete, anotado pela MAVI nas reuniões gravadas e nos grupos de WhatsApp, separado por produto (migração `20261229090000_client_radar`).
+
+- **Tópicos** (`radar_topics`, Painel da MAVI › Radar, `/mavi#radar`, administradores e gestores): a empresa nasce com **Problemas / reclamações** (falas do cliente) e **Promessas** (falas do time, com prazo). Cada tópico tem o que conta (com exemplos), o que não conta, quem precisa ter falado, fontes, status (aberto, em andamento, fechado; fechado pode "reabrir"), escala de gravidade de 4 níveis, campos extras e os produtos em que vale (da empresa, com produtos desligados, ou de um produto só). As mudanças valem para as próximas leituras; tópico com itens não é excluído, só desligado.
+- **Leituras** (`radar_signals`): uma por reunião e uma por dia de grupo, pelo trigger em `ai_documents`, só a partir de `radar_settings.started_at`. O WhatsApp é lido a cada busca (2 h) só nas mensagens novas (`seen`), com as já lidas do dia como contexto; áudio e documento esperando o texto ficam para a próxima. A reunião lida de novo troca as ocorrências dela.
+- **Worker** (`/api/ai`, ação `ai-radar`, até 4 min por chamada): a funcionalidade `client_radar` (modelo de conversa; `CLIENT_RADAR_MODEL` no servidor) tira os itens citando as falas, ou junta a fala a um item que já existe; o que não bate com "quem fala" sai; a funcionalidade `client_radar_check` (o Jev; sem regra, o do termômetro) confere cada item e dá a gravidade. Sem o Jev, os itens entram sem gravidade.
+- **Itens** (`radar_items` + `radar_mentions`): um por assunto do cliente, com status, responsável, gravidade, prazo, produto (ou Geral / Agência), campos extras e cada ocorrência (trecho, quem falou, link para o momento da reunião ou a mensagem). Resolvido que volta a aparecer reabre; título, resumo e produto editados por pessoa não são reescritos.
+- **Telas**: o módulo **Radar** (`/radar`, módulo `radar`, só administradores e gestores) com um cartão por tópico e os filtros resolvidos no banco (`radar_items`), e Drive › cliente › **Radar** (`?radar=<cliente>`), com a regra do Drive (só líderes editam).
+
+Para ligar: aplicar a migração e rodar `supabase/operations/schedule-client-radar.sql` (usa a mesma `mavi_private.ai_config` da indexação). Testes: `npm run test:db:radar` e `npx vitest run api/_radar.test.ts`.
+
 ### Agenda (Google Agenda)
 
 Cada pessoa conecta o próprio Google Agenda em **Agenda**; os eventos são lidos e gravados ao vivo no Google por `/api/google` (nada da agenda é copiado para o banco). A migração `20260930160000_google_calendar` guarda só a conexão, com os tokens criptografados pelo servidor (AES-256-GCM com `GOOGLE_TOKEN_KEY`).

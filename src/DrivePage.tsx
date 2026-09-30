@@ -29,6 +29,7 @@ import {
   Search,
   Palette,
   Thermometer,
+  Radar,
   Trash2,
   Video,
   MessageCircle,
@@ -57,6 +58,7 @@ import { countMeetingRecordings, meetingRecording } from "./meetings";
 import { WhatsappFolder } from "./WhatsappFolder";
 import { ClientDossier } from "./ClientDossier";
 import { ClientTemperature } from "./ClientTemperature";
+import { ClientRadar } from "./ClientRadar";
 import { BrandKit } from "./BrandKit";
 import {
   countClientGroups,
@@ -255,9 +257,14 @@ function DriveTree({
       }
     : at;
   // Pastas virtuais (Gravações da MAVI, Whatsapp, Dossiê da MAVI,
-  // Termômetro): sem arquivos próprios.
+  // Termômetro, Radar): sem arquivos próprios.
   const virtual =
-    !!at.recordings || !!at.whatsapp || !!at.dossier || !!at.temperature || !!at.brand;
+    !!at.recordings ||
+    !!at.whatsapp ||
+    !!at.dossier ||
+    !!at.temperature ||
+    !!at.radar ||
+    !!at.brand;
   const canWrite =
     !virtual &&
     (isLeader ||
@@ -272,7 +279,14 @@ function DriveTree({
   );
   const loadFiles = useCallback(() => {
     // Gravações da MAVI and Whatsapp have no files of their own.
-    if (at.recordings || at.whatsapp || at.dossier || at.temperature || at.brand)
+    if (
+      at.recordings ||
+      at.whatsapp ||
+      at.dossier ||
+      at.temperature ||
+      at.radar ||
+      at.brand
+    )
       return setFiles([]);
     setFiles(null);
     listDriveFiles(company, at)
@@ -310,6 +324,10 @@ function DriveTree({
   const showsTemperature = !data.members
     .find((m) => m.user_id === user)
     ?.hidden_pages?.includes("temperature");
+  // O Radar segue a regra do Drive; escondido o módulo da pessoa, o cartão some.
+  const showsRadar = !data.members
+    .find((m) => m.user_id === user)
+    ?.hidden_pages?.includes("radar");
   // Whatsapp: quantos grupos o cliente tem (o cartão) e o link de uma
   // mensagem (?whatsapp=<grupo>&msg=<mensagem>).
   const [groupCount, setGroupCount] = useState(0);
@@ -363,11 +381,14 @@ function DriveTree({
     const message = params.get("msg");
     // ?termometro=<cliente>: o aviso de que o cliente esfriou.
     const thermo = params.get("termometro");
-    if (!recording && !fileId && !group && !thermo) return;
+    // ?radar=<cliente>: a aba Radar do cliente.
+    const radar = params.get("radar");
+    if (!recording && !fileId && !group && !thermo && !radar) return;
     const start = Number(params.get("t")) || undefined;
     navigate(window.location.pathname, true);
     // O acesso é conferido pelo banco, ao abrir o termômetro.
     if (thermo) setAt({ client: thermo, temperature: true });
+    else if (radar) setAt({ client: radar, radar: true });
     else if (group)
       Promise.all([
         whatsappGroupById(group),
@@ -469,6 +490,7 @@ function DriveTree({
     at.whatsapp,
     at.dossier,
     at.temperature,
+    at.radar,
     at.brand,
   ].join("|");
   const clients =
@@ -970,6 +992,7 @@ function DriveTree({
       | "whatsapp"
       | "dossier"
       | "temperature"
+      | "radar"
       | "brand",
     open: () => void,
     color?: string,
@@ -994,6 +1017,8 @@ function DriveTree({
                 ? BookMarked
                 : icon === "temperature"
                   ? Thermometer
+                  : icon === "radar"
+                    ? Radar
                   : icon === "brand"
                     ? Palette
                     : Folder;
@@ -1021,6 +1046,8 @@ function DriveTree({
                         ? "Gostos, regras e histórico"
                         : icon === "temperature"
                           ? "Temperatura da relação"
+                          : icon === "radar"
+                            ? "Problemas e promessas"
                           : icon === "brand"
                             ? "Logos, fontes e cores"
                             : "Pasta"}
@@ -1259,6 +1286,12 @@ function DriveTree({
             <span>Termômetro</span>
           </>
         )}
+        {!searching && at.radar && (
+          <>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>Radar</span>
+          </>
+        )}
         {searching && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
@@ -1316,6 +1349,15 @@ function DriveTree({
           client={at.client}
           clientName={clientName(at.client)}
           notify={notify}
+        />
+      ) : at.radar && at.client ? (
+        <ClientRadar
+          key={at.client}
+          company={company}
+          client={at.client}
+          clientName={clientName(at.client)}
+          members={data.members}
+          isLeader={isLeader}
         />
       ) : at.temperature && at.client ? (
         <ClientTemperature
@@ -1478,6 +1520,18 @@ function DriveTree({
                             "temperature",
                             () => go({ client: at.client, temperature: true }),
                             "#e0673a",
+                          ),
+                      ]
+                    : []),
+                  ...(showsProducts && showsRadar
+                    ? [
+                        () =>
+                          folderCard(
+                            "radar",
+                            "Radar",
+                            "radar",
+                            () => go({ client: at.client, radar: true }),
+                            "#c8514f",
                           ),
                       ]
                     : []),

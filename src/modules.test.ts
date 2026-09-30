@@ -43,6 +43,7 @@ describe("módulos visíveis por pessoa", () => {
       "socialMedia",
       "cases",
       "temperature",
+      "radar",
       "hours",
       "reports",
       "drive",
@@ -74,6 +75,13 @@ describe("módulos visíveis por pessoa", () => {
       firstPage("member", ["tasks", "agenda", "onboarding", "socialMedia", "cases", "temperature"]),
     ).toBe("drive");
   });
+  it("Radar do cliente: só administradores e gestores, e o administrador pode esconder", () => {
+    expect(roleAllows("radar", "admin")).toBe(true);
+    expect(roleAllows("radar", "manager")).toBe(true);
+    expect(roleAllows("radar", "member")).toBe(false);
+    expect(canOpenPage("radar", "manager", ["radar"])).toBe(false);
+    expect(moduleOf("radar")).toBe("radar");
+  });
   it("Termômetro dos clientes: de todos os perfis, e o administrador pode esconder", () => {
     expect(roleAllows("temperature", "member")).toBe(true);
     expect(canOpenPage("temperature", "member", ["temperature"])).toBe(false);
@@ -98,6 +106,7 @@ describe("módulos visíveis por pessoa", () => {
       "socialMedia",
       "cases",
       "temperature",
+      "radar",
       "hours",
       "reports",
       "drive",

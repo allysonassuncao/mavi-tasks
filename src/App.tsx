@@ -53,6 +53,7 @@ import {
   Rocket,
   Trophy,
   Thermometer,
+  Radar,
   BellRing,
   Lightbulb,
   Settings2,
@@ -271,6 +272,9 @@ const CasesPage = lazy(() =>
 const TemperaturePage = lazy(() =>
   import("./TemperaturePage").then((m) => ({ default: m.TemperaturePage })),
 );
+const RadarPage = lazy(() =>
+  import("./RadarPage").then((m) => ({ default: m.RadarPage })),
+);
 const NoticesPage = lazy(() =>
   import("./NoticesPage").then((m) => ({ default: m.NoticesPage })),
 );
@@ -295,6 +299,7 @@ const navigation = [
   { id: "socialMedia", label: "Social Media", icon: Rocket },
   { id: "cases", label: "Cases de Sucesso", icon: Trophy },
   { id: "temperature", label: "Termômetro dos clientes", icon: Thermometer },
+  { id: "radar", label: "Radar do cliente", icon: Radar },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
@@ -2583,6 +2588,8 @@ export default function App() {
                         "Resultados reais de clientes para usar na venda: busque por termo ou nicho e cadastre os seus.",
                       temperature:
                         "A temperatura da relação com cada cliente, lida pela MAVI nas reuniões gravadas e nos grupos de WhatsApp.",
+                      radar:
+                        "O que os clientes reclamam e o que o time promete, anotado pela MAVI nas reuniões e nos grupos de WhatsApp, por produto.",
                       notices: isLeader
                         ? "Comunicados da agência para pessoas, equipes, clientes e projetos: popup, caixa de entrada, push e faixa no topo."
                         : "Os comunicados da agência para você, guardados em um só lugar.",
@@ -2629,6 +2636,7 @@ export default function App() {
                   page !== "socialMedia" &&
                   page !== "cases" &&
                   page !== "temperature" &&
+                  page !== "radar" &&
                   page !== "notices" &&
                   page !== "storage" &&
                   page !== "aiUsage" &&
@@ -3705,6 +3713,16 @@ export default function App() {
                     isLeader={isLeader}
                     demo={demo}
                     notify={notify}
+                  />
+                </Suspense>
+              )}
+              {page === "radar" && (
+                <Suspense fallback={<Loading variant="table" />}>
+                  <RadarPage
+                    key={company}
+                    company={company}
+                    user={user}
+                    data={catalogData}
                   />
                 </Suspense>
               )}

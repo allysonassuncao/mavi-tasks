@@ -54,6 +54,7 @@ export const MODULES = [
   { id: "socialMedia", label: "Planejamento › Social Media" },
   { id: "cases", label: "Cases de Sucesso" },
   { id: "temperature", label: "Termômetro dos clientes" },
+  { id: "radar", label: "Radar do cliente" },
   { id: "drive", label: "Drive" },
   { id: "reports", label: "Relatórios" },
   { id: "dashboards", label: "Dashboards" },

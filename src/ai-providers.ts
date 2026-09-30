@@ -220,7 +220,9 @@ export type AiFeature =
   | "canvas_writer"
   | "mavi_rerank"
   | "conversation_summary"
-  | "skill_coach";
+  | "skill_coach"
+  | "client_radar"
+  | "client_radar_check";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -464,6 +466,22 @@ export const FEATURES: FeatureInfo[] = [
     env: "CLIENT_TEMPERATURE_TEXT_MODEL",
     note: "Um parágrafo curto por cliente, só quando a temperatura muda: um modelo rápido basta.",
   },
+  {
+    id: "client_radar",
+    group: "Radar do cliente",
+    label: "Problemas, promessas e tópicos nas reuniões e no WhatsApp",
+    conversation: false,
+    env: "CLIENT_RADAR_MODEL",
+    note: "Lê cada reunião e as mensagens novas dos grupos a cada 2 h: um modelo rápido e bom em português segura o custo.",
+  },
+  {
+    id: "client_radar_check",
+    group: "Radar do cliente",
+    label: "Conferência e gravidade de cada item (Jev)",
+    conversation: false,
+    env: "",
+    decisions: true,
+  },
 ];
 
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
@@ -549,6 +567,11 @@ export function serverModel(
       return "~typesafe/jev-latest";
     case "client_temperature_text":
       return env.CLIENT_TEMPERATURE_TEXT_MODEL || env.AI_MODEL || fallback;
+    case "client_radar":
+      return env.CLIENT_RADAR_MODEL || env.AI_MODEL || fallback;
+    case "client_radar_check":
+      // Sem escolha: o Jev do termômetro (o primeiro cadastrado no OpenRouter).
+      return "~typesafe/jev-latest";
     case "task_audio":
       return env.TASK_AUDIO_MODEL || env.AI_MODEL || fallback;
     case "whatsapp_transcribe":

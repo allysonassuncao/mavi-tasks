@@ -14,6 +14,7 @@ export const pagePaths = {
   socialMedia: "/planejamento/social-media",
   cases: "/cases-de-sucesso",
   temperature: "/termometro",
+  radar: "/radar",
   notices: "/mural",
   hours: "/horas",
   reports: "/relatorios",
@@ -75,6 +76,7 @@ export const AI_TABS = [
   "consumo",
   "copiloto",
   "termometro",
+  "radar",
   "poderes",
   "provedores",
   "regras",
@@ -163,6 +165,7 @@ export function safeReturnPath(value: string | null) {
     "aviso",
     "animacao",
     "termometro",
+    "radar",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);
