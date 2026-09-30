@@ -5,6 +5,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import { MaviPersonProfile } from "./MaviPersonProfile";
 import {
   Camera,
   Check,
@@ -407,6 +408,8 @@ export function ProfilePage({
         )}
       </div>
       {notifications}
+      {/* O que a MAVI aprendeu sobre a pessoa (a base de comportamento). */}
+      {!demo && company && <MaviPersonProfile company={company} user={null} data={data} notify={notify} />}
       {!demo && <ConnectedApps notify={notify} />}
     </div>
   );

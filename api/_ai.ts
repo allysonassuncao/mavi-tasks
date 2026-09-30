@@ -90,6 +90,7 @@ import { appOrigin } from "./_origin.js";
 import { PLAN_TOOL, TASK_RULES, handleTaskAction, planLongTask, type TaskHost } from "./_ai-tasks.js";
 import { learningContext, type LearningContext } from "./_mavi-learning.js";
 import { answerSignals, followupSignals } from "./_mavi-judge.js";
+import { personContext, type PersonContext } from "./_mavi-person.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -643,7 +644,7 @@ async function ask(
           ? "mavi_page"
           : "assistant";
   const noMcp: McpCatalog = { servers: [], missing: [] };
-  const [base, limits, history, route, powerList, catalog, mcpCatalog, efforts, learned] = await Promise.all([
+  const [base, limits, history, route, powerList, catalog, mcpCatalog, efforts, learned, person] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
       env,
@@ -716,6 +717,10 @@ async function ask(
       p_client: scope.client ?? null,
       p_contract: scope.contract ?? null,
     })
+      .then((r) => (r.ok && r.data && typeof r.data === "object" ? r.data : null))
+      .catch(() => null),
+    // O que a MAVI sabe de quem pergunta (a base de comportamento dela).
+    callRpc<PersonContext>(env, deps.fetch, auth, "mavi_person_context", { p_company: company })
       .then((r) => (r.ok && r.data && typeof r.data === "object" ? r.data : null))
       .catch(() => null),
   ]);
@@ -1386,6 +1391,7 @@ async function ask(
     (onPage ? TASK_RULES : "");
   const turnContext =
     base.context +
+    personContext(person) +
     learningContext(learned) +
     catalogContext([...skills.catalog.values()], picked) +
     (mcp?.context ?? "") +

@@ -96,7 +96,7 @@ export function AiPage({
       ) : tab === "termometro" ? (
         <TemperatureSettings company={company} data={data} notify={notify} />
       ) : tab === "aprendizado" ? (
-        <MaviLearning company={company} data={data} demo={demo} notify={notify} />
+        <MaviLearning company={company} data={data} demo={demo} isAdmin={isAdmin} notify={notify} />
       ) : tab === "copiloto" ? (
         <CopilotLearning
           company={company}

@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   Bot,
+  Brain,
   CheckCircle2,
   GraduationCap,
   Pause,
@@ -37,6 +38,7 @@ import {
   type MaviLessonKind,
 } from "./mavi-feedback";
 import "./mavi-feedback.css";
+import { MaviPersonProfile } from "./MaviPersonProfile";
 
 /**
  * Painel da MAVI › Aprendizado da MAVI (administradores e gestores): como o
@@ -206,13 +208,20 @@ export function MaviLearning({
   company,
   data,
   demo = false,
+  isAdmin = false,
   notify,
 }: {
   company: string;
   data: Snapshot;
   demo?: boolean;
+  /** Gestores não veem a base de comportamento dos administradores. */
+  isAdmin?: boolean;
   notify: (message: string) => void;
 }) {
+  const [personId, setPersonId] = useState("");
+  const people = data.members
+    .filter((m) => m.active !== false && (isAdmin || m.role !== "admin"))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const today = dateKey();
   const [from, setFrom] = useState(() => {
     const d = new Date();
@@ -766,6 +775,30 @@ export function MaviLearning({
               </ul>
             )}
           </section>
+
+          {!demo && (
+            <>
+              <section className="panel mavi-person-picker">
+                <h2>
+                  <Brain size={17} aria-hidden="true" /> Por pessoa
+                </h2>
+                <Select value={personId || "none"} onValueChange={(v) => setPersonId(v === "none" ? "" : v)}>
+                  <SelectOption value="none">Escolha uma pessoa</SelectOption>
+                  {people.map((m) => (
+                    <SelectOption key={m.user_id} value={m.user_id}>
+                      {m.name}
+                    </SelectOption>
+                  ))}
+                </Select>
+                <p>
+                  O que a MAVI sabe de cada pessoa para responder do jeito dela: preferências, contexto de trabalho, o
+                  que evitar e o histórico das avaliações. A pessoa vê o mesmo em Meu perfil.
+                  {!isAdmin && " Gestores não veem os administradores."}
+                </p>
+              </section>
+              {personId && <MaviPersonProfile company={company} user={personId} data={data} notify={notify} />}
+            </>
+          )}
 
           <section className="panel learning-feedback">
             <header>

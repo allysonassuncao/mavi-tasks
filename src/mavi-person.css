@@ -1,0 +1,233 @@
+/* MAVI · o que a MAVI sabe sobre uma pessoa (MaviPersonProfile.tsx). */
+.mavi-person {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+}
+.mavi-person > header h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+.mavi-person > header p {
+  margin: 0 0 4px;
+  max-width: 760px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #3c4948;
+}
+.mavi-person > header small {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.mavi-person-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.mavi-person-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fbfcfb;
+}
+.mavi-person-group-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  column-gap: 8px;
+}
+.mavi-person-group-head strong {
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+.mavi-person-group-head small {
+  grid-column: 1;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.mavi-person-add {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: 1px solid #c3d6ad;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #2f4f1a;
+}
+.mavi-person-add:disabled {
+  opacity: 0.5;
+}
+.mavi-person-empty {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.mavi-person-group ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mavi-person-group li {
+  padding: 8px 10px;
+  border: 1px solid #e6ebe8;
+  border-radius: 10px;
+  background: #fff;
+}
+.mavi-person-group li.pinned {
+  border-color: #c3d6ad;
+}
+.mavi-person-group li p {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.mavi-person-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.mavi-person-meta > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mavi-person-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+.mavi-person-actions button {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 6px;
+  color: #5d6a68;
+}
+.mavi-person-actions button:hover:not(:disabled) {
+  background: #f0f3f1;
+  color: var(--ink);
+}
+.mavi-person-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mavi-person-editor textarea {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #dfe4e2;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+.mavi-person-editor > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.mavi-person-editor .btn {
+  min-height: 30px;
+  padding: 5px 12px;
+  gap: 5px;
+}
+.mavi-person-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.mavi-person-facts strong {
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+.mavi-person-facts p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #3c4948;
+}
+.mavi-person-history {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.74rem;
+  color: #5d6a68;
+}
+.mavi-person-removed > button {
+  font-size: 0.74rem;
+  color: #5d6a68;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mavi-person-removed ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.mavi-person-removed li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.mavi-person-removed li button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: #3f6a24;
+  text-decoration: none;
+}
+/* Painel da MAVI › Aprendizado da MAVI: a escolha da pessoa. */
+.mavi-person-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+}
+.mavi-person-picker h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  flex: 1 1 260px;
+}
+.mavi-person-picker p {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.78rem;
+  color: #3c4948;
+}

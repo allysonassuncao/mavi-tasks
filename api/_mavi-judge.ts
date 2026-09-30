@@ -106,6 +106,8 @@ type Item = {
   sources: { ref: string; type: string; title: string; date: string | null; excerpt: string | null }[];
   dossier: { kind: string; text: string }[];
   person: { vote: string; reason: string | null; comment: string; question: string }[];
+  /** A base de comportamento de quem perguntou (preenchida pelo worker). */
+  traits?: { kind: string; text: string }[];
 };
 
 /** As perguntas objetivas ao Jev (sim/não, de 0 a 1, e o problema principal). */
@@ -170,9 +172,9 @@ export function jevVerdict(res: JevResponse | null): JevVerdict | null {
   };
 }
 
-export const JUDGE_RULES = `Você confere, depois do fato, uma resposta da MAVI (a inteligência de uma agência de marketing) que deu sinal de problema. Você recebe a pergunta da pessoa, a resposta, os passos que a MAVI fez, os trechos das fontes que ela citou, o dossiê do cliente (quando há), o que essa pessoa já reclamou antes, os sinais automáticos e, quando há, as respostas do Jev (probabilidades de 0 a 1).
+export const JUDGE_RULES = `Você confere, depois do fato, uma resposta da MAVI (a inteligência de uma agência de marketing) que deu sinal de problema. Você recebe a pergunta da pessoa, a resposta, os passos que a MAVI fez, os trechos das fontes que ela citou, o dossiê do cliente (quando há), o que essa pessoa já reclamou antes e o jeito dela (a base de comportamento), os sinais automáticos e, quando há, as respostas do Jev (probabilidades de 0 a 1).
 
-Decida se a resposta atendeu o pedido. Seja justo: um sinal não prova problema (ex.: a MAVI pode ter perguntado algo necessário, ou montado uma tarefa longa com o plano no card — isso é bom). Conte como problema: parar no meio ou anunciar em vez de entregar; faltar parte do pedido; informação sem fonte ou contrária às fontes; não seguir o formato pedido ou o que a pessoa já reclamou antes.
+Decida se a resposta atendeu o pedido. Seja justo: um sinal não prova problema (ex.: a MAVI pode ter perguntado algo necessário, ou montado uma tarefa longa com o plano no card — isso é bom). Conte como problema: parar no meio ou anunciar em vez de entregar; faltar parte do pedido; informação sem fonte ou contrária às fontes; não seguir o formato pedido, o que a pessoa já reclamou antes ou as preferências dela.
 
 Responda só com um objeto JSON, sem texto antes ou depois e sem cercas de código:
 {"ok": true ou false, "reason": "incomplete" | "wrong" | "ignored" | "invented" | "format" | "other" | null, "explanation": "até 400 caracteres, em português do Brasil: o que falhou e o que a MAVI deveria ter feito, de um jeito que sirva de lição (ex.: 'Com 17 clientes, devia montar uma tarefa longa em vez de responder na hora')", "confidence": número de 0 a 1}
@@ -203,6 +205,7 @@ export function judgeState(item: Item) {
       .map((p) => `- ${p.vote === "up" ? "👍" : "👎"} ${p.reason ? REASON_LABEL[p.reason] ?? p.reason : ""}${p.comment ? ` “${p.comment}”` : ""}`)
       .join("\n"),
     sinais: item.signals.map((s) => SIGNAL_LABELS[s] ?? s).join("; "),
+    perfil_da_pessoa: (item.traits ?? []).map((t) => `- ${t.kind}: ${t.text}`).join("\n"),
   };
 }
 export function judgeMessage(item: Item, jev: JevVerdict | null) {
@@ -220,6 +223,7 @@ export function judgeMessage(item: Item, jev: JevVerdict | null) {
     s.fontes ? `\nTrechos das fontes citadas:\n${s.fontes}` : "\nA resposta não citou fontes.",
     s.dossie ? `\nDossiê do cliente:\n${s.dossie}` : "",
     s.reclamacoes_da_pessoa ? `\nO que esta pessoa já avaliou antes:\n${s.reclamacoes_da_pessoa}` : "",
+    s.perfil_da_pessoa ? `\nO jeito desta pessoa (a base de comportamento dela):\n${s.perfil_da_pessoa}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -361,6 +365,10 @@ export async function runMaviJudge(env: AiEnv, deps: AiDeps, deadline: number) {
       items.map(async (item) => {
         try {
           if (!kits.has(item.company)) kits.set(item.company, companyKit(env, deps, item.company));
+          // O jeito de quem perguntou (a base de comportamento): sem ela, segue.
+          item.traits = await workerRpc<{ kind: string; text: string }[]>(env, deps, "mavi_judge_person", {
+            p_message: item.message,
+          }).catch(() => []);
           const bad = await judgeItem(env, deps, await kits.get(item.company)!, item);
           stats.checked++;
           if (bad) stats.bad++;

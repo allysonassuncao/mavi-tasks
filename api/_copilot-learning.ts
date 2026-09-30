@@ -12,6 +12,7 @@ import {
 } from "./_copilot.js";
 import { runMaviLearning } from "./_mavi-learning.js";
 import { runMaviJudge } from "./_mavi-judge.js";
+import { runMaviPerson } from "./_mavi-person.js";
 
 /**
  * Assistente MAVI · aprendizado com o feedback do time ("ai-learning", só o
@@ -315,9 +316,11 @@ export async function handleLearningWorker(
     // O que sobrou do tempo do worker vai para o aprendizado da MAVI.
     const answers = await runMaviLearning(mavi.env, mavi.deps, started + env.workerBudgetMs);
     if (!mavi.judge) return { status: 200, body: { ...copilot, mavi: answers } };
-    const now = (mavi.judge.deps.now ?? Date.now)();
-    const judged = await runMaviJudge(mavi.judge.env, mavi.judge.deps, now + mavi.judge.budgetMs);
-    return { status: 200, body: { ...copilot, mavi: answers, judge: judged } };
+    const now = mavi.judge.deps.now ?? Date.now;
+    const judged = await runMaviJudge(mavi.judge.env, mavi.judge.deps, now() + mavi.judge.budgetMs);
+    // Por último, a base de comportamento das pessoas (até 1 minuto).
+    const people = await runMaviPerson(mavi.env, mavi.deps, now() + 60_000);
+    return { status: 200, body: { ...copilot, mavi: answers, judge: judged, people } };
   } catch (err) {
     const e = errorOf(err);
     return { status: e.status, body: { error: e.error } };
