@@ -46,6 +46,7 @@ describe("módulos visíveis por pessoa", () => {
       "products",
       "projects",
       "campaigns",
+      "financeMedia",
       "onboarding",
       "socialMedia",
       "cases",
@@ -115,6 +116,7 @@ describe("módulos visíveis por pessoa", () => {
       "products",
       "projects",
       "campaigns",
+      "financeMedia",
       "onboarding",
       "socialMedia",
       "cases",
@@ -145,8 +147,8 @@ describe("módulos visíveis por pessoa", () => {
     // Só vira destino quando nada mais abre.
     expect(firstPage("manager", ["overview", "tasks"])).toBe("agenda");
   });
-  it("Visão geral, Campanhas, Radar e Dashboards: desligados para colaboradores até o administrador ligar", () => {
-    for (const page of ["overview", "campaigns", "radar", "dashboards"] as const) {
+  it("Visão geral, Campanhas, Radar, Dashboards e Financeiro › Mídia: desligados para colaboradores até o administrador ligar", () => {
+    for (const page of ["overview", "campaigns", "radar", "dashboards", "financeMedia"] as const) {
       expect(canOpenPage(page, "member", off())).toBe(false);
       expect(canOpenPage(page, "member", off([], [page]))).toBe(true);
       // Hiding wins over turning on.
@@ -156,8 +158,8 @@ describe("módulos visíveis por pessoa", () => {
         canOpenPage(page, "manager", hiddenModules({ role: "manager" })),
       ).toBe(true);
     }
-    // Only the four: Produtos stays out, Tarefas stays in.
-    expect(off()).toEqual(["overview", "campaigns", "radar", "dashboards"]);
+    // Only these: Produtos stays out, Tarefas stays in.
+    expect(off()).toEqual(["overview", "campaigns", "radar", "dashboards", "financeMedia"]);
     expect(canOpenPage("products", "member", off([], ["overview"]))).toBe(false);
     // Landing after login: Tarefas first for a collaborator even with Visão
     // geral on.

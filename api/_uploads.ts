@@ -14,6 +14,8 @@ import {
  *
  * Recorded audio (task descriptions and comments) goes the same way: the
  * draft prepared by prepare_task_audio, with the audio type it declared.
+ * So do the receipts of Financeiro › Mídia (prepare_media_receipt), with the
+ * attachments' rule for file types.
  *
  * It also deletes task attachments permanently (Armazenamento page): the
  * database removes the record if the caller may (delete_attachment) and
@@ -23,7 +25,7 @@ import {
  */
 export type UploadRequest =
   | {
-      kind: "attachment" | "inline-image" | "audio";
+      kind: "attachment" | "inline-image" | "audio" | "media-receipt";
       id: string;
       contentType?: string;
     }
@@ -75,7 +77,8 @@ export async function handleUpload(
   if (
     req.kind !== "attachment" &&
     req.kind !== "inline-image" &&
-    req.kind !== "audio"
+    req.kind !== "audio" &&
+    req.kind !== "media-receipt"
   )
     return fail(400, "Tipo de envio inválido.");
   if (typeof req.id !== "string" || !/^[0-9a-f-]{36}$/i.test(req.id))
@@ -89,20 +92,24 @@ export async function handleUpload(
     authorization,
     req.kind === "attachment"
       ? "attachment_upload_target"
-      : req.kind === "audio"
-        ? "task_audio_upload_target"
-        : "inline_image_upload_target",
+      : req.kind === "media-receipt"
+        ? "media_receipt_upload_target"
+        : req.kind === "audio"
+          ? "task_audio_upload_target"
+          : "inline_image_upload_target",
     req.kind === "attachment"
       ? { p_attachment: req.id }
-      : req.kind === "audio"
-        ? { p_audio: req.id }
-        : { p_image: req.id },
+      : req.kind === "media-receipt"
+        ? { p_receipt: req.id }
+        : req.kind === "audio"
+          ? { p_audio: req.id }
+          : { p_image: req.id },
   );
   const record = target.ok ? target.data[0] : undefined;
   if (!record) return fail(403, "Envio não autorizado ou expirado.");
 
   const contentType =
-    req.kind === "attachment"
+    req.kind === "attachment" || req.kind === "media-receipt"
       ? attachmentType(record.name ?? "")
       : req.kind === "audio"
         ? recordedAudioTypes.find((t) => t === record.mime)

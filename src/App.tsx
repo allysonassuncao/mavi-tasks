@@ -55,6 +55,7 @@ import {
   Thermometer,
   Radar,
   BellRing,
+  Wallet,
   Lightbulb,
   Settings2,
   Search,
@@ -279,6 +280,9 @@ const RadarPage = lazy(() =>
 const NoticesPage = lazy(() =>
   import("./NoticesPage").then((m) => ({ default: m.NoticesPage })),
 );
+const FinanceMediaPage = lazy(() =>
+  import("./FinanceMediaPage").then((m) => ({ default: m.FinanceMediaPage })),
+);
 // Leaders only, and heavy (editor, charts): loaded when first opened.
 const DashboardsPage = lazy(() =>
   import("./DashboardsPage").then((m) => ({ default: m.DashboardsPage })),
@@ -296,6 +300,7 @@ const navigation = [
   { id: "products", label: "Produtos", icon: Package },
   { id: "projects", label: "Projetos", icon: FolderKanban },
   { id: "campaigns", label: "Campanhas", icon: Megaphone },
+  { id: "financeMedia", label: "Financeiro › Mídia", icon: Wallet },
   { id: "onboarding", label: "Social Leads", icon: Rocket },
   { id: "socialMedia", label: "Social Media", icon: Rocket },
   { id: "cases", label: "Cases de Sucesso", icon: Trophy },
@@ -1368,6 +1373,11 @@ export default function App() {
         // Radar do cliente › Relatórios listens for its own notices.
         if (change.kind === "radar") {
           window.dispatchEvent(new CustomEvent("mavi:radar", { detail: change }));
+          return;
+        }
+        // Financeiro › Mídia listens for its own notices.
+        if (change.kind === "media") {
+          window.dispatchEvent(new CustomEvent("mavi:media", { detail: change }));
           return;
         }
         // Cases de Sucesso listens for its own notices.
@@ -2594,6 +2604,8 @@ export default function App() {
                         "Campanhas e entregas com começo e fim, organizadas por cliente.",
                       campaigns:
                         "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
+                      financeMedia:
+                        "A conta de mídia de cada cliente e produto: entradas, saídas, estornos e o gasto das Campanhas, com o motivo e quem lançou.",
                       cases:
                         "Resultados reais de clientes para usar na venda: busque por termo ou nicho e cadastre os seus.",
                       temperature:
@@ -2642,6 +2654,7 @@ export default function App() {
                 {page !== "drive" &&
                   page !== "profile" &&
                   page !== "campaigns" &&
+                  page !== "financeMedia" &&
                   page !== "onboarding" &&
                   page !== "socialMedia" &&
                   page !== "cases" &&
@@ -3714,6 +3727,18 @@ export default function App() {
                     company={company}
                     user={user}
                     isLeader={isLeader}
+                    demo={demo}
+                    notify={notify}
+                  />
+                </Suspense>
+              )}
+              {page === "financeMedia" && (
+                <Suspense fallback={<Loading variant="table" />}>
+                  <FinanceMediaPage
+                    key={company}
+                    company={company}
+                    user={user}
+                    data={catalogData}
                     demo={demo}
                     notify={notify}
                   />

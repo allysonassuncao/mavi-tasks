@@ -76,6 +76,30 @@ describe("handleUpload", () => {
       "content-type;host;x-goog-content-length-range",
     );
   });
+  it("comprovante da conta de mídia: pelo registro preparado, com a regra dos anexos", async () => {
+    const fetchMock = reply([
+      { path: `c/media/k/${id}`, name: "pix.png", size_bytes: 99 },
+    ]);
+    const res = await handleUpload(
+      { kind: "media-receipt", id },
+      "Bearer user-token",
+      env,
+      fetchMock,
+    );
+    expect(res.status).toBe(200);
+    const [url, init] = (fetchMock as any).mock.calls[0];
+    expect(url).toBe(
+      "https://db.example.com/rest/v1/rpc/media_receipt_upload_target",
+    );
+    expect(JSON.parse(init.body)).toEqual({ p_receipt: id });
+    expect(res.body.headers).toEqual({
+      "Content-Type": "image/png",
+      "x-goog-content-length-range": "0,99",
+    });
+    expect(new URL(res.body.url as string).pathname).toBe(
+      `/public-bucket/c/media/k/${id}`,
+    );
+  });
   it("imagem da descrição: só JPG, PNG ou WebP", async () => {
     const rows = [{ path: `c/u/${id}`, name: "print", size_bytes: 10 }];
     const svg = await handleUpload(

@@ -12,6 +12,7 @@ import {
   Trophy,
   Puzzle,
   Radar,
+  Wallet,
 } from "lucide-react";
 import "./due-rules.css";
 import { useState } from "react";
@@ -116,6 +117,10 @@ export function NotificationInbox({
                       <span className="inbox-system temperature" aria-hidden="true">
                         <Radar size={15} />
                       </span>
+                    ) : n.kind === "media_balance" ? (
+                      <span className="inbox-system due-risk" aria-hidden="true">
+                        <Wallet size={15} />
+                      </span>
                     ) : n.kind === "ai_skill" ? (
                       <span className="inbox-system" aria-hidden="true">
                         <Puzzle size={15} />
@@ -140,6 +145,7 @@ export function NotificationInbox({
                       n.kind === "temperature" ||
                       n.kind === "radar_report" ||
                       n.kind === "radar_alert" ||
+                      n.kind === "media_balance" ||
                       n.kind === "tasks_assigned" ||
                       n.kind === "due_risk" ||
                       n.kind === "notice" ? (

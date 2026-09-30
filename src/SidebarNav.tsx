@@ -20,6 +20,7 @@ import {
   Trophy,
   BellRing,
   Users,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 import { aiTab, settingsTab, type Page } from "./router";
@@ -235,6 +236,15 @@ export function SidebarNav({
           label: "Campanhas",
           icon: Megaphone,
           to: { page: "campaigns" },
+        },
+        {
+          key: "finance",
+          label: "Financeiro",
+          icon: Wallet,
+          to: { page: "financeMedia" },
+          children: [
+            { key: "finance-media", label: "Mídia", to: { page: "financeMedia" } },
+          ],
         },
         {
           key: "onboarding",

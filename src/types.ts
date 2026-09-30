@@ -165,7 +165,9 @@ export interface AppNotification {
     /** Radar do cliente: o relatório pedido ou agendado ficou pronto (ou falhou) (link /radar?relatorio=<id>). */
     | "radar_report"
     /** Radar do cliente: um aviso de uma regra da pessoa (link /radar?item=<id>) ou o resumo do dia (link /radar). */
-    | "radar_alert";
+    | "radar_alert"
+    /** Financeiro › Mídia: o saldo de uma conta ficou baixo ou negativo (link /financeiro/midia?contrato=<id>). */
+    | "media_balance";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

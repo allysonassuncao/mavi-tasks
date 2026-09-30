@@ -10,6 +10,7 @@ export const pagePaths = {
   contracts: "/produtos-contratados",
   projects: "/projetos",
   campaigns: "/campanhas",
+  financeMedia: "/financeiro/midia",
   onboarding: "/onboarding/social-leads",
   socialMedia: "/planejamento/social-media",
   cases: "/cases-de-sucesso",
@@ -190,6 +191,7 @@ export function resolvePage(path: string): Page | null {
   if (normalized === "/") return "overview";
   if (normalized === "/onboarding" || normalized === "/planejamento")
     return "onboarding";
+  if (normalized === "/financeiro") return "financeMedia";
   // Endereços antigos do Painel da MAVI.
   if (normalized === "/consumo-ia" || normalized === "/ia") return "aiUsage";
   if (taskIdFromPath(path)) return "tasks";

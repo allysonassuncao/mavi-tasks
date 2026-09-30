@@ -56,6 +56,11 @@ export const NOTICE_TYPES: {
     hint: "Quando um relatório do Radar que você pediu ou agendou fica pronto.",
   },
   {
+    key: "media_balance",
+    label: "Saldo de mídia",
+    hint: "Quando a conta de mídia de um cliente seu (Financeiro › Mídia) fica abaixo do saldo mínimo ou negativa.",
+  },
+  {
     key: "success_case",
     label: "Cases de Sucesso",
     hint: "Um case para aprovar, ou o seu aprovado ou devolvido.",
