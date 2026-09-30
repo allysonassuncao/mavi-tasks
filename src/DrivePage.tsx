@@ -363,6 +363,8 @@ function DriveTree({
     .find((m) => m.user_id === user)
     ?.hidden_pages?.includes("temperature");
   // O Radar segue a regra do Drive; escondido o módulo da pessoa, o cartão some.
+  // ?radar=<cliente>&item=<item>: o item do Radar (o link da tarefa).
+  const [radarItem, setRadarItem] = useState<string | null>(null);
   const showsRadar = !data.members
     .find((m) => m.user_id === user)
     ?.hidden_pages?.includes("radar");
@@ -431,7 +433,10 @@ function DriveTree({
     navigate(window.location.pathname, true);
     // O acesso é conferido pelo banco, ao abrir o termômetro.
     if (thermo) setAt({ client: thermo, temperature: true });
-    else if (radar) setAt({ client: radar, radar: true });
+    else if (radar) {
+      setAt({ client: radar, radar: true });
+      setRadarItem(params.get("item"));
+    }
     else if (group)
       Promise.all([
         whatsappGroupById(group),
@@ -1421,6 +1426,11 @@ function DriveTree({
           clientName={clientName(at.client)}
           members={data.members}
           isLeader={isLeader}
+          data={data}
+          user={user}
+          onNewTask={onNewTask}
+          notify={notify}
+          initialItem={radarItem}
         />
       ) : at.temperature && at.client ? (
         <ClientTemperature

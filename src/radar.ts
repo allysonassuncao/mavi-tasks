@@ -1,4 +1,9 @@
 import { supabase } from "./supabase";
+import { canCreateTaskIn } from "./domain";
+import { serializeDescription, type RichNode } from "./rich-text";
+import { appPath } from "./temperature";
+import type { FormPreset } from "./forms";
+import type { Snapshot } from "./types";
 
 /**
  * Radar do cliente (migration 20261229090000_client_radar): problemas,
@@ -87,6 +92,20 @@ export type RadarItem = {
   last_seen_at: string;
   reopened_at: string | null;
   created_at: string;
+  /** O tema (os itens parecidos de outros clientes do mesmo produto). */
+  theme_id: string | null;
+  theme_title: string | null;
+  /** Tema escolhido por pessoa: a MAVI não mexe. */
+  theme_locked: boolean;
+  /** Esperando a MAVI escolher o tema. */
+  theme_pending: boolean;
+};
+export type RadarTask = {
+  id: string;
+  title: string;
+  status: string;
+  due_date: string | null;
+  assignee_name: string | null;
 };
 export type RadarOccurrence = {
   id: string;
@@ -106,7 +125,61 @@ export type RadarItemDetail = RadarItem & {
   can_edit: boolean;
   client_products: { id: string; name: string }[];
   occurrences: RadarOccurrence[];
+  /** Os temas do mesmo tópico e produto (líderes). */
+  theme_options: { id: string; title: string }[];
+  tasks: RadarTask[];
 };
+export type RadarTheme = {
+  id: string;
+  topic_id: string;
+  product_id: string | null;
+  product_name: string | null;
+  title: string;
+  summary: string;
+  person_edited: boolean;
+  items: number;
+  open_items: number;
+  clients: number;
+  mentions: number;
+  last_seen_at: string | null;
+  max_severity: number | null;
+  client_names: string[];
+};
+export type RadarThemeFilters = {
+  topic: string;
+  /** "none": Geral / Agência. */
+  product?: string;
+  q?: string;
+  days?: number;
+  /** Só temas com item em aberto (padrão). */
+  open_only?: boolean;
+  sort?: "clients" | "items" | "mentions" | "recent";
+  limit?: number;
+  offset?: number;
+};
+export type RadarThemesPage = {
+  total: number;
+  themes: RadarTheme[];
+  /** Itens esperando a MAVI agrupar. */
+  pending: number;
+  /** Itens que alguém deixou sem tema. */
+  without: number;
+};
+export type RadarThemeDetail = {
+  id: string;
+  topic_id: string;
+  product_id: string | null;
+  product_name: string | null;
+  title: string;
+  summary: string;
+  person_edited: boolean;
+  created_at: string;
+  topic: RadarTopic & { id: string };
+  items: RadarItem[];
+  others: { id: string; title: string }[];
+};
+/** Para onde o item vai: um tema, um tema novo, "sem tema" ou a MAVI escolher. */
+export type ThemeMove = { theme: string } | { title: string } | { none: true } | { auto: true };
 export type RadarFilters = {
   topic?: string;
   q?: string;
@@ -114,6 +187,8 @@ export type RadarFilters = {
   product?: string;
   client?: string;
   team?: string;
+  /** "none": sem tema. */
+  theme?: string;
   statuses?: string[];
   severity?: number;
   /** "none": sem responsável. */
@@ -199,7 +274,66 @@ export function occurrencePath(o: RadarOccurrence) {
   return null;
 }
 /** A aba Radar de um cliente no Drive. */
-export const clientRadarPath = (client: string) => `/drive?radar=${client}`;
+export const clientRadarPath = (client: string, item?: string) =>
+  `/drive?radar=${client}${item ? `&item=${item}` : ""}`;
+
+/**
+ * A tarefa a partir de um item: no produto do item (ou no primeiro que a
+ * pessoa pode usar no cliente), com o título, o que a MAVI entendeu, as falas
+ * com o link para o momento e o link do item. Promessa com prazo leva o prazo.
+ */
+export function radarTaskPreset(
+  item: RadarItemDetail,
+  data: Snapshot,
+  user: string,
+): FormPreset | null {
+  const open = data.contracts.filter(
+    (k) => k.client_id === item.client_id && !k.archived && canCreateTaskIn(data, k.id, user),
+  );
+  const contract = (open.find((k) => k.product_id === item.product_id) ?? open[0])?.id;
+  if (!contract) return null;
+  const text = (t: string, marks?: RichNode["marks"]): RichNode => ({
+    type: "text",
+    text: t,
+    ...(marks ? { marks } : {}),
+  });
+  const bold = [{ type: "bold" }] as RichNode["marks"];
+  const link = (href: string) => [{ type: "link", attrs: { href } }] as RichNode["marks"];
+  const paragraph = (...content: RichNode[]): RichNode => ({ type: "paragraph", content });
+  const content: RichNode[] = [];
+  if (item.summary) content.push(paragraph(text(item.summary)));
+  if (item.occurrences.length)
+    content.push(paragraph(text("Onde apareceu", bold)), {
+      type: "bulletList",
+      content: item.occurrences.slice(0, 10).map((o) => {
+        const path = occurrencePath(o);
+        const when = `${dateBr(o.occurred_at)}${o.source_type === "meeting" && o.at_seconds !== null ? ` ${clock(o.at_seconds)}` : ""}`;
+        return {
+          type: "listItem",
+          content: [
+            paragraph(
+              path ? text(when, link(appPath(path))) : text(when),
+              text(" · "),
+              text(`${o.speaker || "Sem nome"}: `, bold),
+              text(`“${o.quote}”`),
+            ),
+          ],
+        };
+      }),
+    });
+  content.push(
+    paragraph(
+      text(`${item.topic.name}: `, bold),
+      text("abrir no Radar do cliente", link(appPath(clientRadarPath(item.client_id, item.id)))),
+    ),
+  );
+  return {
+    contract,
+    title: item.title.slice(0, 240),
+    description: serializeDescription({ type: "doc", content }),
+    ...(item.topic.has_due && item.due_date ? { due: item.due_date } : {}),
+  };
+}
 
 /** Um tópico novo, com os status de sempre. */
 export function blankTopic(): RadarTopic {
@@ -260,6 +394,74 @@ export async function updateItem(company: string, item: string, patch: RadarPatc
     p_item: item,
     p_patch: patch,
   });
+}
+export async function linkTask(company: string, item: string, task: string) {
+  if (offline(company)) {
+    const i = demo.items.find((x) => x.id === item);
+    if (i) i.tasks = [{ id: task, title: "Tarefa criada", status: "open", due_date: null, assignee_name: null }, ...(i.tasks ?? [])];
+    return;
+  }
+  await rpc("link_radar_task", { p_company: company, p_item: item, p_task: task });
+}
+export async function setItemTheme(company: string, item: string, move: ThemeMove) {
+  if (offline(company)) return demoMove(item, move);
+  return rpc<RadarItemDetail>("set_radar_item_theme", {
+    p_company: company,
+    p_item: item,
+    p_theme: "theme" in move ? move.theme : null,
+    p_title: "title" in move ? move.title : null,
+    p_auto: "auto" in move,
+  });
+}
+export async function loadThemes(company: string, filters: RadarThemeFilters) {
+  if (offline(company)) return demoThemes(filters);
+  return rpc<RadarThemesPage>("radar_themes", { p_company: company, p_filters: filters });
+}
+export async function loadTheme(company: string, theme: string) {
+  if (offline(company)) return demoTheme(theme);
+  return rpc<RadarThemeDetail>("radar_theme", { p_company: company, p_theme: theme });
+}
+export async function updateTheme(company: string, theme: string, title: string, summary: string) {
+  if (offline(company)) {
+    const t = demo.themes.find((x) => x.id === theme);
+    if (t) Object.assign(t, { title, summary, person_edited: true });
+    return demoTheme(theme);
+  }
+  return rpc<RadarThemeDetail>("update_radar_theme", {
+    p_company: company,
+    p_theme: theme,
+    p_title: title,
+    p_summary: summary,
+  });
+}
+export async function mergeThemes(company: string, target: string, sources: string[]) {
+  if (offline(company)) {
+    for (const i of demo.items) if (i.theme_id && sources.includes(i.theme_id)) i.theme_id = target;
+    demo.themes = demo.themes.filter((t) => t.id === target || !sources.includes(t.id));
+    return demoTheme(target);
+  }
+  return rpc<RadarThemeDetail>("merge_radar_themes", {
+    p_company: company,
+    p_target: target,
+    p_sources: sources,
+  });
+}
+export type ThemeOptions = {
+  topics: { id: string; name: string }[];
+  themes: { id: string; title: string; topic: string; product: string | null }[];
+};
+export async function loadThemeOptions(company: string): Promise<ThemeOptions> {
+  if (offline(company))
+    return {
+      topics: demo.topics.map((t) => ({ id: t.id, name: t.name })),
+      themes: demo.themes.map((t) => ({
+        id: t.id,
+        title: t.title,
+        topic: demo.topics.find((x) => x.id === t.topic_id)?.name ?? "",
+        product: t.product_name,
+      })),
+    };
+  return rpc<ThemeOptions>("radar_theme_options", { p_company: company });
 }
 export async function loadClientRadar(company: string, client: string) {
   if (offline(company)) return demoClient(client);
@@ -361,7 +563,8 @@ function demoTopics(): (RadarTopic & { id: string })[] {
     },
   ];
 }
-type DemoItem = RadarItem & { occurrences: RadarOccurrence[] };
+type DemoItem = RadarItem & { occurrences: RadarOccurrence[]; tasks?: RadarTask[] };
+type DemoTheme = Omit<RadarTheme, "items" | "open_items" | "clients" | "mentions" | "last_seen_at" | "max_severity" | "client_names">;
 function demoSeed(): DemoItem[] {
   const occ = (
     n: number,
@@ -418,31 +621,35 @@ function demoSeed(): DemoItem[] {
     last_seen_at: occurrences[0]?.occurred_at ?? daysAgo(1),
     reopened_at: null,
     created_at: occurrences[occurrences.length - 1]?.occurred_at ?? daysAgo(1),
+    theme_id: null,
+    theme_title: null,
+    theme_locked: false,
+    theme_pending: false,
     occurrences,
     ...extra,
   });
-  const c1: [string, string] = ["demo-client-1", "4282 · Clínica Sorriso"];
-  const c2: [string, string] = ["demo-client-2", "5120 · Imobiliária Norte"];
-  const c3: [string, string] = ["demo-client-3", "3307 · Academia Força"];
-  const trafego: [string, string] = ["demo-product-trafego", "Tráfego pago"];
-  const social: [string, string] = ["demo-product-social", "Social Media"];
+  const c1: [string, string] = ["cl-1", "Aurora Studio"];
+  const c2: [string, string] = ["cl-2", "Norte Coffee"];
+  const c3: [string, string] = ["cl-4", "Forma Living"];
+  const trafego: [string, string] = ["pd-1", "Make Ads"];
+  const social: [string, string] = ["pd-3", "Social Leads"];
   return [
     item("demo-1", PROBLEMS, c1, trafego, "Leads caíram em setembro",
       "O cliente disse que os leads caíram quase pela metade e quer entender o motivo antes da próxima verba.",
       "aberto", 2, [
-        occ(1, "whatsapp", "Os leads caíram de novo essa semana, o que está acontecendo?", "Dra. Paula", "client", 'Grupo "4282 - Tráfego"'),
+        occ(1, "whatsapp", "Os leads caíram de novo essa semana, o que está acontecendo?", "Dra. Paula", "client", 'Grupo "Aurora Studio - Make Ads"'),
         occ(6, "meeting", "Os leads caíram muito, estou preocupada.", "Paula (cliente)", "client", "Alinhamento de setembro", 312),
       ]),
     item("demo-2", PROBLEMS, c2, social, "Artes saindo com o logo antigo",
       "Pela segunda vez as artes do feed saíram com o logo antigo da imobiliária.",
       "em_tratamento", 1, [
-        occ(2, "whatsapp", "De novo o logo antigo na arte de hoje.", "Ricardo", "client", 'Grupo "5120 - Social"'),
-        occ(9, "whatsapp", "Essa arte está com o logo errado.", "Ricardo", "client", 'Grupo "5120 - Social"'),
+        occ(2, "whatsapp", "De novo o logo antigo na arte de hoje.", "Ricardo", "client", 'Grupo "Norte Coffee"'),
+        occ(9, "whatsapp", "Essa arte está com o logo errado.", "Ricardo", "client", 'Grupo "Norte Coffee"'),
       ]),
     item("demo-3", PROBLEMS, c3, null, "Demora para responder no grupo",
       "O cliente reclamou que esperou dois dias por uma resposta sobre o relatório.",
       "aberto", 3, [
-        occ(0, "whatsapp", "Estou esperando resposta desde segunda, assim não dá.", "Marcos", "client", 'Grupo "3307 - Academia"'),
+        occ(0, "whatsapp", "Estou esperando resposta desde segunda, assim não dá.", "Marcos", "client", 'Grupo "Forma Living"'),
       ]),
     item("demo-4", PROBLEMS, c1, social, "Poucos stories na semana",
       "Pediu mais stories; ficou combinado aumentar para 5 por semana.",
@@ -452,12 +659,12 @@ function demoSeed(): DemoItem[] {
     item("demo-5", PROMISES, c1, trafego, "Enviar o relatório de campanhas",
       "O Bruno prometeu mandar o relatório com a queda dos leads explicada.",
       "pendente", 2, [
-        occ(1, "whatsapp", "Até sexta te mando o relatório completo.", "Bruno Lima", "team", 'Grupo "4282 - Tráfego"'),
+        occ(1, "whatsapp", "Até sexta te mando o relatório completo.", "Bruno Lima", "team", 'Grupo "Aurora Studio - Make Ads"'),
       ], { due_date: dayKey(-2) }),
     item("demo-6", PROMISES, c2, social, "Refazer as artes sem custo",
       "A agência se comprometeu a refazer as 4 artes com o logo novo sem cobrar.",
       "em_andamento", 3, [
-        occ(2, "whatsapp", "Vamos refazer as quatro artes sem custo, pode deixar.", "Gabi Gestora", "team", 'Grupo "5120 - Social"'),
+        occ(2, "whatsapp", "Vamos refazer as quatro artes sem custo, pode deixar.", "Gabi Gestora", "team", 'Grupo "Norte Coffee"'),
       ], { due_date: dayKey(1) }),
     item("demo-7", PROMISES, c3, null, "Ligar com os números do mês",
       "Ficou de ligar para o cliente com os números fechados do mês.",
@@ -468,13 +675,140 @@ function demoSeed(): DemoItem[] {
       "Combinado na reunião mensal.", "cumprida", 1, [
         occ(20, "meeting", "A partir da semana que vem vão ser cinco stories.", "Gabi Gestora", "team", "Reunião mensal", 1250),
       ], { due_date: dayKey(13) }),
+    item("demo-9", PROBLEMS, c2, trafego, "Leads frios, sem interesse de compra",
+      "Reclamou que os leads chegam sem saber o que a imobiliária vende.",
+      "aberto", 2, [
+        occ(3, "meeting", "Os leads que chegam não sabem nem o que a gente vende.", "Ricardo", "client", "Reunião de resultados", 845),
+      ]),
+    item("demo-10", PROBLEMS, c3, trafego, "Poucos contatos pelo anúncio",
+      "Disse que o anúncio novo trouxe poucos contatos no mês.",
+      "aberto", 1, [
+        occ(4, "whatsapp", "Esse mês quase ninguém chamou pelo anúncio.", "Marcos", "client", 'Grupo "Forma Living"'),
+      ], { theme_pending: true }),
   ];
 }
-const demo: { topics: (RadarTopic & { id: string })[]; items: DemoItem[] } = {
+function demoThemeSeed(): DemoTheme[] {
+  return [
+    {
+      id: "demo-theme-leads",
+      topic_id: PROBLEMS,
+      product_id: "pd-1",
+      product_name: "Make Ads",
+      title: "Queda na quantidade e na qualidade dos leads",
+      summary: "Clientes de Make Ads reclamam de menos leads e de leads frios.",
+      person_edited: false,
+    },
+    {
+      id: "demo-theme-marca",
+      topic_id: PROBLEMS,
+      product_id: "pd-3",
+      product_name: "Social Leads",
+      title: "Artes com a marca errada",
+      summary: "Artes publicadas com logo ou cores antigas.",
+      person_edited: false,
+    },
+  ];
+}
+const demo: { topics: (RadarTopic & { id: string })[]; items: DemoItem[]; themes: DemoTheme[] } = {
   topics: demoTopics(),
   items: demoSeed(),
+  themes: demoThemeSeed(),
 };
-const strip = ({ occurrences: _o, ...rest }: DemoItem): RadarItem => rest; // eslint-disable-line @typescript-eslint/no-unused-vars
+for (const [item, theme] of [
+  ["demo-1", "demo-theme-leads"],
+  ["demo-9", "demo-theme-leads"],
+  ["demo-2", "demo-theme-marca"],
+]) {
+  const i = demo.items.find((x) => x.id === item)!;
+  i.theme_id = theme;
+}
+// Os outros esperam a MAVI agrupar.
+for (const i of demo.items) i.theme_pending = !i.theme_id;
+const themeTitle = (id: string | null) => demo.themes.find((t) => t.id === id)?.title ?? null;
+const strip = ({ occurrences: _o, tasks: _t, ...rest }: DemoItem): RadarItem => ({ // eslint-disable-line @typescript-eslint/no-unused-vars
+  ...rest,
+  theme_title: themeTitle(rest.theme_id),
+});
+function demoThemes(f: RadarThemeFilters): RadarThemesPage {
+  const topic = demo.topics.find((t) => t.id === f.topic)!;
+  const q = (f.q ?? "").trim().toLowerCase();
+  const list = demo.themes
+    .filter(
+      (t) =>
+        t.topic_id === f.topic &&
+        (!f.product || (f.product === "none" ? !t.product_id : t.product_id === f.product)) &&
+        (!q || `${t.title} ${t.summary}`.toLowerCase().includes(q)),
+    )
+    .map((t) => {
+      const items = demo.items.filter(
+        (i) => i.theme_id === t.id && (!f.days || Date.now() - Date.parse(i.last_seen_at) < f.days * 864e5),
+      );
+      return {
+        ...t,
+        items: items.length,
+        open_items: items.filter((i) => !isClosed(topic, i.status)).length,
+        clients: new Set(items.map((i) => i.client_id)).size,
+        mentions: items.reduce((n, i) => n + i.mentions, 0),
+        last_seen_at: items.map((i) => i.last_seen_at).sort().pop() ?? null,
+        max_severity: items.reduce<number | null>((m, i) => (i.severity === null ? m : Math.max(m ?? 0, i.severity)), null),
+        client_names: [...new Set(items.map((i) => i.client_name))].slice(0, 6),
+      };
+    })
+    .filter((t) => t.items > 0 && (f.open_only === false || t.open_items > 0))
+    .sort((a, b) =>
+      f.sort === "items"
+        ? b.items - a.items
+        : f.sort === "mentions"
+          ? b.mentions - a.mentions
+          : f.sort === "recent"
+            ? (b.last_seen_at ?? "").localeCompare(a.last_seen_at ?? "")
+            : b.clients - a.clients || b.items - a.items,
+    );
+  const mine = demo.items.filter((i) => i.topic_id === f.topic);
+  return {
+    total: list.length,
+    themes: list,
+    pending: mine.filter((i) => i.theme_pending).length,
+    without: mine.filter((i) => !i.theme_id && !i.theme_pending).length,
+  };
+}
+function demoTheme(id: string): RadarThemeDetail {
+  const t = demo.themes.find((x) => x.id === id);
+  if (!t) throw Error("Tema não encontrado.");
+  return structuredClone({
+    ...t,
+    created_at: daysAgo(10),
+    topic: demo.topics.find((x) => x.id === t.topic_id)!,
+    items: demo.items.filter((i) => i.theme_id === id).map(strip),
+    others: demo.themes
+      .filter((o) => o.id !== id && o.topic_id === t.topic_id && o.product_id === t.product_id)
+      .map((o) => ({ id: o.id, title: o.title })),
+  });
+}
+function demoMove(id: string, move: ThemeMove): RadarItemDetail {
+  const i = demo.items.find((x) => x.id === id);
+  if (!i) throw Error("Item não encontrado.");
+  const before = i.theme_id;
+  if ("auto" in move) Object.assign(i, { theme_id: null, theme_locked: false, theme_pending: true });
+  else if ("none" in move) Object.assign(i, { theme_id: null, theme_locked: true, theme_pending: false });
+  else if ("theme" in move) Object.assign(i, { theme_id: move.theme, theme_locked: true, theme_pending: false });
+  else {
+    const theme: DemoTheme = {
+      id: `demo-theme-${Date.now()}`,
+      topic_id: i.topic_id,
+      product_id: i.product_id,
+      product_name: i.product_name,
+      title: move.title,
+      summary: "",
+      person_edited: true,
+    };
+    demo.themes.push(theme);
+    Object.assign(i, { theme_id: theme.id, theme_locked: true, theme_pending: false });
+  }
+  if (before && !demo.items.some((x) => x.theme_id === before))
+    demo.themes = demo.themes.filter((t) => t.id !== before);
+  return demoDetail(id);
+}
 function demoOverview(): RadarOverview {
   const today = new Date().toLocaleDateString("sv-SE");
   return {
@@ -507,6 +841,7 @@ function demoItems(f: RadarFilters): RadarPage {
       (!f.statuses?.length || f.statuses.includes(i.status)) &&
       (f.severity === undefined || (i.severity ?? -1) >= f.severity) &&
       (!f.assignee || (f.assignee === "none" ? !i.assignee_id : i.assignee_id === f.assignee)) &&
+      (!f.theme || (f.theme === "none" ? !i.theme_id : i.theme_id === f.theme)) &&
       (!f.days || Date.now() - Date.parse(i.last_seen_at) < f.days * 864e5),
   );
   list = [...list].sort((a, b) => {
@@ -528,10 +863,14 @@ function demoDetail(id: string): RadarItemDetail {
     topic: demo.topics.find((t) => t.id === i.topic_id)!,
     can_edit: true,
     client_products: [
-      { id: "demo-product-social", name: "Social Media" },
-      { id: "demo-product-trafego", name: "Tráfego pago" },
+      { id: "pd-3", name: "Social Leads" },
+      { id: "pd-1", name: "Make Ads" },
     ],
     occurrences: i.occurrences,
+    theme_options: demo.themes
+      .filter((t) => t.topic_id === i.topic_id && t.product_id === i.product_id)
+      .map((t) => ({ id: t.id, title: t.title })),
+    tasks: i.tasks ?? [],
   });
 }
 function demoUpdate(id: string, patch: RadarPatch): RadarItemDetail {
@@ -540,17 +879,17 @@ function demoUpdate(id: string, patch: RadarPatch): RadarItemDetail {
   if (patch.status && patch.status !== i.status) i.status_at = new Date().toISOString();
   if (patch.product_id !== undefined)
     i.product_name =
-      patch.product_id === "demo-product-social"
-        ? "Social Media"
-        : patch.product_id === "demo-product-trafego"
-          ? "Tráfego pago"
+      patch.product_id === "pd-3"
+        ? "Social Leads"
+        : patch.product_id === "pd-1"
+          ? "Make Ads"
           : null;
   Object.assign(i, patch);
   return demoDetail(id);
 }
 function demoClient(client: string): ClientRadarData {
   const mine = demo.items.filter((i) => i.client_id === client);
-  const list = mine.length ? mine : demo.items.filter((i) => i.client_id === "demo-client-1");
+  const list = mine.length ? mine : demo.items.filter((i) => i.client_id === "cl-1");
   return structuredClone({
     topics: demo.topics,
     items: list.map(strip),

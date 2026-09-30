@@ -4,7 +4,8 @@
 // time e quem é cliente, o WhatsApp lido só nas mensagens novas, os itens com
 // ocorrências (e reabertos quando voltam), a reunião lida de novo, os filtros
 // do módulo, a aba do cliente pela regra do Drive, a edição por líderes e a
-// configuração dos tópicos.
+// configuração dos tópicos. Fase 2 (migration 20261230090000): os temas
+// por tópico e produto, a tarefa ligada ao item e a fonte nos Dashboards.
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
@@ -516,6 +517,8 @@ await check("o módulo Radar se esconde por pessoa; falhas e o aviso ao worker",
   const [row] = await sql(`select status, attempts, last_error from radar_signals where id = $1`, [g.id]);
   assert.deepEqual([row.status, row.attempts, row.last_error], ["failed", 5, "modelo fora do ar"]);
   await sql(`delete from net.requests`);
+  // Itens esperando tema também acordam o worker (Fase 2): aqui, nenhum.
+  await sql(`update radar_items set theme_pending = false`);
   await sql(`select mavi_private.ai_radar_kick()`);
   assert.equal((await sql(`select count(*)::int as n from net.requests`))[0].n, 0, "sem nada para ler, não acorda");
   await sql(`update radar_signals set status = 'pending', attempts = 0, claimed_until = null, dirty_at = now() - interval '1 hour' where id = $1`, [g.id]);
@@ -531,6 +534,215 @@ await check("a reunião apagada leva as ocorrências e os itens que só ela sust
   assert.equal((await sql(`select count(*)::int as n from radar_signals where source_type = 'meeting'`))[0].n, 0);
   assert.equal((await sql(`select count(*)::int as n from radar_items where id = $1`, [problem.id]))[0].n, 0);
   assert.equal((await sql(`select count(*)::int as n from radar_items where id = $1`, [artItem.id]))[0].n, 1);
+});
+
+// ------------------------------------------------------------ Fase 2
+let themeA;
+const newItem = (title, clientId, product, extra = {}) =>
+  sql(`insert into radar_items(company_id, client_id, topic_id, product_id, title, summary, status, mentions)
+    values ($1,$2,$3,$4,$5,'resumo','aberto',1) returning *`, [A, clientId, topics.problemas.id, product, title])
+    .then(([r]) => r)
+    .then(async (r) => {
+      if (Object.keys(extra).length)
+        await sql(`update radar_items set ${Object.keys(extra).map((k, i) => `${k} = $${i + 2}`).join(", ")} where id = $1`,
+          [r.id, ...Object.values(extra)]);
+      return r;
+    });
+let i1;
+let i2;
+let i3;
+let geral;
+await check("itens sem tema vão para a MAVI por tópico e produto; o que ela não decide volta", async () => {
+  await sql(`update radar_items set theme_pending = false`);
+  i1 = await newItem("Atraso na aprovação das artes", client, trafego);
+  i2 = await newItem("Artes aprovadas com atraso", client, trafego);
+  i3 = await newItem("Leads de baixa qualidade", client, trafego);
+  geral = await newItem("Demora no atendimento", client, null);
+  await as(null);
+  const groups = await rpc("ai_radar_theme_claim", [SECRET, 5]);
+  assert.equal(groups.length, 2);
+  const g = groups.find((x) => x.product_id === trafego);
+  assert.deepEqual(g.items.map((i) => i.title), ["Atraso na aprovação das artes", "Artes aprovadas com atraso",
+    "Leads de baixa qualidade"]);
+  assert.equal(g.items[0].client, "4282");
+  assert.equal(g.topic.name, "Problemas / reclamações");
+  assert.deepEqual(g.themes, []);
+  assert.equal(groups.find((x) => x.product_id === null).product_name, null);
+  await as(null);
+  assert.deepEqual(await rpc("ai_radar_theme_claim", [SECRET, 5]), [], "reservados não saem de novo");
+  await as(null);
+  const n = await rpc("ai_radar_theme_store", [SECRET, JSON.stringify({
+    company_id: A, topic_id: topics.problemas.id, product_id: trafego, claimed: g.items.map((i) => i.id),
+    new: [{ ref: "N1", title: "Atraso na aprovação de criativos", summary: "Clientes esperam a aprovação." },
+      { ref: "N2", title: "Tema sem item" }],
+    assign: [{ item_id: i1.id, ref: "N1" }, { item_id: i2.id, ref: "N1" }, { item_id: uid(555), ref: "N1" }],
+    usage: { model: "openai/gpt-5.6", input: 1500, output: 200, cost: 0.003 },
+  })]);
+  assert.equal(n, 2);
+  const themes = await sql(`select * from radar_themes order by created_at`);
+  assert.deepEqual(themes.map((t) => t.title), ["Atraso na aprovação de criativos"], "tema sem item não nasce");
+  themeA = themes[0];
+  assert.equal(themeA.product_id, trafego);
+  const [r3] = await sql(`select theme_pending, theme_claimed_until, theme_attempts from radar_items where id = $1`, [i3.id]);
+  assert.deepEqual([r3.theme_pending, r3.theme_claimed_until, r3.theme_attempts], [true, null, 1]);
+  assert.equal((await sql(`select count(*)::int as n from ai_usage where kind = 'radar_themes'`))[0].n, 1);
+  // Na próxima, o tema existente vai junto.
+  await as(null);
+  const [again] = (await rpc("ai_radar_theme_claim", [SECRET, 5])).filter((x) => x.product_id === trafego);
+  assert.deepEqual(again.items.map((i) => i.id), [i3.id]);
+  assert.deepEqual(again.themes.map((t) => [t.title, t.items, t.clients]), [["Atraso na aprovação de criativos", 2, 1]]);
+  await as(null);
+  await rpc("ai_radar_theme_store", [SECRET, JSON.stringify({
+    company_id: A, topic_id: topics.problemas.id, product_id: trafego, claimed: [i3.id],
+    new: [{ ref: "N1", title: "Leads de baixa qualidade" }], assign: [{ item_id: i3.id, ref: "N1" }],
+    update: [{ theme_id: themeA.id, summary: "Resumo novo." }],
+  })]);
+  assert.equal((await sql(`select summary from radar_themes where id = $1`, [themeA.id]))[0].summary, "Resumo novo.");
+  // Três tentativas sem decisão: o item para de ir.
+  await sql(`update radar_items set theme_attempts = 3, theme_claimed_until = null where id = $1`, [geral.id]);
+  await as(null);
+  assert.deepEqual(await rpc("ai_radar_theme_claim", [SECRET, 5]), []);
+});
+
+await check("os temas do tópico com os números; renomear, mover, juntar e o tema vazio some", async () => {
+  await as(manager);
+  let list = await rpc("radar_themes", [A, JSON.stringify({ topic: topics.problemas.id })]);
+  assert.deepEqual(list.themes.map((t) => [t.title, t.items, t.open_items, t.clients]), [
+    ["Atraso na aprovação de criativos", 2, 2, 1], ["Leads de baixa qualidade", 1, 1, 1],
+  ]);
+  assert.equal(list.themes[0].product_name, "Tráfego");
+  assert.deepEqual(list.themes[0].client_names, ["4282"]);
+  assert.equal(list.pending, 1);
+  list = await rpc("radar_themes", [A, JSON.stringify({ topic: topics.problemas.id, q: "leads" })]);
+  assert.equal(list.total, 1);
+  await as(manager);
+  const leads = (await sql(`select id from radar_themes where title = 'Leads de baixa qualidade'`))[0].id;
+  let th = await rpc("update_radar_theme", [A, themeA.id, "Aprovação de criativos atrasada", "Por pessoa."]);
+  assert.equal(th.person_edited, true);
+  assert.equal(th.items.length, 2);
+  assert.deepEqual(th.others.map((o) => o.id), [leads]);
+  // A MAVI não reescreve o resumo de tema editado por pessoa.
+  await as(null);
+  await rpc("ai_radar_theme_store", [SECRET, JSON.stringify({ company_id: A, topic_id: topics.problemas.id,
+    product_id: trafego, update: [{ theme_id: themeA.id, summary: "Outro" }] })]);
+  assert.equal((await sql(`select summary from radar_themes where id = $1`, [themeA.id]))[0].summary, "Por pessoa.");
+  // Mover para um tema novo (fica travado), para "sem tema" e de volta para a MAVI.
+  await as(manager);
+  let it = await rpc("set_radar_item_theme", [A, i2.id, null, "Aprovação pelo WhatsApp", false]);
+  assert.equal(it.theme_title, "Aprovação pelo WhatsApp");
+  assert.equal(it.theme_locked, true);
+  assert.equal(it.theme_options.length, 3);
+  const whats = it.theme_id;
+  await as(manager);
+  it = await rpc("set_radar_item_theme", [A, i2.id, null, null, false]);
+  assert.deepEqual([it.theme_id, it.theme_locked, it.theme_pending], [null, true, false]);
+  assert.equal((await sql(`select count(*)::int as n from radar_themes where id = $1`, [whats]))[0].n, 0, "tema vazio some");
+  await as(manager);
+  it = await rpc("set_radar_item_theme", [A, i2.id, null, null, true]);
+  assert.deepEqual([it.theme_locked, it.theme_pending], [false, true]);
+  await as(manager);
+  await rejects(() => rpc("set_radar_item_theme", [A, geral.id, themeA.id, null, false]), /mesmo tópico e produto/);
+  // Juntar: os itens vão para o primeiro e o outro some.
+  await as(manager);
+  th = await rpc("merge_radar_themes", [A, themeA.id, [leads]]);
+  assert.equal(th.items.length, 2);
+  assert.equal((await sql(`select count(*)::int as n from radar_themes where id = $1`, [leads]))[0].n, 0);
+  // Mudar o produto do item manda escolher o tema de novo.
+  await as(manager);
+  it = await rpc("update_radar_item", [A, i3.id, JSON.stringify({ product_id: social })]);
+  assert.deepEqual([it.theme_id, it.theme_pending], [null, true]);
+  await as(member);
+  await rejects(() => rpc("radar_themes", [A, JSON.stringify({ topic: topics.problemas.id })]), /Sem permissão/);
+  await as(member);
+  await rejects(() => rpc("set_radar_item_theme", [A, i1.id, null, "x", false]), /Sem permissão/);
+  // A lista filtra por tema.
+  await as(manager);
+  const byTheme = await rpc("radar_items", [A, JSON.stringify({ theme: themeA.id })]);
+  assert.deepEqual(byTheme.items.map((x) => x.theme_title), ["Aprovação de criativos atrasada"]);
+});
+
+await check("a tarefa criada a partir do item fica ligada; quem não acessa a tarefa não a vê", async () => {
+  const [k] = await sql(`select id from contracts where client_id = $1 and product_id = $2`, [client, trafego]);
+  const [task] = await sql(`insert into tasks(company_id, contract_id, title, creator_id, assignee_id, due_date,
+    original_due_date) values ($1,$2,'Resolver a aprovação',$3,$3,'2026-10-10','2026-10-10') returning id`, [A, k.id, admin]);
+  await as(manager);
+  await rpc("link_radar_task", [A, i1.id, task.id]);
+  await rpc("link_radar_task", [A, i1.id, task.id]);
+  const it = await rpc("radar_item", [A, i1.id]);
+  assert.deepEqual(it.tasks.map((t) => [t.title, t.assignee_name, typeof t.status]), [["Resolver a aprovação", "Ana Admin", "string"]]);
+  await as(member);
+  assert.deepEqual((await rpc("radar_item", [A, i1.id])).tasks, []);
+  await as(member);
+  await rejects(() => rpc("link_radar_task", [A, i1.id, task.id]), /Sem permissão/);
+  await as(manager);
+  await rejects(() => rpc("link_radar_task", [A, i1.id, uid(444)]), /Tarefa não encontrada/);
+});
+
+await check("a fonte Radar nos Dashboards: métricas, agrupamentos e filtros", async () => {
+  const spec = (q, groupBy = "none") => JSON.stringify({ viz: "stat", groupBy, queries: [{ ref: "A", filters: [], ...q }] });
+  const today = (await sql(`select (now() at time zone 'America/Sao_Paulo')::date::text as d`))[0].d;
+  const run = async (q, g) => {
+    await as(manager);
+    return (await rpc("dashboard_preview", [A, spec({ source: "radar", ...q }, g), today, today, "{}"])).series.A;
+  };
+  await sql(`update radar_items set severity = 3 where id = $1`, [i1.id]);
+  // Os 4 itens novos e o da arte (resolvido, da Fase 1).
+  const total = (await run({ metric: "items" }))[0].v;
+  assert.equal(total, 5);
+  assert.equal((await run({ metric: "open_items" }))[0].v, 4);
+  assert.equal((await run({ metric: "closed_items" }))[0].v, 1);
+  assert.equal((await run({ metric: "severe" }))[0].v, 2, "o novo e o da arte");
+  assert.equal((await run({ metric: "clients" }))[0].v, 1);
+  const byTopic = await run({ metric: "items" }, "topic");
+  assert.deepEqual(byTopic.map((p) => [p.l, p.v]), [["Problemas / reclamações", 5]]);
+  const byTheme = await run({ metric: "items" }, "theme");
+  assert.deepEqual(byTheme.map((p) => p.l).sort(), ["Aprovação de criativos atrasada", "Sem tema"]);
+  const byProduct = await run({ metric: "items" }, "product");
+  assert.ok(byProduct.some((p) => p.l === "Geral / Agência"));
+  const bySeverity = await run({ metric: "items" }, "severity");
+  assert.ok(bySeverity.some((p) => p.l === "Crítica" && p.v === 2));
+  const byStatus = await run({ metric: "items" }, "status");
+  assert.deepEqual(byStatus.map((p) => [p.l, p.v]), [["Aberto", 4], ["Fechado", 1]]);
+  const byPerson = await run({ metric: "items" }, "person");
+  assert.deepEqual(byPerson.map((p) => [p.l, p.v]), [["Sem responsável", 4], ["Bruno Equipe", 1]]);
+  const f = (field, values, op) => ({ metric: "items", filters: [{ field, values, ...(op ? { op } : {}) }] });
+  assert.equal((await run(f("product", ["none"])))[0].v, 1);
+  assert.equal((await run(f("state", ["closed"])))[0].v, 1);
+  assert.equal((await run(f("theme", [themeA.id])))[0].v, 1, "o outro mudou de produto");
+  assert.equal((await run(f("severity", ["3"])))[0].v, 2);
+  assert.equal((await run(f("topic", [topics.problemas.id], "not_in")))[0].v, 0);
+  assert.equal((await run(f("team", [team])))[0].v, 5);
+  assert.equal((await run(f("project", [uid(1)])))[0].v, 5, "projeto não se aplica");
+  const mentions = (await run({ metric: "mentions" }))[0].v;
+  assert.ok(mentions >= 1);
+  await as(manager);
+  await rejects(() => run({ metric: "xyz" }), /Métrica inválida/);
+  await as(manager);
+  await rejects(() => run({ metric: "items", dateField: "xyz" }), /Campo de data inválido/);
+  // O painel salvo aceita os agrupamentos novos.
+  await as(manager);
+  await sql(`select mavi_private.dashboard_check($1, $2::jsonb, '{}'::jsonb)`, [A, JSON.stringify([{
+    id: "radar-tema", title: "Por tema", x: 0, y: 0, w: 6, h: 4,
+    spec: { viz: "hbar", groupBy: "theme", queries: [{ ref: "A", source: "radar", metric: "items", filters: [] }] },
+  }])]);
+  await as(manager);
+  await rpc("ai_set_route", [A, "feature", null, OPENROUTER, "openai/gpt-5.6", "client_radar_themes"]);
+  await as(null);
+  assert.equal((await rpc("ai_worker_route", [SECRET, A, "client_radar_themes"])).model, "openai/gpt-5.6");
+  await as(manager);
+  const opts = await rpc("radar_theme_options", [A]);
+  assert.ok(opts.themes.some((t) => t.title === "Aprovação de criativos atrasada" && t.product === "Tráfego"));
+});
+
+await check("item sem tema também acorda o worker", async () => {
+  await sql(`update radar_signals set status = 'done'`);
+  await sql(`delete from net.requests`);
+  await sql(`update radar_items set theme_pending = false`);
+  await sql(`select mavi_private.ai_radar_kick()`);
+  assert.equal((await sql(`select count(*)::int as n from net.requests`))[0].n, 0);
+  await sql(`update radar_items set theme_pending = true, theme_attempts = 0, theme_locked = false where id = $1`, [i3.id]);
+  await sql(`select mavi_private.ai_radar_kick()`);
+  assert.equal((await sql(`select count(*)::int as n from net.requests`))[0].n, 1);
 });
 
 console.log(`\n${passed} checks passed`);

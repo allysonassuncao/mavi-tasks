@@ -54,13 +54,15 @@ function series(
   now: Date,
 ): SeriesRow[] {
   // Social Leads lives in its own store, and the demo keeps no status
-  // history (status_history, reviews) nor notice deliveries: no figures here.
+  // history (status_history, reviews), notice deliveries nor Radar items: no
+  // figures here.
   if (
     q.source === "social_leads" ||
     q.source === "status_history" ||
     q.source === "reviews" ||
     q.source === "notices" ||
-    q.source === "temperature"
+    q.source === "temperature" ||
+    q.source === "radar"
   )
     return group === "none" ? [{ k: "total", v: 0 }] : [];
   const today = dateKey(now, tz);

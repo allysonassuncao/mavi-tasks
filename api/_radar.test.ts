@@ -11,7 +11,10 @@ import {
   extractionMessage,
   handleRadarWorker,
   parseCandidates,
+  parseThemes,
   runRadar,
+  themesMessage,
+  type ThemeGroup,
   type RadarMaterial,
   type RadarTopic,
 } from "./_radar";
@@ -285,7 +288,7 @@ describe("worker do Radar", () => {
         now: () => (t += 60_000),
       },
     );
-    expect(stats).toEqual({ signals: 2, items: 2, skipped: 0, failed: 0 });
+    expect(stats).toEqual({ signals: 2, items: 2, skipped: 0, failed: 0, themed: 0 });
     const stores = calls.filter((c) => c.url.includes("rpc/ai_radar_store"));
     expect(stores).toHaveLength(2);
     const [first, second] = stores.map((s) => s.body.p_result);
@@ -318,5 +321,93 @@ describe("worker do Radar", () => {
     expect(stats.failed).toBe(1);
     const fail = calls.find((c) => c.url.includes("rpc/ai_radar_fail"));
     expect(fail?.body).toMatchObject({ p_id: signal, p_error: "A MAVI não devolveu JSON." });
+  });
+});
+
+describe("temas do Radar", () => {
+  const group: ThemeGroup = {
+    company_id: company,
+    topic_id: problems.id,
+    product_id: trafego,
+    topic: { name: "Problemas / reclamações", description: "Reclamações do cliente." },
+    product_name: "Tráfego",
+    items: [
+      { id: "00000000-0000-4000-8000-0000000001a1", title: "Atraso na aprovação", summary: "x", client: "4282" },
+      { id: "00000000-0000-4000-8000-0000000001a2", title: "Aprovação demorada", summary: "", client: "5120" },
+      { id: "00000000-0000-4000-8000-0000000001a3", title: "Leads ruins", summary: "", client: "4282" },
+    ],
+    themes: [
+      { id: "00000000-0000-4000-8000-0000000002b1", title: "Leads de baixa qualidade", summary: "s", items: 4, clients: 3 },
+    ],
+  };
+
+  it("a mensagem numera temas e itens com o cliente", () => {
+    const text = themesMessage(group);
+    expect(text).toMatch(/Produto: Tráfego\./);
+    expect(text).toMatch(/H1 · Leads de baixa qualidade \(4 itens, 3 clientes\) — s/);
+    expect(text).toMatch(/I2 · cliente 5120: Aprovação demorada/);
+  });
+
+  it("troca as referências; item repetido, tema inexistente e tema novo sem nome saem", () => {
+    const decided = parseThemes(
+      JSON.stringify({
+        assign: [
+          { item: "I1", theme: "N1" },
+          { item: "I2", theme: "N1" },
+          { item: "I3", theme: "H1" },
+          { item: "I3", theme: "N1" },
+          { item: "I9", theme: "H1" },
+          { item: "I1", theme: "H7" },
+        ],
+        new: [
+          { ref: "N1", title: "Atraso na aprovação de criativos", summary: "Clientes esperam." },
+          { ref: "N2", title: "x" },
+        ],
+        update: [{ theme: "H1", summary: "Novo resumo" }, { theme: "H5", summary: "?" }],
+      }),
+      group,
+    );
+    expect(decided.new).toEqual([{ ref: "N1", title: "Atraso na aprovação de criativos", summary: "Clientes esperam." }]);
+    expect(decided.assign).toEqual([
+      { item_id: group.items[0].id, ref: "N1" },
+      { item_id: group.items[1].id, ref: "N1" },
+      { item_id: group.items[2].id, theme_id: group.themes[0].id },
+    ]);
+    expect(decided.update).toEqual([{ theme_id: group.themes[0].id, summary: "Novo resumo" }]);
+  });
+
+  it("o worker agrupa depois das leituras e grava com o custo", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_radar_claim": [],
+      "rpc/ai_radar_theme_claim": () => (claims++ === 0 ? [group] : []),
+      "rpc/ai_worker_route": null,
+      "rpc/ai_radar_theme_store": 2,
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      expect(req.instructions).toMatch(/temas/);
+      const meter = newMeter("claude-haiku-4-5");
+      meter.cost = 0.002;
+      return {
+        text: JSON.stringify({
+          assign: [{ item: "I1", theme: "N1" }, { item: "I2", theme: "N1" }],
+          new: [{ ref: "N1", title: "Atraso na aprovação" }],
+        }),
+        meter,
+        rounds: 1,
+      };
+    });
+    const stats = await runRadar({ ...env, radarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
+    expect(stats.themed).toBe(2);
+    const store = calls.find((c) => c.url.includes("rpc/ai_radar_theme_store"))!;
+    expect(store.body.p_result).toMatchObject({
+      company_id: company,
+      topic_id: problems.id,
+      product_id: trafego,
+      claimed: group.items.map((i) => i.id),
+      new: [{ ref: "N1", title: "Atraso na aprovação" }],
+      usage: { cost: 0.002 },
+    });
+    expect(store.body.p_result.assign).toHaveLength(2);
   });
 });

@@ -1,8 +1,9 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { AlertTriangle, ExternalLink, MessageCircle, RotateCcw, Video } from "lucide-react";
-import { Input, Loading, Select, SelectOption, Textarea } from "./ui";
+import { AlertTriangle, CheckSquare, ExternalLink, Layers, MessageCircle, Plus, RotateCcw, Video } from "lucide-react";
+import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import { Modal } from "./components";
-import type { Member } from "./types";
+import { statuses, type Member, type Snapshot, type Status } from "./types";
+import type { FormPreset } from "./forms";
 import { appPath, openInApp } from "./temperature";
 import {
   SEVERITY_COLORS,
@@ -10,22 +11,29 @@ import {
   dateBr,
   loadItem,
   occurrencePath,
+  linkTask,
   overdue,
+  radarTaskPreset,
+  setItemTheme,
   severityName,
   statusOf,
   updateItem,
   type RadarItemDetail,
   type RadarPatch,
+  type ThemeMove,
 } from "./radar";
 
 const NONE = "__none__";
+const AUTO = "__auto__";
+const NEW = "__new__";
 const ROLE: Record<string, string> = { client: "cliente", team: "time", unknown: "não identificado" };
 
 /**
  * Um item do Radar: o que a MAVI entendeu, o andamento (status,
  * responsável, gravidade, prazo, produto) e cada vez que o assunto apareceu,
  * com o trecho e o link para o momento da reunião ou a mensagem do grupo.
- * Líderes editam; os demais (pela aba do cliente no Drive) só leem.
+ * Líderes editam, mudam o tema e criam tarefas a partir do item; os demais
+ * (pela aba do cliente no Drive) só leem.
  */
 export function RadarItemPanel({
   company,
@@ -33,12 +41,21 @@ export function RadarItemPanel({
   members,
   onClose,
   onChanged,
+  data,
+  user,
+  onNewTask,
+  notify,
 }: {
   company: string;
   itemId: string;
   members: Member[];
   onClose: () => void;
   onChanged?: (item: RadarItemDetail) => void;
+  /** Para criar a tarefa (o produto do cliente que a pessoa pode usar). */
+  data?: Snapshot;
+  user?: string;
+  onNewTask?: (preset: FormPreset) => void;
+  notify?: (message: string) => void;
 }) {
   const [item, setItem] = useState<RadarItemDetail | null>(null);
   const [error, setError] = useState("");
@@ -46,6 +63,7 @@ export function RadarItemPanel({
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
+  const [newTheme, setNewTheme] = useState<string | null>(null);
 
   useEffect(() => {
     loadItem(company, itemId)
@@ -60,10 +78,35 @@ export function RadarItemPanel({
 
   async function save(patch: RadarPatch) {
     if (!item) return;
+    await apply(() => updateItem(company, item.id, patch));
+  }
+  async function move(to: ThemeMove) {
+    if (!item) return;
+    await apply(() => setItemTheme(company, item.id, to));
+    setNewTheme(null);
+  }
+  function createTask() {
+    if (!item || !data || !user || !onNewTask) return;
+    const preset = radarTaskPreset(item, data, user);
+    if (!preset) {
+      notify?.("Para criar a tarefa, você precisa ter acesso a um produto contratado deste cliente.");
+      return;
+    }
+    const id = item.id;
+    onClose();
+    onNewTask({
+      ...preset,
+      onCreated: (task) =>
+        void linkTask(company, id, task)
+          .then(() => notify?.("Tarefa criada e ligada ao item do Radar."))
+          .catch((e) => notify?.(`A tarefa foi criada, mas não ficou ligada ao item: ${(e as Error).message}`)),
+    });
+  }
+  async function apply(fn: () => Promise<RadarItemDetail>) {
     setBusy(true);
     setError("");
     try {
-      const next = await updateItem(company, item.id, patch);
+      const next = await fn();
       setItem(next);
       setTitle(next.title);
       setSummary(next.summary);
@@ -221,6 +264,61 @@ export function RadarItemPanel({
                 <strong>{item.product_name ?? "Geral / Agência"}</strong>
               )}
             </label>
+            <label className="radar-detail-field">
+              <span>Tema</span>
+              {edit ? (
+                <Select
+                  aria-label="Tema"
+                  value={newTheme !== null ? NEW : (item.theme_id ?? (item.theme_pending ? AUTO : NONE))}
+                  onValueChange={(v) =>
+                    v === NEW
+                      ? setNewTheme("")
+                      : v === AUTO
+                        ? move({ auto: true })
+                        : v === NONE
+                          ? move({ none: true })
+                          : move({ theme: v })
+                  }
+                >
+                  <SelectOption value={AUTO}>
+                    {item.theme_pending ? "A MAVI vai escolher" : "Deixar a MAVI escolher"}
+                  </SelectOption>
+                  <SelectOption value={NONE}>Sem tema</SelectOption>
+                  {item.theme_options.map((t) => (
+                    <SelectOption key={t.id} value={t.id}>
+                      {t.title}
+                    </SelectOption>
+                  ))}
+                  <SelectOption value={NEW}>Novo tema…</SelectOption>
+                </Select>
+              ) : (
+                <strong>{item.theme_title ?? (item.theme_pending ? "A MAVI vai escolher" : "Sem tema")}</strong>
+              )}
+            </label>
+            {newTheme !== null && (
+              <div className="radar-detail-field wide radar-new-theme">
+                <span>Nome do tema novo</span>
+                <div>
+                  <Input
+                    autoFocus
+                    value={newTheme}
+                    maxLength={160}
+                    placeholder="Ex.: Atraso na aprovação de criativos"
+                    onChange={(e) => setNewTheme(e.target.value)}
+                  />
+                  <Button
+                    className="btn primary"
+                    disabled={newTheme.trim().length < 3}
+                    onClick={() => move({ title: newTheme.trim() })}
+                  >
+                    <Layers size={14} aria-hidden="true" /> Criar tema
+                  </Button>
+                  <Button className="btn secondary" onClick={() => setNewTheme(null)}>
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            )}
             {topic.fields.map((f) => (
               <label className="radar-detail-field" key={f.key}>
                 <span>{f.label}</span>
@@ -276,6 +374,47 @@ export function RadarItemPanel({
             <p className="form-error" role="alert">
               {error}
             </p>
+          )}
+
+          {(item.tasks.length > 0 || (edit && onNewTask)) && (
+            <div className="radar-tasks">
+              <div className="radar-tasks-head">
+                <h4 className="radar-occ-title">Tarefas</h4>
+                {edit && onNewTask && (
+                  <Button className="btn secondary" onClick={createTask}>
+                    <Plus size={14} aria-hidden="true" /> Criar tarefa
+                  </Button>
+                )}
+              </div>
+              {item.tasks.length ? (
+                <ul>
+                  {item.tasks.map((t) => {
+                    const st = statuses[t.status as Status];
+                    return (
+                      <li key={t.id}>
+                        <a
+                          href={appPath(`/tarefas/${t.id}`)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            onClose();
+                            openInApp(`/tarefas/${t.id}`);
+                          }}
+                        >
+                          <CheckSquare size={14} aria-hidden="true" /> {t.title}
+                        </a>
+                        <small>
+                          {st?.label ?? t.status}
+                          {t.assignee_name && ` · ${t.assignee_name}`}
+                          {t.due_date && ` · até ${dateBr(t.due_date)}`}
+                        </small>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="muted">Nenhuma tarefa ainda. A tarefa criada aqui já vem com as falas e o link do item.</p>
+              )}
+            </div>
           )}
 
           <h4 className="radar-occ-title">Onde apareceu</h4>

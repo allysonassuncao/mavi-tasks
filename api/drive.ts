@@ -382,6 +382,7 @@ export default async function handler(
         ...aiEnv(driveEnv()),
         model: serverModel("client_radar", process.env),
         radarBudgetMs: Number(process.env.RADAR_WORKER_BUDGET_MS) || 240_000,
+        themesModel: serverModel("client_radar_themes", process.env),
       };
       const result = await handleRadarWorker(authorization, env, aiDeps(env));
       res.statusCode = result.status;

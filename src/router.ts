@@ -166,6 +166,7 @@ export function safeReturnPath(value: string | null) {
     "animacao",
     "termometro",
     "radar",
+    "item",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);

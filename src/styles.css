@@ -26897,3 +26897,135 @@ main:has(> .mavi-chat) > .error-banner {
   background: #fff;
   cursor: pointer;
 }
+
+/* Radar · Fase 2: temas e tarefas */
+.radar-view {
+  align-self: flex-start;
+}
+.radar-view button {
+  cursor: pointer;
+}
+.radar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 1px 4px 1px 8px;
+  border-radius: 999px;
+  background: #ece8f7;
+  color: #4a3aa7;
+  font-weight: 600;
+}
+.radar-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.radar-chip button:hover {
+  background: #dcd5f1;
+}
+.radar-caption .text-btn {
+  padding: 0;
+  font-size: inherit;
+}
+.radar-row-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #4a3aa7;
+}
+.radar-new-theme > div,
+.radar-merge > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.radar-new-theme > div > :first-child,
+.radar-merge > div > :first-child {
+  flex: 1 1 240px;
+}
+.radar-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.radar-tasks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.radar-tasks ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.radar-tasks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.radar-tasks li a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.radar-tasks li small,
+.radar-tasks p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.radar-theme-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.radar-theme-items li {
+  display: grid;
+  grid-template-columns: 1fr minmax(170px, 240px);
+  gap: 8px;
+  align-items: center;
+}
+.radar-theme-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.radar-theme-item:hover {
+  background: #f7f9f9;
+}
+@media (max-width: 720px) {
+  .radar-theme-items li {
+    grid-template-columns: 1fr;
+  }
+}

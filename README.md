@@ -174,7 +174,11 @@ O que os clientes reclamam e o que o time promete, anotado pela MAVI nas reuniõ
 - **Itens** (`radar_items` + `radar_mentions`): um por assunto do cliente, com status, responsável, gravidade, prazo, produto (ou Geral / Agência), campos extras e cada ocorrência (trecho, quem falou, link para o momento da reunião ou a mensagem). Resolvido que volta a aparecer reabre; título, resumo e produto editados por pessoa não são reescritos.
 - **Telas**: o módulo **Radar** (`/radar`, módulo `radar`, só administradores e gestores) com um cartão por tópico e os filtros resolvidos no banco (`radar_items`), e Drive › cliente › **Radar** (`?radar=<cliente>`), com a regra do Drive (só líderes editam).
 
-Para ligar: aplicar a migração e rodar `supabase/operations/schedule-client-radar.sql` (usa a mesma `mavi_private.ai_config` da indexação). Testes: `npm run test:db:radar` e `npx vitest run api/_radar.test.ts`.
+- **Temas** (migração `20261230090000_client_radar_themes`): o mesmo assunto em clientes diferentes do mesmo tópico e produto. Todo item novo espera tema (`theme_pending`); o mesmo worker junta os pendentes de cada tópico e produto e a funcionalidade `client_radar_themes` (`CLIENT_RADAR_THEMES_MODEL`) põe cada um num tema existente ou cria um. No módulo, a visão **Temas** ordena pelos que têm mais clientes; o gestor renomeia, junta temas e move itens (item movido por pessoa fica travado; tema sem item some; mudar o produto do item manda escolher o tema de novo).
+- **Tarefa a partir do item**: o item abre o formulário de tarefa com o título, o que a MAVI entendeu, as falas com o link do momento e o link do item (`/drive?radar=<cliente>&item=<item>`); a tarefa fica ligada ao item (`radar_item_tasks`).
+- **Dashboards**: a fonte `radar` (itens, em aberto, fechados, sérios, vencidos, que voltaram, ocorrências, clientes, gravidade média, dias para fechar), agrupada por tópico, tema, gravidade, status, produto, cliente, equipe e responsável, e o modelo "Radar do cliente".
+
+Para ligar: aplicar as migrações e rodar `supabase/operations/schedule-client-radar.sql` (usa a mesma `mavi_private.ai_config` da indexação). Testes: `npm run test:db:radar`, `npx vitest run api/_radar.test.ts` e `npx vitest run src/radar.test.tsx`.
 
 ### Agenda (Google Agenda)
 

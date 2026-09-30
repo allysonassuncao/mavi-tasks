@@ -222,7 +222,8 @@ export type AiFeature =
   | "conversation_summary"
   | "skill_coach"
   | "client_radar"
-  | "client_radar_check";
+  | "client_radar_check"
+  | "client_radar_themes";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -482,6 +483,14 @@ export const FEATURES: FeatureInfo[] = [
     env: "",
     decisions: true,
   },
+  {
+    id: "client_radar_themes",
+    group: "Radar do cliente",
+    label: "Temas: os itens parecidos de clientes diferentes",
+    conversation: false,
+    env: "CLIENT_RADAR_THEMES_MODEL",
+    note: "Junta os itens novos de cada tópico e produto em temas; roda em lotes, poucas vezes por dia.",
+  },
 ];
 
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
@@ -569,6 +578,8 @@ export function serverModel(
       return env.CLIENT_TEMPERATURE_TEXT_MODEL || env.AI_MODEL || fallback;
     case "client_radar":
       return env.CLIENT_RADAR_MODEL || env.AI_MODEL || fallback;
+    case "client_radar_themes":
+      return env.CLIENT_RADAR_THEMES_MODEL || env.AI_MODEL || fallback;
     case "client_radar_check":
       // Sem escolha: o Jev do termômetro (o primeiro cadastrado no OpenRouter).
       return "~typesafe/jev-latest";

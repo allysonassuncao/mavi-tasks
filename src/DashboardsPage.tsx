@@ -53,6 +53,7 @@ import {
   duePanels,
   noticesPanels,
   temperaturePanels,
+  radarPanels,
   vizOptions,
   compact,
   type Dashboard,
@@ -70,6 +71,7 @@ import {
 } from "./dashboards";
 import { priorities, statuses, type Snapshot } from "./types";
 import { loadTemperatureConfig } from "./temperature";
+import { loadThemeOptions } from "./radar";
 
 type Notify = (message: string) => void;
 
@@ -82,6 +84,7 @@ const sourceOrder: Source[] = [
   "social_leads",
   "notices",
   "temperature",
+  "radar",
 ];
 
 // The demonstration keeps its dashboards in memory for the session.
@@ -386,7 +389,9 @@ function DashboardList({
                         ? noticesPanels()
                         : template === "temperature"
                           ? temperaturePanels()
-                          : [],
+                          : template === "radar"
+                            ? radarPanels()
+                            : [],
               variables: { range: { preset: "30d" as const }, filters: {} },
             };
             const saved = demo
@@ -408,6 +413,7 @@ type Template =
   | "due"
   | "notices"
   | "temperature"
+  | "radar"
   | null;
 function CreateDashboard({
   onClose,
@@ -546,6 +552,20 @@ function CreateDashboard({
               sinal, a evolução, os clientes por faixa, por equipe e por cliente.
             </small>
           </label>
+          <label className={template === "radar" ? "selected" : ""}>
+            <input
+              type="radio"
+              name="template"
+              checked={template === "radar"}
+              onChange={() => setTemplate("radar")}
+            />
+            <strong>Modelo: Radar do cliente</strong>
+            <small>
+              Itens novos, em aberto, sérios e com prazo vencido, os temas com
+              mais clientes, os itens por produto e por tópico e os clientes com
+              mais itens em aberto.
+            </small>
+          </label>
           <label className={template === null ? "selected" : ""}>
             <input
               type="radio"
@@ -575,7 +595,11 @@ function CreateDashboard({
  * The options of each filter and, for the Termômetro's "indicator" metric,
  * the company's score indicators.
  */
-function useLookups(data: Snapshot, indicators: PickOption[] = []) {
+function useLookups(
+  data: Snapshot,
+  indicators: PickOption[] = [],
+  radar: { topics: PickOption[]; themes: PickOption[] } = { topics: [], themes: [] },
+) {
   return useMemo(() => {
     const byName = (a: PickOption, b: PickOption) =>
       a.label.localeCompare(b.label, "pt-BR");
@@ -618,9 +642,22 @@ function useLookups(data: Snapshot, indicators: PickOption[] = []) {
         { value: "manual", label: "Lançamento manual" },
       ],
       late: [],
+      topic: radar.topics,
+      theme: radar.themes,
+      severity: [
+        { value: "0", label: "Baixa" },
+        { value: "1", label: "Média" },
+        { value: "2", label: "Alta" },
+        { value: "3", label: "Crítica" },
+      ],
+      state: [
+        { value: "open", label: "Aberto" },
+        { value: "progress", label: "Em andamento" },
+        { value: "closed", label: "Fechado" },
+      ],
       indicators,
     } satisfies Record<FilterField, PickOption[]> & { indicators: PickOption[] };
-  }, [data, indicators]);
+  }, [data, indicators, radar]);
 }
 
 function DashboardView({
@@ -672,7 +709,26 @@ function DashboardView({
       )
       .catch(() => setIndicators([]));
   }, [company, isLeader]);
-  const lookups = useLookups(data, indicators);
+  // Os tópicos e temas do Radar, para os filtros da fonte Radar.
+  const [radarOptions, setRadarOptions] = useState<{ topics: PickOption[]; themes: PickOption[] }>({
+    topics: [],
+    themes: [],
+  });
+  useEffect(() => {
+    if (!isLeader) return;
+    loadThemeOptions(company)
+      .then((o) =>
+        setRadarOptions({
+          topics: o.topics.map((t) => ({ value: t.id, label: t.name })),
+          themes: o.themes.map((t) => ({
+            value: t.id,
+            label: `${t.title} (${[t.topic, t.product ?? "Geral"].join(" · ")})`,
+          })),
+        }),
+      )
+      .catch(() => setRadarOptions({ topics: [], themes: [] }));
+  }, [company, isLeader]);
+  const lookups = useLookups(data, indicators, radarOptions);
 
   useEffect(() => {
     let current = true;

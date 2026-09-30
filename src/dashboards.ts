@@ -17,7 +17,8 @@ export type Source =
   | "status_history"
   | "reviews"
   | "notices"
-  | "temperature";
+  | "temperature"
+  | "radar";
 export type Viz = "stat" | "line" | "area" | "bar" | "hbar" | "donut" | "table";
 export type GroupBy =
   | "none"
@@ -36,7 +37,10 @@ export type GroupBy =
   | "validator"
   | "notice"
   | "level"
-  | "band";
+  | "band"
+  | "topic"
+  | "theme"
+  | "severity";
 export type Interval = "auto" | "day" | "week" | "month";
 /** "money" (R$) is only drawn by Campanhas' charts, not a dashboard metric. */
 export type Unit = "number" | "hours" | "days" | "percent" | "money";
@@ -54,7 +58,11 @@ export type FilterField =
   | "executor"
   | "previous"
   | "validator"
-  | "level";
+  | "level"
+  | "topic"
+  | "theme"
+  | "severity"
+  | "state";
 
 export type QueryFilter = {
   field: FilterField;
@@ -566,6 +574,30 @@ export const sources: Record<
     dateFields: [{ key: "day", label: "Dia da temperatura" }],
     filters: ["client", "product", "team", "person"],
   },
+  // Radar do cliente (migration 20261230090000): one row per item (a
+  // subject of a client in a topic). "Pessoa" is the item's responsible;
+  // "Ocorrências" counts each time a subject came up, by its date.
+  radar: {
+    label: "Radar do cliente",
+    metrics: [
+      { key: "items", label: "Itens", unit: "number", additive: true },
+      { key: "open_items", label: "Itens em aberto", unit: "number", additive: true },
+      { key: "closed_items", label: "Itens fechados", unit: "number", additive: true },
+      { key: "severe", label: "Itens sérios (gravidade alta ou crítica)", unit: "number", additive: true },
+      { key: "overdue", label: "Com prazo vencido (em aberto)", unit: "number", additive: true },
+      { key: "recurring", label: "Que voltaram a aparecer", unit: "number", additive: true },
+      { key: "mentions", label: "Ocorrências (vezes que apareceram)", unit: "number", additive: true },
+      { key: "clients", label: "Clientes com itens", unit: "number", additive: false },
+      { key: "avg_severity", label: "Gravidade média (0 baixa a 3 crítica)", unit: "number", additive: false },
+      { key: "days_to_close", label: "Tempo médio até fechar (dias)", unit: "days", additive: false },
+    ],
+    dateFields: [
+      { key: "created_at", label: "Primeira vez que apareceu" },
+      { key: "last_seen_at", label: "Última vez que apareceu" },
+      { key: "status_at", label: "Última mudança de status" },
+    ],
+    filters: ["topic", "theme", "state", "severity", "client", "product", "team", "person"],
+  },
 };
 export const metricDef = (q: Pick<Query, "source" | "metric">) =>
   sources[q.source]?.metrics.find((m) => m.key === q.metric);
@@ -585,6 +617,10 @@ export const filterLabels: Record<FilterField, string> = {
   previous: "Responsável anterior",
   validator: "Quem validou",
   level: "Nível do aviso",
+  topic: "Tópico do Radar",
+  theme: "Tema do Radar",
+  severity: "Gravidade",
+  state: "Situação (aberto, em andamento, fechado)",
 };
 
 export const groupOptions: {
@@ -603,6 +639,7 @@ export const groupOptions: {
       "reviews",
       "notices",
       "temperature",
+      "radar",
     ],
   },
   {
@@ -616,6 +653,7 @@ export const groupOptions: {
       "reviews",
       "notices",
       "temperature",
+      "radar",
     ],
   },
   {
@@ -628,6 +666,7 @@ export const groupOptions: {
       "status_history",
       "reviews",
       "temperature",
+      "radar",
     ],
   },
   {
@@ -640,6 +679,7 @@ export const groupOptions: {
       "status_history",
       "reviews",
       "temperature",
+      "radar",
     ],
   },
   {
@@ -657,6 +697,7 @@ export const groupOptions: {
       "reviews",
       "notices",
       "temperature",
+      "radar",
     ],
   },
   {
@@ -669,6 +710,7 @@ export const groupOptions: {
       "status_history",
       "reviews",
       "notices",
+      "radar",
     ],
   },
   {
@@ -690,7 +732,14 @@ export const groupOptions: {
     label: "Criador da tarefa (ou autor do aviso)",
     sources: ["tasks", "status_history", "reviews", "notices"],
   },
-  { key: "status", label: "Status", sources: ["tasks", "status_history"] },
+  {
+    key: "status",
+    label: "Status (no Radar: aberto, em andamento, fechado)",
+    sources: ["tasks", "status_history", "radar"],
+  },
+  { key: "topic", label: "Tópico do Radar", sources: ["radar"] },
+  { key: "theme", label: "Tema do Radar", sources: ["radar"] },
+  { key: "severity", label: "Gravidade", sources: ["radar"] },
   {
     key: "priority",
     label: "Prioridade",
@@ -1905,6 +1954,91 @@ export function duePanels(): Panel[] {
           q("A", "count", { ...created, label: "Tarefas criadas" }),
           q("B", "tight_due", { ...created, label: "Antes do mínimo" }),
           q("C", "shorter_than_smart", { ...created, label: "Mais curtos que a MAVI" }),
+        ],
+      },
+    },
+  ];
+}
+
+/**
+ * Radar do cliente (migration 20261230090000): os itens em aberto, os sérios,
+ * as promessas vencidas, a evolução, os temas com mais clientes, os itens por
+ * produto e por tópico, e os clientes com mais itens em aberto.
+ */
+export function radarPanels(): Panel[] {
+  const q = (ref: string, metric: string, extra: Partial<Query> = {}): Query => ({
+    ref,
+    source: "radar",
+    metric,
+    dateField: "created_at",
+    filters: [],
+    ...extra,
+  });
+  const stat = (id: string, title: string, x: number, query: Query): Panel => ({
+    id,
+    title,
+    x,
+    y: 0,
+    w: 3,
+    h: 3,
+    spec: { viz: "stat", groupBy: "none", compare: true, queries: [query] },
+  });
+  return [
+    stat("novos", "Itens novos", 0, q("A", "items")),
+    stat("em-aberto", "Em aberto", 3, q("A", "open_items")),
+    stat("serios", "Sérios", 6, q("A", "severe")),
+    stat("vencidos", "Com prazo vencido", 9, q("A", "overdue")),
+    {
+      id: "radar-tempo",
+      title: "Itens novos no período",
+      x: 0,
+      y: 3,
+      w: 12,
+      h: 5,
+      spec: { viz: "bar", groupBy: "time", interval: "auto", queries: [q("A", "items", { label: "Itens" })] },
+    },
+    {
+      id: "radar-temas",
+      title: "Temas com mais clientes",
+      x: 0,
+      y: 8,
+      w: 6,
+      h: 6,
+      spec: { viz: "hbar", groupBy: "theme", limit: 15, queries: [q("A", "clients")] },
+    },
+    {
+      id: "radar-produto",
+      title: "Itens por produto",
+      x: 6,
+      y: 8,
+      w: 6,
+      h: 6,
+      spec: { viz: "donut", groupBy: "product", queries: [q("A", "items")] },
+    },
+    {
+      id: "radar-topico",
+      title: "Itens por tópico",
+      x: 0,
+      y: 14,
+      w: 6,
+      h: 6,
+      spec: { viz: "hbar", groupBy: "topic", queries: [q("A", "items"), q("B", "open_items", { label: "Em aberto" })] },
+    },
+    {
+      id: "radar-cliente",
+      title: "Clientes com mais itens em aberto",
+      x: 6,
+      y: 14,
+      w: 6,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "client",
+        limit: 30,
+        queries: [
+          q("A", "open_items", { label: "Em aberto" }),
+          q("B", "severe", { label: "Sérios" }),
+          q("C", "mentions", { label: "Ocorrências" }),
         ],
       },
     },

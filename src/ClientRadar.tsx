@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "r
 import { CalendarClock, Radar, RefreshCw, Settings2 } from "lucide-react";
 import { Button, Checkbox, Loading } from "./ui";
 import { Empty } from "./components";
-import type { Member } from "./types";
+import type { Member, Snapshot } from "./types";
+import type { FormPreset } from "./forms";
 import { appPath, openInApp } from "./temperature";
 import { RadarItemPanel, SeverityDot } from "./RadarItemPanel";
 import { dateBr, isClosed, loadClientRadar, overdue, statusOf, type ClientRadarData } from "./radar";
@@ -18,18 +19,32 @@ export function ClientRadar({
   clientName,
   members,
   isLeader,
+  data: snapshot,
+  user,
+  onNewTask,
+  notify,
+  initialItem,
 }: {
   company: string;
   client: string;
   clientName: string;
   members: Member[];
   isLeader: boolean;
+  data?: Snapshot;
+  user?: string;
+  onNewTask?: (preset: FormPreset) => void;
+  notify?: (message: string) => void;
+  /** Abre este item (o link que vai na tarefa). */
+  initialItem?: string | null;
 }) {
   const [data, setData] = useState<ClientRadarData | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [closed, setClosed] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(initialItem ?? null);
+  useEffect(() => {
+    if (initialItem) setOpen(initialItem);
+  }, [initialItem]);
   const load = useCallback(() => {
     setError("");
     setBusy(true);
@@ -106,6 +121,10 @@ export function ClientRadar({
           company={company}
           itemId={open}
           members={members}
+          data={snapshot}
+          user={user}
+          onNewTask={onNewTask}
+          notify={notify}
           onClose={() => setOpen(null)}
           onChanged={(next) =>
             setData((d) => d && { ...d, items: d.items.map((x) => (x.id === next.id ? { ...x, ...next } : x)) })
