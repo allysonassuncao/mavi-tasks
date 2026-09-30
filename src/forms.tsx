@@ -1012,7 +1012,7 @@ export function TaskDetail({
   const memberName = (id: string) =>
     data.members.find((m) => m.user_id === id)?.name ?? "Usuário removido";
   const moveHint =
-    "Somente o responsável, o criador ou um gestor muda o status";
+    "Somente o responsável, o criador, o supervisor da equipe do responsável ou um gestor muda o status";
   const statusChoices: StatusChoice[] = [
     ...workingStatuses.map((status) => ({
       status,

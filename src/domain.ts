@@ -240,6 +240,25 @@ export function isTaskSupervisor(data: Snapshot, task: Task, userId: string) {
     (ct) => ct.client_id === clientId && myTeams.has(ct.team_id),
   );
 }
+/**
+ * Mirrors mavi_private.supervises: the person supervises a team that `personId`
+ * belongs to (whoever supervises the assignee's team moves the task).
+ */
+export function supervisesPerson(
+  data: Snapshot,
+  personId: string,
+  userId: string,
+) {
+  if (!data.members.some((m) => m.user_id === userId && m.active)) return false;
+  const myTeams = new Set(
+    data.teamMembers
+      .filter((tm) => tm.user_id === userId && tm.supervisor)
+      .map((tm) => tm.team_id),
+  );
+  return data.teamMembers.some(
+    (tm) => tm.user_id === personId && myTeams.has(tm.team_id),
+  );
+}
 /** Mirrors the tasks policy: leaders, the creator, the assignee, supervisors. */
 export function canSeeTask(data: Snapshot, task: Task, userId: string) {
   const me = data.members.find((m) => m.user_id === userId && m.active);
@@ -411,11 +430,12 @@ export type BlockedAction = { blocked: string };
  * What the user may do with a task (mirrors public.transition_task):
  * `true` allows it, a BlockedAction shows it disabled, `false` hides it.
  *
- * The flow is free: the current assignee, the creator or a leader moves the
- * task between its working statuses in any order, and picks who is
- * responsible from then on. While in validation, whoever validates may move
- * and approve it: the project's validators and whoever is responsible for it
- * then (the person picked to validate, even the one who sent it). Delivery
+ * The flow is free: the current assignee, the creator, a leader or the
+ * supervisor of a team the assignee belongs to moves the task between its
+ * working statuses in any order, and picks who is responsible from then on.
+ * While in validation, whoever validates may move and approve it: the
+ * project's validators and whoever is responsible for it then (the person
+ * picked to validate, even the one who sent it). Delivery
  * still goes through that approval — except on a task someone created for
  * themselves, which they deliver directly.
  */
@@ -430,6 +450,8 @@ export function taskActions(
     leader = admin || me?.role === "manager",
     creator = task.creator_id === userId,
     assignee = task.assignee_id === userId,
+    /** Supervises a team the assignee belongs to: moves it like the assignee. */
+    teamLead = supervisesPerson(data, task.assignee_id, userId),
     /** Created for themselves: no validation is needed to deliver it. */
     ownTask = creator && assignee,
     s = task.status,
@@ -440,7 +462,8 @@ export function taskActions(
     data.projects.find((p) => p.id === task.project_id),
   ).required;
   const mover =
-    !!me && (assignee || creator || leader || (s === "review" && approver));
+    !!me &&
+    (assignee || creator || leader || teamLead || (s === "review" && approver));
   const reopenExpired =
     !admin &&
     !!task.delivered_at &&
@@ -458,7 +481,7 @@ export function taskActions(
       !!task.internal_approved_by &&
       !task.client_approved_by,
     reopen:
-      s === "done" && (admin || creator || assignee || approver)
+      s === "done" && (admin || creator || assignee || teamLead || approver)
         ? reopenExpired
           ? ({
               blocked:

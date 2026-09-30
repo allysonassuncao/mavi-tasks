@@ -111,7 +111,74 @@ describe("Reabrir tarefa", () => {
       as("user-allyson", delivered(REOPEN_WINDOW_MS * 5), now).reopen,
     ).toBe(true);
   });
-  it("gestor que não criou nem valida a tarefa não reabre", () => {
-    expect(as("user-marina", delivered(60_000), now).reopen).toBe(false);
+  it("gestor que não criou, não valida nem supervisiona a equipe não reabre", () => {
+    const noTeams = { ...data, teamMembers: [] };
+    expect(
+      taskActions(noTeams, delivered(60_000), "user-marina", now).reopen,
+    ).toBe(false);
+  });
+});
+
+describe("Supervisor da equipe do responsável", () => {
+  // Pedro (colaborador) supervisiona só P&D; Lucas está em P&D e Júlia não.
+  const teams: Snapshot = {
+    ...data,
+    members: [
+      ...data.members,
+      {
+        ...data.members.find((m) => m.user_id === "user-lucas")!,
+        user_id: "user-pedro",
+        name: "Pedro",
+      },
+    ],
+    teamMembers: [
+      {
+        company_id: base.company_id,
+        team_id: "team-3",
+        user_id: "user-pedro",
+        supervisor: true,
+      },
+      {
+        company_id: base.company_id,
+        team_id: "team-3",
+        user_id: "user-lucas",
+        supervisor: false,
+      },
+      {
+        company_id: base.company_id,
+        team_id: "team-1",
+        user_id: "user-julia",
+        supervisor: false,
+      },
+    ],
+  };
+  const other = (u: string, t: Task) => taskActions(teams, t, u, Date.now());
+  const lucas = task("progress", { creator_id: "user-allyson" });
+  it("muda status e responsável das tarefas de quem é da equipe", () => {
+    expect(other("user-pedro", lucas).move).toBe(true);
+    expect(
+      other("user-pedro", task("review", { creator_id: "user-allyson" })).move,
+    ).toBe(true);
+  });
+  it("não vale para quem é de outra equipe", () => {
+    expect(
+      other("user-pedro", { ...lucas, assignee_id: "user-julia" }).move,
+    ).toBe(false);
+  });
+  it("quem só é da equipe, sem supervisionar, não muda", () => {
+    expect(
+      other("user-julia", { ...lucas, assignee_id: "user-pedro" }).move,
+    ).toBe(false);
+  });
+  it("reabre a entregue como o responsável", () => {
+    const done = {
+      ...lucas,
+      status: "done" as Status,
+      delivered_at: new Date().toISOString(),
+    };
+    expect(other("user-pedro", done).reopen).toBe(true);
+  });
+  it("não entrega sem validação quando o projeto exige", () => {
+    expect(other("user-pedro", lucas).deliver).toBe(false);
   });
 });

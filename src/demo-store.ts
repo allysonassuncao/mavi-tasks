@@ -1198,7 +1198,7 @@ export class DemoStore {
         if (a.p_action === "move") {
           if (!acts.move)
             throw Error(
-              "Somente o responsável, o criador ou um gestor muda o status da tarefa",
+              "Somente o responsável, o criador, o supervisor da equipe do responsável ou um gestor muda o status da tarefa",
             );
           const target: Status = a.p_status ?? from;
           if (target === "done") {
