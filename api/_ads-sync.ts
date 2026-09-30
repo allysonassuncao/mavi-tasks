@@ -610,9 +610,10 @@ const toMaps = (body: MakeCount) => {
 
 /**
  * The count from the leads the Make sent to the MAVI (api/_make-leads.ts),
- * or null while they don't cover the period yet (the Make's sender hasn't
- * reached the end of dados_capture after its last day) or can't be read:
- * then the Make is asked, as before.
+ * or why it can't be used — they don't cover the period yet (the Make's
+ * sender hasn't reached the end of dados_capture after its last day) or
+ * can't be read: then the Make is asked, as before, and the reason goes with
+ * its error.
  */
 async function storedMakeLeads(
   env: SyncEnv,
@@ -620,8 +621,8 @@ async function storedMakeLeads(
   squeezes: string[],
   since: string,
   until: string,
-) {
-  if (!env.secret) return null;
+): Promise<{ leads: ReturnType<typeof toMaps> } | { why: string }> {
+  if (!env.secret) return { why: "falta ADS_SYNC_SECRET na Vercel" };
   try {
     const found = await callRpc<MakeCount | null>(
       env,
@@ -635,10 +636,33 @@ async function storedMakeLeads(
         p_until: until,
       },
     );
-    return found.ok && found.data ? toMaps(found.data) : null;
-  } catch {
-    return null;
+    if (!found.ok) return { why: `a leitura falhou (${found.error})` };
+    if (found.data) return { leads: toMaps(found.data) };
+    const status = await callRpc<{
+      cursor?: number;
+      caught_up_at?: string | null;
+    }>(env, fetchImpl, null, "make_leads_status", { p_secret: env.secret });
+    return { why: coverage(status.ok ? status.data : null, until) };
+  } catch (e) {
+    return { why: `a leitura falhou (${(e as Error).message})` };
   }
+}
+const brDay = (day: string) => day.split("-").reverse().join("/");
+/** Why the leads in the MAVI don't cover the period up to `until`. */
+export function coverage(
+  status: { cursor?: number; caught_up_at?: string | null } | null,
+  until: string,
+) {
+  const after = `depois de ${brDay(until)}`;
+  if (!status) return `o envio da Make ainda não chegou ao fim da tabela ${after}`;
+  if (!status.caught_up_at)
+    return `o envio da Make ainda está mandando o histórico (até o id ${status.cursor ?? 0}) e não chegou ao fim da tabela`;
+  const when = new Date(status.caught_up_at).toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+  return `o envio da Make chegou ao fim da tabela pela última vez em ${when}, antes do fim de ${brDay(until)}`;
 }
 
 export async function makeLeads(
@@ -655,11 +679,12 @@ export async function makeLeads(
       "O ciclo tem destino página de captura da Make, mas nenhuma página: informe as páginas no ciclo.",
     );
   const stored = await storedMakeLeads(env, fetchImpl, squeezes, since, until);
-  if (stored) return stored;
+  if ("leads" in stored) return stored.leads;
+  const unused = ` Os leads no MAVI não foram usados: ${stored.why}.`;
   if (!env.makeLeadsSecret)
     throw new AdsError(
       500,
-      "Esta campanha conta os cadastros da página de captura da Make, e a leitura deles não está configurada: falta MAKE_LEADS_SECRET na Vercel.",
+      `Esta campanha conta os cadastros da página de captura da Make, e a leitura deles não está configurada: falta MAKE_LEADS_SECRET na Vercel.${unused}`,
     );
   let res: Response;
   try {
@@ -675,12 +700,13 @@ export async function makeLeads(
       }),
     );
   } catch (e) {
-    throw new AdsError(502, `Make: ${(e as Error).message}`);
+    throw new AdsError(502, `Make: ${(e as Error).message}.${unused}`);
   }
   const body = (await res.json().catch(() => ({}))) as MakeCount & {
     error?: string;
   };
-  if (!res.ok) throw new AdsError(502, `Make: ${body.error ?? res.statusText}`);
+  if (!res.ok)
+    throw new AdsError(502, `Make: ${body.error ?? res.statusText}.${unused}`);
   return toMaps(body);
 }
 /** The period's distinct leads up to `end`, from the first-seen days. */

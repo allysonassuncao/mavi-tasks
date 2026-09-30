@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   BACKFILL_LIMIT,
+  coverage,
   gate,
   googleTotals,
   handleAdsSync,
@@ -861,6 +862,54 @@ describe("POST /api/ads-sync", () => {
       calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
     );
     expect(stored.p_snapshot.conversions).toBe(2);
+  });
+
+  it("Make fora do ar com os leads no MAVI incompletos: o erro diz por quê", async () => {
+    let batch = [
+      target({
+        objective: "lead",
+        destination: "make_landing_page",
+        landing_pages: ["81895b88"],
+      }),
+    ];
+    const { fetch } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [/act_111\/insights/, () => json({ data: [] })],
+      [/rpc\/make_leads_count/, () => json(null)],
+      [
+        /rpc\/make_leads_status/,
+        () => json({ cursor: 1200000, caught_up_at: null, seen_at: null }),
+      ],
+      [
+        /POST https:\/\/make\.example\.com/,
+        () => {
+          throw new Error("The operation was aborted due to timeout");
+        },
+      ],
+      [/rpc\/ad_sync_store/, () => json(0)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    const message = String(
+      (result.body.errors as { message: string }[])[0].message,
+    );
+    expect(message).toContain("Make: The operation was aborted due to timeout.");
+    expect(message).toContain("ainda está mandando o histórico (até o id 1200000)");
+  });
+
+  it("por que os leads no MAVI não cobrem o período", () => {
+    expect(
+      coverage({ cursor: 5, caught_up_at: "2026-09-30T02:59:00Z" }, "2026-09-29"),
+    ).toBe(
+      "o envio da Make chegou ao fim da tabela pela última vez em 29/09/2026, 23:59, antes do fim de 29/09/2026",
+    );
+    expect(coverage(null, "2026-09-29")).toContain("depois de 29/09/2026");
   });
 
   it("página de captura da Make sem a leitura configurada: erro, sem números", async () => {
