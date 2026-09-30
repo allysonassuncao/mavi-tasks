@@ -263,7 +263,7 @@ await check("a criação guarda o que a regra e a MAVI davam, e usa a MAVI quand
   // Na edição, "Usar" a sugestão: a data da MAVI, contada de novo no banco.
   const edited = await create({ manual: true, due: "2026-12-20" });
   const v0 = (await sql("select version from tasks where id=$1", [edited]))[0].version;
-  await rpc("update_task", [edited, v0, "Nova", "", "2026-12-20", 0, "normal", START, null, null, true, null]);
+  await rpc("update_task", [edited, v0, "Nova", "", "2026-12-20", 0, "normal", START, null, "Usar a data da MAVI", true, null]);
   assert.deepEqual(await row(edited), { due: smart, due_manual: false, due_smart: true, rule, smart });
   // Editar só o título mantém a marca.
   const v1 = (await sql("select version from tasks where id=$1", [edited]))[0].version;
@@ -272,7 +272,7 @@ await check("a criação guarda o que a regra e a MAVI davam, e usa a MAVI quand
   // Mudar o prazo depois deixa de ser o da MAVI.
   const id = await create({ smart: true });
   const v = (await sql("select version from tasks where id=$1", [id]))[0].version;
-  await rpc("update_task", [id, v, "Nova", "", "2026-12-15", 0, "normal", START]);
+  await rpc("update_task", [id, v, "Nova", "", "2026-12-15", 0, "normal", START, null, "Cliente pediu outra data"]);
   assert.equal((await row(id)).due_smart, false);
 });
 

@@ -28,7 +28,7 @@ import {
   workingStatuses,
 } from "./types";
 import { MEMBER_OPT_IN, MODULES } from "./modules";
-import { canChangeEntry, enteredAt, entryDateError, entryDay } from "./task-entry";
+import { canChangeDue, dueChangeError, dueReasonError } from "./task-due";
 import type { TaskView } from "./api";
 import type { BulkChange, BulkItem, BulkResult, BulkUndo } from "./task-bulk";
 import {
@@ -60,7 +60,23 @@ export class DemoStore {
    * as one by one (transition_task for responsible and status, the edit
    * permission for due dates). The review runs it all and puts it back.
    */
+  /** Mirrors mavi_private.log_due_change: the history line with the reason. */
+  private dueChanged(t: Task, old: string, reason: string, source: string) {
+    this.events.unshift({
+      id: crypto.randomUUID(),
+      task_id: t.id,
+      actor_id: demoUser,
+      action: "due_changed",
+      detail: { old_due: old, new_due: t.due_date, reason: reason.trim(), source },
+      created_at: new Date().toISOString(),
+    });
+  }
   bulk(ids: string[], change: BulkChange, preview: boolean): BulkResult {
+    // Every due date change asks why (migration 20270110090000).
+    if (change.kind === "due" || change.kind === "shift" || change.kind === "rule") {
+      const problem = dueReasonError(change.reason);
+      if (problem) throw Error(problem);
+    }
     const saved = preview
       ? {
           tasks: structuredClone(this.data.tasks),
@@ -126,8 +142,8 @@ export class DemoStore {
           if (t.status === change.value)
             reason = `Já está em ${statuses[change.value].label}`;
           else move(change.value, null, change.note ?? "");
-        } else if (t.creator_id !== demoUser && !leader)
-          reason = "Só quem criou a tarefa ou um gestor muda o prazo";
+        } else if (!canChangeDue(this.data, t, demoUser))
+          reason = "Sem permissão para mudar o prazo desta tarefa";
         else {
           // Mirrors the due branch of public.bulk_update_tasks.
           const byRule = change.kind === "rule";
@@ -145,7 +161,7 @@ export class DemoStore {
               : change.kind === "shift"
                 ? addBusinessDays(this.data.calendarDays, t.due_date, change.value)
                 : (rule?.due ?? t.due_date);
-          const why = change.kind === "rule" ? "" : (change.reason ?? "");
+          const why = change.kind === "rule" ? "" : change.reason;
           const short = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
           if (byRule && !rule)
             reason = "Nenhuma regra de prazo vale para esta tarefa";
@@ -167,10 +183,12 @@ export class DemoStore {
             t.due_tight_reason = tight
               ? (due < t.due_date ? why : "") || t.due_tight_reason || null
               : null;
+            const old = t.due_date;
             t.due_date = due;
             t.due_manual = !byRule;
             t.due_rule_id = byRule ? rule!.rule.id : null;
             t.version++;
+            if (old !== due) this.dueChanged(t, old, change.reason, "bulk");
           }
         }
       } catch (e) {
@@ -788,23 +806,34 @@ export class DemoStore {
         }
         break;
       }
-      case "set_task_entry_date": {
-        // Mirrors public.set_task_entry_date (migration 20270109090000).
-        if (!task || task.archived || !canChangeEntry(this.data, task, demoUser))
-          throw Error("Sem permissão para alterar a data de entrada desta tarefa");
+      case "set_task_due": {
+        // Mirrors public.set_task_due (migration 20270110090000): only the
+        // date changes; approvals and status stay.
+        if (!task || task.archived || !canChangeDue(this.data, task, demoUser))
+          throw Error("Sem permissão para mudar o prazo desta tarefa");
         if (task.version !== a.p_version)
           throw Error("A tarefa mudou. Atualize antes de continuar.");
-        const tz = this.data.companies[0].timezone;
-        const problem = entryDateError(task, a.p_date, String(a.p_reason ?? ""), tz);
+        const problem = dueChangeError(task, a.p_due, String(a.p_reason ?? ""));
         if (problem) throw Error(problem);
-        const old = entryDay(task, tz);
-        task.entered_at = enteredAt(task.created_at, a.p_date, tz);
-        task.version++;
-        event("entry_changed", {
-          old_entry: old,
-          new_entry: a.p_date,
-          reason: String(a.p_reason).trim(),
+        const rule = suggestDue(this.data, {
+          contract: task.contract_id,
+          project: task.project_id,
+          team: task.team_id,
+          assignee: task.assignee_id,
+          base: dueBase(task),
+          approval: task.requires_client_approval,
         });
+        const old = task.due_date;
+        const tight = !!rule?.min && a.p_due < rule.min;
+        task.due_tight_reason = tight
+          ? (a.p_due < old ? String(a.p_reason).trim() : task.due_tight_reason) || null
+          : null;
+        task.due_date = a.p_due;
+        task.due_manual = true;
+        task.due_rule_id = null;
+        task.due_smart = false;
+        task.version++;
+        this.dueChanged(task, old, String(a.p_reason), "task");
         break;
       }
       case "set_task_custom_fields": {
@@ -989,6 +1018,10 @@ export class DemoStore {
       }
       case "apply_replan": {
         // Mirrors public.apply_replan (the move goes through transition_task).
+        if ((a.p_items as { due?: string | null }[]).some((i) => i.due)) {
+          const problem = dueReasonError(a.p_reason);
+          if (problem) throw Error(problem);
+        }
         const results = (a.p_items as { task: string; assignee?: string | null; due?: string | null }[]).map((i) => {
           const t = this.data.tasks.find((x) => x.id === i.task);
           if (!t || t.status === "done") return { task_id: i.task, ok: false, reason: "Tarefa não encontrada ou já entregue" };
@@ -1003,10 +1036,12 @@ export class DemoStore {
                 p_assignee: i.assignee,
               });
             if (i.due && i.due !== t.due_date) {
+              const old = t.due_date;
               t.due_date = i.due;
               t.due_manual = true;
               t.due_rule_id = null;
               t.version++;
+              this.dueChanged(t, old, a.p_reason, "replan");
             }
             return { task_id: t.id, ok: true, reason: null };
           } catch (e) {
@@ -1088,6 +1123,13 @@ export class DemoStore {
         });
         const byRule = a.p_due_manual === false && !!rule;
         const due: string = byRule ? rule!.due : a.p_due;
+        const oldDue = task.due_date;
+        // Mirrors public.update_task (migration 20270110090000): a new due
+        // date always asks why.
+        if (due !== oldDue) {
+          const problem = dueReasonError(a.p_due_reason);
+          if (problem) throw Error(problem);
+        }
         if (due !== task.due_date || byRule) {
           const tight = !byRule && !!rule?.min && due < rule.min;
           if (tight && due < task.due_date && String(a.p_due_reason ?? "").trim().length < 5)
@@ -1122,6 +1164,7 @@ export class DemoStore {
           delivered_at: null,
         });
         event("edited", moved);
+        if (due !== oldDue) this.dueChanged(task, oldDue, String(a.p_due_reason), "edit");
         break;
       }
       case "transition_task": {

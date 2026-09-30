@@ -181,12 +181,12 @@ describe("Alteração em massa (demonstração)", () => {
     t.due_date = "2026-10-02"; // sexta-feira
     t.start_date = null;
     const status = t.status;
-    const r = store.bulk([t.id], { kind: "shift", value: 1 }, false);
+    const r = store.bulk([t.id], { kind: "shift", value: 1, reason: "Cliente pediu" }, false);
     expect(r.applied).toBe(1);
     const after = store.data.tasks.find((x) => x.id === t.id)!;
     expect(after.due_date).toBe("2026-10-05"); // pula o fim de semana
     expect(after.status).toBe(status);
-    const s = sides(r.results[0], { kind: "shift", value: 1 }, (id) => member(store, id));
+    const s = sides(r.results[0], { kind: "shift", value: 1, reason: "Cliente pediu" }, (id) => member(store, id));
     expect(s).toEqual({ before: "02/10 (sex)", after: "05/10 (seg)" });
     const undo = store.undoBulk(r.operation!);
     expect(undo).toEqual({ restored: 1, kept: 0 });
@@ -199,7 +199,7 @@ describe("Alteração em massa (demonstração)", () => {
     t.creator_id = demoUser;
     t.start_date = "2026-10-10";
     t.due_date = "2026-10-12";
-    const r = store.bulk([t.id], { kind: "due", value: "2026-10-05" }, false);
+    const r = store.bulk([t.id], { kind: "due", value: "2026-10-05", reason: "Cliente pediu" }, false);
     expect(r.applied).toBe(0);
     expect(r.results[0].reason).toBe("O prazo ficaria antes do início (10/10)");
     expect(r.operation).toBeNull();
@@ -210,7 +210,7 @@ describe("Alteração em massa (demonstração)", () => {
     const t = store.data.tasks.find((x) => x.status !== "done")!;
     t.creator_id = demoUser;
     t.start_date = null;
-    const r = store.bulk([t.id], { kind: "shift", value: 2 }, false);
+    const r = store.bulk([t.id], { kind: "shift", value: 2, reason: "Cliente pediu" }, false);
     store.data.tasks.find((x) => x.id === t.id)!.version++;
     expect(store.undoBulk(r.operation!)).toEqual({ restored: 0, kept: 1 });
   });
@@ -219,7 +219,7 @@ describe("Alteração em massa (demonstração)", () => {
 describe("Textos da alteração em massa", () => {
   it("descreve a mudança e o resultado", () => {
     const names = { member: () => "Ana Souza", team: () => "Criação" };
-    expect(describeChange({ kind: "shift", value: -1 }, names)).toBe(
+    expect(describeChange({ kind: "shift", value: -1, reason: "Cliente pediu" }, names)).toBe(
       "Antecipar o prazo em 1 dia útil, a partir do prazo de cada tarefa.",
     );
     expect(describeChange({ kind: "assignee", value: "x" }, names)).toBe(

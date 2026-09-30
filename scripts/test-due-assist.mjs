@@ -182,7 +182,7 @@ await check("aplicar: troca o responsável e o prazo, e o que não pode fica de 
     { task: risky, assignee: ana, due: null },
     { task: folgada.id, assignee: null, due: later },
     { task: uid(999), due: later },
-  ])]);
+  ]), "Ana de folga na semana"]);
   assert.equal(r.applied, 2);
   assert.deepEqual(r.results.map((x) => x.ok), [true, true, false]);
   const t = (await sql("select assignee_id, due_date::text d, due_manual from tasks where id=$1", [risky]))[0];
@@ -190,7 +190,8 @@ await check("aplicar: troca o responsável e o prazo, e o que não pode fica de 
   const f = (await sql("select due_date::text d, due_manual from tasks where id=$1", [folgada.id]))[0];
   assert.deepEqual([f.d, f.due_manual], [later, true]);
   const ev = await sql("select detail from task_events where task_id=$1 and action='due_changed'", [folgada.id]);
-  assert.equal(ev[0].detail.replan, true);
+  assert.equal(ev[0].detail.source, "replan");
+  assert.equal(ev[0].detail.reason, "Ana de folga na semana");
   await as(ana);
   await rejects(rpc("apply_replan", [A, "[]"]), /gestores e administradores/);
 });

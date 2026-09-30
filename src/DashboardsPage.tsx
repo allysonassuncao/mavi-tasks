@@ -549,7 +549,7 @@ function CreateDashboard({
             <small>
               Quanto as datas da MAVI e das regras acertam, o erro médio da
               MAVI, quem define prazos apertados ou mais curtos que a sugestão
-              e quem ajusta a data de entrada das tarefas.
+              e quem muda os prazos depois.
             </small>
           </label>
           <label className={template === "social_leads" ? "selected" : ""}>

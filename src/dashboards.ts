@@ -19,7 +19,7 @@ export type Source =
   | "notices"
   | "temperature"
   | "radar"
-  | "entry_changes";
+  | "due_changes";
 export type Viz = "stat" | "line" | "area" | "bar" | "hbar" | "donut" | "table";
 export type GroupBy =
   | "none"
@@ -261,17 +261,9 @@ export const sources: Record<
         unit: "number",
         additive: true,
       },
-      // Migration 20270109090000: the entry date is not the creation's.
-      {
-        key: "entry_adjusted",
-        label: "Tarefas com data de entrada ajustada",
-        unit: "number",
-        additive: true,
-      },
     ],
     dateFields: [
       { key: "created_at", label: "Criação" },
-      { key: "entered_at", label: "Entrada" },
       { key: "due_date", label: "Prazo" },
       { key: "delivered_at", label: "Entrega" },
     ],
@@ -607,18 +599,18 @@ export const sources: Record<
     ],
     filters: ["topic", "theme", "state", "severity", "client", "product", "team", "person"],
   },
-  // Data de entrada (migration 20270109090000): each change of a task's
-  // entry date, with its reason. "Pessoa" is who changed it.
-  entry_changes: {
-    label: "Ajustes da data de entrada",
+  // Mudanças de prazo (migration 20270110090000): each change of a task's
+  // due date after its creation, with its reason. "Pessoa" is who changed it.
+  due_changes: {
+    label: "Mudanças de prazo",
     metrics: [
-      { key: "changes", label: "Ajustes da data de entrada", unit: "number", additive: true },
-      { key: "tasks", label: "Tarefas com a data ajustada", unit: "number", additive: false },
-      { key: "earlier", label: "Ajustes para antes", unit: "number", additive: true },
-      { key: "later", label: "Ajustes para depois", unit: "number", additive: true },
+      { key: "changes", label: "Mudanças de prazo", unit: "number", additive: true },
+      { key: "tasks", label: "Tarefas com prazo mudado", unit: "number", additive: false },
+      { key: "later", label: "Prazos adiados", unit: "number", additive: true },
+      { key: "earlier", label: "Prazos antecipados", unit: "number", additive: true },
       { key: "avg_days", label: "Dias movidos em média", unit: "days", additive: false },
     ],
-    dateFields: [{ key: "created_at", label: "Data do ajuste" }],
+    dateFields: [{ key: "created_at", label: "Data da mudança" }],
     filters: ["priority", "client", "product", "project", "team", "person", "creator"],
   },
 };
@@ -663,7 +655,7 @@ export const groupOptions: {
       "notices",
       "temperature",
       "radar",
-      "entry_changes",
+      "due_changes",
     ],
   },
   {
@@ -678,7 +670,7 @@ export const groupOptions: {
       "notices",
       "temperature",
       "radar",
-      "entry_changes",
+      "due_changes",
     ],
   },
   {
@@ -692,7 +684,7 @@ export const groupOptions: {
       "reviews",
       "temperature",
       "radar",
-      "entry_changes",
+      "due_changes",
     ],
   },
   {
@@ -706,13 +698,13 @@ export const groupOptions: {
       "reviews",
       "temperature",
       "radar",
-      "entry_changes",
+      "due_changes",
     ],
   },
   {
     key: "project",
     label: "Projeto",
-    sources: ["tasks", "hours", "status_history", "reviews", "entry_changes"],
+    sources: ["tasks", "hours", "status_history", "reviews", "due_changes"],
   },
   {
     key: "team",
@@ -725,12 +717,12 @@ export const groupOptions: {
       "notices",
       "temperature",
       "radar",
-      "entry_changes",
+      "due_changes",
     ],
   },
   {
     key: "person",
-    label: "Pessoa (responsável, quem registrou, quem enviou, quem recebeu ou quem ajustou)",
+    label: "Pessoa (responsável, quem registrou, quem enviou, quem recebeu ou quem mudou o prazo)",
     sources: [
       "tasks",
       "hours",
@@ -739,7 +731,7 @@ export const groupOptions: {
       "reviews",
       "notices",
       "radar",
-      "entry_changes",
+      "due_changes",
     ],
   },
   {
@@ -759,7 +751,7 @@ export const groupOptions: {
   {
     key: "creator",
     label: "Criador da tarefa (ou autor do aviso)",
-    sources: ["tasks", "status_history", "reviews", "notices", "entry_changes"],
+    sources: ["tasks", "status_history", "reviews", "notices", "due_changes"],
   },
   {
     key: "status",
@@ -772,7 +764,7 @@ export const groupOptions: {
   {
     key: "priority",
     label: "Prioridade",
-    sources: ["tasks", "status_history", "reviews", "entry_changes"],
+    sources: ["tasks", "status_history", "reviews", "due_changes"],
   },
   {
     key: "stage",
@@ -1986,10 +1978,10 @@ export function duePanels(): Panel[] {
         ],
       },
     },
-    // Migration 20270109090000: who changes the entry date, and how much.
+    // Migration 20270110090000: who changes due dates, and how much.
     {
-      id: "entrada-ajustes",
-      title: "Ajustes da data de entrada, por quem ajustou",
+      id: "prazo-mudancas",
+      title: "Mudanças de prazo, por quem mudou",
       x: 0,
       y: 20,
       w: 12,
@@ -2000,14 +1992,14 @@ export function duePanels(): Panel[] {
         limit: 30,
         queries: (
           [
-            ["A", "changes", "Ajustes"],
-            ["B", "earlier", "Para antes"],
-            ["C", "later", "Para depois"],
+            ["A", "changes", "Mudanças"],
+            ["B", "later", "Adiados"],
+            ["C", "earlier", "Antecipados"],
             ["D", "avg_days", "Dias movidos (média)"],
           ] as const
         ).map(([ref, metric, label]) => ({
           ref,
-          source: "entry_changes" as const,
+          source: "due_changes" as const,
           metric,
           dateField: "created_at",
           filters: [],

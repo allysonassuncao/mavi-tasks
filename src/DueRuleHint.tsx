@@ -154,6 +154,11 @@ export function TaskDueEdit({
   });
   const following =
     !using && (byRule || (due === task.due_date && task.due_manual === false && !task.due_smart));
+  // Every change of the date asks why (migration 20270110090000). "Aplicar"
+  // the rule counts by the date the database will give, which is the rule's.
+  const changed = (byRule && suggestion ? suggestion.due : shown) !== task.due_date;
+  const tight =
+    changed && !byRule && !!suggestion?.min && shown < suggestion.min && shown < task.due_date;
   return (
     <div className="due-rule-field">
       <label>
@@ -176,7 +181,8 @@ export function TaskDueEdit({
         due={shown}
         following={following}
         alternative={using || (task.due_smart === true && due === task.due_date)}
-        shortening={shown < task.due_date}
+        // The reason is asked below for any change (migration 20270110090000).
+        shortening={false}
         reason={reason}
         onReason={setReason}
         onApply={() => {
@@ -199,6 +205,23 @@ export function TaskDueEdit({
         }}
       />
       <AbsenceNote data={data} assignee={task.assignee_id} due={shown} />
+      {changed && (
+        <label className="due-rule-reason">
+          {tight
+            ? `Por que o prazo mudou? Ele fica antes do mínimo da regra, ${dayLabel(suggestion!.min!)}.`
+            : "Por que o prazo mudou?"}
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Ex.: o cliente atrasou o envio do material"
+            required
+            minLength={5}
+            maxLength={1000}
+            rows={2}
+          />
+          <small>O motivo fica no histórico da tarefa e a mudança conta nos Dashboards.</small>
+        </label>
+      )}
       {byRule && <input type="hidden" name="due_rule" value="1" />}
       {using && <input type="hidden" name="due_smart" value="1" />}
       {using && level && <input type="hidden" name="due_effort" value={level} />}

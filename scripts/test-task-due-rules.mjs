@@ -215,11 +215,11 @@ await check("na edição, só encurtar para antes do mínimo pede motivo; aplica
   await edit("2026-11-19", null, "Evento mudou de data");
   t = await task(id);
   assert.deepEqual([t.due, t.manual, t.tight], ["2026-11-19", true, "Evento mudou de data"]);
-  // Alongar sem sair de antes do mínimo: sem motivo, e o de antes fica.
-  await edit("2026-11-20");
+  // Alongar sem sair de antes do mínimo: o motivo da mudança não troca o de antes.
+  await edit("2026-11-20", null, "Um dia a mais para revisar");
   assert.equal((await task(id)).tight, "Evento mudou de data");
   // Aplicar a regra: o prazo dela, automático, sem o motivo.
-  await edit("2026-11-19", false);
+  await edit("2026-11-19", false, "Voltar a seguir a regra");
   t = await task(id);
   assert.deepEqual([t.due, t.manual, t.rule, t.tight], [await plus(START, 4), false, clientProductRule, null]);
   // Editar outra coisa não mexe no prazo nem na origem.
@@ -259,7 +259,7 @@ await check("a principal nunca vence antes da subtarefa", async () => {
   // Já entregue: não muda.
   await sql("update tasks set status='done', internal_approved_by=creator_id, delivered_at=now() where id=$1", [parent]);
   await as(admin);
-  await rpc("update_task", [child, (await task(child)).version, "Peças", "", "2026-12-04", 0, "normal", START]);
+  await rpc("update_task", [child, (await task(child)).version, "Peças", "", "2026-12-04", 0, "normal", START, null, "Cliente pediu mais peças"]);
   p = await task(parent);
   assert.equal(p.due, "2026-11-30");
 });
@@ -294,27 +294,27 @@ await check("em massa: recalcular pela regra, e o mínimo pede motivo", async ()
   const a = await create({ manual: true, due: "2026-12-10", title: "Tarefa A" });
   const b = await create({ manual: true, due: "2026-12-11", title: "Tarefa B" });
   await as(admin);
-  let r = await rpc("bulk_update_tasks", [A, [a, b], JSON.stringify({ kind: "rule" }), false]);
+  let r = await rpc("bulk_update_tasks", [A, [a, b], JSON.stringify({ kind: "rule", reason: "Regra nova da empresa" }), false]);
   assert.equal(r.applied, 2);
   for (const id of [a, b]) {
     const t = await task(id);
     assert.deepEqual([t.due, t.manual, t.rule], [await plus(START, 4), false, clientProductRule]);
   }
   const op = r.operation;
-  // Data fixa antes do mínimo (23/11): sem motivo fica de fora.
-  r = await rpc("bulk_update_tasks", [A, [a], JSON.stringify({ kind: "due", value: "2026-11-19" }), false]);
-  assert.equal(r.applied, 0);
-  assert.match(r.results[0].reason, /mínimo da regra \(23\/11\)/);
+  // Sem motivo, nenhuma mudança de prazo em massa (migração 20270110090000).
+  await rejects(rpc("bulk_update_tasks", [A, [a], JSON.stringify({ kind: "due", value: "2026-11-19" }), false]), /motivo/);
+  await as(admin);
+  // Data fixa antes do mínimo (23/11): o motivo vale também para o prazo apertado.
   r = await rpc("bulk_update_tasks", [A, [a], JSON.stringify({ kind: "due", value: "2026-11-19", reason: "Cliente pediu" }), false]);
   assert.equal(r.applied, 1);
   const t = await task(a);
   assert.deepEqual([t.due, t.manual, t.tight], ["2026-11-19", true, "Cliente pediu"]);
   // Adiar pula os feriados da empresa: quinta 19 + 1 = segunda 23.
-  await rpc("bulk_update_tasks", [A, [a], JSON.stringify({ kind: "shift", value: 1 }), false]);
+  await rpc("bulk_update_tasks", [A, [a], JSON.stringify({ kind: "shift", value: 1, reason: "Feriado local" }), false]);
   assert.equal((await task(a)).due, "2026-11-23");
   // Sem regra que valha: fica de fora.
   await sql("delete from task_due_rules");
-  r = await rpc("bulk_update_tasks", [A, [b], JSON.stringify({ kind: "rule" }), true]);
+  r = await rpc("bulk_update_tasks", [A, [b], JSON.stringify({ kind: "rule", reason: "Regra nova da empresa" }), true]);
   assert.equal(r.results[0].reason, "Nenhuma regra de prazo vale para esta tarefa");
   // Desfazer o recálculo devolve o prazo à mão (b não mudou depois).
   const undo = await rpc("undo_task_bulk", [op]);

@@ -182,7 +182,7 @@ const openTimer = async (id) => {
 const edit = async (title) => {
   const v = await versionOf();
   await as(admin);
-  await rpc("update_task", [task, v, title, "", "2026-10-02", 90, "normal"]);
+  await rpc("update_task", [task, v, title, "", "2026-10-02", 90, "normal", null, null, "Cliente pediu outra data"]);
 };
 
 await check(

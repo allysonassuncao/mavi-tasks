@@ -149,17 +149,20 @@ await check("quem já é o responsável fica de fora com o motivo", async () => 
 });
 
 await check("cada pessoa só muda o que já poderia mudar uma por uma", async () => {
-  // Ana criou "Stories"; t1 ela só acompanha (já foi a responsável): o
-  // prazo é de quem criou ou de gestor. A do Otto ela nem vê.
-  const r = await bulk(ana, [byAna, t1, hidden], { kind: "shift", value: 1 });
+  // Ana criou "Stories"; t1 ela acompanha (já foi a responsável), e
+  // participante também muda o prazo (migração 20270110090000). A do Otto
+  // ela nem vê.
+  const due1 = (await task(t1)).due;
+  const r = await bulk(ana, [byAna, t1, hidden], { kind: "shift", value: 1, reason: "Cliente pediu" });
   assert.deepEqual(
     r.results.map((x) => [x.ok, x.reason]),
     [
       [true, null],
-      [false, "Só quem criou a tarefa ou um gestor muda o prazo"],
+      [true, null],
       [false, "Tarefa não encontrada"],
     ],
   );
+  await bulk(admin, [t1], { kind: "due", value: due1, reason: "Voltar ao prazo" });
   // Não vê a tarefa: não recebe nem o título.
   assert.equal(r.results[2].title, undefined);
   assert.equal((await task(byAna)).due, "2026-10-05");
@@ -178,7 +181,7 @@ await check("cada pessoa só muda o que já poderia mudar uma por uma", async ()
 await check("mudar só o prazo não apaga aprovações nem muda o status", async () => {
   const before = await task(t3);
   assert.equal(before.status, "review");
-  const r = await bulk(admin, [t3], { kind: "shift", value: 1 });
+  const r = await bulk(admin, [t3], { kind: "shift", value: 1, reason: "Cliente atrasou o material" });
   assert.equal(r.applied, 1);
   const after = await task(t3);
   assert.equal(after.status, "review");
@@ -189,15 +192,20 @@ await check("mudar só o prazo não apaga aprovações nem muda o status", async
     "select detail from task_events where task_id=$1 and action='due_changed'",
     [t3],
   );
-  assert.deepEqual(event.detail, { old_due: "2026-10-02", new_due: "2026-10-05" });
-  const back = await bulk(admin, [t3], { kind: "shift", value: -1 });
+  assert.deepEqual(event.detail, {
+    old_due: "2026-10-02",
+    new_due: "2026-10-05",
+    reason: "Cliente atrasou o material",
+    source: "bulk",
+  });
+  const back = await bulk(admin, [t3], { kind: "shift", value: -1, reason: "Material chegou" });
   assert.equal(back.applied, 1);
   assert.equal((await task(t3)).due, "2026-10-02");
 });
 
 await check("data fixa antes do início fica de fora", async () => {
   const late = await newTask(admin, "Landing de Natal", ana, "2026-10-20", contract, "2026-10-10");
-  const r = await bulk(admin, [late, t1], { kind: "due", value: "2026-10-06" });
+  const r = await bulk(admin, [late, t1], { kind: "due", value: "2026-10-06", reason: "Campanha antecipada" });
   assert.deepEqual(
     r.results.map((x) => [x.ok, x.reason]),
     [

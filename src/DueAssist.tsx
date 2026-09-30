@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CalendarClock, Check, UsersRound } from "lucide-react";
 import { Modal } from "./components";
-import { Button } from "./ui";
+import { Button, Textarea } from "./ui";
+import { dueReasonError } from "./task-due";
 import { rpc } from "./api";
 import { dateKey } from "./domain";
 import { absencesIn, nextBusinessDay, personOff, suggestDue } from "./dueRules";
 import { dayLabel, plural } from "./task-bulk";
 import type { Snapshot, Task } from "./types";
 import "./due-rules.css";
+import "./task-due.css";
 
 /**
  * Prazos, Fase 4 (migration 20261201120000_due_assist): who of the client's
@@ -316,6 +318,10 @@ export function ReplanModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company, user, demo]);
   const chosen = (items ?? []).filter((i) => choice[i.task_id] !== "keep");
+  // Adiar muda o prazo: pede o motivo (migration 20270110090000).
+  const [reason, setReason] = useState("");
+  const pushing = chosen.some((i) => choice[i.task_id] === "push");
+  const reasonProblem = pushing ? dueReasonError(reason) : "";
   async function apply() {
     setBusy(true);
     setError("");
@@ -327,6 +333,7 @@ export function ReplanModal({
             ? { task: i.task_id, assignee: i.helper!.user_id, due: null }
             : { task: i.task_id, assignee: null, due: i.push_due },
         ),
+        p_reason: pushing ? reason.trim() : null,
       })) as { applied: number; results: { ok: boolean; reason: string | null }[] } | null;
       const out = (result?.results ?? []).filter((r) => !r.ok);
       notify(
@@ -406,6 +413,21 @@ export function ReplanModal({
             </label>
           </fieldset>
         ))}
+        {pushing && (
+          <label className="replan-reason">
+            Motivo para adiar
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={`Ex.: ${name.split(" ")[0]} está de férias`}
+              required
+              minLength={5}
+              maxLength={1000}
+              rows={2}
+            />
+            <small>Vale para todas as tarefas adiadas: fica no histórico de cada uma e conta nos Dashboards.</small>
+          </label>
+        )}
         {error && (
           <p className="form-error" role="alert">
             {error}
@@ -416,7 +438,7 @@ export function ReplanModal({
             Fechar
           </Button>
           {!!items?.length && (
-            <Button className="btn primary" disabled={busy || !chosen.length} loading={busy} onClick={() => void apply()}>
+            <Button className="btn primary" disabled={busy || !chosen.length || !!reasonProblem} loading={busy} onClick={() => void apply()}>
               Aplicar em {plural(chosen.length, "tarefa", "tarefas")}
             </Button>
           )}

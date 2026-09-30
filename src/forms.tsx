@@ -129,7 +129,8 @@ import { canOpenPage } from "./modules";
 import { CopilotBadge, TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
 import { TaskDueEdit } from "./DueRuleHint";
 import { DueRiskNote, ReplanModal } from "./DueAssist";
-import { TaskEntryRow } from "./TaskEntryDate";
+import { TaskDueValue } from "./TaskDueChange";
+import { dueSources } from "./task-due";
 import { canManageDueScope } from "./dueRules";
 import { MIN_REVIEW, copilotExtras, useTaskCopilot } from "./copilot";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
@@ -554,9 +555,6 @@ function eventLabel(e: TaskEvent) {
   // que empurrou o prazo da principal.
   if (e.action === "due_below_minimum")
     return `Prazo antes do mínimo da regra (${dateLabel(String(e.detail.min))}) · ${String(e.detail.reason ?? "")}`;
-  // Data de entrada (migration 20270109090000): o motivo aparece embaixo.
-  if (e.action === "entry_changed")
-    return `Data de entrada alterada · ${dateLabel(String(e.detail.old_entry))} → ${dateLabel(String(e.detail.new_entry))}`;
   if (e.action === "due_extended_by_subtask")
     return `Prazo acompanhou a subtarefa “${String(e.detail.title ?? "")}” · ${dateLabel(String(e.detail.old_due))} → ${dateLabel(String(e.detail.new_due))}`;
   if (to === "done" && from !== "done") return "Tarefa entregue";
@@ -1459,19 +1457,15 @@ export function TaskDetail({
                 <span className="property-label">
                   <CalendarDays size={15} /> Prazo
                 </span>
-                <div className={`property-value${late ? " late" : ""}`}>
-                  {dateLabel(task.due_date)}
-                  {late && <small className="late">atrasada</small>}
-                  {task.due_smart && !late && <small>pela MAVI</small>}
-                </div>
+                <TaskDueValue
+                  task={task}
+                  data={data}
+                  user={user}
+                  late={late}
+                  mutate={mutate}
+                  notify={notify}
+                />
               </div>
-              <TaskEntryRow
-                task={task}
-                data={data}
-                user={user}
-                mutate={mutate}
-                notify={notify}
-              />
               <div className="property-row">
                 <span className="property-label">
                   <Flag size={15} /> Prioridade
@@ -2241,9 +2235,14 @@ export function TaskDetail({
                         {!!e.detail.note && (
                           <RichTextContent value={String(e.detail.note)} />
                         )}
-                        {e.action === "entry_changed" && (
+                        {/* Mudança de prazo (migration 20270110090000): quem, onde e por quê. */}
+                        {e.action === "due_changed" && !!e.detail.reason && (
                           <span className="event-reason">
-                            {memberName(e.actor_id)}: {String(e.detail.reason ?? "")}
+                            {memberName(e.actor_id)}
+                            {e.detail.source && e.detail.source !== "task"
+                              ? ` (${dueSources[e.detail.source as keyof typeof dueSources] ?? ""})`
+                              : ""}
+                            : {String(e.detail.reason)}
                           </span>
                         )}
                       </div>

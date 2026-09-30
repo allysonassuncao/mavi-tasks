@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Avatar, Modal } from "./components";
 import { Button, Input, Textarea } from "./ui";
+import { dueReasonError } from "./task-due";
 import { fold } from "./domain";
 import { listedStatuses, statuses, type Snapshot, type Status } from "./types";
 import {
@@ -368,7 +369,9 @@ function DuePanel({ onPick }: { onPick: (change: BulkChange) => void }) {
   const [date, setDate] = useState("");
   const [reason, setReason] = useState("");
   const n = Math.abs(days);
-  const why = reason.trim() ? { reason: reason.trim() } : {};
+  // Every due date change asks why (migration 20270110090000).
+  const why = { reason: reason.trim() };
+  const reasonOk = !dueReasonError(reason);
   return (
     <>
       <h3>Mudar prazo</h3>
@@ -435,29 +438,32 @@ function DuePanel({ onPick }: { onPick: (change: BulkChange) => void }) {
           e o prazo volta a seguir a regra. As que não têm regra ficam de fora.
         </p>
       )}
-      {mode !== "rule" && (
-        <label className="bulk-field">
-          Motivo, se algum prazo ficar antes do mínimo da regra
-          <Textarea
-            rows={2}
-            maxLength={500}
-            value={reason}
-            placeholder="Opcional. Sem ele, essas tarefas ficam de fora."
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </label>
-      )}
+      <label className="bulk-field">
+        Motivo da mudança de prazo
+        <Textarea
+          rows={2}
+          maxLength={1000}
+          value={reason}
+          required
+          placeholder="Ex.: o cliente atrasou o envio do material"
+          onChange={(e) => setReason(e.target.value)}
+        />
+        <small className="bulk-hint">
+          Obrigatório. Fica no histórico de cada tarefa, conta nos Dashboards e vale como
+          justificativa quando um prazo fica antes do mínimo da regra.
+        </small>
+      </label>
       <div className="bulk-panel-foot">
         <Button
           className="btn primary"
-          disabled={mode === "due" ? !date : mode === "shift" ? days === 0 : false}
+          disabled={!reasonOk || (mode === "due" ? !date : mode === "shift" ? days === 0 : false)}
           onClick={() =>
             onPick(
               mode === "due"
                 ? { kind: "due", value: date, ...why }
                 : mode === "shift"
                   ? { kind: "shift", value: days, ...why }
-                  : { kind: "rule" },
+                  : { kind: "rule", ...why },
             )
           }
         >

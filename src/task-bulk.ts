@@ -4,16 +4,17 @@ import { statuses, type Status } from "./types";
  * One change applied to many tasks at once (public.bulk_update_tasks):
  * another responsible (a person, or the team's least busy member), another
  * status, a fixed due date, the due dates moved by N business days, or each
- * due date counted again by its due rule. A date before the rule's minimum
- * needs `reason` (tasks without it are left out).
+ * due date counted again by its due rule. Every due date change needs
+ * `reason` (migration 20270110090000), which also justifies a date before
+ * the rule's minimum.
  */
 export type BulkChange =
   | { kind: "assignee"; value: string }
   | { kind: "team"; value: string }
   | { kind: "status"; value: Status; note?: string }
-  | { kind: "due"; value: string; reason?: string }
-  | { kind: "shift"; value: number; reason?: string }
-  | { kind: "rule" };
+  | { kind: "due"; value: string; reason: string }
+  | { kind: "shift"; value: number; reason: string }
+  | { kind: "rule"; reason: string };
 
 interface BulkSide {
   status: Status;
