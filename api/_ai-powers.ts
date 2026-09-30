@@ -52,7 +52,7 @@ import type { ProviderModel } from "../src/ai-providers.js";
  */
 
 export type ToolKind =
-  "read" | "visual" | "image" | "action" | "skill" | "canvas" | "web" | "ask" | "mcp";
+  "read" | "visual" | "image" | "action" | "skill" | "canvas" | "web" | "ask" | "mcp" | "task";
 export type ToolMeta = { kind: ToolKind; power?: Power; timeoutMs: number };
 
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -433,6 +433,10 @@ export const REGISTRY: Record<string, ToolMeta> = {
   ...Object.fromEntries(
     TOOLS.map((t) => [t.name, { kind: "read" as const, timeoutMs: 45_000 }]),
   ),
+  // O dossiê lê várias partes de até 3 clientes ao mesmo tempo.
+  client_overview: { kind: "read", timeoutMs: 90_000 },
+  // O plano da tarefa longa (módulo MAVI): só grava; a pessoa confirma no card.
+  plan_long_task: { kind: "task", timeoutMs: 20_000 },
   show_chart: { kind: "visual", power: "visuals", timeoutMs: 5_000 },
   show_table: { kind: "visual", power: "visuals", timeoutMs: 5_000 },
   show_kpis: { kind: "visual", power: "visuals", timeoutMs: 5_000 },
@@ -611,7 +615,7 @@ export type PowerKit = {
   /** Imagens das respostas anteriores da conversa (ref → caminho). */
   priorImages: Map<string, string>;
   /** O próximo número de cada tipo de referência (V, I, A, D). */
-  next: Record<"V" | "I" | "A" | "D" | "Q", number>;
+  next: Record<"V" | "I" | "A" | "D" | "Q" | "T", number>;
   /** Documentos, apresentações e planilhas das respostas anteriores (ref → anexo). */
   priorCanvas: Map<string, CanvasArtifact>;
   /** As imagens das respostas anteriores com o HTML das artes (read_art, revises). */
@@ -642,7 +646,7 @@ const fold = (s: string) =>
 
 export function add<T extends AiArtifact>(
   kit: PowerKit,
-  letter: "V" | "I" | "A" | "D" | "Q",
+  letter: "V" | "I" | "A" | "D" | "Q" | "T",
   a: Omit<T, "id" | "ref">,
 ) {
   const artifact = {

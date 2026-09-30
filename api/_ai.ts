@@ -43,6 +43,7 @@ import { serverModel, embeddingModel } from "../src/ai-providers.js";
 import {
   ASK_RULES,
   REGISTRY,
+  add,
   describePowerStep,
   historyTurn,
   powerInstructions,
@@ -52,11 +53,13 @@ import {
   type PowerKit,
 } from "./_ai-powers.js";
 import {
+  CAPPED_DETAIL,
   sanitizeArtifacts,
   type AiArtifact,
   type CanvasArtifact,
   type ImageArtifact,
   type Power,
+  type TaskArtifact,
 } from "../src/mavi-artifacts.js";
 import {
   catalogContext,
@@ -84,6 +87,7 @@ import {
   type ConversationAttachment,
 } from "./_ai-attachments.js";
 import { appOrigin } from "./_origin.js";
+import { PLAN_TOOL, TASK_RULES, handleTaskAction, planLongTask, type TaskHost } from "./_ai-tasks.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -152,6 +156,8 @@ export type AiDeps = {
   lookup?: (host: string) => Promise<{ address: string }[]>;
   /** Continua um trabalho depois da resposta (waitUntil na Vercel): leitura dos anexos. */
   background?: (work: Promise<unknown>) => void;
+  /** Tarefa longa: chama a próxima fatia (esta função de novo); sem ele, a tarefa pausa. */
+  next?: (auth: string, task: string) => Promise<boolean>;
 };
 export function aiDeps(env: AiEnv): AiDeps {
   return {
@@ -180,6 +186,7 @@ Como trabalhar:
 - As conversas dos grupos de WhatsApp com cada cliente entram na busca com o tipo whatsapp: o que o cliente pediu, reclamou, aprovou ou combinou no dia a dia. Os áudios aparecem transcritos e o texto dos documentos enviados também; imagens e vídeos aparecem só como "[imagem]" e "[vídeo]" (você não vê o conteúdo deles, diga isso se perguntarem). Cada trecho traz a data e o horário das mensagens.
 - Para o que os clientes reclamaram, o que o time prometeu (e se venceu) e os outros tópicos acompanhados, use client_radar: o Radar do cliente, com o que a MAVI anotou nas reuniões e nos grupos de WhatsApp, o status, a gravidade, o responsável, quantas vezes o assunto voltou, a última fala (cite) e os temas que se repetem entre os clientes; sem cliente, ela traz a carteira e o último relatório do Radar. Para a fala completa, complete com search_knowledge.
 - Para como está a relação com um cliente (satisfeito, irritado, em risco de cancelar, esfriando), use client_temperature: o termômetro que o sistema calcula lendo as reuniões e os grupos de WhatsApp, com indicadores, sinais de alerta, tendência e as leituras que mais pesaram. Sem cliente, ela lista a carteira do mais frio ao mais quente. Diga a nota e a faixa, o que puxa para cima ou para baixo e cite as leituras; para o que exatamente foi dito, complete com search_knowledge.
+- Para a visão geral de um ou mais clientes (como está, situação atual, passagem de carteira, comparação), use client_overview: o dossiê de até 3 clientes numa chamada (produtos, dossiê da MAVI, briefing, reuniões, tarefas em aberto, campanhas, termômetro, Radar e WhatsApp). Com vários clientes, ache todos com uma chamada só de find_clients (os códigos separados por vírgula) e faça várias chamadas de client_overview na mesma rodada.
 - Use read_more quando um trecho parecer cortado ou precisar de mais contexto.
 - Pare de buscar assim que tiver o suficiente. Se nada relevante aparecer, diga claramente que não encontrou no sistema e sugira onde procurar.
 
@@ -794,7 +801,7 @@ async function ask(
   const priorImages = new Map<string, string>();
   const priorArts = new Map<string, ImageArtifact>();
   const priorCanvas = new Map<string, CanvasArtifact>();
-  const next = { V: 1, I: 1, A: 1, D: 1, Q: 1 };
+  const next = { V: 1, I: 1, A: 1, D: 1, Q: 1, T: 1 };
   for (const m of past)
     for (const a of sanitizeArtifacts(m.artifacts)) {
       const letter = a.ref[0] as keyof typeof next;
@@ -1037,8 +1044,25 @@ async function ask(
     ),
     ...(mcp?.tools ?? []),
     ...(attachments.some((a) => a.status === "ready") ? ATTACH_TOOLS : []),
+    // Tarefas longas: só no módulo MAVI (a conversa fica salva e o card aparece).
+    ...(onPage ? [PLAN_TOOL] : []),
   ];
   const allowed = new Set(tools.map((t) => t.name));
+  // Montou o plano de uma tarefa longa: nada mais roda nesta resposta.
+  let planned = false;
+  const planKit = {
+    supabaseUrl: env.supabaseUrl,
+    supabaseKey: env.supabaseKey,
+    fetch: deps.fetch,
+    auth,
+    company,
+    conversation: live?.run?.conversation ?? conversationId,
+    module: scope.module ?? "assistant",
+    clients: base.clients,
+    model: provider?.model || env.model,
+    price: provider?.price ?? null,
+    addCard: (card: Omit<TaskArtifact, "id" | "ref">) => add<TaskArtifact>(kit, "T", card),
+  };
   let n = 0;
   const execute = async (name: string, input: unknown): Promise<ToolOutput> => {
     await checkStop();
@@ -1046,6 +1070,8 @@ async function ask(
     // Depois das perguntas, nada mais roda: a MAVI espera as respostas.
     if (kit.asked && name !== "ask_user")
       return "Você fez perguntas à pessoa: espere as respostas antes de seguir. Escreva só uma frase curta e pare.";
+    if (planned)
+      return "O plano da tarefa longa já está no card: a pessoa confere e confirma. Escreva só uma frase curta e pare.";
     const stepId = `t${++n}`;
     const mcpTool = mcp?.meta.get(name);
     const meta = mcpTool
@@ -1066,6 +1092,8 @@ async function ask(
         ? `Lendo ${scrapeHosts(input)}`
       : name === "web_research"
         ? `Pesquisando na internet “${String((input as Record<string, unknown>)?.question ?? "").slice(0, 80)}”`
+      : name === "plan_long_task"
+        ? "Montando o plano da tarefa longa"
         : kind === "read"
           ? describeStep(ctx, name, input)
           : describePowerStep(name, input);
@@ -1087,6 +1115,11 @@ async function ask(
           ? scrape(input)
         : name === "web_research"
           ? research(input)
+        : name === "plan_long_task"
+          ? planLongTask(planKit, input).then((out) => {
+              if (out.startsWith("Plano montado")) planned = true;
+              return out;
+            })
           : kind === "read"
             ? runTool(ctx, name, input)
             : runPowerTool(kit, name, input);
@@ -1117,6 +1150,8 @@ async function ask(
           ? `${(out.match(/^\[S\d+\] /gm) ?? []).length} de ${scrapeCount(input)} páginas lidas`
         : name === "web_research"
           ? `${new Set(out.match(/\[S\d+\]/g) ?? []).size} páginas`
+        : name === "plan_long_task"
+          ? out.startsWith("Plano montado") ? "plano no card para você confirmar" : "faltou algo no plano"
           : kind === "read"
             ? summarizeStep(name, out)
             : summarizePowerStep(name, out);
@@ -1316,7 +1351,8 @@ async function ask(
     webNote +
     (skills.catalog.size || picked.length ? SKILL_RULES : "") +
     (mcp?.tools.length ? MCP_RULES : "") +
-    (attachments.length ? ATTACH_RULES : "");
+    (attachments.length ? ATTACH_RULES : "") +
+    (onPage ? TASK_RULES : "");
   const turnContext =
     base.context +
     catalogContext([...skills.catalog.values()], picked) +
@@ -1336,7 +1372,16 @@ async function ask(
       onRound: (r) => rounds.push(r),
       execute,
       // Uma skill é um roteiro com vários passos: mais rodadas e mais raciocínio.
-      maxRounds: picked.length ? 14 : skills.catalog.size || mcp?.tools.length ? 12 : powers.size ? 8 : 6,
+      // No módulo, um pouco mais de fôlego (o pedido grande vira tarefa longa).
+      maxRounds: picked.length
+        ? 14
+        : skills.catalog.size || mcp?.tools.length
+          ? 12
+          : onPage
+            ? 10
+            : powers.size
+              ? 8
+              : 6,
       // O esforço do painel; com uma skill carregada (escolhida ou pela MAVI),
       // o dela dali em diante.
       effort: () => turnEffort(efforts, feature, [...skills.loaded.values()]),
@@ -1386,6 +1431,12 @@ async function ask(
         cost: embeddingCost(ctx.usage.embeddingModel, ctx.usage.embeddingTokens),
       });
     await Promise.all(lines.map((e) => logCost(env, deps.fetch, auth, whereOf(ctx), e, ctx.cost)));
+  }
+  // Acabaram as rodadas com a MAVI ainda buscando: a tela oferece continuar.
+  if (result?.capped) {
+    const label = "Chegou ao limite de passos desta resposta";
+    steps.push({ label, detail: CAPPED_DETAIL });
+    emit({ type: "step", id: "capped", label, state: "done", detail: CAPPED_DETAIL });
   }
   const cancelled = !result && stop.signal.aborted;
   const answer = result
@@ -1746,6 +1797,19 @@ export async function runIndexer(env: AiEnv, deps: AiDeps) {
   return stats;
 }
 
+/** Quanto uma fatia da tarefa longa trabalha (a função vai até 5 minutos). */
+const taskSliceMs = (e: Record<string, string | undefined> = process.env) =>
+  Math.min(Math.max(Number(e.AI_TASK_SLICE_MS) || 250_000, 60_000), 780_000);
+
+/** O que a tarefa longa usa daqui (instruções, contexto e esforço). */
+function taskHost(env: AiEnv, deps: AiDeps): TaskHost {
+  return {
+    instructions: INSTRUCTIONS,
+    buildContext: (auth, company, scope, now) => buildContext(env, deps, auth, company, scope, now),
+    effort: (efforts) => effortOf(efforts, "mavi_page"),
+  };
+}
+
 export async function handleAi(
   body: unknown,
   authorization: string | null,
@@ -1760,6 +1824,14 @@ export async function handleAi(
         return { status: 401, body: { error: "Não autorizado." } };
       return { status: 200, body: await runIndexer(env, deps) };
     }
+    if (typeof req.action === "string" && req.action.startsWith("ai-task-"))
+      return handleTaskAction(
+        req,
+        authorization,
+        { ...env, sliceMs: taskSliceMs() },
+        deps,
+        taskHost(env, deps),
+      );
     if (typeof req.action === "string" && req.action.startsWith("ai-provider-"))
       return handleProviders(req, authorization, env, deps);
     if (typeof req.action === "string" && req.action.startsWith("ai-attach-"))

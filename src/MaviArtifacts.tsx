@@ -32,6 +32,7 @@ import { priorities } from "./types";
 import type { FormPreset } from "./forms";
 import { CanvasCard } from "./MaviCanvas";
 import { QuestionCard } from "./MaviQuestions";
+import { TaskCard } from "./MaviTaskCard";
 import { runMcpAction } from "./mavi-mcp";
 import type {
   ActionArtifact,
@@ -103,6 +104,8 @@ export function ArtifactView({
         onReply={host.onReply}
       />
     );
+  if (artifact.type === "task")
+    return <TaskCard artifact={artifact} readOnly={host.readOnly} notify={host.notify} />;
   if (artifact.action.kind === "mcp_call")
     return <McpActionCard artifact={artifact} host={host} />;
   return <ActionCard artifact={artifact} host={host} />;

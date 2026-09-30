@@ -30,6 +30,7 @@ import { claudeComplete } from "./_social-leads.js";
 import { openAiEmbedder } from "./_ai-embeddings.js";
 import { waitUntil } from "@vercel/functions";
 import { appOrigin } from "./_origin.js";
+import { nextSlice, selfOrigin } from "./_ai-tasks.js";
 import { handlePublicApi } from "./_public-api.js";
 import { handleTaskAudio, taskAudioEnv } from "./_task-audio.js";
 import {
@@ -465,6 +466,15 @@ export default async function handler(
         ...aiDeps(env),
         // A leitura dos anexos termina mesmo se a pessoa sair da tela.
         background: (work) => waitUntil(work.catch(() => {})),
+        // Tarefa longa: a próxima fatia é esta função de novo (no mesmo endereço).
+        next: nextSlice(
+          selfOrigin(
+            (req.headers["x-forwarded-host"] as string | undefined) ?? req.headers.host,
+            appOrigin(),
+            process.env.AI_TASK_ORIGIN,
+          ),
+          fetch,
+        ),
       });
     } else
       result = await handleDrive(

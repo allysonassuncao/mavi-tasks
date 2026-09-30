@@ -383,6 +383,52 @@ export type ActiveRun = {
 /** As respostas da MAVI ainda em andamento (de quem está logado). */
 export const activeRuns = (company: string) =>
   rpc<ActiveRun[]>("ai_runs_active", { p_company: company }).then((l) => l ?? []);
+// ------------------------------------------------------------ tarefas longas
+export type AiTaskStatus = "proposed" | "running" | "paused" | "stopping" | "done" | "cancelled" | "error";
+export type AiTaskStep = {
+  ord: number;
+  title: string;
+  status: "pending" | "running" | "done" | "error" | "skipped";
+  error: string | null;
+  cost: number;
+  attempts: number;
+};
+/** Uma tarefa longa da MAVI (ai_task_get), sem o texto das etapas. */
+export type AiTask = {
+  id: string;
+  conversation: string;
+  title: string;
+  goal: string;
+  closing: { title: string; instructions: string } | null;
+  status: AiTaskStatus;
+  pause_reason: string | null;
+  error: string | null;
+  estimate: number;
+  cap: number;
+  spent: number;
+  slices: number;
+  message: number | null;
+  lease_until: string | null;
+  updated_at: string;
+  steps: AiTaskStep[];
+};
+/** A tarefa (só de quem pediu; para os outros, null). */
+export const aiTask = (id: string) => rpc<AiTask | null>("ai_task_get", { p_task: id });
+/** Confirmar o plano: a MAVI começa no servidor. */
+export const confirmAiTask = (id: string) =>
+  providerAction<{ task: AiTask }>({ action: "ai-task-confirm", task: id }).then((r) => r.task);
+/** Parar: antes de começar, cancela; rodando, a MAVI entrega o que já tem. */
+export const stopAiTask = (id: string) =>
+  providerAction<{ task: AiTask }>({ action: "ai-task-stop", task: id }).then((r) => r.task);
+/** Retomar a tarefa pausada (token vencido, a próxima parte não começou). */
+export const resumeAiTask = (id: string) => providerAction({ action: "ai-task-resume", task: id });
+/** O teto por tarefa longa da empresa (padrão US$ 10). */
+export const aiTaskCap = (company: string) =>
+  rpc<number>("ai_task_cap", { p_company: company }).then((v) => Number(v ?? 10));
+/** Líderes: muda o teto (sem valor, volta ao padrão). */
+export const setAiTaskCap = (company: string, usd: number | null) =>
+  rpc<number>("ai_set_task_cap", { p_company: company, p_usd: usd }).then((v) => Number(v ?? 10));
+
 export const renameConversation = (id: string, title: string) =>
   rpc("ai_rename_conversation", { p_conversation: id, p_title: title });
 export const deleteConversation = (id: string) =>

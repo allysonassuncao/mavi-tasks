@@ -12,7 +12,9 @@ import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { contractProductLabel, dateKey } from "./domain";
 import type { Snapshot } from "./types";
 import {
+  aiTaskCap,
   setAiLimit,
+  setAiTaskCap,
   usageReport,
   type UsageLimit,
   type UsageReport,
@@ -314,6 +316,8 @@ export function AiUsagePage({
             />
           </section>
 
+          <TaskCapPanel company={company} notify={notify} onError={setError} />
+
           <div className="drive-view drive-tabs" role="tablist">
             {TABS.map((t) => (
               <button
@@ -504,14 +508,68 @@ function LimitStatus({ limit }: { limit?: UsageLimit }) {
   return null;
 }
 
+/**
+ * O teto por tarefa longa da MAVI (migração 20270111090000): a MAVI mostra
+ * no plano e, perto dele, entrega o que já tem. Vazio volta ao padrão.
+ */
+function TaskCapPanel({
+  company,
+  notify,
+  onError,
+}: {
+  company: string;
+  notify: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [cap, setCap] = useState<number | null>(null);
+  useEffect(() => {
+    aiTaskCap(company)
+      .then(setCap)
+      .catch(() => setCap(null));
+  }, [company]);
+  async function save(value: string) {
+    const amount = value.trim() ? Number(value.replace(",", ".")) : null;
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0.5 || amount > 100)) {
+      onError("O teto por tarefa vai de US$ 0,50 a US$ 100.");
+      return;
+    }
+    try {
+      setCap(await setAiTaskCap(company, amount));
+      notify(amount ? "Teto por tarefa salvo." : "Teto por tarefa de volta ao padrão (US$ 10).");
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  }
+  return (
+    <section className="panel ai-usage-company">
+      <div>
+        <strong>Teto por tarefa longa da MAVI</strong>
+        <small>
+          Pedidos grandes (como a passagem de vários clientes) viram uma tarefa em segundo plano: a MAVI mostra o custo
+          estimado e este teto antes de começar e, perto dele, entrega o que já tem.
+          {cap !== null && ` Hoje: ${money(cap)} por tarefa.`}
+        </small>
+      </div>
+      <LimitInput
+        value={cap ?? undefined}
+        onSave={(v) => void save(v)}
+        label="Teto por tarefa longa em dólares"
+        placeholder="10 (padrão)"
+      />
+    </section>
+  );
+}
+
 function LimitInput({
   value,
   onSave,
   label,
+  placeholder = "sem limite",
 }: {
   value?: number;
   onSave: (value: string) => void;
   label: string;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState(
     value ? String(value).replace(".", ",") : "",
@@ -534,7 +592,7 @@ function LimitInput({
       <input
         inputMode="decimal"
         aria-label={label}
-        placeholder="sem limite"
+        placeholder={placeholder}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
       />

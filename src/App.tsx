@@ -1271,6 +1271,9 @@ export default function App() {
       // Uma resposta da MAVI terminou: a página da MAVI atualiza a conversa.
       onAiRun: (row) =>
         window.dispatchEvent(new CustomEvent("mavi:ai-run", { detail: row })),
+      // Uma tarefa longa andou: o card dela relê e, no fim, a conversa atualiza.
+      onAiTask: (row) =>
+        window.dispatchEvent(new CustomEvent("mavi:ai-task", { detail: row })),
       // A new task for the person, a mention or a reply: the inbox row
       // arrives here while the app is open. It's shown here even with push on
       // (which may never arrive); the push uses the same tag, so it never shows twice.

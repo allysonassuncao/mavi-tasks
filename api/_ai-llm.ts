@@ -116,6 +116,11 @@ export type AgentResult = {
   text: string;
   meter: Meter;
   rounds: number;
+  /**
+   * A resposta saiu porque acabaram as rodadas de ferramentas (o modelo
+   * ainda queria buscar): a tela oferece continuar.
+   */
+  capped?: boolean;
   /** Buscas feitas na internet (US$ 0,01 cada, já no custo). */
   webSearches?: number;
 };
@@ -200,6 +205,13 @@ export function effortFor(
   return e === "xhigh" && !claudeFeatures(model).xhigh ? "high" : e;
 }
 
+/**
+ * O aviso na última rodada, quando o modelo ainda queria usar ferramentas:
+ * sem ele, o comentário de trabalho ("agora vou buscar…") virava a resposta.
+ */
+export const LIMIT_NOTE =
+  "Você chegou ao limite de passos desta resposta: não dá para usar mais ferramentas agora. Não diga que vai buscar, puxar ou fazer mais alguma coisa nesta resposta. Entregue agora, organizado, tudo o que já encontrou (com as fontes [S#]) e termine com uma frase curta dizendo o que ficou faltando. A pessoa verá um botão para você continuar de onde parou.";
+
 /** O pedido quando a IA termina a vez sem escrever a resposta. */
 export const ANSWER_NUDGE =
   "Escreva agora a resposta final à minha pergunta, com base no que você já encontrou (cite as fontes [S#]). Se não encontrou nada relevante, diga isso.";
@@ -260,8 +272,17 @@ export function anthropicAdapter(
     const maxRounds = request.maxRounds ?? 6;
     // Uma resposta sem texto ganha uma segunda chance (uma só).
     let nudged = false;
+    // As rodadas acabaram com o modelo ainda buscando.
+    let capped = false;
     for (let round = 0; ; round++) {
       const last = round >= maxRounds;
+      if (last && !capped && !nudged && maxRounds > 0) {
+        const tail = messages[messages.length - 1];
+        if (tail?.role === "user" && Array.isArray(tail.content)) {
+          capped = true;
+          tail.content = [...tail.content, { type: "text", text: LIMIT_NOTE }];
+        }
+      }
       const stream = api.beta.messages.stream(
         {
           model: env.model,
@@ -418,6 +439,7 @@ export function anthropicAdapter(
         meter,
         rounds: round,
         webSearches,
+        ...(capped ? { capped } : {}),
       };
     }
   };

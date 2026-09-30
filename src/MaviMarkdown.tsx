@@ -200,7 +200,7 @@ export function MaviMarkdown({
     if (line.trim()) {
       const key = k();
       // Uma referência no meio da frase não aparece (o anexo tem o seu lugar).
-      out.push(<p key={key}>{rich(line.replace(/\s?\[\[[VIADQ]\d{1,2}\]\]/g, ""), key)}</p>);
+      out.push(<p key={key}>{rich(line.replace(/\s?\[\[[VIADQT]\d{1,2}\]\]/g, ""), key)}</p>);
     }
     i++;
   }

@@ -18,6 +18,7 @@ import {
   PanelLeft,
   Pencil,
   Paperclip,
+  Play,
   Puzzle,
   Search,
   Share2,
@@ -34,6 +35,7 @@ import { CanvasPanel } from "./MaviCanvas";
 import { AnswerCost, ConversationCostButton, messageCost } from "./MaviCost";
 import {
   ARTIFACT_LINE,
+  CAPPED_DETAIL,
   type ActionArtifact,
   type CanvasArtifact,
   type ImageArtifact,
@@ -287,6 +289,18 @@ export function MaviChatPage({
     };
     window.addEventListener("mavi:ai-run", done);
     return () => window.removeEventListener("mavi:ai-run", done);
+  }, []);
+  // Uma tarefa longa desta conversa terminou: a resposta com o documento aparece.
+  useEffect(() => {
+    const ended = (e: Event) => {
+      const row = (e as CustomEvent<{ conversation: string; status: string }>).detail;
+      if (!row || !["done", "cancelled", "error"].includes(row.status)) return;
+      if (row.conversation !== onScreen.current) return;
+      onScreen.current = null;
+      setReload((n) => n + 1);
+    };
+    window.addEventListener("mavi:ai-task", ended);
+    return () => window.removeEventListener("mavi:ai-task", ended);
   }, []);
 
   // O endereço manda: abre a conversa dele (ou uma nova).
@@ -1175,6 +1189,19 @@ function ChatThread({
                   {!t.streaming && t.content && (
                     <div className="mavi-msg-actions">
                       <CopyButton text={plainAnswer(t.content)} />
+                      {/* Parou no limite de passos: continua de onde parou. */}
+                      {i === turns.length - 1 &&
+                        !readOnly &&
+                        (t.steps ?? []).some((s) => s.detail === CAPPED_DETAIL) && (
+                          <button
+                            type="button"
+                            className="mavi-continue"
+                            disabled={busy || !!background}
+                            onClick={() => void submit("Continue de onde parou.")}
+                          >
+                            <Play size={12} aria-hidden="true" /> Continuar de onde parou
+                          </button>
+                        )}
                       {(() => {
                         // O do banco tem tudo (anexos lidos e o resumo que a resposta disparou).
                         const cost = messageCost(costs, t.id) ?? t.cost;

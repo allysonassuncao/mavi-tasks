@@ -138,6 +138,7 @@ describe("servidor MCP", () => {
     expect(tools.map((t) => t.name)).toEqual([
       "list_workspaces",
       "find_clients",
+      "client_overview",
       "search_knowledge",
       "read_more",
       "list_meetings",

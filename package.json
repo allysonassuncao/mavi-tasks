@@ -32,6 +32,7 @@
     "test:db:mavi-summary": "node scripts/test-mavi-summary.mjs",
     "test:db:mavi-art-brand": "node scripts/test-mavi-art-brand.mjs",
     "test:db:mavi-conversation-cost": "node scripts/test-mavi-conversation-cost.mjs",
+    "test:db:mavi-long-tasks": "node scripts/test-mavi-long-tasks.mjs",
     "test:db:whatsapp": "node scripts/test-whatsapp-groups.mjs",
     "test:db:cases": "node scripts/test-success-cases.mjs",
     "test:db:notices": "node scripts/test-notice-board.mjs",

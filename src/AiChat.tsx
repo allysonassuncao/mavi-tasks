@@ -157,7 +157,7 @@ export function AnswerText({
       return;
     }
     // Uma referência no meio da frase não aparece (o anexo tem o seu lugar).
-    const line = raw.replace(/\s?\[\[[VIADQ]\d{1,2}\]\]/g, "");
+    const line = raw.replace(/\s?\[\[[VIADQT]\d{1,2}\]\]/g, "");
     const item = line.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/);
     if (item) list.push(<li key={i}>{render(item[1])}</li>);
     else {
@@ -246,7 +246,7 @@ export function useTypewriter(target: string, animate: boolean) {
 
 /** Esconde o fim ainda incompleto: "[S1" ou "[[V1]" sem fechar, "**" sem par, "*" solto. */
 export function hidePartial(text: string) {
-  let t = text.replace(/\[\[[VIADQ]?\d{0,2}\]?$/, "").replace(/\[[^\]\n]*$/, "");
+  let t = text.replace(/\[\[[VIADQT]?\d{0,2}\]?$/, "").replace(/\[[^\]\n]*$/, "");
   if ((t.match(/\*\*/g) ?? []).length % 2) t = t.slice(0, t.lastIndexOf("**"));
   return t.replace(/(^|[^*])\*$/, "$1");
 }

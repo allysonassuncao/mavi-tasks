@@ -93,19 +93,60 @@ const dateField = (description: string) => ({
   description: `${description} (AAAA-MM-DD).`,
 });
 
+/** As partes do dossiê de client_overview, na ordem em que aparecem. */
+export const OVERVIEW_SECTIONS = [
+  "products",
+  "dossier",
+  "briefing",
+  "meetings",
+  "tasks",
+  "campaigns",
+  "temperature",
+  "radar",
+  "whatsapp",
+] as const;
+type OverviewSection = (typeof OVERVIEW_SECTIONS)[number];
+
 export const TOOLS: ToolSpec[] = [
   {
     name: "find_clients",
     description:
-      "Acha clientes pelo código ou nome (no sistema, o nome do cliente costuma ser o código dele, ex.: '4282') e mostra os produtos contratados. Use antes de filtrar por cliente quando a pessoa citar um cliente e você não tiver o id.",
+      "Acha clientes pelo código ou nome (no sistema, o nome do cliente costuma ser o código dele, ex.: '4282') e mostra os produtos contratados. Use antes de filtrar por cliente quando a pessoa citar um cliente e você não tiver o id. Vários clientes: mande todos os códigos numa chamada só, separados por vírgula (ex.: '5022, 5017, 5052').",
     parameters: obj(
       {
         query: {
           type: "string",
-          description: "Código ou parte do nome do cliente.",
+          description: "Código ou parte do nome do cliente; vários, separados por vírgula.",
         },
       },
       ["query"],
+    ),
+  },
+  {
+    name: "client_overview",
+    description:
+      "Dossiê de até 3 clientes numa chamada só: produtos contratados, o dossiê da MAVI (gostos, regras, tom, contexto, histórico), briefing (arquivos do Drive e Social Leads), as últimas reuniões com o resumo, tarefas em aberto e atrasadas, resultados das campanhas dos últimos 30 dias (só líderes), termômetro, Radar em aberto e o que o cliente pediu ou reclamou no WhatsApp. Use para visão geral, situação atual, passagem de carteira ou comparação de clientes, em vez de chamar cada ferramenta cliente por cliente; para mais clientes, faça várias chamadas na mesma rodada. Devolve trechos [S#] para citar; complete com search_knowledge ou read_more quando precisar de mais detalhe.",
+    parameters: obj(
+      {
+        client_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Os ids dos clientes (de 1 a 3), de find_clients.",
+        },
+        sections: {
+          type: "array",
+          items: { type: "string", enum: [...OVERVIEW_SECTIONS] },
+          description:
+            "Opcional: só estas partes (padrão: todas). products, dossier, briefing, meetings, tasks, campaigns, temperature, radar, whatsapp.",
+        },
+        days: {
+          type: "integer",
+          minimum: 7,
+          maximum: 180,
+          description: "Opcional: quantos dias para trás nas reuniões (padrão 60).",
+        },
+      },
+      ["client_ids"],
     ),
   },
   {
@@ -433,15 +474,36 @@ export function citeRow(ctx: ToolContext, row: SearchRow) {
   return `[${ref}] ${where}${client ? ` · cliente ${client}` : ""}\n${body}`;
 }
 
+/**
+ * O vetor da busca: a mesma frase na mesma resposta (o dossiê de vários
+ * clientes busca o briefing de cada um com as mesmas palavras) vira um
+ * vetor só, contado uma vez.
+ */
+const embedded = new WeakMap<ToolContext, Map<string, ReturnType<Embedder>>>();
+function embedOnce(ctx: ToolContext, query: string) {
+  let cache = embedded.get(ctx);
+  if (!cache) embedded.set(ctx, (cache = new Map()));
+  let work = cache.get(query);
+  if (!work) {
+    work = ctx.embed([query]).then((out) => {
+      ctx.usage.embeddingTokens += out.tokens;
+      ctx.usage.embeddingModel = out.model;
+      return out;
+    });
+    // Uma falha não fica guardada: a próxima busca tenta de novo.
+    work.catch(() => cache!.delete(query));
+    cache.set(query, work);
+  }
+  return work;
+}
+
 async function searchKnowledge(
   ctx: ToolContext,
   input: Record<string, unknown>,
 ) {
   const query = str(input.query).slice(0, 400);
   if (query.length < 2) return "Informe o que procurar.";
-  const { vectors, tokens, model } = await ctx.embed([query]);
-  ctx.usage.embeddingTokens += tokens;
-  ctx.usage.embeddingModel = model;
+  const { vectors } = await embedOnce(ctx, query);
   const types = Array.isArray(input.types)
     ? input.types.flatMap((t) =>
         typeof t === "string" ? (SEARCH_TYPES[t] ?? []) : [],
@@ -593,38 +655,210 @@ async function listTasks(ctx: ToolContext, input: Record<string, unknown>) {
     .join("\n");
 }
 
-async function findClients(ctx: ToolContext, input: Record<string, unknown>) {
-  const q = str(input.query)
-    .replace(/[,()*%]/g, " ")
+type ClientRow = {
+  id: string;
+  name: string;
+  contracts: {
+    name: string;
+    archived: boolean;
+    products: { name: string } | null;
+  }[];
+};
+const clientLine = (c: ClientRow) => {
+  const products = c.contracts
+    .filter((k) => !k.archived)
+    .map((k) => k.products?.name ?? k.name);
+  return `- Cliente ${c.name} (id ${c.id})${products.length ? ` · produtos: ${[...new Set(products)].join(", ")}` : ""}`;
+};
+const cleanTerm = (t: string) =>
+  t
+    .replace(/[,()*%"\\]/g, " ")
+    .replace(/\s+/g, " ")
     .trim()
     .slice(0, 60);
-  if (!q && !ctx.scope.client) return "Informe o código ou nome do cliente.";
-  const rows = await rest<{
-    id: string;
-    name: string;
-    contracts: {
-      name: string;
-      archived: boolean;
-      products: { name: string } | null;
-    }[];
-  }>(
+/**
+ * Os termos da busca: "5022, 5017; 5052" ou "5022 5017 5052" (só códigos)
+ * viram um termo por cliente; o resto é um nome só.
+ */
+export function clientTerms(raw: string) {
+  const parts = raw.split(/[,;\n]+/).map(cleanTerm).filter(Boolean);
+  const split =
+    parts.length === 1 && /^\d{2,}(\s+\d{2,})+$/.test(parts[0]) ? parts[0].split(" ") : parts;
+  return [...new Set(split)].slice(0, 40);
+}
+
+async function findClients(ctx: ToolContext, input: Record<string, unknown>) {
+  const terms = clientTerms(str(input.query).slice(0, 800));
+  if (!terms.length && !ctx.scope.client) return "Informe o código ou nome do cliente.";
+  const select = "select=id,name,contracts(name,archived,products(name))";
+  if (ctx.scope.client || terms.length === 1) {
+    const q = terms[0] ?? "";
+    const rows = await rest<ClientRow>(
+      ctx,
+      `clients?${select}&company_id=eq.${ctx.company}&archived=is.false` +
+        (ctx.scope.client
+          ? `&id=eq.${ctx.scope.client}`
+          : `&name=ilike.*${encodeURIComponent(q)}*`) +
+        "&order=name&limit=10",
+    );
+    if (!rows.length)
+      return `Nenhum cliente com "${q}" entre os que a pessoa acessa.`;
+    return rows.map(clientLine).join("\n");
+  }
+  // Vários: uma consulta só; para cada termo, o nome igual vale mais que o parecido.
+  const or = terms.map((t) => `name.ilike."*${t}*"`).join(",");
+  const rows = await rest<ClientRow>(
     ctx,
-    `clients?select=id,name,contracts(name,archived,products(name))&company_id=eq.${ctx.company}&archived=is.false` +
-      (ctx.scope.client
-        ? `&id=eq.${ctx.scope.client}`
-        : `&name=ilike.*${encodeURIComponent(q)}*`) +
-      "&order=name&limit=10",
+    `clients?${select}&company_id=eq.${ctx.company}&archived=is.false&or=${encodeURIComponent(`(${or})`)}&order=name&limit=${Math.min(terms.length * 4, 160)}`,
   );
-  if (!rows.length)
-    return `Nenhum cliente com "${q}" entre os que a pessoa acessa.`;
-  return rows
-    .map((c) => {
-      const products = c.contracts
-        .filter((k) => !k.archived)
-        .map((k) => k.products?.name ?? k.name);
-      return `- Cliente ${c.name} (id ${c.id})${products.length ? ` · produtos: ${[...new Set(products)].join(", ")}` : ""}`;
-    })
-    .join("\n");
+  const fold = (v: string) => v.toLowerCase();
+  const found: ClientRow[] = [];
+  const missing: string[] = [];
+  const ambiguous: string[] = [];
+  for (const t of terms) {
+    const exact = rows.filter((r) => fold(r.name) === fold(t));
+    const like = exact.length ? exact : rows.filter((r) => fold(r.name).includes(fold(t)));
+    if (!like.length) missing.push(t);
+    else {
+      if (like.length > 1) ambiguous.push(t);
+      for (const r of like.slice(0, 5)) if (!found.some((f) => f.id === r.id)) found.push(r);
+    }
+  }
+  const lines = [
+    `${found.length} de ${terms.length} ${terms.length === 1 ? "cliente encontrado" : "clientes encontrados"}:`,
+    ...found.map(clientLine),
+  ];
+  if (ambiguous.length)
+    lines.push(`Mais de um cliente parecido com: ${ambiguous.join(", ")} (confira qual é).`);
+  if (missing.length)
+    lines.push(`Não encontrados entre os que a pessoa acessa: ${missing.join(", ")}.`);
+  return lines.join("\n");
+}
+
+// ------------------------------------------------------------ dossiê dos clientes
+const SECTION_TITLES: Record<OverviewSection, string> = {
+  products: "Produtos contratados",
+  dossier: "Dossiê da MAVI (gostos, regras, tom, contexto e histórico)",
+  briefing: "Briefing (Drive e Social Leads)",
+  meetings: "Reuniões recentes",
+  tasks: "Tarefas em aberto",
+  campaigns: "Campanhas (últimos 30 dias)",
+  temperature: "Termômetro",
+  radar: "Radar em aberto (problemas, promessas e outros tópicos)",
+  whatsapp: "WhatsApp: pedidos, reclamações e combinados recentes",
+};
+/** Quanto cada parte ocupa (caracteres), para o dossiê caber na conversa. */
+const SECTION_CHARS: Record<OverviewSection, number> = {
+  products: 800,
+  dossier: 2500,
+  briefing: 3500,
+  meetings: 3500,
+  tasks: 2500,
+  campaigns: 2500,
+  temperature: 2000,
+  radar: 2500,
+  whatsapp: 2500,
+};
+const DOSSIER_KINDS: Record<string, string> = {
+  prefers: "Gosta / prefere",
+  avoids: "Não gosta / não quer",
+  rule: "Regra ou combinado",
+  style: "Tom e identidade",
+  context: "Contexto do negócio",
+  history: "Histórico que pesa",
+};
+/** Corta no fim de uma linha, avisando que continua. */
+export function clip(text: string, max: number) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const at = cut.lastIndexOf("\n");
+  return `${at > max * 0.5 ? cut.slice(0, at) : cut}\n(… cortado: há mais; peça a ferramenta específica para ver tudo)`;
+}
+const daysBefore = (today: string, days: number) =>
+  new Date(Date.parse(`${today}T12:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
+
+async function overviewSection(
+  ctx: ToolContext,
+  client: string,
+  section: OverviewSection,
+  days: number,
+): Promise<string> {
+  const input = { client_id: client };
+  if (section === "products") {
+    const [c] = await rest<ClientRow>(
+      ctx,
+      `clients?select=id,name,contracts(name,archived,products(name))&company_id=eq.${ctx.company}&id=eq.${client}`,
+    );
+    const open = (c?.contracts ?? []).filter((k) => !k.archived).map((k) => k.products?.name ?? k.name);
+    return open.length ? [...new Set(open)].join(", ") : "Nenhum produto ativo.";
+  }
+  if (section === "dossier") {
+    const r = await callRpc<{ items: { kind: string; text: string; seen_at: string | null }[]; pending: boolean }>(
+      ctx,
+      ctx.fetch,
+      ctx.auth,
+      "client_dossier",
+      { p_company: ctx.company, p_client: client },
+    );
+    if (!r.ok) throw new Error(r.error);
+    const items = r.data.items ?? [];
+    if (!items.length)
+      return r.data.pending ? "O dossiê ainda está sendo montado pela MAVI." : "Sem itens no dossiê.";
+    return items.map((i) => `- ${DOSSIER_KINDS[i.kind] ?? i.kind}: ${i.text}`).join("\n");
+  }
+  if (section === "briefing")
+    return searchKnowledge(ctx, {
+      ...input,
+      query: "briefing do cliente: objetivo, público-alvo, produto, oferta, diferenciais e metas",
+      types: ["file", "social"],
+      limit: 4,
+    });
+  if (section === "meetings")
+    return listMeetings(ctx, { ...input, from: daysBefore(ctx.today, days), limit: 6 });
+  if (section === "tasks") return listTasks(ctx, { ...input, open_only: true, limit: 25 });
+  if (section === "campaigns")
+    return campaignResults(ctx, { ...input, from: daysBefore(ctx.today, 30), to: ctx.today });
+  if (section === "temperature") return clientTemperature(ctx, input);
+  if (section === "radar") return clientRadar(ctx, { ...input, status: "open", limit: 10 });
+  return searchKnowledge(ctx, {
+    ...input,
+    query: "pedido, reclamação, pendência, combinado, prazo, aprovação ou insatisfação do cliente",
+    types: ["whatsapp"],
+    from: daysBefore(ctx.today, 45),
+    limit: 5,
+  });
+}
+
+/** Os clientes que o dossiê aceita: os que a pessoa acessa (ou o do escopo). */
+function overviewClients(ctx: ToolContext, input: Record<string, unknown>) {
+  if (ctx.scope.client) return [ctx.scope.client];
+  const ids = Array.isArray(input.client_ids) ? input.client_ids : [input.client_id];
+  return [...new Set(ids.map(str).filter((id) => UUID.test(id) && ctx.clients.has(id)))].slice(0, 3);
+}
+
+async function clientOverview(ctx: ToolContext, input: Record<string, unknown>) {
+  const clients = overviewClients(ctx, input);
+  if (!clients.length)
+    return "Mande de 1 a 3 client_ids de clientes que a pessoa acessa (ache com find_clients).";
+  const asked = Array.isArray(input.sections)
+    ? OVERVIEW_SECTIONS.filter((s) => (input.sections as unknown[]).includes(s))
+    : [];
+  const sections = asked.length ? asked : [...OVERVIEW_SECTIONS];
+  const days = int(input.days, 60, 7, 180);
+  const parts = await Promise.all(
+    clients.map(async (client) => {
+      const blocks = await Promise.all(
+        sections.map(async (section) => {
+          const text = await overviewSection(ctx, client, section, days).catch(
+            (e: Error) => `(não deu para ler agora: ${e.message.slice(0, 160)})`,
+          );
+          return `### ${SECTION_TITLES[section]}\n${clip(text.trim(), SECTION_CHARS[section])}`;
+        }),
+      );
+      return `## Cliente ${ctx.clients.get(client) ?? "?"} (id ${client})\n\n${blocks.join("\n\n")}`;
+    }),
+  );
+  return `${parts.join("\n\n---\n\n")}\n\n(Dossiê de ${ctx.today}. Cite os trechos [S#]; o que estiver cortado, peça à ferramenta específica.)`;
 }
 
 /** O passo, em linguagem de gente, enquanto a ferramenta roda. */
@@ -668,8 +902,19 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
         : "as tarefas";
     return `Conferindo ${what}${inClient}${str(input.assignee) ? ` de ${str(input.assignee)}` : ""}`;
   }
-  if (name === "find_clients")
-    return `Procurando o cliente “${str(input.query).slice(0, 40)}”`;
+  if (name === "find_clients") {
+    const terms = clientTerms(str(input.query));
+    return terms.length > 1
+      ? `Procurando ${terms.length} clientes (${terms.slice(0, 6).join(", ")}${terms.length > 6 ? "…" : ""})`
+      : `Procurando o cliente “${str(input.query).slice(0, 40)}”`;
+  }
+  if (name === "client_overview") {
+    const ids = overviewClients(ctx, input);
+    const names = ids.map((id) => ctx.clients.get(id) ?? "?");
+    return names.length > 1
+      ? `Montando o dossiê dos clientes ${names.join(", ")}`
+      : `Montando o dossiê do cliente ${names[0] ?? ""}`.trim();
+  }
   if (name === "campaign_results")
     return `Conferindo os resultados ${input.by_day ? "diários " : ""}das campanhas${inClient}${period}`;
   if (name === "client_temperature")
@@ -704,7 +949,12 @@ export function summarizeStep(name: string, output: string) {
       : "nenhuma campanha";
   if (name === "find_clients") {
     const n = (output.match(/^- Cliente /gm) ?? []).length;
-    return n ? `${n} ${n === 1 ? "cliente" : "clientes"}` : "nenhum cliente";
+    const missing = /^Não encontrados[^:]*: (.+)\.$/m.exec(output)?.[1];
+    return `${n ? `${n} ${n === 1 ? "cliente" : "clientes"}` : "nenhum cliente"}${missing ? ` · faltou: ${missing}` : ""}`;
+  }
+  if (name === "client_overview") {
+    const n = (output.match(/^## Cliente /gm) ?? []).length;
+    return n ? `${n} ${n === 1 ? "cliente" : "clientes"} · ${refs || new Set(output.match(/\[S\d+\]/g) ?? []).size} fontes` : "nada encontrado";
   }
   if (name === "client_temperature") {
     const n = (output.match(/^- Cliente /gm) ?? []).length;
@@ -1195,5 +1445,6 @@ export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "campaign_results") return campaignResults(ctx, input);
   if (name === "client_temperature") return clientTemperature(ctx, input);
   if (name === "client_radar") return clientRadar(ctx, input);
+  if (name === "client_overview") return clientOverview(ctx, input);
   return `Ferramenta desconhecida: ${name}.`;
 }

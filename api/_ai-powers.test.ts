@@ -176,7 +176,9 @@ describe("poderes no módulo MAVI", () => {
     expect(names).toContain("show_chart");
     expect(names).toContain("propose_task");
     expect(names).not.toContain("generate_image");
-    expect(request!.maxRounds).toBe(8);
+    // No módulo MAVI, 10 rodadas (o pedido grande vira tarefa longa).
+    expect(request!.maxRounds).toBe(10);
+    expect(names).toContain("plan_long_task");
     expect(outputs[0]).toMatch(/^Mostrado para a pessoa como V1/);
     expect(outputs[1]).toMatch(/^Proposta pronta como A1/);
     expect(outputs[1]).toContain("o prazo sugerido já passou");

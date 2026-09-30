@@ -1266,6 +1266,8 @@ export interface RealtimeCallbacks {
   onNotification?: (row: { id: string; task_id: string }) => void;
   /** Uma resposta da MAVI de `user` terminou (ou parou), no mesmo tópico da caixa de entrada. */
   onAiRun?: (row: { id: string; conversation: string | null; status: string }) => void;
+  /** Uma tarefa longa da MAVI de `user` andou (uma etapa, pausa, fim), no mesmo tópico. */
+  onAiTask?: (row: { id: string; conversation: string; status: string; done: number; total: number }) => void;
   onChange?: (change: LiveChange) => void;
   /** Back online after a drop: notices sent meanwhile were missed. */
   onResync?: () => void;
@@ -1317,6 +1319,17 @@ export function subscribeToCompanyChanges(
             status: string;
           };
           if (row.company_id === company) callbacks.onAiRun?.(row);
+        })
+        .on("broadcast", { event: "ai_task" }, ({ payload }) => {
+          const row = payload as {
+            id: string;
+            company_id: string;
+            conversation: string;
+            status: string;
+            done: number;
+            total: number;
+          };
+          if (row.company_id === company) callbacks.onAiTask?.(row);
         })
     : null;
   // Private topics are authorised with the person's session token.

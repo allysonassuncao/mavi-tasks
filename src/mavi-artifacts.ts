@@ -266,12 +266,28 @@ export type QuestionArtifact = Base & {
   questions: QuestionItem[];
 };
 
+// ------------------------------------------------------------ tarefa longa
+/**
+ * O card de uma tarefa longa (migração 20270111090000): o plano, o custo
+ * estimado e o teto no momento do plano. O andamento vem do banco
+ * (ai_task_get) e dos avisos da tarefa.
+ */
+export type TaskArtifact = Base & {
+  type: "task";
+  task: string;
+  title: string;
+  steps: number;
+  estimate: number;
+  cap: number;
+};
+
 export type AiArtifact =
   | VisualArtifact
   | ImageArtifact
   | ActionArtifact
   | CanvasArtifact
-  | QuestionArtifact;
+  | QuestionArtifact
+  | TaskArtifact;
 
 export type ImageSize = "square" | "portrait" | "landscape";
 export const IMAGE_SIZES: Record<ImageSize, string> = {
@@ -280,13 +296,19 @@ export const IMAGE_SIZES: Record<ImageSize, string> = {
   landscape: "1536x1024",
 };
 
+/**
+ * O detalhe do passo que marca a resposta que parou no limite de passos (a
+ * MAVI ainda queria buscar): a tela oferece "Continuar de onde parou".
+ */
+export const CAPPED_DETAIL = "limite de passos";
+
 /** Uma linha só com [[V1]]: o lugar do anexo na resposta. */
-export const ARTIFACT_LINE = /^\s*\[\[([VIADQ]\d{1,2})\]\]\s*$/;
+export const ARTIFACT_LINE = /^\s*\[\[([VIADQT]\d{1,2})\]\]\s*$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ID = /^[A-Za-z0-9_-]{4,64}$/;
-const REF = /^[VIADQ]\d{1,2}$/;
+const REF = /^[VIADQT]\d{1,2}$/;
 
 const text = (v: unknown, max: number) =>
   typeof v === "string"
@@ -446,6 +468,12 @@ export function sanitizeQuestions(raw: unknown): QuestionItem[] | null {
   return items.length ? items : null;
 }
 
+/**
+ * O tamanho máximo de um documento (caracteres): o de uma tarefa longa
+ * (um capítulo por cliente) passa bem dos 60 mil de uma resposta.
+ */
+export const DOCUMENT_MAX = 200_000;
+
 /** Um documento, apresentação ou planilha no formato fechado (null: não dá). */
 export function sanitizeCanvas(raw: unknown): Canvas | null {
   const v = obj(raw);
@@ -454,7 +482,7 @@ export function sanitizeCanvas(raw: unknown): Canvas | null {
   if (v.kind === "document") {
     const markdown =
       typeof v.markdown === "string"
-        ? v.markdown.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, 60_000)
+        ? v.markdown.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, DOCUMENT_MAX)
         : "";
     return markdown.length >= 20
       ? { kind: "document", title: title || "Documento", markdown }
@@ -650,6 +678,22 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       ? { id, ref, type: "canvas", canvas, ...(REF.test(prev) ? { revision_of: prev } : {}) }
       : null;
   }
+  if (a.type === "task") {
+    const task = text(a.task, 40);
+    const title = text(a.title, 160);
+    const steps = num(a.steps);
+    if (!UUID.test(task) || title.length < 3) return null;
+    return {
+      id,
+      ref,
+      type: "task",
+      task,
+      title,
+      steps: steps && steps > 0 ? Math.min(Math.round(steps), 40) : 1,
+      estimate: Math.max(num(a.estimate) ?? 0, 0),
+      cap: Math.max(num(a.cap) ?? 0, 0),
+    };
+  }
   if (a.type === "action") {
     const action = sanitizeAction(a.action);
     if (!action) return null;
@@ -706,6 +750,8 @@ export function artifactSummary(a: AiArtifact): string {
     return `imagem${a.edited_from ? ` (edição de ${a.edited_from})` : ""}: ${a.prompt.slice(0, 120)}`;
   if (a.type === "question")
     return `perguntas para a pessoa: ${a.questions.map((q) => `“${q.question}”`).join("; ")}`;
+  if (a.type === "task")
+    return `plano de tarefa longa “${a.title}” (${a.steps} ${a.steps === 1 ? "etapa" : "etapas"}; a pessoa confirma no card, e o documento chega numa resposta à parte quando terminar)`;
   if (a.type === "canvas") {
     const c = a.canvas;
     const what =

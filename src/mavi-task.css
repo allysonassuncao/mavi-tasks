@@ -1,0 +1,213 @@
+/* MAVI · o card da tarefa longa na conversa (MaviTaskCard.tsx). */
+.mavi-task {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid #d5e2c6;
+  border-radius: 12px;
+  background: #fbfdf8;
+  font-size: 0.82rem;
+}
+.mavi-task.done,
+.mavi-task.cancelled {
+  border-color: var(--border);
+  background: #fafafa;
+}
+.mavi-task.error {
+  border-color: #f0d0cc;
+  background: #fffafa;
+}
+.mavi-task > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #3f6a24;
+}
+.mavi-task > header > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.mavi-task > header > span:not(.mavi-task-chip) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.mavi-task > header small {
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.mavi-task > header strong {
+  font-size: 0.88rem;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.mavi-task-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #e3ebd8;
+  color: #2f4f1a;
+  font-size: 0.7rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.mavi-task-chip.proposed {
+  background: #fff3d6;
+  color: #7a5200;
+}
+.mavi-task-chip.paused,
+.mavi-task-chip.cancelled {
+  background: #eef0ef;
+  color: #4b5857;
+}
+.mavi-task-chip.error {
+  background: #fbe3df;
+  color: #9b2c1f;
+}
+.mavi-task-line {
+  margin: 0;
+  line-height: 1.45;
+  color: #3c4948;
+}
+.mavi-task-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #e6ece0;
+  overflow: hidden;
+}
+.mavi-task-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #4f7d2d;
+  transition: width 0.4s ease;
+}
+.mavi-task-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mavi-task-steps li {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: start;
+  column-gap: 6px;
+  line-height: 1.4;
+  color: #3c4948;
+}
+.mavi-task-steps li > svg {
+  margin-top: 2px;
+  color: #9aa6a4;
+}
+.mavi-task-steps li.done > svg {
+  color: #4f7d2d;
+}
+.mavi-task-steps li.running {
+  font-weight: 600;
+  color: var(--ink);
+}
+.mavi-task-steps li.running > svg {
+  color: #4f7d2d;
+}
+.mavi-task-steps li.error > svg,
+.mavi-task-steps li.skipped > svg {
+  color: #b54434;
+}
+.mavi-task-steps li small {
+  grid-column: 2;
+  font-size: 0.72rem;
+  color: #8a4a40;
+}
+.mavi-task-steps li.closing {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px dashed #d9e0dd;
+}
+.mavi-task-steps li.closing small {
+  grid-column: auto;
+  color: var(--muted);
+}
+.mavi-task-steps li.more {
+  display: block;
+  padding-left: 22px;
+}
+.mavi-task-steps li.more button {
+  font-size: 0.76rem;
+  color: #3f6a24;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mavi-task-cost {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  margin: 0;
+  font-size: 0.78rem;
+  color: #3c4948;
+}
+.mavi-task-cost strong {
+  font-weight: 650;
+  color: var(--ink);
+}
+.mavi-task-cost small {
+  flex-basis: 100%;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.mavi-task-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff3d6;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: #6b4700;
+}
+.mavi-task-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.mavi-task > footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.mavi-task > footer .btn {
+  min-height: 32px;
+  padding: 6px 14px;
+  gap: 6px;
+}
+/* Continuar a resposta que parou no limite de passos. */
+.mavi-continue {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid #c3d6ad;
+  border-radius: 999px;
+  background: #f4f8ee;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #2f4f1a;
+}
+.mavi-continue:hover:not(:disabled) {
+  background: #e3ebd8;
+}

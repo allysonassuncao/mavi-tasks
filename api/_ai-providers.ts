@@ -4,6 +4,7 @@ import { seal, unseal } from "./_google.js";
 import { meterAdd, newMeter, type Meter } from "./_social-leads.js";
 import {
   ANSWER_NUDGE,
+  LIMIT_NOTE,
   LlmError,
   anthropicAdapter,
   effortFor,
@@ -282,6 +283,8 @@ export function openAiChatAdapter(
     ];
     const maxRounds = request.maxRounds ?? 6;
     let nudged = false;
+    // As rodadas acabaram com o modelo ainda buscando (o aviso vai uma vez).
+    let capped = false;
     // Nem todo provedor aceita stream_options: sem ele, o uso vem se vier.
     let usageOption = true;
     const router = config.kind === "openrouter";
@@ -293,6 +296,10 @@ export function openAiChatAdapter(
     let reasoningOption = request.effort !== undefined;
     for (let round = 0; ; round++) {
       const last = round >= maxRounds;
+      if (last && !capped && !nudged && maxRounds > 0 && messages[messages.length - 1]?.role === "tool") {
+        capped = true;
+        messages.push({ role: "user", content: LIMIT_NOTE });
+      }
       const effort = reasoningOption ? effortFor(config.model, request.effort) : null;
       // Os provedores fora da Claude vão até "high".
       const level = effort === "xhigh" || effort === "max" ? "high" : effort;
@@ -457,6 +464,7 @@ export function openAiChatAdapter(
             : answer,
         meter,
         rounds: round,
+        ...(capped ? { capped } : {}),
       };
     }
   };
