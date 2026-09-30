@@ -62,6 +62,7 @@ export function mcpTools() {
     campaign_results: "Resultados das campanhas",
     list_tasks: "Listar tarefas",
     client_temperature: "Termômetro do cliente",
+    client_radar: "Radar do cliente",
   };
   return [
     {

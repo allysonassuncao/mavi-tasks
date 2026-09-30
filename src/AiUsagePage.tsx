@@ -41,6 +41,7 @@ const TOOL_LABELS: Record<string, string> = {
   campaign_results: "Resultados das campanhas",
   list_tasks: "Listar tarefas",
   client_temperature: "Termômetro do cliente",
+  client_radar: "Radar do cliente",
   show_chart: "Gráfico (Visualizações)",
   show_table: "Tabela (Visualizações)",
   show_kpis: "Indicadores (Visualizações)",

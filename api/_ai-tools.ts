@@ -238,6 +238,31 @@ export const TOOLS: ToolSpec[] = [
       },
     }),
   },
+  {
+    name: "client_radar",
+    description:
+      "Radar do cliente: o que a MAVI anotou lendo as reuniões gravadas e os grupos de WhatsApp — problemas e reclamações dos clientes, promessas do time (com prazo) e os outros tópicos que a agência criou —, com status, gravidade, produto, responsável, quantas vezes o assunto voltou e a fala mais recente (com citação da reunião no momento ou da mensagem). Também os temas (o mesmo assunto em vários clientes do mesmo produto) e, na carteira, o último relatório do Radar. Com client_id: os itens do cliente. Sem client_id: a carteira que a pessoa vê. Use para 'o que o cliente reclamou', 'o que prometemos', 'promessas vencidas', 'problemas em aberto de Make Ads', 'o que mais se repete entre os clientes'. Para o que exatamente foi dito além da última fala, complete com search_knowledge.",
+    parameters: obj({
+      client_id: {
+        type: "string",
+        description: "Cliente (id). Omita para ver a carteira.",
+      },
+      topic: {
+        type: "string",
+        description: "Tópico (ex.: \"problemas\", \"promessas\" ou o nome de outro tópico). Omita para todos.",
+      },
+      status: {
+        type: "string",
+        enum: ["open", "closed", "all"],
+        description: "Em aberto (padrão), fechados ou todos.",
+      },
+      query: {
+        type: "string",
+        description: "Palavras para filtrar os itens (título, resumo ou cliente).",
+      },
+      limit: { type: "integer", minimum: 1, maximum: 50, description: "Quantos itens (padrão 20)." },
+    }),
+  },
 ];
 
 export type ToolContext = {
@@ -651,6 +676,10 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
     return ctx.scope.client || client
       ? `Olhando o termômetro${inClient || " do cliente"}`
       : "Olhando o termômetro da carteira";
+  if (name === "client_radar")
+    return ctx.scope.client || client
+      ? `Olhando o Radar${inClient || " do cliente"}`
+      : "Olhando o Radar da carteira";
   return "Consultando o sistema";
 }
 
@@ -682,6 +711,10 @@ export function summarizeStep(name: string, output: string) {
     if (n) return `${n} ${n === 1 ? "cliente" : "clientes"}`;
     const m = /: (\d+)\/100 · ([^·\n]+)/.exec(output);
     return m ? `${m[1]}/100 · ${m[2].trim()}` : "sem temperatura";
+  }
+  if (name === "client_radar") {
+    const n = (output.match(/^- \[/gm) ?? []).length;
+    return n ? `${n} ${n === 1 ? "item" : "itens"}` : "nenhum item";
   }
   return "";
 }
@@ -989,6 +1022,165 @@ async function clientTemperature(
   return `${lines.filter(Boolean).join("\n")}${reads.length ? `\n\nLeituras recentes (do Jev, cada reunião ou dia de grupo):\n${reads.join("\n\n")}` : ""}`;
 }
 
+type RadarQuote = {
+  text: string;
+  speaker: string;
+  role: string;
+  source_type: "meeting" | "whatsapp";
+  source_id: string;
+  group_id: string | null;
+  message_id: string | null;
+  at_seconds: number | null;
+  occurred_at: string;
+  title: string | null;
+};
+type RadarAiItem = {
+  id: string;
+  topic: string;
+  client_id: string;
+  client: string;
+  product: string;
+  title: string;
+  summary: string;
+  status: string;
+  closed: boolean;
+  severity: string | null;
+  due_date: string | null;
+  overdue: boolean;
+  mentions: number;
+  first_seen: string;
+  last_seen: string;
+  theme: string | null;
+  assignee: string | null;
+  quote: RadarQuote | null;
+};
+export type RadarAiRow = {
+  scope: "client" | "portfolio";
+  leader: boolean;
+  today: string;
+  started_at: string | null;
+  topics: {
+    key: string;
+    name: string;
+    has_due: boolean;
+    open: number;
+    severe: number;
+    overdue: number;
+    new_30d: number;
+    closed_30d: number;
+    clients: number;
+  }[];
+  items: RadarAiItem[];
+  total: number;
+  themes: { title: string; topic: string; product: string; clients: number; open: number; client_names: string[] }[];
+  report: {
+    title: string;
+    period_from: string;
+    period_to: string;
+    finished_at: string;
+    headline: string | null;
+    summary: string | null;
+    actions: { priority: string; text: string; product?: string }[] | null;
+  } | null;
+};
+
+const topicCounts = (t: RadarAiRow["topics"][number]) =>
+  `${t.name}: ${t.open} em aberto${t.severe ? ` (${t.severe} ${t.severe === 1 ? "sério" : "sérios"})` : ""}${t.has_due && t.overdue ? ` · ${t.overdue} com prazo vencido` : ""}`;
+
+/**
+ * Uma linha curta com o Radar do cliente (o contexto das conversas no
+ * cliente): o que está em aberto em cada tópico e os itens mais sérios.
+ */
+export function radarLine(r: RadarAiRow | null) {
+  if (!r || Array.isArray(r) || !r.topics?.length) return "";
+  const open = r.items.filter((i) => !i.closed).slice(0, 4);
+  return `Radar do cliente (o que a MAVI anotou nas reuniões e nos grupos): ${r.topics.map(topicCounts).join("; ")}.${open.length ? ` Em aberto: ${open.map((i) => `${i.topic}: ${i.title}${i.severity ? ` (${i.severity})` : ""}${i.overdue ? " (vencida)" : ""}`).join("; ")}.` : ""} Para os detalhes e as falas, use client_radar.`;
+}
+
+async function clientRadar(ctx: ToolContext, input: Record<string, unknown>) {
+  const client = clientOf(ctx, input);
+  const status = ["open", "closed", "all"].includes(str(input.status)) ? str(input.status) : "open";
+  const r = await callRpc<RadarAiRow>(ctx, ctx.fetch, ctx.auth, "radar_ai", {
+    p_company: ctx.company,
+    p_client: client ?? null,
+    p_topic: str(input.topic) || null,
+    p_status: status,
+    p_query: str(input.query) || null,
+    p_limit: int(input.limit, 20, 1, 50),
+  });
+  if (!r.ok) throw new Error(r.error);
+  const d = r.data;
+  const where = client ? `do cliente ${ctx.clients.get(client) ?? "?"}` : "da carteira que você acessa";
+  if (!d.topics.length)
+    return `O Radar ainda não anotou nada ${where}${d.started_at ? ` (ele lê as reuniões e os grupos desde ${brDate(d.started_at)}; o histórico anterior pode ser lido no Painel da MAVI › Radar)` : ""}.`;
+  const lines = [
+    `Radar ${where}${d.started_at ? ` (lendo desde ${brDate(d.started_at)})` : ""}:`,
+    ...d.topics.map(
+      (t) => `- ${topicCounts(t)} · ${t.new_30d} novos e ${t.closed_30d} fechados em 30 dias${client ? "" : ` · ${t.clients} clientes com itens em aberto`}`,
+    ),
+  ];
+  const items = d.items.map((i) => {
+    const q = i.quote;
+    const ref = q
+      ? q.source_type === "meeting"
+        ? cite(ctx, {
+            type: "meeting",
+            id: q.source_id,
+            title: q.title || "Reunião",
+            date: q.occurred_at,
+            client_id: i.client_id,
+            ...(q.at_seconds !== null ? { start: q.at_seconds } : {}),
+          })
+        : q.message_id
+          ? cite(ctx, {
+              type: "whatsapp",
+              id: q.message_id,
+              ...(q.group_id ? { group: q.group_id } : {}),
+              title: q.title || "WhatsApp",
+              date: q.occurred_at,
+              client_id: i.client_id,
+            })
+          : null
+      : null;
+    const meta = [
+      i.topic,
+      client ? null : `cliente ${i.client}`,
+      i.product,
+      i.status,
+      i.severity,
+      i.due_date ? `prazo ${brDate(i.due_date)}${i.overdue ? " (vencido)" : ""}` : null,
+      i.assignee ? `responsável ${i.assignee}` : "sem responsável",
+      `${i.mentions} ${i.mentions === 1 ? "vez" : "vezes"}, desde ${brDate(i.first_seen)}, última em ${brDate(i.last_seen)}`,
+      i.theme ? `tema "${i.theme}"` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return `- [${ref ?? "sem fonte"}] ${i.title} — ${meta}${i.summary ? `\n  ${i.summary}` : ""}${q ? `\n  Última fala (${q.speaker || "sem nome"}, ${q.role === "client" ? "cliente" : q.role === "team" ? "time" : "não identificado"}, ${brDate(q.occurred_at)}): "${q.text.slice(0, 300)}"` : ""}`;
+  });
+  lines.push(
+    "",
+    items.length
+      ? `Itens (${items.length} de ${d.total}${status === "open" ? " em aberto" : status === "closed" ? " fechados" : ""}, os mais sérios e recentes primeiro):`
+      : "Nenhum item com esses filtros.",
+    ...items,
+  );
+  if (d.themes.length)
+    lines.push(
+      "",
+      client ? "Temas em que este cliente aparece (o mesmo assunto em outros clientes):" : "Temas com mais clientes:",
+      ...d.themes.map(
+        (t) => `- ${t.title} · ${t.topic} · ${t.product} · ${t.clients} ${t.clients === 1 ? "cliente" : "clientes"} (${t.client_names.join(", ")}) · ${t.open} em aberto`,
+      ),
+    );
+  if (d.report)
+    lines.push(
+      "",
+      `Último relatório do Radar ("${d.report.title}", ${brDate(d.report.period_from)} a ${brDate(d.report.period_to)}, pronto em ${brDate(d.report.finished_at)}): ${d.report.headline ?? ""} ${d.report.summary ?? ""}`.trim(),
+      ...(d.report.actions ?? []).slice(0, 8).map((a) => `- Ação (${a.priority}): ${a.text}${a.product ? ` (${a.product})` : ""}`),
+    );
+  return lines.join("\n");
+}
+
 /** Executa uma ferramenta pelo nome (entradas conferidas aqui). */
 export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   const input =
@@ -1002,5 +1194,6 @@ export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "find_clients") return findClients(ctx, input);
   if (name === "campaign_results") return campaignResults(ctx, input);
   if (name === "client_temperature") return clientTemperature(ctx, input);
+  if (name === "client_radar") return clientRadar(ctx, input);
   return `Ferramenta desconhecida: ${name}.`;
 }

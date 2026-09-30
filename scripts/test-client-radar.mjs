@@ -1074,6 +1074,47 @@ await check("histórico: a estimativa, a leitura depois do dia a dia e parar", a
   assert.equal((await rpc("radar_settings", [A])).backfill.pending, 0);
 });
 
+// ------------------------------------------------------------ MAVI
+await check("a MAVI lê o Radar pela regra do Drive: cliente, carteira e o relatório para líderes", async () => {
+  await as(member);
+  const mine = await rpc("radar_ai", [A, client, null, "open", null, 50]);
+  assert.equal(mine.scope, "client");
+  assert.equal(mine.leader, false);
+  assert.ok(mine.items.length > 0 && mine.items.every((i) => i.client_id === client && !i.closed));
+  assert.ok(mine.topics.some((t) => t.key === "problemas" && t.open > 0));
+  const withQuote = mine.items.find((i) => i.title === "Relatório atrasado de novo");
+  assert.equal(withQuote.quote.text, "voltou o atraso");
+  assert.equal(withQuote.quote.source_type, "whatsapp");
+  assert.equal(withQuote.severity, "Alta");
+  assert.equal(mine.report, null);
+  // Filtros: tópico, fechados e palavras.
+  await as(member);
+  const promises = await rpc("radar_ai", [A, client, "promessas", "open", null, 50]);
+  assert.ok(promises.items.length > 0 && promises.items.every((i) => i.topic === "Promessas"));
+  assert.ok(promises.items.some((i) => i.overdue), "a promessa de ontem está vencida");
+  await as(member);
+  const closed = await rpc("radar_ai", [A, client, null, "closed", null, 50]);
+  assert.ok(closed.items.every((i) => i.closed));
+  await as(member);
+  assert.ok((await rpc("radar_ai", [A, client, null, "all", "relatório", 50])).items
+    .every((i) => /relat/i.test(i.title + i.summary)));
+  // Carteira: o membro só vê os clientes das equipes dele; o 9001 fica de fora.
+  await sql(`insert into radar_items(company_id, client_id, topic_id, title, status, theme_pending)
+    values ($1,$2,$3,'Item do 9001','aberto',false)`, [A, other, topics.problemas.id]);
+  await as(member);
+  const portfolio = await rpc("radar_ai", [A, null, null, "open", null, 50]);
+  assert.equal(portfolio.scope, "portfolio");
+  assert.ok(!portfolio.items.some((i) => i.title === "Item do 9001"));
+  await as(manager);
+  const all = await rpc("radar_ai", [A, null, null, "open", null, 50]);
+  assert.ok(all.items.some((i) => i.title === "Item do 9001"));
+  assert.equal(all.report.title.length > 0, true, "o último relatório pronto vai junto");
+  await as(outsider);
+  await rejects(() => rpc("radar_ai", [A, client, null, "open", null, 10]), /Sem acesso a este cliente/);
+  await as(outsider);
+  assert.deepEqual((await rpc("radar_ai", [A, null, null, "open", null, 10])).items, []);
+});
+
 // Migrations 20270105090000 e 20270107090000: um administrador liga o Radar
 // para um colaborador; ele usa tudo, menos a configuração, só nos clientes
 // das equipes dele.
