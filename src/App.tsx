@@ -567,6 +567,8 @@ export default function App() {
   // demo-mode stat cards below derive a live total from it directly.
   const demoNow = useNow(demo);
   const request = useRef(0),
+    // The live refresh the task list last loaded (see the snapshot below).
+    shownLiveTick = useRef(0),
     user = demo ? demoUser : (session?.user.id ?? "");
   const currentCompany = data.companies.find((c) => c.id === company),
     member = data.members.find((m) => m.user_id === user),
@@ -914,7 +916,11 @@ export default function App() {
     if (!company || !session) return;
     const id = ++request.current;
     const hasData = data.members.length > 0;
-    if (!hasData || page === "tasks") {
+    // A live notice only refreshes what is already shown: the list stays on
+    // screen and is swapped when the answer arrives, without the loading state.
+    const liveOnly = liveTick !== shownLiveTick.current;
+    shownLiveTick.current = liveTick;
+    if (!hasData || (page === "tasks" && !liveOnly)) {
       setLoading(true);
     }
     setError("");
