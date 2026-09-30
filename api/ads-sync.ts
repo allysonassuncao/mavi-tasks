@@ -1,8 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { adsEnv } from "./_ads.js";
 import { handleAdsSync, syncEnv } from "./_ads-sync.js";
+import { handleMakeLeads } from "./_make-leads.js";
 
-/** Campanhas: the daily sync of the cycles' numbers (api/_ads-sync.ts). */
+/**
+ * Campanhas: the daily sync of the cycles' numbers (api/_ads-sync.ts) and,
+ * at /api/make-leads (vercel.json), the leads the Make server sends
+ * (api/_make-leads.ts).
+ */
 export default async function handler(
   req: IncomingMessage & { body?: any },
   res: ServerResponse,
@@ -20,12 +25,24 @@ export default async function handler(
   } else {
     for await (const chunk of req) raw += chunk;
   }
+  const url = new URL(req.url ?? "/", "https://mavi.invalid");
+  const makeLeads =
+    url.pathname === "/api/make-leads" ||
+    url.searchParams.get("make-leads") === "1";
   try {
-    const result = await handleAdsSync(
-      JSON.parse(raw || "{}"),
-      (req.headers["authorization"] as string | undefined) ?? null,
-      syncEnv(process.env, adsEnv()),
-    );
+    const body = JSON.parse(raw || "{}");
+    const env = syncEnv(process.env, adsEnv());
+    const result = makeLeads
+      ? await handleMakeLeads(
+          body,
+          (req.headers["x-mavi-secret"] as string | undefined) ?? null,
+          env,
+        )
+      : await handleAdsSync(
+          body,
+          (req.headers["authorization"] as string | undefined) ?? null,
+          env,
+        );
     res.statusCode = result.status;
     res.end(JSON.stringify(result.body));
   } catch (err) {

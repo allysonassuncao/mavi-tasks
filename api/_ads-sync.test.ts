@@ -761,6 +761,108 @@ describe("POST /api/ads-sync", () => {
     expect(stored).not.toHaveProperty("p_backfill");
   });
 
+  it("página de captura da Make com os leads no MAVI: conta aqui, sem chamar a Make", async () => {
+    let batch = [
+      target({
+        objective: "lead",
+        destination: "make_landing_page",
+        landing_pages: ["81895b88", " 81895b88 "],
+        snapshot_days: ["2026-09-21"],
+      }),
+    ];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [/act_111\/insights/, () => json({ data: [] })],
+      [
+        /rpc\/make_leads_count/,
+        () =>
+          json({
+            days: { "2026-09-20": 4, "2026-09-22": 3, "2026-09-23": 2 },
+            total: 9,
+            firsts: { "2026-09-20": 4, "2026-09-22": 3, "2026-09-23": 2 },
+          }),
+      ],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    // Without the Make's secret too: it isn't asked.
+    const result = await handleAdsSync(
+      {},
+      `Bearer ${env.secret}`,
+      { ...env, makeLeadsSecret: "" },
+      fetch,
+    );
+    expect(result.body).toEqual({ synced: 1, errors: [] });
+    expect(calls.some((c) => c.url.includes("make.example.com"))).toBe(false);
+    const count = calls.find((c) => c.url.includes("make_leads_count"))!;
+    expect(JSON.parse(count.body!)).toEqual({
+      p_secret: env.secret,
+      p_squeezes: ["81895b88"],
+      p_since: "2026-09-20",
+      p_until: "2026-09-23",
+    });
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    const day = (d: string) =>
+      stored.p_days.find((x: { day: string }) => x.day === d);
+    expect(day("2026-09-22")).toMatchObject({ conversions: 3 });
+    expect(stored.p_snapshot.conversions).toBe(9);
+    expect(
+      stored.p_backfill.map(
+        (b: { period_end: string; conversions: number }) => [
+          b.period_end,
+          b.conversions,
+        ],
+      ),
+    ).toEqual([
+      ["2026-09-22", 7],
+      ["2026-09-21", 4],
+    ]);
+  });
+
+  it("leads no MAVI ainda sem cobrir o período: pergunta à Make, como antes", async () => {
+    let batch = [
+      target({
+        objective: "lead",
+        destination: "make_landing_page",
+        landing_pages: ["81895b88"],
+      }),
+    ];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [/act_111\/insights/, () => json({ data: [] })],
+      [/rpc\/make_leads_count/, () => json(null)],
+      [
+        /POST https:\/\/make\.example\.com/,
+        () => json({ days: { "2026-09-21": 2 }, total: 2 }),
+      ],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(result.body).toEqual({ synced: 1, errors: [] });
+    expect(
+      calls.filter((c) => c.url.includes("make.example.com")),
+    ).toHaveLength(1);
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    expect(stored.p_snapshot.conversions).toBe(2);
+  });
+
   it("página de captura da Make sem a leitura configurada: erro, sem números", async () => {
     let batch = [
       target({

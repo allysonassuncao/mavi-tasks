@@ -570,7 +570,9 @@ async function readGoogle(
 /**
  * The distinct leads of the cycle's Make capture pages (MASO:
  * buscaQntLeadsLPMake, dados_capture visible leads), per day and for the
- * period, from the Make server (api/capture/mavi-leads.php there).
+ * period: from the leads the Make sends to the MAVI (api/_make-leads.ts) or,
+ * while they don't cover the period, from the Make server
+ * (api/capture/mavi-leads.php there).
  */
 /** Runs fn with at most `limit` running at once (across cycles). */
 export function gate(limit: number) {
@@ -590,6 +592,55 @@ export function gate(limit: number) {
 /** The Make server answers a couple of reads at a time (its MySQL is small). */
 const makeGate = gate(2);
 
+type MakeCount = {
+  days?: Record<string, number>;
+  total?: number;
+  firsts?: Record<string, number>;
+};
+const toMaps = (body: MakeCount) => {
+  const map = (o: Record<string, number>) =>
+    new Map(Object.entries(o).map(([d, n]) => [d, num(n)] as const));
+  return {
+    days: map(body.days ?? {}),
+    total: num(body.total),
+    /** Leads seen for the first time in the period, by day (newer servers). */
+    firsts: body.firsts ? map(body.firsts) : null,
+  };
+};
+
+/**
+ * The count from the leads the Make sent to the MAVI (api/_make-leads.ts),
+ * or null while they don't cover the period yet (the Make's sender hasn't
+ * reached the end of dados_capture after its last day) or can't be read:
+ * then the Make is asked, as before.
+ */
+async function storedMakeLeads(
+  env: SyncEnv,
+  fetchImpl: Fetch,
+  squeezes: string[],
+  since: string,
+  until: string,
+) {
+  if (!env.secret) return null;
+  try {
+    const found = await callRpc<MakeCount | null>(
+      env,
+      fetchImpl,
+      null,
+      "make_leads_count",
+      {
+        p_secret: env.secret,
+        p_squeezes: squeezes,
+        p_since: since,
+        p_until: until,
+      },
+    );
+    return found.ok && found.data ? toMaps(found.data) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function makeLeads(
   env: SyncEnv,
   fetchImpl: Fetch,
@@ -597,16 +648,18 @@ export async function makeLeads(
   since: string,
   until: string,
 ) {
-  if (!env.makeLeadsSecret)
-    throw new AdsError(
-      500,
-      "Esta campanha conta os cadastros da página de captura da Make, e a leitura deles não está configurada: falta MAKE_LEADS_SECRET na Vercel.",
-    );
   const squeezes = [...new Set(pages.map((p) => p.trim()).filter(Boolean))];
   if (!squeezes.length)
     throw new AdsError(
       400,
       "O ciclo tem destino página de captura da Make, mas nenhuma página: informe as páginas no ciclo.",
+    );
+  const stored = await storedMakeLeads(env, fetchImpl, squeezes, since, until);
+  if (stored) return stored;
+  if (!env.makeLeadsSecret)
+    throw new AdsError(
+      500,
+      "Esta campanha conta os cadastros da página de captura da Make, e a leitura deles não está configurada: falta MAKE_LEADS_SECRET na Vercel.",
     );
   let res: Response;
   try {
@@ -624,21 +677,11 @@ export async function makeLeads(
   } catch (e) {
     throw new AdsError(502, `Make: ${(e as Error).message}`);
   }
-  const body = (await res.json().catch(() => ({}))) as {
-    days?: Record<string, number>;
-    total?: number;
-    firsts?: Record<string, number>;
+  const body = (await res.json().catch(() => ({}))) as MakeCount & {
     error?: string;
   };
   if (!res.ok) throw new AdsError(502, `Make: ${body.error ?? res.statusText}`);
-  const map = (o: Record<string, number>) =>
-    new Map(Object.entries(o).map(([d, n]) => [d, num(n)] as const));
-  return {
-    days: map(body.days ?? {}),
-    total: num(body.total),
-    /** Leads seen for the first time in the period, by day (newer servers). */
-    firsts: body.firsts ? map(body.firsts) : null,
-  };
+  return toMaps(body);
 }
 /** The period's distinct leads up to `end`, from the first-seen days. */
 export const leadsUpTo = (firsts: Map<string, number>, end: string) =>
