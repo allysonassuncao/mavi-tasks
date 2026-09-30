@@ -26,6 +26,7 @@ import {
   summarizeStep,
   temperatureLine,
   radarLine,
+  mediaLine,
   type AiScope,
   type AiSource,
   type ToolContext,
@@ -189,7 +190,8 @@ Como trabalhar:
 - As conversas dos grupos de WhatsApp com cada cliente entram na busca com o tipo whatsapp: o que o cliente pediu, reclamou, aprovou ou combinou no dia a dia. Os áudios aparecem transcritos e o texto dos documentos enviados também; imagens e vídeos aparecem só como "[imagem]" e "[vídeo]" (você não vê o conteúdo deles, diga isso se perguntarem). Cada trecho traz a data e o horário das mensagens.
 - Para o que os clientes reclamaram, o que o time prometeu (e se venceu) e os outros tópicos acompanhados, use client_radar: o Radar do cliente, com o que a MAVI anotou nas reuniões e nos grupos de WhatsApp, o status, a gravidade, o responsável, quantas vezes o assunto voltou, a última fala (cite) e os temas que se repetem entre os clientes; sem cliente, ela traz a carteira e o último relatório do Radar. Para a fala completa, complete com search_knowledge.
 - Para como está a relação com um cliente (satisfeito, irritado, em risco de cancelar, esfriando), use client_temperature: o termômetro que o sistema calcula lendo as reuniões e os grupos de WhatsApp, com indicadores, sinais de alerta, tendência e as leituras que mais pesaram. Sem cliente, ela lista a carteira do mais frio ao mais quente. Diga a nota e a faixa, o que puxa para cima ou para baixo e cite as leituras; para o que exatamente foi dito, complete com search_knowledge.
-- Para a visão geral de um ou mais clientes (como está, situação atual, passagem de carteira, comparação), use client_overview: o dossiê de até 3 clientes numa chamada (produtos, dossiê da MAVI, briefing, reuniões, tarefas em aberto, campanhas, termômetro, Radar e WhatsApp). Com vários clientes, ache todos com uma chamada só de find_clients (os códigos separados por vírgula) e faça várias chamadas de client_overview na mesma rodada.
+- Para os valores que o cliente depositou na conta de mídia (entradas: quanto, quando, quem lançou, categoria, motivo, estornos e comprovantes), o saldo de mídia de hoje e o que entrou ou saiu num período, use media_account: o extrato do Financeiro › Mídia de cada produto do cliente, com os totais e as entradas mês a mês; sem cliente, a carteira das contas com mais entradas no período. Os totais vêm prontos (não some de cabeça) e o gasto das Campanhas × M sai da conta sozinho. Diga o produto, as datas e os valores e cite a conta. Se a ferramenta disser que a pessoa não tem o módulo, diga isso sem inventar valores.
+- Para a visão geral de um ou mais clientes (como está, situação atual, passagem de carteira, comparação), use client_overview: o dossiê de até 3 clientes numa chamada (produtos, dossiê da MAVI, briefing, reuniões, tarefas em aberto, campanhas, termômetro, Radar, conta de mídia e WhatsApp). Com vários clientes, ache todos com uma chamada só de find_clients (os códigos separados por vírgula) e faça várias chamadas de client_overview na mesma rodada.
 - Use read_more quando um trecho parecer cortado ou precisar de mais contexto.
 - Pare de buscar assim que tiver o suficiente. Se nada relevante aparecer, diga claramente que não encontrou no sistema e sugira onde procurar.
 
@@ -422,7 +424,7 @@ export async function buildContext(
   now: number,
 ) {
   const userId = userIdFrom(auth);
-  const [members, clients, contracts, temperature, radar] = await Promise.all([
+  const [members, clients, contracts, temperature, radar, media] = await Promise.all([
     rest<{
       user_id: string;
       name: string;
@@ -478,6 +480,17 @@ export async function buildContext(
           .then((r) => (r.ok ? r.data : null))
           .catch(() => null)
       : Promise.resolve(null),
+    // E a conta de mídia (saldo e última entrada), para quem tem o
+    // Financeiro › Mídia; sem o módulo, fica de fora sem travar a conversa.
+    scope.client
+      ? callRpc<Parameters<typeof mediaLine>[0]>(env, deps.fetch, auth, "media_ai", {
+          p_company: company,
+          p_client: scope.client,
+          p_limit: 1,
+        })
+          .then((r) => (r.ok ? r.data : null))
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
   const open = contracts.filter((k) => !k.archived).map((k) => k.id);
   const projects = open.length
@@ -525,6 +538,7 @@ export async function buildContext(
       products.length ? `Produtos contratados: ${products.join("; ")}.` : "",
       temperatureLine(temperature),
       radarLine(radar),
+      mediaLine(media),
     );
   } else {
     lines.push(

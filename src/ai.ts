@@ -39,7 +39,9 @@ export type AiSource = {
     | "whatsapp"
     | "web"
     /** Um arquivo que a pessoa anexou na conversa (id: o anexo). */
-    | "attachment";
+    | "attachment"
+    /** Financeiro › Mídia: a conta (id: o produto contratado). */
+    | "media";
   /** Página da internet (busca na internet do módulo MAVI). */
   url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
@@ -742,6 +744,7 @@ export function sourceLabel(s: AiSource) {
   if (s.type === "social") return "Social Leads";
   if (s.type === "campaign") return "Campanha";
   if (s.type === "case") return "Case de sucesso";
+  if (s.type === "media") return "Conta de mídia";
   if (s.type === "whatsapp")
     return [
       `Whatsapp ${shortDate(s.date)}`,
@@ -765,7 +768,7 @@ export function sourceUrl(s: AiSource) {
   if (s.type === "attachment") return "#";
   if (s.type === "task") return taskUrl({ id: s.id, title: s.title }, company);
   const q = new URLSearchParams();
-  let page: "drive" | "onboarding" | "campaigns" | "cases" = "drive";
+  let page: "drive" | "onboarding" | "campaigns" | "cases" | "financeMedia" = "drive";
   if (s.type === "meeting") {
     q.set("gravacao", s.id);
     if (s.start && s.start > 0) q.set("t", String(Math.floor(s.start)));
@@ -779,6 +782,9 @@ export function sourceUrl(s: AiSource) {
   } else if (s.type === "case") {
     page = "cases";
     q.set("caso", s.id);
+  } else if (s.type === "media") {
+    page = "financeMedia";
+    q.set("contrato", s.id);
   } else {
     page = "campaigns";
     q.set("campanha", s.id);

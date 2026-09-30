@@ -23,6 +23,7 @@ import {
   Video,
   X,
   Trophy,
+  Wallet,
 } from "lucide-react";
 import { answerPieces, type ChatTurn } from "./meetings";
 import { ARTIFACT_LINE, type AiArtifact } from "./mavi-artifacts";
@@ -235,6 +236,7 @@ const SOURCE_ICONS = {
   whatsapp: MessageCircle,
   web: Globe,
   attachment: Paperclip,
+  media: Wallet,
 };
 function SourceIcon({ type }: { type: AiSource["type"] }) {
   const Icon = SOURCE_ICONS[type] ?? FileText;

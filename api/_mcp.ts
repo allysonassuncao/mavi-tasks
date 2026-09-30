@@ -63,6 +63,7 @@ export function mcpTools() {
     list_tasks: "Listar tarefas",
     client_temperature: "Termômetro do cliente",
     client_radar: "Radar do cliente",
+    media_account: "Conta de mídia (Financeiro › Mídia)",
   };
   return [
     {
@@ -114,6 +115,9 @@ export function sourceLink(origin: string, s: AiSource) {
   } else if (s.type === "case") {
     path = "/cases-de-sucesso";
     q.set("caso", s.id);
+  } else if (s.type === "media") {
+    path = "/financeiro/midia";
+    q.set("contrato", s.id);
   } else {
     path = "/campanhas";
     q.set("campanha", s.id);

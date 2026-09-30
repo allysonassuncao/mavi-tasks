@@ -31,7 +31,9 @@ export type AiSource = {
     | "case"
     | "whatsapp"
     | "web"
-    | "attachment";
+    | "attachment"
+    /** Financeiro › Mídia: o id é a conta (produto contratado). */
+    | "media";
   /** Página da internet (busca da Claude). */
   url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
@@ -103,6 +105,7 @@ export const OVERVIEW_SECTIONS = [
   "campaigns",
   "temperature",
   "radar",
+  "media",
   "whatsapp",
 ] as const;
 type OverviewSection = (typeof OVERVIEW_SECTIONS)[number];
@@ -125,7 +128,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "client_overview",
     description:
-      "Dossiê de até 3 clientes numa chamada só: produtos contratados, o dossiê da MAVI (gostos, regras, tom, contexto, histórico), briefing (arquivos do Drive e Social Leads), as últimas reuniões com o resumo, tarefas em aberto e atrasadas, resultados das campanhas dos últimos 30 dias (só líderes), termômetro, Radar em aberto e o que o cliente pediu ou reclamou no WhatsApp. Use para visão geral, situação atual, passagem de carteira ou comparação de clientes, em vez de chamar cada ferramenta cliente por cliente; para mais clientes, faça várias chamadas na mesma rodada. Devolve trechos [S#] para citar; complete com search_knowledge ou read_more quando precisar de mais detalhe.",
+      "Dossiê de até 3 clientes numa chamada só: produtos contratados, o dossiê da MAVI (gostos, regras, tom, contexto, histórico), briefing (arquivos do Drive e Social Leads), as últimas reuniões com o resumo, tarefas em aberto e atrasadas, resultados das campanhas dos últimos 30 dias (só líderes), termômetro, Radar em aberto, a conta de mídia (saldo e entradas/depósitos, para quem tem o Financeiro › Mídia) e o que o cliente pediu ou reclamou no WhatsApp. Use para visão geral, situação atual, passagem de carteira ou comparação de clientes, em vez de chamar cada ferramenta cliente por cliente; para mais clientes, faça várias chamadas na mesma rodada. Devolve trechos [S#] para citar; complete com search_knowledge ou read_more quando precisar de mais detalhe.",
     parameters: obj(
       {
         client_ids: {
@@ -302,6 +305,25 @@ export const TOOLS: ToolSpec[] = [
         description: "Palavras para filtrar os itens (título, resumo ou cliente).",
       },
       limit: { type: "integer", minimum: 1, maximum: 50, description: "Quantos itens (padrão 20)." },
+    }),
+  },
+  {
+    name: "media_account",
+    description:
+      "Financeiro › Mídia: a conta de mídia de cada produto do cliente, como um extrato bancário. Traz as entradas (depósitos e outros créditos lançados pelo time) com data, valor, categoria, motivo, quem lançou, se foi estornada e se tem comprovante; o total depositado (e o estornado), a primeira e a última entrada, as entradas mês a mês nos últimos 12 meses, o saldo de hoje, o saldo mínimo e se está abaixo dele ou negativo; com período, o que entrou e o que saiu nele (o gasto das Campanhas × M sai da conta sozinho). Com client_id: as contas do cliente. Sem client_id: a carteira, das contas com mais entradas no período. Use para 'quanto o cliente depositou', 'quando foi o último depósito/Pix', 'quem lançou', 'quanto entrou em setembro', 'quais clientes depositaram este mês', 'qual o saldo de mídia', 'o saldo dá para quantos dias'. Os valores vêm prontos: não some de cabeça o que a ferramenta já traz.",
+    parameters: obj({
+      client_id: {
+        type: "string",
+        description: "Cliente (id). Omita para ver a carteira.",
+      },
+      from: { type: "string", description: "Início do período (AAAA-MM-DD), pela data do lançamento." },
+      to: { type: "string", description: "Fim do período (AAAA-MM-DD)." },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+        description: "Quantas entradas (com cliente, padrão 30, as mais recentes) ou contas (na carteira, padrão 20).",
+      },
     }),
   },
 ];
@@ -745,6 +767,7 @@ const SECTION_TITLES: Record<OverviewSection, string> = {
   campaigns: "Campanhas (últimos 30 dias)",
   temperature: "Termômetro",
   radar: "Radar em aberto (problemas, promessas e outros tópicos)",
+  media: "Conta de mídia (saldo e entradas)",
   whatsapp: "WhatsApp: pedidos, reclamações e combinados recentes",
 };
 /** Quanto cada parte ocupa (caracteres), para o dossiê caber na conversa. */
@@ -757,6 +780,7 @@ const SECTION_CHARS: Record<OverviewSection, number> = {
   campaigns: 2500,
   temperature: 2000,
   radar: 2500,
+  media: 2000,
   whatsapp: 2500,
 };
 const DOSSIER_KINDS: Record<string, string> = {
@@ -820,6 +844,7 @@ async function overviewSection(
     return campaignResults(ctx, { ...input, from: daysBefore(ctx.today, 30), to: ctx.today });
   if (section === "temperature") return clientTemperature(ctx, input);
   if (section === "radar") return clientRadar(ctx, { ...input, status: "open", limit: 10 });
+  if (section === "media") return mediaAccount(ctx, { ...input, limit: 8 });
   return searchKnowledge(ctx, {
     ...input,
     query: "pedido, reclamação, pendência, combinado, prazo, aprovação ou insatisfação do cliente",
@@ -925,6 +950,10 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
     return ctx.scope.client || client
       ? `Olhando o Radar${inClient || " do cliente"}`
       : "Olhando o Radar da carteira";
+  if (name === "media_account")
+    return ctx.scope.client || client
+      ? `Conferindo a conta de mídia${inClient || " do cliente"}${period}`
+      : `Conferindo as entradas das contas de mídia${period}`;
   return "Consultando o sistema";
 }
 
@@ -965,6 +994,12 @@ export function summarizeStep(name: string, output: string) {
   if (name === "client_radar") {
     const n = (output.match(/^- \[/gm) ?? []).length;
     return n ? `${n} ${n === 1 ? "item" : "itens"}` : "nenhum item";
+  }
+  if (name === "media_account") {
+    const entries = (output.match(/^- \d{2}\/\d{2}\/\d{4} · /gm) ?? []).length;
+    const accounts = (output.match(/^- Cliente /gm) ?? []).length;
+    if (accounts) return `${accounts} ${accounts === 1 ? "conta" : "contas"}`;
+    return entries ? `${entries} ${entries === 1 ? "entrada" : "entradas"}` : "nenhuma entrada";
   }
   return "";
 }
@@ -1431,6 +1466,169 @@ async function clientRadar(ctx: ToolContext, input: Record<string, unknown>) {
   return lines.join("\n");
 }
 
+// ------------------------------------------------------------ Financeiro › Mídia
+type MediaLevel = "ok" | "low" | "negative";
+type MediaAiAccount = {
+  contract_id: string;
+  product_name: string;
+  archived: boolean;
+  balance: number;
+  min_balance: number | null;
+  level: MediaLevel;
+  entries: number;
+  credits: number;
+  credits_count: number;
+  reversed: number;
+  first_on: string | null;
+  last: { on: string; amount: number } | null;
+  period: { credits: number; debits: number; campaign_spend: number } | null;
+};
+type MediaAiCredit = {
+  id: string;
+  contract_id: string;
+  product_name: string;
+  occurred_on: string;
+  amount: number;
+  category: string | null;
+  reason: string;
+  by: string | null;
+  created_at: string;
+  receipts: number;
+  reversed: { at: string; by: string | null; reason: string } | null;
+};
+export type MediaAiClient = {
+  client: true;
+  accounts: MediaAiAccount[];
+  monthly: { month: string; credits: number; count: number }[];
+  total: number;
+  credits: MediaAiCredit[];
+};
+type MediaAiPortfolio = {
+  client: false;
+  accounts_with_credits: number;
+  credits: number;
+  credits_count: number;
+  accounts: {
+    contract_id: string;
+    client_id: string;
+    client_name: string;
+    product_name: string;
+    archived: boolean;
+    credits: number;
+    credits_count: number;
+    last_on: string | null;
+    balance: number;
+    min_balance: number | null;
+    level: MediaLevel;
+  }[];
+};
+const MEDIA_LEVEL: Record<MediaLevel, string> = {
+  ok: "",
+  low: " (abaixo do mínimo)",
+  negative: " (negativo)",
+};
+// -R$ 120,00, como a página mostra.
+const money = (v: number) => `${Number(v) < 0 ? "-" : ""}${brl(Math.abs(Number(v) || 0))}`;
+const monthBr = (ym: string) => `${ym.slice(5, 7)}/${ym.slice(0, 4)}`;
+const mediaPeriod = (from: string, to: string) =>
+  from || to
+    ? `${from ? `de ${brDate(from)}` : "desde o início"}${to ? ` até ${brDate(to)}` : " até hoje"}`
+    : "";
+
+/** Uma linha com o saldo e a última entrada (o contexto das conversas no cliente). */
+export function mediaLine(m: MediaAiClient | null) {
+  if (!m || !m.client || !m.accounts?.length) return "";
+  const parts = m.accounts
+    .filter((a) => !a.archived || a.entries)
+    .map(
+      (a) =>
+        `${a.product_name}: saldo ${money(a.balance)}${MEDIA_LEVEL[a.level] ?? ""}, ${money(a.credits)} em ${a.credits_count} ${a.credits_count === 1 ? "entrada" : "entradas"}${a.last ? `, a última de ${money(a.last.amount)} em ${brDate(a.last.on)}` : ""}`,
+    );
+  return parts.length
+    ? `Conta de mídia (Financeiro › Mídia): ${parts.join("; ")}. Para as entradas, quem lançou, o período e os meses, use media_account.`
+    : "";
+}
+
+async function mediaAccount(ctx: ToolContext, input: Record<string, unknown>) {
+  const client = clientOf(ctx, input);
+  const from = DATE.test(str(input.from)) ? str(input.from) : "";
+  const to = DATE.test(str(input.to)) ? str(input.to) : "";
+  const r = await callRpc<MediaAiClient | MediaAiPortfolio>(ctx, ctx.fetch, ctx.auth, "media_ai", {
+    p_company: ctx.company,
+    p_client: client ?? null,
+    p_from: from || null,
+    p_to: to || null,
+    p_limit: int(input.limit, client ? 30 : 20, 1, 100),
+  });
+  if (!r.ok) {
+    if (/Sem permissão/i.test(r.error))
+      return "Quem pergunta não tem o Financeiro › Mídia (ou este cliente não é de uma equipe dela): não dá para ver as contas de mídia. Diga isso e que um administrador liga o módulo em Módulos visíveis.";
+    throw new Error(r.error);
+  }
+  const period = mediaPeriod(from, to);
+  const d = r.data;
+  if (!d.client) {
+    if (!d.accounts.length)
+      return `Nenhuma entrada nas contas de mídia${period ? ` ${period}` : ""}.`;
+    const rows = d.accounts.map((a) => {
+      const ref = cite(ctx, {
+        type: "media",
+        id: a.contract_id,
+        title: `${a.client_name} › ${a.product_name}`,
+        date: a.last_on,
+        client_id: a.client_id,
+        contract_id: a.contract_id,
+      });
+      return `- Cliente ${a.client_name} (id ${a.client_id}) · ${a.product_name}${a.archived ? " (arquivado)" : ""} [${ref}]: ${money(a.credits)} em ${a.credits_count} ${a.credits_count === 1 ? "entrada" : "entradas"}, a última em ${brDate(a.last_on)} · saldo hoje ${money(a.balance)}${MEDIA_LEVEL[a.level] ?? ""}`;
+    });
+    return [
+      `Entradas nas contas de mídia${period ? ` ${period}` : " (todo o histórico)"}: ${money(d.credits)} em ${d.credits_count} lançamentos, ${d.accounts_with_credits} ${d.accounts_with_credits === 1 ? "conta" : "contas"} (sem as estornadas).`,
+      `Contas com mais entradas${d.accounts.length < d.accounts_with_credits ? ` (${d.accounts.length} de ${d.accounts_with_credits})` : ""}:`,
+      ...rows,
+    ].join("\n");
+  }
+  const name = client ? (ctx.clients.get(client) ?? "?") : "?";
+  if (!d.accounts.length)
+    return `O cliente ${name} ainda não tem conta de mídia (nenhum lançamento nem campanha no Financeiro › Mídia).`;
+  const refs = new Map(
+    d.accounts.map((a) => [
+      a.contract_id,
+      cite(ctx, {
+        type: "media",
+        id: a.contract_id,
+        title: `${name} › ${a.product_name}`,
+        date: a.last?.on ?? null,
+        client_id: client ?? null,
+        contract_id: a.contract_id,
+      }),
+    ]),
+  );
+  const lines = [`Contas de mídia do cliente ${name} (Financeiro › Mídia; entradas sem as estornadas):`];
+  for (const a of d.accounts) {
+    const p = a.period;
+    lines.push(
+      `- ${a.product_name}${a.archived ? " (arquivado)" : ""} [${refs.get(a.contract_id)}]: saldo hoje ${money(a.balance)}${MEDIA_LEVEL[a.level] ?? ""}${a.min_balance !== null ? ` · mínimo ${money(a.min_balance)}` : ""} · entradas ${money(a.credits)} em ${a.credits_count}${a.first_on ? ` (desde ${brDate(a.first_on)})` : ""}${a.last ? ` · última ${money(a.last.amount)} em ${brDate(a.last.on)}` : " · nenhuma entrada ainda"}${a.reversed ? ` · estornado ${money(a.reversed)}` : ""}${p ? ` · ${period}: entrou ${money(p.credits)}, saiu ${money(p.debits)} (gasto das Campanhas × M ${money(p.campaign_spend)})` : ""}`,
+    );
+  }
+  if (d.monthly.length)
+    lines.push(
+      "",
+      "Entradas mês a mês (últimos 12 meses):",
+      d.monthly.map((m) => `${monthBr(m.month)} ${money(m.credits)} (${m.count})`).join("; "),
+    );
+  lines.push(
+    "",
+    d.credits.length
+      ? `Entradas${period ? ` ${period}` : ""} (${d.credits.length} de ${d.total}, da mais recente):`
+      : `Nenhuma entrada${period ? ` ${period}` : ""}.`,
+    ...d.credits.map(
+      (c) =>
+        `- ${brDate(c.occurred_on)} · ${money(c.amount)} · ${c.product_name} [${refs.get(c.contract_id)}] · ${c.category ?? "sem categoria"} · lançado por ${c.by ?? "pessoa removida"} em ${brDate(c.created_at)}${c.receipts ? ` · ${c.receipts} ${c.receipts === 1 ? "comprovante" : "comprovantes"}` : ""}${c.reversed ? ` · ESTORNADA em ${brDate(c.reversed.at)} por ${c.reversed.by ?? "?"}: ${c.reversed.reason.slice(0, 160)}` : ""}\n  Motivo: ${c.reason.slice(0, 300)}`,
+    ),
+  );
+  return lines.join("\n");
+}
+
 /** Executa uma ferramenta pelo nome (entradas conferidas aqui). */
 export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   const input =
@@ -1445,6 +1643,7 @@ export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "campaign_results") return campaignResults(ctx, input);
   if (name === "client_temperature") return clientTemperature(ctx, input);
   if (name === "client_radar") return clientRadar(ctx, input);
+  if (name === "media_account") return mediaAccount(ctx, input);
   if (name === "client_overview") return clientOverview(ctx, input);
   return `Ferramenta desconhecida: ${name}.`;
 }

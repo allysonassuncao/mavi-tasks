@@ -146,6 +146,7 @@ describe("servidor MCP", () => {
       "list_tasks",
       "client_temperature",
       "client_radar",
+      "media_account",
     ]);
     for (const t of tools) expect(t.annotations.readOnlyHint).toBe(true);
     const search = tools.find((t) => t.name === "search_knowledge")!;

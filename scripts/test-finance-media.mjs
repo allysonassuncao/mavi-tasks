@@ -350,4 +350,92 @@ await check("o saldo pronto de cada conta bate com a soma do extrato", async () 
   }
 });
 
+await check("MAVI (media_ai): entradas do cliente com totais, meses, estornos e quem lançou", async () => {
+  // A credit reversed now: it stays in the list, marked, out of the totals.
+  await as(admin);
+  const deposit = await category("Depósito do cliente");
+  const wrong = await rpc("create_media_entry", [A, contract, "credit", 70, "2026-09-25", deposit, "Pix repetido"]);
+  await rpc("reverse_media_entry", [A, wrong, "Pix lançado duas vezes"]);
+  const [expected] = await sql(
+    `select sum(e.amount)::float as total, count(*)::int as n, max(e.occurred_on)::text as last_on, min(e.occurred_on)::text as first_on
+     from media_entries e where e.contract_id = $1 and e.kind = 'credit' and e.source = 'manual'
+      and not exists (select 1 from media_entries r where r.reversal_of = e.id)`,
+    [contract],
+  );
+  await as(admin);
+  const d = await rpc("media_ai", [A, client, null, null, 50]);
+  assert.equal(d.client, true);
+  const [acc] = d.accounts;
+  assert.equal(acc.product_name, "Make Ads");
+  assert.equal(Number(acc.credits), expected.total);
+  assert.equal(acc.credits_count, expected.n);
+  assert.equal(Number(acc.reversed), 70);
+  assert.equal(acc.first_on, expected.first_on);
+  assert.equal(acc.last.on, expected.last_on);
+  assert.equal(Number(acc.balance), await balance());
+  assert.equal(acc.period, null, "no period asked");
+  // The list: every manual credit, the reversed one marked, newest first.
+  assert.equal(d.total, expected.n + 1);
+  const r = d.credits.find((c) => c.id === wrong);
+  assert.equal(r.reversed.by, "Ana Admin");
+  assert.equal(r.reversed.reason, "Pix lançado duas vezes");
+  assert.equal(r.category, "Depósito do cliente");
+  assert.equal(r.by, "Ana Admin");
+  const days = d.credits.map((c) => c.occurred_on);
+  assert.deepEqual(days, [...days].sort().reverse());
+  assert.ok(d.credits.some((c) => c.receipts === 1), "the credit with a receipt counts it");
+  assert.ok(d.credits.every((c) => c.id !== undefined && c.reason));
+  // Month by month, without the reversed credit.
+  const sept = d.monthly.find((m) => m.month === "2026-09");
+  const [sep] = await sql(
+    `select sum(e.amount)::float as total from media_entries e where e.contract_id = $1 and e.kind = 'credit'
+      and e.source = 'manual' and e.occurred_on >= '2026-09-01' and e.occurred_on < '2026-10-01'
+      and not exists (select 1 from media_entries r where r.reversal_of = e.id)`,
+    [contract],
+  );
+  assert.equal(Number(sept.credits), sep.total);
+  // A period: what came in and went out in it, and only its credits.
+  const p = await rpc("media_ai", [A, client, "2026-09-01", "2026-09-03", 50]);
+  assert.equal(Number(p.accounts[0].period.credits), 1000);
+  assert.ok(Number(p.accounts[0].period.campaign_spend) > 0);
+  assert.deepEqual(p.credits.map((c) => c.occurred_on), ["2026-09-02"]);
+  const one = await rpc("media_ai", [A, client, null, null, 1]);
+  assert.equal(one.credits.length, 1);
+});
+
+await check("MAVI (media_ai): a carteira, das contas com mais entradas no período", async () => {
+  await as(admin);
+  const deposit = await category("Depósito do cliente");
+  await rpc("create_media_entry", [A, otherContract, "credit", 99999, "2026-09-15", deposit, "Pix grande"]);
+  const d = await rpc("media_ai", [A, null, "2026-09-01", "2026-09-30", 10]);
+  assert.equal(d.client, false);
+  assert.equal(d.accounts_with_credits, 2);
+  assert.deepEqual(d.accounts.map((a) => a.client_name), ["Outro cliente", "Vittalium"]);
+  assert.equal(Number(d.accounts[0].credits), 99999);
+  assert.equal(d.accounts[0].last_on, "2026-09-15");
+  const top = await rpc("media_ai", [A, null, "2026-09-01", "2026-09-30", 1]);
+  assert.equal(top.accounts.length, 1);
+  assert.equal(top.accounts_with_credits, 2);
+  const none = await rpc("media_ai", [A, null, "2020-01-01", "2020-01-31", 10]);
+  assert.equal(none.accounts.length, 0);
+});
+
+await check("MAVI (media_ai): a mesma regra do módulo", async () => {
+  // Tiago has the module on: his team's client, not the other one.
+  await as(trafego);
+  const mine = await rpc("media_ai", [A, null, null, null, 10]);
+  assert.deepEqual(mine.accounts.map((a) => a.client_name), ["Vittalium"]);
+  await fails(() => rpc("media_ai", [A, otherClient, null, null, 10]), /não é de uma equipe sua/);
+  // Olga's module is off.
+  await as(admin);
+  await rpc("set_member_pages", [A, other, ["overview", "campaigns", "radar", "dashboards", "financeMedia"]]);
+  await as(other);
+  await fails(() => rpc("media_ai", [A, client, null, null, 10]), /Sem permissão/);
+  // A leader with the module hidden in "Módulos visíveis" doesn't see it either.
+  await as(manager);
+  await fails(() => rpc("media_ai", [A, client, null, null, 10]), /Financeiro › Mídia não está disponível/);
+  await as(outsider);
+  await fails(() => rpc("media_ai", [A, client, null, null, 10]), /Sem permissão/);
+});
+
 console.log(`${passed} checks passed`);

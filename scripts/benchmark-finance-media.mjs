@@ -52,6 +52,11 @@ await time("media_accounts (todos os produtos)", "select public.media_accounts($
 await time("media_categories", "select public.media_categories($1)", [co]);
 await time("media_statement (500 dias, 1ª página)", "select public.media_statement($1,$2,null,null,'',null,100,0)", [co, k]);
 await time("media_statement (período de 30 dias)", "select public.media_statement($1,$2,'2025-06-01','2025-06-30','',null,100,0)", [co, k]);
+const cl = (await db.query("select k.client_id from contracts k where k.id = $1", [k])).rows[0].client_id;
+await time("media_ai (MAVI, cliente)", "select public.media_ai($1,$2,null,null,30)", [co, cl]);
+await time("media_ai (MAVI, cliente, setembro)", "select public.media_ai($1,$2,'2025-09-01','2025-09-30',30)", [co, cl]);
+await time("media_ai (MAVI, carteira do mês)", "select public.media_ai($1,null,'2024-03-01','2024-03-31',20)", [co]);
+await time("media_ai (MAVI, carteira inteira)", "select public.media_ai($1,null,null,null,20)", [co]);
 await db.exec("reset role");
 const t = performance.now();
 await db.query(`insert into media_entries(company_id, contract_id, kind, amount, occurred_on, source, category_id, reason, created_by)
