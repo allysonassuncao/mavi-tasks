@@ -315,6 +315,29 @@ export async function handleDrive(
     };
   }
 
+  if (req.action === "brand-urls") {
+    if (!isId(req.company) || !isId(req.client)) return fail(400, "Cliente inválido.");
+    const r = await callRpc<{ id: string; path: string; content_type: string }[]>(
+      env,
+      fetchImpl,
+      authorization,
+      "brand_asset_targets",
+      { p_company: req.company, p_client: req.client },
+    );
+    if (!r.ok) return fail(r.status, r.error);
+    return {
+      status: 200,
+      body: {
+        urls: Object.fromEntries(
+          (r.data ?? []).map((f) => [
+            f.id,
+            signGcsUrl(creds, env.bucket, f.path, "GET", { expiresInSeconds: 900 }),
+          ]),
+        ),
+      },
+    };
+  }
+
   if (!isId(req.file)) return fail(400, "Arquivo inválido.");
 
   if (req.action === "sign-thumb") {
@@ -384,29 +407,6 @@ export async function handleDrive(
             ),
           },
         }),
-      },
-    };
-  }
-
-  if (req.action === "brand-urls") {
-    if (!isId(req.company) || !isId(req.client)) return fail(400, "Cliente inválido.");
-    const r = await callRpc<{ id: string; path: string; content_type: string }[]>(
-      env,
-      fetchImpl,
-      authorization,
-      "brand_asset_targets",
-      { p_company: req.company, p_client: req.client },
-    );
-    if (!r.ok) return fail(r.status, r.error);
-    return {
-      status: 200,
-      body: {
-        urls: Object.fromEntries(
-          (r.data ?? []).map((f) => [
-            f.id,
-            signGcsUrl(creds, env.bucket, f.path, "GET", { expiresInSeconds: 900 }),
-          ]),
-        ),
       },
     };
   }

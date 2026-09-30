@@ -265,6 +265,32 @@ describe("handleDrive", () => {
     );
     expect(denied.status).toBe(403);
   });
+  it("links da marca: pedido por cliente, sem arquivo", async () => {
+    const company = "00000000-0000-4000-8000-00000000000a";
+    const client = "00000000-0000-4000-8000-00000000000b";
+    const fetchMock = rpcReply([
+      { id: fileId, path: `drive/c/${fileId}`, content_type: "image/jpeg" },
+    ]);
+    const res = await handleDrive(
+      { action: "brand-urls", company, client },
+      "Bearer user-token",
+      env,
+      fetchMock,
+    );
+    expect(res.status).toBe(200);
+    const [url, init] = (fetchMock as any).mock.calls[0];
+    expect(url).toBe("https://db.example.com/rest/v1/rpc/brand_asset_targets");
+    expect(JSON.parse(init.body)).toEqual({ p_company: company, p_client: client });
+    const urls = res.body.urls as Record<string, string>;
+    expect(new URL(urls[fileId]).pathname).toBe(`/drive-bucket/drive/c/${fileId}`);
+    const bad = await handleDrive(
+      { action: "brand-urls", company, client: "../x" },
+      "Bearer user-token",
+      env,
+      rpcReply([]),
+    );
+    expect(bad.status).toBe(400);
+  });
   it("excluir remove também a miniatura", async () => {
     const fetchMock = vi
       .fn()
