@@ -4,6 +4,7 @@
 // pasta da prova social com envio pelo link público.
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
+const SECRET = "s".repeat(40);
 
 const db = await createTestDatabase();
 const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -357,24 +358,43 @@ await check(
       await one("select public.drive_public_folder($1) as r", [f.share_token])
     ).r;
     assert.equal(view.upload, true);
+    assert.equal(view.social_proof, true);
+    assert.deepEqual(view.upload_types, ["image", "video", "audio", "pdf"]);
     await assert.rejects(
       db.query(
         "select * from public.drive_public_upload($1,'planilha.xlsx',10,'application/vnd.ms-excel')",
         [f.share_token],
       ),
-      /imagem, vídeo, áudio ou PDF/,
+      /não é aceito nesta pasta/,
     );
+    // Only the server (with its secret) finishes a send.
+    await db.exec("reset role");
+    await db.query(
+      "insert into mavi_private.ai_config(url, secret) values('https://app.example/api/ai', $1) on conflict do nothing",
+      [SECRET],
+    );
+    await as(null);
     const up = await one(
       "select * from public.drive_public_upload($1,'../depoimento.mp4',2000,'video/mp4')",
       [f.share_token],
     );
     assert.ok(up.path.endsWith(up.id));
-    await db.query("select public.drive_public_upload_done($1,$2)", [
+    await assert.rejects(
+      db.query("select public.drive_public_upload_done($1,$2,$3)", [
+        "x".repeat(40),
+        f.share_token,
+        up.id,
+      ]),
+      /Sem permissão/,
+    );
+    await db.query("select public.drive_public_upload_done($1,$2,$3)", [
+      SECRET,
       f.share_token,
       up.id,
     ]);
     await assert.rejects(
-      db.query("select public.drive_public_upload_done($1,$2)", [
+      db.query("select public.drive_public_upload_done($1,$2,$3)", [
+        SECRET,
         f.share_token,
         up.id,
       ]),

@@ -441,6 +441,194 @@ await check(
   },
 );
 
+// Receiving files through the link (migration 20270118090000).
+const SECRET = "s".repeat(40);
+await sql(
+  `insert into mavi_private.ai_config(url, secret) values('https://app.example/api/ai', $1)`,
+  [SECRET],
+);
+const docsOnly = { enabled: true, types: ["pdf", "document"], max_mb: 10 };
+const send = async (tokenValue, name, size, type = "application/pdf") => {
+  await as(null);
+  return (
+    await db.query("select * from public.drive_public_upload($1,$2,$3,$4)", [
+      tokenValue,
+      name,
+      size,
+      type,
+    ])
+  ).rows[0];
+};
+
+await check("só quem compartilha escolhe o que o link recebe", async () => {
+  await as(teamMember);
+  await assert.rejects(
+    () => rpc("set_drive_folder_sharing", [deliveries, true, [], docsOnly]),
+    /Sem permissão/,
+  );
+  await as(admin);
+  await assert.rejects(
+    () =>
+      rpc("set_drive_folder_sharing", [
+        deliveries,
+        true,
+        [],
+        { enabled: true, types: [], max_mb: 10 },
+      ]),
+    /tipos de arquivo/,
+  );
+  await as(admin);
+  await assert.rejects(
+    () =>
+      rpc("set_drive_folder_sharing", [
+        deliveries,
+        true,
+        [],
+        { enabled: true, types: ["image", "exe"], max_mb: 10 },
+      ]),
+    /tipos de arquivo/,
+  );
+  await as(admin);
+  await assert.rejects(
+    () =>
+      rpc("set_drive_folder_sharing", [
+        deliveries,
+        true,
+        [],
+        { enabled: true, types: ["image"], max_mb: 600 },
+      ]),
+    /500 MB/,
+  );
+});
+
+await as(admin);
+const receiving = await rpc("set_drive_folder_sharing", [
+  deliveries,
+  true,
+  [],
+  docsOnly,
+]);
+
+await check("a pasta pública diz o que aceita", async () => {
+  assert.deepEqual(receiving.upload, {
+    enabled: true,
+    types: ["document", "pdf"],
+    max_mb: 10,
+  });
+  await as(admin);
+  assert.deepEqual(
+    (await rpc("drive_folder_sharing", [deliveries])).upload,
+    receiving.upload,
+  );
+  await as(null);
+  const view = await rpc("drive_public_folder", [receiving.share_token, null]);
+  assert.equal(view.upload, true);
+  assert.deepEqual(view.upload_types, ["document", "pdf"]);
+  assert.equal(view.upload_max_mb, 10);
+  assert.equal(view.social_proof, false);
+});
+
+await check("o link recusa tipos e tamanhos fora da regra", async () => {
+  const t = receiving.share_token;
+  await assert.rejects(
+    () => send(t, "foto.jpg", 100, "image/jpeg"),
+    /não é aceito/,
+  );
+  await assert.rejects(
+    () => send(t, "logo.svg", 100, "image/svg+xml"),
+    /não é aceito/,
+  );
+  await assert.rejects(() => send(t, "planilha.xlsm", 100), /não é aceito/);
+  await assert.rejects(() => send(t, "pacote.zip", 100), /não é aceito/);
+  await assert.rejects(() => send(t, "relatorio.pdf.exe", 100), /não é aceito/);
+  await assert.rejects(
+    () => send(t, "relatorio.pdf", 10 * 1048576 + 1),
+    /até 10 MB/,
+  );
+});
+
+await check(
+  "o tipo guardado vem da extensão, não do que o navegador diz",
+  async () => {
+    const up = await send(
+      receiving.share_token,
+      "Proposta.DOCX",
+      500,
+      "text/html",
+    );
+    assert.equal(
+      up.content_type,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    const [row] = await sql(
+      "select status, content_type from drive_files where id=$1",
+      [up.id],
+    );
+    assert.equal(row.status, "pending", "invisível até a checagem");
+  },
+);
+
+await check("só o servidor conclui o envio, depois de conferir", async () => {
+  const t = receiving.share_token;
+  const ok = await send(t, "contrato.pdf", 1000);
+  await as(null);
+  await assert.rejects(
+    () => rows("drive_public_upload_pending", ["x".repeat(40), t, ok.id]),
+    /Sem permissão/,
+  );
+  await as(null);
+  await assert.rejects(
+    () => rpc("drive_public_upload_done", ["x".repeat(40), t, ok.id, null]),
+    /Sem permissão/,
+  );
+  await as(null);
+  const [p] = await rows("drive_public_upload_pending", [SECRET, t, ok.id]);
+  assert.equal(p.name, "contrato.pdf");
+  await as(null);
+  await rpc("drive_public_upload_done", [SECRET, t, ok.id, null]);
+  const [done] = await sql("select status from drive_files where id=$1", [
+    ok.id,
+  ]);
+  assert.equal(done.status, "ready");
+
+  const bad = await send(t, "falso.pdf", 1000);
+  await as(null);
+  await rpc("drive_public_upload_done", [SECRET, t, bad.id, "content"]);
+  assert.deepEqual(
+    await sql("select id from drive_files where id=$1", [bad.id]),
+    [],
+  );
+  const [log] = await sql(
+    "select actor_id, details->>'reason' as reason from drive_audit where file_id=$1 and action='public_upload_rejected'",
+    [bad.id],
+  );
+  assert.deepEqual(log, { actor_id: null, reason: "content" });
+});
+
+await check(
+  "salvar sem mexer no envio mantém as regras; desligar o link desliga o envio",
+  async () => {
+    await as(admin);
+    const kept = await rpc("set_drive_folder_sharing", [deliveries, true, []]);
+    assert.deepEqual(kept.upload, receiving.upload);
+    await as(admin);
+    const off = await rpc("set_drive_folder_sharing", [deliveries, false, []]);
+    assert.equal(off.upload.enabled, false);
+    assert.deepEqual(off.upload.types, ["document", "pdf"]);
+    await assert.rejects(
+      () => send(receiving.share_token, "contrato.pdf", 1000),
+      /não recebe arquivos/,
+    );
+    await as(admin);
+    const again = await rpc("set_drive_folder_sharing", [deliveries, true, []]);
+    assert.equal(
+      again.upload.enabled,
+      false,
+      "religar o link não religa o envio",
+    );
+  },
+);
+
 await db.close();
 console.log(
   `\n${passed} verificações de compartilhamento de pastas aprovadas.`,

@@ -1752,6 +1752,7 @@ function DriveTree({
                       ...f,
                       visibility: saved.visibility,
                       share_token: saved.share_token,
+                      public_upload: saved.upload?.enabled ?? f.public_upload,
                     }
                   : f,
               ),

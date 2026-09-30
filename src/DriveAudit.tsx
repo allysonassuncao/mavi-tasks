@@ -5,6 +5,7 @@ import { Empty } from "./components";
 import type { DriveAuditEntry, Snapshot } from "./types";
 import { contractProductLabel } from "./domain";
 import { DRIVE_AUDIT_PAGE, formatBytes, listDriveAudit } from "./drive";
+import { DRIVE_UPLOAD_KINDS } from "./drive-upload-types";
 
 export const auditActions: Record<string, string> = {
   upload_started: "Envio iniciado",
@@ -24,6 +25,7 @@ export const auditActions: Record<string, string> = {
   public_folder_opened: "Pasta aberta pelo link público",
   public_upload_started: "Envio iniciado pelo link público",
   public_upload_completed: "Arquivo enviado pelo link público",
+  public_upload_rejected: "Envio pelo link público descartado",
   recording_view: "Gravação da MAVI assistida",
   recording_shared: "Link público da gravação criado ou alterado",
   recording_unshared: "Link público da gravação desativado",
@@ -105,12 +107,32 @@ export function DriveAudit({
         (Array.isArray(ids) ? ids : []).map((id) => who(String(id)));
       const added = names(d.added),
         removed = names(d.removed);
+      const upload = d.upload as
+        { enabled?: boolean; types?: string[]; max_mb?: number } | undefined;
       return [
         `Link ${d.visibility === "public" ? "público ativo" : "desativado"}`,
+        ...(upload?.enabled
+          ? [
+              `recebe ${DRIVE_UPLOAD_KINDS.filter((k) =>
+                upload.types?.includes(k.kind),
+              )
+                .map((k) => k.label.toLowerCase())
+                .join(", ")} até ${upload.max_mb} MB`,
+            ]
+          : d.visibility === "public" && upload
+            ? ["não recebe arquivos"]
+            : []),
         ...(added.length ? [`incluiu ${added.join(", ")}`] : []),
         ...(removed.length ? [`removeu ${removed.join(", ")}`] : []),
       ].join(" · ");
     }
+    if (e.action === "public_upload_rejected")
+      return [
+        typeof d.size_bytes === "number" ? formatBytes(d.size_bytes) : "",
+        "o conteúdo não corresponde ao tipo do arquivo",
+      ]
+        .filter(Boolean)
+        .join(" · ");
     if (e.action === "file_renamed" || e.action === "folder_renamed")
       return `“${d.from}” → “${d.to}”`;
     if (

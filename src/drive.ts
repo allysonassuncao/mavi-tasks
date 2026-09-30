@@ -2,11 +2,13 @@ import { supabase } from "./supabase";
 import { fetchAllRows, rpc } from "./api";
 import { contractProductLabel } from "./domain";
 import { fold } from "./task-search";
+import { uploadFormat } from "./drive-upload-types";
 import type {
   DriveAuditEntry,
   DriveFile,
   DriveFolder,
   DriveFolderSharing,
+  DriveFolderUploadRules,
   DriveLocation,
   PublicFolderView,
   DriveVisibility,
@@ -322,11 +324,13 @@ export function setFolderSharing(
   folder: string,
   isPublic: boolean,
   members: string[],
+  upload?: DriveFolderUploadRules,
 ): Promise<DriveFolderSharing> {
   return rpc("set_drive_folder_sharing", {
     p_folder: folder,
     p_public: isPublic,
     p_members: members,
+    p_upload: upload ?? null,
   });
 }
 /** Folders shared directly with the signed-in person. */
@@ -362,31 +366,39 @@ export function openPublicFolderFile(
 
 /**
  * Sends a file through a public folder link that accepts uploads (no
- * sign-in): the server records it and signs the upload, the browser PUTs
- * it, and the database marks it ready.
+ * sign-in): the server checks the folder's rules and signs the upload, the
+ * browser PUTs it, and the server checks its content before it shows in the
+ * folder. `rules` only lets the page refuse early; the server decides.
  */
 export async function uploadToPublicFolder(
   token: string,
   file: File,
+  rules: { types: readonly string[]; maxMb: number },
   onProgress: (fraction: number) => void,
 ) {
-  if (file.size === 0 || file.size > DRIVE_MAX_BYTES)
-    throw Error(`${file.name}: envie arquivos não vazios de até 500 MB.`);
+  const format = uploadFormat(file.name);
+  if (!format || !rules.types.includes(format.kind))
+    throw Error(`${file.name}: este tipo de arquivo não é aceito nesta pasta.`);
+  if (file.size === 0 || file.size > rules.maxMb * 1048576)
+    throw Error(
+      `${file.name}: envie arquivos não vazios de até ${rules.maxMb} MB.`,
+    );
   const target = await driveServer<{
     file: string;
     url: string;
-    content_type: string;
+    headers: Record<string, string>;
   }>({
     action: "public-upload",
     token,
     name: file.name,
     size: file.size,
-    content_type: file.type || "application/octet-stream",
+    content_type: format.type,
   });
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", target.url);
-    xhr.setRequestHeader("Content-Type", target.content_type);
+    for (const [name, value] of Object.entries(target.headers))
+      xhr.setRequestHeader(name, value);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
@@ -398,10 +410,7 @@ export async function uploadToPublicFolder(
       reject(Error(`${file.name}: falha de conexão no envio.`));
     xhr.send(file);
   });
-  await rpc("drive_public_upload_done", {
-    p_token: token,
-    p_file: target.file,
-  });
+  await driveServer({ action: "public-upload-done", token, file: target.file });
   return target.file;
 }
 

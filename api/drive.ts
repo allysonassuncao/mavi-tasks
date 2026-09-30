@@ -59,6 +59,7 @@ export function driveEnv(
       env.VITE_SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_ANON_KEY || "",
     bucket: env.GCS_DRIVE_BUCKET || env.GCS_BUCKET || "maso_storage_main",
     credentials: credentials(),
+    workerSecret: env.AI_WORKER_SECRET?.trim() || undefined,
   };
 }
 

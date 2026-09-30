@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { SNIFF_BYTES, contentMatches } from "../src/drive-upload-types.js";
 
 /**
  * Drive server logic shared by the Vercel function (api/drive.ts) and the Vite
@@ -16,6 +17,12 @@ export type DriveEnv = {
   supabaseKey: string;
   bucket: string;
   credentials: GcsCredentials | null;
+  /**
+   * The server's secret (AI_WORKER_SECRET, the one in mavi_private.ai_config):
+   * only the server finishes a send through a public link, after checking
+   * the file's content.
+   */
+  workerSecret?: string;
 };
 type Fetch = typeof fetch;
 
@@ -172,8 +179,9 @@ export type DriveRequest =
     }
   /**
    * A file sent through a public folder link that accepts uploads
-   * (drive_folders.public_upload): the database records it and the answer
-   * is where to PUT it. No sign-in.
+   * (drive_folders.public_upload): the database checks the folder's rules
+   * and records it, and the answer is where to PUT it (exactly that size).
+   * No sign-in.
    */
   | {
       action: "public-upload";
@@ -181,7 +189,12 @@ export type DriveRequest =
       name: string;
       size: number;
       content_type: string;
-    };
+    }
+  /**
+   * After the PUT: the server reads the file's first bytes and, when they
+   * match its format, it shows in the folder; otherwise it is thrown away.
+   */
+  | { action: "public-upload-done"; token: string; file: string };
 
 export const THUMBS_PER_REQUEST = 200;
 /** Signed into the thumbnail upload: at most 1 MB, cached by the browser. */
@@ -305,16 +318,82 @@ export async function handleDrive(
     if (!created.ok) return fail(created.status, created.error);
     const file = created.data[0];
     if (!file) return fail(403, "Envio não autorizado.");
+    // The signed upload only takes the declared size.
+    const size = Number(req.size);
+    const headers = { "x-goog-content-length-range": `${size},${size}` };
     return {
       status: 200,
       body: {
         file: file.id,
         url: signGcsUrl(creds, env.bucket, file.path, "PUT", {
           contentType: file.content_type,
+          headers,
         }),
         content_type: file.content_type,
+        headers: { "Content-Type": file.content_type, ...headers },
       },
     };
+  }
+
+  if (req.action === "public-upload-done") {
+    if (!isToken(req.token) || !isId(req.file))
+      return fail(404, "Link inválido ou pasta indisponível.");
+    if (!env.workerSecret)
+      return fail(500, "O envio pelo link não está configurado no servidor.");
+    const pending = await callRpc<
+      { path: string; name: string; content_type: string; size_bytes: number }[]
+    >(env, fetchImpl, null, "drive_public_upload_pending", {
+      p_secret: env.workerSecret,
+      p_token: req.token,
+      p_file: req.file,
+    });
+    if (!pending.ok) return fail(pending.status, pending.error);
+    const file = pending.data[0];
+    if (!file) return fail(404, "Envio não encontrado.");
+    const res = await fetchImpl(
+      signGcsUrl(creds, env.bucket, file.path, "GET", {
+        expiresInSeconds: 120,
+      }),
+      { headers: { Range: `bytes=0-${SNIFF_BYTES - 1}` } },
+    ).catch(() => null);
+    // Not there yet (or storage failing): the send stays pending and can be
+    // finished again; it never shows while unchecked.
+    if (!res || !res.ok)
+      return fail(
+        409,
+        `${file.name}: o arquivo ainda não chegou. Tente de novo.`,
+      );
+    const head = new Uint8Array(await res.arrayBuffer()).subarray(
+      0,
+      SNIFF_BYTES,
+    );
+    const total = Number(res.headers.get("content-range")?.split("/")[1]);
+    const reason = !contentMatches(file.name, head)
+      ? "content"
+      : Number.isFinite(total) && total !== Number(file.size_bytes)
+        ? "size"
+        : null;
+    const done = await callRpc<null>(
+      env,
+      fetchImpl,
+      null,
+      "drive_public_upload_done",
+      {
+        p_secret: env.workerSecret,
+        p_token: req.token,
+        p_file: req.file,
+        p_rejected: reason,
+      },
+    );
+    if (!done.ok) return fail(done.status, done.error);
+    if (!reason) return { status: 200, body: { file: req.file } };
+    await fetchImpl(signGcsUrl(creds, env.bucket, file.path, "DELETE"), {
+      method: "DELETE",
+    }).catch(() => null);
+    return fail(
+      422,
+      `${file.name}: o conteúdo não é de um arquivo ${file.name.split(".").pop()?.toUpperCase()} válido e foi descartado.`,
+    );
   }
 
   if (req.action === "public" || req.action === "public-folder-file") {

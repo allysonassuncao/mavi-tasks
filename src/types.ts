@@ -451,11 +451,21 @@ export interface DriveFolder {
   /** Pasta do sistema ("brand": Drive › cliente › Marca), fora da lista de pastas. */
   system?: "brand" | null;
 }
+/**
+ * Sending files through a folder's public link (migration
+ * 20270118090000): which kinds (src/drive-upload-types.ts) and how large.
+ */
+export interface DriveFolderUploadRules {
+  enabled: boolean;
+  types: string[];
+  max_mb: number;
+}
 /** Who a folder is shared with, as the sharing dialog edits it. */
 export interface DriveFolderSharing {
   visibility: DriveVisibility;
   share_token: string;
   members: string[];
+  upload?: DriveFolderUploadRules;
 }
 /** One level of a publicly shared folder (/pasta/<token>). */
 export interface PublicFolderView {
@@ -463,6 +473,11 @@ export interface PublicFolderView {
   folder: string;
   /** The link also accepts uploads (migration 20261121090000). */
   upload?: boolean;
+  /** What the link accepts (migration 20270118090000). */
+  upload_types?: string[] | null;
+  upload_max_mb?: number | null;
+  /** A client's Social Leads social proof folder: the page asks for testimonials. */
+  social_proof?: boolean;
   /** Who shares (the company's name), for the upload page. */
   company?: string;
   /** From the shared folder down to the one shown. */

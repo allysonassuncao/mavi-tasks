@@ -8237,6 +8237,91 @@ label .input-control .ui-input {
   flex: none;
   margin-top: 2px;
 }
+/* Receiving files through the link: kinds and size (ShareFolderDialog). */
+.share-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.share-upload-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-left: 28px;
+}
+.share-upload-rules fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.share-upload-rules legend,
+.share-upload-size > span {
+  margin-bottom: 6px;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.share-upload-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+}
+.share-upload-kind {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.share-upload-kind:has([data-state="checked"]) {
+  border-color: #b9cfa3;
+  background: #f5f8f2;
+}
+.share-upload-kind > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.share-upload-kind strong {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.share-upload-kind small {
+  color: #8f9e80;
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.share-upload-size {
+  display: flex;
+  flex-direction: column;
+  max-width: 220px;
+}
+.share-upload-safe {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: #5f7a4c;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.share-upload-safe svg {
+  flex: none;
+  margin-top: 2px;
+}
+@media (max-width: 560px) {
+  .share-upload-rules {
+    margin-left: 0;
+  }
+}
 .share-link {
   display: flex;
   gap: 8px;

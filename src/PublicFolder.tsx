@@ -19,16 +19,23 @@ import {
 import type { PublicFolderView } from "./types";
 import { DriveThumb, FileTypeIcon } from "./DriveThumb";
 import { thumbAfterUpload, useDriveThumbs } from "./drive-thumbs";
+import {
+  DRIVE_UPLOAD_MAX_MB,
+  uploadAccept,
+  uploadKindsSentence,
+} from "./drive-upload-types";
 import "./social-leads-onboarding.css";
 
 /**
  * Public folder page (/pasta/<token>): works without signing in. Browses the
  * shared folder and its subfolders; files open or download through short
  * signed links, asked for on each click. When the link accepts uploads
- * (e.g. the social proof folder of a Social Leads client), whoever has it
- * sends images, videos, audio or PDFs into the shared folder. Files show as
- * thumbnail cards, as in the Drive.
+ * (turned on in the sharing dialog, or the social proof folder of a Social
+ * Leads client), whoever has it sends the kinds of file the folder accepts,
+ * up to its size, into the shared folder. Files show as thumbnail cards, as
+ * in the Drive.
  */
+const DEFAULT_UPLOAD_TYPES = ["image", "video", "audio", "pdf"];
 export function PublicFolder({ token }: { token: string }) {
   const [view, setView] = useState<PublicFolderView | null>(null);
   const [folder, setFolder] = useState<string | undefined>();
@@ -125,6 +132,9 @@ export function PublicFolder({ token }: { token: string }) {
               <PublicUpload
                 token={token}
                 company={view.company}
+                types={view.upload_types ?? DEFAULT_UPLOAD_TYPES}
+                maxMb={view.upload_max_mb ?? DRIVE_UPLOAD_MAX_MB}
+                socialProof={view.social_proof ?? false}
                 onSent={() => setReload((n) => n + 1)}
               />
             )}
@@ -221,10 +231,16 @@ export function PublicFolder({ token }: { token: string }) {
 function PublicUpload({
   token,
   company,
+  types,
+  maxMb,
+  socialProof,
   onSent,
 }: {
   token: string;
   company?: string;
+  types: string[];
+  maxMb: number;
+  socialProof: boolean;
   onSent: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
@@ -238,10 +254,14 @@ function PublicUpload({
       const key = `${Date.now()}-${file.name}`;
       setItems((l) => [...l, { key, name: file.name, progress: 0 }]);
       try {
-        const id = await uploadToPublicFolder(token, file, (progress) =>
-          setItems((l) =>
-            l.map((x) => (x.key === key ? { ...x, progress } : x)),
-          ),
+        const id = await uploadToPublicFolder(
+          token,
+          file,
+          { types, maxMb },
+          (progress) =>
+            setItems((l) =>
+              l.map((x) => (x.key === key ? { ...x, progress } : x)),
+            ),
         );
         // The thumbnail comes from the file still in this browser.
         thumbAfterUpload(id, file, token);
@@ -265,9 +285,10 @@ function PublicUpload({
   return (
     <div className="public-upload">
       <p>
-        {company ? `${company} pediu seus arquivos aqui. ` : ""}Envie fotos,
-        vídeos, áudios ou PDFs (até 500 MB cada). Depoimentos de clientes,
-        bastidores e resultados reais ajudam muito.
+        {company ? `${company} pediu seus arquivos aqui. ` : ""}Envie{" "}
+        {uploadKindsSentence(types)} (até {maxMb} MB cada).
+        {socialProof &&
+          " Depoimentos de clientes, bastidores e resultados reais ajudam muito."}
       </p>
       <button
         type="button"
@@ -289,7 +310,7 @@ function PublicUpload({
         type="file"
         multiple
         hidden
-        accept="image/*,video/*,audio/*,application/pdf"
+        accept={uploadAccept(types)}
         onChange={(e) => {
           if (e.target.files?.length) void send([...e.target.files]);
           e.target.value = "";

@@ -1,15 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Globe, Lock, Search, Users } from "lucide-react";
+import {
+  Copy,
+  Globe,
+  Lock,
+  Search,
+  ShieldCheck,
+  Upload,
+  Users,
+} from "lucide-react";
 import { Avatar, Modal } from "./components";
-import { Button, Checkbox, Input, Loading } from "./ui";
+import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
 import { fold } from "./domain";
 import { folderSharing, publicFolderUrl, setFolderSharing } from "./drive";
-import type { DriveFolder, DriveFolderSharing, Snapshot } from "./types";
+import {
+  DRIVE_UPLOAD_KINDS,
+  DRIVE_UPLOAD_SIZES,
+  uploadExtensions,
+} from "./drive-upload-types";
+import type {
+  DriveFolder,
+  DriveFolderSharing,
+  DriveFolderUploadRules,
+  Snapshot,
+} from "./types";
 
 /**
- * Shares a Drive folder (inside a product) two ways: a public, read-only
- * link, and chosen people of the company who then see it (and everything
- * inside) even without access to the client.
+ * Shares a Drive folder (inside a product) two ways: a public link, and
+ * chosen people of the company who then see it (and everything inside) even
+ * without access to the client. The link may also receive files, of the
+ * kinds and up to the size chosen here.
  */
 export function ShareFolderDialog({
   folder,
@@ -29,6 +48,11 @@ export function ShareFolderDialog({
   const [loaded, setLoaded] = useState<DriveFolderSharing | null>(null);
   const [isPublic, setIsPublic] = useState(false);
   const [members, setMembers] = useState<string[]>([]);
+  const [upload, setUpload] = useState<DriveFolderUploadRules>({
+    enabled: false,
+    types: ["image", "video", "audio", "pdf"],
+    max_mb: 500,
+  });
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -38,6 +62,7 @@ export function ShareFolderDialog({
         setLoaded(s);
         setIsPublic(s.visibility === "public");
         setMembers(s.members);
+        if (s.upload) setUpload(s.upload);
       })
       .catch((e) => setError((e as Error).message));
   }, [folder.id]);
@@ -69,11 +94,32 @@ export function ShareFolderDialog({
       ? publicFolderUrl(loaded.share_token)
       : "";
 
+  const toggleKind = (kind: string) =>
+    setUpload((u) => ({
+      ...u,
+      types: u.types.includes(kind)
+        ? u.types.filter((k) => k !== kind)
+        : [...u.types, kind],
+    }));
+  // The size list always has the saved value, even one set elsewhere.
+  const sizes = [...new Set([...DRIVE_UPLOAD_SIZES, upload.max_mb])].sort(
+    (a, b) => a - b,
+  );
+
   async function save() {
+    if (isPublic && upload.enabled && !upload.types.length) {
+      setError("Escolha que tipos de arquivo o link aceita.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const saved = await setFolderSharing(folder.id, isPublic, members);
+      const saved = await setFolderSharing(
+        folder.id,
+        isPublic,
+        members,
+        upload,
+      );
       setLoaded(saved);
       onSaved(saved);
       if (saved.visibility === "public" && loaded?.visibility !== "public") {
@@ -114,8 +160,11 @@ export function ShareFolderDialog({
                   </strong>
                   <small>
                     Qualquer pessoa com o link vê e baixa os arquivos desta
-                    pasta e das subpastas, sem entrar no sistema. Ninguém envia
-                    nem altera nada.
+                    pasta e das subpastas, sem entrar no sistema. Ninguém altera
+                    nada
+                    {isPublic && upload.enabled
+                      ? "; o envio de arquivos segue as regras abaixo."
+                      : " nem envia arquivos."}
                   </small>
                 </span>
               </label>
@@ -145,6 +194,72 @@ export function ShareFolderDialog({
                 <small className="share-hint">
                   Ao salvar, o link atual deixa de funcionar para sempre.
                 </small>
+              )}
+              {isPublic && (
+                <div className="share-upload">
+                  <label className="share-toggle">
+                    <Checkbox
+                      checked={upload.enabled}
+                      onCheckedChange={(v) =>
+                        setUpload((u) => ({ ...u, enabled: v === true }))
+                      }
+                    />
+                    <span>
+                      <strong>
+                        <Upload size={15} /> Receber arquivos pelo link
+                      </strong>
+                      <small>
+                        Quem tem o link envia arquivos para esta pasta, sem
+                        entrar no sistema. Cada arquivo só aparece depois que o
+                        conteúdo é conferido.
+                      </small>
+                    </span>
+                  </label>
+                  {upload.enabled && (
+                    <div className="share-upload-rules">
+                      <fieldset>
+                        <legend>Tipos aceitos</legend>
+                        <div className="share-upload-kinds">
+                          {DRIVE_UPLOAD_KINDS.map((k) => (
+                            <label key={k.kind} className="share-upload-kind">
+                              <Checkbox
+                                checked={upload.types.includes(k.kind)}
+                                onCheckedChange={() => toggleKind(k.kind)}
+                              />
+                              <span>
+                                <strong>{k.label}</strong>
+                                <small>{uploadExtensions(k.kind)}</small>
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      </fieldset>
+                      <div className="share-upload-size">
+                        <span>Tamanho máximo por arquivo</span>
+                        <Select
+                          aria-label="Tamanho máximo por arquivo"
+                          value={String(upload.max_mb)}
+                          onValueChange={(v) =>
+                            setUpload((u) => ({ ...u, max_mb: Number(v) }))
+                          }
+                        >
+                          {sizes.map((mb) => (
+                            <SelectOption key={mb} value={String(mb)}>
+                              {`${mb} MB`}
+                            </SelectOption>
+                          ))}
+                        </Select>
+                      </div>
+                      <p className="share-upload-safe" role="note">
+                        <ShieldCheck size={14} /> Por segurança, programas,
+                        arquivos compactados (ZIP, RAR), páginas HTML, SVG e
+                        arquivos do Office com macros nunca são aceitos. Um
+                        arquivo com nome de um tipo e conteúdo de outro é
+                        descartado.
+                      </p>
+                    </div>
+                  )}
+                </div>
               )}
             </section>
 
