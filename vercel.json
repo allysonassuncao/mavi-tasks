@@ -9,7 +9,6 @@
     "api/social-leads.ts": { "maxDuration": 300 },
     "api/render-art.ts": {
       "maxDuration": 90,
-      "memory": 2048,
       "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
     }
   },

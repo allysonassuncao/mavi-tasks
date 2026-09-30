@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { callRpc, signGcsUrl } from "./_drive.js";
 import type { ToolOutput, ToolSpec } from "./_ai-llm.js";
 import { add, type PowerKit } from "./_ai-powers.js";
-import { renderArt, type ArtAsset, type RenderInput } from "./_art-render.js";
+import type { ArtAsset, RenderInput } from "./_art-render.js";
 import { appOrigin } from "./_origin.js";
 import type { ImageArtifact, ImageSize } from "../src/mavi-artifacts.js";
 
@@ -211,6 +211,15 @@ const aspect = (w: number, h: number): ImageSize =>
   w / h > 1.15 ? "landscape" : h / w > 1.15 ? "portrait" : "square";
 const cssString = (s: string) => s.replace(/["\\\n]/g, "");
 
+/**
+ * O desenho aqui mesmo (só no computador). O caminho vai numa variável de
+ * propósito: assim o empacotador da Vercel não leva o Chromium (70 MB) para a
+ * função /api/drive, que atende todo o resto; lá, quem desenha é a
+ * /api/render-art.
+ */
+export const localRenderer = (path = "./_art-render.ts"): Promise<typeof import("./_art-render.js")> =>
+  import(/* @vite-ignore */ path);
+
 /** Onde desenhar: aqui mesmo (computador) ou a função /api/render-art (Vercel). */
 async function draw(
   kit: PowerKit,
@@ -220,6 +229,7 @@ async function draw(
   const { ctx } = kit;
   if (kit.env.renderArt) return kit.env.renderArt(input, put);
   if (!process.env.VERCEL) {
+    const { renderArt } = await localRenderer();
     const r = await renderArt(input, ctx.fetch);
     const saved = await ctx.fetch(put, {
       method: "PUT",
