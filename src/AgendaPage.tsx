@@ -21,6 +21,7 @@ import {
   MapPin,
   Menu,
   Pencil,
+  PlayCircle,
   Plus,
   RefreshCw,
   Repeat2,
@@ -81,6 +82,12 @@ import {
   maviInvite,
   meetingLink,
 } from "./mavi-bot";
+import {
+  eventRecordings,
+  recordingLink,
+  type EventRecording,
+} from "./meetings";
+import { navigate } from "./router";
 
 type Notify = (message: string) => void;
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -131,11 +138,14 @@ const resultMessages: Record<string, string> = {
  * connects their own account; nobody sees anyone else's calendar here.
  */
 export function AgendaPage({
+  company,
   data,
   demo,
   email,
   notify,
 }: {
+  /** The agency open (the recordings of its meetings). */
+  company: string;
   data: Snapshot;
   demo: boolean;
   email: string;
@@ -225,6 +235,7 @@ export function AgendaPage({
   return (
     <AgendaView
       api={api}
+      company={company}
       data={data}
       demo={demo}
       account={connection.account_email}
@@ -262,6 +273,7 @@ function lookOf(e: AgendaEvent, now: Date): Look {
 
 function AgendaView({
   api,
+  company,
   data,
   demo,
   account,
@@ -270,6 +282,7 @@ function AgendaView({
   onDisconnected,
 }: {
   api: AgendaApi;
+  company: string;
   data: Snapshot;
   demo: boolean;
   account: string;
@@ -608,6 +621,8 @@ function AgendaView({
             dialog.event.title,
             plainText(dialog.event.description ?? ""),
           )}
+          clients={data.clients}
+          company={demo ? "" : company}
           onAddMavi={addMavi}
           onClose={() => setDialog(null)}
           onEdit={() => setDialog({ mode: "edit", event: dialog.event })}
@@ -1313,11 +1328,49 @@ function ScopeChoice({
   );
 }
 
+/**
+ * Opens the recording in Drive › Gravações da MAVI, in the app (a new tab
+ * with Ctrl/Cmd or the middle button, like any link).
+ */
+function RecordingButton({
+  recording,
+  label,
+  onOpen,
+}: {
+  recording: EventRecording;
+  label: string;
+  onOpen: () => void;
+}) {
+  const href = recordingLink(recording.id);
+  return (
+    <a
+      className="btn secondary"
+      href={href}
+      title="Abrir a gravação e a transcrição desta reunião no Drive"
+      onClick={(e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+          return;
+        e.preventDefault();
+        onOpen();
+        const url = new URL(href);
+        navigate(url.pathname + url.search);
+      }}
+    >
+      <PlayCircle size={16} /> {label}
+    </a>
+  );
+}
+
+/** "Reunião interna": the person said the meeting has no client. */
+const INTERNAL = "__internal";
+
 function EventDetails({
   event,
   calendar,
   color,
-  client,
+  client: found,
+  clients,
+  company,
   onAddMavi,
   onClose,
   onEdit,
@@ -1328,6 +1381,10 @@ function EventDetails({
   color: string;
   /** The client the event is about, found in its title or description. */
   client: Snapshot["clients"][number] | null;
+  /** To ask for the client when the event doesn't say which one it is. */
+  clients: Snapshot["clients"];
+  /** Where to look for the meeting's recording (empty: don't). */
+  company: string;
   onAddMavi: (
     link: string,
     client: Snapshot["clients"][number] | null,
@@ -1340,13 +1397,56 @@ function EventDetails({
   const [busy, setBusy] = useState(false);
   const [mavi, setMavi] = useState<"idle" | "sending" | "sent">("idle");
   const [maviError, setMaviError] = useState("");
+  // Neither the title nor the description names the client (or cites its
+  // code): the person says which one before the invitation goes out.
+  const [asking, setAsking] = useState(false);
+  const [pickedId, setPickedId] = useState("");
+  const active = clients
+    .filter((c) => !c.archived)
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const picked = active.find((c) => c.id === pickedId) ?? null;
+  const client = found ?? picked;
+  // The MAVI's recording of this meeting (Drive › Gravações da MAVI), once
+  // the recorder saved it: new ones arrive by the Realtime notice.
+  const [recordings, setRecordings] = useState<EventRecording[]>([]);
+  useEffect(() => {
+    const link = event.meetUrl;
+    if (!company || !link) return;
+    let alive = true;
+    const load = () =>
+      eventRecordings(company, link, event.start, event.end)
+        .then((list) => alive && setRecordings(list))
+        .catch(() => {});
+    void load();
+    const onNotice = (e: Event) => {
+      const d = (e as CustomEvent).detail ?? {};
+      if (!d.table || d.table === "meeting_recordings") void load();
+    };
+    window.addEventListener("mavi:meetings", onNotice);
+    return () => {
+      alive = false;
+      window.removeEventListener("mavi:meetings", onNotice);
+    };
+  }, [company, event.meetUrl, event.start, event.end]);
   async function addMavi() {
     if (!event.meetUrl) return;
+    if (!found && !asking) {
+      setAsking(true);
+      setMaviError("");
+      return;
+    }
+    if (!found && !pickedId) {
+      setMaviError(
+        "Escolha o cliente desta reunião ou marque como reunião interna.",
+      );
+      return;
+    }
     setMavi("sending");
     setMaviError("");
     try {
       await onAddMavi(event.meetUrl, client);
       setMavi("sent");
+      setAsking(false);
     } catch (err) {
       setMavi("idle");
       setMaviError((err as Error).message);
@@ -1389,24 +1489,94 @@ function EventDetails({
               >
                 <Video size={16} /> Entrar com Google Meet
               </a>
-              <Button
-                className="btn secondary"
-                onClick={() => void addMavi()}
-                loading={mavi === "sending"}
-                disabled={mavi === "sent"}
-                title="A MAVI entra na chamada como participante, grava e transcreve a reunião"
-              >
-                {mavi === "sent" ? <Check size={16} /> : <Bot size={16} />}
-                {mavi === "sent" ? "MAVI convidada" : "Adicionar MAVI"}
-              </Button>
+              {!asking && (
+                <Button
+                  className="btn secondary"
+                  onClick={() => void addMavi()}
+                  loading={mavi === "sending"}
+                  disabled={mavi === "sent"}
+                  title="A MAVI entra na chamada como participante, grava e transcreve a reunião"
+                >
+                  {mavi === "sent" ? <Check size={16} /> : <Bot size={16} />}
+                  {mavi === "sent" ? "MAVI convidada" : "Adicionar MAVI"}
+                </Button>
+              )}
+              {recordings.map((r) => (
+                <RecordingButton
+                  key={r.id}
+                  recording={r}
+                  // Invited twice: the time tells the recordings apart.
+                  label={
+                    recordings.length > 1
+                      ? `Ver gravação das ${new Date(r.recorded_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`
+                      : "Ver gravação"
+                  }
+                  onOpen={onClose}
+                />
+              ))}
             </div>
-            <small className="muted">
-              {mavi === "sent"
-                ? "Convite enviado. A MAVI pode levar até 2 minutos para entrar na chamada."
-                : "A MAVI entra na chamada, grava e transcreve a reunião."}
-              {client ? ` Cliente: ${client.name}.` : ""}
-            </small>
-            {maviError && (
+            {asking ? (
+              <div className="agenda-mavi-client">
+                <label>
+                  De qual cliente é esta reunião?
+                  <Select
+                    value={pickedId}
+                    onValueChange={(v) => {
+                      setPickedId(v);
+                      setMaviError("");
+                    }}
+                    disabled={mavi === "sending"}
+                  >
+                    <SelectOption value="">Escolha o cliente</SelectOption>
+                    <SelectOption value={INTERNAL}>
+                      Reunião interna (sem cliente)
+                    </SelectOption>
+                    {active.map((c) => (
+                      <SelectOption key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectOption>
+                    ))}
+                  </Select>
+                </label>
+                <small className="muted">
+                  O título e a descrição do evento não dizem o cliente. Com ele,
+                  a gravação e a transcrição ficam ligadas a ele.
+                </small>
+                {maviError && (
+                  <p className="form-error" role="alert">
+                    {maviError}
+                  </p>
+                )}
+                <div className="agenda-mavi-client-actions">
+                  <Button
+                    className="btn secondary"
+                    onClick={() => {
+                      setAsking(false);
+                      setPickedId("");
+                      setMaviError("");
+                    }}
+                    disabled={mavi === "sending"}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    className="btn primary"
+                    onClick={() => void addMavi()}
+                    loading={mavi === "sending"}
+                  >
+                    <Bot size={16} /> Convidar MAVI
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <small className="muted">
+                {mavi === "sent"
+                  ? "Convite enviado. A MAVI pode levar até 2 minutos para entrar na chamada."
+                  : "A MAVI entra na chamada, grava e transcreve a reunião."}
+                {client ? ` Cliente: ${client.name}.` : ""}
+              </small>
+            )}
+            {!asking && maviError && (
               <p className="form-error" role="alert">
                 {maviError}
               </p>

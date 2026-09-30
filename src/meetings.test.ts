@@ -4,6 +4,8 @@ import { hidePartial } from "./AiChat";
 import {
   answerPieces,
   deadlineDate,
+  eventRecordingWindow,
+  meetLinkPattern,
   meetingKind,
   segmentAt,
   stepDescription,
@@ -104,5 +106,37 @@ describe("resposta digitando", () => {
     expect(hidePartial("até **sexta")).toBe("até ");
     expect(hidePartial("até *")).toBe("até ");
     expect(hidePartial("pronto [S1].")).toBe("pronto [S1].");
+  });
+});
+
+describe("gravação de um evento da Agenda", () => {
+  it("reconhece o link do Meet de qualquer jeito que foi salvo", () => {
+    const pattern = "%meet.google.com/abc-defg-hij%";
+    expect(meetLinkPattern("https://meet.google.com/abc-defg-hij")).toBe(
+      pattern,
+    );
+    expect(
+      meetLinkPattern(" meet.google.com/ABC-DEFG-HIJ?authuser=1&hs=122 "),
+    ).toBe(pattern);
+    expect(meetLinkPattern("https://meet.google.com/lookup/abc-defg-hij")).toBe(
+      pattern,
+    );
+  });
+
+  it("usa endereço e caminho nos outros serviços, sem curingas", () => {
+    expect(meetLinkPattern("https://www.zoom.us/j/123_45%6?pwd=segredo")).toBe(
+      "%zoom.us/j/123\\_45\\%6%",
+    );
+    expect(meetLinkPattern("")).toBeNull();
+    expect(meetLinkPattern("reunião")).toBeNull();
+  });
+
+  it("procura de 30 min antes do início a 30 min depois do fim", () => {
+    const { from, to } = eventRecordingWindow(
+      "2026-10-01T14:00:00-03:00",
+      "2026-10-01T15:30:00-03:00",
+    );
+    expect(from.toISOString()).toBe("2026-10-01T16:30:00.000Z");
+    expect(to.toISOString()).toBe("2026-10-01T19:00:00.000Z");
   });
 });

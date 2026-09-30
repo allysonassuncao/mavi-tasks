@@ -126,6 +126,73 @@ export async function searchMeetingSegments(
   }));
 }
 
+// ------------------------------------------------------------ agenda
+/**
+ * What identifies a call link in meet_link, however it was written: the
+ * Google Meet code ("abc-defg-hij", with or without https, ?authuser…) or,
+ * for other services, the host and path. An ilike pattern.
+ */
+export function meetLinkPattern(link: string): string | null {
+  const text = link.trim().toLowerCase();
+  const code = text.match(
+    /meet\.google\.com\/(?:lookup\/)?([a-z]{3}-[a-z]{4}-[a-z]{3})\b/,
+  )?.[1];
+  if (code) return `%meet.google.com/${code}%`;
+  try {
+    const url = new URL(/^https?:\/\//.test(text) ? text : `https://${text}`);
+    const path = `${url.hostname.replace(/^www\./, "")}${url.pathname.replace(/\/+$/, "")}`;
+    if (!url.hostname.includes(".")) return null;
+    return `%${path.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * When the recording of an event may have started: from 30 minutes before
+ * it to 30 minutes after it ends (the MAVI joins late or the call runs
+ * over). Recurring meetings share the link; the time tells them apart.
+ */
+export function eventRecordingWindow(start: string, end: string) {
+  const margin = 30 * 60_000;
+  const from = new Date(start).getTime() - margin;
+  const to = Math.max(new Date(end).getTime(), from + margin) + margin;
+  return { from: new Date(from), to: new Date(to) };
+}
+
+export type EventRecording = Pick<
+  MeetingRecording,
+  "id" | "client_id" | "title" | "recorded_at"
+>;
+/**
+ * The recordings of a calendar event the person can open (the Drive rule,
+ * by RLS): same call link, recorded during it. Usually one; two when the
+ * MAVI was invited twice.
+ */
+export async function eventRecordings(
+  company: string,
+  link: string,
+  start: string,
+  end: string,
+): Promise<EventRecording[]> {
+  const pattern = meetLinkPattern(link);
+  if (!supabase || !company || !pattern) return [];
+  const { from, to } = eventRecordingWindow(start, end);
+  // Nothing recorded yet: the meeting hasn't started.
+  if (from.getTime() > Date.now()) return [];
+  const { data, error } = await supabase
+    .from("meeting_recordings")
+    .select("id,client_id,title,recorded_at")
+    .eq("company_id", company)
+    .gte("recorded_at", from.toISOString())
+    .lte("recorded_at", to.toISOString())
+    .ilike("meet_link", pattern)
+    .order("recorded_at")
+    .limit(5);
+  if (error) throw error;
+  return (data ?? []) as EventRecording[];
+}
+
 export async function meetingVideoUrl(recording: string) {
   const { url } = await driveServer<{ url: string }>({
     action: "meeting-video",

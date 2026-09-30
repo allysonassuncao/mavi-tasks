@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MAVI_WEBHOOK,
+  clientCodes,
   clientFromEvent,
   inviteMavi,
   maviInvite,
@@ -22,6 +23,10 @@ const clients = [
   client("3", "Praça"),
   client("4", "Sol", true),
   client("5", "BR"),
+  client("6", "2745 - Facilita"),
+  client("7", "4316"),
+  client("8", "4316 - Daselis antigo"),
+  client("9", "9999 - Arquivado", true),
 ];
 
 describe("Adicionar MAVI", () => {
@@ -55,6 +60,23 @@ describe("Adicionar MAVI", () => {
     expect(clientFromEvent(clients, "Auroras e estúdios")).toBeNull();
     expect(clientFromEvent(clients, "Reunião no Sol")).toBeNull();
     expect(clientFromEvent(clients, "Time BR")).toBeNull();
+  });
+
+  it("lê os códigos de 3 a 5 dígitos do texto", () => {
+    expect(clientCodes("(SME) 4316 - Daselis")).toEqual(["4316"]);
+    expect(clientCodes("#232 Marcos às 14:30")).toEqual(["232"]);
+    expect(clientCodes("123456 e 12 não; 2745-X sim")).toEqual(["2745"]);
+  });
+
+  it("identifica o cliente pelo código no título ou na descrição", () => {
+    expect(clientFromEvent(clients, "Alinhamento 2745")?.id).toBe("6");
+    // Uma data (2026) não é cliente; segue para o próximo código.
+    expect(clientFromEvent(clients, "30/09/2026 · 2745")?.id).toBe("6");
+    // Quem se chama só pelo código vence.
+    expect(clientFromEvent(clients, "(SME) 4316")?.id).toBe("7");
+    expect(clientFromEvent(clients, "Reunião", "Cliente #2745")?.id).toBe("6");
+    expect(clientFromEvent(clients, "Reunião 9999")).toBeNull();
+    expect(clientFromEvent(clients, "Reunião 27450")).toBeNull();
   });
 
   it("monta o payload com o cliente, quando há", () => {

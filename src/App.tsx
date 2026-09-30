@@ -3854,6 +3854,7 @@ export default function App() {
                 <Suspense fallback={<Loading variant="calendar" />}>
                   <AgendaPage
                     key={company}
+                    company={company}
                     data={catalogData}
                     demo={demo}
                     email={session?.user.email ?? member?.email ?? ""}

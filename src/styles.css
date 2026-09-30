@@ -11697,6 +11697,29 @@ label .input-control .ui-input {
   flex-wrap: wrap;
   gap: 8px;
 }
+/* The client, asked for when the event doesn't say which one it is. */
+.agenda-mavi-client {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e0e8d7;
+  border-radius: 10px;
+  background: #f5f9ef;
+}
+.agenda-mavi-client label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+.agenda-mavi-client small {
+  font-size: 0.72rem;
+}
+.agenda-mavi-client-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .mavi-intro {
   display: flex;
   gap: 12px;

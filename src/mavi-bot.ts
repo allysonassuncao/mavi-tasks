@@ -37,25 +37,45 @@ const words = (text: string) =>
     .trim()} `;
 
 /**
+ * The client codes a text cites: every number of 3 to 5 digits standing on
+ * its own ("(SME) 4316 - Daselis", "#232 Marcos"), in order.
+ */
+export function clientCodes(text: string): string[] {
+  return [...text.matchAll(/(?:^|\D)(\d{3,5})(?!\d)/g)].map((m) => m[1]);
+}
+
+/**
  * The client an event is about, from its title (first) or description: the
  * active client whose whole name appears in it — the longest one when
- * several do ("Açaí da Praça" over "Praça"). Names under 3 letters are
- * ignored, too likely to match by chance.
+ * several do ("Açaí da Praça" over "Praça") — or, failing that, whose code
+ * it cites (the client named "2745" or "2745 - Facilita"). Names under 3
+ * letters are ignored, too likely to match by chance.
  */
 export function clientFromEvent(
   clients: Client[],
   title: string,
   description = "",
 ): Client | null {
-  const names = clients
-    .filter((c) => !c.archived)
+  const active = clients.filter((c) => !c.archived);
+  const names = active
     .map((c) => ({ client: c, name: words(c.name) }))
     .filter((c) => c.name.trim().length >= 3)
     .sort((a, b) => b.name.length - a.name.length);
+  const byCode = new Map<string, Client>();
+  for (const c of active) {
+    const code = c.name.trim().match(/^(\d{3,5})(?!\d)/)?.[1];
+    // The client named just by the code wins over "2745 - …".
+    if (code && (!byCode.has(code) || c.name.trim() === code))
+      byCode.set(code, c);
+  }
   for (const text of [title, description]) {
     const haystack = words(text);
     const hit = names.find((c) => haystack.includes(c.name));
     if (hit) return hit.client;
+    for (const code of clientCodes(text)) {
+      const client = byCode.get(code);
+      if (client) return client;
+    }
   }
   return null;
 }
