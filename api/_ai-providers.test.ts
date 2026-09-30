@@ -469,6 +469,24 @@ describe("qual IA responde", () => {
     expect(meetings.status).toBe(200);
   });
 
+  it("Whatsapp › Perguntar ao histórico: regra própria e as conversas dos grupos como foco", async () => {
+    const { fetchImpl, calls } = database(routes(null, ["assistant"]));
+    const llm = vi.fn(answer);
+    const res = await handleAi(
+      { action: "ai-ask", company, scope: { client, module: "whatsapp" }, question: "O que o cliente pediu?" },
+      token,
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+    );
+    // A bolinha desligada não desliga a pasta Whatsapp (vale o acesso ao cliente).
+    expect(res.status).toBe(200);
+    const resolve = calls.find((c) => c.url.includes("ai_resolve_route"))!;
+    expect(resolve.body.p_feature).toBe("whatsapp_history");
+    expect(llm.mock.calls[0][0].context).toContain("pasta Whatsapp do cliente");
+    const log = calls.find((c) => c.url.includes("ai_log_usage"))!;
+    expect(log.body.p_module).toBe("whatsapp");
+  });
+
   it("sem AI_PROVIDER_KEY no servidor: avisa o que falta", () => {
     expect(() => routeConfig({ providerKey: null }, route as any)).toThrow(
       /AI_PROVIDER_KEY/,

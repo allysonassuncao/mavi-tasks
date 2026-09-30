@@ -52,6 +52,7 @@ const TOOL_LABELS: Record<string, string> = {
 const MODULE_LABELS: Record<string, string> = {
   assistant: "Assistente (MAVI)",
   meetings: "Gravações da MAVI",
+  whatsapp: "Grupos do Whatsapp",
   index: "Indexação da base",
   mcp: "MAVI em apps externos (MCP)",
   tasks: "Assistente MAVI nas tarefas",

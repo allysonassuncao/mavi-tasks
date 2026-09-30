@@ -24,12 +24,15 @@ import {
   Plus,
   Search,
   Sparkles,
+  X,
 } from "lucide-react";
 import { Button, Input, Loading } from "./ui";
 import { Empty } from "./components";
 import { DateInput } from "./DateInput";
 import { FileViewer, type ViewerFile } from "./FileViewer";
 import { WhatsappMedia } from "./WhatsappMedia";
+import { AiChat, AnswerText } from "./AiChat";
+import { askAi, openAiSource } from "./ai";
 import { canCreateTaskIn } from "./domain";
 import type { FormPreset } from "./forms";
 import type { Snapshot } from "./types";
@@ -55,6 +58,7 @@ import {
   timeLabel,
   visibleMessages,
   whatsappDay,
+  whatsappMessageById,
   whatsappLink,
   viewerFile,
   draftWhatsappTask,
@@ -63,6 +67,13 @@ import {
   type WhatsappGroup,
   type WhatsappMessage,
 } from "./whatsapp";
+
+const HISTORY_SUGGESTIONS = [
+  "O que o cliente pediu ou cobrou nos últimos dias?",
+  "Teve alguma reclamação ou sinal de insatisfação nos grupos?",
+  "O que foi combinado ou aprovado com o cliente pelo Whatsapp?",
+  "Quais pendências ficaram em aberto nas conversas?",
+];
 
 type Props = {
   company: string;
@@ -99,6 +110,7 @@ export function WhatsappFolder({
   );
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<WhatsappMessage[] | null>(null);
+  const [asking, setAsking] = useState(false);
 
   useEffect(() => {
     setGroups(null);
@@ -195,6 +207,14 @@ export function WhatsappFolder({
             <ImageIcon size={15} /> Mídias
           </button>
         </div>
+        <button
+          type="button"
+          className={`btn ${asking ? "primary" : "secondary"}`}
+          aria-expanded={asking}
+          onClick={() => setAsking((v) => !v)}
+        >
+          <Sparkles size={15} /> Perguntar ao histórico
+        </button>
       </div>
       {/* As mensagens chegam da Uazapi a cada 2 horas: quem lê precisa
           saber que a conversa pode estar atrás do WhatsApp. */}
@@ -212,6 +232,39 @@ export function WhatsappFolder({
         <p className="form-error" role="alert">
           {error}
         </p>
+      )}
+      {asking && (
+        <section
+          className="panel meetings-ask"
+          aria-label="Perguntar à MAVI sobre todas as conversas"
+        >
+          <header>
+            <strong>
+              <Sparkles size={15} /> Perguntar à MAVI sobre os grupos de{" "}
+              {clientName}
+            </strong>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Fechar"
+              onClick={() => setAsking(false)}
+            >
+              <X size={15} />
+            </button>
+          </header>
+          <HistoryChat
+            company={company}
+            client={client}
+            onOpen={(id) =>
+              whatsappMessageById(id)
+                .then((m) => {
+                  if (!m) throw Error("Mensagem não encontrada ou sem acesso.");
+                  openMessage(m);
+                })
+                .catch((e) => setError((e as Error).message))
+            }
+          />
+        </section>
       )}
       {view === "media" ? (
         <WhatsappMedia
@@ -296,6 +349,45 @@ export function WhatsappFolder({
         </div>
       )}
     </div>
+  );
+}
+
+function HistoryChat({
+  company,
+  client,
+  onOpen,
+}: {
+  company: string;
+  client: string;
+  onOpen: (message: string) => void;
+}) {
+  // A conversa fica salva (aparece também no histórico da MAVI).
+  const conversation = useRef<string | null>(null);
+  return (
+    <AiChat
+      intro="A MAVI busca nas mensagens de todos os grupos deste cliente (com os áudios transcritos e o texto dos documentos) e mostra de onde tirou cada informação. Clique na fonte para abrir a conversa na mensagem. Imagens e vídeos ela só sabe que foram enviados."
+      placeholder="Pergunte sobre as conversas deste cliente"
+      suggestions={HISTORY_SUGGESTIONS}
+      send={(q, _history, handlers) =>
+        askAi(
+          company,
+          { client, module: "whatsapp" },
+          q,
+          conversation.current,
+          handlers,
+        )
+      }
+      onAnswer={(a) => (conversation.current = a.conversation)}
+      renderAnswer={(text, sources) => (
+        <AnswerText
+          text={text}
+          sources={sources}
+          onSource={(s) =>
+            s.type === "whatsapp" ? onOpen(s.id) : openAiSource(s)
+          }
+        />
+      )}
+    />
   );
 }
 

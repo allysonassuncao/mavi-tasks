@@ -511,6 +511,10 @@ export async function buildContext(
     lines.push(
       "A pessoa está na pasta Gravações da MAVI: reuniões costumam ser o foco, mas use também as tarefas quando ajudar.",
     );
+  if (scope.module === "whatsapp")
+    lines.push(
+      'A pessoa está na pasta Whatsapp do cliente: as conversas dos grupos são o foco. Busque primeiro com search_knowledge e types ["whatsapp"] (com from e to quando a pergunta tiver período) e use as reuniões e as tarefas só quando ajudarem. As mensagens chegam a cada 2 horas: as das últimas horas podem ainda não estar no sistema.',
+    );
   return {
     context: lines.filter(Boolean).join("\n"),
     members: memberMap,
@@ -608,7 +612,13 @@ async function ask(
   const onPage = body.surface === "page";
   // A MAVI do módulo e a da bolinha têm regras (modelo e esforço) próprias no painel.
   const feature =
-    scope.module === "meetings" ? "meetings_history" : onPage ? "mavi_page" : "assistant";
+    scope.module === "meetings"
+      ? "meetings_history"
+      : scope.module === "whatsapp"
+        ? "whatsapp_history"
+        : onPage
+          ? "mavi_page"
+          : "assistant";
   const noMcp: McpCatalog = { servers: [], missing: [] };
   const [base, limits, history, route, powerList, catalog, mcpCatalog, efforts] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),

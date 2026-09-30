@@ -198,6 +198,7 @@ export type AiFeature =
   | "assistant"
   | "meetings_history"
   | "meetings_ask"
+  | "whatsapp_history"
   | "whatsapp_task"
   | "social_leads_plan"
   | "social_leads_adjust"
@@ -337,6 +338,13 @@ export const FEATURES: FeatureInfo[] = [
     label: "Perguntar a uma reunião",
     conversation: true,
     env: "MEETINGS_MODEL",
+  },
+  {
+    id: "whatsapp_history",
+    group: "WhatsApp",
+    label: "Perguntar ao histórico dos grupos",
+    conversation: true,
+    env: "AI_MODEL",
   },
   {
     id: "whatsapp_task",
@@ -513,6 +521,7 @@ export function serverModel(
     case "assistant":
     case "mavi_page":
     case "meetings_history":
+    case "whatsapp_history":
       return env.AI_MODEL || fallback;
     case "web_search":
       return env.AI_MODEL || fallback;

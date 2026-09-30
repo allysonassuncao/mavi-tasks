@@ -187,3 +187,18 @@ describe("imagens em Quem usa qual modelo", () => {
     expect(aiTab("poderes")).toBe("poderes");
   });
 });
+
+describe("Whatsapp › Perguntar ao histórico em Quem usa qual modelo", () => {
+  it("funcionalidade de conversa: vale a regra por cliente e, sem regra, o padrão da empresa", () => {
+    const f = FEATURES.find((x) => x.id === "whatsapp_history")!;
+    expect(f).toMatchObject({ group: "WhatsApp", conversation: true, env: "AI_MODEL" });
+    expect(serverModel("whatsapp_history", { AI_MODEL: "claude-fable-5-1" })).toBe("claude-fable-5-1");
+    const routes: AiRoute[] = [
+      { id: "r1", type: "company", scope_id: null, provider_id: "p1", model: "claude-opus-5-5" },
+      { id: "r2", type: "client", scope_id: "c1", provider_id: "p1", model: "gpt-x" },
+    ];
+    const active = new Set(["p1"]);
+    expect(pickRoute(routes, { feature: "whatsapp_history", client: "c1" }, active)?.id).toBe("r2");
+    expect(pickRoute(routes, { feature: "whatsapp_history" }, active)?.id).toBe("r1");
+  });
+});

@@ -1059,7 +1059,7 @@ export const EFFORT_OPTIONS: { id: string; label: string }[] = [
   { id: "max", label: "Máximo · mais lento e caro" },
 ];
 /** As funcionalidades de conversa em que o esforço muda a resposta. */
-export const EFFORT_FEATURES = new Set(["assistant", "mavi_page", "meetings_history", "canvas_writer", "web_search"]);
+export const EFFORT_FEATURES = new Set(["assistant", "mavi_page", "meetings_history", "whatsapp_history", "canvas_writer", "web_search"]);
 const effortName = (id: string | undefined) =>
   EFFORT_OPTIONS.find((o) => o.id === id)?.label.split(" · ")[0] ?? "";
 
