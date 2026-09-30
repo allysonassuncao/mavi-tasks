@@ -45,6 +45,13 @@ export type AgentRequest = {
   maxRounds?: number;
   /** O contexto é longo e se repete (a transcrição de uma reunião): fica em cache. */
   cacheContext?: boolean;
+  /**
+   * Conversa com várias rodadas (a MAVI): a conversa inteira fica em cache e
+   * cada rodada de ferramentas (e a próxima pergunta) lê do cache.
+   */
+  cacheConversation?: boolean;
+  /** Agrupa o cache no provedor (OpenAI: prompt_cache_key), ex.: empresa + pessoa. */
+  cacheKey?: string;
   /** Quanto raciocinar (padrão "medium"); o copiloto usa "low" para responder rápido. */
   effort?: "low" | "medium" | "high";
   /** Teto da resposta (padrão 32.000). */
@@ -231,6 +238,8 @@ export function anthropicAdapter(
             },
           ],
           ...(tools.length ? { tools } : {}),
+          // Cache automático no fim da conversa: o ponto anda a cada rodada.
+          ...(request.cacheConversation ? { cache_control: { type: "ephemeral" as const } } : {}),
           // Depois do limite de rodadas, só a resposta.
           ...(last && tools.length
             ? { tool_choice: { type: "none" as const } }

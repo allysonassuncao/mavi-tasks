@@ -216,7 +216,9 @@ export type AiFeature =
   | "image_generation"
   | "mavi_page"
   | "web_search"
-  | "canvas_writer";
+  | "canvas_writer"
+  | "mavi_rerank"
+  | "conversation_summary";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -286,6 +288,23 @@ export const FEATURES: FeatureInfo[] = [
     env: "",
     own: true,
     note: "A MAVI do módulo junta os dados e este modelo escreve o documento, os slides ou a planilha. Sem escolha, a própria MAVI do módulo escreve.",
+  },
+  {
+    id: "mavi_rerank",
+    group: "MAVI · poderes",
+    label: "Reordenação da busca (RAG)",
+    conversation: false,
+    env: "",
+    own: true,
+    note: "Um modelo rápido e barato (ex.: Claude Haiku, GPT mini) escolhe, entre os trechos que a busca achou, os que mais ajudam a responder, antes de a MAVI ler. Melhora a precisão; custa uma chamada curta por busca. Sem escolha, fica a ordem da busca.",
+  },
+  {
+    id: "conversation_summary",
+    group: "MAVI · poderes",
+    label: "Resumo de conversas longas",
+    conversation: false,
+    env: "AI_MODEL",
+    note: "Quando a conversa cresce, as mensagens antigas viram um resumo (em segundo plano), para a MAVI lembrar do começo sem reler tudo. Um modelo barato funciona bem. Sem escolha, usa o padrão da empresa.",
   },
   {
     id: "image_generation",
@@ -489,6 +508,8 @@ export function serverModel(
     case "web_search":
       return env.AI_MODEL || fallback;
     case "canvas_writer":
+    case "mavi_rerank":
+    case "conversation_summary":
       return env.AI_MODEL || fallback;
     case "meetings_ask":
       return env.MEETINGS_MODEL || fallback;

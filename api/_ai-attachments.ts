@@ -14,7 +14,7 @@ import { transcribe } from "./_whatsapp.js";
 import { addUsage, newMeter } from "./_social-leads.js";
 import { transcribePerMinute } from "../src/ai-providers.js";
 import type { ToolSpec } from "./_ai-llm.js";
-import { cite, type ToolContext } from "./_ai-tools.js";
+import { cite, reranked, type ToolContext } from "./_ai-tools.js";
 
 /**
  * MAVI · anexos na conversa (migração 20261221090000_mavi_attachments).
@@ -642,13 +642,14 @@ export async function runAttachmentTool(
         p_conversation: conversation,
         p_embedding: vectorLiteral(out.vectors[0]),
         p_query: query,
-        p_limit: 8,
+        p_limit: ctx.rerank ? 20 : 8,
         p_ids: only ? [only.id] : null,
       },
     );
     if (!r.ok) throw new Error(r.error);
     if (!r.data.length) return "Nada encontrado nos anexos sobre isso.";
-    return r.data
+    const rows = await reranked(ctx, query, r.data, (row) => row.content, 8);
+    return rows
       .map((row) => {
         const label = typeof row.meta?.label === "string" ? row.meta.label : null;
         const page = typeof row.meta?.page === "number" ? row.meta.page : undefined;

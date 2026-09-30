@@ -291,6 +291,8 @@ export default async function handler(
           if (!done) for (const listener of closed.splice(0)) listener();
         });
         const work = streamAi(body, authorization, env, aiDeps(env), write, {
+          // O resumo da conversa longa segue depois da resposta.
+          later: (task) => waitUntil(task.catch(() => {})),
           onClose: (listener) => {
             if (res.destroyed && !done) listener();
             else closed.push(listener);

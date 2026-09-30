@@ -25796,3 +25796,9 @@ main:has(> .mavi-chat) > .error-banner {
   border-color: #f1c9c2;
   color: #a2281c;
 }
+/* Consumo da MAVI: com o card do cache do prompt, cinco na linha. */
+@media (min-width: 1180px) {
+  .stats-grid.ai-usage-five {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}

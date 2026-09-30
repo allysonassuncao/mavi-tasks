@@ -368,6 +368,9 @@ export type UsageReport = {
     input_tokens: number;
     output_tokens: number;
     embedding_tokens: number;
+    /** Cache do prompt (migração 20261222090000): lidos (custam ~10%) e gravados. */
+    cache_read_tokens?: number;
+    cache_write_tokens?: number;
   };
   by_user: UsageRow[];
   by_client: UsageRow[];

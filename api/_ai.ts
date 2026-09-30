@@ -249,6 +249,91 @@ const todayKey = (now: number) =>
     day: "2-digit",
   }).format(new Date(now));
 
+/** Quantas mensagens recentes (e quantos caracteres) a MAVI relê a cada pergunta. */
+const HISTORY_LIMIT = 40;
+const HISTORY_CHARS = 60_000;
+/** Acima disso, as mensagens antigas viram resumo (em segundo plano). */
+const SUMMARY_AFTER_MESSAGES = 16;
+const SUMMARY_AFTER_CHARS = 40_000;
+/** As mais recentes ficam inteiras (fora do resumo). */
+const SUMMARY_KEEP = 6;
+const SUMMARY_HEADER = "[Resumo das mensagens anteriores desta conversa, feito pela MAVI]";
+const RERANK_RULES =
+  "Você reordena trechos encontrados numa busca pela utilidade para responder à pergunta. Considere o assunto, as datas, os nomes e os números pedidos. Responda só com os números dos trechos, sem explicar.";
+const SUMMARY_RULES = `Você mantém a memória de uma conversa entre uma pessoa de uma agência de marketing e a MAVI (a inteligência do sistema). Escreva o resumo que vai substituir as mensagens antigas, para a MAVI continuar a conversa sem perder nada importante. Em português do Brasil, em tópicos curtos, com:
+- o objetivo e os pedidos da pessoa;
+- fatos, números, datas, nomes de clientes e decisões, exatamente como apareceram (com as fontes citadas quando houver);
+- o que a MAVI já entregou (documentos, apresentações, planilhas, imagens, ações propostas ou confirmadas, com as referências como [[D1]] ou [[A2]]);
+- preferências, correções e instruções que a pessoa deu (tom, formato, o que não fazer);
+- o que ficou pendente.
+Junte o resumo anterior (se houver) com as mensagens novas num resumo só. Não invente nada. No máximo 1.200 palavras.`;
+
+/** Resume as mensagens antigas (com o resumo anterior) e guarda na conversa. */
+async function summarize(
+  env: AiEnv,
+  deps: AiDeps,
+  auth: string,
+  company: string,
+  scope: AiScope,
+  conversationId: string,
+  previous: string,
+  fold: (ChatTurn & { artifacts?: unknown })[],
+  upto: number,
+  fallback: ProviderConfig | null,
+  fallbackLlm: LlmAdapter,
+) {
+  const route = await resolveRoute(env, deps.fetch, auth, company, scope, "conversation_summary").catch(() => null);
+  const config = route ? routeConfig(env, route) : fallback;
+  const run = route
+    ? (deps.providerLlm ?? ((x: ProviderConfig) => adapterFor(x, deps.fetch)))(routeConfig(env, route))
+    : fallbackLlm;
+  let transcript = fold
+    .map((m) =>
+      `${m.role === "user" ? "Pessoa" : "MAVI"}: ${(m.role === "assistant" ? historyTurn(m.content, sanitizeArtifacts(m.artifacts)) : m.content).slice(0, 6000)}`,
+    )
+    .join("\n\n");
+  if (transcript.length > 120_000) transcript = transcript.slice(-120_000);
+  const out = await run({
+    instructions: SUMMARY_RULES,
+    context: "",
+    messages: [
+      {
+        role: "user",
+        content: `${previous ? `Resumo anterior:\n${previous}\n\n` : ""}Mensagens para incorporar:\n\n${transcript}`,
+      },
+    ],
+    tools: [],
+    execute: async () => "",
+    maxRounds: 0,
+    effort: "low",
+    maxTokens: 6000,
+  });
+  const text = out.text.trim();
+  if (text.length >= 20)
+    await callRpc(env, deps.fetch, auth, "ai_conversation_summary_save", {
+      p_conversation: conversationId,
+      p_summary: text,
+      p_upto: upto,
+    });
+  await callRpc(env, deps.fetch, auth, "ai_log_usage", {
+    p_company: company,
+    p_module: scope.module ?? "assistant",
+    p_kind: "summary",
+    p_client: scope.client ?? null,
+    p_contract: scope.contract ?? null,
+    p_project: scope.project ?? null,
+    p_recording: null,
+    p_model: out.meter.model || config?.model || env.model,
+    p_input: out.meter.input,
+    p_output: out.meter.output,
+    p_cache_read: out.meter.cacheRead,
+    p_cache_write: out.meter.cacheWrite,
+    p_embedding: 0,
+    p_cost: Math.round(out.meter.cost * 1e6) / 1e6,
+    ...(route ? { p_provider: route.provider_id } : {}),
+  }).catch(() => {});
+}
+
 function conversation(question: unknown, history: unknown): ChatTurn[] {
   const q = typeof question === "string" ? question.trim() : "";
   if (q.length < 2 || q.length > 2000)
@@ -261,12 +346,25 @@ function conversation(question: unknown, history: unknown): ChatTurn[] {
         typeof t.content === "string" &&
         !!t.content.trim(),
     )
-    .slice(-12)
     // As referências das respostas antigas não valem nesta pergunta.
     .map((t) => ({
       role: t.role,
-      content: t.content.replace(/\[S\d+\]/g, "").slice(0, 8000),
+      content: t.content.startsWith(SUMMARY_HEADER)
+        ? t.content.slice(0, 20_000)
+        : t.content.replace(/\[S\d+\]/g, "").slice(0, 8000),
     }));
+  // O resumo do começo (quando há) fica sempre; das outras, as mais recentes que cabem.
+  const summarized = turns.length > 0 && turns[0].content.startsWith(SUMMARY_HEADER);
+  const head = summarized ? turns.slice(0, 2) : [];
+  const rest = summarized ? turns.slice(2) : turns;
+  const kept: ChatTurn[] = [];
+  let size = 0;
+  for (let i = rest.length - 1; i >= 0 && kept.length < HISTORY_LIMIT; i--) {
+    if (size + rest[i].content.length > HISTORY_CHARS) break;
+    size += rest[i].content.length;
+    kept.unshift(rest[i]);
+  }
+  turns.splice(0, turns.length, ...head, ...kept);
   while (turns.length && turns[0].role !== "user") turns.shift();
   const clean: ChatTurn[] = [];
   for (const t of turns)
@@ -441,6 +539,8 @@ export type Live = {
   onClose: (listener: () => void) => void;
   /** A execução desta resposta (preenchida por ask). */
   run?: { id: string; conversation: string } | null;
+  /** Um trabalho que segue depois da resposta (o resumo da conversa): waitUntil. */
+  later?: (work: Promise<unknown>) => void;
 };
 
 async function ask(
@@ -492,24 +592,28 @@ async function ask(
     ),
     conversationId
       ? Promise.all([
-          rest<{ owner_id: string }>(
+          rest<{ owner_id: string; summary?: string | null; summary_upto?: number | null }>(
             env,
             deps,
             auth,
-            `ai_conversations?select=owner_id&id=eq.${conversationId}`,
+            `ai_conversations?select=owner_id,summary,summary_upto&id=eq.${conversationId}`,
+          ).catch(() =>
+            // Antes da migração 20261222090000 não há resumo.
+            rest<{ owner_id: string }>(env, deps, auth, `ai_conversations?select=owner_id&id=eq.${conversationId}`),
           ),
-          rest<ChatTurn & { artifacts?: unknown }>(
+          // As mais recentes (as mais antigas estão no resumo, quando há).
+          rest<ChatTurn & { id?: number; artifacts?: unknown }>(
             env,
             deps,
             auth,
-            `ai_messages?select=role,content,artifacts&conversation_id=eq.${conversationId}&order=id.desc&limit=12`,
+            `ai_messages?select=id,role,content,artifacts&conversation_id=eq.${conversationId}&order=id.desc&limit=${HISTORY_LIMIT}`,
           ).catch(() =>
             // Antes da migração 20261212090000_mavi_powers não há anexos.
-            rest<ChatTurn & { artifacts?: unknown }>(
+            rest<ChatTurn & { id?: number; artifacts?: unknown }>(
               env,
               deps,
               auth,
-              `ai_messages?select=role,content&conversation_id=eq.${conversationId}&order=id.desc&limit=12`,
+              `ai_messages?select=id,role,content&conversation_id=eq.${conversationId}&order=id.desc&limit=${HISTORY_LIMIT}`,
             ),
           ),
         ])
@@ -567,13 +671,15 @@ async function ask(
   let llm = provider ? makeLlm(provider) : deps.llm;
   // Modelos próprios de poderes ("Quem usa qual modelo"): a busca na
   // internet e o escritor do canvas. Sem regra, a MAVI do módulo faz.
-  const optional = (on: boolean, feature: "web_search" | "canvas_writer") =>
+  const optional = (on: boolean, feature: "web_search" | "canvas_writer" | "mavi_rerank") =>
     on
       ? resolveRoute(env, deps.fetch, auth, company, scope, feature).catch(() => null)
       : Promise.resolve(null);
-  const [webRoute, writerRoute] = await Promise.all([
+  const [webRoute, writerRoute, rerankRoute] = await Promise.all([
     optional(onPage && powers.has("web"), "web_search"),
     optional(onPage && powers.has("canvas"), "canvas_writer"),
+    // Reordenação da busca: só com um modelo escolhido para ela.
+    optional(true, "mavi_rerank"),
   ]);
   if (limits.ok && limits.data.blocked)
     throw new AiError(
@@ -630,7 +736,11 @@ async function ask(
     if (r?.ok && r.data === true) stop.abort();
   };
   // O que as respostas anteriores mostraram (as imagens podem ser editadas).
-  const past = history ? [...history[1]].reverse() : [];
+  // Conversa longa: o resumo das antigas + as recentes que ele não cobre.
+  const convRow = (history?.[0][0] ?? null) as { summary?: string | null; summary_upto?: number | null } | null;
+  const summary = convRow?.summary?.trim() || "";
+  const summaryUpto = summary ? Number(convRow?.summary_upto) || 0 : 0;
+  const past = history ? [...history[1]].reverse().filter((m) => !summaryUpto || Number(m.id) > summaryUpto) : [];
   const priorImages = new Map<string, string>();
   const priorCanvas = new Map<string, CanvasArtifact>();
   const next = { V: 1, I: 1, A: 1, D: 1, Q: 1 };
@@ -644,13 +754,22 @@ async function ask(
   const messages = conversation(
     question,
     history
-      ? past.map((m) => ({
-          role: m.role,
-          content:
-            m.role === "assistant"
-              ? historyTurn(m.content, sanitizeArtifacts(m.artifacts))
-              : m.content,
-        }))
+      ? [
+          // O começo da conversa, resumido (as mensagens dele não vêm abaixo).
+          ...(summary
+            ? [
+                { role: "user" as const, content: `${SUMMARY_HEADER}\n${summary}` },
+                { role: "assistant" as const, content: "Certo: tenho o contexto das mensagens anteriores." },
+              ]
+            : []),
+          ...past.map((m) => ({
+            role: m.role,
+            content:
+              m.role === "assistant"
+                ? historyTurn(m.content, sanitizeArtifacts(m.artifacts))
+                : m.content,
+          })),
+        ]
       : body.history,
   );
   emit({
@@ -726,6 +845,47 @@ async function ask(
     last: null,
   };
   const steps: { label: string; detail?: string }[] = [];
+  if (summary) {
+    const label = "Relembrando o começo da conversa";
+    steps.push({ label, detail: "resumo das mensagens antigas" });
+    emit({ type: "step", id: "summary", label, state: "done", detail: "resumo das mensagens antigas" });
+  }
+  // Reordenação: um modelo rápido escolhe, entre os trechos que a busca
+  // achou, os que mais ajudam a responder (sem ele, fica a ordem da busca).
+  if (rerankRoute) {
+    const rc = routeConfig(env, rerankRoute);
+    const rerankLlm = makeLlm(rc);
+    ctx.rerank = async (query, texts, keep) => {
+      const list = texts.map((t, i) => `[${i + 1}] ${t.replace(/\s+/g, " ").slice(0, 700)}`).join("\n");
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const out = await Promise.race([
+        rerankLlm({
+          instructions: RERANK_RULES,
+          context: "",
+          messages: [
+            {
+              role: "user",
+              content: `Pergunta: ${query}\n\nTrechos:\n${list}\n\nResponda só com os números dos trechos que ajudam a responder, do mais útil para o menos útil, separados por vírgula (no máximo ${keep}).`,
+            },
+          ],
+          tools: [],
+          execute: async () => "",
+          maxRounds: 0,
+          effort: "low",
+          maxTokens: 2000,
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(Error("A reordenação demorou.")), 15_000);
+        }),
+      ]).finally(() => clearTimeout(timer));
+      kit.extraCost!.usd += out.meter.cost;
+      void logUsage("rerank", out.meter, rerankRoute.provider_id);
+      const order = [...new Set([...out.text.matchAll(/\d+/g)].map((m) => Number(m[0]) - 1))].filter(
+        (i) => i >= 0 && i < texts.length,
+      );
+      return order.length ? order : null;
+    };
+  }
   // Cada chamada fica registrada (qual, quanto tempo, se falhou, quanto custou).
   const calls: {
     tool: string;
@@ -1124,6 +1284,10 @@ async function ask(
       webSearch: webOn,
       onCitation: citeWeb,
       signal: stop.signal,
+      // Cache do prompt: instruções, contexto e a conversa (cada rodada lê do cache).
+      cacheContext: true,
+      cacheConversation: true,
+      cacheKey: `${company}:${userIdFrom(auth)}`,
     });
   } catch (e) {
     // Parou: o que já tinha chegado fica na conversa, marcado.
@@ -1195,6 +1359,20 @@ async function ask(
         cost: Math.round(c.cost * 1e6) / 1e6,
       })),
     }).catch(() => {});
+  // Conversa longa: as mensagens antigas viram resumo (em segundo plano, para a próxima pergunta).
+  if (live?.later && savedId && UUID.test(savedId)) {
+    const chars = past.reduce((n, m) => n + m.content.length, 0);
+    if (past.length + 2 > SUMMARY_AFTER_MESSAGES || chars > SUMMARY_AFTER_CHARS) {
+      let cut = past.length - SUMMARY_KEEP;
+      while (cut > 0 && past[cut - 1].role !== "assistant") cut--;
+      const fold = past.slice(0, cut);
+      const upto = Number(fold.at(-1)?.id);
+      if (fold.length >= 2 && upto)
+        live.later(
+          summarize(env, deps, auth, company, scope, savedId, summary, fold, upto, provider, llm).catch(() => null),
+        );
+    }
+  }
   finished = true;
   if (runId)
     await callRpc(env, deps.fetch, auth, "ai_run_finish", {

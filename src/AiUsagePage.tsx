@@ -6,6 +6,7 @@ import {
   MessageSquare,
   OctagonX,
   Sigma,
+  Zap,
 } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { contractProductLabel, dateKey } from "./domain";
@@ -238,7 +239,10 @@ export function AiUsagePage({
         <Loading compact />
       ) : (
         <>
-          <section className="stats-grid" aria-label="Resumo do período">
+          <section
+            className={`stats-grid${total!.cache_read_tokens || total!.cache_write_tokens ? " ai-usage-five" : ""}`}
+            aria-label="Resumo do período"
+          >
             <article className="stat-card green">
               <div>
                 Gasto no período <CircleDollarSign size={17} />
@@ -269,6 +273,23 @@ export function AiUsagePage({
                 {count(total!.embedding_tokens)} tokens de vetores
               </footer>
             </article>
+            {(() => {
+              // Cache do prompt: quanto da entrada dos modelos veio do cache.
+              const read = Number(total!.cache_read_tokens ?? 0);
+              const all = read + Number(total!.cache_write_tokens ?? 0) + Number(total!.input_tokens ?? 0);
+              if (!all) return null;
+              return (
+                <article className="stat-card green">
+                  <div>
+                    Cache do prompt <Zap size={17} />
+                  </div>
+                  <strong>{Math.round((read / all) * 100)}%</strong>
+                  <footer>
+                    da entrada lida do cache ({count(read)} tokens, a ~10% do preço)
+                  </footer>
+                </article>
+              );
+            })()}
           </section>
 
           <section className="panel ai-usage-company">

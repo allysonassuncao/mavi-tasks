@@ -256,7 +256,26 @@ export type ToolContext = {
   sources: AiSource[];
   /** Trecho do banco de cada referência (para read_more). */
   chunks: Map<string, number>;
+  /**
+   * Reordenação da busca ("Quem usa qual modelo" › Reordenação): devolve a
+   * ordem dos trechos mais úteis (índices), ou null para ficar como veio.
+   */
+  rerank?: (query: string, texts: string[], keep: number) => Promise<number[] | null>;
 };
+
+/** Os trechos na ordem da reordenação (o que ela não citou fica de fora). */
+export async function reranked<T>(
+  ctx: Pick<ToolContext, "rerank">,
+  query: string,
+  rows: T[],
+  text: (row: T) => string,
+  keep: number,
+) {
+  if (!ctx.rerank || rows.length <= 2) return rows.slice(0, keep);
+  const order = await ctx.rerank(query, rows.map(text), keep).catch(() => null);
+  if (!order?.length) return rows.slice(0, keep);
+  return order.map((i) => rows[i]).filter((r): r is T => r !== undefined).slice(0, keep);
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -408,16 +427,19 @@ async function searchKnowledge(
     from: DATE.test(str(input.from)) ? str(input.from) : undefined,
     to: DATE.test(str(input.to)) ? str(input.to) : undefined,
   };
+  const limit = int(input.limit, 10, 1, 20);
   const r = await callRpc<SearchRow[]>(ctx, ctx.fetch, ctx.auth, "ai_search", {
     p_company: ctx.company,
     p_embedding: vectors[0] ? vectorLiteral(vectors[0]) : null,
     p_query: query,
     p_filters: filters,
-    p_limit: int(input.limit, 10, 1, 20),
+    // Com reordenação, a busca traz mais candidatos e o modelo escolhe os melhores.
+    p_limit: ctx.rerank ? Math.min(limit * 2 + 4, 30) : limit,
   });
   if (!r.ok) throw new Error(r.error);
   if (!r.data.length) return "Nenhum trecho encontrado para essa busca.";
-  return r.data.map((row) => citeRow(ctx, row)).join("\n\n");
+  const rows = await reranked(ctx, query, r.data, (row) => `${row.title}\n${row.content}`, limit);
+  return rows.map((row) => citeRow(ctx, row)).join("\n\n");
 }
 
 async function readMore(ctx: ToolContext, input: Record<string, unknown>) {

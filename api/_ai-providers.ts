@@ -251,11 +251,22 @@ export function openAiChatAdapter(
         parameters: t.parameters,
       },
     }));
+    // A Claude pelo OpenRouter: pontos de cache nas instruções e no contexto
+    // (as outras fazem cache sozinhas de prompts longos).
+    const routerClaude = config.kind === "openrouter" && /^anthropic\//.test(config.model);
     const messages: ChatMessage[] = [
-      {
-        role: "system",
-        content: `${request.instructions}\n\n${request.context}`,
-      },
+      routerClaude
+        ? ({
+            role: "system",
+            content: [
+              { type: "text", text: request.instructions, cache_control: { type: "ephemeral" } },
+              { type: "text", text: request.context, cache_control: { type: "ephemeral" } },
+            ],
+          } as unknown as ChatMessage)
+        : {
+            role: "system",
+            content: `${request.instructions}\n\n${request.context}`,
+          },
       ...request.messages.map((m) => ({ role: m.role, content: m.content })),
     ];
     const maxRounds = request.maxRounds ?? 6;
@@ -278,6 +289,8 @@ export function openAiChatAdapter(
         stream: true,
         ...(usageOption ? { stream_options: { include_usage: true } } : {}),
         ...(router ? { max_tokens: maxTokens, usage: { include: true } } : {}),
+        // A OpenAI junta no mesmo cache os pedidos com a mesma chave.
+        ...(config.kind === "openai" && request.cacheKey ? { prompt_cache_key: request.cacheKey } : {}),
         ...(web ? { plugins: [{ id: "web", max_results: 5 }] } : {}),
       };
       const res = await fetchImpl(`${config.baseUrl}/chat/completions`, {

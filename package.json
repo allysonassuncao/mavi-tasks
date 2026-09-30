@@ -28,6 +28,7 @@
     "test:db:mavi-mcp": "node scripts/test-mavi-mcp.mjs",
     "test:db:mavi-runs": "node scripts/test-mavi-runs.mjs",
     "test:db:mavi-attachments": "node scripts/test-mavi-attachments.mjs",
+    "test:db:mavi-summary": "node scripts/test-mavi-summary.mjs",
     "test:db:whatsapp": "node scripts/test-whatsapp-groups.mjs",
     "test:db:cases": "node scripts/test-success-cases.mjs",
     "test:db:notices": "node scripts/test-notice-board.mjs",

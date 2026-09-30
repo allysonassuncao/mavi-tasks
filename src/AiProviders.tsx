@@ -1541,10 +1541,10 @@ function FeatureRoutes({
                     <div className="ai-feature-name">
                       <span className="ai-feature-group">{f.group}</span>
                       <span className="ai-usage-name">{f.label}</span>
-                      {(outsideClaude || f.transcription || f.images || f.own || f.web || f.id === "mavi_page") &&
+                      {(outsideClaude || f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary") &&
                         f.note && (
                         <small
-                          className={`ai-feature-note${f.transcription || f.images || f.own || f.web || f.id === "mavi_page" ? " info" : ""}`}
+                          className={`ai-feature-note${f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary" ? " info" : ""}`}
                         >
                           {f.note}
                         </small>
@@ -1566,6 +1566,8 @@ function FeatureRoutes({
                               ? "Sem modelo próprio · a MAVI do módulo busca (se for Claude)"
                               : f.id === "canvas_writer"
                                 ? "Sem modelo próprio · a MAVI do módulo escreve"
+                                : f.id === "mavi_rerank"
+                                  ? "Sem reordenação · fica a ordem da busca"
                                 : bubble
                                   ? `Segue a bolinha · ${routeLabel(bubble)}`
                                   : companyLabel
