@@ -89,6 +89,7 @@ import {
 import { appOrigin } from "./_origin.js";
 import { PLAN_TOOL, TASK_RULES, handleTaskAction, planLongTask, type TaskHost } from "./_ai-tasks.js";
 import { learningContext, type LearningContext } from "./_mavi-learning.js";
+import { answerSignals, followupSignals } from "./_mavi-judge.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -807,6 +808,20 @@ async function ask(
   const summary = convRow?.summary?.trim() || "";
   const summaryUpto = summary ? Number(convRow?.summary_upto) || 0 : 0;
   const past = history ? [...history[1]].reverse().filter((m) => !summaryUpto || Number(m.id) > summaryUpto) : [];
+  // A pergunta nova diz algo da resposta anterior ("me mande o que pedi", o
+  // mesmo pedido de novo): a MAVI confere aquela resposta depois (autoavaliação).
+  {
+    const lastAnswer = [...past].reverse().find((m) => m.role === "assistant" && typeof m.id === "number");
+    const before = lastAnswer
+      ? [...past].reverse().find((m) => m.role === "user" && Number(m.id) < Number(lastAnswer.id))
+      : undefined;
+    const said = lastAnswer ? followupSignals(question, before?.content ?? null) : [];
+    if (said.length)
+      void callRpc(env, deps.fetch, auth, "mavi_answer_signal", {
+        p_message: lastAnswer!.id,
+        p_signals: said,
+      }).catch(() => null);
+  }
   const priorImages = new Map<string, string>();
   const priorArts = new Map<string, ImageArtifact>();
   const priorCanvas = new Map<string, CanvasArtifact>();
@@ -1510,6 +1525,21 @@ async function ask(
         }).catch(() => null)
       : null;
   const messageId = closed?.ok && typeof closed.data === "number" ? closed.data : null;
+  // Sinais de problema nesta resposta: a MAVI confere depois (autoavaliação).
+  if (messageId && !cancelled) {
+    const signals = answerSignals({
+      answer,
+      capped: result?.capped,
+      failedTools: calls.filter((c) => !c.ok).length,
+      found: ctx.sources.length,
+      cited: sources.length,
+      waiting: !!kit.asked || planned,
+    });
+    if (signals.length)
+      await callRpc(env, deps.fetch, auth, "mavi_answer_signal", { p_message: messageId, p_signals: signals }).catch(
+        () => null,
+      );
+  }
   if (calls.length)
     await callRpc(env, deps.fetch, auth, "ai_log_tool_calls", {
       p_company: company,

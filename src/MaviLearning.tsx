@@ -6,6 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  Bot,
   CheckCircle2,
   GraduationCap,
   Pause,
@@ -26,8 +27,10 @@ import {
   MAVI_KIND_LABELS,
   MAVI_PAGE,
   MAVI_REASON_LABELS,
+  SIGNAL_LABELS,
   maviLearningReport,
   saveMaviLesson,
+  setMaviJudge,
   setMaviLesson,
   type MaviLesson,
   type MaviLearningReport,
@@ -109,6 +112,14 @@ function demoReport(): LearningReport {
   });
   return {
     totals: { up: 42, down: 9, people: 11, answers: 380 },
+    judge: {
+      checked: 14,
+      bad: 5,
+      pending: 1,
+      signals: { capped: 4, announce: 3, frustration: 2, no_sources: 2 },
+      enabled: true,
+      daily_limit: 40,
+    },
     reasons: { incomplete: 4, format: 3, wrong: 2 },
     lessons: [
       lesson({
@@ -140,6 +151,22 @@ function demoReport(): LearningReport {
     ],
     feedback: [
       {
+        id: 3,
+        user_id: null,
+        origin: "judge",
+        signals: ["capped", "announce", "frustration"],
+        client_id: null,
+        product_id: null,
+        module: "assistant",
+        vote: "down",
+        reason: "incomplete",
+        comment: "Com 17 clientes, devia montar uma tarefa longa em vez de responder na hora; parou anunciando que ia puxar as reuniões.",
+        question: "Me mande o que te pedi",
+        answer: "A busca isolada funcionou. Vou puxar os briefings em lotes menores.",
+        at: now,
+        learned: false,
+      },
+      {
         id: 1,
         user_id: "",
         client_id: null,
@@ -168,8 +195,8 @@ function demoReport(): LearningReport {
         learned: false,
       },
     ],
-    feedback_total: 2,
-    pending: 1,
+    feedback_total: 3,
+    pending: 2,
     learned_at: now,
   };
 }
@@ -193,7 +220,7 @@ export function MaviLearning({
     return dateKey(d);
   });
   const [to, setTo] = useState(today);
-  const [vote, setVote] = useState<"up" | "down" | null>(null);
+  const [vote, setVote] = useState<"up" | "down" | "judge" | null>(null);
   const [offset, setOffset] = useState(0);
   const [report, setReport] = useState<LearningReport | null>(null);
   const [error, setError] = useState("");
@@ -248,7 +275,9 @@ export function MaviLearning({
   const productName = (id: string | null) =>
     data.products.find((p) => p.id === id)?.name ?? "produto removido";
   const person = (id: string | null) =>
-    data.members.find((m) => m.user_id === id)?.name ?? "Alguém do time";
+    id === null
+      ? "Autoavaliação da MAVI"
+      : (data.members.find((m) => m.user_id === id)?.name ?? "Alguém do time");
   const scopeLabel = (l: Pick<Lesson, "scope" | "client_id" | "product_id">) =>
     l.scope === "company"
       ? "Toda a empresa"
@@ -480,6 +509,64 @@ export function MaviLearning({
             </article>
           </section>
 
+          {report.judge && (
+            <section className="panel mavi-judge-panel">
+              <div>
+                <h2>
+                  <Bot size={17} aria-hidden="true" /> Autoavaliação
+                </h2>
+                <p>
+                  Sem gastar nada, a MAVI marca as respostas com sinal de problema. Só essas vão para o juiz: o Jev
+                  responde as perguntas objetivas (entregou tudo? os fatos estão nas fontes?) e um modelo explica o que
+                  faltou. Resposta ruim vira uma avaliação da MAVI; sozinha, a lição espera mais uma pessoa ou um líder.
+                </p>
+                <small>
+                  {count(report.judge.checked)} conferida(s) no período · {count(report.judge.bad)} ruim(ns) ·{" "}
+                  {count(report.judge.pending)} na fila
+                  {Object.keys(report.judge.signals).length > 0 &&
+                    ` · ${Object.entries(report.judge.signals)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([k, n]) => `${SIGNAL_LABELS[k] ?? k} (${n})`)
+                      .join(", ")}`}
+                </small>
+              </div>
+              <div className="mavi-judge-controls">
+                <label className="mavi-judge-toggle">
+                  <input
+                    type="checkbox"
+                    checked={report.judge.enabled}
+                    disabled={busy === "judge"}
+                    onChange={(e) =>
+                      void run(
+                        "judge",
+                        () => setMaviJudge(company, e.target.checked, null),
+                        e.target.checked ? "Autoavaliação ligada." : "Autoavaliação desligada.",
+                      )
+                    }
+                  />
+                  {report.judge.enabled ? "Ligada" : "Desligada"}
+                </label>
+                <label>
+                  Até
+                  <input
+                    className="mavi-judge-limit"
+                    type="number"
+                    min={0}
+                    max={500}
+                    defaultValue={report.judge.daily_limit}
+                    aria-label="Respostas conferidas por dia"
+                    onBlur={(e) => {
+                      const n = Number(e.target.value);
+                      if (Number.isInteger(n) && n >= 0 && n <= 500 && n !== report.judge!.daily_limit)
+                        void run("judge", () => setMaviJudge(company, null, n), "Limite por dia salvo.");
+                    }}
+                  />
+                  por dia
+                </label>
+              </div>
+            </section>
+          )}
+
           <section className="panel learning-lessons">
             <header>
               <div>
@@ -689,6 +776,7 @@ export function MaviLearning({
                     [null, "Todos"],
                     ["up", "👍 Ajudou"],
                     ["down", "👎 Não ajudou"],
+                    ["judge", "🤖 Autoavaliação"],
                   ] as const
                 ).map(([v, label]) => (
                   <button
@@ -710,7 +798,7 @@ export function MaviLearning({
             ) : (
               <ul className="learning-feedback-list">
                 {report.feedback.map((f) => (
-                  <li key={f.id} className={`vote-${f.vote}`}>
+                  <li key={f.id} className={`vote-${f.vote}${f.origin === "judge" ? " by-mavi" : ""}`}>
                     <span className="learning-vote" aria-hidden="true">
                       {f.vote === "up" ? (
                         <ThumbsUp size={14} />
@@ -721,6 +809,13 @@ export function MaviLearning({
                     <div>
                       <strong>{f.question ? `“${f.question}”` : "Resposta da MAVI"}</strong>
                       {f.answer && <p className="learning-answer">{f.answer}</p>}
+                      {!!f.signals?.length && (
+                        <p className="mavi-judge-signals">
+                          {f.signals.map((x) => (
+                            <span key={x}>{SIGNAL_LABELS[x] ?? x}</span>
+                          ))}
+                        </p>
+                      )}
                       {f.vote === "down" && (f.reason || f.comment) && (
                         <p>
                           {f.reason && (

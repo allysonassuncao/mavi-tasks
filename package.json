@@ -35,6 +35,7 @@
     "test:db:mavi-conversation-cost": "node scripts/test-mavi-conversation-cost.mjs",
     "test:db:mavi-long-tasks": "node scripts/test-mavi-long-tasks.mjs",
     "test:db:mavi-feedback": "node scripts/test-mavi-feedback.mjs",
+    "test:db:mavi-judge": "node scripts/test-mavi-judge.mjs",
     "test:db:whatsapp": "node scripts/test-whatsapp-groups.mjs",
     "test:db:cases": "node scripts/test-success-cases.mjs",
     "test:db:notices": "node scripts/test-notice-board.mjs",

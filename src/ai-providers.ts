@@ -226,7 +226,9 @@ export type AiFeature =
   | "client_radar_themes"
   | "client_radar_report"
   | "mavi_learning"
-  | "campaign_report";
+  | "campaign_report"
+  | "mavi_judge"
+  | "mavi_judge_check";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -321,6 +323,22 @@ export const FEATURES: FeatureInfo[] = [
     conversation: false,
     env: "MAVI_LEARNING_MODEL",
     note: "A cada 10 minutos, a MAVI lê os 👍/👎 novos das respostas e propõe aprendizados para ela mesma seguir. Roda em segundo plano, com pouco texto. Sem escolha, usa o padrão da empresa.",
+  },
+  {
+    id: "mavi_judge",
+    group: "MAVI · poderes",
+    label: "Autoavaliação: o juiz das respostas com sinal de problema",
+    conversation: false,
+    env: "MAVI_JUDGE_MODEL",
+    note: "Só as respostas com sinal (parou no limite, erro de ferramenta, sem fonte, a pessoa reclamou ou deu 👎 sem motivo) são conferidas, em segundo plano. Sem escolha, usa o padrão da empresa.",
+  },
+  {
+    id: "mavi_judge_check",
+    group: "MAVI · poderes",
+    label: "Autoavaliação: as perguntas objetivas (Jev)",
+    conversation: false,
+    env: "",
+    decisions: true,
   },
   {
     id: "skill_coach",
@@ -596,6 +614,11 @@ export function serverModel(
       return env.COPILOT_LEARNING_MODEL || env.AI_MODEL || fallback;
     case "mavi_learning":
       return env.MAVI_LEARNING_MODEL || env.COPILOT_LEARNING_MODEL || env.AI_MODEL || fallback;
+    case "mavi_judge":
+      return env.MAVI_JUDGE_MODEL || env.AI_MODEL || fallback;
+    case "mavi_judge_check":
+      // Sem escolha: o Jev do termômetro (o primeiro cadastrado no OpenRouter).
+      return "~typesafe/jev-latest";
     case "notice_writer":
       return env.NOTICE_WRITER_MODEL || env.AI_MODEL || fallback;
     case "notice_animation":

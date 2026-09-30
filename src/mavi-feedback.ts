@@ -84,7 +84,10 @@ export type MaviLesson = {
 };
 export type MaviFeedbackRow = {
   id: number;
-  user_id: string;
+  /** Nulo: a autoavaliação da própria MAVI. */
+  user_id: string | null;
+  origin?: "person" | "judge";
+  signals?: string[];
   client_id: string | null;
   product_id: string | null;
   module: string;
@@ -96,8 +99,27 @@ export type MaviFeedbackRow = {
   at: string;
   learned: boolean;
 };
+/** A autoavaliação no período: conferidas, ruins, na fila, sinais e a configuração. */
+export type MaviJudgeReport = {
+  checked: number;
+  bad: number;
+  pending: number;
+  signals: Record<string, number>;
+  enabled: boolean;
+  daily_limit: number;
+};
+export const SIGNAL_LABELS: Record<string, string> = {
+  capped: "Parou no limite de passos",
+  tool_errors: "Ferramentas com erro",
+  no_sources: "Sem fonte citada",
+  announce: "Anunciou em vez de entregar",
+  frustration: "A pessoa reclamou depois",
+  repeated: "A pessoa repetiu o pedido",
+  down_unexplained: "👎 sem motivo",
+};
 export type MaviLearningReport = {
   totals: { up: number; down: number; people: number; answers: number };
+  judge?: MaviJudgeReport;
   reasons: Record<string, number>;
   lessons: MaviLesson[];
   feedback: MaviFeedbackRow[];
@@ -106,7 +128,13 @@ export type MaviLearningReport = {
   learned_at: string | null;
 };
 export const MAVI_PAGE = 50;
-export const maviLearningReport = (company: string, from: string, to: string, vote: MaviVote | null, offset: number) =>
+export const maviLearningReport = (
+  company: string,
+  from: string,
+  to: string,
+  vote: MaviVote | "judge" | null,
+  offset: number,
+) =>
   rpc<MaviLearningReport>("mavi_learning_report", {
     p_company: company,
     p_from: from,
@@ -135,3 +163,11 @@ export const saveMaviLesson = (
   });
 export const setMaviLesson = (company: string, id: string, action: "review" | "pause" | "activate" | "dismiss") =>
   rpc<void>("mavi_lesson_set", { p_company: company, p_id: id, p_action: action });
+
+/** Liga ou desliga a autoavaliação e muda o limite por dia (líderes). */
+export const setMaviJudge = (company: string, enabled: boolean | null, limit: number | null) =>
+  rpc<{ enabled: boolean; daily_limit: number }>("mavi_judge_set", {
+    p_company: company,
+    p_enabled: enabled,
+    p_limit: limit,
+  });

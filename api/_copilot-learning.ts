@@ -11,6 +11,7 @@ import {
   workerRpc,
 } from "./_copilot.js";
 import { runMaviLearning } from "./_mavi-learning.js";
+import { runMaviJudge } from "./_mavi-judge.js";
 
 /**
  * Assistente MAVI · aprendizado com o feedback do time ("ai-learning", só o
@@ -299,8 +300,11 @@ export async function handleLearningWorker(
   authorization: string | null,
   env: LearningEnv,
   deps: AiDeps,
-  /** O aprendizado da MAVI com as avaliações das respostas (o mesmo agendamento). */
-  mavi?: { env: AiEnv; deps: AiDeps },
+  /**
+   * O aprendizado da MAVI com as avaliações das respostas e a autoavaliação
+   * dela (o juiz, com o tempo próprio), no mesmo agendamento.
+   */
+  mavi?: { env: AiEnv; deps: AiDeps; judge?: { env: AiEnv; deps: AiDeps; budgetMs: number } },
 ): Promise<{ status: number; body: Row }> {
   if (!workerAuthorized(authorization, env))
     return { status: 401, body: { error: "Não autorizado." } };
@@ -310,7 +314,10 @@ export async function handleLearningWorker(
     if (!mavi) return { status: 200, body: copilot };
     // O que sobrou do tempo do worker vai para o aprendizado da MAVI.
     const answers = await runMaviLearning(mavi.env, mavi.deps, started + env.workerBudgetMs);
-    return { status: 200, body: { ...copilot, mavi: answers } };
+    if (!mavi.judge) return { status: 200, body: { ...copilot, mavi: answers } };
+    const now = (mavi.judge.deps.now ?? Date.now)();
+    const judged = await runMaviJudge(mavi.judge.env, mavi.judge.deps, now + mavi.judge.budgetMs);
+    return { status: 200, body: { ...copilot, mavi: answers, judge: judged } };
   } catch (err) {
     const e = errorOf(err);
     return { status: e.status, body: { error: e.error } };

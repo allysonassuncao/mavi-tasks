@@ -132,3 +132,82 @@
   font-size: 0.76rem;
   color: var(--muted);
 }
+/* Painel da MAVI › Aprendizado da MAVI: a autoavaliação. */
+.mavi-judge-panel {
+  padding: 16px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+.mavi-judge-panel > div:first-child {
+  flex: 1 1 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mavi-judge-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.mavi-judge-panel p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #3c4948;
+}
+.mavi-judge-panel small {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.mavi-judge-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.8rem;
+}
+.mavi-judge-controls label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.mavi-judge-limit {
+  width: 68px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #dfe4e2;
+  border-radius: 8px;
+  font: inherit;
+}
+.mavi-judge-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #4f7d2d;
+}
+.mavi-judge-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 4px;
+}
+.mavi-judge-signals span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #fff3d6;
+  font-size: 0.68rem;
+  color: #6b4700;
+}
+.learning-feedback-list li.by-mavi .learning-vote {
+  background: #ece9fb;
+  color: #4b3fa0;
+}

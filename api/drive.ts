@@ -76,10 +76,20 @@ function copilotEnv(
   return { ...env, model, dossierModel: model, learningModel: model };
 }
 
-/** O aprendizado da MAVI com as avaliações das respostas (funcionalidade 'mavi_learning'). */
+/** O aprendizado da MAVI com as avaliações das respostas (funcionalidade 'mavi_learning') e a autoavaliação. */
 function maviLearning() {
   const env = { ...aiEnv(driveEnv()), model: serverModel("mavi_learning", process.env) };
-  return { env, deps: aiDeps(env) };
+  // A autoavaliação (funcionalidade 'mavi_judge'): até 2 minutos por vez.
+  const judgeEnv = { ...aiEnv(driveEnv()), model: serverModel("mavi_judge", process.env) };
+  return {
+    env,
+    deps: aiDeps(env),
+    judge: {
+      env: judgeEnv,
+      deps: aiDeps(judgeEnv),
+      budgetMs: Number(process.env.MAVI_JUDGE_BUDGET_MS) || 120_000,
+    },
+  };
 }
 
 /** Browser IP and user agent, for the Drive audit trail (Vercel sets x-forwarded-for). */
