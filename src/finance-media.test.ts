@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  coalesce,
+  fetchOnce,
+  forgetStatements,
+  remember,
+  remembered,
+  statementKey,
   categoriesFor,
+  clientStatus,
+  toggleStatus,
   demoMedia,
   entryInput,
   levelOf,
@@ -72,6 +80,67 @@ describe("Financeiro › Mídia", () => {
       low: 1,
       count: 3,
     });
+  });
+  it("status do cliente: pelo cadastro de Clientes, ou pela própria conta", () => {
+    const clients = [
+      { id: "a", archived: false },
+      { id: "b", archived: true },
+    ];
+    expect(clientStatus({ client_id: "a", archived: true }, clients)).toBe("active");
+    expect(clientStatus({ client_id: "b", archived: false }, clients)).toBe("archived");
+    expect(clientStatus({ client_id: "x", archived: true }, clients)).toBe("archived");
+  });
+  it("filtro de status: inclui e tira, mas o último marcado fica", () => {
+    expect(toggleStatus(["active"], "archived")).toEqual(["active", "archived"]);
+    expect(toggleStatus(["active", "archived"], "active")).toEqual(["archived"]);
+    expect(toggleStatus(["archived"], "archived")).toEqual(["archived"]);
+  });
+  it("rajada de avisos ao vivo: recarrega uma vez, no máximo 2 s depois do primeiro", () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn();
+      const reload = coalesce(run, 400, 2000);
+      reload();
+      vi.advanceTimersByTime(300);
+      reload();
+      vi.advanceTimersByTime(300);
+      expect(run).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(150);
+      expect(run).toHaveBeenCalledTimes(1);
+      // A sync that doesn't stop: still one reload every 2 s.
+      for (let i = 0; i < 10; i++) {
+        reload();
+        vi.advanceTimersByTime(250);
+      }
+      expect(run).toHaveBeenCalledTimes(2);
+      reload.cancel();
+      vi.advanceTimersByTime(5000);
+      expect(run).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("mesmo pedido ao mesmo tempo vai uma vez, e a resposta fica lembrada", async () => {
+    const fetcher = vi.fn(() => Promise.resolve(42));
+    const [a, b] = await Promise.all([fetchOnce("t:x", fetcher), fetchOnce("t:x", fetcher)]);
+    expect([a, b]).toEqual([42, 42]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(remembered("t:x")).toBe(42);
+    // After it arrives, a new question goes again (to refresh).
+    await fetchOnce("t:x", fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("esquece só os extratos da conta que mudou", () => {
+    const f = { from: "", to: "", kind: "", category: "" };
+    remember(statementKey("s", "k1", f, 100), 1);
+    remember(statementKey("s", "k1", { ...f, kind: "credit" }, 100), 2);
+    remember(statementKey("s", "k2", f, 100), 3);
+    forgetStatements("s", "k1");
+    expect(remembered(statementKey("s", "k1", f, 100))).toBeUndefined();
+    expect(remembered(statementKey("s", "k1", { ...f, kind: "credit" }, 100))).toBeUndefined();
+    expect(remembered(statementKey("s", "k2", f, 100))).toBe(3);
+    forgetStatements("s", null);
+    expect(remembered(statementKey("s", "k2", f, 100))).toBeUndefined();
   });
   it("demonstração: lança, estorna uma vez e recalcula o saldo", async () => {
     const data = {

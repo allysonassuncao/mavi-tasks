@@ -4,6 +4,7 @@
 // itself (the whole history, then only the differences), low-balance alerts
 // and the module's access, as Visão geral's in "Módulos visíveis".
 import assert from "node:assert/strict";
+import { readdir } from "node:fs/promises";
 import { applyMigration, createTestDatabase } from "./database-fixture.mjs";
 
 const db = await createTestDatabase({ until: "20270114090000" });
@@ -75,7 +76,9 @@ await sql(
    ($1,$2,$3,'2026-09-01',1.3,100,'maso'),($1,$2,$3,'2026-09-02',1.3,0,'meta'),($1,$2,$3,'2026-09-03',1.3,50.5,'meta')`,
   [A, campaign, cycle],
 );
-await applyMigration(db, "20270114090000");
+// This one and every later migration (20270119090000: the balance kept ready).
+for (const file of (await readdir("supabase/migrations")).sort())
+  if (file >= "20270114090000") await applyMigration(db, file.slice(0, 14));
 
 const debits = () =>
   sql(
@@ -236,8 +239,12 @@ await check("a lista traz as contas com lançamento, campanha ou mínimo; com p_
   assert.equal(all.accounts.length, 2);
   const acc = some.accounts[0];
   assert.equal(acc.client_name, "Vittalium");
-  assert.equal(acc.campaigns, 1);
   assert.equal(Number(acc.balance), await balance());
+  // Only what the screen shows (20270119090000).
+  assert.deepEqual(Object.keys(acc).sort(), [
+    "archived", "balance", "client_id", "client_name", "contract_id", "level", "min_balance",
+    "product_color", "product_name",
+  ]);
 });
 
 await check("saldo baixo e negativo avisam na piora: líderes e a equipe do cliente", async () => {
@@ -326,6 +333,21 @@ await check("Módulos visíveis: financeMedia é aceito para esconder e para lig
   assert.deepEqual(m.hidden_pages, ["financeMedia"]);
   // Hidden for a leader: they don't get alerts either.
   assert.equal((await sql("select count(*)::int as n from mavi_private.media_recipients($1,$2) u where u=$3", [A, client, manager]))[0].n, 0);
+});
+
+await check("o saldo pronto de cada conta bate com a soma do extrato", async () => {
+  const rows = await sql(
+    `select a.contract_id, a.balance::float as ready, a.entries,
+      (select coalesce(sum(case e.kind when 'credit' then e.amount else -e.amount end), 0)::float
+       from media_entries e where e.contract_id = a.contract_id) as summed,
+      (select count(*)::int from media_entries e where e.contract_id = a.contract_id) as n
+     from media_accounts a`,
+  );
+  assert.ok(rows.length >= 1);
+  for (const r of rows) {
+    assert.equal(r.ready, r.summed);
+    assert.equal(r.entries, r.n);
+  }
 });
 
 console.log(`${passed} checks passed`);

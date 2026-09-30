@@ -22,6 +22,17 @@ import { ATTACHMENT_HINT } from "./attachments";
 import type { Snapshot } from "./types";
 import {
   CATEGORY_KIND_LABEL,
+  CLIENT_STATUS_LABEL,
+  archivedById,
+  clientStatus,
+  coalesce,
+  fetchOnce,
+  forgetStatements,
+  remember,
+  remembered,
+  statementKey,
+  toggleStatus,
+  type ClientStatus,
   KIND_LABEL,
   LEVEL_LABEL,
   categoriesFor,
@@ -84,60 +95,130 @@ export function FinanceMediaPage({
     [demo, company, user],
   );
   const [selected, setSelected] = useUrlState<string>("contrato", "");
-  const [list, setList] = useState<MediaAccounts | null>(null);
+  // What this tab already loaded shows at once; the database answers behind.
+  const scope = `${company}:${user}:${demo ? "demo" : "db"}`;
   const [all, setAll] = useState(false);
-  const [categories, setCategories] = useState<MediaCategory[]>([]);
+  const accountsKey = `${scope}:contas:${all}`;
+  const categoriesKey = `${scope}:categorias`;
+  const [list, setList] = useState<MediaAccounts | null>(
+    () => remembered<MediaAccounts>(accountsKey) ?? null,
+  );
+  const [categories, setCategories] = useState<MediaCategory[]>(
+    () => remembered<MediaCategory[]>(categoriesKey) ?? [],
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState<MediaLevel | "">("");
+  // Clients' status: only the active ones unless the person adds archived.
+  const [statuses, setStatuses] = useState<ClientStatus[]>(["active"]);
   const [entryFor, setEntryFor] = useState<{ contract: string; kind: MediaKind } | null>(null);
   const [showCategories, setShowCategories] = useState(false);
   // Bumped on each change heard live: the statement reloads itself.
   const [tick, setTick] = useState(0);
 
+  // The accounts (saldo pronto no banco, migração 20270119090000); the
+  // categories only change by an administrator's hand, here.
   const load = useCallback(() => {
+    const cached = remembered<MediaAccounts>(accountsKey);
+    if (cached) setList(cached);
     setBusy(true);
-    Promise.all([media.accounts(all), media.categories()])
-      .then(([accounts, cats]) => {
+    fetchOnce(accountsKey, () => media.accounts(all))
+      .then((accounts) => {
         setList(accounts);
-        setCategories(cats);
         setError("");
       })
       .catch((e) => setError((e as Error).message))
       .finally(() => setBusy(false));
-  }, [media, all]);
+  }, [media, all, accountsKey]);
   useEffect(load, [load]);
+  useEffect(() => {
+    fetchOnce(categoriesKey, () => media.categories())
+      .then(setCategories)
+      .catch((e) => setError((e as Error).message));
+  }, [media, categoriesKey]);
 
+  // Live notices come in bursts (the Campanhas sync sends one per day it
+  // records): one reload after the burst, not one per notice.
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const touched = useRef<Set<string> | null>(new Set());
+  const reload = useMemo(
+    () =>
+      coalesce(() => {
+        const contracts = touched.current;
+        touched.current = new Set();
+        loadRef.current();
+        if (!contracts || contracts.has(selectedRef.current)) setTick((n) => n + 1);
+      }),
+    [],
+  );
   useEffect(() => {
     const onChange = (e: Event) => {
       const contracts = (e as CustomEvent<{ contracts: string[] | null }>).detail?.contracts;
-      load();
-      if (!contracts || contracts.includes(selectedRef.current)) setTick((n) => n + 1);
+      if (!contracts) {
+        touched.current = null;
+        forgetStatements(scope, null);
+      } else
+        for (const c of contracts) {
+          touched.current?.add(c);
+          forgetStatements(scope, c);
+        }
+      reload();
     };
     window.addEventListener("mavi:media", onChange);
-    return () => window.removeEventListener("mavi:media", onChange);
-  }, [load]);
+    return () => {
+      window.removeEventListener("mavi:media", onChange);
+      reload.cancel();
+    };
+  }, [reload, scope]);
+
+  // Warms the statement up while the pointer rests on an account.
+  const hover = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const prefetch = (contract: string) => {
+    clearTimeout(hover.current);
+    hover.current = setTimeout(() => {
+      const key = statementKey(scope, contract, NO_FILTER, PAGE);
+      if (!remembered(key))
+        fetchOnce(key, () => media.statement(contract, NO_FILTER, PAGE, 0)).catch(() => {});
+    }, 150);
+  };
+  useEffect(() => () => clearTimeout(hover.current), []);
 
   const accounts = list?.accounts ?? [];
+  // One lookup per account, not a search through every client.
+  const archivedMap = useMemo(() => archivedById(data.clients), [data.clients]);
+  const statusOf = useCallback((a: MediaAccount) => clientStatus(a, archivedMap), [archivedMap]);
+  const byStatus = useMemo(() => {
+    const count = { active: 0, archived: 0 };
+    for (const a of accounts) count[statusOf(a)]++;
+    return count;
+  }, [accounts, statusOf]);
+  // The cards count the accounts of the chosen statuses; the list also
+  // follows the search and the card clicked.
+  const inStatus = useMemo(
+    () => accounts.filter((a) => statuses.includes(statusOf(a))),
+    [accounts, statuses, statusOf],
+  );
   const rows = useMemo(() => {
     const q = query.trim().toLocaleLowerCase("pt-BR");
-    return accounts.filter(
+    return inStatus.filter(
       (a) =>
         (!q || accountLabel(a).toLocaleLowerCase("pt-BR").includes(q)) &&
         (!level || a.level === level),
     );
-  }, [accounts, query, level]);
-  const totals = summary(accounts.filter((a) => !a.archived));
+  }, [inStatus, query, level]);
+  const totals = summary(inStatus);
   const current = accounts.find((a) => a.contract_id === selected) ?? null;
   // An account opened by link (a notice) but not listed yet: every one.
   useEffect(() => {
     if (list && selected && !current && !all) setAll(true);
   }, [list, selected, current, all]);
 
-  const changed = () => {
+  const changed = (contract = selected) => {
+    forgetStatements(scope, contract);
     load();
     setTick((n) => n + 1);
   };
@@ -160,7 +241,8 @@ export function FinanceMediaPage({
           </span>
           <strong className={totals.balance < 0 ? "neg" : ""}>{money(totals.balance)}</strong>
           <small>
-            {totals.count} {totals.count === 1 ? "conta" : "contas"} ativas
+            {totals.count} {totals.count === 1 ? "conta" : "contas"} de clientes{" "}
+            {statuses.length > 1 ? "ativos e arquivados" : statuses[0] === "active" ? "ativos" : "arquivados"}
           </small>
         </div>
         <button
@@ -199,6 +281,26 @@ export function FinanceMediaPage({
             onChange={(e) => setQuery(e.target.value)}
           />
         </span>
+        <div className="media-status" role="group" aria-label="Status do cliente">
+          <span>Clientes</span>
+          {(["active", "archived"] as const).map((st) => (
+            <button
+              key={st}
+              type="button"
+              className={`media-status-option${statuses.includes(st) ? " selected" : ""}`}
+              aria-pressed={statuses.includes(st)}
+              title={
+                statuses.includes(st) && statuses.length === 1
+                  ? "Ao menos um status fica marcado"
+                  : undefined
+              }
+              onClick={() => setStatuses((on) => toggleStatus(on, st))}
+            >
+              {CLIENT_STATUS_LABEL[st]}
+              <small>{byStatus[st]}</small>
+            </button>
+          ))}
+        </div>
         <label className="media-check">
           <Checkbox checked={all} onCheckedChange={(v) => setAll(v === true)} />
           Mostrar todos os produtos contratados
@@ -239,7 +341,9 @@ export function FinanceMediaPage({
               title={accounts.length ? "Nenhuma conta com esses filtros" : "Nenhuma conta ainda"}
               body={
                 accounts.length
-                  ? "Mude a busca ou o filtro escolhido."
+                  ? statuses.includes("archived")
+                    ? "Mude a busca ou o filtro escolhido."
+                    : "Mude a busca ou o filtro escolhido, ou inclua os clientes arquivados."
                   : "A conta de mídia aparece quando o produto contratado tem campanha ou o primeiro lançamento. Use Novo lançamento ou marque Mostrar todos os produtos contratados."
               }
             />
@@ -252,6 +356,9 @@ export function FinanceMediaPage({
                     className={`media-account${a.contract_id === selected ? " selected" : ""}`}
                     aria-current={a.contract_id === selected || undefined}
                     onClick={() => setSelected(a.contract_id)}
+                    onMouseEnter={() => prefetch(a.contract_id)}
+                    onFocus={() => prefetch(a.contract_id)}
+                    onMouseLeave={() => clearTimeout(hover.current)}
                   >
                     <span className="media-account-name">
                       <span
@@ -263,7 +370,9 @@ export function FinanceMediaPage({
                         <strong>{a.client_name}</strong>
                         <small>
                           {a.product_name}
-                          {a.archived && " · arquivado"}
+                          {statusOf(a) === "archived"
+                            ? " · cliente arquivado"
+                            : a.archived && " · produto arquivado"}
                         </small>
                       </span>
                     </span>
@@ -283,13 +392,14 @@ export function FinanceMediaPage({
         {current ? (
           <Statement
             key={current.contract_id}
+            scope={scope}
             media={media}
             account={current}
             categories={categories}
             tick={tick}
             onBack={() => setSelected("")}
             onNew={(kind) => setEntryFor({ contract: current.contract_id, kind })}
-            onChanged={changed}
+            onChanged={() => changed(current.contract_id)}
             notify={notify}
           />
         ) : (
@@ -307,7 +417,7 @@ export function FinanceMediaPage({
         <EntryModal
           media={media}
           accounts={all ? accounts : null}
-          loadAll={() => media.accounts(true).then((r) => r.accounts)}
+          loadAll={() => fetchOnce(`${scope}:contas:true`, () => media.accounts(true)).then((r) => r.accounts)}
           categories={categories}
           initial={entryFor}
           onClose={() => setEntryFor(null)}
@@ -316,7 +426,7 @@ export function FinanceMediaPage({
             notify("Lançamento registrado.");
             if (contract !== selected) setSelected(contract);
             if (!accounts.some((a) => a.contract_id === contract)) setAll(true);
-            changed();
+            changed(contract);
           }}
         />
       )}
@@ -324,7 +434,10 @@ export function FinanceMediaPage({
         <CategoriesModal
           media={media}
           categories={categories}
-          onChange={setCategories}
+          onChange={(list) => {
+            remember(categoriesKey, list);
+            setCategories(list);
+          }}
           onClose={() => setShowCategories(false)}
         />
       )}
@@ -335,6 +448,7 @@ export function FinanceMediaPage({
 /* ------------------------------------------------------------------ */
 
 function Statement({
+  scope,
   media,
   account,
   categories,
@@ -344,6 +458,8 @@ function Statement({
   onChanged,
   notify,
 }: {
+  /** Whose memory of statements (see remembered). */
+  scope: string;
   media: MediaBackend;
   account: MediaAccount;
   categories: MediaCategory[];
@@ -354,32 +470,68 @@ function Statement({
   notify: (message: string) => void;
 }) {
   const [filter, setFilter] = useState<StatementFilter>(NO_FILTER);
-  const [statement, setStatement] = useState<MediaStatement | null>(null);
-  const [limit, setLimit] = useState(PAGE);
+  const contract = account.contract_id;
+  // Warmed up by the hover, or loaded before in this tab: shown at once.
+  const [statement, setStatement] = useState<MediaStatement | null>(
+    () => remembered<MediaStatement>(statementKey(scope, contract, NO_FILTER, PAGE)) ?? null,
+  );
+  // "Mostrar mais": the next pages, appended (the first page stays).
+  const [more, setMore] = useState<MediaEntry[]>([]);
+  const shown = useRef(PAGE);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // The rows on screen are of another filter, until its answer arrives.
+  const [stale, setStale] = useState(false);
   const [reversing, setReversing] = useState<MediaEntry | null>(null);
   const [attaching, setAttaching] = useState<string | null>(null);
   const [editingMin, setEditingMin] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const attachFor = useRef("");
 
+  // The first page of the filter; after a live change, as many rows as
+  // were on screen, in one question.
+  const filterRef = useRef(filter);
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    media
-      .statement(account.contract_id, filter, limit, 0)
+    const sameFilter = filterRef.current === filter;
+    filterRef.current = filter;
+    const limit = sameFilter ? Math.max(PAGE, shown.current) : PAGE;
+    const key = statementKey(scope, contract, filter, limit);
+    const cached = remembered<MediaStatement>(key);
+    if (cached) setStatement(cached);
+    setStale(!cached && !sameFilter);
+    fetchOnce(key, () => media.statement(contract, filter, limit, 0))
       .then((s) => {
         if (!alive) return;
         setStatement(s);
+        setMore([]);
+        setStale(false);
+        shown.current = s.entries.length;
         setError("");
       })
-      .catch((e) => alive && setError((e as Error).message))
-      .finally(() => alive && setLoading(false));
+      .catch((e) => {
+        if (!alive) return;
+        setStale(false);
+        setError((e as Error).message);
+      });
     return () => {
       alive = false;
     };
-  }, [media, account.contract_id, filter, limit, tick]);
+  }, [media, scope, contract, filter, tick]);
+
+  async function showMore() {
+    if (!statement || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const next = await media.statement(contract, filter, PAGE, statement.entries.length + more.length);
+      setMore((list) => [...list, ...next.entries]);
+      shown.current = statement.entries.length + more.length + next.entries.length;
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function attach(entry: string, files: FileList | null) {
     if (!files?.length) return;
@@ -396,11 +548,12 @@ function Statement({
   }
 
   const set = (patch: Partial<StatementFilter>) => {
-    setLimit(PAGE);
+    shown.current = PAGE;
     setFilter((f) => ({ ...f, ...patch }));
   };
   const filtered = filter.from || filter.to || filter.kind || filter.category;
   const s = statement;
+  const rows = s ? (more.length ? [...s.entries, ...more] : s.entries) : [];
   return (
     <section className="media-statement panel" aria-label={`Extrato de ${accountLabel(account)}`}>
       <header className="media-statement-head">
@@ -515,7 +668,7 @@ function Statement({
       />
       {!s ? (
         <Loading variant="table" />
-      ) : !s.entries.length ? (
+      ) : !rows.length ? (
         <Empty
           title={filtered ? "Nenhum lançamento com esses filtros" : "Sem lançamentos"}
           body={
@@ -525,7 +678,7 @@ function Statement({
           }
         />
       ) : (
-        <div className="drive-table-wrap">
+        <div className={`drive-table-wrap${stale ? " media-stale" : ""}`} aria-busy={stale || undefined}>
           <table className="drive-table media-table">
             <thead>
               <tr>
@@ -539,7 +692,7 @@ function Statement({
               </tr>
             </thead>
             <tbody>
-              {s.entries.map((e) => (
+              {rows.map((e) => (
                 <tr key={e.id} className={e.reversed_by ? "reversed" : ""}>
                   <td className="media-date">{dateBr(e.occurred_on)}</td>
                   <td>
@@ -629,10 +782,10 @@ function Statement({
               ))}
             </tbody>
           </table>
-          {s.entries.length < s.total && (
+          {rows.length < s.total && (
             <div className="media-more">
-              <Button className="btn secondary" loading={loading} onClick={() => setLimit((n) => n + PAGE)}>
-                Mostrar mais ({s.total - s.entries.length})
+              <Button className="btn secondary" loading={loadingMore} onClick={() => void showMore()}>
+                Mostrar mais ({s.total - rows.length})
               </Button>
             </div>
           )}

@@ -22,24 +22,18 @@ export type MediaCategory = {
   /** How many entries use it. */
   entries: number;
 };
+/** An account as the list shows it (migration 20270119090000). */
 export type MediaAccount = {
   contract_id: string;
   client_id: string;
   client_name: string;
-  product_id: string;
   product_name: string;
   product_color: string | null;
-  contract_name: string;
+  /** The client or the contracted product is archived. */
   archived: boolean;
   balance: number;
-  credits: number;
-  debits: number;
-  entries: number;
-  last_on: string | null;
-  last_at: string | null;
   min_balance: number | null;
   level: MediaLevel;
-  campaigns: number;
 };
 export type MediaAccounts = {
   is_admin: boolean;
@@ -138,8 +132,6 @@ function account(a: MediaAccount): MediaAccount {
   return {
     ...a,
     balance: num(a.balance),
-    credits: num(a.credits),
-    debits: num(a.debits),
     min_balance: numOrNull(a.min_balance),
   };
 }
@@ -246,6 +238,78 @@ export function supabaseMedia(company: string): MediaBackend {
 }
 
 /* ------------------------------------------------------------------ */
+/* What was already loaded, to show right away                         */
+
+/**
+ * The last accounts, categories and statements loaded in this tab (memory
+ * only: balances change all day, a copy from another visit would mislead).
+ * The page shows them at once and asks the database again behind them;
+ * the same question asked twice at the same time (hover, then click) goes
+ * once.
+ */
+const memory = new Map<string, unknown>();
+const inFlight = new Map<string, Promise<unknown>>();
+const MEMORY_LIMIT = 80;
+export function remembered<T>(key: string): T | undefined {
+  return memory.get(key) as T | undefined;
+}
+export function remember<T>(key: string, value: T) {
+  memory.delete(key);
+  memory.set(key, value);
+  // The oldest go first.
+  while (memory.size > MEMORY_LIMIT) memory.delete(memory.keys().next().value!);
+}
+/** Asks once for everyone waiting on the same key; remembers the answer. */
+export function fetchOnce<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  const pending = inFlight.get(key) as Promise<T> | undefined;
+  if (pending) return pending;
+  const p = fetcher()
+    .then((value) => {
+      remember(key, value);
+      return value;
+    })
+    .finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
+export const statementKey = (
+  scope: string,
+  contract: string,
+  f: StatementFilter,
+  limit: number,
+) => `${scope}:extrato:${contract}:${f.from}|${f.to}|${f.kind}|${f.category}:${limit}`;
+/** Drops what was remembered of an account (it just changed). */
+export function forgetStatements(scope: string, contract: string | null) {
+  const prefix = contract ? `${scope}:extrato:${contract}:` : `${scope}:extrato:`;
+  for (const key of [...memory.keys()]) if (key.startsWith(prefix)) memory.delete(key);
+}
+
+/**
+ * Calls `run` once after a burst of calls has settled (`wait` ms without a
+ * new one), but no later than `max` ms after the first: the Campanhas sync
+ * sends one notice per day it records.
+ */
+export function coalesce(run: () => void, wait = 400, max = 2000) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let first = 0;
+  const call = () => {
+    const now = Date.now();
+    if (!timer) first = now;
+    clearTimeout(timer);
+    const delay = Math.max(0, Math.min(wait, first + max - now));
+    timer = setTimeout(() => {
+      timer = undefined;
+      run();
+    }, delay);
+  };
+  call.cancel = () => {
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  return call;
+}
+
+/* ------------------------------------------------------------------ */
 /* Rules shared by the screen and the demonstration                    */
 
 export const KIND_LABEL: Record<MediaKind, string> = {
@@ -338,6 +402,36 @@ export function platformName(p: string | null) {
     ""
   );
 }
+export type ClientStatus = "active" | "archived";
+export const CLIENT_STATUS_LABEL: Record<ClientStatus, string> = {
+  active: "Ativos",
+  archived: "Arquivados",
+};
+/**
+ * Whether the account's client is active or archived (Clientes). An account
+ * whose client isn't in the list the screen has follows its own flag.
+ */
+export function clientStatus(
+  a: Pick<MediaAccount, "client_id" | "archived">,
+  clients: { id: string; archived: boolean }[] | ReadonlyMap<string, boolean>,
+): ClientStatus {
+  const archived =
+    clients instanceof Map
+      ? clients.get(a.client_id)
+      : (clients as { id: string; archived: boolean }[]).find((c) => c.id === a.client_id)?.archived;
+  return (archived ?? a.archived) ? "archived" : "active";
+}
+/** Clients' archived flag by id, to look each account up at once. */
+export const archivedById = (clients: { id: string; archived: boolean }[]) =>
+  new Map(clients.map((c) => [c.id, c.archived]));
+/**
+ * Toggles one status of the filter; the last one on stays on (the list
+ * would be empty otherwise).
+ */
+export function toggleStatus(on: ClientStatus[], status: ClientStatus): ClientStatus[] {
+  if (!on.includes(status)) return [...on, status];
+  return on.length > 1 ? on.filter((s) => s !== status) : on;
+}
 /** The totals of the accounts on screen. */
 export function summary(accounts: MediaAccount[]) {
   return {
@@ -384,7 +478,11 @@ export function demoMedia(data: () => Snapshot, user: string): MediaBackend {
   }));
   const mins = new Map<string, number | null>();
   const entries: DemoEntry[] = [];
-  const contracts = snap.contracts.filter((k) => !k.archived).slice(0, 4);
+  // Four active accounts and one of a former client (the "Arquivados" filter).
+  const contracts = [
+    ...snap.contracts.filter((k) => !k.archived).slice(0, 4),
+    ...snap.contracts.filter((k) => k.archived).slice(0, 1),
+  ];
   const at = (d: string) => `${d}T10:00:00.000Z`;
   contracts.forEach((k, i) => {
     const start = addDays(today, -20);
@@ -474,31 +572,18 @@ export function demoMedia(data: () => Snapshot, user: string): MediaBackend {
         .map((k) => {
           const client = snap.clients.find((c) => c.id === k.client_id);
           const product = snap.products.find((p) => p.id === k.product_id);
-          const own = entries.filter((e) => e.contract === k.id);
           const balance = balanceOf(k.id);
           const min = mins.get(k.id) ?? null;
           return {
             contract_id: k.id,
             client_id: k.client_id,
             client_name: client?.name ?? "Cliente",
-            product_id: k.product_id,
             product_name: product?.name ?? "Produto",
             product_color: product?.color ?? null,
-            contract_name: k.name,
             archived: k.archived || !!client?.archived,
             balance,
-            credits: own
-              .filter((e) => e.kind === "credit")
-              .reduce((s, e) => s + e.amount, 0),
-            debits: own
-              .filter((e) => e.kind === "debit")
-              .reduce((s, e) => s + e.amount, 0),
-            entries: own.length,
-            last_on: own.map((e) => e.occurred_on).sort().pop() ?? null,
-            last_at: own.map((e) => e.created_at).sort().pop() ?? null,
             min_balance: min,
             level: levelOf(balance, min),
-            campaigns: own.some((e) => e.source === "campaign") ? 1 : 0,
           };
         })
         .sort((a, b) =>
