@@ -178,6 +178,18 @@ describe("Agrupar a lista de tarefas", () => {
     expect(byProject.map((g) => g.label)).toEqual([project.name, "Sem projeto"]);
   });
 
+  it("na busca, Relevância mantém a ordem em que foram achadas, grupos também", () => {
+    const tasks = [
+      task({ id: "b1", contract_id: contractB.id, due_date: "2026-10-20" }),
+      task({ id: "a1", contract_id: contractA.id, due_date: "2026-09-29" }),
+      task({ id: "b2", contract_id: contractB.id, due_date: "2026-09-28" }),
+    ];
+    expect([...tasks].sort(compareTasks("relevance")).map((t) => t.id)).toEqual(["b1", "a1", "b2"]);
+    const groups = groupTasks(tasks, "client", { ...ctx, sort: "relevance" });
+    if (contractA.client_id !== contractB.client_id)
+      expect(groups.map((g) => g.tasks.map((t) => t.id))).toEqual([["b1", "b2"], ["a1"]]);
+  });
+
   it("ordena as tarefas como o servidor pagina: pela escolha, depois pelo id", () => {
     const list = [
       task({ id: "b", title: "beta", due_date: "2026-10-01" }),

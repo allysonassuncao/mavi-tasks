@@ -7854,6 +7854,17 @@ label .input-control .ui-input {
   color: #596861;
   overflow-wrap: anywhere;
 }
+/* The search's results in the task list's table: order and split beside the count. */
+.task-search-count .list-tools {
+  margin-left: auto;
+}
+.task-table .task-search-snippet {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  white-space: normal;
+}
 .task-search-snippet em {
   font-style: normal;
   font-weight: 600;

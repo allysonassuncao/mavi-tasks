@@ -55,9 +55,23 @@ export const SORT_OPTIONS: { id: TaskSort; label: string }[] = [
 export function parseSort(value: string): TaskSort {
   return SORT_OPTIONS.some((o) => o.id === value) ? (value as TaskSort) : "due";
 }
+/**
+ * The advanced search adds "Relevância": the order the search found them
+ * (title before description before comments), sections by their first hit.
+ */
+export type ListSort = TaskSort | "relevance";
+export const SEARCH_SORT_OPTIONS: { id: ListSort; label: string }[] = [
+  { id: "relevance", label: "Relevância" },
+  ...SORT_OPTIONS,
+];
+export function parseSearchSort(value: string): ListSort {
+  return value === "relevance" ? value : value ? parseSort(value) : "relevance";
+}
 /** The sort's own key, without the tie-breaker (sections break ties apart). */
-function sortKey(sort: TaskSort, a: Task, b: Task) {
+function sortKey(sort: ListSort, a: Task, b: Task) {
   switch (sort) {
+    case "relevance":
+      return 0;
     case "due_desc":
       return b.due_date.localeCompare(a.due_date);
     case "created_desc":
@@ -70,8 +84,12 @@ function sortKey(sort: TaskSort, a: Task, b: Task) {
       return a.due_date.localeCompare(b.due_date);
   }
 }
-/** Tasks in the sort's order; ties by id, as the server pages them. */
-export function compareTasks(sort: TaskSort) {
+/**
+ * Tasks in the sort's order; ties by id, as the server pages them.
+ * "Relevância" keeps the order they came in.
+ */
+export function compareTasks(sort: ListSort) {
+  if (sort === "relevance") return () => 0;
   return (a: Task, b: Task) =>
     sortKey(sort, a, b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
@@ -94,16 +112,18 @@ export type PlacedGroup = TaskGroup & {
  */
 export function placeGroups(
   groups: PlacedGroup[],
-  sort: TaskSort,
+  sort: ListSort,
   fixed = false,
 ): TaskGroup[] {
   const own = fixed || sort === "title";
+  // "Relevância": in the order the first hit of each came.
+  const asFound = !fixed && sort === "relevance";
   return [...groups]
     .sort(
       (a, b) =>
         Number(!!a.last) - Number(!!b.last) ||
         (own ? 0 : sortKey(sort, a.tasks[0], b.tasks[0])) ||
-        a.order.localeCompare(b.order, "pt-BR"),
+        (asFound ? 0 : a.order.localeCompare(b.order, "pt-BR")),
     )
     .map(({ order: _order, last: _last, ...g }) => g);
 }
@@ -114,7 +134,7 @@ export interface GroupContext {
   /** The company's timezone: the day a task was created, for packs. */
   timezone: string;
   /** "Ordenar por": the tasks' order and the sections' (due date by default). */
-  sort?: TaskSort;
+  sort?: ListSort;
 }
 
 export interface TaskGroup {

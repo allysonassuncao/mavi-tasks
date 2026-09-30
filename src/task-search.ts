@@ -118,6 +118,89 @@ export async function searchTasks(
   return (rows ?? []).map((r) => ({ ...r, total: Number(r.total) }));
 }
 
+/** Where the search found a task, shown under it in the list. */
+export type SearchMatch = Pick<TaskSearchHit, "match_in" | "snippet" | "comment_id">;
+/** The tasks found, whole, for the same table as the task list's. */
+export type TaskSearchRows = {
+  /** In the order found (title first, then description, then comments). */
+  tasks: Task[];
+  matches: Map<string, SearchMatch>;
+  /** How many there are in all (more than `tasks` past SEARCH_CAP). */
+  total: number;
+};
+/** The most tasks the search brings at once (public.search_task_rows). */
+export const SEARCH_CAP = 2000;
+
+/**
+ * Runs public.search_task_rows (as the person): every task found, up to
+ * SEARCH_CAP, without description and template fields (the task's page reads
+ * its own). A reply cut by the API's row limit is read on from where it
+ * stopped.
+ */
+export async function searchTaskRows(
+  company: string,
+  p: TaskSearchParams,
+): Promise<TaskSearchRows> {
+  type Row = SearchMatch & { task: Task; total: number };
+  const rows: Row[] = [];
+  let total = 0;
+  for (;;) {
+    const page = ((await rpc("search_task_rows", {
+      p_company: company,
+      p_query: p.query.trim(),
+      p_in: p.fields,
+      p_client: p.client || null,
+      p_project: p.project || null,
+      p_assignee: p.assignee || null,
+      p_creator: p.creator || null,
+      p_status: p.status || null,
+      p_from: p.from || null,
+      p_to: p.to || null,
+      p_limit: SEARCH_CAP - rows.length,
+      p_offset: rows.length,
+    })) ?? []) as Row[];
+    rows.push(...page);
+    if (page.length) total = Number(page[0].total);
+    if (!page.length || rows.length >= Math.min(total, SEARCH_CAP)) break;
+  }
+  const matches = new Map<string, SearchMatch>();
+  for (const r of rows)
+    matches.set(r.task.id, {
+      match_in: r.match_in,
+      snippet: r.snippet,
+      comment_id: r.comment_id,
+    });
+  return { tasks: rows.map((r) => r.task), matches, total };
+}
+
+/** searchTaskRows over the demo's data. */
+export function searchTaskRowsLocal(
+  data: Snapshot,
+  comments: Comment[],
+  user: string,
+  p: TaskSearchParams,
+): TaskSearchRows {
+  const hits = searchTasksLocal(data, comments, user, {
+    ...p,
+    offset: 0,
+    limit: SEARCH_CAP,
+  });
+  const byId = new Map(data.tasks.map((t) => [t.id, t]));
+  const matches = new Map<string, SearchMatch>();
+  const tasks: Task[] = [];
+  for (const h of hits) {
+    const t = byId.get(h.task_id);
+    if (!t) continue;
+    tasks.push(t);
+    matches.set(t.id, {
+      match_in: h.match_in,
+      snippet: h.snippet,
+      comment_id: h.comment_id,
+    });
+  }
+  return { tasks, matches, total: hits[0]?.total ?? 0 };
+}
+
 /** The same search over the demo's data (public.search_tasks mirrored). */
 export function searchTasksLocal(
   data: Snapshot,

@@ -1,26 +1,46 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, CalendarDays, Search, X } from "lucide-react";
+import { ArrowLeft, Search, TriangleAlert, X } from "lucide-react";
 import { Button, Input, Select, SelectOption } from "./ui";
-import { BULK_LIMIT } from "./api";
-import { Avatar, Badge, Empty, Loading } from "./components";
-import { dateLabel } from "./domain";
+import { Empty, Loading } from "./components";
+import { buildNameLookup, dateKey } from "./domain";
 import { navigate, useUrlState } from "./router";
 import { readFilters, writeFilters } from "./remembered-filters";
-import { BulkEditor, SelectBox, selectState } from "./TaskBulk";
+import { BulkEditor } from "./TaskBulk";
+import { ListArrange, TaskTable, type Playing } from "./TaskTable";
 import type { BulkChange, BulkResult, BulkUndo } from "./task-bulk";
-import { listedStatuses, statuses, type Comment, type Snapshot } from "./types";
+import {
+  GROUP_OPTIONS,
+  SEARCH_SORT_OPTIONS,
+  compareTasks,
+  groupTasks,
+  parseGroupBy,
+  parseSearchSort,
+  withSubgroups,
+  type TaskGroup,
+} from "./task-grouping";
+import {
+  listedStatuses,
+  statuses,
+  type Comment,
+  type Snapshot,
+  type Task,
+} from "./types";
 import {
   SEARCH_FIELDS,
   hasCriteria,
   highlightParts,
-  searchTasks,
-  searchTasksLocal,
+  searchTaskRows,
+  searchTaskRowsLocal,
   type SearchField,
   type TaskSearchHit,
   type TaskSearchParams,
+  type TaskSearchRows,
 } from "./task-search";
 
-/** The search's filters (URL params) kept for the next visit, with the term. */
+/**
+ * The search's filters (URL params) kept for the next visit, with the term;
+ * the order and the split too, as the task list keeps its own.
+ */
 const FILTER_PARAMS = [
   "em",
   "cli",
@@ -30,7 +50,12 @@ const FILTER_PARAMS = [
   "situacao",
   "de",
   "ate",
+  "ordenar",
+  "agrupar",
+  "depois",
 ] as const;
+/** Splits of the search: the list's, but the tab's own (there is no tab). */
+const SEARCH_GROUPS = GROUP_OPTIONS.filter((o) => o.id !== "auto");
 
 const MATCH_LABEL: Record<TaskSearchHit["match_in"], string> = {
   title: "Título",
@@ -42,7 +67,8 @@ const MATCH_LABEL: Record<TaskSearchHit["match_in"], string> = {
 /**
  * Advanced task search: title, description and comments, delivered tasks
  * included, with filters. Criteria live in the URL, so opening a result and
- * closing it comes back to the same search.
+ * closing it comes back to the same search. The tasks found show in the task
+ * list's own table: order, split, closed sections' digest, bulk edit.
  */
 export function TaskSearch({
   data,
@@ -55,6 +81,7 @@ export function TaskSearch({
   runBulk,
   undoBulk,
   onBulkDone,
+  playing,
 }: {
   data: Snapshot;
   company: string;
@@ -71,6 +98,8 @@ export function TaskSearch({
   ) => Promise<BulkResult>;
   undoBulk: (operation: string) => Promise<BulkUndo>;
   onBulkDone: () => void;
+  /** The person's running timer, marked on its task as in the list. */
+  playing?: Playing | null;
 }) {
   const [query, setQuery] = useUrlState<string>("termo", "");
   const [fieldsParam, setFieldsParam] = useUrlState<string>("em", "");
@@ -81,10 +110,19 @@ export function TaskSearch({
   const [status, setStatus] = useUrlState<string>("situacao", "");
   const [from, setFrom] = useUrlState<string>("de", "");
   const [to, setTo] = useUrlState<string>("ate", "");
+  const [sortParam, setSortParam] = useUrlState<string>("ordenar", "");
+  const [groupParam, setGroupParam] = useUrlState<string>("agrupar", "none");
+  const [thenParam, setThenParam] = useUrlState<string>("depois", "none");
+  const sort = parseSearchSort(sortParam);
+  const groupBy = parseGroupBy(groupParam, "none");
+  const thenChoice = parseGroupBy(thenParam, "none");
+  const thenBy =
+    groupBy === "auto" || thenChoice === "auto" || thenChoice === groupBy
+      ? "none"
+      : thenChoice;
   const [text, setText] = useState(query);
-  const [hits, setHits] = useState<TaskSearchHit[]>([]);
+  const [found, setFound] = useState<TaskSearchRows | null>(null);
   const [loading, setLoading] = useState(false);
-  const [more, setMore] = useState(false);
   const [error, setError] = useState("");
   const request = useRef(0);
 
@@ -119,6 +157,9 @@ export function TaskSearch({
     situacao: status,
     de: from,
     ate: to,
+    ordenar: sortParam,
+    agrupar: groupParam === "none" ? "" : groupParam,
+    depois: thenParam === "none" ? "" : thenParam,
   });
   useEffect(() => {
     if (filtersFor === `${company}:${user}`)
@@ -153,79 +194,56 @@ export function TaskSearch({
   );
   const active = hasCriteria(params);
 
-  function page(p: TaskSearchParams) {
-    return demo
-      ? Promise.resolve(searchTasksLocal(data, demoComments(), user, p))
-      : searchTasks(company, p);
-  }
-  function run(offset: number) {
+  // Every task found at once (up to SEARCH_CAP): the sections come whole
+  // and the table shows them a batch at a time ("Carregar mais").
+  function run(quiet = false) {
     const id = ++request.current;
     setError("");
-    if (offset) setMore(true);
-    else setLoading(true);
-    page({ ...params, offset })
+    if (!quiet) setLoading(true);
+    (demo
+      ? Promise.resolve(searchTaskRowsLocal(data, demoComments(), user, params))
+      : searchTaskRows(company, params)
+    )
       .then((rows) => {
-        if (id !== request.current) return;
-        setHits((list) => (offset ? [...list, ...rows] : rows));
+        if (id === request.current) setFound(rows);
       })
       .catch((e) => {
         if (id === request.current) setError((e as Error).message);
       })
       .finally(() => {
-        if (id === request.current) {
-          setLoading(false);
-          setMore(false);
-        }
+        if (id === request.current) setLoading(false);
       });
   }
   useEffect(() => {
     if (!active) {
       request.current++;
-      setHits([]);
+      setFound(null);
       setLoading(false);
       return;
     }
-    run(0);
+    run();
     // `run` reads the current params; re-run only when they change.
   }, [params, active, company, demo]);
 
-  // Tasks picked for a bulk edit; "all" is every task the search finds, on
-  // every "Carregar mais" (resolved when the edit is reviewed).
+  // Tasks picked for a bulk edit, among the ones found.
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
-  const [pickedAll, setPickedAll] = useState(false);
-  const clearPicked = useCallback(() => {
-    setPicked(new Set());
-    setPickedAll(false);
-  }, []);
+  const clearPicked = useCallback(() => setPicked(new Set()), []);
   useEffect(clearPicked, [params, company, clearPicked]);
-  const shownIds = hits.map((h) => h.task_id);
   function togglePicked(ids: string[]) {
     setPicked((prev) => {
-      const base = pickedAll ? new Set(shownIds) : prev;
-      const on = ids.every((id) => base.has(id));
-      const next = new Set(base);
+      const on = ids.every((id) => prev.has(id));
+      const next = new Set(prev);
       for (const id of ids) {
         if (on) next.delete(id);
         else next.add(id);
       }
       return next;
     });
-    setPickedAll(false);
-  }
-  async function resolvePicked() {
-    if (!pickedAll) return [...picked];
-    const ids = new Set<string>();
-    const want = Math.min(total, BULK_LIMIT);
-    while (ids.size < want) {
-      const rows = await page({ ...params, offset: ids.size, limit: 100 });
-      if (!rows.length) break;
-      for (const r of rows) ids.add(r.task_id);
-    }
-    return [...ids].slice(0, BULK_LIMIT);
   }
   function afterBulk() {
     onBulkDone();
-    run(0);
+    // The results stay on screen while they are read again.
+    run(true);
   }
 
   function toggleField(id: SearchField) {
@@ -263,11 +281,40 @@ export function TaskSearch({
   const people = data.members
     .filter((m) => m.active)
     .sort((a, b) => a.name.localeCompare(b.name));
-  const member = (id: string) => data.members.find((m) => m.user_id === id);
-  const total = hits[0]?.total ?? 0;
-  const pickedCount = pickedAll ? Math.min(total, BULK_LIMIT) : picked.size;
-  const shownAllPicked =
-    !pickedAll && hits.length > 0 && shownIds.every((id) => picked.has(id));
+  const total = found?.total ?? 0;
+
+  // The list's table: its order, its split, its sections.
+  const lookup = useMemo(() => buildNameLookup(data), [data]);
+  const timezone =
+    data.companies.find((c) => c.id === company)?.timezone ??
+    "America/Sao_Paulo";
+  const today = dateKey(new Date(), timezone);
+  const tasks = useMemo(
+    () => [...(found?.tasks ?? [])].sort(compareTasks(sort)),
+    [found, sort],
+  );
+  const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+  const groups: TaskGroup[] | undefined = useMemo(() => {
+    const ctx = { lookup, today, timezone, sort };
+    if (groupBy === "none")
+      return thenBy === "none" ? undefined : groupTasks(tasks, thenBy, ctx);
+    return withSubgroups(groupTasks(tasks, groupBy, ctx), thenBy, ctx);
+  }, [tasks, groupBy, thenBy, lookup, today, timezone, sort]);
+  const marked = (value: string) =>
+    highlightParts(value, query).map((p, i) =>
+      p.match ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>,
+    );
+  const titleOf = (t: Task) =>
+    found?.matches.get(t.id)?.match_in === "title" ? marked(t.title) : t.title;
+  const noteOf = (t: Task) => {
+    const m = found?.matches.get(t.id);
+    if (!m || m.match_in === "title" || m.match_in === "filters") return null;
+    return (
+      <span className="task-search-snippet">
+        <em>{MATCH_LABEL[m.match_in]}:</em> {marked(m.snippet)}
+      </span>
+    );
+  };
 
   return (
     <section className="panel task-search">
@@ -415,7 +462,7 @@ export function TaskSearch({
         />
       ) : loading ? (
         <Loading compact />
-      ) : !hits.length ? (
+      ) : !tasks.length ? (
         <Empty
           title="Nada encontrado"
           body="Tente outro termo, procure em mais lugares ou remova algum filtro."
@@ -423,139 +470,58 @@ export function TaskSearch({
       ) : (
         <>
           <div className="task-search-count">
-            <SelectBox
-              state={selectState(shownIds, picked, pickedAll)}
-              label="Selecionar as tarefas mostradas"
-              onToggle={() => togglePicked(shownIds)}
-            />
             <p role="status">
               {total === 1
                 ? "1 tarefa encontrada"
                 : `${total} tarefas encontradas`}
             </p>
+            <div className="list-tools">
+              <ListArrange
+                sort={sort}
+                sortOptions={SEARCH_SORT_OPTIONS}
+                onSort={(v) => setSortParam(v === "relevance" ? "" : v)}
+                group={groupBy}
+                then={thenBy}
+                groupOptions={SEARCH_GROUPS}
+                onGroup={setGroupParam}
+                onThen={setThenParam}
+              />
+            </div>
           </div>
-          {(pickedAll || (shownAllPicked && total > hits.length)) && (
-            <div className="select-banner task-search-banner" role="status">
-              <span>
-                {pickedAll
-                  ? total > BULK_LIMIT
-                    ? `As primeiras ${BULK_LIMIT} das ${total} tarefas da busca estão selecionadas (o limite de uma vez).`
-                    : `Todas as ${total} tarefas da busca estão selecionadas, inclusive as ainda não carregadas.`
-                  : `As ${hits.length} tarefas mostradas estão selecionadas.`}
-              </span>
-              <Button
-                className="text-btn"
-                onClick={() =>
-                  pickedAll ? clearPicked() : setPickedAll(true)
-                }
-              >
-                {pickedAll
-                  ? "Limpar seleção"
-                  : total > BULK_LIMIT
-                    ? `Selecionar as primeiras ${BULK_LIMIT} da busca`
-                    : `Selecionar todas as ${total} da busca`}
-              </Button>
-            </div>
+          {total > tasks.length && (
+            <p className="task-list-capped" role="status">
+              <TriangleAlert size={14} aria-hidden="true" />
+              Mostrando as primeiras {tasks.length} das {total} tarefas
+              encontradas. Use os filtros para ver as outras.
+            </p>
           )}
-          <ol className="task-search-results">
-            {hits.map((h) => {
-              const contract = data.contracts.find(
-                (k) => k.id === h.contract_id,
-              );
-              const clientName = data.clients.find(
-                (c) => c.id === contract?.client_id,
-              )?.name;
-              const productName = data.products.find(
-                (p) => p.id === contract?.product_id,
-              )?.name;
-              const projectName = data.projects.find(
-                (p) => p.id === h.project_id,
-              )?.name;
-              const who = member(h.assignee_id);
-              const isPicked = pickedAll || picked.has(h.task_id);
-              return (
-                <li
-                  key={h.task_id}
-                  className={isPicked ? "is-picked" : undefined}
-                >
-                  <SelectBox
-                    state={isPicked ? "all" : "none"}
-                    label={`Selecionar ${h.title}`}
-                    onToggle={() => togglePicked([h.task_id])}
-                  />
-                  <button
-                    type="button"
-                    className="task-search-hit"
-                    onClick={() => onOpen(h.task_id)}
-                  >
-                    <span className="task-search-hit-top">
-                      <strong>
-                        {h.match_in === "title"
-                          ? highlightParts(h.title, query).map((p, i) =>
-                              p.match ? (
-                                <mark key={i}>{p.text}</mark>
-                              ) : (
-                                <span key={i}>{p.text}</span>
-                              ),
-                            )
-                          : h.title}
-                      </strong>
-                      <Badge status={h.status} />
-                    </span>
-                    <small className="task-search-hit-meta">
-                      {[clientName, productName, projectName]
-                        .filter(Boolean)
-                        .join(" / ")}
-                    </small>
-                    {h.match_in !== "title" && h.match_in !== "filters" && (
-                      <span className="task-search-snippet">
-                        <em>{MATCH_LABEL[h.match_in]}:</em>{" "}
-                        {highlightParts(h.snippet, query).map((p, i) =>
-                          p.match ? (
-                            <mark key={i}>{p.text}</mark>
-                          ) : (
-                            <span key={i}>{p.text}</span>
-                          ),
-                        )}
-                      </span>
-                    )}
-                    <span className="task-search-hit-foot">
-                      <span>
-                        <Avatar
-                          name={who?.name ?? "?"}
-                          src={who?.avatar_url}
-                          size="small"
-                        />
-                        {who?.name ?? "—"}
-                      </span>
-                      <span>
-                        <CalendarDays size={14} /> {dateLabel(h.due_date)}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-          {hits.length < total && (
-            <div className="task-search-more">
-              <Button
-                className="btn secondary"
-                loading={more}
-                disabled={more}
-                onClick={() => run(hits.length)}
-              >
-                Carregar mais
-              </Button>
-            </div>
-          )}
+          <TaskTable
+            tasks={tasks}
+            groups={groups}
+            me={user}
+            lookup={lookup}
+            today={today}
+            playing={playing}
+            onSelect={onOpen}
+            selection={{ picked, all: false, toggle: togglePicked }}
+            parentTitle={(id) => byId.get(id)?.title}
+            rememberGroups={{
+              company,
+              user,
+              split: `busca:${groupBy}>${thenBy}`,
+            }}
+            growBy={50}
+            growKey={`${company}|${JSON.stringify(params)}|${sort}|${groupBy}|${thenBy}`}
+            renderTitle={titleOf}
+            renderNote={noteOf}
+          />
         </>
       )}
       <BulkEditor
-        count={pickedCount}
+        count={picked.size}
         data={data}
         me={user}
-        resolveIds={resolvePicked}
+        resolveIds={async () => [...picked]}
         run={runBulk}
         undo={undoBulk}
         onClear={clearPicked}
