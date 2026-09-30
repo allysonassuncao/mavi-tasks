@@ -40,20 +40,72 @@ export function parseGroupBy(value: string, fallback: GroupBy): GroupBy {
 }
 
 /**
- * The server's order for a split, so a page of 50 holds whole sections as
- * far as possible (packs newest first; the rest by due date inside).
+ * How the list is sorted ("Ordenar por"), chosen by each person: the tasks
+ * and, for splits without an order of their own, the sections too (by each
+ * one's first task). The server pages the list without groups in this order.
  */
-export type TaskOrder = "due" | "created" | "contract" | "assignee" | "status" | "project";
-export function groupOrder(by: GroupBy): TaskOrder {
-  return (
-    {
-      pack: "created",
-      client: "contract",
-      assignee: "assignee",
-      status: "status",
-      project: "project",
-    } as Partial<Record<GroupBy, TaskOrder>>
-  )[by] ?? "due";
+export type TaskSort = "due" | "due_desc" | "created_desc" | "created" | "title";
+export const SORT_OPTIONS: { id: TaskSort; label: string }[] = [
+  { id: "due", label: "Prazo mais próximo" },
+  { id: "due_desc", label: "Prazo mais distante" },
+  { id: "created_desc", label: "Criadas por último" },
+  { id: "created", label: "Criadas primeiro" },
+  { id: "title", label: "Nome (A–Z)" },
+];
+export function parseSort(value: string): TaskSort {
+  return SORT_OPTIONS.some((o) => o.id === value) ? (value as TaskSort) : "due";
+}
+/** The sort's own key, without the tie-breaker (sections break ties apart). */
+function sortKey(sort: TaskSort, a: Task, b: Task) {
+  switch (sort) {
+    case "due_desc":
+      return b.due_date.localeCompare(a.due_date);
+    case "created_desc":
+      return b.created_at.localeCompare(a.created_at);
+    case "created":
+      return a.created_at.localeCompare(b.created_at);
+    case "title":
+      return a.title.localeCompare(b.title, "pt-BR", { sensitivity: "base" });
+    default:
+      return a.due_date.localeCompare(b.due_date);
+  }
+}
+/** Tasks in the sort's order; ties by id, as the server pages them. */
+export function compareTasks(sort: TaskSort) {
+  return (a: Task, b: Task) =>
+    sortKey(sort, a, b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/** Splits whose sections keep their own order whatever the sort. */
+const FIXED_ORDER: GroupBy[] = ["status", "due", "none", "auto"];
+
+/** A section before it is placed: its own order and whether it goes last. */
+export type PlacedGroup = TaskGroup & {
+  /** The split's own order (packs newest first, names A–Z…). */
+  order: string;
+  /** "Sem projeto", "Sem equipe": after the others. */
+  last?: boolean;
+};
+/**
+ * Sections in the list's order: by their first task under the sort (the
+ * pack with the nearest due date first, by default), their own order
+ * breaking ties. "Nome" and the splits with an order of their own (status,
+ * due date) keep theirs. The tasks inside must already be sorted.
+ */
+export function placeGroups(
+  groups: PlacedGroup[],
+  sort: TaskSort,
+  fixed = false,
+): TaskGroup[] {
+  const own = fixed || sort === "title";
+  return [...groups]
+    .sort(
+      (a, b) =>
+        Number(!!a.last) - Number(!!b.last) ||
+        (own ? 0 : sortKey(sort, a.tasks[0], b.tasks[0])) ||
+        a.order.localeCompare(b.order, "pt-BR"),
+    )
+    .map(({ order: _order, last: _last, ...g }) => g);
 }
 
 export interface GroupContext {
@@ -61,6 +113,8 @@ export interface GroupContext {
   today: string;
   /** The company's timezone: the day a task was created, for packs. */
   timezone: string;
+  /** "Ordenar por": the tasks' order and the sections' (due date by default). */
+  sort?: TaskSort;
 }
 
 export interface TaskGroup {
@@ -89,7 +143,7 @@ function sectionOf(
   task: Task,
   by: GroupBy,
   ctx: GroupContext,
-): { key: string; label: string; sort: string } {
+): { key: string; label: string; sort: string; last?: boolean } {
   const contract = ctx.lookup.contracts.get(task.contract_id);
   const client = contract ? ctx.lookup.clients.get(contract.client_id) : undefined;
   const clientName = client?.name ?? "Sem cliente";
@@ -104,7 +158,12 @@ function sectionOf(
       };
     }
     case "client":
-      return { key: contract?.client_id ?? "-", label: clientName, sort: clientName };
+      return {
+        key: contract?.client_id ?? "-",
+        label: clientName,
+        sort: clientName,
+        last: !client,
+      };
     case "assignee": {
       const name = ctx.lookup.members.get(task.assignee_id)?.name ?? "Usuário removido";
       return { key: task.assignee_id, label: name, sort: name };
@@ -119,7 +178,7 @@ function sectionOf(
       const project = task.project_id ? ctx.lookup.projects.get(task.project_id) : undefined;
       return project
         ? { key: project.id, label: project.name, sort: `0${project.name}` }
-        : { key: "-", label: "Sem projeto", sort: "1" };
+        : { key: "-", label: "Sem projeto", sort: "1", last: true };
     }
     case "due": {
       const end = weekEnd(ctx.today);
@@ -207,14 +266,15 @@ export function groupSummary(tasks: Task[], today: string): GroupSummary {
   };
 }
 
-/** Splits tasks into sections, in each section's order. */
+/** Splits tasks into sections, in the list's order (see placeGroups). */
 export function groupTasks(
   tasks: Task[],
   by: GroupBy,
   ctx: GroupContext,
   keyPrefix = "",
 ): TaskGroup[] {
-  const map = new Map<string, TaskGroup & { sort: string }>();
+  const sort = ctx.sort ?? "due";
+  const map = new Map<string, PlacedGroup>();
   for (const t of tasks) {
     const s = sectionOf(t, by, ctx);
     const group = map.get(s.key);
@@ -223,19 +283,18 @@ export function groupTasks(
       map.set(s.key, {
         key: keyPrefix + s.key,
         label: s.label,
-        sort: s.sort,
+        order: s.sort,
+        last: s.last,
         hint: "",
         tasks: [t],
       });
   }
-  return [...map.values()]
-    .sort((a, b) => a.sort.localeCompare(b.sort, "pt-BR"))
-    .map(({ sort: _sort, ...g }) => ({
-      ...g,
-      // Inside a section, the nearest due date first.
-      tasks: [...g.tasks].sort((a, b) => a.due_date.localeCompare(b.due_date)),
-      hint: groupHint(g.tasks, ctx.today),
-    }));
+  const sections = [...map.values()].map((g) => ({
+    ...g,
+    tasks: [...g.tasks].sort(compareTasks(sort)),
+    hint: groupHint(g.tasks, ctx.today),
+  }));
+  return placeGroups(sections, sort, FIXED_ORDER.includes(by));
 }
 
 /** Adds the second level to sections made elsewhere (the tab's own too). */
@@ -281,6 +340,7 @@ export function nestSubtasks(tasks: Task[]): TaskRowNode[] {
 export interface TaskViewConfig {
   group?: GroupBy;
   then?: GroupBy;
+  sort?: TaskSort;
   view?: string;
   status?: string;
   product?: string;
@@ -292,6 +352,7 @@ export interface TaskViewConfig {
 const VIEW_KEYS: (keyof TaskViewConfig)[] = [
   "group",
   "then",
+  "sort",
   "view",
   "status",
   "product",
@@ -308,6 +369,7 @@ export function normalizeViewConfig(c: TaskViewConfig): TaskViewConfig {
     if (v === undefined || v === "" || v === false) continue;
     if (k === "group" && v === "auto") continue;
     if (k === "then" && v === "none") continue;
+    if (k === "sort" && v === "due") continue;
     if (k === "view" && v === "list") continue;
     (out as Record<string, unknown>)[k] = v;
   }

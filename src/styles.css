@@ -24882,6 +24882,26 @@ label.drive-pick-file {
   min-width: 170px;
   box-shadow: none;
 }
+/* A list split into sections grows a few sections at a time. */
+.task-list-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 0 6px;
+}
+.task-list-more small {
+  color: #6f7c77;
+  font-size: 0.75rem;
+}
+.task-list-capped {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  color: #9a6b12;
+  font-size: 0.78rem;
+}
 .views-trigger {
   display: inline-flex;
   align-items: center;

@@ -5,7 +5,7 @@ const { buildNameLookup } = await import("./domain");
 const {
   groupTasks,
   groupHint,
-  groupOrder,
+  compareTasks,
   groupSummary,
   nestSubtasks,
   normalizeViewConfig,
@@ -135,18 +135,67 @@ describe("Agrupar a lista de tarefas", () => {
     ]);
   });
 
-  it("pede ao servidor a ordem que mantém as seções inteiras na página", () => {
-    expect(groupOrder("pack")).toBe("created");
-    expect(groupOrder("assignee")).toBe("assignee");
-    expect(groupOrder("due")).toBe("due");
-    expect(groupOrder("auto")).toBe("due");
+  it("ordena os pacotes pelo prazo mais próximo, e as tarefas dentro deles", () => {
+    const tasks = [
+      task({ id: "a1", contract_id: contractA.id, due_date: "2026-10-09" }),
+      task({ id: "a2", contract_id: contractA.id, due_date: "2026-10-02" }),
+      task({
+        id: "d1",
+        contract_id: contractA.id,
+        created_at: "2026-09-26T12:00:00Z",
+        due_date: "2026-10-05",
+      }),
+    ];
+    const groups = groupTasks(tasks, "pack", ctx);
+    const clientA = lookup.clients.get(contractA.client_id)!.name;
+    // O pacote de 24/09 é mais antigo, mas vence antes (02/10).
+    expect(groups.map((g) => g.label)).toEqual([`${clientA} · 24/09`, `${clientA} · 26/09`]);
+    expect(groups[0].tasks.map((t) => t.id)).toEqual(["a2", "a1"]);
+    // Prazo mais distante: o de 24/09 tem a mais distante (09/10).
+    const far = groupTasks(tasks, "pack", { ...ctx, sort: "due_desc" });
+    expect(far.map((g) => g.tasks[0].id)).toEqual(["a1", "d1"]);
+    // Criadas por último: o pacote mais novo primeiro.
+    const newest = groupTasks(tasks, "pack", { ...ctx, sort: "created_desc" });
+    expect(newest[0].label).toBe(`${clientA} · 26/09`);
+  });
+
+  it("mantém a ordem própria de Prazo e Status, e o 'Sem projeto' no fim", () => {
+    const tasks = [
+      task({ id: "later", due_date: "2026-11-01" }),
+      task({ id: "late", due_date: "2026-09-25" }),
+    ];
+    const groups = groupTasks(tasks, "due", { ...ctx, sort: "due_desc" });
+    expect(groups.map((g) => g.label)).toEqual(["Atrasadas", "Mais tarde"]);
+    const project = data.projects[0];
+    const byProject = groupTasks(
+      [
+        task({ id: "none", project_id: null, due_date: "2026-09-29" }),
+        task({ id: "p", project_id: project.id, contract_id: project.contract_id, due_date: "2026-10-20" }),
+      ],
+      "project",
+      ctx,
+    );
+    expect(byProject.map((g) => g.label)).toEqual([project.name, "Sem projeto"]);
+  });
+
+  it("ordena as tarefas como o servidor pagina: pela escolha, depois pelo id", () => {
+    const list = [
+      task({ id: "b", title: "beta", due_date: "2026-10-01" }),
+      task({ id: "a", title: "Alfa", due_date: "2026-10-01" }),
+      task({ id: "c", title: "gama", due_date: "2026-09-29" }),
+    ];
+    const ids = (sort: Parameters<typeof compareTasks>[0]) =>
+      [...list].sort(compareTasks(sort)).map((t) => t.id);
+    expect(ids("due")).toEqual(["c", "a", "b"]);
+    expect(ids("due_desc")).toEqual(["a", "b", "c"]);
+    expect(ids("title")).toEqual(["a", "b", "c"]);
   });
 });
 
 describe("Visões salvas", () => {
   it("compara só o que difere do padrão", () => {
     expect(
-      normalizeViewConfig({ group: "auto", then: "none", view: "list", status: "", late: false }),
+      normalizeViewConfig({ group: "auto", then: "none", sort: "due", view: "list", status: "", late: false }),
     ).toEqual({});
     expect(
       sameViewConfig({ group: "pack", late: true }, { group: "pack", then: "none", late: true, view: "list" }),

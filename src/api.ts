@@ -2,7 +2,7 @@ import type { NotificationPrefs } from "./notificationPrefs";
 import { supabase } from "./supabase";
 import * as cache from "./cache";
 import { fold, type TaskScope } from "./domain";
-import type { TaskOrder, TaskViewConfig } from "./task-grouping";
+import type { TaskSort, TaskViewConfig } from "./task-grouping";
 import {
   emptySnapshot,
   type Snapshot,
@@ -42,8 +42,14 @@ export interface Filters {
   onlyMineOrCreated?: boolean;
   /** Leaders' list tabs: for them, created by them, their teams, others. */
   scope?: TaskScope;
-  /** The list's order, following its split ("Agrupar por"); due date by default. */
-  order?: TaskOrder;
+  /** The list's order ("Ordenar por"); nearest due date by default. */
+  order?: TaskSort;
+  /**
+   * The whole filter at once (up to LIST_CAP), for a list split into
+   * sections: each one whole and in its place. Without the heavy columns
+   * (description, template fields): the task's page reads its own.
+   */
+  all?: boolean;
 }
 
 export interface Summary {
@@ -117,24 +123,30 @@ type PagedQuery<T> = PromiseLike<{
 export async function fetchAllRows<T>(
   build: (count?: "exact") => PagedQuery<T>,
   concurrency = 4,
+  /** Stop after this many rows (the query's first ones). */
+  limit = Infinity,
 ): Promise<T[]> {
-  const first = await build("exact").range(0, PAGE_ROWS - 1);
+  const first = await build("exact").range(0, Math.min(PAGE_ROWS, limit) - 1);
   if (first.error) throw first.error;
   const rows = [...(first.data ?? [])];
   const size = rows.length;
-  if (!size) return rows;
+  if (!size || size >= limit) return rows.slice(0, limit);
   if (first.count == null) {
     // No count: keep reading until a page comes back short.
-    for (let page = first.data ?? []; page.length === size;) {
+    for (
+      let page = first.data ?? [];
+      page.length === size && rows.length < limit;
+    ) {
       const next = await build().range(rows.length, rows.length + size - 1);
       if (next.error) throw next.error;
       page = next.data ?? [];
       rows.push(...page);
     }
-    return rows;
+    return rows.slice(0, limit);
   }
   const starts: number[] = [];
-  for (let from = size; from < first.count; from += size) starts.push(from);
+  const end = Math.min(first.count, limit);
+  for (let from = size; from < end; from += size) starts.push(from);
   const pages: T[][] = new Array(starts.length);
   let next = 0;
   await Promise.all(
@@ -147,9 +159,19 @@ export async function fetchAllRows<T>(
       }
     }),
   );
-  return rows.concat(...pages);
+  return rows.concat(...pages).slice(0, limit);
 }
 const SCHEDULE_CAP = 2000;
+/** The most tasks a list split into sections brings at once (Filters.all). */
+export const LIST_CAP = 2000;
+/** What the list's rows need of a task: all but the heavy columns. */
+const LIST_COLUMNS =
+  "id,company_id,contract_id,project_id,team_id,parent_id,title,status,priority," +
+  "creator_id,assignee_id,due_date,original_due_date,start_date,estimated_minutes," +
+  "requires_client_approval,internal_approved_by,client_approved_by," +
+  "client_approval_note,delivered_at,status_changed_at,executor_id," +
+  "participant_ids,recurrence_id,due_manual,due_rule_id,due_tight_reason," +
+  "due_smart,due_rule_date,due_smart_date,revision,version,archived,created_at";
 
 // TTL configurations in milliseconds
 export const CACHE_TTL = {
@@ -281,6 +303,7 @@ function hashFilters(filters: Filters): string {
     mc: filters.onlyMineOrCreated,
     sc: filters.scope,
     o: filters.order,
+    a: filters.all,
   });
 }
 
@@ -425,24 +448,22 @@ export function applyScope<
     : others;
 }
 
-/** The list's order: its split first (packs newest first), then due date. */
+/** The list's order ("Ordenar por"); the id keeps pages from overlapping. */
 function orderTasks<
   Q extends {
     order: (c: string, o?: { ascending?: boolean }) => Q;
   },
->(query: Q, order: TaskOrder = "due"): Q {
-  const first = {
-    due: null,
-    created: "created_at",
-    contract: "contract_id",
-    assignee: "assignee_id",
-    status: "status",
-    project: "project_id",
-  }[order];
-  const q = first
-    ? query.order(first, { ascending: order !== "created" })
-    : query;
-  return q.order("due_date").order("id");
+>(query: Q, order: TaskSort = "due"): Q {
+  const [column, ascending] = (
+    {
+      due: ["due_date", true],
+      due_desc: ["due_date", false],
+      created_desc: ["created_at", false],
+      created: ["created_at", true],
+      title: ["title", true],
+    } as const
+  )[order];
+  return query.order(column, { ascending }).order("id");
 }
 
 /** A view of the task list the person saved (only they see theirs). */
@@ -506,12 +527,28 @@ export async function tasksQuery(
   return cache.fetchWithCache(
     cacheKey,
     async () => {
-      let query = orderTasks(
-        filteredTasks(company, filters, lookups, companyTz),
-        filters.order,
-      );
-      if (filters.scope)
-        query = applyScope(query, filters.scope, filters.user, lookups);
+      const build = (columns?: string) => {
+        const query = orderTasks(
+          filteredTasks(company, filters, lookups, companyTz, false, columns),
+          filters.order,
+        );
+        return filters.scope
+          ? applyScope(query, filters.scope, filters.user, lookups)
+          : query;
+      };
+      if (filters.all && !filters.schedule) {
+        const rows = await fetchAllRows<Task>(
+          () => build(LIST_COLUMNS) as unknown as PagedQuery<Task>,
+          4,
+          LIST_CAP,
+        );
+        // Past the cap, the list says how many there are in all.
+        if (rows.length < LIST_CAP) return { tasks: rows, count: rows.length };
+        const { count, error } = await build().range(0, 0);
+        if (error) throw error;
+        return { tasks: rows, count: count ?? rows.length };
+      }
+      const query = build();
 
       const result = await query.range(
         filters.schedule ? 0 : filters.page * 50,

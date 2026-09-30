@@ -72,6 +72,7 @@ import {
   CalendarDays,
   List,
   Layers,
+  ArrowUpDown,
   Columns3,
   SlidersHorizontal,
   TriangleAlert,
@@ -206,13 +207,16 @@ import {
 import type { BulkChange, BulkResult, BulkUndo } from "./task-bulk";
 import {
   GROUP_OPTIONS,
+  SORT_OPTIONS,
   THEN_OPTIONS,
-  groupOrder,
+  compareTasks,
   groupSummary,
   groupTasks,
   nestSubtasks,
   normalizeViewConfig,
   parseGroupBy,
+  parseSort,
+  placeGroups,
   withSubgroups,
   type TaskGroup,
   type TaskViewConfig,
@@ -499,6 +503,9 @@ export default function App() {
   const thenChoice = parseGroupBy(thenParam, "none");
   const thenBy =
     thenChoice === "auto" || thenChoice === groupBy ? "none" : thenChoice;
+  // "Ordenar por": the tasks, and the sections that have no order of their own.
+  const [sortParam, setSortBy] = useUrlState<string>("ordenar", "due");
+  const sortBy = parseSort(sortParam);
   const [entityEdit, setEntityEdit] = useState<EntityEdit | null>(null);
   const [editMember, setEditMember] = useState<Member | null>(null);
   const [resetPasswordMember, setResetPasswordMember] = useState<Member | null>(
@@ -618,6 +625,12 @@ export default function App() {
   const listScope: TaskScope = scopeTabs.some((t) => t.id === scopeParam)
     ? (scopeParam as TaskScope)
     : "mine";
+  // The list split into sections comes whole (up to api.LIST_CAP), so each
+  // section is complete and in its place, and grows with "Carregar mais".
+  const groupedList =
+    view === "list" &&
+    ((groupBy === "auto" ? listScope === "teams" : groupBy !== "none") ||
+      thenBy !== "none");
   const today = dateKey(new Date(), currentCompany?.timezone);
   const [periodValue, setPeriod] = useUrlState<string>("periodo", "");
   const [currentRunning, setCurrentRunning] = useState<
@@ -945,11 +958,12 @@ export default function App() {
           mine: false,
           scope: page === "tasks" ? listScope : undefined,
           user,
-          page: page === "tasks" ? offset : 0,
+          page: page === "tasks" && !groupedList ? offset : 0,
+          all: page === "tasks" && groupedList,
           late: page === "tasks" ? late : false,
           client: page === "tasks" ? clientFilter : "",
           project: page === "tasks" ? projectFilter : "",
-          order: page === "tasks" ? groupOrder(groupBy) : undefined,
+          order: page === "tasks" ? sortBy : undefined,
           onlyMineOrCreated: !isLeader,
           schedule:
             page === "tasks" && scheduleView
@@ -1003,7 +1017,8 @@ export default function App() {
     liveTick,
     isLeader,
     listScope,
-    page === "tasks" ? groupBy : "",
+    page === "tasks" ? sortBy : "",
+    page === "tasks" && groupedList,
     page === "tasks",
     page === "tasks" ? view : "list",
     page === "tasks" ? scheduleMonth : "",
@@ -1956,10 +1971,10 @@ export default function App() {
   const teamsOfMine = useMemo(() => myTeams(data, user), [data, user]);
   const filtered = useMemo(
     () =>
-      unscoped.filter(
-        (t) => taskScope(data, t, user, teamsOfMine) === listScope,
-      ),
-    [unscoped, listScope, data, user, teamsOfMine],
+      unscoped
+        .filter((t) => taskScope(data, t, user, teamsOfMine) === listScope)
+        .sort(compareTasks(sortBy)),
+    [unscoped, listScope, data, user, teamsOfMine, sortBy],
   );
   // Tab counts: from the server, or from the demo's (complete) task list.
   const tabCounts = useMemo((): Partial<Record<TaskScope, number>> | null => {
@@ -1982,25 +1997,33 @@ export default function App() {
         const name = taskTeamName(data, t);
         byTeam.set(name, [...(byTeam.get(name) ?? []), t]);
       }
-      return [...byTeam.entries()]
-        .sort(([a], [b]) =>
-          a === "Sem equipe" ? 1 : b === "Sem equipe" ? -1 : a.localeCompare(b),
-        )
-        .map(([name, tasks]) => ({
+      // Like the other splits: the team with the nearest due date first
+      // (under "Ordenar por"), "Sem equipe" last.
+      return placeGroups(
+        [...byTeam.entries()].map(([name, tasks]) => ({
           key: name,
           label: name,
           hint:
             name === "Sem equipe" ? "Tarefas sem equipe definida" : "Equipe",
           tasks,
-        }));
+          order: name,
+          last: name === "Sem equipe",
+        })),
+        sortBy,
+      );
     }
     return undefined;
-  }, [listScope, filtered, data]);
+  }, [listScope, filtered, data, sortBy]);
   // The split the person chose: the tab's own ("Padrão da aba") or another,
   // plus the second level. Without a first level, the second one leads.
   const companyTimezone = currentCompany?.timezone ?? "America/Sao_Paulo";
   const listGroups: TaskGroup[] | undefined = useMemo(() => {
-    const ctx = { lookup: nameLookup, today, timezone: companyTimezone };
+    const ctx = {
+      lookup: nameLookup,
+      today,
+      timezone: companyTimezone,
+      sort: sortBy,
+    };
     const base =
       groupBy === "auto"
         ? tabGroups
@@ -2010,7 +2033,16 @@ export default function App() {
     if (!base)
       return thenBy === "none" ? undefined : groupTasks(filtered, thenBy, ctx);
     return withSubgroups(base, thenBy, ctx);
-  }, [groupBy, thenBy, tabGroups, filtered, nameLookup, today, companyTimezone]);
+  }, [
+    groupBy,
+    thenBy,
+    tabGroups,
+    filtered,
+    nameLookup,
+    today,
+    companyTimezone,
+    sortBy,
+  ]);
   // Tasks picked in the list for a bulk edit; "all" is every task under the
   // filters, on every page (resolved when the edit is reviewed).
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
@@ -2071,7 +2103,7 @@ export default function App() {
         project: projectFilter,
         onlyMineOrCreated: !isLeader,
         scope: listScope,
-        order: groupOrder(groupBy),
+        order: sortBy,
       },
       companyTimezone,
     );
@@ -2125,6 +2157,7 @@ export default function App() {
   const currentViewConfig: TaskViewConfig = normalizeViewConfig({
     group: groupBy,
     then: thenBy,
+    sort: sortBy,
     view,
     status,
     product,
@@ -2143,6 +2176,7 @@ export default function App() {
     setProjectFilter(c.project ?? "");
     setGroupBy(c.group ?? "auto");
     setThenBy(c.then ?? "none");
+    setSortBy(c.sort ?? "due");
     setSearch("");
     setQuery("");
     setOffset(0);
@@ -3108,6 +3142,26 @@ export default function App() {
                       ))}
                     </div>
                     <div className="list-tools">
+                      {!scheduleView && (
+                        <span className="group-pick">
+                          <ArrowUpDown size={15} aria-hidden="true" />
+                          Ordenar por
+                          <Select
+                            aria-label="Ordenar por"
+                            value={sortBy}
+                            onValueChange={(value) => {
+                              setSortBy(value);
+                              setOffset(0);
+                            }}
+                          >
+                            {SORT_OPTIONS.map((o) => (
+                              <SelectOption key={o.id} value={o.id}>
+                                {o.label}
+                              </SelectOption>
+                            ))}
+                          </Select>
+                        </span>
+                      )}
                       {view === "list" && (
                         <>
                           <span className="group-pick">
@@ -3326,7 +3380,8 @@ export default function App() {
                             </span>
                           ) : (
                             <span>
-                              As {filtered.length} tarefas desta página estão
+                              As {filtered.length} tarefas{" "}
+                              {groupedList ? "carregadas" : "desta página"} estão
                               selecionadas.
                             </span>
                           )}
@@ -3363,6 +3418,8 @@ export default function App() {
                           user,
                           split: `${groupBy === "auto" ? `auto-${listScope}` : groupBy}>${thenBy}`,
                         }}
+                        growBy={50}
+                        growKey={`${company}|${query}|${listFiltersKey}`}
                       />
                     </>
                   ) : view === "board" ? (
@@ -3438,11 +3495,22 @@ export default function App() {
                       body="Altere os filtros ou crie uma tarefa."
                     />
                   )}
+                  {groupedList && !loading && count > filtered.length && (
+                    <p className="task-list-capped" role="status">
+                      <TriangleAlert size={14} aria-hidden="true" />
+                      Mostrando as primeiras {filtered.length} das {count}{" "}
+                      tarefas deste filtro. Use os filtros para ver as outras.
+                    </p>
+                  )}
                   {!scheduleView && (
                     <Pagination
                       always
-                      page={demo ? 0 : offset}
-                      pageCount={demo ? 1 : Math.max(1, Math.ceil(count / 50))}
+                      page={demo || groupedList ? 0 : offset}
+                      pageCount={
+                        demo || groupedList
+                          ? 1
+                          : Math.max(1, Math.ceil(count / 50))
+                      }
                       pageSize={50}
                       total={demo ? filtered.length : count}
                       noun={
@@ -4689,6 +4757,7 @@ const LIST_PARAMS = [
   "projeto",
   "agrupar",
   "depois",
+  "ordenar",
   "pagina",
   "minhas",
 ];
@@ -4703,6 +4772,8 @@ function TaskTable({
   selection,
   parentTitle,
   rememberGroups,
+  growBy,
+  growKey,
 }: {
   tasks: Task[];
   /** Sections (e.g. "Para você", a pack), each maybe with a second level. */
@@ -4728,6 +4799,13 @@ function TaskTable({
    * of splitting, so pages, reloads and live updates keep them as left.
    */
   rememberGroups?: { company: string; user: string; split: string };
+  /**
+   * With sections: about this many rows at first, and as many more on each
+   * "Carregar mais" (a closed section counts as one row). Back to the first
+   * rows when `growKey` changes (other filters); live updates keep them.
+   */
+  growBy?: number;
+  growKey?: string;
 }) {
   const memory = rememberGroups
     ? `${rememberGroups.company}|${rememberGroups.user}|${rememberGroups.split}`
@@ -4749,6 +4827,12 @@ function TaskTable({
   }
   // Main tasks whose subtasks are hidden.
   const [folded, setFolded] = useState<Set<string>>(() => new Set());
+  const [rowLimit, setRowLimit] = useState(growBy ?? Infinity);
+  const [grownFor, setGrownFor] = useState(growKey);
+  if (grownFor !== growKey) {
+    setGrownFor(growKey);
+    setRowLimit(growBy ?? Infinity);
+  }
   const flip =
     (set: typeof setCollapsed) =>
     (key: string) =>
@@ -5076,6 +5160,17 @@ function TaskTable({
       </tr>
     );
   };
+  // The sections that fit the rows shown so far (at least one).
+  const shownGroups: TaskGroup[] = [];
+  if (groups) {
+    let used = 0;
+    for (const g of groups) {
+      if (shownGroups.length && used >= rowLimit) break;
+      shownGroups.push(g);
+      used += collapsed.has(g.key) ? 1 : g.tasks.length + 1;
+    }
+  }
+  const hiddenGroups = (groups?.length ?? 0) - shownGroups.length;
   return (
     <>
       <div className="table-scroll">
@@ -5099,7 +5194,7 @@ function TaskTable({
             </tr>
           </thead>
           {groups ? (
-            groups.map((g) => (
+            shownGroups.map((g) => (
               <tbody key={g.key} className="task-group">
                 {head(g, 0)}
                 {!collapsed.has(g.key) &&
@@ -5116,6 +5211,19 @@ function TaskTable({
           )}
         </table>
       </div>
+      {hiddenGroups > 0 && (
+        <div className="task-list-more">
+          <Button
+            className="btn secondary"
+            onClick={() => setRowLimit((n) => n + (growBy ?? 0))}
+          >
+            Carregar mais
+          </Button>
+          <small>
+            {shownGroups.length} de {groups!.length} grupos
+          </small>
+        </div>
+      )}
       {!tasks.length && (
         <Empty
           title="Tudo livre por aqui"
