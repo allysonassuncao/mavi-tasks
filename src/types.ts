@@ -181,6 +181,8 @@ export interface AppNotification {
   link?: string | null;
   /** Status and validation notices: what the actor did ("moveu para Correção"). */
   headline?: string | null;
+  /** The client: the task's, or the one the notice's link points to. */
+  client_id?: string | null;
 }
 export interface TimeEntry {
   id: string;

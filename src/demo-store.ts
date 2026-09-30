@@ -269,6 +269,17 @@ export class DemoStore {
   inbox(user: string): AppNotification[] {
     return this.notifications
       .filter((n) => n.user_id === user)
+      .map((n) => ({
+        ...n,
+        client_id:
+          n.client_id ??
+          this.data.contracts.find(
+            (k) =>
+              k.id ===
+              this.data.tasks.find((t) => t.id === n.task_id)?.contract_id,
+          )?.client_id ??
+          null,
+      }))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
   readNotifications(user: string, ids?: string[]) {

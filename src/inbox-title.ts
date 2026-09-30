@@ -44,13 +44,21 @@ export function freshNotice(
 
 const BLINK_MS = 1500;
 
-export function useInboxTitle(items: AppNotification[], enabled: boolean) {
+/**
+ * `unreadTotal`: every unread notice, counted in the database (the items are only
+ * the latest ones, to spot one that just arrived).
+ */
+export function useInboxTitle(
+  items: AppNotification[],
+  enabled: boolean,
+  unreadTotal: number,
+) {
   // The page's own title (index.html), restored when signing out.
   const base = useRef(document.title);
   const seen = useRef(new Set<string>());
   const since = useRef(new Date().toISOString());
   const blink = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-  const unread = enabled ? items.filter((n) => !n.read_at).length : 0;
+  const unread = enabled ? unreadTotal : 0;
   const count = useRef(unread);
   count.current = unread;
 

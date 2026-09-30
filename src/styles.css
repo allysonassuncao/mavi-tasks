@@ -5859,7 +5859,12 @@ label .input-control .ui-input {
   padding: 0;
   list-style: none;
 }
+/* As it was when the inbox's list rules also reached this panel. */
+.notify-panel .notify-steps {
+  padding: 6px;
+}
 .notify-panel .notify-steps li.notify-step {
+  position: relative;
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 9px;
@@ -6111,15 +6116,15 @@ label .input-control .ui-input {
   gap: 5px;
   font-size: 0.68rem;
 }
-.inbox-panel ul {
+.inbox-list {
   list-style: none;
   margin: 0;
   padding: 6px;
 }
-.inbox-panel li {
+.inbox-list li {
   position: relative;
 }
-.inbox-panel li button.inbox-item {
+.inbox-list li button.inbox-item {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 10px;
@@ -6135,15 +6140,15 @@ label .input-control .ui-input {
   line-height: 1.4;
   cursor: pointer;
 }
-.inbox-panel li button.inbox-item:hover,
-.inbox-panel li button.inbox-item:focus-visible {
+.inbox-list li button.inbox-item:hover,
+.inbox-list li button.inbox-item:focus-visible {
   background: #f3f6ef;
   outline: none;
 }
-.inbox-panel li button.inbox-item.unread {
+.inbox-list li button.inbox-item.unread {
   background: #f4faeb;
 }
-.inbox-panel li button.inbox-item.unread .inbox-line::before {
+.inbox-list li button.inbox-item.unread .inbox-line::before {
   content: "";
   display: inline-block;
   width: 7px;
@@ -6156,7 +6161,7 @@ label .input-control .ui-input {
 .inbox-line strong {
   font-weight: 600;
 }
-.inbox-panel li small {
+.inbox-list li small {
   display: block;
   margin-top: 3px;
   color: var(--muted);
@@ -6167,14 +6172,14 @@ label .input-control .ui-input {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
-.inbox-panel time {
+.inbox-list time {
   color: var(--muted);
   font-size: 0.64rem;
   white-space: nowrap;
 }
 /* Marks one notification read without opening it: under the time, shown
    on hover or focus (always on touch screens, which have no hover). */
-.inbox-panel .inbox-read {
+.inbox-list .inbox-read {
   position: absolute;
   top: 30px;
   right: 8px;
@@ -6191,18 +6196,18 @@ label .input-control .ui-input {
   opacity: 0;
   transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
-.inbox-panel li:hover .inbox-read,
-.inbox-panel .inbox-read:focus-visible {
+.inbox-list li:hover .inbox-read,
+.inbox-list .inbox-read:focus-visible {
   opacity: 1;
 }
-.inbox-panel .inbox-read:hover,
-.inbox-panel .inbox-read:focus-visible {
+.inbox-list .inbox-read:hover,
+.inbox-list .inbox-read:focus-visible {
   color: #3f7a1f;
   border-color: #9cc47e;
   outline: none;
 }
 @media (hover: none) {
-  .inbox-panel .inbox-read {
+  .inbox-list .inbox-read {
     opacity: 1;
   }
 }
@@ -6215,6 +6220,169 @@ label .input-control .ui-input {
   color: var(--muted);
   font-size: 0.74rem;
   text-align: center;
+}
+/* The panel's foot: "Carregar mais" and "Ver tudo" (the page). */
+.inbox-panel footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 14px;
+  background: #fff;
+  border-top: 1px solid var(--border);
+}
+.inbox-panel footer .text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  text-decoration: none;
+}
+.inbox-panel footer a.text-btn:only-child {
+  margin-left: auto;
+}
+/* The "Caixa de entrada" page. */
+.inbox-page .scope-tabs {
+  align-items: center;
+}
+.inbox-page .scope-tabs .inbox-page-read-all {
+  margin-left: auto;
+  gap: 6px;
+  color: #56704a;
+}
+/* Its label isn't a count badge (".scope-tabs button span"). */
+.inbox-page .scope-tabs .inbox-page-read-all span {
+  min-width: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+.inbox-page .scope-tabs .inbox-page-read-all:hover {
+  color: var(--ink);
+}
+.inbox-page-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.inbox-page-search {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 240px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--muted);
+}
+.inbox-page-search input[type="search"] {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  box-shadow: none;
+  font-size: 0.8rem;
+}
+.inbox-page-search input::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+.inbox-page-search:focus-within {
+  border-color: #9cc47e;
+}
+.inbox-page-period .ui-select {
+  min-height: 36px;
+  width: auto;
+  padding-block: 0;
+  font-size: 0.78rem;
+}
+.inbox-page-dates {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.inbox-page-dates .date-control {
+  width: 160px;
+}
+.inbox-page-dates .ui-date {
+  min-height: 36px;
+  padding-block: 0;
+  font-size: 0.78rem;
+}
+.inbox-page .inbox-list {
+  padding: 8px 12px;
+}
+.inbox-page .inbox-list li button.inbox-item {
+  padding: 12px 10px;
+  font-size: 0.8rem;
+}
+.inbox-page .inbox-list li small {
+  font-size: 0.74rem;
+}
+.inbox-page .inbox-list time {
+  font-size: 0.7rem;
+}
+.inbox-page .inbox-list .inbox-read {
+  top: 34px;
+}
+.inbox-page-more {
+  display: flex;
+  justify-content: center;
+  padding: 6px 20px 18px;
+}
+.inbox-page-error {
+  margin: 12px 20px 0;
+}
+.inbox-page .inbox-empty {
+  padding: 48px 24px;
+  font-size: 0.8rem;
+}
+@media (max-width: 720px) {
+  .inbox-page-filters {
+    padding: 12px 16px;
+  }
+  .inbox-page-filters .multi-pick,
+  .inbox-page-period {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    max-width: none;
+  }
+  .inbox-page-filters .multi-pick > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .inbox-page-read-all span {
+    display: none;
+  }
+  .inbox-page-period .ui-select {
+    width: 100%;
+  }
+  .inbox-page-dates {
+    flex: 1 1 100%;
+  }
+  .inbox-page-dates .date-control {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+  }
+  .inbox-page .inbox-list {
+    padding: 6px;
+  }
 }
 /* Who is online: the top bar button, its list, and dots on avatars. */
 .online-toggle {

@@ -17,6 +17,7 @@ export const pagePaths = {
   temperature: "/termometro",
   radar: "/radar",
   notices: "/mural",
+  inbox: "/caixa-de-entrada",
   hours: "/horas",
   reports: "/relatorios",
   drive: "/drive",

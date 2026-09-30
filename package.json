@@ -12,6 +12,7 @@
     "test:db:live": "node scripts/test-live-sync.mjs",
     "test:db:push": "node scripts/test-web-push.mjs",
     "test:db:notification-prefs": "node scripts/test-notification-prefs.mjs",
+    "test:db:inbox": "node scripts/test-inbox-page.mjs",
     "test:db:status": "node scripts/test-correction-status.mjs",
     "test:db:own-delivery": "node scripts/test-own-task-delivery.mjs",
     "test:db:drive": "node scripts/test-drive-sharing.mjs",

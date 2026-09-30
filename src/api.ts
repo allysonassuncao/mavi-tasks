@@ -1375,6 +1375,54 @@ export async function myNotifications(
   })) ?? []) as AppNotification[];
 }
 
+/**
+ * Filters of the "Caixa de entrada" page, resolved in the database
+ * (my_inbox, migration 20270121090000). Empty means "all".
+ */
+export interface InboxFilters {
+  unread?: boolean;
+  kinds?: string[];
+  /** Who sent it; `system` adds the automatic ones (no person). */
+  actors?: string[];
+  system?: boolean;
+  clients?: string[];
+  /** ISO instants: from (inclusive) and to (exclusive). */
+  from?: string | null;
+  to?: string | null;
+  search?: string;
+}
+
+/**
+ * One page of the person's inbox, newest first; `after` continues past the
+ * last one shown ("Carregar mais").
+ */
+export async function myInbox(
+  company: string,
+  limit: number,
+  after?: Pick<AppNotification, "id" | "created_at"> | null,
+  filters: InboxFilters = {},
+): Promise<AppNotification[]> {
+  return ((await rpc("my_inbox", {
+    p_company: company,
+    p_limit: limit,
+    p_before: after?.created_at ?? null,
+    p_before_id: after?.id ?? null,
+    p_unread: !!filters.unread,
+    p_kinds: filters.kinds?.length ? filters.kinds : null,
+    p_actors: filters.actors?.length ? filters.actors : null,
+    p_system: !!filters.system,
+    p_clients: filters.clients?.length ? filters.clients : null,
+    p_from: filters.from ?? null,
+    p_to: filters.to ?? null,
+    p_search: filters.search?.trim() || null,
+  })) ?? []) as AppNotification[];
+}
+
+/** How many notices the person hasn't read, in all (not only those loaded). */
+export async function myInboxUnread(company: string): Promise<number> {
+  return Number(await rpc("my_inbox_unread", { p_company: company })) || 0;
+}
+
 /** What the person receives and until when they paused (Meu perfil › Notificações). */
 export async function myNotificationPrefs(
   company: string,

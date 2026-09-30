@@ -221,6 +221,7 @@ import { NoticeCenter } from "./NoticeCenter";
 import { useAlwaysOnTop } from "./ConnectionStatus";
 import { noticesApi, onDemoNoticesChange } from "./notices";
 import { useInboxTitle } from "./inbox-title";
+import { INBOX_PANEL_PAGE, mergeHead, pageOf } from "./inbox";
 import { authErrorMessage } from "./auth-errors";
 import {
   ADMIN_PAGES,
@@ -276,6 +277,9 @@ const TemperaturePage = lazy(() =>
 );
 const RadarPage = lazy(() =>
   import("./RadarPage").then((m) => ({ default: m.RadarPage })),
+);
+const InboxPage = lazy(() =>
+  import("./InboxPage").then((m) => ({ default: m.InboxPage })),
 );
 const NoticesPage = lazy(() =>
   import("./NoticesPage").then((m) => ({ default: m.NoticesPage })),
@@ -1131,8 +1135,14 @@ export default function App() {
   }, [demo, company, session, isLeader, casesTick]);
 
   // Latest values for the long-lived realtime subscription below.
-  // Inbox: who mentioned the person, and where.
+  // Inbox: who mentioned the person, and where. The top bar's panel loads 10
+  // at a time; the count of unread ones comes from the database.
   const [inbox, setInbox] = useState<AppNotification[]>([]);
+  const [inboxUnread, setInboxUnread] = useState(0);
+  const [inboxMore, setInboxMore] = useState(false);
+  const [inboxLoadingMore, setInboxLoadingMore] = useState(false);
+  const inboxRef = useRef({ items: inbox, more: inboxMore });
+  inboxRef.current = { items: inbox, more: inboxMore };
   // Leaders: MAVI skills waiting for approval (again when a skill notice
   // arrives in the inbox, or after a review on the Skills page).
   const [pendingSkills, setPendingSkills] = useState<number | undefined>();
@@ -1153,20 +1163,72 @@ export default function App() {
       alive = false;
     };
   }, [demo, company, session, isLeader, skillsTick, skillNotices]);
-  const loadInbox = useCallback(() => {
-    if (!company || (!demo && !session)) return;
+  // The newest page again, merged into what "Carregar mais" already brought.
+  // Resolves with that page (the realtime notice looks for its row there).
+  const loadInbox = useCallback((): Promise<AppNotification[]> => {
+    if (!company || (!demo && !session)) return Promise.resolve([]);
+    const apply = (head: AppNotification[], unread: number) => {
+      const merged = mergeHead(
+        head,
+        inboxRef.current.items,
+        INBOX_PANEL_PAGE,
+        inboxRef.current.more,
+      );
+      setInbox(merged.items);
+      setInboxMore(merged.more);
+      setInboxUnread(unread);
+      // The "Caixa de entrada" page, when open, reloads its own list.
+      window.dispatchEvent(new CustomEvent("mavi:inbox", { detail: {} }));
+      return head;
+    };
     if (demo) {
-      setInbox(demoStore.current.inbox(user));
-      return;
+      const all = demoStore.current.inbox(user);
+      return Promise.resolve(
+        apply(
+          pageOf(all, INBOX_PANEL_PAGE, null),
+          all.filter((n) => !n.read_at).length,
+        ),
+      );
     }
-    api
-      .myNotifications(company)
-      .then(setInbox)
-      .catch(() => {});
+    return Promise.all([
+      api.myInbox(company, INBOX_PANEL_PAGE),
+      api.myInboxUnread(company),
+    ])
+      .then(([head, unread]) => apply(head, unread))
+      .catch(() => []);
   }, [company, demo, session, user]);
-  useEffect(loadInbox, [loadInbox]);
+  useEffect(() => {
+    // Another company (or person): nothing of the previous one stays.
+    inboxRef.current = { items: [], more: false };
+    setInbox([]);
+    setInboxMore(false);
+    setInboxUnread(0);
+  }, [company, user, demo]);
+  useEffect(() => {
+    void loadInbox();
+  }, [loadInbox]);
+  function loadMoreInbox() {
+    const last = inbox[inbox.length - 1];
+    if (!last || inboxLoadingMore) return;
+    setInboxLoadingMore(true);
+    const next = demo
+      ? Promise.resolve(
+          pageOf(demoStore.current.inbox(user), INBOX_PANEL_PAGE, last),
+        )
+      : api.myInbox(company, INBOX_PANEL_PAGE, last);
+    next
+      .then((page) => {
+        setInbox((list) => {
+          const ids = new Set(list.map((n) => n.id));
+          return [...list, ...page.filter((n) => !ids.has(n.id))];
+        });
+        setInboxMore(page.length === INBOX_PANEL_PAGE);
+      })
+      .catch(() => notify("Não deu para carregar mais avisos. Tente de novo."))
+      .finally(() => setInboxLoadingMore(false));
+  }
   // The tab's title counts the unread notices and flags a new one.
-  useInboxTitle(inbox, !!member && (demo || !!session));
+  useInboxTitle(inbox, !!member && (demo || !!session), inboxUnread);
   // A notice that isn't about a task carries its own place in the app
   // (e.g. /onboarding/social-leads?contrato=…), inside the current company.
   const appLink = (link: string) =>
@@ -1182,12 +1244,20 @@ export default function App() {
     setInbox((list) =>
       list.map((x) => (x.id === n.id ? { ...x, read_at: at } : x)),
     );
+    setInboxUnread((count) => Math.max(0, count - 1));
+    window.dispatchEvent(
+      new CustomEvent("mavi:inbox", { detail: { read: [n.id], at } }),
+    );
     if (demo) demoStore.current.readNotifications(user, [n.id]);
     else void api.readNotifications(company, [n.id]).catch(() => {});
   }
   function readAllNotifications() {
     const at = new Date().toISOString();
     setInbox((list) => list.map((x) => ({ ...x, read_at: x.read_at ?? at })));
+    setInboxUnread(0);
+    window.dispatchEvent(
+      new CustomEvent("mavi:inbox", { detail: { read: "all", at } }),
+    );
     if (demo) demoStore.current.readNotifications(user);
     else void api.readNotifications(company).catch(() => {});
   }
@@ -1289,9 +1359,8 @@ export default function App() {
       // arrives here while the app is open. It's shown here even with push on
       // (which may never arrive); the push uses the same tag, so it never shows twice.
       onNotification: (row) => {
-        live.current.loadInbox();
-        api
-          .myNotifications(company)
+        live.current
+          .loadInbox()
           .then((list) => {
             const n = list.find((x) => x.id === row.id);
             if (!n) return;
@@ -2484,10 +2553,15 @@ export default function App() {
             </button>
             <NotificationInbox
               items={inbox}
+              unread={inboxUnread}
+              more={inboxMore}
+              loadingMore={inboxLoadingMore}
               members={data.members}
+              pageHref={pageUrl("inbox", companyPath)}
               onOpen={openNotification}
               onRead={readNotification}
               onReadAll={readAllNotifications}
+              onLoadMore={loadMoreInbox}
             />
             {notifications !== "unsupported" && (
               <NotificationMenu
@@ -2574,6 +2648,8 @@ export default function App() {
                     ? "Visão geral"
                     : page === "profile"
                       ? "Meu perfil"
+                      : page === "inbox"
+                        ? "Caixa de entrada"
                       : page === "search"
                         ? "Tarefas"
                         : (navigation.find((n) => n.id === page)?.label ??
@@ -2630,6 +2706,8 @@ export default function App() {
                       dashboards:
                         "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
                       profile: "Seu nome, sua foto e sua senha.",
+                      inbox:
+                        "Tudo o que chegou para você: menções, respostas, tarefas, validações, avisos do Mural e da MAVI.",
                       reports: isLeader
                         ? "Entenda o ritmo e os resultados da operação."
                         : "Seu ritmo e seus resultados no período.",
@@ -2653,6 +2731,7 @@ export default function App() {
                 )}
                 {page !== "drive" &&
                   page !== "profile" &&
+                  page !== "inbox" &&
                   page !== "campaigns" &&
                   page !== "financeMedia" &&
                   page !== "onboarding" &&
@@ -3715,6 +3794,23 @@ export default function App() {
                     user={user}
                     isLeader={isLeader}
                     demo={demo}
+                    notify={notify}
+                  />
+                </Suspense>
+              )}
+              {page === "inbox" && (
+                <Suspense fallback={<Loading variant="table" />}>
+                  <InboxPage
+                    key={`${company}:${user}`}
+                    company={company}
+                    demo={demo}
+                    demoInbox={() => demoStore.current.inbox(user)}
+                    members={data.members}
+                    clients={data.clients}
+                    unread={inboxUnread}
+                    onOpen={openNotification}
+                    onRead={readNotification}
+                    onReadAll={readAllNotifications}
                     notify={notify}
                   />
                 </Suspense>
