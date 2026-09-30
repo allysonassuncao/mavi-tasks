@@ -361,7 +361,11 @@ await check("mídias: só as copiadas, só para quem vê, e abrir entra no hist�
 
 // ------------------------------------------------------------ etapa 3: MAVI
 const g2 = await group("2@g.us");
-const day = (h) => new Date(Date.UTC(2026, 8, 20, h)).toISOString(); // 20/09, UTC
+// Dois dias atrás: a Uazapi só guarda as mídias por 7 dias, então uma data
+// fixa deixaria de ser copiada (e lida) com o tempo. 13h UTC = 10h em Brasília.
+const ymd = new Date(now - 48 * hour).toISOString().slice(0, 10);
+const dmy = ymd.split("-").reverse().join("/");
+const day = (h) => `${ymd}T${String(h).padStart(2, "0")}:00:00.000Z`;
 await check("áudios e documentos legíveis entram na fila de leitura", async () => {
   await as(null);
   const batch = [
@@ -416,16 +420,19 @@ await check("cada dia do grupo vira um documento da MAVI com trechos de conversa
   while ((await rpc("ai_index_step", [SECRET, 100])) > 0);
   const [d] = await sql(
     `select d.* from ai_documents d join mavi_private.whatsapp_ai_days w on w.id = d.source_id
-     where d.source_type = 'whatsapp' and w.group_id = $1 and w.day = '2026-09-20'`,
-    [g2.id],
+     where d.source_type = 'whatsapp' and w.group_id = $1 and w.day = $2`,
+    [g2.id, ymd],
   );
   assert.equal(d.client_id, client);
   assert.equal(d.access, "client");
-  assert.match(d.title, /^Whatsapp · 2745 - SEO\/SME Facil&Make · 20\/09\/2026$/);
+  assert.equal(d.title, `Whatsapp · 2745 - SEO/SME Facil&Make · ${dmy}`);
   const chunks = await sql(`select content, meta from ai_chunks where document_id = $1 order by ord`, [d.id]);
   const text = chunks.map((c) => c.content).join("\n---\n");
   assert.equal(chunks.length, 3, text);
-  assert.match(chunks[0].content, /^\[Whatsapp\] grupo "2745 - SEO\/SME Facil&Make" · cliente 2745 · 20\/09\/2026\n10:00 Kamilli: Bom dia! \*Relatório\* da semana/);
+  assert.ok(
+    chunks[0].content.startsWith(`[Whatsapp] grupo "2745 - SEO/SME Facil&Make" · cliente 2745 · ${dmy}\n10:00 Kamilli: Bom dia! *Relatório* da semana`),
+    chunks[0].content,
+  );
   assert.match(text, /10:01 Kamilli: \[áudio 00:23\] Precisamos aumentar a verba em outubro/);
   assert.match(text, /10:02 Kamilli: \[documento "Proposta.pdf"\] segue/);
   assert.match(text, /10:04 Kamilli: \[imagem\] arte nova/);
@@ -466,7 +473,7 @@ await check("texto editado refaz só o dia dele", async () => {
   await sql(`update whatsapp_messages set body = 'Bom dia! Relatório corrigido', edited = true where wa_id = 'C1'`);
   const queued = await sql(`select q.source_id, w.day::text as day from mavi_private.ai_queue q
     join mavi_private.whatsapp_ai_days w on w.id = q.source_id where q.source_type = 'whatsapp'`);
-  assert.deepEqual(queued.map((q) => q.day), ["2026-09-20"]);
+  assert.deepEqual(queued.map((q) => q.day), [ymd]);
   // Reservar a mídia (só o horário de reserva muda) não refaz nada.
   await sql(`delete from mavi_private.ai_queue`);
   await sql(`update whatsapp_messages set media_claimed_at = now() where wa_id = 'C2'`);
