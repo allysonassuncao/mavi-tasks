@@ -3701,8 +3701,6 @@ export default function App() {
                     company={company}
                     user={user}
                     data={catalogData}
-                    notify={notify}
-                    onNewTask={(preset) => openForm("task", preset)}
                   />
                 </Suspense>
               )}
