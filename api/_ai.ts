@@ -88,6 +88,7 @@ import {
 } from "./_ai-attachments.js";
 import { appOrigin } from "./_origin.js";
 import { PLAN_TOOL, TASK_RULES, handleTaskAction, planLongTask, type TaskHost } from "./_ai-tasks.js";
+import { learningContext, type LearningContext } from "./_mavi-learning.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -641,7 +642,7 @@ async function ask(
           ? "mavi_page"
           : "assistant";
   const noMcp: McpCatalog = { servers: [], missing: [] };
-  const [base, limits, history, route, powerList, catalog, mcpCatalog, efforts] = await Promise.all([
+  const [base, limits, history, route, powerList, catalog, mcpCatalog, efforts, learned] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
       env,
@@ -708,6 +709,14 @@ async function ask(
     callRpc<Record<string, string>>(env, deps.fetch, auth, "ai_efforts", { p_company: company })
       .then((r) => (r.ok && r.data && typeof r.data === "object" ? r.data : {}))
       .catch(() => ({}) as Record<string, string>),
+    // O que a MAVI aprendeu com as avaliações do time (sem ele, a conversa segue).
+    callRpc<LearningContext>(env, deps.fetch, auth, "mavi_learning_context", {
+      p_company: company,
+      p_client: scope.client ?? null,
+      p_contract: scope.contract ?? null,
+    })
+      .then((r) => (r.ok && r.data && typeof r.data === "object" ? r.data : null))
+      .catch(() => null),
   ]);
   const powers = new Set(
     powerList.filter((p): p is Power =>
@@ -901,6 +910,13 @@ async function ask(
     const label = "Relembrando o começo da conversa";
     steps.push({ label, detail: "resumo das mensagens antigas" });
     emit({ type: "step", id: "summary", label, state: "done", detail: "resumo das mensagens antigas" });
+  }
+  // O que o time ensinou (as avaliações das respostas) aparece nos passos.
+  const taught = learned?.lessons?.length ?? 0;
+  if (taught) {
+    const label = `Seguindo ${taught} ${taught === 1 ? "aprendizado" : "aprendizados"} do time`;
+    steps.push({ label, detail: "das avaliações das respostas" });
+    emit({ type: "step", id: "lessons", label, state: "done", detail: "das avaliações das respostas" });
   }
   // Reordenação: um modelo rápido escolhe, entre os trechos que a busca
   // achou, os que mais ajudam a responder (sem ele, fica a ordem da busca).
@@ -1355,6 +1371,7 @@ async function ask(
     (onPage ? TASK_RULES : "");
   const turnContext =
     base.context +
+    learningContext(learned) +
     catalogContext([...skills.catalog.values()], picked) +
     (mcp?.context ?? "") +
     attachmentContext(attachments);

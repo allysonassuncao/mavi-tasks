@@ -75,6 +75,7 @@ export type SettingsTab = (typeof SETTINGS_TABS)[number];
 export const AI_TABS = [
   "consumo",
   "copiloto",
+  "aprendizado",
   "termometro",
   "radar",
   "poderes",

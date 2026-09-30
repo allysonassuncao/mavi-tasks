@@ -1,0 +1,134 @@
+/* MAVI · 👍/👎 nas respostas (MaviFeedback.tsx). Os botões entram na fila de
+   ações da resposta (copiar, custo); o painel do 👎 ocupa a linha de baixo. */
+.mavi-msg-actions {
+  flex-wrap: wrap;
+}
+.mavi-feedback {
+  display: contents;
+}
+.mavi-vote {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.mavi-vote:hover:not(:disabled) {
+  background: #f0f3f1;
+  color: var(--ink);
+}
+.mavi-vote.on {
+  background: #e3ebd8;
+  color: #2f4f1a;
+}
+.mavi-vote.down.on {
+  background: #fbe3df;
+  color: #9b2c1f;
+}
+.mavi-feedback-thanks {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  font-size: 0.72rem;
+  color: #3f6a24;
+}
+.mavi-feedback-error {
+  margin-left: 4px;
+  font-size: 0.72rem;
+  color: #9b2c1f;
+}
+.mavi-feedback-panel {
+  /* Depois de copiar, 👍/👎 e o custo, numa linha só dela. */
+  order: 99;
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 2px 7px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+.mavi-feedback-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mavi-feedback-panel > header strong {
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+.mavi-feedback-panel > header button {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.mavi-feedback-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mavi-feedback-reasons button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid #dfe4e2;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.74rem;
+  color: #3c4948;
+}
+.mavi-feedback-reasons button:hover {
+  border-color: #c9d2cf;
+}
+.mavi-feedback-reasons button.on {
+  border-color: #b54434;
+  background: #fbe3df;
+  color: #7c2418;
+  font-weight: 600;
+}
+.mavi-feedback-panel textarea {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #dfe4e2;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.78rem;
+  resize: vertical;
+}
+.mavi-feedback-panel > footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mavi-feedback-panel > footer small {
+  flex: 1 1 220px;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.mavi-feedback-panel > footer .btn {
+  min-height: 30px;
+  padding: 5px 12px;
+  gap: 6px;
+}
+/* Painel da MAVI › Aprendizado da MAVI: o trecho da resposta avaliada. */
+.learning-answer {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 2px 0 4px;
+  font-size: 0.76rem;
+  color: var(--muted);
+}

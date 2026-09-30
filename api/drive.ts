@@ -75,6 +75,12 @@ function copilotEnv(
   return { ...env, model, dossierModel: model, learningModel: model };
 }
 
+/** O aprendizado da MAVI com as avaliações das respostas (funcionalidade 'mavi_learning'). */
+function maviLearning() {
+  const env = { ...aiEnv(driveEnv()), model: serverModel("mavi_learning", process.env) };
+  return { env, deps: aiDeps(env) };
+}
+
 /** Browser IP and user agent, for the Drive audit trail (Vercel sets x-forwarded-for). */
 export function requestOrigin(req: IncomingMessage) {
   const forwarded = req.headers["x-forwarded-for"];
@@ -358,7 +364,7 @@ export default async function handler(
           ? await copilotRelated(body, authorization, env, aiDeps(env))
           : action === "ai-dossier"
             ? await handleDossierWorker(authorization, env, aiDeps(env))
-            : await handleLearningWorker(authorization, env, aiDeps(env));
+            : await handleLearningWorker(authorization, env, aiDeps(env), maviLearning());
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

@@ -224,7 +224,8 @@ export type AiFeature =
   | "client_radar"
   | "client_radar_check"
   | "client_radar_themes"
-  | "client_radar_report";
+  | "client_radar_report"
+  | "mavi_learning";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -311,6 +312,14 @@ export const FEATURES: FeatureInfo[] = [
     conversation: false,
     env: "AI_MODEL",
     note: "Quando a conversa cresce, as mensagens antigas viram um resumo (em segundo plano), para a MAVI lembrar do começo sem reler tudo. Um modelo barato funciona bem. Sem escolha, usa o padrão da empresa.",
+  },
+  {
+    id: "mavi_learning",
+    group: "MAVI · poderes",
+    label: "Aprendizado da MAVI com as avaliações das respostas",
+    conversation: false,
+    env: "MAVI_LEARNING_MODEL",
+    note: "A cada 10 minutos, a MAVI lê os 👍/👎 novos das respostas e propõe aprendizados para ela mesma seguir. Roda em segundo plano, com pouco texto. Sem escolha, usa o padrão da empresa.",
   },
   {
     id: "skill_coach",
@@ -576,6 +585,8 @@ export function serverModel(
       return env.CLIENT_DOSSIER_MODEL || env.AI_MODEL || fallback;
     case "copilot_learning":
       return env.COPILOT_LEARNING_MODEL || env.AI_MODEL || fallback;
+    case "mavi_learning":
+      return env.MAVI_LEARNING_MODEL || env.COPILOT_LEARNING_MODEL || env.AI_MODEL || fallback;
     case "notice_writer":
       return env.NOTICE_WRITER_MODEL || env.AI_MODEL || fallback;
     case "notice_animation":

@@ -33,6 +33,8 @@ import { AttachButton, AttachmentTray, FileChip, useAttachmentTray } from "./Mav
 import { conversationAttachments, type Attachment } from "./mavi-attachments";
 import { CanvasPanel } from "./MaviCanvas";
 import { AnswerCost, ConversationCostButton, messageCost } from "./MaviCost";
+import { AnswerFeedback } from "./MaviFeedback";
+import { myVotes, type MyVote } from "./mavi-feedback";
 import {
   ARTIFACT_LINE,
   CAPPED_DETAIL,
@@ -846,6 +848,19 @@ function ChatThread({
   >;
 }) {
   const chat = useAiTurns({ initial, send, readOnly, onAnswer, onRun });
+  // As minhas avaliações das respostas desta conversa (👍/👎).
+  const [votes, setVotes] = useState<Map<number, MyVote>>(new Map());
+  useEffect(() => {
+    if (!host.conversation) {
+      setVotes(new Map());
+      return;
+    }
+    let alive = true;
+    void myVotes(host.conversation).then((l) => alive && setVotes(new Map(l.map((v) => [v.message, v]))));
+    return () => {
+      alive = false;
+    };
+  }, [host.conversation]);
   const [stoppingBackground, setStoppingBackground] = useState(false);
   const tray = useAttachmentTray(host.company, host.conversation);
   const [dragging, setDragging] = useState(false);
@@ -1202,6 +1217,20 @@ function ChatThread({
                             <Play size={12} aria-hidden="true" /> Continuar de onde parou
                           </button>
                         )}
+                      {typeof t.id === "number" && (
+                        <AnswerFeedback
+                          message={t.id}
+                          mine={votes.get(t.id) ?? null}
+                          onChange={(v) =>
+                            setVotes((m) => {
+                              const next = new Map(m);
+                              if (v) next.set(t.id!, v);
+                              else next.delete(t.id!);
+                              return next;
+                            })
+                          }
+                        />
+                      )}
                       {(() => {
                         // O do banco tem tudo (anexos lidos e o resumo que a resposta disparou).
                         const cost = messageCost(costs, t.id) ?? t.cost;

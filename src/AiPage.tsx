@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import {
   BarChart3,
   Boxes,
+  Brain,
   GraduationCap,
   Radar,
   Route,
@@ -13,6 +14,7 @@ import type { Snapshot } from "./types";
 import { AiUsagePage } from "./AiUsagePage";
 import { AiProvidersPanel, AiRoutesPanel, useAiLibrary } from "./AiProviders";
 import { CopilotLearning } from "./CopilotLearning";
+import { MaviLearning } from "./MaviLearning";
 import { TemperatureSettings } from "./TemperatureSettings";
 import { RadarSettings } from "./RadarSettings";
 import { AiPowersPanel } from "./AiPowersPanel";
@@ -27,6 +29,7 @@ const TABS: {
 }[] = [
   { id: "consumo", label: "Consumo e limites", icon: BarChart3, admin: false },
   { id: "copiloto", label: "Copiloto", icon: GraduationCap, admin: false },
+  { id: "aprendizado", label: "Aprendizado da MAVI", icon: Brain, admin: false },
   { id: "termometro", label: "Termômetro", icon: Thermometer, admin: false },
   { id: "radar", label: "Radar", icon: Radar, admin: false },
   { id: "poderes", label: "Poderes", icon: Zap, admin: false },
@@ -36,7 +39,8 @@ const TABS: {
 
 /**
  * Painel de IA (líderes): o consumo e os limites de gasto, o aprendizado
- * do Assistente MAVI nas tarefas (#copiloto), o Termômetro do cliente
+ * do Assistente MAVI nas tarefas (#copiloto), o das respostas da MAVI
+ * (#aprendizado), o Termômetro do cliente
  * (#termometro), os tópicos do Radar do cliente (#radar), os poderes do módulo MAVI (#poderes) e as regras de quem usa qual provedor e modelo (por
  * funcionalidade, pessoa, cliente, produto e projeto, #regras); para
  * administradores, também a biblioteca de provedores e API Keys
@@ -91,6 +95,8 @@ export function AiPage({
         <RadarSettings company={company} data={data} notify={notify} />
       ) : tab === "termometro" ? (
         <TemperatureSettings company={company} data={data} notify={notify} />
+      ) : tab === "aprendizado" ? (
+        <MaviLearning company={company} data={data} demo={demo} notify={notify} />
       ) : tab === "copiloto" ? (
         <CopilotLearning
           company={company}

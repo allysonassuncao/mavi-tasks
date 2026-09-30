@@ -366,6 +366,11 @@ export function SidebarNav({
               to: { page: "aiUsage", hash: "copiloto" },
             },
             {
+              key: "ai-learning",
+              label: "Aprendizado da MAVI",
+              to: { page: "aiUsage", hash: "aprendizado" },
+            },
+            {
               key: "ai-temperature",
               label: "Termômetro",
               to: { page: "aiUsage", hash: "termometro" },
