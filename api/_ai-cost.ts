@@ -52,8 +52,33 @@ export const whereOf = (ctx: {
   contract: ctx.scope.contract ?? null,
   project: ctx.scope.project ?? null,
 });
+/**
+ * O passo a passo da resposta: cada rodada do modelo, cada ferramenta e de
+ * onde veio a entrada da primeira rodada (estimativa pelo tamanho de cada
+ * parte, somando o que o provedor contou).
+ */
+export type TurnDetail = {
+  rounds: {
+    model: string;
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    output: number;
+    cost: number;
+    tools: string[];
+  }[];
+  tools: { tool: string; label: string; ok: boolean; ms: number; cost: number }[];
+  /** Tokens da 1ª rodada por parte (≈). */
+  prompt: { question: number; extras: number; history: number; instructions: number; context: number };
+  /** Tokens de saída de todas as rodadas e quanto disso é o texto da resposta (≈). */
+  output: number;
+  answer: number;
+};
 /** O resumo da vez por modelo (vai na resposta para a tela). */
 export type TurnCost = {
+  detail?: TurnDetail;
+  /** O gasto por uso (resposta, busca nos vetores, imagem, anexos, resumo…). */
+  kinds: { kind: string; cost: number }[];
   cost: number;
   models: {
     model: string;
@@ -192,8 +217,58 @@ export function turnCost(entries: CostEntry[]): TurnCost {
     models.set(key, m);
   }
   const list = [...models.values()].sort((a, b) => b.cost - a.cost);
+  const kinds = new Map<string, number>();
+  for (const e of entries) kinds.set(e.kind, (kinds.get(e.kind) ?? 0) + e.cost);
   return {
+    kinds: [...kinds.entries()]
+      .map(([kind, cost]) => ({ kind, cost: Math.round(cost * 1e6) / 1e6 }))
+      .sort((a, b) => b.cost - a.cost),
     cost: Math.round(list.reduce((n, m) => n + m.cost, 0) * 1e6) / 1e6,
     models: list.map((m) => ({ ...m, cost: Math.round(m.cost * 1e6) / 1e6 })),
+  };
+}
+
+const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/** O passo a passo da resposta a partir das rodadas, das ferramentas e do tamanho de cada parte. */
+export function turnDetail(input: {
+  rounds: { model: string; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; tools: string[] }[];
+  tools: { tool: string; label?: string; ok: boolean; ms: number; cost: number }[];
+  /** Caracteres de cada parte da 1ª rodada. */
+  parts: TurnDetail["prompt"];
+  answerChars: number;
+}): TurnDetail {
+  const first = input.rounds[0];
+  const total = first ? first.input + first.cacheRead + first.cacheWrite : 0;
+  const chars = Object.values(input.parts).reduce((n, v) => n + v, 0) || 1;
+  const share = (v: number) => Math.round((total * v) / chars);
+  const output = input.rounds.reduce((n, r) => n + r.output, 0);
+  return {
+    rounds: input.rounds.slice(0, 30).map((r) => ({
+      model: r.model.slice(0, 80),
+      input: r.input,
+      cacheRead: r.cacheRead,
+      cacheWrite: r.cacheWrite,
+      output: r.output,
+      cost: round6(r.cost),
+      tools: r.tools.slice(0, 12).map((t) => t.slice(0, 80)),
+    })),
+    tools: input.tools.slice(0, 60).map((t) => ({
+      tool: t.tool.slice(0, 80),
+      label: (t.label ?? t.tool).slice(0, 140),
+      ok: t.ok,
+      ms: Math.round(t.ms),
+      cost: round6(t.cost),
+    })),
+    prompt: {
+      question: share(input.parts.question),
+      extras: share(input.parts.extras),
+      history: share(input.parts.history),
+      instructions: share(input.parts.instructions),
+      context: share(input.parts.context),
+    },
+    output,
+    // Português tem ~3,5 caracteres por token; o resto da saída é raciocínio e pedidos de ferramentas.
+    answer: Math.min(output, Math.round(input.answerChars / 3.5)),
   };
 }

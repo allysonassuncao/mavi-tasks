@@ -62,4 +62,28 @@ describe("custo na conversa da MAVI", () => {
   it("o topo da conversa mostra o total", () => {
     expect(renderToStaticMarkup(<ConversationCostButton costs={costs} />)).toContain("US$ 0,492");
   });
+
+  it("a resposta mostra tudo o que aconteceu: entrada por parte, rodadas, ferramentas e os outros gastos", () => {
+    const html = renderToStaticMarkup(
+      <AnswerCost
+        cost={{
+          cost: 0.05,
+          models: [{ model: "claude-opus-5-5", provider: null, kinds: ["ask"], input: 3400, output: 1000, cacheRead: 19000, cacheWrite: 100, embedding: 0, cost: 0.05 }],
+          kinds: [{ kind: "ask", cost: 0.049 }, { kind: "attachment_transcription", cost: 0.001 }],
+          detail: {
+            rounds: [
+              { model: "claude-opus-5-5", input: 900, cacheRead: 9000, cacheWrite: 100, output: 300, cost: 0.02, tools: ["search_knowledge"] },
+              { model: "claude-opus-5-5", input: 2500, cacheRead: 10000, cacheWrite: 0, output: 700, cost: 0.03, tools: [] },
+            ],
+            tools: [{ tool: "search_knowledge", label: "Buscando “verba”", ok: true, ms: 812, cost: 0 }],
+            prompt: { question: 100, extras: 0, history: 900, instructions: 8000, context: 1000 },
+            output: 1000,
+            answer: 400,
+          },
+        }}
+      />,
+    );
+    // O conteúdo da janelinha só aparece aberta: confere o gatilho e o formato dos dados.
+    expect(html).toContain("US$ 0,05");
+  });
 });

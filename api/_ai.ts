@@ -16,6 +16,7 @@ import {
   outputText,
   type ChatTurn,
   type Effort,
+  type RoundUsage,
   type LlmAdapter,
   type ToolOutput,
 } from "./_ai-llm.js";
@@ -70,7 +71,7 @@ import {
   type SkillKit,
 } from "./_ai-skills.js";
 import { MCP_RULES, handleMcpAction, mcpTurn, type McpCatalog } from "./_ai-mcp.js";
-import { logCost, meterEntries, newTurn, turnCost, whereOf, type TurnCost } from "./_ai-cost.js";
+import { logCost, meterEntries, newTurn, turnCost, turnDetail, whereOf, type TurnCost } from "./_ai-cost.js";
 import type { Meter } from "./_social-leads.js";
 import { pageForMavi, scrapePage } from "./_ai-scrape.js";
 import {
@@ -311,6 +312,8 @@ async function summarize(
   upto: number,
   fallback: ProviderConfig | null,
   fallbackLlm: LlmAdapter,
+  /** A vez da resposta que disparou o resumo: o gasto conta nela. */
+  turnId?: string,
 ) {
   const route = await resolveRoute(env, deps.fetch, auth, company, scope, "conversation_summary").catch(() => null);
   const config = route ? routeConfig(env, route) : fallback;
@@ -345,13 +348,18 @@ async function summarize(
       p_summary: text,
       p_upto: upto,
     });
-  // O resumo é da conversa (não de uma resposta).
-  const turn = newTurn(conversationId);
+  // O resumo conta na resposta que o disparou (a mesma vez, fechada de novo).
+  const turn = { ...newTurn(conversationId), ...(turnId ? { turn: turnId } : {}) };
   await Promise.all(
     meterEntries("summary", out.meter, route?.provider_id ?? null, config?.model || env.model).map((e) =>
       logCost(env, deps.fetch, auth, { company, ...scope }, e, turn),
     ),
   );
+  if (turnId)
+    await callRpc(env, deps.fetch, auth, "ai_usage_close_turn", {
+      p_conversation: conversationId,
+      p_turn: turnId,
+    }).catch(() => null);
 }
 
 function conversation(question: unknown, history: unknown): ChatTurn[] {
@@ -546,8 +554,10 @@ export type AiStreamEvent =
       sources: AiSource[];
       artifacts: AiArtifact[];
       conversation: string | null;
-      /** O custo desta resposta, por modelo. */
+      /** O custo desta resposta, por modelo, com o passo a passo. */
       cost?: TurnCost;
+      /** A mensagem salva desta resposta (o custo completo fica nela no banco). */
+      message?: number;
     }
   | { type: "error"; error: string; status: number };
 type Emit = (event: AiStreamEvent) => void;
@@ -908,6 +918,8 @@ async function ask(
     error?: string;
     skill?: string;
     skill_version?: number;
+    /** O que a pessoa viu no passo (para o custo passo a passo; não vai ao registro). */
+    label?: string;
   }[] = [];
   // As skills escolhidas na caixa de mensagem entram já carregadas (na
   // mensagem da pessoa, perto do pedido).
@@ -918,6 +930,7 @@ async function ask(
       const s = await loadSkill(skills, pick.slug, pick.version).catch(() => null);
       calls.push({
         tool: "use_skill",
+        label: `Skill escolhida: ${pick.slug}`,
         power: "skills",
         ok: !!s,
         ms: Date.now() - started,
@@ -1087,6 +1100,7 @@ async function ask(
       steps.push({ label, detail });
       calls.push({
         tool: logName,
+        label,
         power,
         ok: true,
         ms: Date.now() - started,
@@ -1100,6 +1114,7 @@ async function ask(
     } catch (e) {
       calls.push({
         tool: logName,
+        label,
         power,
         ok: false,
         ms: Date.now() - started,
@@ -1155,6 +1170,7 @@ async function ask(
     steps.push({ label });
     calls.push({
       tool: name,
+      label,
       power: "web",
       ok: true,
       ms: 0,
@@ -1248,6 +1264,7 @@ async function ask(
     emit({ type: "step", id: stepId, label, state: r.ok ? "done" : "error", detail: "confirmado por você" });
     calls.push({
       tool: `mcp:${r.slug}/${r.tool}`,
+      label,
       power: "mcp",
       ok: r.ok,
       ms: Date.now() - started,
@@ -1257,28 +1274,32 @@ async function ask(
     const last = messages[messages.length - 1];
     last.content = `${last.content}\n\n[A pessoa confirmou no card a ação ${r.where}. Já foi executada; o resultado está abaixo.]\n${r.answer}\n\nContinue o pedido a partir daqui: se o serviço ainda estiver processando, espere e busque o resultado com as ferramentas de consulta dele; mostre o que ficou pronto (imagens com [[I#]]). Não proponha a mesma ação de novo.`;
   }
+  const turnInstructions =
+    INSTRUCTIONS +
+    (onPage ? PAGE_STYLE : "") +
+    ASK_RULES +
+    powerInstructions(powers, onPage) +
+    webNote +
+    (skills.catalog.size || picked.length ? SKILL_RULES : "") +
+    (mcp?.tools.length ? MCP_RULES : "") +
+    (attachments.length ? ATTACH_RULES : "");
+  const turnContext =
+    base.context +
+    catalogContext([...skills.catalog.values()], picked) +
+    (mcp?.context ?? "") +
+    attachmentContext(attachments);
+  const turnMessages = picked.length ? withSkills(messages, picked) : messages;
+  // O passo a passo do custo: cada rodada do modelo (com as ferramentas que pediu).
+  const rounds: RoundUsage[] = [];
   let result: Awaited<ReturnType<LlmAdapter>> | undefined;
   let partial = "";
   try {
     result = await llm({
-      instructions:
-        INSTRUCTIONS +
-        (onPage ? PAGE_STYLE : "") +
-        ASK_RULES +
-        powerInstructions(powers, onPage) +
-        webNote +
-        (skills.catalog.size || picked.length ? SKILL_RULES : "") +
-        (mcp?.tools.length ? MCP_RULES : "") +
-        (attachments.length ? ATTACH_RULES : ""),
-      context:
-        base.context +
-        catalogContext([...skills.catalog.values()], picked) +
-        (mcp?.context ?? "") +
-        attachmentContext(attachments),
-      messages: picked.length
-        ? withSkills(messages, picked)
-        : messages,
+      instructions: turnInstructions,
+      context: turnContext,
+      messages: turnMessages,
       tools,
+      onRound: (r) => rounds.push(r),
       execute,
       // Uma skill é um roteiro com vários passos: mais rodadas e mais raciocínio.
       maxRounds: picked.length ? 14 : skills.catalog.size || mcp?.tools.length ? 12 : powers.size ? 8 : 6,
@@ -1362,19 +1383,37 @@ async function ask(
   if (!saved?.ok)
     emit({ type: "warning", text: "Não foi possível salvar esta conversa." });
   const savedId = saved?.ok ? saved.data : (live?.run?.conversation ?? conversationId);
-  // Os gastos desta vez passam a ser desta resposta (e da conversa, se nasceu agora).
+  // Os gastos desta vez passam a ser desta resposta (e da conversa, se nasceu
+  // agora), com o passo a passo e a leitura dos anexos desta pergunta.
   await Promise.all(ctx.cost!.pending).catch(() => null);
-  if (saved?.ok && savedId && ctx.cost!.entries.length)
-    await callRpc(env, deps.fetch, auth, "ai_usage_close_turn", {
-      p_conversation: savedId,
-      p_turn: ctx.cost!.turn,
-    }).catch(() => null);
+  const detail = turnDetail({
+    rounds,
+    tools: calls,
+    parts: {
+      question: question.trim().length,
+      extras: Math.max(0, (turnMessages.at(-1)?.content.length ?? 0) - question.trim().length),
+      history: turnMessages.slice(0, -1).reduce((n, m) => n + m.content.length, 0),
+      instructions: turnInstructions.length + JSON.stringify(tools).length,
+      context: turnContext.length,
+    },
+    answerChars: answer.length,
+  });
+  const closed =
+    saved?.ok && savedId && (ctx.cost!.entries.length || attachIds.length)
+      ? await callRpc<number | null>(env, deps.fetch, auth, "ai_usage_close_turn", {
+          p_conversation: savedId,
+          p_turn: ctx.cost!.turn,
+          p_detail: detail,
+          ...(attachIds.length ? { p_attachments: attachIds } : {}),
+        }).catch(() => null)
+      : null;
+  const messageId = closed?.ok && typeof closed.data === "number" ? closed.data : null;
   if (calls.length)
     await callRpc(env, deps.fetch, auth, "ai_log_tool_calls", {
       p_company: company,
       p_conversation: savedId,
       p_module: scope.module ?? "assistant",
-      p_calls: calls.map((c) => ({
+      p_calls: calls.map(({ label: _label, ...c }) => ({
         ...c,
         cost: Math.round(c.cost * 1e6) / 1e6,
       })),
@@ -1389,7 +1428,9 @@ async function ask(
       const upto = Number(fold.at(-1)?.id);
       if (fold.length >= 2 && upto)
         live.later(
-          summarize(env, deps, auth, company, scope, savedId, summary, fold, upto, provider, llm).catch(() => null),
+          summarize(env, deps, auth, company, scope, savedId, summary, fold, upto, provider, llm, ctx.cost!.turn).catch(
+            () => null,
+          ),
         );
     }
   }
@@ -1406,7 +1447,8 @@ async function ask(
     sources,
     artifacts,
     conversation: savedId,
-    cost: turnCost(ctx.cost!.entries),
+    cost: { ...turnCost(ctx.cost!.entries), detail },
+    ...(messageId ? { message: messageId } : {}),
   };
 }
 
@@ -1724,6 +1766,7 @@ export async function handleAi(
           artifacts: done.artifacts,
           conversation: done.conversation,
           cost: done.cost,
+          message: done.message,
         },
       };
     }

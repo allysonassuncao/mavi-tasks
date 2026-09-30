@@ -45,6 +45,36 @@ export type AgentEvent =
   | { type: "round_end"; tools: number }
   /** A Claude buscou na internet ou leu uma página (ferramenta do servidor dela). */
   | { type: "server_tool"; name: string; input: unknown };
+/** O gasto de uma rodada do modelo e as ferramentas que ela pediu (o custo da resposta, passo a passo). */
+export type RoundUsage = {
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  /** As ferramentas que o modelo chamou nesta rodada (as do servidor da Claude também). */
+  tools: string[];
+};
+/** A diferença do medidor numa rodada, por modelo que respondeu. */
+export function roundDelta(
+  before: Pick<Meter, "input" | "output" | "cacheRead" | "cacheWrite" | "cost">,
+  meter: Meter,
+  tools: string[],
+): RoundUsage {
+  return {
+    model: meter.model,
+    input: meter.input - before.input,
+    output: meter.output - before.output,
+    cacheRead: meter.cacheRead - before.cacheRead,
+    cacheWrite: meter.cacheWrite - before.cacheWrite,
+    cost: meter.cost - before.cost,
+    tools,
+  };
+}
+const snapshot = (m: Meter) => ({ input: m.input, output: m.output, cacheRead: m.cacheRead, cacheWrite: m.cacheWrite, cost: m.cost });
+export { snapshot as meterSnapshot };
+
 export type AgentRequest = {
   /** Instruções fixas (ficam em cache). */
   instructions: string;
@@ -75,6 +105,8 @@ export type AgentRequest = {
   maxTokens?: number;
   signal?: AbortSignal;
   onEvent?: (event: AgentEvent) => void;
+  /** O gasto de cada rodada (quanto custou cada passo da resposta). */
+  onRound?: (round: RoundUsage) => void;
   /** Busca na internet e leitura de páginas (só na Claude). */
   webSearch?: boolean;
   /** Uma página citada vira uma fonte: devolve a referência (ex.: "S7"). */
@@ -288,6 +320,7 @@ export function anthropicAdapter(
         });
       }
       const message = await stream.finalMessage();
+      const before = snapshot(meter);
       addUsage(meter, message.model, message.usage, env.price);
       const searches =
         Number(
@@ -296,6 +329,15 @@ export function anthropicAdapter(
         ) || 0;
       webSearches += searches;
       if (searches) meterAdd(meter, message.model, { cost: searches * WEB_SEARCH_PRICE });
+      request.onRound?.(
+        roundDelta(
+          before,
+          meter,
+          message.content
+            .filter((b) => b.type === "tool_use" || b.type === "server_tool_use")
+            .map((b) => (b as { name: string }).name),
+        ),
+      );
       if (message.stop_reason === "refusal")
         throw new LlmError(
           422,

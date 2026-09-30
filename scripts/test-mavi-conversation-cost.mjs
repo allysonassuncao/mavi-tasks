@@ -51,12 +51,14 @@ await check("os gastos da vez viram da resposta, por modelo; a conversa soma tud
   await log(ana, { kind: "ask", model: "claude-opus-4-8", cost: 0.1, input: 3000, output: 500, conversation: conv, turn: t });
   await log(ana, { kind: "image", model: "gpt-image-1", cost: 0.042, conversation: conv, turn: t });
   await one(ana, "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','Faz a arte','Pronto','[]'::jsonb,'[]'::jsonb)", [A, conv]);
-  assert.equal(await one(ana, "select public.ai_usage_close_turn($1,$2)", [conv, t]), 3);
+  const answer = Number(await one(ana, "select public.ai_usage_close_turn($1,$2)", [conv, t]));
+  const [last] = await q(ana, "select max(id) as id from ai_messages where conversation_id = $1 and role = 'assistant'", [conv]);
+  assert.equal(answer, Number(last.id));
   // Uma conversa nova sem a execução: a vez sem conversa ganha a conversa ao fechar.
   const t2 = turnId();
   await log(ana, { kind: "ask", model: "claude-opus-5-5", cost: 0.05, input: 500, turn: t2 });
   await one(ana, "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','E o texto?','Aqui','[]'::jsonb,'[]'::jsonb)", [A, conv]);
-  assert.equal(await one(ana, "select public.ai_usage_close_turn($1,$2)", [conv, t2]), 1);
+  assert.ok(Number(await one(ana, "select public.ai_usage_close_turn($1,$2)", [conv, t2])) > answer);
   const cost = await one(ana, "select public.ai_conversation_cost($1)", [conv]);
   assert.equal(Number(cost.total.cost), 0.492);
   assert.equal(Number(cost.total.answers), 2);
@@ -86,6 +88,36 @@ await check("só quem começou a conversa ou gestores veem o custo; ninguém reg
   await assert.rejects(() => q(bia, "select public.ai_usage_close_turn($1,$2)", [conv, turnId()]), /não encontrada/);
   // O registro antigo (sem a conversa) continua funcionando.
   await q(bia, "select public.ai_log_usage($1,'assistant','ask',null,null,null,null,'m',1,1,0,0,0,0.001)", [A]);
+});
+
+await check("tudo da resposta: o passo a passo, os anexos da pergunta e o resumo que ela disparou", async () => {
+  const t = turnId();
+  // O anexo desta pergunta foi lido antes (sem a vez) e a resposta usou a Claude.
+  const a = await one(ana, "select public.ai_attachment_create($1,$2,'briefing.pdf','application/pdf',2000,'document',null)", [A, conv]);
+  await log(ana, { kind: "attachment_transcription", model: "gpt-4o-mini-transcribe", cost: 0.003, attachment: a.id });
+  await log(ana, { kind: "ask", model: "claude-opus-5-5", cost: 0.02, input: 800, output: 100, conversation: conv, turn: t });
+  await one(ana, "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','Lê o briefing','Lido','[]'::jsonb,'[]'::jsonb)", [A, conv]);
+  const detail = { rounds: [{ model: "claude-opus-5-5", input: 800, output: 100, cost: 0.02, tools: ["read_attachment"] }], tools: [{ tool: "read_attachment", label: "Lendo o anexo", ok: true, ms: 40, cost: 0 }] };
+  const msg = Number(
+    await one(ana, "select public.ai_usage_close_turn($1,$2,$3::jsonb,$4::uuid[])", [conv, t, JSON.stringify(detail), [a.id]]),
+  );
+  // O resumo roda depois, com a mesma vez, e fecha de novo (sem apagar o passo a passo).
+  await log(ana, { kind: "summary", model: "claude-haiku-4-5", cost: 0.001, conversation: conv, turn: t });
+  assert.equal(Number(await one(ana, "select public.ai_usage_close_turn($1,$2)", [conv, t])), msg);
+  const cost = await one(ana, "select public.ai_conversation_cost($1)", [conv]);
+  const m = cost.by_message.find((x) => Number(x.message) === msg);
+  // + o contrato.pdf do passo anterior: lido antes desta resposta e ainda sem resposta.
+  assert.equal(Number(m.cost), 0.0241);
+  assert.deepEqual(m.items.map((i) => i.kind).sort(), ["ask", "attachment_index", "attachment_transcription", "summary"]);
+  assert.equal(m.detail.tools[0].label, "Lendo o anexo");
+  // Anexo lido depois de fechar: conta na primeira resposta salva depois do gasto.
+  const late = await one(ana, "select public.ai_attachment_create($1,$2,'video.mp4','video/mp4',3000,'video',null)", [A, conv]);
+  await log(ana, { kind: "attachment_transcription", model: "gpt-4o-mini-transcribe", cost: 0.004, attachment: late.id });
+  await one(ana, "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','E o vídeo?','Visto','[]'::jsonb,'[]'::jsonb)", [A, conv]);
+  const after = await one(ana, "select public.ai_conversation_cost($1)", [conv]);
+  const newest = after.by_message.at(-1);
+  assert.ok(Number(newest.message) > msg);
+  assert.equal(Number(newest.cost), 0.004);
 });
 
 console.log(`\n${passed} verificações passaram.`);

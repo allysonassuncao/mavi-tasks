@@ -1176,7 +1176,8 @@ function ChatThread({
                     <div className="mavi-msg-actions">
                       <CopyButton text={plainAnswer(t.content)} />
                       {(() => {
-                        const cost = t.cost ?? messageCost(costs, t.id);
+                        // O do banco tem tudo (anexos lidos e o resumo que a resposta disparou).
+                        const cost = messageCost(costs, t.id) ?? t.cost;
                         return cost ? <AnswerCost cost={cost} /> : null;
                       })()}
                     </div>

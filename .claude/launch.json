@@ -83,6 +83,32 @@
         "--strictPort"
       ],
       "port": 5185
+    },
+    {
+      "name": "mavi-dev-miniaturas",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5191",
+        "--strictPort"
+      ],
+      "port": 5191
+    },
+    {
+      "name": "mavi-dev-chat",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5192",
+        "--strictPort"
+      ],
+      "port": 5192
     }
   ]
 }

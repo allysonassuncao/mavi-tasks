@@ -7,7 +7,9 @@ import {
   LlmError,
   anthropicAdapter,
   effortFor,
+  meterSnapshot,
   outputText,
+  roundDelta,
   usableImages,
   type LlmAdapter,
   type ToolImage,
@@ -341,6 +343,7 @@ export function openAiChatAdapter(
       }
       let text = "";
       let finish = "";
+      const before = meterSnapshot(meter);
       const calls: { id: string; name: string; args: string }[] = [];
       for await (const data of sseData(res.body)) {
         if (data === "[DONE]") break;
@@ -383,6 +386,7 @@ export function openAiChatAdapter(
         if (choice.finish_reason) finish = choice.finish_reason;
       }
       const used = calls.filter((c) => c && c.name);
+      request.onRound?.(roundDelta(before, meter, used.map((c) => c.name)));
       if (used.length && !last) {
         request.onEvent?.({ type: "round_end", tools: used.length });
         messages.push({

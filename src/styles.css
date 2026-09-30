@@ -26040,8 +26040,11 @@ main:has(> .mavi-chat) > .error-banner {
   box-shadow: 0 12px 38px #152c2026;
   border-radius: 12px;
   z-index: 101;
-  width: 420px;
+  width: 470px;
   max-width: calc(100vw - 28px);
+  max-height: min(78vh, 720px);
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -26110,4 +26113,64 @@ main:has(> .mavi-chat) > .error-banner {
   .mavi-cost-btn span {
     display: none;
   }
+}
+.mavi-cost-table {
+  table-layout: fixed;
+}
+.mavi-cost-table th:first-child {
+  width: 46%;
+}
+.mavi-cost-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mavi-cost-steps h4 {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mavi-cost-steps ul,
+.mavi-cost-steps ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mavi-cost-steps li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid #eef1f0;
+  font-variant-numeric: tabular-nums;
+}
+.mavi-cost-steps li > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mavi-cost-steps li small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.mavi-cost-steps li strong {
+  font-weight: 600;
+}
+.mavi-cost-steps li.failed > span:first-child {
+  color: #b3261e;
+}
+.mavi-cost-steps .num {
+  white-space: nowrap;
+  text-align: right;
+}
+.mavi-cost-note {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
 }

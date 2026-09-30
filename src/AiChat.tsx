@@ -494,6 +494,7 @@ export function useAiTurns({
         sources: result.sources,
         artifacts: result.artifacts?.length ? result.artifacts : e.artifacts,
         ...(result.cost ? { cost: result.cost } : {}),
+        ...(result.message ? { id: result.message } : {}),
         streaming: false,
         thinking: "",
       }));

@@ -78,8 +78,27 @@ export type AiStreamHandlers = {
   /** A execução desta resposta (para parar) e a conversa em que ela fica. */
   onRun?: (run: { id: string; conversation: string }) => void;
 };
+/** O passo a passo do custo de uma resposta (api/_ai-cost.ts, turnDetail). */
+export type TurnDetail = {
+  rounds: {
+    model: string;
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    output: number;
+    cost: number;
+    tools: string[];
+  }[];
+  tools: { tool: string; label: string; ok: boolean; ms: number; cost: number }[];
+  prompt: { question: number; extras: number; history: number; instructions: number; context: number };
+  output: number;
+  answer: number;
+};
 /** O custo de uma resposta, por modelo (o servidor manda no fim). */
 export type TurnCost = {
+  detail?: TurnDetail | null;
+  /** O gasto por uso (resposta, busca, imagem, anexos, resumo…). */
+  kinds?: { kind: string; cost: number }[];
   cost: number;
   models: {
     model: string;
@@ -100,6 +119,8 @@ export type AiAnswer = {
   artifacts?: AiArtifact[];
   conversation: string | null;
   cost?: TurnCost;
+  /** A mensagem salva desta resposta. */
+  message?: number;
 };
 /** O custo de uma conversa (ai_conversation_cost). */
 export type ConversationCost = {
@@ -140,6 +161,7 @@ export type ConversationCost = {
       cache_write_tokens: number;
       embedding_tokens: number;
     }[];
+    detail?: TurnDetail | null;
   }[];
 };
 /**
@@ -211,6 +233,7 @@ export async function streamAnswer(
         artifacts: sanitizeArtifacts(e.artifacts),
         conversation: e.conversation ?? null,
         ...(e.cost && typeof e.cost.cost === "number" ? { cost: e.cost as TurnCost } : {}),
+        ...(typeof e.message === "number" ? { message: e.message } : {}),
       };
     else if (e.type === "error")
       throw Error(e.error ?? "Não foi possível responder.");

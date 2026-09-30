@@ -310,7 +310,12 @@ describe("pergunta à IA", () => {
     expect(vectors.p_turn).toBe(ask.p_turn);
     // Salva a resposta: os gastos da vez passam a ser dela, e a tela recebe o custo por modelo.
     const close = calls.find((c) => c.url.includes("rpc/ai_usage_close_turn"))!;
-    expect(close.body).toEqual({ p_conversation: saved, p_turn: ask.p_turn });
+    expect(close.body).toMatchObject({ p_conversation: saved, p_turn: ask.p_turn });
+    // O passo a passo vai junto: as ferramentas que rodaram (com o que a pessoa viu) e as partes da pergunta.
+    expect(close.body.p_detail.tools.map((t: any) => t.tool)).toEqual(["search_knowledge", "list_tasks"]);
+    expect(close.body.p_detail.tools[0].label).toMatch(/Buscando/);
+    expect(close.body.p_detail.prompt).toMatchObject({ question: 0, history: 0 });
+    expect((res.body as any).message).toBe(2);
     expect((res.body as any).cost.models.map((m: any) => m.model)).toEqual(["claude-opus-5", "text-embedding-3-small"]);
   });
 

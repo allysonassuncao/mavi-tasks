@@ -1,7 +1,7 @@
 import { useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Coins } from "lucide-react";
-import type { ConversationCost, TurnCost } from "./ai";
+import type { ConversationCost, TurnCost, TurnDetail } from "./ai";
 
 /**
  * MAVI · o custo de cada resposta e da conversa inteira, por modelo
@@ -84,7 +84,112 @@ export function messageCost(costs: ConversationCost | null, id: number | undefin
     if (!r.kinds.includes(i.kind)) r.kinds.push(i.kind);
     rows.set(key, r);
   }
-  return { cost: Number(m.cost) || 0, models: [...rows.values()].sort((a, b) => b.cost - a.cost) };
+  const kinds = new Map<string, number>();
+  for (const i of m.items) kinds.set(i.kind, (kinds.get(i.kind) ?? 0) + (Number(i.cost) || 0));
+  return {
+    cost: Number(m.cost) || 0,
+    models: [...rows.values()].sort((a, b) => b.cost - a.cost),
+    kinds: [...kinds.entries()].map(([kind, cost]) => ({ kind, cost })).sort((a, b) => b.cost - a.cost),
+    detail: m.detail ?? null,
+  };
+}
+
+/** Os usos da resposta (vetores, imagens, anexos, resumo…). */
+const kindsOf = (cost: TurnCost) => cost.kinds ?? [];
+const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s` : `${Math.round(v)} ms`);
+
+/** Tudo o que aconteceu na resposta: de onde veio a entrada, cada rodada e cada ferramenta. */
+function Steps({ detail, kinds }: { detail: TurnDetail; kinds: { kind: string; cost: number }[] }) {
+  const p = detail.prompt;
+  const parts: [string, number][] = [
+    ["Sua mensagem", p.question],
+    ["Skills e anexos colados na mensagem", p.extras],
+    ["Histórico da conversa (mensagens suas e da MAVI)", p.history],
+    ["Instruções e ferramentas da MAVI", p.instructions],
+    ["Contexto (empresa, cliente, data, catálogos)", p.context],
+  ];
+  const others = kinds.filter((k) => k.kind !== "ask");
+  const tools = new Map(detail.tools.map((t) => [t.tool, t]));
+  return (
+    <div className="mavi-cost-steps">
+      {detail.rounds.length > 0 && (
+        <section>
+          <h4>Entrada da 1ª rodada (≈, pelo tamanho de cada parte)</h4>
+          <ul>
+            {parts
+              .filter(([, n]) => n > 0)
+              .map(([label, n]) => (
+                <li key={label}>
+                  <span>{label}</span>
+                  <span className="num">{tokens(n)}</span>
+                </li>
+              ))}
+          </ul>
+        </section>
+      )}
+      {detail.rounds.length > 0 && (
+        <section>
+          <h4>Rodadas do modelo</h4>
+          <ol>
+            {detail.rounds.map((r, i) => (
+              <li key={i}>
+                <span>
+                  <strong>
+                    {i + 1}ª · {r.model}
+                  </strong>
+                  <small>
+                    entrada {tokens(r.input + r.cacheRead + r.cacheWrite)}
+                    {r.cacheRead ? ` (${tokens(r.cacheRead)} do cache)` : ""} · saída {tokens(r.output)}
+                    {r.tools.length
+                      ? ` · pediu ${r.tools.map((t) => tools.get(t)?.label ?? t).join(", ")}`
+                      : " · escreveu a resposta"}
+                  </small>
+                </span>
+                <span className="num">{usd(r.cost)}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="mavi-cost-note">
+            A saída ({tokens(detail.output)}) inclui o raciocínio e os pedidos de ferramentas; o texto da resposta
+            tem ≈ {tokens(detail.answer)}. O resultado de cada ferramenta entra na rodada seguinte.
+          </p>
+        </section>
+      )}
+      {detail.tools.length > 0 && (
+        <section>
+          <h4>Ferramentas e skills</h4>
+          <ul>
+            {detail.tools.map((t, i) => (
+              <li key={i} className={t.ok ? "" : "failed"}>
+                <span>
+                  {t.label}
+                  <small>
+                    {ms(t.ms)}
+                    {t.ok ? "" : " · falhou"}
+                    {t.cost ? "" : " · sem custo próprio"}
+                  </small>
+                </span>
+                <span className="num">{t.cost ? usd(t.cost) : "—"}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {others.length > 0 && (
+        <section>
+          <h4>Outros gastos desta resposta</h4>
+          <ul>
+            {others.map((k) => (
+              <li key={k.kind}>
+                <span>{kindLabel(k.kind)}</span>
+                <span className="num">{usd(k.cost)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
 }
 
 function ModelTable({ rows }: { rows: Row[] }) {
@@ -155,6 +260,7 @@ export function AnswerCost({ cost }: { cost: TurnCost }) {
         <Popover.Content className="mavi-cost-pop" align="start" sideOffset={6}>
           <strong>Custo desta resposta</strong>
           <ModelTable rows={turnRows(cost)} />
+          {cost.detail && <Steps detail={cost.detail} kinds={kindsOf(cost)} />}
           <p className="mavi-cost-total">
             Total <strong>{usd(cost.cost)}</strong>
           </p>

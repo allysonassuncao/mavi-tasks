@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { logCost, meterEntries, newTurn, turnCost } from "./_ai-cost";
+import { logCost, meterEntries, newTurn, turnCost, turnDetail } from "./_ai-cost";
+import { anthropicAdapter, type RoundUsage } from "./_ai-llm";
 import { addUsage, newMeter } from "./_social-leads";
 
 describe("custo da conversa por modelo", () => {
@@ -64,5 +65,63 @@ describe("custo da conversa por modelo", () => {
     expect(bodies[1].p_turn).toBeUndefined();
     expect(turn.entries).toHaveLength(1);
     expect(turn.pending).toHaveLength(1);
+  });
+
+  it("o passo a passo: a entrada da 1ª rodada dividida pelas partes, e quanto da saída é o texto", () => {
+    const d = turnDetail({
+      rounds: [
+        { model: "claude-opus-5-5", input: 900, cacheRead: 9000, cacheWrite: 100, output: 300, cost: 0.02, tools: ["search_knowledge"] },
+        { model: "claude-opus-5-5", input: 2500, cacheRead: 10000, cacheWrite: 0, output: 700, cost: 0.03, tools: [] },
+      ],
+      tools: [{ tool: "search_knowledge", label: "Buscando “verba”", ok: true, ms: 812.4, cost: 0 }],
+      parts: { question: 100, extras: 0, history: 900, instructions: 8000, context: 1000 },
+      answerChars: 1400,
+    });
+    // 10.000 tokens na 1ª rodada, divididos pelo tamanho de cada parte.
+    expect(d.prompt).toEqual({ question: 100, extras: 0, history: 900, instructions: 8000, context: 1000 });
+    expect(d.output).toBe(1000);
+    expect(d.answer).toBe(400);
+    expect(d.tools[0]).toEqual({ tool: "search_knowledge", label: "Buscando “verba”", ok: true, ms: 812, cost: 0 });
+  });
+
+  it("a Claude conta cada rodada: tokens, custo e as ferramentas pedidas", async () => {
+    let round = 0;
+    const client = {
+      beta: {
+        messages: {
+          stream: () => {
+            const first = round++ === 0;
+            return {
+              on: () => undefined,
+              finalMessage: async () => ({
+                model: "claude-opus-5-5",
+                stop_reason: first ? "tool_use" : "end_turn",
+                content: first
+                  ? [{ type: "tool_use", id: "t1", name: "search_knowledge", input: {} }]
+                  : [{ type: "text", text: "pronto" }],
+                usage: first
+                  ? { input_tokens: 1000, output_tokens: 50, cache_creation_input_tokens: 4000 }
+                  : { input_tokens: 600, output_tokens: 400, cache_read_input_tokens: 4000 },
+              }),
+            };
+          },
+        },
+      },
+    };
+    const rounds: RoundUsage[] = [];
+    const out = await anthropicAdapter({ anthropicKey: "", model: "claude-opus-5-5" }, client as never)({
+      instructions: "i",
+      context: "c",
+      messages: [{ role: "user", content: "oi" }],
+      tools: [{ name: "search_knowledge", description: "d", parameters: { type: "object" } }],
+      execute: async () => "achei",
+      onRound: (r) => rounds.push(r),
+    });
+    expect(rounds.map((r) => [r.input, r.cacheWrite, r.cacheRead, r.output, r.tools])).toEqual([
+      [1000, 4000, 0, 50, ["search_knowledge"]],
+      [600, 0, 4000, 400, []],
+    ]);
+    // As rodadas somam o total do medidor.
+    expect(rounds[0].cost + rounds[1].cost).toBeCloseTo(out.meter.cost, 9);
   });
 });
