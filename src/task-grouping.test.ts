@@ -6,6 +6,7 @@ const {
   groupTasks,
   groupHint,
   groupOrder,
+  groupSummary,
   nestSubtasks,
   normalizeViewConfig,
   sameViewConfig,
@@ -81,6 +82,28 @@ describe("Agrupar a lista de tarefas", () => {
       ),
     ).toBe("2h estimadas");
     expect(groupHint([task({ estimated_minutes: 0 })], "2026-09-28")).toBe("");
+  });
+
+  it("resume o grupo fechado: status, prazos em aberto e pessoas", () => {
+    const s = groupSummary(
+      [
+        task({ status: "review", due_date: "2026-09-20", assignee_id: "b", creator_id: "x" }),
+        task({ status: "progress", due_date: "2026-10-04", assignee_id: "a", creator_id: "x" }),
+        task({ status: "progress", due_date: "2026-09-30", assignee_id: "a", creator_id: "y" }),
+        task({ status: "done", due_date: "2026-09-01", assignee_id: "c", creator_id: "x" }),
+      ],
+      "2026-09-28",
+    );
+    expect(s.late).toBe(1);
+    expect(s.statuses).toEqual([
+      ["progress", 2],
+      ["review", 1],
+      ["done", 1],
+    ]);
+    // The done task's date does not count.
+    expect([s.firstDue, s.lastDue]).toEqual(["2026-09-20", "2026-10-04"]);
+    expect(s.assignees).toEqual(["a", "b", "c"]);
+    expect(s.creators).toEqual(["x", "y"]);
   });
 
   it("monta o segundo nível dentro de cada seção", () => {

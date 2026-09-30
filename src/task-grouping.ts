@@ -159,6 +159,54 @@ export function groupHint(tasks: Task[], _today: string, lead = "") {
     .join(" · ");
 }
 
+/**
+ * What a closed section shows in its own columns, so it reads without
+ * opening: how many per status, the open due dates' span, and who does and
+ * who asked (most tasks first). One pass over the section's tasks.
+ */
+export interface GroupSummary {
+  late: number;
+  /** Statuses present, in the list's order, with their counts. */
+  statuses: [Task["status"], number][];
+  /** Nearest and farthest due date of the tasks not done ("" when none). */
+  firstDue: string;
+  lastDue: string;
+  /** Member ids, most tasks first. */
+  assignees: string[];
+  creators: string[];
+}
+export function groupSummary(tasks: Task[], today: string): GroupSummary {
+  const byStatus = new Map<Task["status"], number>(),
+    assignees = new Map<string, number>(),
+    creators = new Map<string, number>();
+  let late = 0,
+    firstDue = "",
+    lastDue = "";
+  for (const t of tasks) {
+    byStatus.set(t.status, (byStatus.get(t.status) ?? 0) + 1);
+    assignees.set(t.assignee_id, (assignees.get(t.assignee_id) ?? 0) + 1);
+    creators.set(t.creator_id, (creators.get(t.creator_id) ?? 0) + 1);
+    if (t.status === "done" || !t.due_date) continue;
+    if (t.due_date < today) late++;
+    if (!firstDue || t.due_date < firstDue) firstDue = t.due_date;
+    if (t.due_date > lastDue) lastDue = t.due_date;
+  }
+  const ranked = (m: Map<string, number>) =>
+    [...m.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+  const order = (s: Task["status"]) => {
+    const i = listedStatuses.indexOf(s);
+    return i < 0 ? listedStatuses.length : i;
+  };
+  return {
+    late,
+    statuses: [...byStatus.entries()].sort((a, b) => order(a[0]) - order(b[0])),
+    firstDue,
+    lastDue,
+    assignees: ranked(assignees),
+    creators: ranked(creators),
+  };
+}
+
 /** Splits tasks into sections, in each section's order. */
 export function groupTasks(
   tasks: Task[],

@@ -7865,6 +7865,57 @@ label .input-control .ui-input {
   color: #6e8060;
   text-align: center;
 }
+/* A closed section's digest in the columns: status counts, open due span, people. */
+.task-table .task-group-head td.group-digest {
+  padding-block: 6px;
+  background: #f7f9f4;
+  border-block: 1px solid #eef1ea;
+  cursor: pointer;
+}
+.task-table .task-group-head:hover td.group-digest {
+  background: #f1f5ec;
+}
+.group-statuses {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 9px;
+  border-radius: 4px;
+  background: #fff;
+  border: 1px solid #e8ece4;
+  white-space: nowrap;
+}
+.group-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: #596861;
+}
+.group-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.group-people {
+  display: inline-flex;
+  align-items: center;
+  padding-left: 6px;
+}
+.group-people .avatar {
+  width: 24px;
+  height: 24px;
+  margin-left: -6px;
+  font-size: 0.55rem;
+  box-shadow: 0 0 0 2px #f7f9f4;
+}
+.group-people-more {
+  margin-left: 4px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: #6e8060;
+}
 /* Late tasks in a section: seen at a glance, even with it closed. */
 .task-group-late {
   display: inline-flex;

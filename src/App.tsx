@@ -206,6 +206,7 @@ import {
   GROUP_OPTIONS,
   THEN_OPTIONS,
   groupOrder,
+  groupSummary,
   groupTasks,
   nestSubtasks,
   normalizeViewConfig,
@@ -4771,9 +4772,116 @@ function TaskTable({
       ];
     });
   };
+  // A closed section's people: one shows as in the rows; more, as a stack.
+  const people = (ids: string[], role: string) => {
+    const names = ids.map(
+      (id) => lookup.members.get(id)?.name ?? "Usuário removido",
+    );
+    if (ids.length === 1) {
+      const m = lookup.members.get(ids[0]);
+      return (
+        <span className="task-person" title={names[0]}>
+          <Avatar name={names[0]} src={m?.avatar_url} size="small" />
+          {ids[0] === me ? (
+            <span className="you-tag">Você</span>
+          ) : (
+            <span className="task-person-name">{names[0].split(" ")[0]}</span>
+          )}
+        </span>
+      );
+    }
+    const shown = ids.slice(0, 3);
+    return (
+      <span
+        className="group-people"
+        title={`${ids.length} ${role}: ${names.join(", ")}`}
+        aria-label={`${ids.length} ${role}: ${names.join(", ")}`}
+      >
+        {shown.map((id, i) => (
+          <Avatar
+            key={id}
+            name={names[i]}
+            src={lookup.members.get(id)?.avatar_url}
+            size="small"
+          />
+        ))}
+        {ids.length > shown.length && (
+          <span className="group-people-more">+{ids.length - shown.length}</span>
+        )}
+      </span>
+    );
+  };
+  const dueText = (day: string) => (day === today ? "Hoje" : dateLabel(day));
+  // "28 set." — a span of two dates stays on one line.
+  const shortDue = (day: string) =>
+    day === today ? "Hoje" : dateLabel(day).replace(" de ", " ");
+  // Closed, a section fills the columns with a digest of its tasks (worked
+  // out only then; open, its rows already say it).
+  const digest = (g: TaskGroup, open: () => void) => {
+    const s = groupSummary(g.tasks, today);
+    return (
+      <>
+        <td className="col-status group-digest" onClick={open}>
+          {s.statuses.length === 1 ? (
+            <Badge status={s.statuses[0][0]} />
+          ) : (
+            <span
+              className="group-statuses"
+              aria-label={s.statuses
+                .map(([st, n]) => `${statuses[st]?.label ?? st}: ${n}`)
+                .join(", ")}
+            >
+              {s.statuses.map(([st, n]) => (
+                <span
+                  key={st}
+                  className="group-status"
+                  title={`${statuses[st]?.label ?? st}: ${n}`}
+                >
+                  <i style={{ background: statuses[st]?.color }} />
+                  {n}
+                </span>
+              ))}
+            </span>
+          )}
+        </td>
+        <td className="group-digest" onClick={open}>
+          {s.firstDue ? (
+            <span
+              className={`due ${s.late ? "late" : ""}`}
+              title={
+                s.firstDue === s.lastDue
+                  ? "Prazo das tarefas em aberto"
+                  : "Do prazo mais próximo ao mais distante das tarefas em aberto"
+              }
+            >
+              <CalendarDays size={14} />
+              {s.lastDue === s.firstDue
+                ? dueText(s.firstDue)
+                : `${shortDue(s.firstDue)} – ${shortDue(s.lastDue)}`}
+              {s.late > 0 && <span className="late-dot" />}
+            </span>
+          ) : (
+            <span className="due">
+              <Check size={14} /> Concluídas
+            </span>
+          )}
+        </td>
+        <td className="col-assignee group-digest" onClick={open}>
+          {people(s.assignees, "responsáveis")}
+        </td>
+        <td className="col-creator group-digest" onClick={open}>
+          {people(s.creators, "criadores")}
+        </td>
+      </>
+    );
+  };
   const head = (g: TaskGroup, level: 0 | 1) => {
     const closed = collapsed.has(g.key),
       late = g.tasks.filter((t) => isLate(t, today)).length;
+    const flipGroup = () => {
+      touched.current = true;
+      toggle(g.key);
+    };
     return (
       <tr className={`task-group-head level-${level}`} key={`head:${g.key}`}>
         {selection && (
@@ -4784,15 +4892,8 @@ function TaskTable({
             )}
           </th>
         )}
-        <th colSpan={5} scope="rowgroup">
-          <button
-            type="button"
-            aria-expanded={!closed}
-            onClick={() => {
-              touched.current = true;
-              toggle(g.key);
-            }}
-          >
+        <th colSpan={closed ? 1 : 5} scope="rowgroup">
+          <button type="button" aria-expanded={!closed} onClick={flipGroup}>
             <ChevronRight
               size={15}
               className={closed ? "" : "open"}
@@ -4809,6 +4910,7 @@ function TaskTable({
             <small>{g.hint}</small>
           </button>
         </th>
+        {closed && digest(g, flipGroup)}
       </tr>
     );
   };
