@@ -1074,4 +1074,50 @@ await check("histórico: a estimativa, a leitura depois do dia a dia e parar", a
   assert.equal((await rpc("radar_settings", [A])).backfill.pending, 0);
 });
 
+// Migration 20270105090000_member_opt_in_modules: um administrador liga o
+// Radar para um colaborador; ele vê só os itens dos clientes das equipes dele.
+await check("colaborador com o Radar ligado: só os clientes dele, sem configurar", async () => {
+  const [moved] = await sql(`select id from radar_items where client_id = $1 limit 1`, [client]);
+  await sql(`update radar_items set client_id = $1 where id = $2`, [other, moved.id]);
+  try {
+    await as(member);
+    await rejects(() => rpc("radar_items", [A, "{}"]), /Sem permissão/);
+    await as(admin);
+    // Tudo desligado menos o Radar.
+    await rpc("set_member_pages", [A, member, ["overview", "campaigns", "dashboards"]]);
+    const [{ n: mine }] = await sql(
+      `select count(*)::int as n from radar_items where company_id = $1 and client_id = $2`,
+      [A, client],
+    );
+    await as(member);
+    const ov = await rpc("radar_overview", [A]);
+    assert.equal(ov.can_configure, false);
+    assert.equal(ov.topics.reduce((sum, t) => sum + Number(t.total), 0), mine);
+    const r = await rpc("radar_items", [A, JSON.stringify({ limit: 200 })]);
+    assert.equal(r.total, mine);
+    assert.ok(r.items.every((i) => i.client_id === client));
+    assert.ok(!r.items.some((i) => i.id === moved.id));
+    // Pedir o outro cliente pelo filtro não abre nada.
+    assert.equal((await rpc("radar_items", [A, JSON.stringify({ client: other })])).total, 0);
+    // Temas, relatórios e configuração seguem dos líderes; editar também.
+    await rejects(() => rpc("radar_settings", [A]), /Sem permissão/);
+    await rejects(() => rpc("radar_reports", [A]), /Sem permissão/);
+    await rejects(
+      () => rpc("update_radar_item", [A, r.items[0].id, JSON.stringify({ status: "resolvido" })]),
+      /Sem permissão/,
+    );
+    // O líder continua vendo tudo, e configurando.
+    await as(manager);
+    const all = await rpc("radar_overview", [A]);
+    assert.equal(all.can_configure, true);
+    assert.ok(all.topics.reduce((sum, t) => sum + Number(t.total), 0) > mine);
+    // Quem não tem o módulo ligado continua fora.
+    await as(outsider);
+    await rejects(() => rpc("radar_overview", [A]), /Sem permissão/);
+  } finally {
+    await sql(`update radar_items set client_id = $1 where id = $2`, [client, moved.id]);
+    await sql(`update memberships set shown_pages = '{}' where user_id = $1`, [member]);
+  }
+});
+
 console.log(`\n${passed} checks passed`);

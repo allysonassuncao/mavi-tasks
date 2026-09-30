@@ -48,11 +48,14 @@ function readSaved(key: string): Saved {
 }
 
 /**
- * Radar do cliente (administradores e gestores): o que os clientes reclamam,
+ * Radar do cliente: o que os clientes reclamam,
  * o que o time promete e os outros tópicos que a MAVI acompanha nas reuniões
  * e nos grupos de WhatsApp. Um cartão por tópico com os números, a lista com
  * os filtros resolvidos no banco e o item aberto num painel. Os filtros
- * ficam guardados neste navegador, por empresa e pessoa.
+ * ficam guardados neste navegador, por empresa e pessoa. Administradores e
+ * gestores veem tudo; um colaborador com o módulo ligado vê só os itens dos
+ * clientes das equipes dele, sem temas, relatórios, avisos nem edição
+ * (can_configure falso).
  */
 export function RadarPage({
   company,
@@ -261,6 +264,7 @@ export function RadarPage({
         ))}
       </section>
 
+      {overview.can_configure && (
       <div className="radar-view-row">
       <nav className="drive-view radar-view" aria-label="Como ver">
         <button
@@ -292,8 +296,9 @@ export function RadarPage({
           <BellRing size={15} aria-hidden="true" /> Meus avisos
         </Button>
       </div>
+      )}
 
-      {view === "reports" ? (
+      {view === "reports" && overview.can_configure ? (
         <RadarReports
           company={company}
           data={data}
@@ -302,7 +307,7 @@ export function RadarPage({
           openReport={reportLink}
           onOpened={() => setReportLink(null)}
         />
-      ) : view === "themes" ? (
+      ) : view === "themes" && overview.can_configure ? (
         <RadarThemes
           key={topic.id}
           company={company}
@@ -421,16 +426,18 @@ export function RadarPage({
             <Button className="icon-btn" onClick={refresh} loading={busy} aria-label="Atualizar" title="Atualizar">
               <RefreshCw size={15} />
             </Button>
-            <a
-              className="btn secondary"
-              href={appPath("/mavi#radar")}
-              onClick={(e) => {
-                e.preventDefault();
-                openInApp("/mavi#radar");
-              }}
-            >
-              <Settings2 size={15} aria-hidden="true" /> Configurar
-            </a>
+            {overview.can_configure && (
+              <a
+                className="btn secondary"
+                href={appPath("/mavi#radar")}
+                onClick={(e) => {
+                  e.preventDefault();
+                  openInApp("/mavi#radar");
+                }}
+              >
+                <Settings2 size={15} aria-hidden="true" /> Configurar
+              </a>
+            )}
           </div>
         </div>
         <p className="radar-caption">
@@ -549,7 +556,7 @@ export function RadarPage({
         </>
       )}
 
-      {alertsOpen && (
+      {alertsOpen && overview.can_configure && (
         <RadarAlerts
           company={company}
           data={data}
@@ -648,6 +655,8 @@ function RadarInfo({
                 </>
               ) : overview.backfill_from ? (
                 <>o histórico desde {dateBr(overview.backfill_from)} já foi lido.</>
+              ) : !overview.can_configure ? (
+                <>as reuniões e conversas de antes podem ser lidas por um administrador ou gestor.</>
               ) : (
                 <>
                   as reuniões e conversas de antes podem ser lidas em{" "}

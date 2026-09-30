@@ -8,8 +8,23 @@ import type { Role } from "./types";
  *    modules are exclusive to administrators;
  *  - on top of them, the modules an administrator hid from the person
  *    (memberships.hidden_pages, migration 20261007090000_member_modules).
- *    It only restricts: "Meu perfil" and "Equipe e configurações" never hide.
+ *    It only restricts: "Meu perfil" and "Equipe e configurações" never hide;
+ *  - for collaborators, the opt-in modules (MEMBER_OPT_IN) stay off until an
+ *    administrator turns them on (memberships.shown_pages, migration
+ *    20270105090000_member_opt_in_modules).
  */
+
+/**
+ * Modules a collaborator only sees when an administrator turns them on for
+ * the person: off by default, read-only and limited to the clients they serve
+ * (Visão geral with their own numbers, Dashboards shared with them).
+ */
+export const MEMBER_OPT_IN = [
+  "overview",
+  "campaigns",
+  "radar",
+  "dashboards",
+] as const satisfies readonly Page[];
 
 // Collaborators see these modules scoped to them: clients/projects they serve
 // (read-only, plus creating tasks) and only their own hours and reports.
@@ -31,6 +46,7 @@ export const MEMBER_PAGES: readonly Page[] = [
   "skills",
   "connections",
   "profile",
+  ...MEMBER_OPT_IN,
 ];
 /**
  * Modules that aren't pages: the AI assistant, the bubble over every page
@@ -67,6 +83,32 @@ export const MODULES = [
   { id: "assistant", label: "MAVI (conversas e bolinha)" },
 ] as const satisfies readonly { id: Page | WidgetModule; label: string }[];
 export type ModuleId = (typeof MODULES)[number]["id"];
+
+/**
+ * The modules off for the person: the ones an administrator hid plus, for a
+ * collaborator, the opt-in ones not turned on. What every screen checks.
+ */
+export function hiddenModules(
+  member:
+    | {
+        role?: Role;
+        hidden_pages?: readonly string[] | null;
+        shown_pages?: readonly string[] | null;
+      }
+    | null
+    | undefined,
+): string[] {
+  const hidden = [...(member?.hidden_pages ?? [])];
+  if (member?.role !== "member") return hidden;
+  const shown = member.shown_pages ?? [];
+  for (const id of MEMBER_OPT_IN)
+    if (!shown.includes(id) && !hidden.includes(id)) hidden.push(id);
+  return hidden;
+}
+
+/** Whether the module is one a collaborator only sees when turned on. */
+export const optInFor = (module: string, role: Role | undefined) =>
+  role === "member" && (MEMBER_OPT_IN as readonly string[]).includes(module);
 
 /** The module a page belongs to (the task search is Tarefas…), if any. */
 export function moduleOf(page: Page): ModuleId | null {

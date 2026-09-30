@@ -91,6 +91,8 @@ type Props = {
   company: string;
   user: string;
   notify: (message: string) => void;
+  /** False: a collaborator with the module on, read-only. */
+  canEdit?: boolean;
 };
 type CampaignFormState = { campaign?: AdCampaign } | null;
 type CycleFormState = {
@@ -105,12 +107,20 @@ const emptyData: CampaignData = { campaigns: [], cycles: [] };
 
 /**
  * Campanhas: cadastro de campanhas (por produto contratado) e de seus ciclos.
- * Módulo de administradores e gestores (App só o abre para eles, e o banco
- * repete a regra).
+ * Administradores e gestores editam; um colaborador com o módulo ligado
+ * (Módulos visíveis) só vê as campanhas dos clientes das equipes dele, sem
+ * editar, sincronizar nem conectar contas (o banco repete a regra).
  * A troca do ciclo atual é sempre manual; a tela só aponta quando o ciclo
  * atual terminou ou quando o próximo investimento precisa entrar.
  */
-export function CampaignsPage({ demo, data, company, user, notify }: Props) {
+export function CampaignsPage({
+  demo,
+  data,
+  company,
+  user,
+  notify,
+  canEdit = true,
+}: Props) {
   const dataRef = useRef(data);
   dataRef.current = data;
   const backend: CampaignsBackend = useMemo(
@@ -174,7 +184,7 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
     notify(message);
   };
 
-  const canCreate = data.contracts.some((k) => !k.archived);
+  const canCreate = canEdit && data.contracts.some((k) => !k.archived);
   const campaign = state.campaigns.find((c) => c.id === selected);
 
   return (
@@ -202,6 +212,7 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           notify={notify}
           connectionTick={connectionTick}
           onPending={setPending}
+          canEdit={canEdit}
           onBack={() => {
             setTab("");
             setViewedCycle("");
@@ -233,11 +244,11 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           tick={listTick}
           onOpen={(id) => setSelected(id)}
           onNew={() => setCampaignForm({})}
-          onConnections={() => setConnections(true)}
+          onConnections={canEdit ? () => setConnections(true) : undefined}
           demo={demo}
         />
       )}
-      {campaignForm && (
+      {canEdit && campaignForm && (
         <CampaignForm
           campaign={campaignForm.campaign}
           data={data}
@@ -266,7 +277,7 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           }}
         />
       )}
-      {cycleForm && (
+      {canEdit && cycleForm && (
         <CycleForm
           campaign={cycleForm.campaign}
           cycle={cycleForm.cycle}
@@ -298,7 +309,7 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           }}
         />
       )}
-      {connections && (
+      {canEdit && connections && (
         <AdConnections
           company={company}
           ads={backend.ads}
@@ -312,7 +323,7 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           refresh={connectionTick}
         />
       )}
-      {pending && (
+      {canEdit && pending && (
         <MetaAccountChooser
           key={pending}
           ads={backend.ads}
@@ -325,7 +336,7 @@ export function CampaignsPage({ demo, data, company, user, notify }: Props) {
           }}
         />
       )}
-      {statusForm && (
+      {canEdit && statusForm && (
         <StatusForm
           campaign={statusForm.campaign}
           to={statusForm.to}
@@ -442,7 +453,8 @@ function CampaignList({
   tick: number;
   onOpen: (id: string) => void;
   onNew: () => void;
-  onConnections: () => void;
+  /** Absent: read-only (no "Conexões"). */
+  onConnections?: () => void;
   demo: boolean;
 }) {
   const [query, setQuery] = useUrlState<string>("busca", "");
@@ -583,13 +595,15 @@ function CampaignList({
               </SelectOption>
             ))}
           </Select>
-          <Button
-            className="btn secondary"
-            onClick={onConnections}
-            title="Conexões com o Facebook e o Google Ads"
-          >
-            <Plug size={16} /> Conexões
-          </Button>
+          {onConnections && (
+            <Button
+              className="btn secondary"
+              onClick={onConnections}
+              title="Conexões com o Facebook e o Google Ads"
+            >
+              <Plug size={16} /> Conexões
+            </Button>
+          )}
           {canCreate && (
             <Button className="btn primary" onClick={onNew}>
               <Plus size={17} /> Nova campanha
@@ -747,6 +761,7 @@ function CampaignDetail({
   notify,
   connectionTick,
   onPending,
+  canEdit,
   onBack,
   onEdit,
   onStatus,
@@ -764,6 +779,8 @@ function CampaignDetail({
   notify: (message: string) => void;
   connectionTick: number;
   onPending: (id: string) => void;
+  /** False: a collaborator's read-only view. */
+  canEdit: boolean;
   onBack: () => void;
   onEdit: () => void;
   onStatus: (to: AdCampaignStatus) => void;
@@ -800,7 +817,7 @@ function CampaignDetail({
         ? alert.suggestion
         : null;
 
-  const actions = (
+  const actions = canEdit && (
     <>
       <Button className="btn secondary" onClick={onEdit}>
         <Pencil size={15} /> Editar
@@ -846,6 +863,7 @@ function CampaignDetail({
           {alert.kind === "ending" &&
             `O ciclo atual termina em ${alert.days} ${alert.days === 1 ? "dia" : "dias"} e não há próximo ciclo: é hora de cobrar o próximo investimento.`}
         </span>
+        {canEdit && (
         <span className="campaign-alert-actions">
           {suggestion && suggestion.id !== current?.id && (
             <Button
@@ -864,6 +882,7 @@ function CampaignDetail({
             </Button>
           )}
         </span>
+        )}
       </div>
     ) : null;
 
@@ -887,6 +906,7 @@ function CampaignDetail({
         actions={actions}
         banner={banner}
         connection={
+          canEdit &&
           campaign.platform === "meta" &&
           parts.client && (
             <ClientMetaConnection
@@ -906,7 +926,8 @@ function CampaignDetail({
         describeEvent={(e) => describeEvent(e, state)}
         notify={notify}
         onRecordEdited={() => setEditsTick((t) => t + 1)}
-        onConversions={setConversions}
+        onConversions={canEdit ? setConversions : undefined}
+        readOnly={!canEdit}
         metricsTick={metricsTick}
         cyclesTab={
           <>
@@ -919,9 +940,11 @@ function CampaignDetail({
                     alguém troca.
                   </p>
                 </div>
-                <Button className="btn secondary" onClick={onNewCycle}>
-                  <Plus size={15} /> Novo ciclo
-                </Button>
+                {canEdit && (
+                  <Button className="btn secondary" onClick={onNewCycle}>
+                    <Plus size={15} /> Novo ciclo
+                  </Button>
+                )}
               </div>
               {cycles.length ? (
                 <div className="table-scroll">
@@ -998,7 +1021,7 @@ function CampaignDetail({
                               </span>
                             </td>
                             <td className="campaign-row-actions">
-                              {!isCurrent && (
+                              {canEdit && !isCurrent && (
                                 <Button
                                   className="text-btn"
                                   onClick={() => onMakeCurrent(y)}
@@ -1007,14 +1030,16 @@ function CampaignDetail({
                                   <Star size={14} /> Tornar atual
                                 </Button>
                               )}
-                              <Button
-                                className="icon-btn"
-                                aria-label={`Editar ciclo de ${shortDate(y.start_date)} a ${shortDate(y.end_date)}`}
-                                title="Editar ciclo"
-                                onClick={() => onEditCycle(y)}
-                              >
-                                <Pencil size={14} />
-                              </Button>
+                              {canEdit && (
+                                <Button
+                                  className="icon-btn"
+                                  aria-label={`Editar ciclo de ${shortDate(y.start_date)} a ${shortDate(y.end_date)}`}
+                                  title="Editar ciclo"
+                                  onClick={() => onEditCycle(y)}
+                                >
+                                  <Pencil size={14} />
+                                </Button>
+                              )}
                             </td>
                           </tr>
                         );

@@ -3,7 +3,14 @@ import { Check } from "lucide-react";
 import { Modal } from "./components";
 import { Button, Checkbox, Input, Select, SelectOption } from "./ui";
 import type { Member, Role, Snapshot } from "./types";
-import { ADMIN_PAGES, MODULES, roleAllows } from "./modules";
+import {
+  ADMIN_PAGES,
+  MEMBER_OPT_IN,
+  MODULES,
+  hiddenModules,
+  optInFor,
+  roleAllows,
+} from "./modules";
 import { loadMemberPhones, saveMemberPhones } from "./temperature";
 import { PhoneListField, phoneRows, phonesChanged } from "./PhoneListField";
 
@@ -50,8 +57,20 @@ export function MemberForm({
       .filter((tm) => tm.user_id === member.user_id)
       .map((tm) => tm.team_id),
   );
-  // Modules an administrator hid from the person (src/modules.ts).
-  const [hidden, setHidden] = useState<string[]>(member.hidden_pages ?? []);
+  // Modules off for the person, a collaborator's opt-in ones included
+  // (src/modules.ts); the database splits the list by profile.
+  const [hidden, setHidden] = useState<string[]>(() => hiddenModules(member));
+  // A new profile: the opt-in modules follow what is saved for it.
+  const shownRole = useRef(member.role);
+  useEffect(() => {
+    if (shownRole.current === role) return;
+    shownRole.current = role;
+    const optIn = MEMBER_OPT_IN as readonly string[];
+    setHidden((list) => [
+      ...list.filter((id) => !optIn.includes(id)),
+      ...hiddenModules({ ...member, role }).filter((id) => optIn.includes(id)),
+    ]);
+  }, [role, member]);
   // Celulares com WhatsApp: nos grupos dos clientes, as mensagens deles são do time.
   const [phones, setPhones] = useState([""]);
   const [savedPhones, setSavedPhones] = useState<string[]>([]);
@@ -90,7 +109,7 @@ export function MemberForm({
       });
       if (canEditPhone && phonesChanged(phones, savedPhones))
         setSavedPhones(await saveMemberPhones(company, member.user_id, phones));
-      const before = [...(member.hidden_pages ?? [])].sort().join();
+      const before = [...hiddenModules(member)].sort().join();
       if (callerIsAdmin && [...hidden].sort().join() !== before)
         await mutate("set_member_pages", {
           p_company: company,
@@ -232,6 +251,12 @@ export function MemberForm({
                             {ADMIN_PAGES.includes(m.id)
                               ? "só administradores"
                               : "gestores e administradores"}
+                          </small>
+                        )}
+                        {optInFor(m.id, role) && (
+                          <small className="member-module-note">
+                            desligado por padrão · só leitura, dos clientes das
+                            equipes da pessoa
                           </small>
                         )}
                       </span>

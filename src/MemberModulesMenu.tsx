@@ -3,7 +3,13 @@ import * as Popover from "@radix-ui/react-popover";
 import { LayoutGrid, PlugZap } from "lucide-react";
 import { Checkbox } from "./ui";
 import type { Member } from "./types";
-import { ADMIN_PAGES, MODULES, roleAllows } from "./modules";
+import {
+  ADMIN_PAGES,
+  MODULES,
+  hiddenModules,
+  optInFor,
+  roleAllows,
+} from "./modules";
 
 // A burst of clicks becomes a single save.
 const SAVE_DELAY = 500;
@@ -14,7 +20,9 @@ const sameList = (a: readonly string[], b: readonly string[]) =>
 /**
  * Shortcut to the "Módulos visíveis" of the user form: from the person's row,
  * each click shows or hides a module and is saved by itself, without opening
- * the form. Only administrators (set_member_pages).
+ * the form. Only administrators (set_member_pages). The list handled here is
+ * every module off for the person, including a collaborator's opt-in ones
+ * not turned on; the database splits it by profile.
  */
 export function MemberModulesMenu({
   member,
@@ -27,7 +35,7 @@ export function MemberModulesMenu({
   /** Liga ou desliga a IA externa (MCP) da pessoa (set_member_mcp). */
   saveMcp?: (access: "default" | "on" | "off") => Promise<unknown>;
 }) {
-  const saved = member.hidden_pages ?? [];
+  const saved = hiddenModules(member);
   const [hidden, setHidden] = useState<string[]>(saved);
   const [status, setStatus] = useState<"" | "saving" | "saved" | "error">("");
   const [error, setError] = useState("");
@@ -114,7 +122,11 @@ export function MemberModulesMenu({
 
   const allowed = MODULES.filter((m) => roleAllows(m.id, member.role));
   const shown = allowed.filter((m) => !hidden.includes(m.id)).length;
-  const count = saved.filter((id) => allowed.some((m) => m.id === id)).length;
+  // The badge: modules the profile gives and someone hid (a collaborator's
+  // opt-in modules start off, which isn't hiding).
+  const count = saved.filter(
+    (id) => allowed.some((m) => m.id === id) && !optInFor(id, member.role),
+  ).length;
 
   return (
     <Popover.Root
@@ -187,6 +199,11 @@ export function MemberModulesMenu({
                   {!byRole && (
                     <small>
                       {ADMIN_PAGES.includes(m.id) ? "só admin." : "gestores"}
+                    </small>
+                  )}
+                  {optInFor(m.id, member.role) && (
+                    <small title="Desligado por padrão para colaboradores. Ligado, mostra só os clientes das equipes da pessoa, sem editar">
+                      só leitura
                     </small>
                   )}
                 </label>

@@ -117,6 +117,7 @@ export function CampaignDayToDay({
   onRecordEdited,
   onConversions,
   metricsTick = 0,
+  readOnly = false,
 }: {
   campaign: AdCampaign;
   /** Oldest first. */
@@ -143,6 +144,8 @@ export function CampaignDayToDay({
   onConversions?: (cycle: AdCycle) => void;
   /** Bumped after the numbers changed elsewhere (read them again). */
   metricsTick?: number;
+  /** Collaborators: the numbers only, no sync or edits. */
+  readOnly?: boolean;
 }) {
   const [tab, setTab] = useUrlState<string>("aba", "dia");
   const [cycleId, setCycleId] = useUrlState<string>("ciclo", "");
@@ -219,7 +222,7 @@ export function CampaignDayToDay({
         onWithM={setWithM}
         onCycle={setCycleId}
         syncing={syncing}
-        onSync={() => void sync()}
+        onSync={readOnly ? undefined : () => void sync()}
         tags={tags}
         actions={actions}
         connection={connection}
@@ -289,7 +292,7 @@ export function CampaignDayToDay({
               withM={withM}
               events={events}
               describeEvent={describeEvent}
-              onEdit={setEditing}
+              onEdit={readOnly ? undefined : setEditing}
             />
           ) : null}
         </section>
@@ -346,7 +349,8 @@ function CampaignSummary({
   onWithM: (v: boolean) => void;
   onCycle: (id: string) => void;
   syncing: boolean;
-  onSync: () => void;
+  /** Absent: read-only (no "Sincronizar"). */
+  onSync?: () => void;
   tags: ReactNode;
   actions: ReactNode;
   connection?: ReactNode;
@@ -626,6 +630,7 @@ function CampaignSummary({
                     ? "Ainda não sincronizado"
                     : "Vincule contas ao ciclo"}
               </span>
+              {onSync && (
               <Button
                 className="text-btn"
                 onClick={onSync}
@@ -642,6 +647,7 @@ function CampaignSummary({
                 />{" "}
                 {syncing ? "Sincronizando…" : "Sincronizar"}
               </Button>
+              )}
               {campaign.platform === "google" && cycle && onConversions && (
                 <Button
                   className="text-btn"
@@ -1073,7 +1079,8 @@ function Timeline({
   withM: boolean;
   events: AdCampaignEvent[] | null;
   describeEvent: (e: AdCampaignEvent) => string;
-  onEdit: (target: EditTarget) => void;
+  /** Absent: read-only. */
+  onEdit?: (target: EditTarget) => void;
 }) {
   const [sub, setSub] = useUrlState<string>("linha", "maso");
   const active: Sub = sub === "diario" || sub === "cliente" ? sub : "maso";
@@ -1111,7 +1118,7 @@ function Timeline({
           withM={withM}
           events={(events ?? []).filter((e) => e.cycle_id === cycle.id)}
           describeEvent={describeEvent}
-          onEdit={(row) => onEdit({ kind: "snapshot", row })}
+          onEdit={onEdit && ((row) => onEdit({ kind: "snapshot", row }))}
         />
       )}
       {active === "diario" && (
@@ -1120,7 +1127,7 @@ function Timeline({
           metrics={metrics}
           withM={withM}
           objective={cycle.objective}
-          onEdit={(row) => onEdit({ kind: "daily", row })}
+          onEdit={onEdit && ((row) => onEdit({ kind: "daily", row }))}
         />
       )}
       {active === "cliente" && (
@@ -1152,7 +1159,7 @@ function SnapshotsTable({
   withM: boolean;
   events: AdCampaignEvent[];
   describeEvent: (e: AdCampaignEvent) => string;
-  onEdit: (row: CycleSnapshot) => void;
+  onEdit?: (row: CycleSnapshot) => void;
 }) {
   const funnel = cycle.objective === "sale" || cycle.objective === "custom";
   const m = withM ? cycle.multiplier : 1;
@@ -1304,10 +1311,12 @@ function SnapshotsTable({
                       </span>
                     </td>
                     <td>
-                      <EditButton
-                        label={`Editar o registro de ${shortDate(r.s.taken_on)}`}
-                        onClick={() => onEdit(r.s)}
-                      />
+                      {onEdit && (
+                        <EditButton
+                          label={`Editar o registro de ${shortDate(r.s.taken_on)}`}
+                          onClick={() => onEdit(r.s)}
+                        />
+                      )}
                     </td>
                   </tr>
                 ),
@@ -1331,7 +1340,7 @@ function DailyTable({
   metrics: CampaignMetrics;
   withM: boolean;
   objective: AdObjective;
-  onEdit: (row: DailyMetric) => void;
+  onEdit?: (row: DailyMetric) => void;
 }) {
   const funnel = objective === "sale" || objective === "custom";
   const live = useMemo(
@@ -1427,10 +1436,12 @@ function DailyTable({
                 </>
               )}
               <td>
-                <EditButton
-                  label={`Editar o registro de ${shortDate(r.day)}`}
-                  onClick={() => onEdit(r)}
-                />
+                {onEdit && (
+                  <EditButton
+                    label={`Editar o registro de ${shortDate(r.day)}`}
+                    onClick={() => onEdit(r)}
+                  />
+                )}
               </td>
             </tr>
           ))}

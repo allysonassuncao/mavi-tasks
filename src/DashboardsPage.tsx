@@ -12,6 +12,7 @@ import {
   Save,
   Share2,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -157,13 +158,16 @@ const linkBadge: Record<LinkAccess, { label: string; Icon: typeof Lock }> = {
 
 /**
  * Dashboards (leaders): the list, and each dashboard to view, edit and
- * share. People a dashboard is shared with open it by its link (view only).
+ * share. People a dashboard is shared with open it by its link (view only);
+ * a collaborator with the module on (Módulos visíveis) also gets the list of
+ * the ones shared with them.
  */
 export function DashboardsPage({
   data,
   company,
   demo,
   isLeader,
+  canList = isLeader,
   user,
   notify,
   dashboardId,
@@ -174,6 +178,8 @@ export function DashboardsPage({
   company: string;
   demo: boolean;
   isLeader: boolean;
+  /** Whether the person has the module (the list); leaders always do. */
+  canList?: boolean;
   user: string;
   notify: Notify;
   dashboardId: string | null;
@@ -192,12 +198,12 @@ export function DashboardsPage({
         isLeader={isLeader}
         user={user}
         notify={notify}
-        onBack={isLeader ? () => onOpen(null) : undefined}
+        onBack={isLeader || canList ? () => onOpen(null) : undefined}
         onDeleted={() => onOpen(null)}
         internalUrl={internalUrl}
       />
     );
-  if (!isLeader)
+  if (!isLeader && !canList)
     return (
       <Empty
         title="Dashboards"
@@ -212,6 +218,7 @@ export function DashboardsPage({
       user={user}
       notify={notify}
       onOpen={onOpen}
+      canEdit={isLeader}
     />
   );
 }
@@ -224,6 +231,7 @@ function DashboardList({
   user,
   notify,
   onOpen,
+  canEdit,
 }: {
   data: Snapshot;
   company: string;
@@ -231,6 +239,8 @@ function DashboardList({
   user: string;
   notify: Notify;
   onOpen: (id: string) => void;
+  /** False: a collaborator, who only sees what was shared with them. */
+  canEdit: boolean;
 }) {
   const [list, setList] = useState<Dashboard[] | null>(null);
   const [error, setError] = useState("");
@@ -291,9 +301,11 @@ function DashboardList({
             ? `${list.length} ${list.length === 1 ? "dashboard" : "dashboards"}`
             : ""}
         </span>
-        <Button className="btn primary" onClick={() => setCreating(true)}>
-          <Plus size={16} /> Novo dashboard
-        </Button>
+        {canEdit && (
+          <Button className="btn primary" onClick={() => setCreating(true)}>
+            <Plus size={16} /> Novo dashboard
+          </Button>
+        )}
       </div>
       {error && (
         <p className="form-error" role="alert">
@@ -322,17 +334,24 @@ function DashboardList({
                   </span>
                 </button>
                 <footer>
-                  <span
-                    className={`visibility-badge ${d.link_access === "public" ? "public" : ""}`}
-                  >
-                    <Icon size={12} /> {label}
-                  </span>
+                  {canEdit ? (
+                    <span
+                      className={`visibility-badge ${d.link_access === "public" ? "public" : ""}`}
+                    >
+                      <Icon size={12} /> {label}
+                    </span>
+                  ) : (
+                    <span className="visibility-badge">
+                      <Users size={12} /> Compartilhado com você
+                    </span>
+                  )}
                   <small>
                     {d.panels.length}{" "}
                     {d.panels.length === 1 ? "painel" : "painéis"} · editado por{" "}
                     {who(d.updated_by ?? d.created_by)} em{" "}
                     {new Date(d.updated_at).toLocaleDateString("pt-BR")}
                   </small>
+                  {canEdit && (
                   <span className="dash-card-actions">
                     <Button
                       className="icon-btn"
@@ -351,6 +370,7 @@ function DashboardList({
                       <Trash2 size={15} />
                     </Button>
                   </span>
+                  )}
                 </footer>
               </article>
             );
@@ -358,6 +378,12 @@ function DashboardList({
         </div>
       ) : (
         <div className="panel">
+          {!canEdit ? (
+            <Empty
+              title="Nenhum dashboard compartilhado com você"
+              body="Quando um administrador ou gestor compartilhar um dashboard com você ou com a sua equipe, ele aparece aqui."
+            />
+          ) : (
           <Empty
             title="Seu primeiro dashboard"
             body="Monte painéis com indicadores de tarefas, status, validações, horas e Social Leads da agência: números, gráficos e tabelas, com filtros por período, cliente, produto, equipe e pessoa."
@@ -367,6 +393,7 @@ function DashboardList({
               </Button>
             }
           />
+          )}
         </div>
       )}
       {creating && (

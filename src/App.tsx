@@ -226,6 +226,7 @@ import {
   MODULES,
   canOpenPage,
   firstPage,
+  hiddenModules,
   moduleOf,
   moduleOn,
 } from "./modules";
@@ -572,8 +573,9 @@ export default function App() {
     isManager = member?.role === "manager",
     isLeader = isAdmin || isManager;
   // The profile's rules, plus the modules an administrator hid from the
-  // person (src/modules.ts).
-  const hiddenPages = member?.hidden_pages ?? [];
+  // person and, for a collaborator, the opt-in ones not turned on
+  // (src/modules.ts).
+  const hiddenPages = hiddenModules(member);
   // Pessoas tab of the settings page: by name, e-mail or access profile.
   const memberTerms = fold(memberQuery).split(/\s+/).filter(Boolean);
   const shownMembers = memberTerms.length
@@ -2175,13 +2177,14 @@ export default function App() {
         : summary,
     [demo, reportTasks, today, period, periodHours, demoNow, summary],
   );
+  // Collaborators: their own tasks (Visão geral, when turned on for them).
   const focus = useMemo(
     () =>
-      data.tasks
+      reportTasks
         .filter((t) => t.status !== "done")
         .sort((a, b) => a.due_date.localeCompare(b.due_date))
         .slice(0, 6),
-    [data.tasks],
+    [reportTasks],
   );
   const byClient = useMemo(
     () =>
@@ -2728,12 +2731,14 @@ export default function App() {
                     }
                   />
                 )}
-              {((isLeader && page === "overview") || page === "reports") && (
+              {(page === "overview" || page === "reports") && (
                 <>
                   <div className="section-top">
                     <span className="section-caption">
                       {page === "overview"
-                        ? "O PULSO DA SUA OPERAÇÃO"
+                        ? isLeader
+                          ? "O PULSO DA SUA OPERAÇÃO"
+                          : "O PULSO DO SEU TRABALHO"
                         : isLeader
                           ? "INDICADORES DO PERÍODO"
                           : "SEUS INDICADORES DO PERÍODO"}
@@ -2800,7 +2805,7 @@ export default function App() {
                   </div>
                 </>
               )}
-              {isLeader && page === "overview" && (
+              {page === "overview" && (
                 <div className="dashboard-grid">
                   <section className="panel focus-panel">
                     <div className="panel-heading">
@@ -2809,7 +2814,11 @@ export default function App() {
                           Entregas em foco{" "}
                           <span className="small-counter">{focus.length}</span>
                         </h2>
-                        <p>Os próximos passos da sua equipe</p>
+                        <p>
+                          {isLeader
+                            ? "Os próximos passos da sua equipe"
+                            : "Os seus próximos passos"}
+                        </p>
                       </div>
                       <Button className="text-btn" onClick={() => go("tasks")}>
                         Ver tarefas <ArrowUpRight size={16} />
@@ -2917,11 +2926,11 @@ export default function App() {
                       </Button>
                     </div>
                     <div className="mini-projects">
-                      {data.projects.slice(0, 3).map((p, i) => {
-                        const contract = data.contracts.find(
+                      {catalogData.projects.slice(0, 3).map((p, i) => {
+                        const contract = catalogData.contracts.find(
                             (c) => c.id === p.contract_id,
                           ),
-                          client = data.clients.find(
+                          client = catalogData.clients.find(
                             (c) => c.id === contract?.client_id,
                           );
                         return (
@@ -3660,7 +3669,7 @@ export default function App() {
                   }
                 />
               )}
-              {page === "campaigns" && isLeader && (
+              {page === "campaigns" && allowed("campaigns") && (
                 <CampaignsPage
                   key={company}
                   demo={demo}
@@ -3668,6 +3677,7 @@ export default function App() {
                   company={company}
                   user={user}
                   notify={notify}
+                  canEdit={isLeader}
                 />
               )}
               {(page === "onboarding" || page === "socialMedia") && (
@@ -3850,7 +3860,8 @@ export default function App() {
                   />
                 </Suspense>
               )}
-              {page === "dashboards" && (isLeader || openDashboard) && (
+              {page === "dashboards" &&
+                (allowed("dashboards") || openDashboard) && (
                 <Suspense fallback={<Loading variant="grid" />}>
                   <DashboardsPage
                     key={company}
@@ -3858,6 +3869,7 @@ export default function App() {
                     company={company}
                     demo={demo}
                     isLeader={isLeader}
+                    canList={allowed("dashboards")}
                     user={user}
                     notify={notify}
                     dashboardId={openDashboard}
@@ -4030,6 +4042,23 @@ export default function App() {
                                         : "módulos escondidos"}
                                     </span>
                                   )}
+                                  {isAdmin &&
+                                    m.role === "member" &&
+                                    !!m.shown_pages?.length && (
+                                      <span
+                                        className="member-email"
+                                        title={`Ligados só para esta pessoa (só leitura): ${MODULES.filter(
+                                          (x) => m.shown_pages?.includes(x.id),
+                                        )
+                                          .map((x) => x.label)
+                                          .join(", ")}`}
+                                      >
+                                        {m.shown_pages.length}{" "}
+                                        {m.shown_pages.length === 1
+                                          ? "módulo ligado"
+                                          : "módulos ligados"}
+                                      </span>
+                                    )}
                                 </div>
                                 <span className="role-tag">
                                   {ROLE_LABELS[m.role]}

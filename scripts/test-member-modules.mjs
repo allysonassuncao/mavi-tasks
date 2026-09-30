@@ -1,5 +1,6 @@
 // Módulos visíveis por pessoa (migration 20261007090000_member_modules): só
-// administradores escolhem; a lista guarda os módulos escondidos, validados.
+// administradores escolhem; a lista guarda os módulos escondidos, validados,
+// e, para colaboradores, os opcionais ligados (20270105090000).
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
@@ -105,6 +106,69 @@ await check("ninguém muda a lista direto na tabela", async () => {
     )
     .catch(() => {});
   assert.deepEqual(await hidden(admin), ["storage"]);
+});
+
+// Migration 20270105090000_member_opt_in_modules: Visão geral, Campanhas,
+// Radar e Dashboards começam desligados para colaboradores; a lista que chega
+// é a de tudo o que fica desligado, e o banco a divide pelo perfil.
+const pages = async (target) => {
+  await db.exec("reset role");
+  return (
+    await db.query(
+      "select hidden_pages, shown_pages from memberships where company_id=$1 and user_id=$2",
+      [A, target],
+    )
+  ).rows[0];
+};
+await check("colaborador: os módulos opcionais começam desligados", async () => {
+  const fresh = "00000000-0000-4000-8000-000000000099";
+  await db.exec("reset role");
+  await db.query("insert into auth.users(id) values ($1)", [fresh]);
+  await db.query(
+    "insert into memberships(company_id,user_id,name,role) values ($1,$2,'Nova','member')",
+    [A, fresh],
+  );
+  assert.deepEqual(await pages(fresh), { hidden_pages: [], shown_pages: [] });
+  // Everything off but Campanhas and Radar: those two are turned on.
+  await set(admin, member, ["overview", "dashboards", "agenda"]);
+  assert.deepEqual(await pages(member), {
+    hidden_pages: ["agenda"],
+    shown_pages: ["campaigns", "radar"],
+  });
+  // "Mostrar todos" turns all four on.
+  await set(admin, member, []);
+  assert.deepEqual(await pages(member), {
+    hidden_pages: [],
+    shown_pages: ["campaigns", "dashboards", "overview", "radar"],
+  });
+  await set(admin, member, ["overview", "campaigns", "radar", "dashboards"]);
+  assert.deepEqual(await pages(member), { hidden_pages: [], shown_pages: [] });
+});
+
+await check("líderes: os opcionais são escondidos como os outros", async () => {
+  await set(admin, manager, ["campaigns"]);
+  assert.deepEqual(await pages(manager), {
+    hidden_pages: ["campaigns"],
+    shown_pages: [],
+  });
+  await set(admin, manager, []);
+});
+
+await check("ninguém se liga um módulo direto na tabela", async () => {
+  await as(member);
+  await db
+    .query(
+      "update memberships set shown_pages='{campaigns}' where company_id=$1 and user_id=$2",
+      [A, member],
+    )
+    .catch(() => {});
+  assert.deepEqual((await pages(member)).shown_pages, []);
+  await db.exec("reset role");
+  await assert.rejects(
+    db.query("update memberships set shown_pages='{tasks}' where user_id=$1", [
+      member,
+    ]),
+  );
 });
 
 console.log(`\n${passed} verificações de módulos por pessoa passaram.`);

@@ -1,6 +1,7 @@
 // Campanhas (migration 20260930090000_ad_campaigns): campaigns belong to a
 // contracted product and go through cycles; the current cycle only changes
-// by hand. The module is exclusive to the company's administrators.
+// by hand. Administrators and managers use the module; a collaborator only
+// reads it when an administrator turns it on (20270105090000).
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
@@ -1324,7 +1325,7 @@ await check("aguardando ativação: novas nunca ativadas, à parte", async () =>
 
 await check("lista paginada: só administradores e gestores", async () => {
   for (const user of [trafego, outsider])
-    await assert.rejects(page(user), /exclusivo de administradores/);
+    await assert.rejects(page(user), /Sem permissão: Campanhas/);
 });
 
 // ------------------------------------------------------------ workspace
@@ -1635,10 +1636,7 @@ await check(
       manager,
     ]);
     assert.equal((await visible(manager, "ad_campaigns")).length, 0);
-    await assert.rejects(
-      page(manager),
-      /exclusivo de administradores e gestores/,
-    );
+    await assert.rejects(page(manager), /Sem permissão: Campanhas/);
     await sql("update memberships set role='manager' where user_id=$1", [
       manager,
     ]);
@@ -1781,6 +1779,88 @@ await check(
     const targets = await rpc("ad_sync_targets", [null, google, 15]);
     // An April cycle is out of the sync's window; the column is there for the running ones.
     assert.ok(Array.isArray(targets));
+  },
+);
+
+// Migration 20270105090000_member_opt_in_modules: an administrator turns
+// Campanhas on for a collaborator; read-only, only the clients of their teams.
+await check(
+  "colaborador com Campanhas ligado: só leitura, só os clientes das equipes dele",
+  async () => {
+    // A client no team of Tiago's serves.
+    await as(admin);
+    const farClient = await rpc("create_client", [A, "Cliente distante", ""]);
+    const farContract = await rpc("create_contract", [
+      A,
+      farClient,
+      makeAds,
+      "Make Ads",
+    ]);
+    const other = await campaign(admin, {
+      contract: farContract,
+      name: "Distante - Meta",
+    });
+    await cycle(admin, other, { current: true, links: [] });
+    // Off by default: nothing changes until an administrator turns it on.
+    await assert.rejects(page(trafego), /Sem permissão: Campanhas/);
+    assert.equal((await visible(trafego, "ad_campaigns")).length, 0);
+    await as(admin);
+    await rpc("set_member_pages", [A, trafego, ["overview", "radar", "dashboards"]]);
+    assert.deepEqual(
+      (
+        await sql(
+          "select hidden_pages, shown_pages from memberships where company_id=$1 and user_id=$2",
+          [A, trafego],
+        )
+      )[0],
+      { hidden_pages: [], shown_pages: ["campaigns"] },
+    );
+    const served = new Set(
+      (
+        await sql(
+          `select a.id from ad_campaigns a join contracts k on k.id = a.contract_id
+           where k.client_id in (select ct.client_id from client_teams ct
+            join team_members tm on tm.team_id = ct.team_id where tm.user_id = $1)`,
+          [trafego],
+        )
+      ).map((r) => r.id),
+    );
+    const listed = await page(trafego, { limit: 100 });
+    assert.ok(listed.rows.length > 0);
+    assert.ok(!served.has(other));
+    assert.ok(listed.rows.every((r) => served.has(r.campaign.id)));
+    const rows = await visible(trafego, "ad_campaigns");
+    assert.ok(rows.length > 0 && rows.every((r) => served.has(r.id)));
+    assert.ok(!rows.some((r) => r.id === other));
+    // Cycles, numbers and runs follow the campaign.
+    for (const table of [
+      "ad_cycles",
+      "ad_daily_metrics",
+      "ad_cycle_snapshots",
+      "ad_sync_runs",
+      "ad_campaign_events",
+    ])
+      assert.ok(
+        (await visible(trafego, table)).every((r) => served.has(r.campaign_id)),
+        table,
+      );
+    assert.ok((await visible(trafego, "ad_cycles")).length > 0);
+    // Still read-only.
+    await assert.rejects(campaign(trafego), /exclusivo/);
+    await as(trafego);
+    await assert.rejects(
+      rpc("set_ad_campaign_status", [rows[0].id, "inactive", "Teste"]),
+    );
+    // Hiding wins over turning on; a manager keeps the module by profile.
+    await as(admin);
+    await rpc("set_member_pages", [A, trafego, ["campaigns"]]);
+    await assert.rejects(page(trafego), /Sem permissão: Campanhas/);
+    await sql("update memberships set shown_pages = '{campaigns}', hidden_pages = '{campaigns}' where user_id = $1", [trafego]);
+    await assert.rejects(page(trafego), /Sem permissão: Campanhas/);
+    assert.ok(
+      (await visible(manager, "ad_campaigns")).some((r) => r.id === other),
+    );
+    await sql("update memberships set shown_pages = '{}', hidden_pages = '{}' where user_id = $1", [trafego]);
   },
 );
 

@@ -27,7 +27,7 @@ import {
   statuses,
   workingStatuses,
 } from "./types";
-import { MODULES } from "./modules";
+import { MEMBER_OPT_IN, MODULES } from "./modules";
 import type { TaskView } from "./api";
 import type { BulkChange, BulkItem, BulkResult, BulkUndo } from "./task-bulk";
 import {
@@ -529,7 +529,13 @@ export class DemoStore {
         const hidden = [...new Set<string>(a.p_hidden ?? [])].sort();
         if (hidden.some((h) => !MODULES.some((m) => m.id === h)))
           throw Error("Módulo inválido");
-        target.hidden_pages = hidden;
+        // A collaborator's opt-in modules are kept as the ones turned on
+        // (set_member_pages in migration 20270105090000).
+        if (target.role === "member") {
+          const optIn = MEMBER_OPT_IN as readonly string[];
+          target.hidden_pages = hidden.filter((h) => !optIn.includes(h));
+          target.shown_pages = optIn.filter((h) => !hidden.includes(h));
+        } else target.hidden_pages = hidden;
         break;
       }
       case "set_member_mcp": {
