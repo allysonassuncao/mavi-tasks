@@ -67,6 +67,10 @@ await check("quem resume segue a empresa; a reordenação só com modelo escolhi
   assert.equal(await resolve("conversation_summary"), "claude-haiku-4-5");
   await assert.rejects(() => q(ana, "select public.ai_set_route($1,'feature',null,$2,'claude-haiku-4-5','mavi_rerank')", [A, provider]), /Só administradores e gestores/);
   await assert.rejects(() => q(admin, "select public.ai_set_route($1,'feature',null,$2,'claude-haiku-4-5','inventada')", [A, provider]), /inválida/);
+  // O validador e o assistente das skills (20261227090000): sem regra, o padrão da empresa.
+  assert.equal(await resolve("skill_coach"), "claude-opus-5-5");
+  await q(admin, "select public.ai_set_route($1,'feature',null,$2,'claude-haiku-4-5','skill_coach')", [A, provider]);
+  assert.equal(await resolve("skill_coach"), "claude-haiku-4-5");
 });
 
 await check("o Consumo mostra os tokens lidos e gravados no cache", async () => {

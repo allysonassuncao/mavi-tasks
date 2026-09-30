@@ -306,3 +306,179 @@ export async function importSkill(file: File): Promise<{
     skipped,
   };
 }
+
+// ------------------------------------------------------------ validador e assistente
+/**
+ * A MAVI revisa a qualidade da skill e ajuda a criar (ação "skill-mavi" de
+ * /api/drive, api/_skill-coach.ts). Nada é gravado lá: a tela mostra, a
+ * pessoa aplica e só depois salva.
+ */
+export type CheckKind = "include" | "fix" | "change" | "improve" | "remove";
+export type CheckItem = {
+  id: string;
+  kind: CheckKind;
+  severity: "high" | "medium" | "low";
+  target: "name" | "description" | "instructions" | "file";
+  file?: string;
+  title: string;
+  why: string;
+  before?: string;
+  anchor?: string;
+  after?: string;
+};
+export type SkillCheck = {
+  verdict: "great" | "good" | "needs_work";
+  summary: string;
+  items: CheckItem[];
+  model: string;
+};
+export type CoachMessage = { role: "user" | "assistant"; content: string };
+export type CoachReply = {
+  reply: string;
+  question?: { text: string; options: string[]; multiple: boolean };
+  draft?: { name?: string; description?: string; instructions?: string };
+  files?: { name: string; content?: string; remove?: boolean }[];
+  ready: boolean;
+  model: string;
+};
+
+export const CHECK_KINDS: Record<CheckKind, string> = {
+  include: "Incluir",
+  fix: "Corrigir",
+  change: "Alterar",
+  improve: "Melhorar",
+  remove: "Remover",
+};
+export const VERDICTS: Record<SkillCheck["verdict"], string> = {
+  great: "Muito boa",
+  good: "Boa, com ajustes",
+  needs_work: "Precisa de ajustes",
+};
+
+async function skillMavi<T>(body: Record<string, unknown>): Promise<T> {
+  const token = supabase ? (await supabase.auth.getSession()).data.session?.access_token : undefined;
+  const res = await fetch("/api/drive", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ action: "skill-mavi", ...body }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Error(data.error ?? "A MAVI não conseguiu responder agora.");
+  return data as T;
+}
+const skillBody = (d: SkillDraft) => ({
+  slug: d.slug,
+  name: d.name,
+  description: d.description,
+  instructions: d.instructions,
+  files: d.files,
+});
+export const checkSkill = (company: string, draft: SkillDraft, origin: "import" | "submit" | "manual") =>
+  skillMavi<SkillCheck>({ company, mode: "review", origin, skill: skillBody(draft) });
+export const coachSkill = (company: string, messages: CoachMessage[], draft: SkillDraft) =>
+  skillMavi<CoachReply>({ company, mode: "coach", messages, skill: skillBody(draft) });
+
+/** O que a revisão leu: mudou isto, a revisão ficou velha. */
+export const checkKey = (d: SkillDraft) =>
+  JSON.stringify([d.name.trim(), d.description.trim(), d.instructions, d.files.map((f) => [f.name, f.content])]);
+
+/** O que muda num campo ou arquivo: o valor antes (para desfazer). */
+export type CheckUndo =
+  | { target: "name" | "description" | "instructions"; value: string }
+  | { target: "file"; name: string; content: string | null };
+
+const insert = (text: string, anchor: string | undefined, add: string) => {
+  const at = anchor ? text.indexOf(anchor) : -1;
+  if (at < 0) return `${text.replace(/\s+$/, "")}\n\n${add.trim()}\n`;
+  const end = at + anchor!.length;
+  const rest = text.slice(end).replace(/^\s+/, "");
+  return `${text.slice(0, end).replace(/\s+$/, "")}\n\n${add.trim()}\n${rest ? `\n${rest}` : ""}`;
+};
+function edit(text: string, item: CheckItem): string | null {
+  if (item.before) {
+    if (!text.includes(item.before)) return null;
+    return text.replace(item.before, () => item.after ?? "").replace(/\n{3,}/g, "\n\n");
+  }
+  if (!item.after?.trim()) return null;
+  return insert(text, item.anchor, item.after);
+}
+
+/**
+ * Aplica um ponto da revisão. null: não dá (sem texto pronto, ou o trecho
+ * mudou desde a revisão).
+ */
+export function applyCheck(draft: SkillDraft, item: CheckItem): { draft: SkillDraft; undo: CheckUndo } | null {
+  if (item.target === "name" || item.target === "description") {
+    if (!item.after?.trim()) return null;
+    const max = item.target === "name" ? LIMITS.name : LIMITS.description;
+    return {
+      draft: { ...draft, [item.target]: item.after.trim().slice(0, max) },
+      undo: { target: item.target, value: draft[item.target] },
+    };
+  }
+  if (item.target === "instructions") {
+    const next = edit(draft.instructions, item);
+    if (next === null || next === draft.instructions) return null;
+    return {
+      draft: { ...draft, instructions: next.slice(0, LIMITS.instructions) },
+      undo: { target: "instructions", value: draft.instructions },
+    };
+  }
+  const name = item.file ? cleanFileName(item.file) : "";
+  if (!name) return null;
+  const file = draft.files.find((f) => f.name === name);
+  const undo: CheckUndo = { target: "file", name, content: file?.content ?? null };
+  if (item.kind === "remove" && !item.before) {
+    if (!file) return null;
+    return { draft: { ...draft, files: draft.files.filter((f) => f.name !== name) }, undo };
+  }
+  if (!file) {
+    if (!item.after?.trim() || draft.files.length >= LIMITS.files) return null;
+    return { draft: { ...draft, files: [...draft.files, { name, content: item.after }] }, undo };
+  }
+  const next = edit(file.content, item);
+  if (next === null || next === file.content) return null;
+  return {
+    draft: { ...draft, files: draft.files.map((f) => (f.name === name ? { name, content: next } : f)) },
+    undo,
+  };
+}
+export function undoCheck(draft: SkillDraft, undo: CheckUndo): SkillDraft {
+  if (undo.target !== "file") return { ...draft, [undo.target]: undo.value };
+  const rest = draft.files.filter((f) => f.name !== undo.name);
+  if (undo.content === null) return { ...draft, files: rest };
+  const i = draft.files.findIndex((f) => f.name === undo.name);
+  const files = [...rest];
+  files.splice(i < 0 ? files.length : i, 0, { name: undo.name, content: undo.content });
+  return { ...draft, files };
+}
+
+/** O que o assistente mudou, aplicado à skill (os campos inteiros). */
+export function applyCoach(draft: SkillDraft, reply: Pick<CoachReply, "draft" | "files">, isNew: boolean): SkillDraft {
+  const d = reply.draft ?? {};
+  let files = draft.files;
+  for (const f of reply.files ?? []) {
+    const name = cleanFileName(f.name);
+    if (!name) continue;
+    if (f.remove) files = files.filter((x) => x.name !== name);
+    else if (f.content?.trim()) {
+      const content = f.content.slice(0, LIMITS.file);
+      files = files.some((x) => x.name === name)
+        ? files.map((x) => (x.name === name ? { name, content } : x))
+        : files.length < LIMITS.files
+          ? [...files, { name, content }]
+          : files;
+    }
+  }
+  const name = d.name?.trim().slice(0, LIMITS.name);
+  return {
+    ...draft,
+    ...(name ? { name, ...(isNew ? { slug: slugify(name) } : {}) } : {}),
+    ...(d.description?.trim() ? { description: d.description.trim().slice(0, LIMITS.description) } : {}),
+    ...(d.instructions?.trim() ? { instructions: d.instructions.trim().slice(0, LIMITS.instructions) } : {}),
+    files,
+  };
+}

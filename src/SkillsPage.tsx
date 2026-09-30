@@ -13,6 +13,8 @@ import {
   Plus,
   Puzzle,
   Search,
+  ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -26,7 +28,10 @@ import { myPowers } from "./ai";
 import {
   LIMITS,
   STATE_LABELS,
+  applyCheck,
   archiveSkill,
+  checkKey,
+  checkSkill,
   cleanFileName,
   deleteSkill,
   getSkill,
@@ -39,16 +44,21 @@ import {
   setSkillAudience,
   skillMd,
   slugify,
+  undoCheck,
   validSlug,
+  type CheckItem,
+  type CheckUndo,
+  type SkillCheck,
   type SkillDetail,
   type SkillDraft,
   type SkillState,
   type SkillSummary,
 } from "./mavi-skills";
+import { SkillAssistant, SkillCheckPanel } from "./SkillCoach";
 import "./mavi-skills.css";
 
 type Tab = "available" | "mine" | "review" | "all";
-type Editing = { id: string | null; draft: SkillDraft; skipped?: string[] };
+type Editing = { id: string | null; draft: SkillDraft; skipped?: string[]; imported?: boolean };
 
 const emptyDraft = (): SkillDraft => ({
   slug: "",
@@ -152,7 +162,7 @@ export function SkillsPage({
   async function pickImport(file: File) {
     try {
       const { draft, skipped } = await importSkill(file);
-      setEditing({ id: null, draft: { ...draft, note: "Importada de " + file.name }, skipped });
+      setEditing({ id: null, draft: { ...draft, note: "Importada de " + file.name }, skipped, imported: true });
     } catch (e) {
       notify((e as Error).message);
     }
@@ -188,6 +198,7 @@ export function SkillsPage({
       <SkillView
         key={`${skillId}-${tick}`}
         id={skillId}
+        company={company}
         data={data}
         isLeader={isLeader}
         name={name}
@@ -373,6 +384,7 @@ function StateChip({
 // ------------------------------------------------------------ uma skill
 function SkillView({
   id,
+  company,
   data,
   isLeader,
   name,
@@ -384,6 +396,7 @@ function SkillView({
   notify,
 }: {
   id: string;
+  company: string;
   data: Snapshot;
   isLeader: boolean;
   name: (id: string | null) => string;
@@ -401,6 +414,40 @@ function SkillView({
   const [file, setFile] = useState<{ name: string; content: string } | null>(null);
   const [returning, setReturning] = useState(false);
   const [audience, setAudience] = useState<Audience | null>(null);
+  // A revisão da MAVI para quem aprova (só leitura: ajustar é com quem escreveu).
+  const [check, setCheck] = useState<SkillCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState("");
+  const [showCheck, setShowCheck] = useState(false);
+  async function runCheck(d: SkillDetail) {
+    setShowCheck(true);
+    setChecking(true);
+    setCheckError("");
+    try {
+      setCheck(
+        await checkSkill(
+          company,
+          {
+            slug: d.slug,
+            name: d.version.name,
+            description: d.version.description,
+            instructions: d.version.instructions,
+            files: d.version.files.map((f) => ({ name: f.name, content: f.content })),
+            note: "",
+          },
+          "manual",
+        ),
+      );
+    } catch (e) {
+      setCheckError((e as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  }
+  useEffect(() => {
+    setShowCheck(false);
+    setCheck(null);
+  }, [version]);
   useEffect(() => {
     setError("");
     getSkill(id, version)
@@ -581,6 +628,9 @@ function SkillView({
             />
           ) : (
             <span className="skill-review-actions">
+              <Button className="btn secondary" onClick={() => void runCheck(detail)} loading={checking}>
+                <ShieldCheck size={15} /> Validar com a MAVI
+              </Button>
               <Button className="btn secondary" onClick={() => onTest(detail.slug, v.version)}>
                 <FlaskConical size={15} /> Testar antes
               </Button>
@@ -601,6 +651,26 @@ function SkillView({
             </span>
           )}
         </section>
+      )}
+      {showCheck && (
+        <SkillCheckPanel
+          check={check}
+          loading={checking}
+          error={checkError}
+          stale={false}
+          draft={{
+            slug: detail.slug,
+            name: v.name,
+            description: v.description,
+            instructions: v.instructions,
+            files: v.files.map((f) => ({ name: f.name, content: f.content })),
+            note: "",
+          }}
+          applied={new Map()}
+          onRecheck={() => void runCheck(detail)}
+          onClose={() => setShowCheck(false)}
+          readOnly
+        />
       )}
       {v.state === "rejected" && v.review_note && (
         <p className="panel skill-note">
@@ -792,14 +862,30 @@ function SkillEditor({
   onCancel: () => void;
   onSaved: (id: string, message: string) => void;
 }) {
-  const [draft, setDraft] = useState(editing.draft);
+  const [draft, setDraftState] = useState(editing.draft);
   const [slugByHand, setSlugByHand] = useState(!!editing.draft.slug);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [viewing, setViewing] = useState<{ name: string; content: string } | null>(null);
   const adder = useRef<HTMLInputElement>(null);
   const isNew = !editing.id;
-  const set = (patch: Partial<SkillDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  // A skill mais recente, para aplicar vários pontos seguidos (cada um lê o anterior).
+  const current = useRef(draft);
+  const setDraft = (next: SkillDraft) => {
+    current.current = next;
+    setDraftState(next);
+  };
+  const set = (patch: Partial<SkillDraft>) => setDraft({ ...current.current, ...patch });
+  // A revisão da MAVI (ao importar, ao enviar e no botão) e o assistente.
+  const [check, setCheck] = useState<SkillCheck | null>(null);
+  const [checkedKey, setCheckedKey] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState("");
+  const [showCheck, setShowCheck] = useState(false);
+  const [applied, setApplied] = useState<Map<string, CheckUndo>>(new Map());
+  const [sending, setSending] = useState(false);
+  const [coach, setCoach] = useState(isNew && !editing.imported);
+  const checkBox = useRef<HTMLDivElement>(null);
   const total = useMemo(
     () => draft.files.reduce((n, f) => n + f.content.length, 0),
     [draft.files],
@@ -834,6 +920,66 @@ function SkillEditor({
     }
     set({ files: next });
   }
+  async function runCheck(origin: "import" | "submit" | "manual") {
+    const d = current.current;
+    setShowCheck(true);
+    setChecking(true);
+    setCheckError("");
+    try {
+      const r = await checkSkill(company, d, origin);
+      setCheck(r);
+      setCheckedKey(checkKey(d));
+      setApplied(new Map());
+      return r;
+    } catch (e) {
+      setCheckError((e as Error).message);
+      return null;
+    } finally {
+      setChecking(false);
+    }
+  }
+  // Importada: a revisão roda sozinha (skills da Claude costumam pedir o que a MAVI não faz).
+  useEffect(() => {
+    if (editing.imported && editing.draft.instructions.trim().length >= 20) void runCheck("import");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  function apply(item: CheckItem) {
+    const r = applyCheck(current.current, item);
+    if (!r) return;
+    setDraft(r.draft);
+    setApplied((m) => new Map(m).set(item.id, r.undo));
+  }
+  function undo(id: string) {
+    const u = applied.get(id);
+    if (!u) return;
+    setDraft(undoCheck(current.current, u));
+    setApplied((m) => {
+      const next = new Map(m);
+      next.delete(id);
+      return next;
+    });
+  }
+  /**
+   * Enviar: antes, a MAVI revisa (se a skill mudou desde a última revisão).
+   * Muito boa, segue direto; com pontos, a pessoa vê e decide. Nada trava:
+   * se a revisão não rodar, a skill segue.
+   */
+  async function submit() {
+    if (problems.length) {
+      setError(problems[0]);
+      return;
+    }
+    setError("");
+    setSending(true);
+    if (!check || checkedKey !== checkKey(current.current)) {
+      const r = await runCheck("submit");
+      if (r && r.verdict !== "great") {
+        requestAnimationFrame(() => checkBox.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+        return;
+      }
+    }
+    await save(true);
+  }
   async function save(submit: boolean) {
     if (problems.length) {
       setError(problems[0]);
@@ -842,7 +988,7 @@ function SkillEditor({
     setBusy(true);
     setError("");
     try {
-      const r = await saveSkill(company, editing.id, draft, submit);
+      const r = await saveSkill(company, editing.id, current.current, submit);
       onSaved(
         r.id,
         r.state === "approved"
@@ -855,15 +1001,25 @@ function SkillEditor({
       setError((e as Error).message);
     } finally {
       setBusy(false);
+      setSending(false);
     }
   }
+  const sendLabel = isLeader ? "Publicar" : "Enviar para aprovação";
   return (
-    <div className="skills-page skill-editor">
+    <div className={`skills-page skill-editor${coach ? " with-coach" : ""}`}>
       <button type="button" className="skills-back" onClick={onCancel} disabled={busy}>
         <ArrowLeft size={15} /> {isNew ? "Skills" : "Voltar sem salvar"}
       </button>
+      <div className="skill-editor-body">
       <section className="panel skill-form">
-        <h2>{isNew ? "Nova skill" : `Editar ${editing.draft.name}`}</h2>
+        <div className="skill-form-head">
+          <h2>{isNew ? "Nova skill" : `Editar ${editing.draft.name}`}</h2>
+          {!coach && (
+            <Button className="btn secondary skill-coach-open" onClick={() => setCoach(true)}>
+              <Sparkles size={15} /> {isNew && !draft.instructions.trim() ? "Criar com a MAVI" : "Melhorar com a MAVI"}
+            </Button>
+          )}
+        </div>
         {!isNew && (
           <p className="muted">
             Se a skill já está publicada, as mudanças viram uma versão nova: a
@@ -984,23 +1140,68 @@ function SkillEditor({
             onChange={(e) => set({ note: e.target.value })}
           />
         </label>
+        {showCheck && (
+          <div ref={checkBox}>
+            <SkillCheckPanel
+              check={check}
+              loading={checking}
+              error={checkError}
+              stale={!!check && checkedKey !== checkKey(draft)}
+              draft={draft}
+              applied={applied}
+              onApply={apply}
+              onUndo={undo}
+              onRecheck={() => void runCheck("manual")}
+              submitting={sending ? { label: sendLabel, busy } : null}
+              onSendAnyway={() => void save(true)}
+              onClose={() => {
+                setShowCheck(false);
+                setSending(false);
+              }}
+            />
+          </div>
+        )}
         {error && (
           <p className="form-error" role="alert">
             {error}
           </p>
         )}
         <footer className="skill-form-foot">
+          <Button
+            className="btn secondary skill-check-open"
+            onClick={() => void runCheck("manual")}
+            loading={checking && !sending}
+            disabled={busy || problems.length > 0}
+            title={problems[0] ?? "A MAVI lê a skill e diz o que incluir, corrigir, alterar, melhorar ou remover"}
+          >
+            <ShieldCheck size={15} /> Validar com a MAVI
+          </Button>
           <Button className="btn secondary" onClick={onCancel} disabled={busy}>
             Cancelar
           </Button>
-          <Button className="btn secondary" onClick={() => void save(false)} loading={busy}>
+          <Button className="btn secondary" onClick={() => void save(false)} loading={busy && !sending}>
             Salvar rascunho
           </Button>
-          <Button className="btn primary" onClick={() => void save(true)} loading={busy}>
-            <Check size={15} /> {isLeader ? "Publicar" : "Enviar para aprovação"}
+          <Button
+            className="btn primary"
+            onClick={() => void submit()}
+            loading={(busy && sending) || (checking && sending)}
+          >
+            <Check size={15} /> {sendLabel}
           </Button>
         </footer>
       </section>
+      {coach && (
+        <SkillAssistant
+          company={company}
+          draft={draft}
+          isNew={isNew}
+          autoSlug={isNew && !slugByHand}
+          onDraft={setDraft}
+          onClose={() => setCoach(false)}
+        />
+      )}
+      </div>
       {viewing && (
         <Modal title={viewing.name} onClose={() => setViewing(null)}>
           <pre className="skill-file-view">{viewing.content}</pre>

@@ -218,7 +218,8 @@ export type AiFeature =
   | "web_search"
   | "canvas_writer"
   | "mavi_rerank"
-  | "conversation_summary";
+  | "conversation_summary"
+  | "skill_coach";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -305,6 +306,14 @@ export const FEATURES: FeatureInfo[] = [
     conversation: false,
     env: "AI_MODEL",
     note: "Quando a conversa cresce, as mensagens antigas viram um resumo (em segundo plano), para a MAVI lembrar do começo sem reler tudo. Um modelo barato funciona bem. Sem escolha, usa o padrão da empresa.",
+  },
+  {
+    id: "skill_coach",
+    group: "MAVI · poderes",
+    label: "Skills: validador de qualidade e assistente de criação",
+    conversation: false,
+    env: "AI_MODEL",
+    note: "Revisa a skill ao importar, ao enviar para aprovação ou quando pedem, e conduz a conversa de quem cria. Um modelo forte escreve skills melhores. Sem escolha, usa o padrão da empresa.",
   },
   {
     id: "image_generation",
@@ -510,6 +519,7 @@ export function serverModel(
     case "canvas_writer":
     case "mavi_rerank":
     case "conversation_summary":
+    case "skill_coach":
       return env.AI_MODEL || fallback;
     case "meetings_ask":
       return env.MEETINGS_MODEL || fallback;

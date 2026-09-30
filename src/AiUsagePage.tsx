@@ -56,6 +56,7 @@ const MODULE_LABELS: Record<string, string> = {
   mcp: "MAVI em apps externos (MCP)",
   tasks: "Assistente MAVI nas tarefas",
   notices: "Mural de avisos",
+  skills: "Skills da MAVI",
   clients: "Termômetro do cliente",
 };
 

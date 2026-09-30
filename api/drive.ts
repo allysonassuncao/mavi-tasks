@@ -23,6 +23,7 @@ import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
 import { handleNotices } from "./_notices.js";
 import { handleNoticeWriter } from "./_notice-writer.js";
+import { handleSkillCoach } from "./_skill-coach.js";
 import { handleNoticeAnimate } from "./_notice-animation.js";
 import { claudeComplete } from "./_social-leads.js";
 import { openAiEmbedder } from "./_ai-embeddings.js";
@@ -411,6 +412,13 @@ export default async function handler(
         model: serverModel("notice_writer", process.env),
       };
       result = await handleNoticeWriter(body, authorization, env, aiDeps(env));
+    } else if (action === "skill-mavi") {
+      // O validador e o assistente das skills (funcionalidade 'skill_coach').
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("skill_coach", process.env),
+      };
+      result = await handleSkillCoach(body, authorization, env, aiDeps(env));
     } else if (action === "notice-animate") {
       // A animação do aviso: responde na hora e gera em segundo plano
       // (na Vercel, até o maxDuration desta função).
