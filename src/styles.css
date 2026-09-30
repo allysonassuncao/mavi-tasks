@@ -26744,6 +26744,16 @@ main:has(> .mavi-chat) > .error-banner {
   gap: 14px;
   padding: 4px 24px 28px;
 }
+/* The wide sheet (.modal.sheet[open]) doesn't scroll itself: the detail does. */
+.modal.sheet > .radar-detail {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.modal.sheet > .radar-detail > * {
+  flex-shrink: 0;
+}
 .radar-detail-tags {
   display: flex;
   flex-wrap: wrap;
