@@ -326,6 +326,41 @@ await check("período de comparação: os dois períodos guardados, no link tamb
   await rpc("delete_ad_report", [cmp.id]);
 });
 
+await check("Google: fontes com a MCC e as conversões; palavras-chave e termos no relatório", async () => {
+  await as(admin);
+  const google = await rpc("create_ad_campaign", [A, contract, "Vittalium - Google - Leads", "google", "", "", "", ]);
+  const y = await rpc("create_ad_cycle", [
+    google, "2026-09-01", "2026-09-01", "2026-09-30", "lead", 100, 3000, 2, "external_page", [], "Saúde",
+    JSON.stringify([{ account_id: "123-456-7890", campaign_id: "g1", manager_id: "999-000-1111" }]), true,
+  ]);
+  await rpc("set_ad_cycle_conversion_actions", [y, ["555", "phone_calls"]]);
+  await sql(
+    `insert into ad_daily_metrics(company_id,campaign_id,cycle_id,day,multiplier,spend,impressions,reach,clicks,conversions,source)
+     values ($1,$2,$3,'2026-09-01',2,100,1000,0,50,10,'google')`,
+    [A, google, y],
+  );
+  await as(trafego);
+  const sources = await rpc("ad_report_sources", [google, "2026-09-01", "2026-09-02"]);
+  assert.equal(sources.platform, "google");
+  assert.deepEqual(sources.links, [{ account_id: "1234567890", campaign_id: "g1", manager_id: "9990001111" }]);
+  assert.deepEqual(sources.cycles[0].conversion_actions, ["555", "phone_calls"]);
+  const item = { id: "k1", name: "suplemento natural", days: [{ d: "2026-09-01", s: 30, i: 300, c: 12, r: 3 }] };
+  const r = await rpc("create_ad_report", [
+    google, "Google setembro", "2026-09-01", "2026-09-02",
+    config({ with_m: true, sections: { ads: true, adsets: true, keywords: true, search_terms: false, analysis: false, goal: false } }),
+    JSON.stringify({ currency: "BRL", reach: null, ad_results: true, ads: [], adsets: [], keywords: [item], search_terms: [{ ...item, id: "t1" }] }),
+    "", true, null, null,
+  ]);
+  assert.equal(r.view.platform, "google");
+  assert.equal(r.view.keywords[0].days[0].s, 60);
+  assert.equal(r.view.search_terms[0].days[0].s, 60);
+  await as(null);
+  const page = await rpc("ad_report_public", [r.link.token, null]);
+  assert.equal(page.view.keywords[0].name, "suplemento natural");
+  assert.equal(page.view.search_terms, undefined);
+  assert.doesNotMatch(JSON.stringify(page), /"m"|multiplier/);
+});
+
 await check("a MAVI na análise: funcionalidade 'campaign_report' no Painel", async () => {
   const [{ ok }] = await sql(
     `select pg_get_constraintdef(oid) like '%campaign_report%' as ok from pg_constraint

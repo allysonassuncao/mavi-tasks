@@ -48,7 +48,15 @@ export type ReportConfig = {
   with_m: boolean;
   metrics: ReportMetric[];
   charts: ReportChart[];
-  sections: { ads: boolean; adsets: boolean; analysis: boolean; goal: boolean };
+  sections: {
+    ads: boolean;
+    adsets: boolean;
+    analysis: boolean;
+    goal: boolean;
+    /** Google: the keywords and the search terms. */
+    keywords?: boolean;
+    search_terms?: boolean;
+  };
   /** How many ads with their creative (the ones that spent the most). */
   ads_limit: number;
   /** The client may narrow the period inside the report's. */
@@ -78,6 +86,8 @@ export type ReportItem = {
   thumb?: string;
   title?: string;
   body?: string;
+  /** Google: the ad type, or the keyword's match type. */
+  kind?: string;
   link?: string;
   video?: boolean;
   days: ItemDay[];
@@ -107,6 +117,9 @@ export type ReportView = {
   ad_results: boolean;
   ads?: ReportItem[];
   adsets?: ReportItem[];
+  /** Google. */
+  keywords?: ReportItem[];
+  search_terms?: ReportItem[];
   meta_error?: string | null;
 };
 export type ReportLink = {
@@ -160,6 +173,8 @@ export type ReportInput = {
   link: boolean;
   expires_at?: string | null;
   password?: string | null;
+  /** The campaign's platform (where the ads are read from). */
+  provider?: "meta" | "google";
   compare_start?: string | null;
   compare_end?: string | null;
 };
@@ -226,7 +241,11 @@ export const CHARTS: { id: ReportChart; label: string }[] = [
   { id: "funnel", label: "Funil de vendas" },
   { id: "ads", label: "Resultados por anúncio" },
 ];
-export function defaultConfig(objective: AdObjective | null): ReportConfig {
+export function defaultConfig(
+  objective: AdObjective | null,
+  platform: string = "meta",
+): ReportConfig {
+  const google = platform === "google";
   const sale = objective === "sale" || objective === "custom";
   return {
     with_m: true,
@@ -235,13 +254,16 @@ export function defaultConfig(objective: AdObjective | null): ReportConfig {
       "results",
       "cpa",
       "impressions",
-      "reach",
+      ...(google ? [] : (["reach"] as const)),
       "clicks",
       "ctr",
+      ...(google ? (["cpc"] as const) : []),
       ...(sale ? (["view_content", "add_to_cart", "initiate_checkout"] as const) : []),
     ],
     charts: ["results", "spend", "cpa", "cumulative", ...(sale ? (["funnel"] as const) : []), "ads"],
-    sections: { ads: true, adsets: false, analysis: true, goal: true },
+    sections: google
+      ? { ads: true, adsets: true, analysis: true, goal: true, keywords: true, search_terms: true }
+      : { ads: true, adsets: false, analysis: true, goal: true },
     ads_limit: 10,
     allow_filter: true,
   };
@@ -377,13 +399,20 @@ function singular(word: string) {
   return map[word] ?? word;
 }
 /** The metrics that make sense for the report's objective. */
-export function metricsFor(view: ReportView | null, objective?: AdObjective | null) {
+export function metricsFor(
+  view: ReportView | null,
+  objective?: AdObjective | null,
+  platform?: string,
+) {
   const o = objective ?? view?.cycles[view.cycles.length - 1]?.objective;
   const sale = o === "sale" || o === "custom";
+  // Google has no deduplicated reach for these campaigns.
+  const google = (platform ?? view?.platform) === "google";
   return METRICS.filter(
     (m) =>
-      sale ||
-      (m.id !== "view_content" && m.id !== "add_to_cart" && m.id !== "initiate_checkout"),
+      (sale ||
+        (m.id !== "view_content" && m.id !== "add_to_cart" && m.id !== "initiate_checkout")) &&
+      !(google && (m.id === "reach" || m.id === "frequency")),
   );
 }
 export function chartsFor(objective?: AdObjective | null) {
@@ -560,6 +589,20 @@ export function numbersForMavi(
           };
         })()
       : {}),
+    ...(config.sections.keywords && view.keywords?.length
+      ? {
+          palavras_chave: itemsIn(view.keywords, from, to, view.ad_results)
+            .slice(0, 10)
+            .map((k) => ({ palavra: k.item.name, investimento: round(k.spend), cliques: k.clicks, resultados: view.ad_results ? k.results : null })),
+        }
+      : {}),
+    ...(config.sections.search_terms && view.search_terms?.length
+      ? {
+          termos_de_pesquisa: itemsIn(view.search_terms, from, to, view.ad_results)
+            .slice(0, 10)
+            .map((k) => ({ termo: k.item.name, cliques: k.clicks, resultados: view.ad_results ? k.results : null })),
+        }
+      : {}),
     ...(view.ad_results ? {} : { observacao: "Os resultados vêm das páginas de captura; por anúncio só há investimento e cliques." }),
   };
 }
@@ -589,8 +632,8 @@ export const supabaseReports: ReportsBackend = {
     const { report } = await adsServer<{ report: CampaignReport }>({
       action: "report-create",
       company,
-      provider: "meta",
       ...input,
+      provider: input.provider ?? "meta",
     });
     return fromDb(report);
   },
@@ -637,11 +680,16 @@ export const supabaseReports: ReportsBackend = {
 export function demoReports(deps: {
   metrics: MetricsBackend;
   cycles: (campaign: string) => AdCycle[];
-  names: (campaign: string) => { campaign: string; client: string; product: string };
+  names: (campaign: string) => {
+    campaign: string;
+    client: string;
+    product: string;
+    platform?: string;
+  };
   user: string;
 }): ReportsBackend {
   type Stored = Omit<CampaignReport, "view" | "can_manage"> & {
-    raw: { days: (ReportDay & { m: number })[]; cycles: AdCycle[]; ads: ReportItem[]; adsets: ReportItem[]; reach: number; compare_reach: number | null };
+    raw: { days: (ReportDay & { m: number })[]; cycles: AdCycle[]; ads: ReportItem[]; adsets: ReportItem[]; keywords?: ReportItem[]; search_terms?: ReportItem[]; reach: number | null; compare_reach: number | null };
     company: string;
     password: string | null;
   };
@@ -669,7 +717,7 @@ export function demoReports(deps: {
       }));
     const names = deps.names(r.campaign_id);
     return {
-      platform: "meta",
+      platform: names.platform ?? "meta",
       campaign_name: names.campaign,
       client_name: names.client,
       product_name: names.product,
@@ -689,6 +737,7 @@ export function demoReports(deps: {
       ad_results: true,
       ads: items(r.raw.ads),
       adsets: items(r.raw.adsets),
+      ...(r.raw.keywords ? { keywords: items(r.raw.keywords), search_terms: items(r.raw.search_terms ?? []) } : {}),
     };
   };
   const out = (r: Stored, withView = true): CampaignReport => ({
@@ -753,17 +802,23 @@ export function demoReports(deps: {
               y.start_date <= (input.compare_end ?? input.compare_start) &&
               y.end_date >= input.compare_start),
         );
+      const google = deps.names(input.campaign).platform === "google";
       // A few ads sharing the days' numbers.
-      const names = ["Vídeo depoimento", "Carrossel benefícios", "Imagem oferta", "Reels bastidores", "Story pergunta"];
+      const names = google
+        ? ["Café especial | Norte Coffee", "Torra fresca toda semana", "Assinatura com desconto", "Café em grãos 1 kg", "Presente para quem ama café"]
+        : ["Vídeo depoimento", "Carrossel benefícios", "Imagem oferta", "Reels bastidores", "Story pergunta"];
       const weights = [0.34, 0.26, 0.18, 0.14, 0.08];
       const ads: ReportItem[] = names.map((name, i) => ({
         id: `demo-ad-${i}`,
         name,
-        adset: i < 3 ? "Aberto 25-54" : "Remarketing 30 dias",
-        campaign: "[MSG] Motion · Conversas WhatsApp",
-        title: name,
-        body: "Conheça a solução que já ajudou centenas de clientes. Fale com a gente!",
-        video: i === 0 || i === 3,
+        adset: google ? (i < 3 ? "Café especial" : "Café em grãos") : i < 3 ? "Aberto 25-54" : "Remarketing 30 dias",
+        campaign: google ? "Pesquisa · Genéricas" : "[MSG] Motion · Conversas WhatsApp",
+        title: google ? `${name} | Frete grátis acima de R$ 150 | Peça hoje` : name,
+        body: google
+          ? "Cafés especiais de pequenos produtores, torrados toda semana. Assine e receba em casa."
+          : "Conheça a solução que já ajudou centenas de clientes. Fale com a gente!",
+        kind: google ? "Anúncio responsivo de pesquisa" : undefined,
+        video: !google && (i === 0 || i === 3),
         reach: Math.round(days.reduce((s, d) => s + d.reach, 0) * weights[i] * 0.7),
         days: days.map((d) => ({
           d: d.day,
@@ -773,7 +828,27 @@ export function demoReports(deps: {
           r: Math.round(d.conversions * weights[(i + 1) % 5]),
         })),
       }));
-      const adsets: ReportItem[] = ["Aberto 25-54", "Remarketing 30 dias"].map((name) => {
+      const share = (list: string[], weightsOf: number[], kind?: (i: number) => string) =>
+        list.map((name, i): ReportItem => ({
+          id: `demo-${name}`,
+          name,
+          adset: i % 2 ? "Café em grãos" : "Café especial",
+          kind: kind?.(i),
+          days: days.map((d) => ({
+            d: d.day,
+            s: Math.round(d.spend * weightsOf[i] * 100) / 100,
+            i: Math.round(d.impressions * weightsOf[i]),
+            c: Math.round(d.clicks * weightsOf[i]),
+            r: Math.round(d.conversions * weightsOf[i]),
+          })),
+        }));
+      const keywords = google
+        ? share(["[café especial]", '"café em grãos"', "comprar café gourmet", "[norte coffee]", "café torrado na hora"], [0.3, 0.24, 0.2, 0.16, 0.1], (i) => ["Correspondência exata", "Correspondência de frase", "Correspondência ampla"][i % 3])
+        : undefined;
+      const searchTerms = google
+        ? share(["café especial", "café especial preço", "café em grãos 1kg", "melhor café gourmet", "norte coffee", "café torrado perto de mim"], [0.22, 0.2, 0.18, 0.16, 0.14, 0.1])
+        : undefined;
+      const adsets: ReportItem[] = (google ? ["Café especial", "Café em grãos"] : ["Aberto 25-54", "Remarketing 30 dias"]).map((name) => {
         const own = ads.filter((a) => a.adset === name);
         return {
           id: `demo-set-${name}`,
@@ -812,12 +887,16 @@ export function demoReports(deps: {
           cycles,
           ads: ads.slice(0, Math.max(input.config.ads_limit, 5)),
           adsets,
-          reach: Math.round(
-            days
-              .filter((d) => d.day >= input.start && d.day <= input.end)
-              .reduce((s, d) => s + d.reach, 0) * 0.62,
-          ),
-          compare_reach: input.compare_start
+          ...(keywords ? { keywords, search_terms: searchTerms } : {}),
+          // Google has no deduplicated reach.
+          reach: google
+            ? null
+            : Math.round(
+                days
+                  .filter((d) => d.day >= input.start && d.day <= input.end)
+                  .reduce((s, d) => s + d.reach, 0) * 0.62,
+              ),
+          compare_reach: input.compare_start && !google
             ? Math.round(
                 days
                   .filter((d) => d.day >= input.compare_start! && d.day <= input.compare_end!)

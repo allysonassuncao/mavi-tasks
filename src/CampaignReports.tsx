@@ -211,6 +211,7 @@ export function CampaignReports({
           onSubmit={async (values) => {
             const created = await backend.create(company, {
               campaign: campaign.id,
+              provider: campaign.platform === "google" ? "google" : "meta",
               title: values.title,
               start: values.start,
               end: values.end,
@@ -654,7 +655,7 @@ function ReportForm({
   const objective =
     report?.view?.cycles.at(-1)?.objective ?? current?.objective ?? cycles.at(-1)?.objective ?? null;
   const [config, setConfig] = useState<ReportConfig>(() =>
-    report ? configFrom(report.config) : defaultConfig(objective),
+    report ? configFrom(report.config) : defaultConfig(objective, campaign.platform),
   );
   const defaultTitle = `Relatório ${clientName ? `${clientName} · ` : ""}${shortDate(chosen.start).slice(0, 5)} a ${shortDate(chosen.end).slice(0, 5)}`;
   const [title, setTitle] = useState(report?.title ?? "");
@@ -729,9 +730,13 @@ function ReportForm({
       setBusy(false);
     }
   };
-  const metricChoices = metricsFor(report?.view ?? null, objective);
+  const metricChoices = metricsFor(report?.view ?? null, objective, campaign.platform);
   const chartChoices = chartsFor(objective);
-  const meta = campaign.platform === "meta";
+  // Meta and Google: the ads (and Google's keywords and terms) are read
+  // from the platform when the report is created.
+  const google = campaign.platform === "google";
+  const meta = campaign.platform === "meta" || google;
+  const platformName = google ? "Google Ads" : "Meta";
   return (
     <Modal
       title={mode === "create" ? "Novo relatório" : "Editar relatório"}
@@ -789,7 +794,7 @@ function ReportForm({
             </div>
             <small className="share-hint">
               Os números do período ficam guardados no relatório e não mudam
-              depois{meta ? ", nem os anúncios, lidos agora do Meta" : ""}.
+              depois{meta ? `, nem os anúncios, lidos agora do ${platformName}` : ""}.
             </small>
           </fieldset>
         ) : (
@@ -919,9 +924,11 @@ function ReportForm({
                 }
               />
               <span>
-                <strong>Anúncios com o criativo</strong>
+                <strong>{google ? "Anúncios" : "Anúncios com o criativo"}</strong>
                 <small>
-                  Os anúncios que mais trouxeram resultado, com a imagem e os
+                  {google
+                    ? "Os anúncios que mais trouxeram resultado, com títulos, descrições, a imagem quando houver e os"
+                    : "Os anúncios que mais trouxeram resultado, com a imagem e os"}
                   números.
                 </small>
               </span>
@@ -955,8 +962,36 @@ function ReportForm({
                 }
               />
               <span>
-                <strong>Conjuntos de anúncios</strong>
-                <small>Uma tabela com os números de cada conjunto.</small>
+                <strong>{google ? "Grupos de anúncios" : "Conjuntos de anúncios"}</strong>
+                <small>Uma tabela com os números de cada {google ? "grupo" : "conjunto"}.</small>
+              </span>
+            </label>
+          )}
+          {google && (
+            <label className="share-toggle">
+              <Checkbox
+                checked={!!config.sections.keywords}
+                onCheckedChange={(v) =>
+                  setConfig((c) => ({ ...c, sections: { ...c.sections, keywords: v === true } }))
+                }
+              />
+              <span>
+                <strong>Palavras-chave</strong>
+                <small>As palavras-chave que mais trouxeram resultado, com cliques, custo e conversões.</small>
+              </span>
+            </label>
+          )}
+          {google && (
+            <label className="share-toggle">
+              <Checkbox
+                checked={!!config.sections.search_terms}
+                onCheckedChange={(v) =>
+                  setConfig((c) => ({ ...c, sections: { ...c.sections, search_terms: v === true } }))
+                }
+              />
+              <span>
+                <strong>Termos de pesquisa</strong>
+                <small>O que as pessoas pesquisaram no Google antes de clicar nos anúncios.</small>
               </span>
             </label>
           )}
@@ -1111,8 +1146,8 @@ function ReportForm({
                 ? "Confirmar e criar sem M"
                 : "Confirmar e salvar sem M"
               : mode === "create"
-                ? meta && config.sections.ads
-                  ? "Criar relatório (lê os anúncios no Meta)"
+                ? meta && (config.sections.ads || config.sections.adsets || config.sections.keywords || config.sections.search_terms)
+                  ? `Criar relatório (lê os anúncios no ${platformName})`
                   : "Criar relatório"
                 : "Salvar"}
           </Button>

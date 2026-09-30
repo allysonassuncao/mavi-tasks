@@ -589,3 +589,39 @@
   color: var(--muted);
   font-size: 0.78rem;
 }
+
+/* Google: a text ad as it shows on the results page. */
+.creport-gad {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 14px 12px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  font-family: Arial, sans-serif;
+  min-height: 150px;
+}
+.creport-gad-sponsor {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #202124;
+}
+.creport-gad-site {
+  font-size: 0.75rem;
+  color: #4d5156;
+}
+.creport-gad-title {
+  color: #1a0dab;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+.creport-gad-text {
+  color: #4d5156;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.creport-item-sub {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+}

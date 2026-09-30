@@ -975,7 +975,11 @@ export type ReportMeta = {
 const IMAGE_HOSTS = /(^|\.)(fbcdn\.net|facebook\.com|cdninstagram\.com|fbsbx\.com)$/;
 const MAX_IMAGE = 160_000;
 /** A creative's image as a data: address (kept inside the report). */
-export async function inlineImage(fetchImpl: Fetch, src: string | undefined) {
+export async function inlineImage(
+  fetchImpl: Fetch,
+  src: string | undefined,
+  hosts: RegExp = IMAGE_HOSTS,
+) {
   if (!src) return undefined;
   let url: URL;
   try {
@@ -983,7 +987,7 @@ export async function inlineImage(fetchImpl: Fetch, src: string | undefined) {
   } catch {
     return undefined;
   }
-  if (url.protocol !== "https:" || !IMAGE_HOSTS.test(url.hostname)) return undefined;
+  if (url.protocol !== "https:" || !hosts.test(url.hostname)) return undefined;
   try {
     const res = await fetchImpl(url.toString());
     const type = (res.headers.get("content-type") ?? "").split(";")[0].trim();

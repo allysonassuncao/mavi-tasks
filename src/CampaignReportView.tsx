@@ -122,6 +122,15 @@ export function CampaignReportView({
     () => itemsIn(view.adsets, range.from, range.to, view.ad_results),
     [view.adsets, view.ad_results, range],
   );
+  const google = view.platform === "google";
+  const keywords = useMemo(
+    () => itemsIn(view.keywords, range.from, range.to, view.ad_results),
+    [view.keywords, view.ad_results, range],
+  );
+  const terms = useMemo(
+    () => itemsIn(view.search_terms, range.from, range.to, view.ad_results),
+    [view.search_terms, view.ad_results, range],
+  );
   const presets = useMemo(() => {
     const list: { label: string; from: string; to: string }[] = [
       { label: "Período todo", from: periodStart, to: periodEnd },
@@ -384,6 +393,14 @@ export function CampaignReportView({
           <div className="creport-ad-grid">
             {shownAds.map((a) => (
               <figure key={a.item.id} className="creport-ad">
+                {google && !a.item.thumb ? (
+                  <div className="creport-gad" aria-label="Anúncio no Google">
+                    <span className="creport-gad-sponsor">Patrocinado</span>
+                    {a.item.link && <span className="creport-gad-site">{siteOf(a.item.link)}</span>}
+                    <span className="creport-gad-title">{a.item.title || a.item.name}</span>
+                    {a.item.body && <span className="creport-gad-text">{a.item.body}</span>}
+                  </div>
+                ) : (
                 <div className="creport-ad-media">
                   {a.item.thumb ? (
                     <img src={a.item.thumb} alt={`Criativo do anúncio ${a.item.name}`} loading="lazy" />
@@ -396,9 +413,12 @@ export function CampaignReportView({
                     </span>
                   )}
                 </div>
+                )}
                 <figcaption>
-                  <strong title={a.item.name}>{a.item.name}</strong>
-                  {a.item.adset && <small>{a.item.adset}</small>}
+                  {!(google && !a.item.thumb) && <strong title={a.item.name}>{a.item.name}</strong>}
+                  {(a.item.adset || a.item.kind) && (
+                    <small>{[a.item.kind, a.item.adset].filter(Boolean).join(" · ")}</small>
+                  )}
                   <dl>
                     {view.ad_results && (
                       <>
@@ -423,10 +443,10 @@ export function CampaignReportView({
                       </dd>
                     </div>
                   </dl>
-                  {a.item.body && <p className="creport-ad-body">{a.item.body}</p>}
+                  {a.item.body && !(google && !a.item.thumb) && <p className="creport-ad-body">{a.item.body}</p>}
                   {a.item.link && /^https:\/\//.test(a.item.link) && (
                     <a href={a.item.link} target="_blank" rel="noreferrer">
-                      Ver a publicação <ExternalLink size={12} />
+                      {google ? "Ver a página" : "Ver a publicação"} <ExternalLink size={12} />
                     </a>
                   )}
                 </figcaption>
@@ -437,43 +457,36 @@ export function CampaignReportView({
       )}
 
       {config.sections.adsets && adsets.length > 0 && (
-        <section className="creport-adsets">
-          <h2>Conjuntos de anúncios</h2>
-          <div className="creport-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Conjunto</th>
-                  {view.ad_results && <th className="num">{result}</th>}
-                  {view.ad_results && <th className="num">Custo por resultado</th>}
-                  <th className="num">Investimento</th>
-                  <th className="num">Impressões</th>
-                  <th className="num">Cliques</th>
-                  <th className="num">CTR</th>
-                </tr>
-              </thead>
-              <tbody>
-                {adsets.map((s) => (
-                  <tr key={s.item.id}>
-                    <td>{s.item.name}</td>
-                    {view.ad_results && <td className="num">{formatMetric("count", s.results)}</td>}
-                    {view.ad_results && (
-                      <td className="num">
-                        {formatMetric("money", s.results ? s.spend / s.results : null, currency)}
-                      </td>
-                    )}
-                    <td className="num">{formatMetric("money", s.spend, currency)}</td>
-                    <td className="num">{formatMetric("count", s.impressions)}</td>
-                    <td className="num">{formatMetric("count", s.clicks)}</td>
-                    <td className="num">
-                      {formatMetric("percent", s.impressions ? (s.clicks / s.impressions) * 100 : null)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <ItemTable
+          title={google ? "Grupos de anúncios" : "Conjuntos de anúncios"}
+          heading={google ? "Grupo de anúncios" : "Conjunto"}
+          items={adsets}
+          view={view}
+          result={result}
+          currency={currency}
+        />
+      )}
+      {config.sections.keywords && keywords.length > 0 && (
+        <ItemTable
+          title="Palavras-chave"
+          heading="Palavra-chave"
+          items={keywords.slice(0, 30)}
+          view={view}
+          result={result}
+          currency={currency}
+          detail
+        />
+      )}
+      {config.sections.search_terms && terms.length > 0 && (
+        <ItemTable
+          title="Termos de pesquisa"
+          heading="Termo pesquisado"
+          items={terms.slice(0, 30)}
+          view={view}
+          result={result}
+          currency={currency}
+          detail
+        />
       )}
 
       {!days.length && (
@@ -489,6 +502,83 @@ export function CampaignReportView({
         . O relatório não muda depois de criado.
       </footer>
     </article>
+  );
+}
+
+const siteOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+};
+
+/** Ad sets / ad groups, keywords, search terms: a table of the period. */
+function ItemTable({
+  title,
+  heading,
+  items,
+  view,
+  result,
+  currency,
+  detail = false,
+}: {
+  title: string;
+  heading: string;
+  items: ReturnType<typeof itemsIn>;
+  view: ReportView;
+  result: string;
+  currency: string;
+  /** Under the name: the match type and the ad group. */
+  detail?: boolean;
+}) {
+  return (
+    <section className="creport-adsets">
+      <h2>{title}</h2>
+      <div className="creport-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>{heading}</th>
+              {view.ad_results && <th className="num">{result}</th>}
+              {view.ad_results && <th className="num">Custo por resultado</th>}
+              <th className="num">Investimento</th>
+              <th className="num">Impressões</th>
+              <th className="num">Cliques</th>
+              <th className="num">CTR</th>
+              <th className="num">CPC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((s) => (
+              <tr key={s.item.id}>
+                <td>
+                  {s.item.name}
+                  {detail && (s.item.kind || s.item.adset) && (
+                    <small className="creport-item-sub">
+                      {[s.item.kind, s.item.adset].filter(Boolean).join(" · ")}
+                    </small>
+                  )}
+                </td>
+                {view.ad_results && <td className="num">{formatMetric("count", s.results)}</td>}
+                {view.ad_results && (
+                  <td className="num">
+                    {formatMetric("money", s.results ? s.spend / s.results : null, currency)}
+                  </td>
+                )}
+                <td className="num">{formatMetric("money", s.spend, currency)}</td>
+                <td className="num">{formatMetric("count", s.impressions)}</td>
+                <td className="num">{formatMetric("count", s.clicks)}</td>
+                <td className="num">
+                  {formatMetric("percent", s.impressions ? (s.clicks / s.impressions) * 100 : null)}
+                </td>
+                <td className="num">{formatMetric("money", s.clicks ? s.spend / s.clicks : null, currency)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

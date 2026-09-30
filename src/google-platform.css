@@ -1,0 +1,258 @@
+/* Campanhas › Plataforma (Google Ads): the Google Ads interface's look, on
+   top of the Meta tab's table (campaign-platform.css). */
+.gplat {
+  --g-blue: #1a73e8;
+  --g-line: #dadce0;
+  --g-soft: #f1f3f4;
+  --g-ink: #202124;
+  --g-muted: #5f6368;
+  display: flex;
+  flex-direction: column;
+  color: var(--g-ink);
+  font-size: 0.82rem;
+  min-width: 0;
+}
+.gplat .mplat-table th,
+.gplat .mplat-table td {
+  border-color: #e8eaed;
+}
+.gplat-body {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  min-height: 480px;
+}
+.gplat-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--g-line);
+  background: #fff;
+}
+.gplat-nav-group {
+  display: flex;
+  flex-direction: column;
+}
+.gplat-nav-label {
+  padding: 6px 12px 4px;
+  color: var(--g-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.gplat-nav button {
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: var(--g-ink);
+  padding: 7px 12px;
+  border-radius: 0 999px 999px 0;
+  cursor: pointer;
+}
+.gplat-nav button:hover {
+  background: var(--g-soft);
+}
+.gplat-nav button.selected {
+  background: #e8f0fe;
+  color: var(--g-blue);
+  font-weight: 600;
+}
+.gplat-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.gplat-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 14px 0;
+  color: var(--g-muted);
+}
+.gplat-crumbs button {
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--g-blue);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.gplat-crumbs button.current {
+  color: var(--g-ink);
+  font-weight: 600;
+}
+.gplat-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #e8f0fe;
+  border-radius: 999px;
+  padding: 0 4px 0 6px;
+}
+.gplat-crumb .gplat-crumb-x {
+  color: var(--g-muted);
+  display: inline-flex;
+}
+.gplat-title {
+  margin: 4px 14px 6px;
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: var(--g-ink);
+}
+.gplat-toolbar {
+  border-top: 1px solid var(--g-line);
+}
+.gplat-notice {
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fef7e0;
+  color: #7a5a00;
+}
+.gplat-table .gplat-dot-col {
+  width: 28px;
+  min-width: 28px;
+}
+.gplat-table .gplat-name-col {
+  left: 28px;
+}
+.gplat-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: #9aa0a6;
+}
+.gplat-dot.on {
+  background: #1e8e3e;
+}
+.gplat-dot.removed {
+  background: #d93025;
+}
+.gplat-link {
+  color: var(--g-blue);
+}
+.gplat-plain {
+  font-weight: 600;
+  word-break: break-word;
+}
+.gplat-ad {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--g-line);
+  border-radius: 8px;
+  background: #fff;
+  max-width: 420px;
+  white-space: normal;
+  font-family: Arial, sans-serif;
+}
+.gplat-ad-sponsor {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--g-ink);
+}
+.gplat-ad-site {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  color: var(--g-ink);
+}
+.gplat-ad-site span {
+  color: #4d5156;
+}
+.gplat-ad-title {
+  color: #1a0dab;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+.gplat-ad-text {
+  color: #4d5156;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.gplat-ad.compact .gplat-ad-title {
+  font-size: 0.85rem;
+}
+.gplat-drawer-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gplat-drawer-preview h4 {
+  margin: 0;
+}
+.gplat-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 6px;
+}
+.gplat-images img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--g-line);
+}
+.gplat-asset-img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.gplat-perf {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--g-soft);
+}
+.gplat-perf.best {
+  background: #e6f4ea;
+  color: #137333;
+}
+.gplat-perf.low {
+  background: #fce8e6;
+  color: #a50e0e;
+}
+.gplat .ui-select,
+.gplat .input-control,
+.gplat .date-control {
+  width: auto;
+  flex: none;
+}
+.gplat .mplat-search .input-control {
+  width: 100%;
+}
+.gplat-top .ui-select,
+.gplat-toolbar .ui-select {
+  min-width: 160px;
+}
+
+@media (max-width: 860px) {
+  .gplat-body {
+    grid-template-columns: 1fr;
+  }
+  .gplat-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--g-line);
+    gap: 4px;
+  }
+  .gplat-nav-group {
+    flex-direction: row;
+  }
+  .gplat-nav-label {
+    display: none;
+  }
+  .gplat-nav button {
+    white-space: nowrap;
+    border-radius: 999px;
+  }
+}

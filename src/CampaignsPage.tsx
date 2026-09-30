@@ -84,6 +84,12 @@ import {
 import { CampaignDayToDay } from "./CampaignDayToDay";
 import { CampaignPlatform } from "./CampaignPlatform";
 import { CampaignReports } from "./CampaignReports";
+import { GooglePlatform } from "./GooglePlatform";
+import {
+  demoGooglePlatform,
+  serverGooglePlatform,
+  type GooglePlatformBackend,
+} from "./google-platform";
 import {
   demoPlatform,
   serverPlatform,
@@ -159,6 +165,11 @@ export function CampaignsPage({
     () => (demo ? demoPlatform(["23850001"]) : serverPlatform),
     [demo],
   );
+  // Google: the same, with the Google Ads interface's views.
+  const googlePlatform: GooglePlatformBackend = useMemo(
+    () => (demo ? demoGooglePlatform(["21000001"]) : serverGooglePlatform),
+    [demo],
+  );
   const reports: ReportsBackend = useMemo(
     () =>
       demo
@@ -172,6 +183,7 @@ export function CampaignsPage({
                 campaign: c?.name ?? "",
                 client: parts?.client?.name ?? "",
                 product: parts?.product?.name ?? "",
+                platform: c?.platform,
               };
             },
             user,
@@ -254,6 +266,7 @@ export function CampaignsPage({
           company={company}
           backend={backend}
           platform={platform}
+          googlePlatform={googlePlatform}
           reports={reports}
           today={today}
           eventsTick={eventsTick}
@@ -807,6 +820,7 @@ function CampaignDetail({
   company,
   backend,
   platform,
+  googlePlatform,
   reports,
   today,
   eventsTick,
@@ -827,6 +841,7 @@ function CampaignDetail({
   company: string;
   backend: CampaignsBackend;
   platform: PlatformBackend;
+  googlePlatform: GooglePlatformBackend;
   reports: ReportsBackend;
   today: string;
   eventsTick: number;
@@ -976,7 +991,7 @@ function CampaignDetail({
         }
         metricsBackend={backend.metrics}
         reportsTab={
-          campaign.platform === "meta" && (
+          (campaign.platform === "meta" || campaign.platform === "google") && (
             <CampaignReports
               company={company}
               campaign={campaign}
@@ -993,7 +1008,7 @@ function CampaignDetail({
           )
         }
         platformTab={
-          campaign.platform === "meta" && (
+          campaign.platform === "meta" ? (
             <CampaignPlatform
               company={company}
               cycles={cycles}
@@ -1001,7 +1016,15 @@ function CampaignDetail({
               backend={platform}
               today={today}
             />
-          )
+          ) : campaign.platform === "google" ? (
+            <GooglePlatform
+              company={company}
+              cycles={cycles}
+              current={current}
+              backend={googlePlatform}
+              today={today}
+            />
+          ) : null
         }
         today={today}
         events={events}

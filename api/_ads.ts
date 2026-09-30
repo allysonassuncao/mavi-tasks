@@ -20,6 +20,13 @@ import {
   type ReportMeta,
   type ReportSources,
 } from "./_ads-platform.js";
+import {
+  googleDetail,
+  googleList,
+  googleQuery,
+  googleReportMeta,
+  type GoogleReportSources,
+} from "./_ads-google-platform.js";
 
 /**
  * Campanhas: the ad accounts and campaigns of Meta and Google Ads, read live
@@ -910,11 +917,20 @@ export type AdsRequest =
       provider: "meta";
       account: string;
     }
+  /** Google: the Google Ads view of an account (api/_ads-google-platform.ts). */
+  | {
+      action: "google-platform" | "google-platform-detail";
+      company: string;
+      provider: "google";
+      account: string;
+      manager?: string;
+    }
   /** A report of a campaign: its ads from Meta, then create_ad_report. */
   | {
       action: "report-create";
       company: string;
-      provider: "meta";
+      /** The campaign's platform (Meta or Google). */
+      provider: "meta" | "google";
       campaign: string;
       title: string;
       start: string;
@@ -1210,6 +1226,24 @@ export async function handleAds(
       };
     }
 
+    if (req.action === "google-platform" || req.action === "google-platform-detail") {
+      if (provider !== "google") return fail(400, "Só no Google Ads.");
+      const q = googleQuery(req as Record<string, unknown>);
+      // A collaborator: only the accounts linked to their clients' campaigns.
+      const allowed = await googleScope(env, fetchImpl, authorization, company);
+      if (allowed && !allowed.includes(q.account))
+        return fail(403, "Esta conta do Google Ads não é de um cliente seu.");
+      const ads = googleAds(env, fetchImpl, authorization, company);
+      const search = (query: string) => ads.search(q.account, query, q.manager || q.account);
+      return {
+        status: 200,
+        body:
+          req.action === "google-platform"
+            ? await googleList(search, q, fetchImpl)
+            : await googleDetail(search, req as Record<string, unknown>),
+      };
+    }
+
     if (req.action === "report-create") {
       if (!UUID.test(String(req.campaign ?? "")))
         return fail(400, "Campanha inválida.");
@@ -1239,7 +1273,25 @@ export async function handleAds(
       // The campaign's numbers are the database's; Meta adds the ads. If
       // Meta fails, the report is still made and says why the ads are out.
       let meta: ReportMeta | { error: string } | Record<string, never> = {};
-      if (sources.platform === "meta" && sources.links.length)
+      const adsLimit = Math.min(30, Math.max(0, Number(config.ads_limit) || 10));
+      if (sources.platform === "google" && sources.links.length) {
+        const allowed = await googleScope(env, fetchImpl, authorization, company);
+        const ads = googleAds(env, fetchImpl, authorization, company);
+        meta = await googleReportMeta(
+          (account, manager) => (query) => {
+            if (allowed && !allowed.includes(account))
+              throw new AdsError(403, `A conta ${account} do Google Ads não é de um cliente seu.`);
+            return ads.search(account, query, manager || account);
+          },
+          sources as unknown as GoogleReportSources,
+          [{ start, end }, ...(compare ? [compare] : [])],
+          adsLimit,
+          fetchImpl,
+        ).catch((e: unknown) => ({
+          error:
+            e instanceof Error ? e.message : "Não foi possível ler os anúncios no Google Ads.",
+        }));
+      } else if (sources.platform === "meta" && sources.links.length)
         meta = await reportMeta(
           env,
           fetchImpl,
@@ -1248,7 +1300,7 @@ export async function handleAds(
           sources,
           start,
           end,
-          Math.min(30, Math.max(0, Number(config.ads_limit) || 10)),
+          adsLimit,
           compare,
         ).catch((e: unknown) => ({
           error:
