@@ -939,12 +939,14 @@ export function TaskDetail({
   }, [tab, panelOpen, loading, extras.comments.length]);
   const running = currentRunning;
   const isRunning = running?.task_id === task.id;
-  // No play (and no description blur) while the task waits on validation or
-  // was returned, or for its creator — unless the creator is also doing it.
-  // A delivered task keeps play but never blurs its description.
+  // A delivered task hides the button; a clock still running can be stopped.
+  const showPlay = isRunning || task.status !== "done";
+  // No play (and no description blur) while the task waits on validation, was
+  // returned or delivered, or for its creator — unless the creator is doing it.
   const canPlay =
     task.status !== "review" &&
     task.status !== "returned" &&
+    task.status !== "done" &&
     (task.creator_id !== user || task.assignee_id === user);
   const totalSeconds = useTaskSeconds({
     company: task.company_id,
@@ -1561,33 +1563,35 @@ export function TaskDetail({
             }
           />
           <section
-            className={`focus-timer${isRunning ? " is-running" : ""}`}
+            className={`focus-timer${isRunning ? " is-running" : ""}${showPlay ? "" : " no-play"}`}
             aria-label="Controle de execução"
           >
-            <Button
-              className={`timer-play${isRunning ? " timer-stop" : ""}`}
-              loading={busy}
-              disabled={busy || editorUploading || (!isRunning && !canPlay)}
-              onClick={() =>
-                void mutate(
-                  isRunning ? "stop_timer" : "start_timer",
-                  isRunning ? { p_entry: running.id } : { p_task: task.id },
-                )
-                  .then(() => {
-                    // Play and pause are posted as comments.
-                    invalidateTaskExtras(task.id);
-                    setLocalRefresh((v) => v + 1);
-                  })
-                  .catch((e) => setError(e.message))
-              }
-            >
-              {isRunning ? (
-                <Pause size={20} fill="currentColor" />
-              ) : (
-                <Play size={20} fill="currentColor" />
-              )}
-              <span>{isRunning ? "Parar" : "Iniciar"}</span>
-            </Button>
+            {showPlay && (
+              <Button
+                className={`timer-play${isRunning ? " timer-stop" : ""}`}
+                loading={busy}
+                disabled={busy || editorUploading || (!isRunning && !canPlay)}
+                onClick={() =>
+                  void mutate(
+                    isRunning ? "stop_timer" : "start_timer",
+                    isRunning ? { p_entry: running.id } : { p_task: task.id },
+                  )
+                    .then(() => {
+                      // Play and pause are posted as comments.
+                      invalidateTaskExtras(task.id);
+                      setLocalRefresh((v) => v + 1);
+                    })
+                    .catch((e) => setError(e.message))
+                }
+              >
+                {isRunning ? (
+                  <Pause size={20} fill="currentColor" />
+                ) : (
+                  <Play size={20} fill="currentColor" />
+                )}
+                <span>{isRunning ? "Parar" : "Iniciar"}</span>
+              </Button>
+            )}
             <div className="timer-body">
               <div className="timer-head">
                 <span className="timer-clock">
@@ -1627,16 +1631,16 @@ export function TaskDetail({
                     ? "Seu tempo está sendo registrado — a estimativa já foi ultrapassada."
                     : "Seu tempo está sendo registrado nesta tarefa."
                   : !canPlay
-                    ? task.creator_id === user
-                      ? "Você criou esta tarefa; o tempo é registrado por quem a executa."
-                      : "Sem registro de tempo enquanto a tarefa está nesta etapa."
+                    ? task.status === "done"
+                      ? "Tarefa entregue — o tempo registrado fica aqui."
+                      : task.creator_id === user
+                        ? "Você criou esta tarefa; o tempo é registrado por quem a executa."
+                        : "Sem registro de tempo enquanto a tarefa está nesta etapa."
                     : running
                       ? "Ao iniciar, sua outra tarefa em andamento é pausada automaticamente."
                       : totalSeconds > 0
                         ? "Clique em Iniciar para continuar registrando."
-                        : task.status === "done"
-                          ? "Clique em Iniciar para registrar seu tempo."
-                          : "Inicie para ver a descrição e registrar seu tempo."}
+                        : "Inicie para ver a descrição e registrar seu tempo."}
               </p>
             </div>
           </section>
@@ -1776,7 +1780,7 @@ export function TaskDetail({
                 />
               )}
             </>
-          ) : !isRunning && canPlay && task.status !== "done" ? (
+          ) : !isRunning && canPlay ? (
             <section
               className="description-locked"
               aria-label="Descrição bloqueada até iniciar"

@@ -4047,6 +4047,9 @@ label .input-control .ui-input {
   background: #f4f8ef;
   margin: 24px 0;
 }
+.focus-timer.no-play {
+  grid-template-columns: minmax(0, 1fr);
+}
 .focus-timer.is-running {
   background: #eaf3df;
   border-color: #a1bf78;
