@@ -4584,27 +4584,15 @@ label .input-control .ui-input {
 .quick-task {
   gap: 16px;
 }
-.quick-task .input-control:has(.quick-task-title) {
-  display: block;
+.quick-task-mavi-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
 }
-.quick-task .input-control:has(.quick-task-title) > svg {
-  display: none;
-}
-.quick-task .quick-task-title {
-  width: 100%;
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  padding: 4px 0 12px;
-  font-size: 1.2rem;
-  font-weight: 600;
-  color: var(--ink);
-  background: transparent;
-}
-.quick-task .quick-task-title:focus {
-  outline: none;
-  box-shadow: none;
-  border-bottom-color: #83a657;
+.quick-task-mavi-title svg {
+  color: #83a657;
+  flex: none;
 }
 .quick-task-created {
   display: inline-flex;

@@ -34,6 +34,7 @@ import { appOrigin } from "./_origin.js";
 import { nextSlice, selfOrigin } from "./_ai-tasks.js";
 import { handlePublicApi } from "./_public-api.js";
 import { handleTaskAudio, taskAudioEnv } from "./_task-audio.js";
+import { handleTaskTitle } from "./_task-title.js";
 import {
   handleTaskAudioCleanup,
   taskAudioCleanupEnv,
@@ -448,6 +449,13 @@ export default async function handler(
         model: serverModel("notice_writer", process.env),
       };
       result = await handleNoticeWriter(body, authorization, env, aiDeps(env));
+    } else if (action === "task-title") {
+      // O título de uma tarefa nova, ao salvar (funcionalidade 'task_title').
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("task_title", process.env),
+      };
+      result = await handleTaskTitle(body, authorization, env, aiDeps(env));
     } else if (action === "campaign-report-mavi") {
       // A análise do relatório de campanha (funcionalidade 'campaign_report').
       const env = {

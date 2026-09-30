@@ -205,6 +205,7 @@ export type AiFeature =
   | "social_leads_briefing"
   | "social_leads_colors"
   | "task_copilot"
+  | "task_title"
   | "client_dossier"
   | "copilot_learning"
   | "notice_writer"
@@ -433,6 +434,14 @@ export const FEATURES: FeatureInfo[] = [
     note: "Roda a cada pausa na digitação: prefira um modelo rápido.",
   },
   {
+    id: "task_title",
+    group: "Tarefas",
+    label: "Título das tarefas novas (a partir da descrição e dos áudios)",
+    conversation: false,
+    env: "TASK_TITLE_MODEL",
+    note: "Uma chamada curta ao clicar em Criar tarefa, que espera o título antes de salvar: prefira um modelo rápido (ex.: Claude Haiku, GPT mini). Se a MAVI falhar, a tarefa salva com o começo da descrição.",
+  },
+  {
     id: "client_dossier",
     group: "Tarefas",
     label: "Dossiê do cliente (atualizado em segundo plano)",
@@ -608,6 +617,9 @@ export function serverModel(
       return env.WHATSAPP_TASK_MODEL || env.MEETINGS_MODEL || fallback;
     case "task_copilot":
       return env.TASK_COPILOT_MODEL || env.AI_MODEL || fallback;
+    case "task_title":
+      // Um título curto: um modelo rápido basta (o Painel da MAVI vence).
+      return env.TASK_TITLE_MODEL || "claude-haiku-4-5";
     case "client_dossier":
       return env.CLIENT_DOSSIER_MODEL || env.AI_MODEL || fallback;
     case "copilot_learning":

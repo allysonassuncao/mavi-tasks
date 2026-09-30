@@ -9,7 +9,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { Check, ChevronDown, Paperclip, X } from "lucide-react";
+import { Check, ChevronDown, Paperclip, Sparkles, X } from "lucide-react";
 import { Modal, Loading } from "./components";
 import { ContractPicker } from "./ContractPicker";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
@@ -41,7 +41,9 @@ import {
   type TaskUploadState,
 } from "./attachments";
 import { TaskAudioList, useTaskAudios } from "./TaskAudios";
-import { audioTranscripts } from "./task-audio";
+import { audioTranscripts, audioWorking } from "./task-audio";
+import { requestTaskTitle } from "./task-title-request";
+import { TASK_TITLE_WAIT_MS, fallbackTaskTitle } from "./task-title";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
 
@@ -72,9 +74,12 @@ const dueShortcuts = [
 ];
 
 /**
- * Task creation keeps only what the backend requires up front (title,
- * contracted product, assignee and due date — all but the title prefilled);
- * everything else lives behind "Adicionar detalhes". The assignee can be a
+ * Task creation keeps only what the backend requires up front (contracted
+ * product, assignee and due date, all prefilled); everything else lives
+ * behind "Adicionar detalhes". There is no title field: on "Criar tarefa"
+ * the MAVI writes the title from the description and the audios (feature
+ * 'task_title'), and the task is saved with it — or, when she fails or takes
+ * too long, with the start of the description. The assignee can be a
  * team instead of a person: the database hands the task to the team member
  * with the fewest open tasks (supervisors only when there is nobody else).
  * The due date follows the due rules (dueRules.ts) until picked by hand.
@@ -98,7 +103,10 @@ export function TaskCreateForm({
 }: {
   initialContract?: string;
   initialProject?: string;
-  /** Prefilled from elsewhere (a recording's next step). */
+  /**
+   * Handed in from elsewhere (a recording's next step): the MAVI starts from
+   * it, and it becomes the description when there is none.
+   */
   initialTitle?: string;
   /** HTML for the description editor. */
   initialDescription?: string;
@@ -136,7 +144,9 @@ export function TaskCreateForm({
       ? (initialProject ?? "")
       : "",
   );
-  const [title, setTitle] = useState(initialTitle ?? "");
+  // The title handed in from elsewhere: only for the first task created here.
+  const [presetTitle, setPresetTitle] = useState(initialTitle ?? "");
+  const [lastTitle, setLastTitle] = useState("");
   const [assignee, setAssignee] = useState(() =>
     initialAssignee &&
     data.members.some((m) => m.user_id === initialAssignee && m.active)
@@ -175,8 +185,9 @@ export function TaskCreateForm({
   const [error, setError] = useState("");
   const uploads = useRef<TaskUploadState>({ pending: [] });
   const submitting = useRef(false);
-  const titleRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
+  // Waiting for the MAVI's title (the button says so); then the task is saved.
+  const [naming, setNaming] = useState(false);
   const [editorUploading, setEditorUploading] = useState(false);
   const [, updateUploads] = useState(0);
   const redrawUploads = () => updateUploads((v) => v + 1);
@@ -312,7 +323,7 @@ export function TaskCreateForm({
     {
       company,
       contract: contract || null,
-      title,
+      title: presetTitle,
       description: descriptionText,
       audio: audioTranscripts(audio.items),
       due,
@@ -345,15 +356,10 @@ export function TaskCreateForm({
   const copilotFeedback = useCopilotFeedback(copilot, {
     company,
     contract: contract || null,
-    title,
+    title: presetTitle,
     demo,
   });
 
-  // Modal opens the dialog in its own (later) effect, which steals focus.
-  useEffect(() => {
-    const id = requestAnimationFrame(() => titleRef.current?.focus());
-    return () => cancelAnimationFrame(id);
-  }, []);
   const close = () => {
     if (submitting.current || editorUploading) return;
     // Closed without creating: the recorded drafts go away.
@@ -390,7 +396,7 @@ export function TaskCreateForm({
   const drop = useFileDrop(addFiles, !demo && !saving);
   function resetForNext() {
     uploads.current = { pending: [] };
-    setTitle("");
+    setPresetTitle("");
     setRepeat("");
     setCustomValues({});
     setStart("");
@@ -403,7 +409,6 @@ export function TaskCreateForm({
     setFormKey((v) => v + 1);
     setCreated((v) => v + 1);
     redrawUploads();
-    requestAnimationFrame(() => titleRef.current?.focus());
   }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -428,10 +433,20 @@ export function TaskCreateForm({
       setError(fieldsProblem);
       return;
     }
+    // What the MAVI writes the title from.
+    const written = descriptionText.trim();
+    const spoken = audioTranscripts(audio.items);
+    if (!uploads.current.taskId && !written && !spoken && !presetTitle.trim()) {
+      setError(
+        audio.items.some((a) => audioWorking(a))
+          ? "Espere a MAVI transcrever o áudio: ela usa o que foi dito para criar o título."
+          : "Descreva a tarefa ou grave um áudio: a MAVI cria o título a partir deles.",
+      );
+      return;
+    }
     const args = {
       p_company: company,
       p_contract: contract,
-      p_title: title.trim(),
       // Without an assignee, the database picks one from the team.
       p_assignee: byTeam ? null : assignee,
       p_due: due,
@@ -474,7 +489,21 @@ export function TaskCreateForm({
     try {
       await saveTaskWithAttachments(
         uploads.current,
-        () => mutate("create_task", args),
+        async () => {
+          // The title first, so the task reaches the list with it.
+          setNaming(true);
+          const title = await taskTitle({
+            demo,
+            company,
+            contract,
+            project: project || null,
+            description: written,
+            audio: spoken,
+            hint: presetTitle.trim(),
+          }).finally(() => setNaming(false));
+          setLastTitle(title);
+          return mutate("create_task", { ...args, p_title: title });
+        },
         uploadAttachment,
         redrawUploads,
       );
@@ -522,6 +551,10 @@ export function TaskCreateForm({
           onKeyDown={submitShortcut}
           {...drop.handlers}
         >
+          <small className="quick-task-mavi-title">
+            <Sparkles size={14} aria-hidden="true" />
+            A MAVI cria o título ao salvar, a partir da descrição e dos áudios.
+          </small>
           {drop.active && (
             <DropOverlay
               label="Solte para anexar à nova tarefa"
@@ -529,23 +562,12 @@ export function TaskCreateForm({
             />
           )}
           <fieldset className="create-fields" disabled={locked}>
-            <Input
-              ref={titleRef}
-              className="quick-task-title"
-              aria-label="Nome da tarefa"
-              placeholder="O que precisa ser feito?"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              required
-              minLength={2}
-              maxLength={240}
-            />
             {created > 0 && (
               <small className="quick-task-created" role="status">
                 <Check size={14} />
                 {created === 1
-                  ? "Tarefa criada. Pode escrever a próxima."
-                  : `${created} tarefas criadas. Pode escrever a próxima.`}
+                  ? `Tarefa “${lastTitle}” criada. Pode escrever a próxima.`
+                  : `${created} tarefas criadas (a última: “${lastTitle}”). Pode escrever a próxima.`}
               </small>
             )}
             {contract ? (
@@ -738,7 +760,12 @@ export function TaskCreateForm({
             <Suspense fallback={<Loading variant="editor" />}>
               <RichTextEditor
                 key={formKey}
-                defaultValue={formKey === 0 ? (initialDescription ?? "") : ""}
+                defaultValue={
+                  formKey === 0
+                    ? initialDescription ||
+                      (initialTitle ? `<p>${escapeHtml(initialTitle)}</p>` : "")
+                    : ""
+                }
                 company={company}
                 demo={demo}
                 onUploading={setEditorUploading}
@@ -963,9 +990,11 @@ export function TaskCreateForm({
               className="btn primary"
               disabled={working || !contract}
               loading={working}
-              title="Enter no título ou Ctrl/⌘ + Enter"
+              title="Ctrl/⌘ + Enter"
             >
-              {uploads.current.taskId
+              {naming
+                ? "Criando o título…"
+                : uploads.current.taskId
                 ? uploads.current.pending.length
                   ? "Reenviar anexos"
                   : "Concluir"
@@ -981,7 +1010,7 @@ export function TaskCreateForm({
             members={data.members}
             onApplyFix={(text) => appendToDescription.current?.(text)}
             typedEnough={
-              `${title} ${descriptionText}`.trim().length >= MIN_REVIEW
+              `${presetTitle} ${descriptionText}`.trim().length >= MIN_REVIEW
             }
           />
         )}
@@ -989,6 +1018,49 @@ export function TaskCreateForm({
     </Modal>
   );
 }
+
+/**
+ * The MAVI's title for the task about to be saved. She has a few seconds;
+ * after that (or when she fails, or in the demo) the start of what was
+ * written or said is the title, so saving never gets stuck.
+ */
+async function taskTitle(input: {
+  demo: boolean;
+  company: string;
+  contract: string;
+  project: string | null;
+  description: string;
+  audio: string;
+  hint: string;
+}) {
+  const fallback =
+    fallbackTaskTitle(input.description) ||
+    fallbackTaskTitle(input.audio.replace(/^Áudio \d+: /gm, "")) ||
+    fallbackTaskTitle(input.hint);
+  const safe = fallback.length >= 2 ? fallback : "Nova tarefa";
+  if (input.demo) return safe;
+  try {
+    const title = await requestTaskTitle(
+      {
+        company: input.company,
+        contract: input.contract,
+        project: input.project,
+        description: input.description,
+        audio: input.audio,
+        hint: input.hint,
+      },
+      TASK_TITLE_WAIT_MS,
+    );
+    return title.length >= 2 ? title : safe;
+  } catch {
+    return safe;
+  }
+}
+
+const escapeHtml = (text: string) =>
+  text.replace(/[&<>"]/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&quot;",
+  );
 
 /**
  * What a repetition will do, from today: when the first copy opens and its

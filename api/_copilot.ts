@@ -483,7 +483,7 @@ export function draftMessage(
     draft.task
       ? "Rascunho (edição de uma tarefa existente):"
       : "Rascunho da tarefa:",
-    `Título: ${draft.title || "(sem título)"}`,
+    `Título: ${draft.title || "(a MAVI escreve o título ao salvar, a partir da descrição e dos áudios)"}`,
     draft.due ? `Prazo: ${brDate(draft.due)}` : "",
     draft.assignee ? `Responsável: ${draft.assignee}` : "",
     draft.extra ? `Campos preenchidos:\n${draft.extra}` : "",
