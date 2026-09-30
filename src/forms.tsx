@@ -129,6 +129,7 @@ import { canOpenPage } from "./modules";
 import { CopilotBadge, TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
 import { TaskDueEdit } from "./DueRuleHint";
 import { DueRiskNote, ReplanModal } from "./DueAssist";
+import { TaskEntryRow } from "./TaskEntryDate";
 import { canManageDueScope } from "./dueRules";
 import { MIN_REVIEW, copilotExtras, useTaskCopilot } from "./copilot";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
@@ -553,6 +554,9 @@ function eventLabel(e: TaskEvent) {
   // que empurrou o prazo da principal.
   if (e.action === "due_below_minimum")
     return `Prazo antes do mínimo da regra (${dateLabel(String(e.detail.min))}) · ${String(e.detail.reason ?? "")}`;
+  // Data de entrada (migration 20270109090000): o motivo aparece embaixo.
+  if (e.action === "entry_changed")
+    return `Data de entrada alterada · ${dateLabel(String(e.detail.old_entry))} → ${dateLabel(String(e.detail.new_entry))}`;
   if (e.action === "due_extended_by_subtask")
     return `Prazo acompanhou a subtarefa “${String(e.detail.title ?? "")}” · ${dateLabel(String(e.detail.old_due))} → ${dateLabel(String(e.detail.new_due))}`;
   if (to === "done" && from !== "done") return "Tarefa entregue";
@@ -1461,6 +1465,13 @@ export function TaskDetail({
                   {task.due_smart && !late && <small>pela MAVI</small>}
                 </div>
               </div>
+              <TaskEntryRow
+                task={task}
+                data={data}
+                user={user}
+                mutate={mutate}
+                notify={notify}
+              />
               <div className="property-row">
                 <span className="property-label">
                   <Flag size={15} /> Prioridade
@@ -2229,6 +2240,11 @@ export function TaskDetail({
                         </small>
                         {!!e.detail.note && (
                           <RichTextContent value={String(e.detail.note)} />
+                        )}
+                        {e.action === "entry_changed" && (
+                          <span className="event-reason">
+                            {memberName(e.actor_id)}: {String(e.detail.reason ?? "")}
+                          </span>
                         )}
                       </div>
                     </div>

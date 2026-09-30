@@ -54,9 +54,10 @@ function series(
   now: Date,
 ): SeriesRow[] {
   // Social Leads lives in its own store, and the demo keeps no status
-  // history (status_history, reviews), notice deliveries nor Radar items: no
-  // figures here.
+  // history (status_history, reviews), notice deliveries, Radar items nor
+  // entry date changes: no figures here.
   if (
+    q.source === "entry_changes" ||
     q.source === "social_leads" ||
     q.source === "status_history" ||
     q.source === "reviews" ||
@@ -80,6 +81,8 @@ function series(
           const task = taskById.get(entry.task_id);
           return task ? [{ task, entry }] : [];
         });
+  // The entry date: the creation, unless adjusted (migration 20270109090000).
+  const entered = (t: Task) => t.entered_at ?? t.created_at;
   const dateOf = (r: Row) =>
     q.source === "hours"
       ? day(r.entry!.started_at)
@@ -88,7 +91,9 @@ function series(
         : day(
             q.dateField === "delivered_at"
               ? r.task.delivered_at
-              : r.task.created_at,
+              : q.dateField === "entered_at"
+                ? entered(r.task)
+                : r.task.created_at,
           );
   const field = (r: Row, name: string): string | null => {
     const k = contract.get(r.task.contract_id);
@@ -192,6 +197,8 @@ function series(
         );
       case "tight_due":
         return list.filter((r) => r.task.due_tight_reason).length;
+      case "entry_adjusted":
+        return list.filter((r) => r.task.entered_at).length;
       case "shorter_than_smart":
         return list.filter(
           (r) => r.task.due_smart_date && r.task.original_due_date < r.task.due_smart_date,
@@ -214,7 +221,7 @@ function series(
               (s, r) =>
                 s +
                 (Date.parse(r.task.delivered_at!) -
-                  Date.parse(r.task.created_at ?? r.task.delivered_at!)) /
+                  Date.parse(entered(r.task) ?? r.task.delivered_at!)) /
                   86400000,
               0,
             ) / list.length

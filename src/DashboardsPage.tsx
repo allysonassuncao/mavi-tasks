@@ -548,7 +548,8 @@ function CreateDashboard({
             <strong>Modelo: prazos e previsões</strong>
             <small>
               Quanto as datas da MAVI e das regras acertam, o erro médio da
-              MAVI e quem define prazos apertados ou mais curtos que a sugestão.
+              MAVI, quem define prazos apertados ou mais curtos que a sugestão
+              e quem ajusta a data de entrada das tarefas.
             </small>
           </label>
           <label className={template === "social_leads" ? "selected" : ""}>

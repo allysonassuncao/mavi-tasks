@@ -28,6 +28,7 @@ import {
   workingStatuses,
 } from "./types";
 import { MEMBER_OPT_IN, MODULES } from "./modules";
+import { canChangeEntry, enteredAt, entryDateError, entryDay } from "./task-entry";
 import type { TaskView } from "./api";
 import type { BulkChange, BulkItem, BulkResult, BulkUndo } from "./task-bulk";
 import {
@@ -785,6 +786,25 @@ export class DemoStore {
           r.active = false;
           event("recurrence_stopped");
         }
+        break;
+      }
+      case "set_task_entry_date": {
+        // Mirrors public.set_task_entry_date (migration 20270109090000).
+        if (!task || task.archived || !canChangeEntry(this.data, task, demoUser))
+          throw Error("Sem permissão para alterar a data de entrada desta tarefa");
+        if (task.version !== a.p_version)
+          throw Error("A tarefa mudou. Atualize antes de continuar.");
+        const tz = this.data.companies[0].timezone;
+        const problem = entryDateError(task, a.p_date, String(a.p_reason ?? ""), tz);
+        if (problem) throw Error(problem);
+        const old = entryDay(task, tz);
+        task.entered_at = enteredAt(task.created_at, a.p_date, tz);
+        task.version++;
+        event("entry_changed", {
+          old_entry: old,
+          new_entry: a.p_date,
+          reason: String(a.p_reason).trim(),
+        });
         break;
       }
       case "set_task_custom_fields": {

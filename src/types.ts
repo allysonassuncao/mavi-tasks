@@ -129,6 +129,8 @@ export interface Task {
   /** What the rule and the MAVI gave when the task was created. */
   due_rule_date?: string | null;
   due_smart_date?: string | null;
+  /** Data de entrada ajustada (null = a criação; see task-entry.ts). */
+  entered_at?: string | null;
   revision: number;
   version: number;
   archived: boolean;

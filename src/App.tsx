@@ -316,6 +316,7 @@ const TASK_ROW_MUTATIONS = new Set([
   "transition_task",
   "update_task",
   "set_task_custom_fields",
+  "set_task_entry_date",
 ]);
 const TIMER_ROW_MUTATIONS = new Set(["start_timer", "stop_timer"]);
 const SELF_HANDLED_MUTATIONS = new Set(["add_comment"]);
