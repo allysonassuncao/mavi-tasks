@@ -119,6 +119,7 @@ export function InboxList({
                   name={n.actor_name ?? "?"}
                   src={actor?.avatar_url}
                   size="small"
+                  person={actor?.user_id}
                 />
               )}
               <span>
@@ -142,7 +143,9 @@ export function InboxList({
                   </span>
                 ) : (
                   <span className="inbox-line">
-                    <strong>{n.actor_name ?? "Alguém"}</strong>{" "}
+                    <strong data-person={actor?.user_id}>
+                      {n.actor_name ?? "Alguém"}
+                    </strong>{" "}
                     {n.headline
                       ? `${n.headline}:`
                       : n.kind === "assigned"

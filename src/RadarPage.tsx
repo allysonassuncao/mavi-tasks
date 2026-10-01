@@ -546,10 +546,12 @@ export function RadarPage({
                         </td>
                       )}
                       <td>
-                        {i.assignee_name ??
-                          data.members.find((m) => m.user_id === i.assignee_id)?.name ?? (
-                            <span className="muted">—</span>
-                          )}
+                        <span data-person={i.assignee_id ?? undefined}>
+                          {i.assignee_name ??
+                            data.members.find((m) => m.user_id === i.assignee_id)?.name ?? (
+                              <span className="muted">—</span>
+                            )}
+                        </span>
                       </td>
                       <td>
                         <RadarItemTasks tasks={i.tasks ?? []} />

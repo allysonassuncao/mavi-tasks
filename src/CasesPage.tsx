@@ -558,7 +558,8 @@ function CaseCard({
           <span className="case-card-when">
             {scope === "review" ? (
               <>
-                <Clock3 size={13} /> {row.author_name} ·{" "}
+                <Clock3 size={13} />{" "}
+                <span data-person={row.created_by}>{row.author_name}</span> ·{" "}
                 {shortDate(row.updated_at)}
               </>
             ) : (

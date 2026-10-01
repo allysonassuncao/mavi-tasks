@@ -91,7 +91,7 @@ export function OnlineMembers({
         {present.length ? (
           <ul>
             {present.map((p) => (
-              <li key={p.member.user_id}>
+              <li key={p.member.user_id} data-person={p.member.user_id}>
                 <span className="online-avatar">
                   <Avatar
                     name={p.member.name}

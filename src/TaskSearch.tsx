@@ -136,12 +136,19 @@ export function TaskSearch({
   useEffect(() => {
     const url = new URL(window.location.href);
     const saved = readFilters<Record<string, string>>("search", company, user);
+    // A link with filters of its own (a person's "Ver tarefas") shows just
+    // those: neither the saved filters nor the saved term.
+    const linked = FILTER_PARAMS.some((k) => url.searchParams.has(k));
     if (saved) {
-      if (!FILTER_PARAMS.some((k) => url.searchParams.has(k)))
+      if (!linked)
         for (const k of FILTER_PARAMS)
           if (typeof saved[k] === "string" && saved[k])
             url.searchParams.set(k, saved[k]);
-      if (!url.searchParams.get("termo") && typeof saved.termo === "string") {
+      if (
+        !linked &&
+        !url.searchParams.get("termo") &&
+        typeof saved.termo === "string"
+      ) {
         if (saved.termo) url.searchParams.set("termo", saved.termo);
         setText(saved.termo);
       }

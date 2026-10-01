@@ -781,11 +781,14 @@ function DriveTree({
                     <small className="drive-row-path">{pathOf(f)}</small>
                   )}
                   <small className="show-mobile">
-                    {formatBytes(f.size_bytes)} · {who(f.uploaded_by)}
+                    {formatBytes(f.size_bytes)} ·{" "}
+                    <span data-person={f.uploaded_by}>{who(f.uploaded_by)}</span>
                   </small>
                 </td>
                 <td className="hide-mobile">{formatBytes(f.size_bytes)}</td>
-                <td className="hide-mobile">{who(f.uploaded_by)}</td>
+                <td className="hide-mobile">
+                  <span data-person={f.uploaded_by}>{who(f.uploaded_by)}</span>
+                </td>
                 <td className="hide-mobile hide-narrow">
                   {new Date(f.created_at).toLocaleDateString("pt-BR")}
                 </td>

@@ -394,7 +394,10 @@ function DashboardList({
                   <small>
                     {d.panels.length}{" "}
                     {d.panels.length === 1 ? "painel" : "painéis"} · editado por{" "}
-                    {who(d.updated_by ?? d.created_by)} em{" "}
+                    <span data-person={d.updated_by ?? d.created_by ?? undefined}>
+                      {who(d.updated_by ?? d.created_by)}
+                    </span>{" "}
+                    em{" "}
                     {new Date(d.updated_at).toLocaleDateString("pt-BR")}
                   </small>
                   {canEdit && (

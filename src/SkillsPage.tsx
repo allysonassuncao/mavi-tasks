@@ -138,6 +138,10 @@ export function SkillsPage({
   };
   const name = (id: string | null) =>
     data.members.find((m) => m.user_id === id)?.name ?? "Alguém";
+  // Pointing at the name opens the person's balloon (PersonCard).
+  const who = (id: string | null) => (
+    <span data-person={id ?? undefined}>{name(id)}</span>
+  );
 
   const pending = (list ?? []).filter((s) => s.latest?.state === "pending" && !s.archived);
   const q = fold(query.trim());
@@ -347,7 +351,7 @@ export function SkillsPage({
                         state !== "approved" && <StateChip state={state} />
                       )}
                       {s.published && <small>versão {s.published}</small>}
-                      {(s.mine || isLeader) && <small>de {name(s.author_id)}</small>}
+                      {(s.mine || isLeader) && <small>de {who(s.author_id)}</small>}
                       {(s.mine || isLeader) && !!Number(s.uses_30d) && (
                         <small>
                           {Number(s.uses_30d)} {Number(s.uses_30d) === 1 ? "uso" : "usos"} em 30 dias
@@ -407,6 +411,9 @@ function SkillView({
   onDeleted: () => void;
   notify: (message: string) => void;
 }) {
+  const who = (id: string | null) => (
+    <span data-person={id ?? undefined}>{name(id)}</span>
+  );
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [version, setVersion] = useState<number | undefined>();
   const [error, setError] = useState("");
@@ -535,7 +542,7 @@ function SkillView({
           <h2>{v.name}</h2>
           <small className="skill-slug">
             {detail.slug} · versão {v.version}
-            {detail.published === v.version ? " (publicada)" : ""} · de {name(detail.author_id)}
+            {detail.published === v.version ? " (publicada)" : ""} · de {who(detail.author_id)}
           </small>
           <p>{v.description}</p>
           <span className="skill-card-meta">
@@ -613,7 +620,7 @@ function SkillView({
         <section className="panel skill-review">
           <strong>Esta versão espera a sua aprovação</strong>
           <small>
-            Enviada por {name(v.created_by)} em {when(v.created_at)}.
+            Enviada por {who(v.created_by)} em {when(v.created_at)}.
             {detail.published ? ` Enquanto isso, a MAVI usa a versão ${detail.published}.` : ""}
           </small>
           {returning ? (
@@ -674,7 +681,7 @@ function SkillView({
       )}
       {v.state === "rejected" && v.review_note && (
         <p className="panel skill-note">
-          <strong>Devolvida por {name(v.reviewed_by)}:</strong> {v.review_note}
+          <strong>Devolvida por {who(v.reviewed_by)}:</strong> {v.review_note}
         </p>
       )}
       {v.state === "pending" && !isLeader && (
@@ -772,7 +779,7 @@ function SkillView({
                       <StateChip state={x.state} />
                     </button>
                     <small>
-                      {name(x.created_by)} · {when(x.created_at)}
+                      {who(x.created_by)} · {when(x.created_at)}
                       {Number(x.uses) ? ` · ${Number(x.uses)} ${Number(x.uses) === 1 ? "uso" : "usos"}` : ""}
                     </small>
                     {x.note && <small>{x.note}</small>}

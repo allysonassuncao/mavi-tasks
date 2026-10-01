@@ -7,13 +7,20 @@ export function Avatar({
   name,
   size = "normal",
   src,
+  person,
 }: {
   name: string;
   size?: "small" | "normal" | "large" | "xlarge";
   src?: string | null;
+  /** The person's id: pointing at the photo opens their balloon (PersonCard). */
+  person?: string | null;
 }) {
   return (
-    <span className={`avatar ${size}`} title={name}>
+    <span
+      className={`avatar ${size}`}
+      title={person ? undefined : name}
+      data-person={person || undefined}
+    >
       {src ? (
         <img src={src} alt="" loading="lazy" decoding="async" />
       ) : (

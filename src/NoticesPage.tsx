@@ -431,7 +431,7 @@ function SentRow({ row, onOpen }: { row: SentNotice; onOpen: () => void }) {
                 ? `Editado ${whenLabel(row.updated_at)}`
                 : `Publicado ${whenLabel(row.publish_at)}`}
             {" · "}
-            {row.author_name}
+            <span data-person={row.created_by}>{row.author_name}</span>
           </small>
         </span>
         {row.status !== "draft" && row.status !== "scheduled" && (
@@ -572,7 +572,8 @@ function NoticeView({
           )}
         </div>
         <p className="notice-view-meta">
-          <BellRing size={14} aria-hidden="true" /> {detail.author_name}
+          <BellRing size={14} aria-hidden="true" />{" "}
+          <span data-person={detail.created_by}>{detail.author_name}</span>
           {detail.publish_at &&
             ` · ${detail.status === "scheduled" ? "publica" : "publicado"} ${whenLabel(detail.publish_at)}`}
           {detail.expires_at && ` · sai do ar ${whenLabel(detail.expires_at)}`}
@@ -957,7 +958,8 @@ function TemplateList({
             <strong>{t.name}</strong>
             <small>
               {t.content.title ? `${t.content.title} · ` : ""}
-              {t.author_name} · {whenLabel(t.updated_at)}
+              <span data-person={t.created_by}>{t.author_name}</span> ·{" "}
+              {whenLabel(t.updated_at)}
             </small>
           </span>
           {t.can_edit && (

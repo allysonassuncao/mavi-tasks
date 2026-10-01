@@ -235,8 +235,15 @@ function PersonWorkday({
     days.join() !== savedDays.join();
   return (
     <div className="due-workload-person">
-      <Avatar name={member.name} src={member.avatar_url} size="small" />
-      <span className="due-workload-name">{member.name}</span>
+      <Avatar
+        name={member.name}
+        src={member.avatar_url}
+        size="small"
+        person={member.user_id}
+      />
+      <span className="due-workload-name" data-person={member.user_id}>
+        {member.name}
+      </span>
       <span className="due-workload-hours">
         <Input
           type="number"

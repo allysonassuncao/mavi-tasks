@@ -334,7 +334,11 @@ export function TaskTable({
           </span>
         </td>
         <td className="col-assignee">
-          <span className="task-person" title={n.member?.name}>
+          <span
+            className="task-person"
+            title={n.member ? undefined : "?"}
+            data-person={n.member?.user_id}
+          >
             <Avatar
               name={n.member?.name ?? "?"}
               src={n.member?.avatar_url}
@@ -350,7 +354,7 @@ export function TaskTable({
           </span>
         </td>
         <td className="col-creator">
-          <span className="task-person">
+          <span className="task-person" data-person={creator?.user_id}>
             <Avatar
               name={creator?.name ?? "?"}
               src={creator?.avatar_url}
@@ -393,7 +397,11 @@ export function TaskTable({
     if (ids.length === 1) {
       const m = lookup.members.get(ids[0]);
       return (
-        <span className="task-person" title={names[0]}>
+        <span
+          className="task-person"
+          title={m ? undefined : names[0]}
+          data-person={m?.user_id}
+        >
           <Avatar name={names[0]} src={m?.avatar_url} size="small" />
           {ids[0] === me ? (
             <span className="you-tag">Você</span>
@@ -416,6 +424,7 @@ export function TaskTable({
             name={names[i]}
             src={lookup.members.get(id)?.avatar_url}
             size="small"
+            person={lookup.members.has(id) ? id : undefined}
           />
         ))}
         {ids.length > shown.length && (

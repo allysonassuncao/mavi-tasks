@@ -28,6 +28,8 @@ export const pagePaths = {
   connections: "/mavi/conexoes",
   dashboards: "/dashboards",
   profile: "/perfil",
+  /** The profile of another person: /pessoas/<id> (personIdFromPath). */
+  person: "/pessoas",
   settings: "/configuracoes",
 } as const;
 export type Page = keyof typeof pagePaths;
@@ -199,6 +201,7 @@ export function safeReturnPath(value: string | null) {
     "radar",
     "item",
     "relatorio",
+    "convidar",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);
@@ -228,6 +231,7 @@ export function resolvePage(path: string): Page | null {
   if (maviChatIdFromPath(path)) return "mavi";
   if (skillIdFromPath(path)) return "skills";
   if (driveLocationFromPath(path)) return "drive";
+  if (personIdFromPath(path)) return "person";
   return (
     (Object.keys(pagePaths) as Page[]).find(
       (page) => pagePaths[page] === normalized,
@@ -366,6 +370,13 @@ export function maviChatIdFromPath(path: string) {
     routeParts(path).path.match(
       /^\/mavi\/conversas\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
     )?.[1] ?? null
+  );
+}
+
+/** O perfil de uma pessoa: /pessoas/<id> (ids são uuids; os da demo, não). */
+export function personIdFromPath(path: string) {
+  return (
+    routeParts(path).path.match(/^\/pessoas\/([0-9a-z-]{1,64})$/i)?.[1] ?? null
   );
 }
 

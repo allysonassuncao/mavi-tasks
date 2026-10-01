@@ -971,7 +971,7 @@ function PortfolioView({
                       </td>
                       <td>
                         {who ? (
-                          <span className="sl-person">
+                          <span className="sl-person" data-person={who.user_id}>
                             <Avatar
                               name={who.name}
                               src={who.avatar_url}

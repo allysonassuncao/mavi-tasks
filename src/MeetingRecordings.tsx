@@ -414,7 +414,16 @@ export function MeetingRecordings({
                       )}
                       <small>
                         {weekdayTime(r.recorded_at)} ·{" "}
-                        {memberName(r.recorded_by_email)}
+                        <span
+                          data-person={
+                            data.members.find(
+                              (m) =>
+                                m.email?.toLowerCase() === r.recorded_by_email,
+                            )?.user_id
+                          }
+                        >
+                          {memberName(r.recorded_by_email)}
+                        </span>
                         {r.duration_seconds ? (
                           <>
                             {" · "}

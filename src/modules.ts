@@ -51,6 +51,7 @@ export const MEMBER_PAGES: readonly Page[] = [
   "skills",
   "connections",
   "profile",
+  "person",
   "inbox",
   ...MEMBER_OPT_IN,
 ];

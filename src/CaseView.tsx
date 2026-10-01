@@ -424,7 +424,8 @@ export function CaseView({
             )}
             <section className="case-meta">
               <span>
-                Cadastrado por <strong>{d.author_name}</strong> em{" "}
+                Cadastrado por{" "}
+                <strong data-person={d.created_by}>{d.author_name}</strong> em{" "}
                 {date(d.created_at)}
               </span>
               {d.approved_at && (

@@ -90,9 +90,9 @@ export default function Reports({
             {(page) =>
               page.map((p) => (
                 <div key={p.id}>
-                  <Avatar name={p.name} src={avatarOf?.(p.id)} />
+                  <Avatar name={p.name} src={avatarOf?.(p.id)} person={p.id} />
                   <span>
-                    <strong>{p.name}</strong>
+                    <strong data-person={p.id}>{p.name}</strong>
                     <small>{workload(p)}</small>
                   </span>
                   <span className="workload-figures">

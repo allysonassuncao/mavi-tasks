@@ -519,12 +519,14 @@ export function MaviChatPage({
             <span>{c.title}</span>
             {(c.owner_id !== user || c.scope?.client) && (
               <small>
-                {[
-                  c.owner_id !== user ? `de ${memberName(c.owner_id)}` : "",
-                  c.scope?.client ? clientName(c.scope.client) : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
+                {c.owner_id !== user && (
+                  <>
+                    de{" "}
+                    <span data-person={c.owner_id}>{memberName(c.owner_id)}</span>
+                  </>
+                )}
+                {c.owner_id !== user && c.scope?.client && " · "}
+                {c.scope?.client ? clientName(c.scope.client) : ""}
               </small>
             )}
           </a>
@@ -636,14 +638,18 @@ export function MaviChatPage({
             <strong title={conv?.title}>{conv?.title ?? "MAVI"}</strong>
             {conv && (
               <small>
-                {[
-                  readOnly ? `Compartilhada por ${memberName(conv.owner_id)}` : "",
-                  conv.scope?.client
-                    ? `Cliente ${clientName(conv.scope.client)}`
-                    : "Todos os clientes",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
+                {readOnly && (
+                  <>
+                    Compartilhada por{" "}
+                    <span data-person={conv.owner_id}>
+                      {memberName(conv.owner_id)}
+                    </span>
+                    {" · "}
+                  </>
+                )}
+                {conv.scope?.client
+                  ? `Cliente ${clientName(conv.scope.client)}`
+                  : "Todos os clientes"}
               </small>
             )}
           </div>

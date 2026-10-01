@@ -3,6 +3,7 @@ import { EditEntityForm, type EntityEdit } from "./EditEntityForm";
 import {
   dashboardIdFromPath,
   maviChatIdFromPath,
+  personIdFromPath,
   skillIdFromPath,
   taskIdFromPath,
   taskUrl,
@@ -177,6 +178,8 @@ import { CampaignsPage } from "./CampaignsPage";
 import { StoragePage } from "./StoragePage";
 import { CompanyLogoDialog, WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { ProfilePage } from "./ProfilePage";
+import { PersonHoverCards, type PersonEnv } from "./PersonCard";
+import { PersonPage } from "./PersonPage";
 import { MemberForm } from "./MemberForm";
 import { MemberModulesMenu } from "./MemberModulesMenu";
 import { MemberAccessLogs } from "./MemberAccessLogs";
@@ -526,6 +529,7 @@ export default function App() {
   const openDashboard = dashboardIdFromPath(location.split("?")[0]);
   const openChat = maviChatIdFromPath(location.split("?")[0]);
   const openSkill = skillIdFromPath(location.split("?")[0]);
+  const openPerson = personIdFromPath(location.split("?")[0]);
   // MAVI › Skills › "Usar na conversa" / "Testar esta versão".
   const maviStartSkill = useMemo(() => {
     const q = new URLSearchParams(location.split("?")[1] ?? "");
@@ -1602,6 +1606,29 @@ export default function App() {
   }, [company, demo, session]);
 
   const notify = useCallback((message: string) => setToast(message), []);
+  // The balloon over another person's name or photo and their page
+  // (/pessoas/<id>): shortcuts to their tasks, a new task, a meeting, contact
+  // and, for leaders, the same Editar and Logs as Pessoas do espaço.
+  const personEnv: PersonEnv = {
+    data,
+    company,
+    companyPath,
+    user,
+    isAdmin,
+    isLeader,
+    presence,
+    today,
+    canOpen: allowed,
+    onNewTask: (assignee) => openForm("task", { assignee }),
+    onEdit: setEditMember,
+    onLogs: setAccessLogsMember,
+    notify,
+  };
+  // Their own page is Meu perfil.
+  useEffect(() => {
+    if (page === "person" && openPerson && openPerson === user)
+      navigate(pageUrl("profile", companyPath), true);
+  }, [page, openPerson, user, companyPath]);
   // Drops every cached copy of the company's data (memory and localStorage)
   // and reads the tasks again, with the catalogs, hours and open details.
   function reloadTasks() {
@@ -2674,6 +2701,8 @@ export default function App() {
             <strong>
               {page === "profile"
                 ? "Meu perfil"
+                : page === "person"
+                  ? "Perfil"
                 : page === "search"
                   ? "Busca avançada"
                   : (navigation.find((n) => n.id === page)?.label ??
@@ -2809,6 +2838,8 @@ export default function App() {
                     ? "Visão geral"
                     : page === "profile"
                       ? "Meu perfil"
+                      : page === "person"
+                        ? "Perfil"
                       : page === "inbox"
                         ? "Caixa de entrada"
                       : page === "search"
@@ -2867,6 +2898,8 @@ export default function App() {
                       dashboards:
                         "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
                       profile: "Seu nome, sua foto e sua senha.",
+                      person:
+                        "Quem é, as equipes, a jornada e as tarefas de quem trabalha com você.",
                       inbox:
                         "Tudo o que chegou para você: menções, respostas, tarefas, validações, avisos do Mural e da MAVI.",
                       reports: isLeader
@@ -2892,6 +2925,7 @@ export default function App() {
                 )}
                 {page !== "drive" &&
                   page !== "profile" &&
+                  page !== "person" &&
                   page !== "inbox" &&
                   page !== "campaigns" &&
                   page !== "financeMedia" &&
@@ -3151,9 +3185,13 @@ export default function App() {
                         .slice(0, 4)
                         .map((m) => (
                           <div className="team-person" key={m.user_id}>
-                            <Avatar name={m.name} src={m.avatar_url} />
+                            <Avatar
+                              name={m.name}
+                              src={m.avatar_url}
+                              person={m.user_id}
+                            />
                             <div>
-                              <strong>{m.name}</strong>
+                              <strong data-person={m.user_id}>{m.name}</strong>
                               <small>
                                 {m.role === "manager"
                                   ? "Gestão"
@@ -3600,6 +3638,7 @@ export default function App() {
                                         name={n.member?.name ?? "?"}
                                         src={n.member?.avatar_url}
                                         size="small"
+                                        person={n.member?.user_id}
                                       />
                                     </footer>
                                   </Button>
@@ -4002,6 +4041,9 @@ export default function App() {
                   }
                 />
               )}
+              {page === "person" && (
+                <PersonPage env={personEnv} id={openPerson ?? ""} />
+              )}
               {page === "campaigns" && allowed("campaigns") && (
                 <CampaignsPage
                   key={company}
@@ -4378,13 +4420,17 @@ export default function App() {
                             page.map((m) => (
                               <div className="member-row" key={m.user_id}>
                                 <span className="online-avatar">
-                                  <Avatar name={m.name} src={m.avatar_url} />
+                                  <Avatar
+                                    name={m.name}
+                                    src={m.avatar_url}
+                                    person={m.user_id}
+                                  />
                                   <PresenceDot
                                     state={presence.get(m.user_id)?.state}
                                   />
                                 </span>
                                 <div className="member-info">
-                                  <strong>{m.name}</strong>
+                                  <strong data-person={m.user_id}>{m.name}</strong>
                                   {m.email && (
                                     <span className="member-email">
                                       {m.email}
@@ -4591,6 +4637,7 @@ export default function App() {
                                         (m) => m.user_id === tm.user_id,
                                       )?.avatar_url
                                     }
+                                    person={tm.user_id}
                                     size="small"
                                   />
                                 ))}
@@ -4750,6 +4797,7 @@ export default function App() {
           />
         )
       )}
+      <PersonHoverCards env={personEnv} />
       {editMember && isLeader && (
         <MemberForm
           member={editMember}

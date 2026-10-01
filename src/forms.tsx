@@ -1296,10 +1296,11 @@ export function TaskDetail({
           name={author?.name ?? "Usuário"}
           src={author?.avatar_url}
           size="small"
+          person={author?.user_id}
         />
         <div>
           <strong>
-            {author?.name}
+            <span data-person={author?.user_id}>{author?.name}</span>
             <small>{new Date(c.created_at).toLocaleString("pt-BR")}</small>
           </strong>
           {orphan && (
@@ -1594,19 +1595,20 @@ export function TaskDetail({
                         name={n.member?.name ?? "?"}
                         src={n.member?.avatar_url}
                         size="small"
+                        person={n.member?.user_id}
                       />
                       {n.member?.name}
                       <UserRoundPen size={14} />
                     </button>
                   ) : (
-                    <>
+                    <span className="property-person" data-person={n.member?.user_id}>
                       <Avatar
                         name={n.member?.name ?? "?"}
                         src={n.member?.avatar_url}
                         size="small"
                       />
                       {n.member?.name}
-                    </>
+                    </span>
                   )}
                 </div>
               </div>
@@ -1615,12 +1617,14 @@ export function TaskDetail({
                   <UserRoundPen size={15} /> Criado por
                 </span>
                 <div className="property-value">
-                  <Avatar
-                    name={creator?.name ?? "?"}
-                    src={creator?.avatar_url}
-                    size="small"
-                  />
-                  {creator?.name ?? "Usuário removido"}
+                  <span className="property-person" data-person={creator?.user_id}>
+                    <Avatar
+                      name={creator?.name ?? "?"}
+                      src={creator?.avatar_url}
+                      size="small"
+                    />
+                    {creator?.name ?? "Usuário removido"}
+                  </span>
                 </div>
               </div>
               <div className="property-row">
@@ -1630,7 +1634,7 @@ export function TaskDetail({
                 <div className="property-value participant-list">
                   {participants.length ? (
                     participants.map((m) => (
-                      <span key={m.user_id} title={m.name}>
+                      <span key={m.user_id} data-person={m.user_id}>
                         <Avatar name={m.name} src={m.avatar_url} size="small" />
                         {participants.length <= 3 && m.name}
                       </span>
@@ -2324,8 +2328,13 @@ export function TaskDetail({
                           e.detail.assignee_to !== e.detail.assignee_from && (
                             <span className="event-assignee">
                               Responsável:{" "}
-                              {memberName(String(e.detail.assignee_from))} →{" "}
-                              {memberName(String(e.detail.assignee_to))}
+                              <span data-person={String(e.detail.assignee_from)}>
+                                {memberName(String(e.detail.assignee_from))}
+                              </span>{" "}
+                              →{" "}
+                              <span data-person={String(e.detail.assignee_to)}>
+                                {memberName(String(e.detail.assignee_to))}
+                              </span>
                             </span>
                           )}
                         <small>
@@ -2337,13 +2346,13 @@ export function TaskDetail({
                         {e.action === "priority" && !e.detail.system && (
                           <span className="event-reason">
                             {isPrioritized(String(e.detail.to)) ? "Marcada" : "Alterada"} por{" "}
-                            {memberName(e.actor_id)}
+                            <span data-person={e.actor_id}>{memberName(e.actor_id)}</span>
                           </span>
                         )}
                         {/* Mudança de prazo (migration 20270110090000): quem, onde e por quê. */}
                         {e.action === "due_changed" && !!e.detail.reason && (
                           <span className="event-reason">
-                            {memberName(e.actor_id)}
+                            <span data-person={e.actor_id}>{memberName(e.actor_id)}</span>
                             {e.detail.source && e.detail.source !== "task"
                               ? ` (${dueSources[e.detail.source as keyof typeof dueSources] ?? ""})`
                               : ""}

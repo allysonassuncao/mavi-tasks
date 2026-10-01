@@ -357,9 +357,12 @@ export function StoragePage({
                 name={member?.name ?? "?"}
                 src={member?.avatar_url}
                 size="small"
+                person={member?.user_id}
               />
               <span>
-                <strong>{member?.name ?? "Pessoa removida"}</strong>
+                <strong data-person={member?.user_id}>
+                  {member?.name ?? "Pessoa removida"}
+                </strong>
                 <small>
                   {member
                     ? member.active

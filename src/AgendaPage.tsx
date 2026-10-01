@@ -165,6 +165,29 @@ export function AgendaPage({
     if (reason) setMessage(reason);
   }, []);
 
+  // "Agendar reunião" (the person's balloon): /agenda?convidar=<user id>.
+  // Kept for 15 minutes of the session, so it survives connecting the
+  // Google account.
+  const [inviting] = useState(() => {
+    const id = new URL(window.location.href).searchParams.get("convidar");
+    try {
+      if (id) {
+        sessionStorage.setItem(INVITE_KEY, JSON.stringify({ id, at: Date.now() }));
+        return id;
+      }
+      const kept = JSON.parse(sessionStorage.getItem(INVITE_KEY) ?? "null") as {
+        id?: string;
+        at?: number;
+      } | null;
+      return kept?.id && Date.now() - (kept.at ?? 0) < 15 * 60_000 ? kept.id : null;
+    } catch {
+      return id;
+    }
+  });
+  const invitee = inviting
+    ? data.members.find((m) => m.user_id === inviting && m.email)
+    : undefined;
+
   useEffect(() => {
     // Back from Google's consent screen: say how it went, clean the URL.
     const url = new URL(window.location.href);
@@ -207,6 +230,12 @@ export function AgendaPage({
           <CalendarDays size={28} />
         </span>
         <h2>Conecte seu Google Agenda</h2>
+        {invitee && (
+          <p className="agenda-connect-invite">
+            Depois de conectar, o evento com {invitee.name} abre pronto para
+            você escolher o horário.
+          </p>
+        )}
         <p>
           Veja todos os seus eventos aqui e crie ou edite compromissos sem sair
           do workspace. Tudo fica sincronizado com o Google: o que muda aqui
@@ -242,14 +271,24 @@ export function AgendaPage({
       userEmail={email}
       notify={notify}
       onDisconnected={disconnected}
+      invitee={invitee}
     />
   );
 }
 
 type Dialog =
   | { mode: "view"; event: AgendaEvent }
-  | { mode: "edit"; event?: AgendaEvent; start?: Date; allDay?: boolean };
+  | {
+      mode: "edit";
+      event?: AgendaEvent;
+      start?: Date;
+      allDay?: boolean;
+      /** A new event with these guests and a Meet (Agendar reunião). */
+      guests?: string[];
+      title?: string;
+    };
 const ASIDE_KEY = "mavi:agenda-aside";
+const INVITE_KEY = "mavi:agenda-invite";
 const SECTIONS_KEY = "mavi:agenda-sections";
 const viewLabels: Record<View, string> = {
   day: "Dia",
@@ -280,6 +319,7 @@ function AgendaView({
   userEmail,
   notify,
   onDisconnected,
+  invitee,
 }: {
   api: AgendaApi;
   company: string;
@@ -290,6 +330,8 @@ function AgendaView({
   userEmail: string;
   notify: Notify;
   onDisconnected: (reason?: string) => void;
+  /** Agendar reunião: a new event opens with this guest. */
+  invitee?: { name: string; email?: string };
 }) {
   const [calendars, setCalendars] = useState<AgendaCalendar[] | null>(null);
   const [hidden, setHidden] = useState<string[]>(() =>
@@ -338,6 +380,31 @@ function AgendaView({
   useEffect(() => {
     api.calendars().then(setCalendars).catch(handle);
   }, [api, handle]);
+
+  // Agendar reunião: once the calendars are known, the new event opens with
+  // the guest and a Meet; the request is used up (the URL and the session).
+  const invited = useRef(false);
+  useEffect(() => {
+    if (invited.current || !calendars) return;
+    invited.current = true;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("convidar")) {
+      url.searchParams.delete("convidar");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search);
+    }
+    try {
+      sessionStorage.removeItem(INVITE_KEY);
+    } catch {
+      // Blocked storage: nothing was kept.
+    }
+    if (invitee?.email && calendars.some((c) => c.writable))
+      setDialog({
+        mode: "edit",
+        start: defaultStart(new Date()),
+        guests: [invitee.email.toLowerCase()],
+        title: `Reunião com ${invitee.name.split(" ")[0]}`,
+      });
+  }, [calendars, invitee]);
 
   const visible = useMemo(
     () =>
@@ -622,6 +689,7 @@ function AgendaView({
             plainText(dialog.event.description ?? ""),
           )}
           clients={data.clients}
+          members={data.members}
           company={demo ? "" : company}
           onAddMavi={addMavi}
           onClose={() => setDialog(null)}
@@ -665,6 +733,8 @@ function AgendaView({
           event={dialog.event}
           start={dialog.start}
           allDay={dialog.allDay}
+          initialGuests={dialog.guests}
+          initialTitle={dialog.title}
           onClose={() => setDialog(null)}
           onSaved={() => {
             notify(
@@ -1370,6 +1440,7 @@ function EventDetails({
   color,
   client: found,
   clients,
+  members,
   company,
   onAddMavi,
   onClose,
@@ -1383,6 +1454,8 @@ function EventDetails({
   client: Snapshot["clients"][number] | null;
   /** To ask for the client when the event doesn't say which one it is. */
   clients: Snapshot["clients"];
+  /** The guests from the agency, by e-mail (their name opens their balloon). */
+  members: Snapshot["members"];
   /** Where to look for the meeting's recording (empty: don't). */
   company: string;
   onAddMavi: (
@@ -1603,7 +1676,17 @@ function EventDetails({
                   <li key={a.email} className={a.response ?? "needsAction"}>
                     <Icon size={13} aria-label={label} />
                     <span>
-                      {a.name || a.email}
+                      <span
+                        data-person={
+                          members.find(
+                            (m) =>
+                              !!m.email &&
+                              m.email.toLowerCase() === a.email.toLowerCase(),
+                          )?.user_id
+                        }
+                      >
+                        {a.name || a.email}
+                      </span>
                       {a.organizer && <small> · organizador</small>}
                       {a.self && <small> · você</small>}
                     </span>
@@ -1794,6 +1877,8 @@ function EventForm({
   event,
   start: initialStart,
   allDay: initialAllDay,
+  initialGuests,
+  initialTitle,
   onClose,
   onSaved,
   onError,
@@ -1805,6 +1890,9 @@ function EventForm({
   event?: AgendaEvent;
   start?: Date;
   allDay?: boolean;
+  /** A new event's guests (Agendar reunião), with a Meet by default. */
+  initialGuests?: string[];
+  initialTitle?: string;
   onClose: () => void;
   onSaved: () => void;
   onError: (e: unknown) => void;
@@ -1815,7 +1903,7 @@ function EventForm({
         start: initialStart ?? new Date(),
         end: new Date((initialStart ?? new Date()).getTime() + 3600000),
       };
-  const [title, setTitle] = useState(event?.title ?? "");
+  const [title, setTitle] = useState(event?.title ?? initialTitle ?? "");
   const [calendarId, setCalendarId] = useState(
     event?.calendarId ??
       (calendars.find((c) => c.primary) ?? calendars[0])?.id ??
@@ -1842,10 +1930,14 @@ function EventForm({
     event ? plainText(event.description) : "",
   );
   const [guests, setGuests] = useState<string[]>(
-    event?.attendees.filter((a) => !a.self).map((a) => a.email) ?? [],
+    event?.attendees.filter((a) => !a.self).map((a) => a.email) ??
+      initialGuests ??
+      [],
   );
   const [guestInput, setGuestInput] = useState("");
-  const [meet, setMeet] = useState(!!event?.meetUrl);
+  const [meet, setMeet] = useState(
+    event ? !!event.meetUrl : !!initialGuests?.length,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const recurring = !!event?.recurringEventId;

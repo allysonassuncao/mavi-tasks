@@ -1,0 +1,328 @@
+/* O balão da pessoa (PersonHoverCards) e a página /pessoas/<id> (PersonPage). */
+[data-person],
+.mention[data-user] {
+  cursor: default;
+}
+span[data-person]:not(.avatar):hover,
+.mention[data-user]:hover {
+  text-decoration: underline;
+  text-decoration-color: #b8c3b1;
+  text-underline-offset: 2px;
+}
+.person-card {
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 38px #152c2026;
+  max-height: min(460px, var(--radix-popover-content-available-height, 460px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  z-index: 140;
+  font-size: 0.78rem;
+  animation: person-card-in 0.14s ease-out;
+}
+@keyframes person-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .person-card {
+    animation: none;
+  }
+}
+.person-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.person-card-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.person-card-name {
+  font-weight: 650;
+  font-size: 0.92rem;
+  color: var(--ink);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-card-name:hover {
+  text-decoration: underline;
+}
+.person-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.person-card-meta small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+.person-inactive {
+  background: #f4ecec;
+  color: #a2565c;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 0.65rem;
+}
+.person-away {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: #f6f3ea;
+  color: #7a6a43;
+  font-size: 0.72rem;
+}
+.person-away.now {
+  background: #fdf1dc;
+  color: #8a5d12;
+  font-weight: 600;
+}
+.person-card-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 12px 0 0;
+}
+.person-card-facts dt {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.person-card-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.person-card-facts dd.late {
+  color: #b5414f;
+}
+.person-teams {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.person-team {
+  background: #f1f4f2;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+}
+.person-team small {
+  color: var(--muted);
+}
+.person-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.person-action {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.74rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.person-action:hover {
+  background: #f4f8ee;
+  border-color: #d6e4c3;
+}
+.person-action:focus-visible {
+  outline: 2px solid #8fb85a;
+  outline-offset: 1px;
+}
+.person-action svg {
+  flex-shrink: 0;
+  color: #6f8a55;
+}
+
+/* A página da pessoa. */
+.person-page {
+  display: grid;
+  gap: 18px;
+}
+.person-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 20px 23px;
+}
+.person-shortcuts {
+  padding: 14px 16px;
+}
+.person-tasks-body {
+  padding: 0 23px 20px;
+}
+.person-tasks-body > .muted {
+  margin: 14px 0 0;
+  font-size: 0.8rem;
+}
+.person-hero .avatar.xlarge,
+.person-hero .avatar {
+  width: 72px;
+  height: 72px;
+  font-size: 1.3rem;
+}
+.person-hero .online-avatar .presence-dot {
+  width: 14px;
+  height: 14px;
+  right: 2px;
+  bottom: 2px;
+}
+.person-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.person-hero-text h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+.person-hero-text .person-away {
+  margin: 0;
+  align-self: flex-start;
+}
+.person-page .person-actions {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.person-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .person-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.person-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+  margin: 0;
+  padding: 0 23px 23px;
+  font-size: 0.82rem;
+}
+.person-facts dt {
+  color: var(--muted);
+}
+.person-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.person-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+@media (max-width: 560px) {
+  .person-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.person-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--ink);
+  text-decoration: none;
+}
+a.person-tile:hover {
+  background: #f8faf5;
+}
+.person-tile strong {
+  font-size: 1.4rem;
+  font-variant-numeric: tabular-nums;
+}
+.person-tile span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.person-tile.late strong {
+  color: #b5414f;
+}
+.person-next {
+  list-style: none;
+  margin: 14px -8px 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.person-next li a {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.8rem;
+}
+.person-next li a:hover {
+  background: #f6f8f4;
+}
+.person-next-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-next-due {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+.person-next-due.late {
+  color: #b5414f;
+  font-weight: 600;
+}
+@media (max-width: 560px) {
+  .person-next li a {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .person-next li a .badge {
+    display: none;
+  }
+}
+.property-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
