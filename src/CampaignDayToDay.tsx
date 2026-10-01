@@ -77,7 +77,8 @@ const brl = (v: number | null) => (v === null ? "—" : money(v));
 const dayLabel = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
 
 const M_KEY = "mavi:campanhas:com-m";
-function useWithM(): [boolean, (v: boolean) => void] {
+/** "Com M"/"Sem M", one preference for the list and the Dia a Dia. */
+export function useWithM(): [boolean, (v: boolean) => void] {
   const [value, setValue] = useState(() => {
     try {
       return localStorage.getItem(M_KEY) === "1";

@@ -163,6 +163,7 @@ export function demoCampaigns(
         .filter((c) => !c.archived)
         .map((c) => {
           const contract = data().contracts.find((k) => k.id === c.contract_id);
+          const current = currentCycle(snapshot, c);
           return {
             campaign: c,
             client_name:
@@ -171,12 +172,13 @@ export function demoCampaigns(
             product_name:
               data().products.find((x) => x.id === contract?.product_id)
                 ?.name ?? "",
-            current: currentCycle(snapshot, c),
+            current,
             alert:
               c.status === "inactive" && !pending(c)
                 ? { kind: "none" as const }
                 : cycleAlert(snapshot, c, today),
             waiting: pending(c),
+            spent: current ? demoSpent(store, current, today) : null,
           };
         })
         .sort(
@@ -1044,6 +1046,24 @@ function changes(before: object, after: object) {
       .filter((k) => b[k] !== a[k])
       .map((k) => [k, { from: b[k], to: a[k] }]),
   );
+}
+/** The current cycle's spend, as ad_campaign_page sums it. */
+function demoSpent(store: Store, y: AdCycle, today: string) {
+  const parts = demoCycleMetrics(y, today);
+  const days = parts.daily.map((r) => ({
+    ...r,
+    ...store.edits.get(`d:${r.cycle_id}:${r.day}`),
+  }));
+  if (days.length)
+    return {
+      net: days.reduce((t, r) => t + r.spend, 0),
+      gross: days.reduce((t, r) => t + r.spend * r.multiplier, 0),
+    };
+  const last = parts.snapshots
+    .map((x) => ({ ...x, ...store.edits.get(`s:${x.cycle_id}:${x.id}`) }))
+    .sort((a, b) => b.taken_on.localeCompare(a.taken_on))[0];
+  const spend = last?.spend ?? 0;
+  return { net: spend, gross: spend * y.multiplier };
 }
 function demoMetrics(
   store: Store,

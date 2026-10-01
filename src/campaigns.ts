@@ -412,6 +412,11 @@ export type CampaignRow = {
   alert: CycleAlert;
   /** A new campaign waiting for its first activation. */
   waiting: boolean;
+  /**
+   * What the current cycle spent so far: net (the platform's) and gross
+   * (each day × its M). Null without a current cycle.
+   */
+  spent: { net: number; gross: number } | null;
 };
 export type CampaignPage = {
   rows: CampaignRow[];
@@ -889,6 +894,7 @@ export const supabaseCampaigns: CampaignsBackend = {
         current: RawCycle | null;
         alert: Parameters<typeof alertFrom>[0];
         waiting?: boolean;
+        spent?: { net: number | string; gross: number | string } | null;
       }[];
     };
     return {
@@ -903,6 +909,9 @@ export const supabaseCampaigns: CampaignsBackend = {
         current: cycleFrom(r.current),
         alert: alertFrom(r.alert),
         waiting: !!r.waiting,
+        spent: r.spent
+          ? { net: Number(r.spent.net), gross: Number(r.spent.gross) }
+          : null,
       })),
     };
   },

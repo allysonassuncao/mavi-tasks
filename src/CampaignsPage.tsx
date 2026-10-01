@@ -68,6 +68,7 @@ import {
   type AdPlatform,
   type CampaignData,
   type CampaignPage,
+  type CampaignRow,
   type CampaignScope,
   type CampaignsBackend,
   type CycleAlert,
@@ -82,7 +83,8 @@ import {
   MetaAccountChooser,
   accountLabel,
 } from "./CampaignLinks";
-import { CampaignDayToDay } from "./CampaignDayToDay";
+import { CampaignDayToDay, useWithM } from "./CampaignDayToDay";
+import { dailyBudget, daysRemaining } from "./campaign-metrics";
 import { CampaignPlatform } from "./CampaignPlatform";
 import { CampaignReports } from "./CampaignReports";
 import { GooglePlatform } from "./GooglePlatform";
@@ -500,6 +502,31 @@ const statusFilters: { value: string; scope: CampaignScope; label: string }[] =
     { value: "todos", scope: "all", label: "Todos os status" },
   ];
 
+/** The list's "Orçamento diário": what the cycle should spend a day now. */
+function DailyBudget({
+  cycle,
+  spent,
+  today,
+  withM,
+}: {
+  cycle: AdCycle | null;
+  spent: CampaignRow["spent"];
+  today: string;
+  withM: boolean;
+}) {
+  // An ended cycle has no day left to spend on.
+  if (!cycle || !spent || today > cycle.end_date) return <>—</>;
+  const days = daysRemaining(cycle, today);
+  return (
+    <>
+      {money(dailyBudget(cycle, spent.gross, today, withM))}
+      <small className="cell-note">
+        {days} {days === 1 ? "dia restante" : "dias restantes"}
+      </small>
+    </>
+  );
+}
+
 /**
  * The list, a page at a time from the server (ad_campaign_page): by default
  * only active campaigns; the Status filter shows the new ones waiting for
@@ -535,6 +562,9 @@ function CampaignList({
   const [platform, setPlatform] = useUrlState<string>("plataforma", "");
   const [attention, setAttention] = useUrlState<boolean>("atencao", false);
   const [status, setStatus] = useUrlState<string>("status", "");
+  const [withM, setWithM] = useWithM();
+  // Money as the client contracted it (com M) or what the platform spends.
+  const shown = (value: number, m: number) => money(withM ? value : value / m);
   const scope =
     statusFilters.find((f) => f.value === status)?.scope ?? "active";
   const pendingOnly = scope === "pending";
@@ -664,6 +694,22 @@ function CampaignList({
               </SelectOption>
             ))}
           </Select>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={withM}
+            aria-label="Valores com M aplicado"
+            className={`template-switch campaign-m-switch${withM ? " on" : ""}`}
+            title={
+              withM
+                ? "Valores com M, como o cliente contratou e vê. Clique para ver sem M."
+                : "Valores sem M: o que a plataforma gasta. Clique para ver com M."
+            }
+            onClick={() => setWithM(!withM)}
+          >
+            <span aria-hidden="true" />
+            {withM ? "Com M aplicado" : "Sem M"}
+          </button>
           {onConnections && (
             <Button
               className="btn secondary"
@@ -702,6 +748,9 @@ function CampaignList({
                   <th>Status</th>
                   <th>Ciclo atual</th>
                   <th>Verba do ciclo</th>
+                  <th title="Mídia restante do ciclo ÷ dias restantes (hoje incluído): quanto a campanha deve gastar por dia para fechar a verba">
+                    Orçamento diário
+                  </th>
                   <th>Meta do ciclo</th>
                   <th title="Índice de performance">M</th>
                 </tr>
@@ -715,6 +764,7 @@ function CampaignList({
                     current: cycle,
                     alert,
                     waiting,
+                    spent,
                   }) => (
                     <tr
                       key={campaign.id}
@@ -756,7 +806,17 @@ function CampaignList({
                           />
                         )}
                       </td>
-                      <td>{cycle ? money(cycle.budget) : "—"}</td>
+                      <td>
+                        {cycle ? shown(cycle.budget, cycle.multiplier) : "—"}
+                      </td>
+                      <td>
+                        <DailyBudget
+                          cycle={cycle}
+                          spent={spent}
+                          today={today}
+                          withM={withM}
+                        />
+                      </td>
                       <td>
                         {cycle ? (
                           <>
@@ -764,7 +824,8 @@ function CampaignList({
                             {objectives[cycle.objective].result}
                             {goalCost(cycle) !== null && (
                               <small className="cell-note">
-                                {money(goalCost(cycle)!)} por resultado
+                                {shown(goalCost(cycle)!, cycle.multiplier)} por
+                                resultado
                               </small>
                             )}
                           </>

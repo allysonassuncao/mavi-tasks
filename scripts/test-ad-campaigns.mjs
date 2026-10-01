@@ -1267,6 +1267,39 @@ await check("lista paginada: só ativas, com ciclo atual e alerta", async () => 
   assert.ok(all.attention >= 3);
 });
 
+await check("lista traz o gasto do ciclo atual (Orçamento diário)", async () => {
+  const [zeta] = await sql(
+    "select current_cycle_id as id from ad_campaigns where id=$1",
+    [ok],
+  );
+  const [beta] = await sql(
+    "select current_cycle_id as id, multiplier::float as m from ad_campaigns a join ad_cycles y on y.id = a.current_cycle_id where a.id=$1",
+    [ending],
+  );
+  // Days: each one by its own M; without days, the latest snapshot × M.
+  await sql(
+    `insert into ad_daily_metrics(company_id,campaign_id,cycle_id,day,multiplier,spend,source) values
+     ($1,$2,$3,$4,2,100,'meta'),($1,$2,$3,$5,3,50,'meta')`,
+    [A, ok, zeta.id, shift(-2), shift(-1)],
+  );
+  await sql(
+    `insert into ad_cycle_snapshots(company_id,campaign_id,cycle_id,taken_on,period_start,period_end,spend,source) values
+     ($1,$2,$3,$4,$4,$4,40,'meta'),($1,$2,$3,$5,$4,$5,80,'meta')`,
+    [A, ending, beta.id, shift(-3), shift(-1)],
+  );
+  const byName = Object.fromEntries(
+    (await page(admin, { search: "açai" })).rows.map((r) => [
+      r.campaign.name,
+      r.spent,
+    ]),
+  );
+  assert.deepEqual(byName["Zeta ok"], { net: 150, gross: 350 });
+  assert.equal(byName["Beta terminando"].net, 80);
+  assert.equal(Number(byName["Beta terminando"].gross), 80 * beta.m);
+  assert.deepEqual(byName["Alfa encerrado"], { net: 0, gross: 0 });
+  assert.equal(byName["Delta sem atual"], null);
+});
+
 await check("busca sem acento, plataforma, atenção e paginação", async () => {
   assert.equal((await page(admin, { search: "ACAI zeta" })).total, 0);
   assert.equal((await page(admin, { search: "zeta" })).rows[0].campaign.id, ok);

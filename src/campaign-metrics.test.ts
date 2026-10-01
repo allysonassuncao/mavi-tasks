@@ -4,6 +4,8 @@ import {
   conversionRate,
   ctr,
   cycleKpis,
+  dailyBudget,
+  daysRemaining,
   diverges,
   emptyTotals,
   grade,
@@ -99,6 +101,24 @@ describe("cabeçalho do ciclo (print do MASO, cliente 5022)", () => {
     expect(k.status).toBe("good");
     // CPA 400/60 = 6,67 → 3,98: 40% better.
     expect(k.improvement).toBeCloseTo(40.28, 1);
+  });
+  it("orçamento diário da lista: o mesmo do Dia a Dia", () => {
+    const gross = metrics.daily.reduce((t, r) => t + r.spend * r.multiplier, 0);
+    const k = cycleKpis(cycle, "meta", metrics, "2026-09-24", false);
+    expect(dailyBudget(cycle, gross, "2026-09-24", false)).toBeCloseTo(
+      k.idealBudget,
+      6,
+    );
+    expect(dailyBudget(cycle, gross, "2026-09-24", true)).toBeCloseTo(
+      k.idealBudget * 2.5,
+      6,
+    );
+    // Before the cycle starts: the budget over its own days.
+    expect(daysRemaining(cycle, "2026-08-20")).toBe(31);
+    expect(dailyBudget(cycle, 0, "2026-08-20", false)).toBeCloseTo(1200 / 31, 6);
+    // Last day: everything left; spent over the budget: nothing.
+    expect(dailyBudget(cycle, 2000, "2026-09-30", true)).toBe(1000);
+    expect(dailyBudget(cycle, 3500, "2026-09-25", true)).toBe(0);
   });
   it("com M: tudo em valores do cliente", () => {
     const k = cycleKpis(cycle, "meta", metrics, "2026-09-24", true);

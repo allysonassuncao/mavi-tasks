@@ -160,6 +160,32 @@ export const costLabel: Record<AdObjective, string> = {
 };
 
 // ------------------------------------------------------------ header
+/** Days left in the cycle, today included (all of them before it starts). */
+export function daysRemaining(
+  cycle: Pick<AdCycle, "start_date" | "end_date">,
+  today: string,
+) {
+  const from = today < cycle.start_date ? cycle.start_date : today;
+  return Math.max(daysBetween(from, cycle.end_date) + 1, 0);
+}
+/**
+ * "Orçamento diário": the media left in the cycle ÷ the days left (today
+ * included) — what the campaign should spend a day from now on to close the
+ * budget. spentGross: each day × its own M. withM as in cycleKpis.
+ */
+export function dailyBudget(
+  cycle: Pick<AdCycle, "budget" | "multiplier" | "start_date" | "end_date">,
+  spentGross: number,
+  today: string,
+  withM: boolean,
+) {
+  const m = cycle.multiplier;
+  const remaining = daysRemaining(cycle, today);
+  const leftNet = cycle.budget / m - spentGross / m;
+  const net = Math.max(leftNet, 0) / Math.max(remaining, 1);
+  return withM ? net * m : net;
+}
+
 export type CycleKpis = {
   days: number;
   /** Days with data (up to yesterday), and "D-N". */
@@ -201,7 +227,7 @@ export function cycleKpis(
     Math.max(daysBetween(cycle.start_date, today), 0),
     days,
   );
-  const remaining = Math.max(daysBetween(today, cycle.end_date) + 1, 0);
+  const remaining = daysRemaining(cycle, today);
   const rows = metrics.daily.filter((d) => d.cycle_id === cycle.id);
   const snaps = metrics.snapshots
     .filter((s) => s.cycle_id === cycle.id)
@@ -234,7 +260,7 @@ export function cycleKpis(
       goal > totals.conversions
         ? Math.ceil((goal - totals.conversions) / Math.max(remaining, 1))
         : 0,
-    idealBudget: money(Math.max(leftNet, 0) / Math.max(remaining, 1)),
+    idealBudget: dailyBudget(cycle, spentGross, today, withM),
     improvement:
       firstCost && lastCost ? 100 - (lastCost / firstCost) * 100 : null,
     overPace:
