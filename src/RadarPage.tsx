@@ -697,7 +697,7 @@ function RadarInfo({
               <strong>Reuniões gravadas:</strong> lidas alguns minutos depois que a transcrição fica pronta.
             </li>
             <li>
-              <strong>Grupos de WhatsApp:</strong> lidos a cada busca dos grupos (a cada 2 horas), só nas mensagens
+              <strong>Grupos de WhatsApp:</strong> lidos a cada busca dos grupos (a cada hora), só nas mensagens
               novas. Áudio esperando transcrição entra na leitura seguinte.
             </li>
             <li>

@@ -22,7 +22,7 @@ import { serverModel, transcribePerMinute } from "../src/ai-providers.js";
  * (migration 20261027150000_whatsapp_groups).
  *
  * - "whatsapp-sync": o worker, chamado pelo pg_cron (mavi_private.
- *   whatsapp_kick) com o segredo. A cada 2 horas faz a varredura (a lista de
+ *   whatsapp_kick) com o segredo. A cada hora faz a varredura (a lista de
  *   grupos com o horário da última mensagem, 200 por página); depois lê os
  *   grupos com mensagem nova desde onde parou e copia as mídias para o GCS,
  *   enquanto houver tempo. O que não couber fica para a próxima chamada.

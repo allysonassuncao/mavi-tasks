@@ -551,7 +551,7 @@ export async function buildContext(
     );
   if (scope.module === "whatsapp")
     lines.push(
-      'A pessoa está na pasta Whatsapp do cliente: as conversas dos grupos são o foco. Busque primeiro com search_knowledge e types ["whatsapp"] (com from e to quando a pergunta tiver período) e use as reuniões e as tarefas só quando ajudarem. As mensagens chegam a cada 2 horas: as das últimas horas podem ainda não estar no sistema.',
+      'A pessoa está na pasta Whatsapp do cliente: as conversas dos grupos são o foco. Busque primeiro com search_knowledge e types ["whatsapp"] (com from e to quando a pergunta tiver período) e use as reuniões e as tarefas só quando ajudarem. As mensagens chegam a cada hora: as da última hora podem ainda não estar no sistema.',
     );
   return {
     context: lines.filter(Boolean).join("\n"),

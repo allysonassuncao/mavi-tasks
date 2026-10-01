@@ -9,7 +9,7 @@ import type { ViewerFile } from "./FileViewer";
 
 /**
  * Drive › cliente › "Whatsapp": os grupos de WhatsApp dos clientes, trazidos
- * da Uazapi a cada 2 horas (migration 20261027150000_whatsapp_groups,
+ * da Uazapi a cada hora (migration 20261027150000_whatsapp_groups,
  * api/_whatsapp.ts). Aqui, a tela de ajuste de Configurações: qual cliente
  * (e quais produtos) cada grupo atende, ou se ele é ignorado.
  */

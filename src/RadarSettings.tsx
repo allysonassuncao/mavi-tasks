@@ -123,7 +123,7 @@ export function RadarSettings({
             <Radar size={18} aria-hidden="true" /> Radar do cliente
           </h2>
           <p>
-            A MAVI lê cada reunião gravada e, a cada busca dos grupos (2 h), as mensagens novas do WhatsApp, e
+            A MAVI lê cada reunião gravada e, a cada busca dos grupos (de hora em hora), as mensagens novas do WhatsApp, e
             anota em cada tópico abaixo o que aparece: um item por assunto, com as vezes em que ele voltou. O
             Jev confere cada item e dá a gravidade.
           </p>

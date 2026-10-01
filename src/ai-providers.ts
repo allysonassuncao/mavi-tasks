@@ -520,7 +520,7 @@ export const FEATURES: FeatureInfo[] = [
     label: "Problemas, promessas e tópicos nas reuniões e no WhatsApp",
     conversation: false,
     env: "CLIENT_RADAR_MODEL",
-    note: "Lê cada reunião e as mensagens novas dos grupos a cada 2 h: um modelo rápido e bom em português segura o custo.",
+    note: "Lê cada reunião e as mensagens novas dos grupos a cada hora: um modelo rápido e bom em português segura o custo.",
   },
   {
     id: "client_radar_check",

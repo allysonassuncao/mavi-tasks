@@ -216,13 +216,13 @@ export function WhatsappFolder({
           <Sparkles size={15} /> Perguntar ao histórico
         </button>
       </div>
-      {/* As mensagens chegam da Uazapi a cada 2 horas: quem lê precisa
+      {/* As mensagens chegam da Uazapi a cada hora: quem lê precisa
           saber que a conversa pode estar atrás do WhatsApp. */}
       <p className="wa-notice" role="note">
         <Clock size={16} aria-hidden="true" />
         <span>
           <strong>Não é em tempo real.</strong> As conversas são atualizadas a
-          cada 2 horas
+          cada hora
           {lastRead ? ` (última atualização ${ago(lastRead)})` : ""}. Mensagens
           mais recentes podem ainda não aparecer aqui: para o que acabou de
           acontecer, confira o WhatsApp.
@@ -799,7 +799,7 @@ function Chat({
                 {group.synced_at
                   ? `Conversa atualizada ${ago(group.synced_at)}.`
                   : "Conversa ainda não atualizada."}{" "}
-                Mensagens novas chegam a cada 2 horas.
+                Mensagens novas chegam a cada hora.
               </p>
             )}
           </>

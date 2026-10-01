@@ -5,7 +5,7 @@
 --   insert into mavi_private.whatsapp_config(company_id, url, secret)
 --   values ('<id da empresa>', 'https://<seu domínio>/api/whatsapp', '<WHATSAPP_WORKER_SECRET>');
 -- Sem segredos neste arquivo. Rodar de novo substitui o job.
--- A cada minuto o banco confere se há trabalho: a varredura de 2 em 2 horas
+-- A cada minuto o banco confere se há trabalho: a varredura de hora em hora
 -- venceu, ou ainda há grupos para ler ou mídias na fila. Só então acorda o
 -- servidor (que trabalha ~80 s por chamada); sem trabalho, não faz nada.
 begin;
