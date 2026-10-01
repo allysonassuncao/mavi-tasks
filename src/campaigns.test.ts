@@ -475,6 +475,37 @@ describe("lista paginada (demonstração com as regras do servidor)", () => {
     });
     expect(found.rows.map((r) => r.campaign.name)).toContain(name);
   });
+  it("filtro de Status: inativas sem alerta de ciclo; todas com as ativas primeiro", async () => {
+    const backend = demoCampaigns(() => data, demoUser);
+    const q = {
+      scope: "active" as const,
+      search: "",
+      platform: "",
+      attention: false,
+      limit: 100,
+      offset: 0,
+    };
+    const active = await backend.page(company, q);
+    const [first] = active.rows;
+    await backend.setStatus(first.campaign, "inactive", "Teste");
+    const inactive = await backend.page(company, { ...q, scope: "inactive" });
+    const off = inactive.rows.find((r) => r.campaign.id === first.campaign.id);
+    expect(off?.alert.kind).toBe("none");
+    expect(off?.waiting).toBe(false);
+    expect(inactive.rows.every((r) => r.campaign.status === "inactive")).toBe(
+      true,
+    );
+    const all = await backend.page(company, { ...q, scope: "all" });
+    expect(all.all).toBe(active.all - 1 + inactive.all);
+    const statuses = all.rows.map((r) => r.campaign.status);
+    expect(statuses.lastIndexOf("active")).toBeLessThan(
+      statuses.indexOf("inactive"),
+    );
+    // The demonstration's store is shared: back to how it was.
+    const [back] = (await backend.campaign(company, first.campaign.id))
+      .campaigns;
+    await backend.setStatus(back, "active", "Teste");
+  });
 });
 
 describe("editar registros da Linha do tempo (demonstração)", () => {

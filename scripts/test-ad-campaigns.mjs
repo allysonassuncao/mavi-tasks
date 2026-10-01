@@ -1323,6 +1323,50 @@ await check("aguardando ativação: novas nunca ativadas, à parte", async () =>
   await sql("update ad_campaigns set legacy_id = 'x1' where id = $1", [fresh]);
 });
 
+await check(
+  "filtro de Status: inativas e todas, as ativas primeiro",
+  async () => {
+    // A new one never activated, and an active one whose cycle ended, inactivated.
+    const waiting = await campaign(admin, {
+      contract: acme,
+      name: "Ômega aguardando",
+    });
+    const inactive = await page(admin, { scope: "inactive", search: "acai" });
+    assert.deepEqual(
+      inactive.rows.map((r) => r.campaign.id),
+      [fresh, waiting],
+    );
+    assert.ok(inactive.rows.every((r) => r.campaign.status === "inactive"));
+    const byId = Object.fromEntries(
+      inactive.rows.map((r) => [r.campaign.id, r]),
+    );
+    // An inactive one has no cycle alert; the new one keeps its own.
+    assert.deepEqual(
+      [byId[fresh].alert.kind, byId[fresh].waiting],
+      ["none", false],
+    );
+    assert.deepEqual(
+      [byId[waiting].alert.kind, byId[waiting].waiting],
+      ["no_cycle", true],
+    );
+    const all = await page(admin, { scope: "all", search: "acai" });
+    assert.deepEqual(
+      all.rows.map((r) => r.campaign.name),
+      [
+        "Alfa encerrado",
+        "Beta terminando",
+        "Delta sem atual",
+        "Zeta ok",
+        "Nova aguardando",
+        "Ômega aguardando",
+      ],
+    );
+    assert.equal(all.total, 6);
+    // An unknown scope is the default: only active ones.
+    assert.equal((await page(admin, { scope: "x", search: "acai" })).total, 4);
+  },
+);
+
 await check("lista paginada: só administradores e gestores", async () => {
   for (const user of [trafego, outsider])
     await assert.rejects(page(user), /Sem permissão: Campanhas/);

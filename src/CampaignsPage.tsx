@@ -68,6 +68,7 @@ import {
   type AdPlatform,
   type CampaignData,
   type CampaignPage,
+  type CampaignScope,
   type CampaignsBackend,
   type CycleAlert,
   type CycleDraft,
@@ -490,10 +491,20 @@ function StatusChip({ status }: { status: AdCampaignStatus }) {
 
 const PAGE_SIZE = 25;
 
+/** The Status filter: the URL's word for each scope (active: none). */
+const statusFilters: { value: string; scope: CampaignScope; label: string }[] =
+  [
+    { value: "", scope: "active", label: "Ativas" },
+    { value: "aguardando", scope: "pending", label: "Aguardando ativação" },
+    { value: "inativas", scope: "inactive", label: "Inativas" },
+    { value: "todos", scope: "all", label: "Todos os status" },
+  ];
+
 /**
- * The list, a page at a time from the server (ad_campaign_page): only active
- * campaigns, or the new ones waiting for their first activation. Search,
- * platform and "precisam de atenção" are applied there too.
+ * The list, a page at a time from the server (ad_campaign_page): by default
+ * only active campaigns; the Status filter shows the new ones waiting for
+ * their first activation, the inactive ones or all. Search, platform and
+ * "precisam de atenção" are applied there too.
  */
 function CampaignList({
   backend,
@@ -523,10 +534,10 @@ function CampaignList({
   const [query, setQuery] = useUrlState<string>("busca", "");
   const [platform, setPlatform] = useUrlState<string>("plataforma", "");
   const [attention, setAttention] = useUrlState<boolean>("atencao", false);
-  const [pendingOnly, setPendingOnly] = useUrlState<boolean>(
-    "aguardando",
-    false,
-  );
+  const [status, setStatus] = useUrlState<string>("status", "");
+  const scope =
+    statusFilters.find((f) => f.value === status)?.scope ?? "active";
+  const pendingOnly = scope === "pending";
   const [typed, setTyped] = useState(query);
   const [page, setPage] = useState(0);
   const [result, setResult] = useState<CampaignPage | null>(null);
@@ -538,17 +549,17 @@ function CampaignList({
     const t = setTimeout(() => setQuery(typed.trim()), 300);
     return () => clearTimeout(t);
   }, [typed, setQuery]);
-  const filters = `${query}|${platform}|${attention}|${pendingOnly}`;
+  const filters = `${query}|${platform}|${attention}|${scope}`;
   useEffect(() => setPage(0), [filters]);
   useEffect(() => {
     let live = true;
     setLoading(true);
     backend
       .page(company, {
-        scope: pendingOnly ? "pending" : "active",
+        scope,
         search: query,
         platform,
-        attention: attention && !pendingOnly,
+        attention: attention && scope === "active",
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
       })
@@ -562,12 +573,12 @@ function CampaignList({
     return () => {
       live = false;
     };
-  }, [backend, company, query, platform, attention, pendingOnly, page, tick]);
+  }, [backend, company, query, platform, attention, scope, page, tick]);
 
   const rows = result?.rows ?? [];
   const total = result?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const filtered = !!(query || platform || attention);
+  const filtered = !!(query || platform || (attention && scope === "active"));
 
   return (
     <>
@@ -587,20 +598,8 @@ function CampaignList({
         <span>
           {result ? (
             <>
-              {pendingOnly ? (
-                <>
-                  {result.all}{" "}
-                  {result.all === 1
-                    ? "campanha aguardando ativação"
-                    : "campanhas aguardando ativação"}
-                </>
-              ) : (
-                <>
-                  {result.all}{" "}
-                  {result.all === 1 ? "campanha ativa" : "campanhas ativas"}
-                </>
-              )}
-              {!pendingOnly && result.attention > 0 && (
+              {result.all} {scopeCount(scope, result.all)}
+              {scope === "active" && result.attention > 0 && (
                 <>
                   {" · "}
                   <button
@@ -614,7 +613,7 @@ function CampaignList({
                   </button>
                 </>
               )}
-              {(pendingOnly || result.pending > 0) && (
+              {(pendingOnly || (scope === "active" && result.pending > 0)) && (
                 <>
                   {" · "}
                   <button
@@ -622,7 +621,7 @@ function CampaignList({
                     className={`campaign-attention pending ${pendingOnly ? "on" : ""}`}
                     aria-pressed={pendingOnly}
                     title="Campanhas criadas nos últimos 60 dias que ainda não foram ativadas"
-                    onClick={() => setPendingOnly(!pendingOnly)}
+                    onClick={() => setStatus(pendingOnly ? "" : "aguardando")}
                   >
                     {pendingOnly
                       ? "Voltar às ativas"
@@ -632,7 +631,7 @@ function CampaignList({
               )}
             </>
           ) : (
-            "Campanhas ativas"
+            "Campanhas"
           )}
         </span>
         <div className="campaign-filters">
@@ -646,6 +645,13 @@ function CampaignList({
               icon={Search}
             />
           </span>
+          <Select value={status} onValueChange={setStatus} aria-label="Status">
+            {statusFilters.map((f) => (
+              <SelectOption key={f.value} value={f.value}>
+                {f.label}
+              </SelectOption>
+            ))}
+          </Select>
           <Select
             value={platform}
             onValueChange={setPlatform}
@@ -708,6 +714,7 @@ function CampaignList({
                     product_name,
                     current: cycle,
                     alert,
+                    waiting,
                   }) => (
                     <tr
                       key={campaign.id}
@@ -740,7 +747,14 @@ function CampaignList({
                             {shortDate(cycle.end_date)}
                           </span>
                         )}
-                        <AlertChip alert={alert} today={today} cycle={cycle} />
+                        {/* An inactive one has no cycle alert. */}
+                        {(campaign.status === "active" || waiting) && (
+                          <AlertChip
+                            alert={alert}
+                            today={today}
+                            cycle={cycle}
+                          />
+                        )}
                       </td>
                       <td>{cycle ? money(cycle.budget) : "—"}</td>
                       <td>
@@ -774,21 +788,28 @@ function CampaignList({
             title={
               filtered
                 ? "Nenhuma campanha encontrada"
-                : pendingOnly
-                  ? "Nenhuma campanha aguardando ativação"
-                  : "Nenhuma campanha ativa"
+                : {
+                    active: "Nenhuma campanha ativa",
+                    pending: "Nenhuma campanha aguardando ativação",
+                    inactive: "Nenhuma campanha inativa",
+                    all: "Nenhuma campanha",
+                  }[scope]
             }
             body={
               filtered
                 ? "Confira a busca e os filtros."
                 : pendingOnly
                   ? "Campanhas novas aparecem aqui até a primeira ativação."
-                  : canCreate
-                    ? "Cadastre uma campanha de tráfego pago e o ciclo de verba dela; ao ativá-la, ela aparece aqui."
-                    : "Aqui aparecem as campanhas ativas."
+                  : scope === "inactive"
+                    ? "Campanhas inativadas aparecem aqui."
+                    : canCreate
+                      ? "Cadastre uma campanha de tráfego pago e o ciclo de verba dela; ao ativá-la, ela aparece aqui."
+                      : "Aqui aparecem as campanhas ativas."
             }
             action={
-              !filtered && !pendingOnly && canCreate ? (
+              !filtered &&
+              (scope === "active" || scope === "all") &&
+              canCreate ? (
                 <Button className="btn primary" onClick={onNew}>
                   <Plus size={17} /> Nova campanha
                 </Button>
@@ -809,6 +830,23 @@ function CampaignList({
       />
     </>
   );
+}
+
+/** "12 campanhas ativas", in the words of the Status filter. */
+function scopeCount(scope: CampaignScope, n: number) {
+  const one = n === 1;
+  switch (scope) {
+    case "pending":
+      return one
+        ? "campanha aguardando ativação"
+        : "campanhas aguardando ativação";
+    case "inactive":
+      return one ? "campanha inativa" : "campanhas inativas";
+    case "all":
+      return one ? "campanha" : "campanhas";
+    default:
+      return one ? "campanha ativa" : "campanhas ativas";
+  }
 }
 
 /* ------------------------------------------------------------------ */

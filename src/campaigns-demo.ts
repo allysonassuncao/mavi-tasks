@@ -142,8 +142,9 @@ export function demoCampaigns(
     metrics: demoMetrics(store, (campaign, cycle, action, detail) =>
       log(campaignOf(campaign), cycle, action, detail),
     ),
-    // The same rules as ad_campaign_page: only active campaigns, or the new
-    // ones never activated ("pending"), searched, filtered and paged.
+    // The same rules as ad_campaign_page: active campaigns, the new ones
+    // never activated ("pending"), the inactive ones or all, searched,
+    // filtered and paged.
     async page(_company, q) {
       const snapshot = clone();
       const today = dateKey();
@@ -171,18 +172,26 @@ export function demoCampaigns(
               data().products.find((x) => x.id === contract?.product_id)
                 ?.name ?? "",
             current: currentCycle(snapshot, c),
-            alert: cycleAlert(snapshot, c, today),
+            alert:
+              c.status === "inactive" && !pending(c)
+                ? { kind: "none" as const }
+                : cycleAlert(snapshot, c, today),
+            waiting: pending(c),
           };
         })
         .sort(
           (a, b) =>
+            Number(a.campaign.status !== "active") -
+              Number(b.campaign.status !== "active") ||
             fold(a.client_name).localeCompare(fold(b.client_name)) ||
             fold(a.campaign.name).localeCompare(fold(b.campaign.name)),
         );
       const scoped = rows.filter((r) =>
         q.scope === "pending"
-          ? pending(r.campaign)
-          : r.campaign.status === "active",
+          ? r.waiting
+          : q.scope === "inactive"
+            ? r.campaign.status === "inactive"
+            : q.scope === "all" || r.campaign.status === "active",
       );
       const term = fold(q.search.trim());
       const filtered = scoped.filter(
@@ -197,7 +206,7 @@ export function demoCampaigns(
         total: filtered.length,
         all: scoped.length,
         attention: scoped.filter((r) => r.alert.kind !== "none").length,
-        pending: rows.filter((r) => pending(r.campaign)).length,
+        pending: rows.filter((r) => r.waiting).length,
       };
     },
     async campaign(_company, id) {

@@ -390,12 +390,14 @@ export type CampaignInput = {
   notes: string;
 };
 /**
- * The list is paged on the server (migration 20261003090000): only active
- * campaigns — never the inactive ones — or, in "pending", campaigns created
- * in MAVI in the last 60 days that were never activated.
+ * The list is paged on the server (migration 20261003090000): by default only
+ * active campaigns; in "pending", campaigns created in MAVI in the last 60
+ * days that were never activated; "inactive" and "all" when the Status
+ * filter asks (migration 20270207090000, the active ones first).
  */
+export type CampaignScope = "active" | "pending" | "inactive" | "all";
 export type PageQuery = {
-  scope: "active" | "pending";
+  scope: CampaignScope;
   search: string;
   platform: string;
   attention: boolean;
@@ -408,6 +410,8 @@ export type CampaignRow = {
   product_name: string;
   current: AdCycle | null;
   alert: CycleAlert;
+  /** A new campaign waiting for its first activation. */
+  waiting: boolean;
 };
 export type CampaignPage = {
   rows: CampaignRow[];
@@ -454,7 +458,7 @@ export function alertFrom(raw: {
 }
 
 export interface CampaignsBackend {
-  /** A page of the list: only active campaigns (or the ones "pending"). */
+  /** A page of the list, by status (active ones unless asked otherwise). */
   page(company: string, query: PageQuery): Promise<CampaignPage>;
   /** One campaign with its cycles (and links), or none. */
   campaign(company: string, id: string): Promise<CampaignData>;
@@ -884,6 +888,7 @@ export const supabaseCampaigns: CampaignsBackend = {
         product_name: string;
         current: RawCycle | null;
         alert: Parameters<typeof alertFrom>[0];
+        waiting?: boolean;
       }[];
     };
     return {
@@ -897,6 +902,7 @@ export const supabaseCampaigns: CampaignsBackend = {
         product_name: r.product_name,
         current: cycleFrom(r.current),
         alert: alertFrom(r.alert),
+        waiting: !!r.waiting,
       })),
     };
   },
