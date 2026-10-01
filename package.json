@@ -19,6 +19,7 @@
     "test:db:person-summary": "node scripts/test-person-summary.mjs",
     "test:db:own-delivery": "node scripts/test-own-task-delivery.mjs",
     "test:db:drive": "node scripts/test-drive-sharing.mjs",
+    "test:db:drive-move": "node scripts/test-drive-move.mjs",
     "test:db:meetings": "node scripts/test-meeting-recordings.mjs",
     "test:db:meeting-shares": "node scripts/test-meeting-shares.mjs",
     "test:db:campaign-reports": "node scripts/test-campaign-reports.mjs",

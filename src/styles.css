@@ -28551,3 +28551,195 @@ a.radar-task-chip:hover {
     animation: none;
   }
 }
+
+/* Drive: mover (seleção, arrastar e soltar, janela) e histórico do item */
+.drive-select-cell {
+  width: 34px;
+  padding-right: 0 !important;
+}
+.drive-card .drive-select,
+.drive-folder-card .drive-select {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.drive-folder-card .drive-select {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  background: #fff;
+}
+.drive-card:hover .drive-select,
+.drive-card:focus-within .drive-select,
+.drive-folder-card:hover .drive-select,
+.drive-folder-card:focus-within .drive-select,
+.drive-page.selecting .drive-select {
+  opacity: 1;
+}
+@media (hover: none) {
+  .drive-card .drive-select,
+  .drive-folder-card .drive-select {
+    opacity: 1;
+  }
+}
+.drive-card.selected {
+  background: #e3efd2;
+  border-color: #b7d68f;
+}
+.drive-folder-card.selected .drive-folder {
+  border-color: #9fc56b;
+  background: #f5faee;
+}
+.drive-table tr.selected td {
+  background: #f5faee;
+}
+.drive-card[draggable="true"],
+.drive-folder-card[draggable="true"],
+.drive-table tr[draggable="true"] {
+  cursor: grab;
+}
+/* Enquanto se arrasta: onde dá para soltar, e onde o cursor está. */
+.drive-page.moving [data-drop-target="ok"] .drive-folder,
+.drive-page.moving .drive-breadcrumb button[data-drop-target="ok"] {
+  outline: 1.5px dashed #9fc56b;
+  outline-offset: 2px;
+}
+.drive-page.moving [data-drop-target="over"] .drive-folder,
+.drive-page.moving .drive-breadcrumb button[data-drop-target="over"] {
+  outline: 2px solid #6f9b3a;
+  outline-offset: 2px;
+  background: #eef6e2;
+}
+.drive-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  border-radius: 12px;
+  background: #263334;
+  color: #fff;
+}
+.drive-selection strong {
+  font-size: 0.84rem;
+}
+.drive-selection small {
+  margin-right: auto;
+  color: #c3ccc9;
+  font-size: 0.76rem;
+}
+.drive-selection strong:has(+ .btn) {
+  margin-right: auto;
+}
+.drive-selection .icon-btn {
+  color: #fff;
+  background: transparent;
+}
+.drive-move-route,
+.drive-move-summary,
+.drive-move-note,
+.drive-move-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.drive-move-route svg,
+.drive-move-summary svg,
+.drive-move-note svg,
+.drive-move-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.drive-move-route {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.drive-move-check {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 24px;
+}
+.drive-move-summary {
+  color: #4d5c58;
+}
+.drive-move-note {
+  color: #7d8a85;
+}
+.drive-move-warning {
+  padding: 9px 12px;
+  border-radius: 10px;
+}
+.drive-move-warning.mavi {
+  background: #f2eefb;
+  color: #4f3d8f;
+}
+.drive-move-warning.warn {
+  background: #fbf4e4;
+  color: #7a5512;
+}
+.drive-move-warning.info {
+  background: #f1f4f5;
+  color: #4d5c58;
+}
+.modal.drive-history-modal {
+  width: 560px;
+}
+.drive-history {
+  padding: 18px 24px 22px;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+}
+.drive-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.drive-history-list li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0 0 16px 18px;
+  border-left: 2px solid #e3ecd8;
+}
+.drive-history-list li:last-child {
+  border-left-color: transparent;
+}
+.drive-history-list li::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c8ed8d;
+  border: 2px solid #fff;
+}
+.drive-history-list li.via::before {
+  background: #d8dedc;
+}
+.drive-history-list p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.drive-history-list small {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.audit-action.file_moved,
+.audit-action.folder_moved {
+  background: #f2eefb;
+  color: #4f3d8f;
+}

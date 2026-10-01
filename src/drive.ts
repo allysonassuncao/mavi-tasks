@@ -10,6 +10,7 @@ import type {
   DriveFolderSharing,
   DriveFolderUploadRules,
   DriveLocation,
+  DriveMovePreview,
   PublicFolderView,
   DriveVisibility,
   Snapshot,
@@ -191,6 +192,45 @@ export function deleteDriveFolder(id: string) {
 }
 export function renameDriveFile(id: string, name: string) {
   return rpc("rename_drive_file", { p_file: id, p_name: name });
+}
+
+/** O que vai ser movido: arquivos e pastas (estas levam tudo o que têm dentro). */
+export type DriveMoveItems = { files: string[]; folders: string[] };
+const moveArgs = (company: string, items: DriveMoveItems, to: DriveLocation) => ({
+  p_company: company,
+  p_files: items.files,
+  p_folders: items.folders,
+  p_client: to.folder ? null : (to.client ?? null),
+  p_contract: to.folder ? null : (to.contract ?? null),
+  p_folder: to.folder ?? null,
+});
+/** Confere a movimentação sem fazer nada: avisos de cliente e de links. */
+export function previewDriveMove(
+  company: string,
+  items: DriveMoveItems,
+  to: DriveLocation,
+): Promise<DriveMovePreview> {
+  return rpc("drive_move_preview", moveArgs(company, items, to));
+}
+export function moveDriveItems(
+  company: string,
+  items: DriveMoveItems,
+  to: DriveLocation,
+): Promise<DriveMovePreview> {
+  return rpc("move_drive_items", moveArgs(company, items, to));
+}
+/** O histórico de um arquivo ou pasta (para quem o vê). */
+export async function driveItemHistory(
+  company: string,
+  item: { file?: string; folder?: string },
+): Promise<DriveAuditEntry[]> {
+  return (
+    (await rpc("drive_item_history", {
+      p_company: company,
+      p_file: item.file ?? null,
+      p_folder: item.folder ?? null,
+    })) ?? []
+  );
 }
 
 /** Calls the Drive server (api/drive.ts), which checks access and signs GCS URLs. */

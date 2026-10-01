@@ -548,6 +548,29 @@ export interface DriveLocation {
   /** The client's "Marca" (logos, fonts, colors), next to the products. */
   brand?: boolean;
 }
+/** Um lugar do Drive, como o histórico guarda (ids e o caminho da época). */
+export interface DrivePlace {
+  client_id: string | null;
+  contract_id: string | null;
+  folder_id: string | null;
+  label: string;
+}
+/** O que uma movimentação faz, conferido pelo banco antes de confirmar. */
+export interface DriveMovePreview {
+  files: number;
+  folders: number;
+  inner_files: number;
+  inner_folders: number;
+  /** Clientes de onde os itens saem (quando não é o do destino). */
+  from_clients: (string | null)[];
+  to: DrivePlace;
+  enter_public: string[];
+  enter_people: string[];
+  leave_public: string[];
+  leave_people: string[];
+  /** Pastas que perdem o compartilhamento (vão para fora de um produto). */
+  unshare: string[];
+}
 export interface DriveAuditEntry {
   id: number;
   company_id: string;
@@ -562,4 +585,6 @@ export interface DriveAuditEntry {
     origin?: { ip?: string; user_agent?: string };
   };
   created_at: string;
+  /** No histórico de um item: a mudança foi de uma pasta em que ele está. */
+  via_folder?: boolean;
 }

@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent,
   type FormEvent,
   type ReactNode,
 } from "react";
@@ -16,6 +17,7 @@ import {
   Eye,
   EllipsisVertical,
   Folder,
+  FolderInput,
   FolderPlus,
   Globe,
   LayoutGrid,
@@ -36,7 +38,7 @@ import {
   X,
 } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
-import { Button, Input, Select, SelectOption, Loading } from "./ui";
+import { Button, Checkbox, Input, Select, SelectOption, Loading } from "./ui";
 import { Empty } from "./components";
 import { Paged } from "./Pagination";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
@@ -47,11 +49,13 @@ import type {
   DriveFile,
   DriveFolder,
   DriveLocation,
+  DriveMovePreview,
   DriveVisibility,
   Snapshot,
 } from "./types";
 import { canCreateTaskIn, contractProductLabel } from "./domain";
-import { DriveAudit } from "./DriveAudit";
+import { DriveAudit, DriveItemHistory } from "./DriveAudit";
+import { DriveMoveDialog, canWriteAt, moveWarnings } from "./DriveMoveDialog";
 import { FileViewer } from "./FileViewer";
 import { MeetingRecordings } from "./MeetingRecordings";
 import { countMeetingRecordings, meetingRecording } from "./meetings";
@@ -95,9 +99,21 @@ import {
   mySharedFolders,
   shareableFolder,
   driveFile,
+  moveDriveItems,
+  previewDriveMove,
+  type DriveMoveItems,
 } from "./drive";
 
 type Upload = { key: string; name: string; progress: number; error?: string };
+/** A janela de mover: o que vai, e (arrastar e soltar) o destino já conferido. */
+type Moving = {
+  items: DriveMoveItems;
+  label: string;
+  fixed?: { at: DriveLocation; preview: DriveMovePreview };
+};
+const NO_ITEMS: DriveMoveItems = { files: [], folders: [] };
+/** O tipo do arrasto interno (não é "Files": não abre o envio de arquivos). */
+const DRAG_TYPE = "application/x-mavi-drive";
 type Editing =
   | { kind: "new-folder" }
   | { kind: "folder"; id: string }
@@ -224,6 +240,7 @@ function DriveTree({
   const [files, setFiles] = useState<DriveFile[] | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DriveFile[] | null>(null);
+  const [searchTick, setSearchTick] = useState(0);
   const [error, setError] = useState("");
   const [newVisibility, setNewVisibility] =
     useState<DriveVisibility>("private");
@@ -348,7 +365,7 @@ function DriveTree({
         .catch((e) => setError((e as Error).message));
     }, 300);
     return () => clearTimeout(id);
-  }, [company, query, root?.client]);
+  }, [company, query, root?.client, searchTick]);
 
   // Gravações da MAVI: how many the client has (its card), and the link of a
   // moment (?gravacao=<id>&t=<s>) opening the recording right there.
@@ -707,6 +724,120 @@ function DriveTree({
   }
   const drop = useFileDrop((files) => void upload(files), canWrite);
 
+  // Mover: vários de uma vez (seleção), pelo menu ou arrastando até uma pasta.
+  const [selected, setSelected] = useState<DriveMoveItems>(NO_ITEMS);
+  const [moving, setMoving] = useState<Moving | null>(null);
+  const [history, setHistory] = useState<{
+    file?: string;
+    folder?: string;
+    name: string;
+  } | null>(null);
+  const [dragging, setDragging] = useState<DriveMoveItems | null>(null);
+  const [dropKey, setDropKey] = useState("");
+  useEffect(() => setSelected(NO_ITEMS), [locationKey, query]);
+  const selectedCount = selected.files.length + selected.folders.length;
+  const isSelected = (kind: keyof DriveMoveItems, id: string) =>
+    selected[kind].includes(id);
+  const toggleSelected = (kind: keyof DriveMoveItems, id: string) =>
+    setSelected((s) => ({
+      ...s,
+      [kind]: s[kind].includes(id)
+        ? s[kind].filter((x) => x !== id)
+        : [...s[kind], id],
+    }));
+  /** Um item escolhido leva junto os outros escolhidos. */
+  const itemsFor = (kind: keyof DriveMoveItems, id: string): DriveMoveItems =>
+    isSelected(kind, id) ? selected : { ...NO_ITEMS, [kind]: [id] };
+  function labelOf(items: DriveMoveItems) {
+    const n = items.files.length + items.folders.length;
+    if (n !== 1) return `${n} itens`;
+    const name = items.files.length
+      ? [...(files ?? []), ...(results ?? [])].find(
+          (f) => f.id === items.files[0],
+        )?.name
+      : folderById.get(items.folders[0])?.name;
+    return name ? `“${name}”` : "1 item";
+  }
+  const startMove = (items: DriveMoveItems) =>
+    setMoving({ items, label: labelOf(items) });
+  async function finishMove(result: DriveMovePreview) {
+    setMoving(null);
+    setSelected(NO_ITEMS);
+    notify(`Movido para ${result.to.label}.`);
+    await loadFolders();
+    loadFiles();
+    if (searching) setSearchTick((n) => n + 1);
+  }
+  async function dropOn(to: DriveLocation) {
+    const items = dragging;
+    setDragging(null);
+    setDropKey("");
+    if (!items || (to.folder && items.folders.includes(to.folder))) return;
+    setError("");
+    try {
+      const preview = await previewDriveMove(company, items, to);
+      // Sem nada a avisar, move direto; com troca de cliente ou de link, confirma.
+      if (moveWarnings(data, preview).length)
+        setMoving({ items, label: labelOf(items), fixed: { at: to, preview } });
+      else await finishMove(await moveDriveItems(company, items, to));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  const dragSource = (items: () => DriveMoveItems, allowed: boolean) =>
+    allowed
+      ? {
+          draggable: true,
+          onDragStart(e: DragEvent) {
+            const list = items();
+            setDragging(list);
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(list));
+          },
+          onDragEnd() {
+            setDragging(null);
+            setDropKey("");
+          },
+        }
+      : {};
+  /** Uma pasta (ou um nível do caminho) que recebe o que se arrasta. */
+  const dropTarget = (key: string, to: DriveLocation, allowed: boolean) =>
+    dragging &&
+    allowed &&
+    !(to.folder && dragging.folders.includes(to.folder))
+      ? {
+          "data-drop-target": dropKey === key ? "over" : "ok",
+          onDragOver(e: DragEvent) {
+            if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (dropKey !== key) setDropKey(key);
+          },
+          onDragLeave(e: DragEvent) {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+              setDropKey((k) => (k === key ? "" : k));
+          },
+          onDrop(e: DragEvent) {
+            if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+            e.preventDefault();
+            void dropOn(to);
+          },
+        }
+      : {};
+  const writableAt = (contract: string | null | undefined) =>
+    canWriteAt(data, user, isLeader, contract);
+  // O que dá para escolher na tela: arquivos que a pessoa edita e, fora da
+  // busca, as pastas daqui (a mesma regra de renomear).
+  const movableFiles = (searching ? (results ?? []) : (files ?? [])).filter(
+    (f) => writableAt(f.contract_id),
+  );
+  const movableFolders = !searching && canWrite ? subfolders : [];
+  const selectAll = () =>
+    setSelected({
+      files: movableFiles.map((f) => f.id),
+      folders: movableFolders.map((f) => f.id),
+    });
+
   const who = (id: string) =>
     data.members.find((m) => m.user_id === id)?.name ?? "—";
   const nameForm = (label: string) => (
@@ -742,6 +873,32 @@ function DriveTree({
       <table className="drive-table">
         <thead>
           <tr>
+            <th className="drive-select-cell">
+              {list.some((f) => writableAt(f.contract_id)) && (
+                <Checkbox
+                  aria-label="Escolher todos os arquivos da página"
+                  checked={
+                    list.every(
+                      (f) =>
+                        !writableAt(f.contract_id) || isSelected("files", f.id),
+                    )
+                      ? true
+                      : list.some((f) => isSelected("files", f.id))
+                        ? "indeterminate"
+                        : false
+                  }
+                  onCheckedChange={(on) =>
+                    setSelected((s) => {
+                      const page = list
+                        .filter((f) => writableAt(f.contract_id))
+                        .map((f) => f.id);
+                      const rest = s.files.filter((id) => !page.includes(id));
+                      return { ...s, files: on === true ? [...rest, ...page] : rest };
+                    })
+                  }
+                />
+              )}
+            </th>
             <th>Nome</th>
             <th className="hide-mobile">Tamanho</th>
             <th className="hide-mobile">Enviado por</th>
@@ -758,7 +915,23 @@ function DriveTree({
               (!!f.contract_id && canCreateTaskIn(data, f.contract_id, user));
             const renaming = editing?.kind === "file" && editing.id === f.id;
             return (
-              <tr key={f.id}>
+              <tr
+                key={f.id}
+                className={isSelected("files", f.id) ? "selected" : ""}
+                {...dragSource(
+                  () => itemsFor("files", f.id),
+                  writable && !renaming,
+                )}
+              >
+                <td className="drive-select-cell">
+                  {writable && (
+                    <Checkbox
+                      aria-label={`Escolher ${f.name}`}
+                      checked={isSelected("files", f.id)}
+                      onCheckedChange={() => toggleSelected("files", f.id)}
+                    />
+                  )}
+                </td>
                 <td>
                   {renaming ? (
                     nameForm(`Novo nome de ${f.name}`)
@@ -849,6 +1022,27 @@ function DriveTree({
                         <Link2 size={15} />
                       </Button>
                     )}
+                    {writable && (
+                      <Button
+                        className="icon-btn"
+                        aria-label={`Mover ${f.name}`}
+                        title="Mover para…"
+                        disabled={busyId === f.id}
+                        onClick={() => startMove(itemsFor("files", f.id))}
+                      >
+                        <FolderInput size={15} />
+                      </Button>
+                    )}
+                    <Button
+                      className="icon-btn"
+                      aria-label={`Histórico de ${f.name}`}
+                      title="Histórico"
+                      onClick={() =>
+                        setHistory({ file: f.id, name: f.name })
+                      }
+                    >
+                      <History size={15} />
+                    </Button>
                     {writable && !showPath && (
                       <Button
                         className="icon-btn"
@@ -889,6 +1083,7 @@ function DriveTree({
     list: DriveFile[],
     f: DriveFile,
     owner: boolean,
+    writable: boolean,
     renamable: boolean,
   ) => {
     const item = (
@@ -944,6 +1139,13 @@ function DriveTree({
             item("Renomear", <Pencil size={14} />, () =>
               startEdit({ kind: "file", id: f.id }, f.name),
             )}
+          {writable &&
+            item("Mover para…", <FolderInput size={15} />, () =>
+              startMove(itemsFor("files", f.id)),
+            )}
+          {item("Histórico", <History size={15} />, () =>
+            setHistory({ file: f.id, name: f.name }),
+          )}
           {owner &&
             (f.visibility === "public"
               ? item(
@@ -987,13 +1189,24 @@ function DriveTree({
         return (
           <div
             key={f.id}
-            className={`drive-card ${busyId === f.id ? "busy" : ""}`}
+            className={`drive-card ${busyId === f.id ? "busy" : ""} ${
+              isSelected("files", f.id) ? "selected" : ""
+            }`}
+            {...dragSource(() => itemsFor("files", f.id), writable && !renaming)}
           >
             <div className="drive-card-head">
               {renaming ? (
                 nameForm(`Novo nome de ${f.name}`)
               ) : (
                 <>
+                  {writable && (
+                    <Checkbox
+                      className="drive-select"
+                      aria-label={`Escolher ${f.name}`}
+                      checked={isSelected("files", f.id)}
+                      onCheckedChange={() => toggleSelected("files", f.id)}
+                    />
+                  )}
                   <FileTypeIcon file={f} size={16} />
                   <button
                     type="button"
@@ -1010,7 +1223,7 @@ function DriveTree({
                       aria-label="Público"
                     />
                   )}
-                  {fileMenu(list, f, owner, writable && !showPath)}
+                  {fileMenu(list, f, owner, writable, writable && !showPath)}
                 </>
               )}
             </div>
@@ -1066,9 +1279,13 @@ function DriveTree({
       rename?: () => void;
       remove?: () => void;
       share?: () => void;
+      move?: () => void;
+      history?: () => void;
     },
     isPublic = false,
     where = "",
+    /** Arrastar e soltar, e a caixa de escolher (pastas que se movem). */
+    more?: { props?: object; select?: ReactNode; selected?: boolean },
   ) => {
     const Icon =
       icon === "client"
@@ -1089,7 +1306,12 @@ function DriveTree({
                     ? Palette
                     : Folder;
     return (
-      <div className="drive-folder-card" key={key}>
+      <div
+        className={`drive-folder-card ${more?.selected ? "selected" : ""}`}
+        key={key}
+        {...more?.props}
+      >
+        {more?.select}
         <button type="button" className="drive-folder" onClick={open}>
           <Icon
             size={20}
@@ -1131,7 +1353,11 @@ function DriveTree({
             )}
           </span>
         </button>
-        {(actions?.rename || actions?.remove || actions?.share) && (
+        {(actions?.rename ||
+          actions?.remove ||
+          actions?.share ||
+          actions?.move ||
+          actions?.history) && (
           <span className="drive-folder-actions">
             {actions.share && (
               <Button
@@ -1141,6 +1367,26 @@ function DriveTree({
                 onClick={actions.share}
               >
                 <Share2 size={13} />
+              </Button>
+            )}
+            {actions.move && (
+              <Button
+                className="icon-btn"
+                aria-label={`Mover ${title}`}
+                title="Mover para…"
+                onClick={actions.move}
+              >
+                <FolderInput size={13} />
+              </Button>
+            )}
+            {actions.history && (
+              <Button
+                className="icon-btn"
+                aria-label={`Histórico de ${title}`}
+                title="Histórico"
+                onClick={actions.history}
+              >
+                <History size={13} />
               </Button>
             )}
             {actions.rename && (
@@ -1185,7 +1431,9 @@ function DriveTree({
 
   return (
     <div
-      className={`drive-page ${drop.active ? "dragging" : ""}`}
+      className={`drive-page ${drop.active ? "dragging" : ""} ${
+        selectedCount ? "selecting" : ""
+      } ${dragging ? "moving" : ""}`}
       {...drop.handlers}
     >
       {!virtual && (
@@ -1273,7 +1521,11 @@ function DriveTree({
 
       <nav className="drive-breadcrumb" aria-label="Pasta atual">
         {!root && (
-          <button type="button" onClick={() => go({})}>
+          <button
+            type="button"
+            onClick={() => go({})}
+            {...dropTarget("crumb-root", {}, isLeader && !!(at.client || at.folder))}
+          >
             Drive
           </button>
         )}
@@ -1286,7 +1538,15 @@ function DriveTree({
         {!viaShare && (root || (!searching && at.client)) && (
           <>
             {!root && <ChevronRight size={15} aria-hidden="true" />}
-            <button type="button" onClick={() => go({ client: at.client })}>
+            <button
+              type="button"
+              onClick={() => go({ client: at.client })}
+              {...dropTarget(
+                "crumb-client",
+                { client: at.client },
+                isLeader && !!(at.contract || at.folder),
+              )}
+            >
               {clientName(at.client)}
             </button>
           </>
@@ -1299,6 +1559,11 @@ function DriveTree({
               onClick={() =>
                 go({ client: place.client, contract: place.contract })
               }
+              {...dropTarget(
+                "crumb-product",
+                { client: place.client, contract: place.contract },
+                !!at.folder && writableAt(place.contract),
+              )}
             >
               {contractProductLabel(data, place.contract)}
             </button>
@@ -1317,6 +1582,15 @@ function DriveTree({
                     folder: f.id,
                   })
                 }
+                {...dropTarget(
+                  `crumb-${f.id}`,
+                  {
+                    client: f.client_id ?? undefined,
+                    contract: f.contract_id ?? undefined,
+                    folder: f.id,
+                  },
+                  f.id !== at.folder && writableAt(f.contract_id),
+                )}
               >
                 {f.name}
               </button>
@@ -1365,6 +1639,37 @@ function DriveTree({
           </>
         )}
       </nav>
+
+      {selectedCount > 0 && (
+        <div
+          className="drive-selection"
+          role="region"
+          aria-label="Itens escolhidos"
+        >
+          <strong>
+            {selectedCount === 1 ? "1 escolhido" : `${selectedCount} escolhidos`}
+          </strong>
+          <small className="hide-mobile">
+            Arraste até uma pasta ou use Mover para…
+          </small>
+          {selectedCount < movableFiles.length + movableFolders.length && (
+            <Button className="btn secondary" onClick={selectAll}>
+              Escolher tudo
+            </Button>
+          )}
+          <Button className="btn primary" onClick={() => startMove(selected)}>
+            <FolderInput size={15} /> Mover para…
+          </Button>
+          <Button
+            className="icon-btn"
+            aria-label="Limpar escolha"
+            title="Limpar escolha"
+            onClick={() => setSelected(NO_ITEMS)}
+          >
+            <X size={15} />
+          </Button>
+        </div>
+      )}
 
       {!canWrite && !searching && !virtual && (
         <p className="drive-readonly" role="note">
@@ -1549,6 +1854,16 @@ function DriveTree({
                         "client",
                         () => go({ client: c.id }),
                         c.color,
+                        undefined,
+                        false,
+                        "",
+                        {
+                          props: dropTarget(
+                            `client-${c.id}`,
+                            { client: c.id },
+                            isLeader,
+                          ),
+                        },
                       ),
                   ),
                   ...(showsProducts && recordingCount > 0
@@ -1631,6 +1946,16 @@ function DriveTree({
                         "product",
                         () => go({ client: k.client_id, contract: k.id }),
                         data.products.find((p) => p.id === k.product_id)?.color,
+                        undefined,
+                        false,
+                        "",
+                        {
+                          props: dropTarget(
+                            `product-${k.id}`,
+                            { client: k.client_id, contract: k.id },
+                            writableAt(k.id),
+                          ),
+                        },
                       ),
                   ),
                   ...subfolders.map(
@@ -1669,8 +1994,42 @@ function DriveTree({
                               (isLeader || f.created_by === user)
                                 ? () => setSharing(f)
                                 : undefined,
+                            move: canWrite
+                              ? () => startMove(itemsFor("folders", f.id))
+                              : undefined,
+                            history: () =>
+                              setHistory({ folder: f.id, name: f.name }),
                           },
                           f.visibility === "public",
+                          "",
+                          {
+                            selected: isSelected("folders", f.id),
+                            select: canWrite && (
+                              <Checkbox
+                                className="drive-select"
+                                aria-label={`Escolher ${f.name}`}
+                                checked={isSelected("folders", f.id)}
+                                onCheckedChange={() =>
+                                  toggleSelected("folders", f.id)
+                                }
+                              />
+                            ),
+                            props: {
+                              ...dragSource(
+                                () => itemsFor("folders", f.id),
+                                canWrite,
+                              ),
+                              ...dropTarget(
+                                `folder-${f.id}`,
+                                {
+                                  client: f.client_id ?? undefined,
+                                  contract: f.contract_id ?? undefined,
+                                  folder: f.id,
+                                },
+                                writableAt(f.contract_id),
+                              ),
+                            },
+                          },
                         )
                       ),
                   ),
@@ -1761,6 +2120,29 @@ function DriveTree({
               ),
             )
           }
+        />
+      )}
+      {moving && (
+        <DriveMoveDialog
+          company={company}
+          data={data}
+          user={user}
+          isLeader={isLeader}
+          folders={folders}
+          items={moving.items}
+          label={moving.label}
+          start={at.folder ? { ...place, folder: at.folder } : place}
+          fixed={moving.fixed}
+          onClose={() => setMoving(null)}
+          onMoved={(result) => void finishMove(result)}
+        />
+      )}
+      {history && (
+        <DriveItemHistory
+          data={data}
+          company={company}
+          item={history}
+          onClose={() => setHistory(null)}
         />
       )}
       {viewer && (
