@@ -12,6 +12,7 @@ import { Avatar, Badge, Empty } from "./components";
 import { dateLabel, durationWithSeconds, isLate, namesFrom, type NameLookup } from "./domain";
 import { readClosedGroups, writeClosedGroups } from "./remembered-filters";
 import { SelectBox, selectState } from "./TaskBulk";
+import { PriorityTag, priorityClass } from "./TaskPriority";
 import {
   GROUP_OPTIONS,
   SORT_OPTIONS,
@@ -182,6 +183,7 @@ export function TaskTable({
       ? (parentTitle?.(opts.elsewhere) ?? "outra tarefa")
       : null;
     const classes = [
+      priorityClass(t.priority),
       isPlaying && "is-playing",
       picked && "is-picked",
       opts.isChild && "is-subtask",
@@ -229,7 +231,10 @@ export function TaskTable({
                 </span>
               )}
               <span>
-                <strong>{renderTitle?.(t) ?? t.title}</strong>
+                <strong>
+                  <PriorityTag priority={t.priority} />
+                  {renderTitle?.(t) ?? t.title}
+                </strong>
                 <small>
                   {parent ? (
                     <>Subtarefa de {parent}</>

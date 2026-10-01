@@ -15,6 +15,7 @@
     "test:db:inbox": "node scripts/test-inbox-page.mjs",
     "test:db:search-rows": "node scripts/test-task-search-rows.mjs",
     "test:db:status": "node scripts/test-correction-status.mjs",
+    "test:db:priority": "node scripts/test-task-priority.mjs",
     "test:db:own-delivery": "node scripts/test-own-task-delivery.mjs",
     "test:db:drive": "node scripts/test-drive-sharing.mjs",
     "test:db:meetings": "node scripts/test-meeting-recordings.mjs",

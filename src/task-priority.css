@@ -1,0 +1,93 @@
+/* Prioridades: Alta e Urgente em destaque na lista, no quadro e na busca. */
+.priority-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 7px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1.6;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+.priority-tag-urgent {
+  background: #fbe1d9;
+  color: #a33f27;
+}
+.priority-tag-high {
+  background: #f9ecd0;
+  color: #85590f;
+}
+
+/* The row: a tinted background and a colored edge on the first cell. */
+.task-table tr.priority-row-urgent td {
+  background: #fff6f3;
+}
+.task-table tr.priority-row-urgent td:first-child {
+  box-shadow: inset 4px 0 0 #d0654a;
+}
+.task-table tr.priority-row-high td {
+  background: #fffaf0;
+}
+.task-table tr.priority-row-high td:first-child {
+  box-shadow: inset 4px 0 0 #d9a441;
+}
+.task-table tr.is-priority .task-title strong {
+  color: #33403a;
+  font-weight: 650;
+}
+/* The running timer and the bulk selection keep their own mark. */
+.task-table tr.is-priority.is-playing td,
+.task-table tr.is-priority.is-picked td {
+  background: #f4f9ec;
+}
+
+/* The board's card. */
+.task-card.priority-row-urgent {
+  border-color: #eab3a3;
+  box-shadow: inset 4px 0 0 #d0654a;
+  background: #fff8f5;
+}
+.task-card.priority-row-high {
+  border-color: #ecd3a0;
+  box-shadow: inset 4px 0 0 #d9a441;
+  background: #fffbf2;
+}
+.task-card .priority-tag {
+  display: flex;
+  width: fit-content;
+  margin: 0 0 7px;
+}
+
+/* The menu in the task's properties. */
+.priority-menu .priority-flag {
+  flex: 1;
+}
+.priority-menu .status-option:disabled .priority-flag {
+  opacity: 0.55;
+}
+.priority-menu-rule {
+  display: block;
+  max-width: 230px;
+  margin: 6px 8px 4px;
+  color: #8f9e80;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+.priority-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 8px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+.priority-banner.priority-tag-urgent,
+.priority-banner.priority-tag-high {
+  margin-right: 0;
+}

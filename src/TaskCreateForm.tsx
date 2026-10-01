@@ -27,6 +27,12 @@ import {
   priorities,
   recurrenceFrequencies,
 } from "./types";
+import {
+  PRIORITY_RULE,
+  canPrioritize,
+  canPrioritizeTeam,
+  isPrioritized,
+} from "./task-priority";
 import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
 import { suggestDue } from "./dueRules";
 import { AbsenceNote, DueRuleHint, SmartDueHint } from "./DueRuleHint";
@@ -163,7 +169,7 @@ export function TaskCreateForm({
   const [start, setStart] = useState("");
   const [clientApproval, setClientApproval] = useState(false);
   const [parent, setParent] = useState("");
-  const [priority, setPriority] = useState<keyof typeof priorities>(
+  const [pickedPriority, setPriority] = useState<keyof typeof priorities>(
     initialPriority ?? "normal",
   );
   const [estimated, setEstimated] = useState("");
@@ -227,6 +233,14 @@ export function TaskCreateForm({
   )
     ? assignTeam
     : "";
+  // Alta e Urgente só por quem pode marcar para quem recebe (gestor, admin,
+  // supervisor da equipe; src/task-priority.ts). Escolhida antes de trocar
+  // para alguém que a pessoa não pode marcar, volta a Normal.
+  const mayPrioritize = byTeam
+    ? canPrioritizeTeam(data, team, user)
+    : canPrioritize(data, assignee, user);
+  const priority =
+    !mayPrioritize && isPrioritized(pickedPriority) ? "normal" : pickedPriority;
   const dueSuggestion = useMemo(
     () =>
       contract
@@ -901,11 +915,16 @@ export function TaskCreateForm({
                         }
                       >
                         {Object.entries(priorities).map(([id, label]) => (
-                          <SelectOption key={id} value={id}>
+                          <SelectOption
+                            key={id}
+                            value={id}
+                            disabled={!mayPrioritize && isPrioritized(id)}
+                          >
                             {label}
                           </SelectOption>
                         ))}
                       </Select>
+                      {!mayPrioritize && <small>{PRIORITY_RULE}</small>}
                     </label>
                     <label>
                       Estimativa em horas

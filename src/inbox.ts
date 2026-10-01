@@ -14,6 +14,7 @@ export const INBOX_KINDS: { id: string; label: string; kinds: AppNotification["k
   { id: "assigned", label: "Tarefas para você", kinds: ["assigned", "tasks_assigned"] },
   { id: "status", label: "Mudanças de status", kinds: ["status"] },
   { id: "review", label: "Validações", kinds: ["review"] },
+  { id: "priority", label: "Prioridades", kinds: ["priority", "tasks_priority"] },
   { id: "due_risk", label: "Prazos em risco", kinds: ["due_risk"] },
   { id: "notice", label: "Mural de avisos", kinds: ["notice"] },
   { id: "temperature", label: "Termômetro", kinds: ["temperature"] },

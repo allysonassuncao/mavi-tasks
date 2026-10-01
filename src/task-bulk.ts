@@ -1,4 +1,4 @@
-import { statuses, type Status } from "./types";
+import { priorities, statuses, type Status, type Task } from "./types";
 
 /**
  * One change applied to many tasks at once (public.bulk_update_tasks):
@@ -6,7 +6,8 @@ import { statuses, type Status } from "./types";
  * status, a fixed due date, the due dates moved by N business days, or each
  * due date counted again by its due rule. Every due date change needs
  * `reason` (migration 20270110090000), which also justifies a date before
- * the rule's minimum.
+ * the rule's minimum. "priority": Alta and Urgente only where the person
+ * may prioritize (migration 20270130090000).
  */
 export type BulkChange =
   | { kind: "assignee"; value: string }
@@ -14,12 +15,14 @@ export type BulkChange =
   | { kind: "status"; value: Status; note?: string }
   | { kind: "due"; value: string; reason: string }
   | { kind: "shift"; value: number; reason: string }
-  | { kind: "rule"; reason: string };
+  | { kind: "rule"; reason: string }
+  | { kind: "priority"; value: Task["priority"] };
 
 interface BulkSide {
   status: Status;
   assignee_id: string;
   due_date: string;
+  priority?: Task["priority"];
 }
 /** How one task came out: changed, or left out and why. */
 export interface BulkItem {
@@ -85,6 +88,8 @@ export function describeChange(
     }
     case "rule":
       return "Recalcular o prazo de cada tarefa pela regra de prazo que vale para ela, contando do início planejado ou do dia em que foi criada.";
+    case "priority":
+      return `Mudar a prioridade para ${priorities[change.value]}. Alta e Urgente só mudam nas tarefas em que você pode marcar (administrador, gestor ou supervisor da equipe do responsável).`;
   }
 }
 
@@ -94,7 +99,9 @@ export function changedField(change: BulkChange): keyof BulkSide {
     ? "assignee_id"
     : change.kind === "status"
       ? "status"
-      : "due_date";
+      : change.kind === "priority"
+        ? "priority"
+        : "due_date";
 }
 
 /** Before and after of one task, in words. */
@@ -110,7 +117,11 @@ export function sides(
       ? member(side.assignee_id)
       : field === "status"
         ? (statuses[side.status]?.label ?? side.status)
-        : dayLabel(side.due_date);
+        : field === "priority"
+          ? side.priority
+            ? priorities[side.priority]
+            : "—"
+          : dayLabel(side.due_date);
   return { before: label(item.before), after: label(item.after) };
 }
 

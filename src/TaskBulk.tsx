@@ -6,6 +6,7 @@ import {
   Check,
   CircleAlert,
   CircleDot,
+  Flag,
   Info,
   Minus,
   Plus,
@@ -18,7 +19,15 @@ import { Avatar, Modal } from "./components";
 import { Button, Input, Textarea } from "./ui";
 import { dueReasonError } from "./task-due";
 import { fold } from "./domain";
-import { listedStatuses, statuses, type Snapshot, type Status } from "./types";
+import {
+  listedStatuses,
+  priorities,
+  statuses,
+  type Snapshot,
+  type Status,
+  type Task,
+} from "./types";
+import { PRIORITY_RULE, isPrioritized } from "./task-priority";
 import {
   NOTE_STATUSES,
   appliedMessage,
@@ -68,7 +77,7 @@ export function SelectBox({
   );
 }
 
-type Panel = "assignee" | "due" | "status" | null;
+type Panel = "assignee" | "due" | "status" | "priority" | null;
 
 /**
  * The bar of a selection in the task list: how many are selected and the
@@ -193,6 +202,14 @@ export function BulkEditor({
             label="Status"
           >
             <StatusPanel onPick={openReview} />
+          </ActionPopover>
+          <ActionPopover
+            open={panel === "priority"}
+            onOpenChange={(o) => setPanel(o ? "priority" : null)}
+            icon={<Flag size={16} />}
+            label="Prioridade"
+          >
+            <PriorityPanel data={data} me={me} onPick={openReview} />
           </ActionPopover>
           <button
             type="button"
@@ -533,6 +550,50 @@ function StatusPanel({ onPick }: { onPick: (change: BulkChange) => void }) {
   );
 }
 
+/**
+ * Alta e Urgente só para quem pode marcar em alguma tarefa (gestor, admin ou
+ * supervisor de uma equipe); o banco confere cada tarefa e deixa de fora as
+ * outras.
+ */
+function PriorityPanel({
+  data,
+  me,
+  onPick,
+}: {
+  data: Snapshot;
+  me: string;
+  onPick: (change: BulkChange) => void;
+}) {
+  const member = data.members.find((m) => m.user_id === me && m.active);
+  const mayMark =
+    member?.role === "admin" ||
+    member?.role === "manager" ||
+    (!!member && data.teamMembers.some((tm) => tm.user_id === me && tm.supervisor));
+  const order: Task["priority"][] = ["urgent", "high", "normal", "low"];
+  return (
+    <>
+      <h3>Mudar prioridade</h3>
+      <p className="bulk-panel-sub">{PRIORITY_RULE}</p>
+      <div className="bulk-options">
+        {order.map((p) => (
+          <button
+            key={p}
+            type="button"
+            className="bulk-option"
+            disabled={isPrioritized(p) && !mayMark}
+            onClick={() => onPick({ kind: "priority", value: p })}
+          >
+            <span className={`priority-flag priority-${p}`}>
+              <Flag size={13} fill="currentColor" />
+              {priorities[p]}
+            </span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function BulkReview({
   change,
   result,
@@ -571,7 +632,11 @@ function BulkReview({
   };
   const changed = result?.results.filter((r) => r.ok) ?? [];
   const skipped = result?.results.filter((r) => !r.ok) ?? [];
-  const dueOnly = change.kind === "due" || change.kind === "shift" || change.kind === "rule";
+  const dueOnly =
+    change.kind === "due" ||
+    change.kind === "shift" ||
+    change.kind === "rule" ||
+    change.kind === "priority";
   return (
     <Modal title="Revisar alterações" onClose={onBack} busy={applying} className="bulk-review">
       <div className="bulk-review-head">

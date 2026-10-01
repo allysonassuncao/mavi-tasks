@@ -31,6 +31,11 @@ export const NOTICE_TYPES: {
     hint: "Quando respondem a um comentário seu.",
   },
   {
+    key: "priority",
+    label: "Tarefa prioritária",
+    hint: "Quando uma tarefa sua é marcada como prioridade Alta ou Urgente.",
+  },
+  {
     key: "review",
     label: "Tarefa para validar",
     hint: "Quando uma tarefa que você valida entra em Em validação.",

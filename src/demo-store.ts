@@ -24,11 +24,18 @@ import {
   type TaskEvent,
   type TaskRecurrence,
   type AppNotification,
+  priorities,
   statuses,
   workingStatuses,
 } from "./types";
 import { MEMBER_OPT_IN, MODULES } from "./modules";
 import { canChangeDue, dueChangeError, dueReasonError } from "./task-due";
+import {
+  PRIORITY_RULE,
+  canPrioritize,
+  canSetPriority,
+  isPrioritized,
+} from "./task-priority";
 import type { TaskView } from "./api";
 import type { BulkChange, BulkItem, BulkResult, BulkUndo } from "./task-bulk";
 import {
@@ -68,6 +75,23 @@ export class DemoStore {
       actor_id: demoUser,
       action: "due_changed",
       detail: { old_due: old, new_due: t.due_date, reason: reason.trim(), source },
+      created_at: new Date().toISOString(),
+    });
+  }
+  /** Mirrors the priority triggers: who marked it, and the history line. */
+  private setPriority(t: Task, next: Task["priority"]) {
+    const from = t.priority;
+    t.priority = next;
+    t.priority_weight = isPrioritized(next) ? (next === "urgent" ? 2 : 1) : 0;
+    t.priority_set_by = isPrioritized(next) ? demoUser : null;
+    t.priority_set_at = isPrioritized(next) ? new Date().toISOString() : null;
+    t.version++;
+    this.events.unshift({
+      id: crypto.randomUUID(),
+      task_id: t.id,
+      actor_id: demoUser,
+      action: "priority",
+      detail: { from, to: next },
       created_at: new Date().toISOString(),
     });
   }
@@ -142,6 +166,15 @@ export class DemoStore {
           if (t.status === change.value)
             reason = `Já está em ${statuses[change.value].label}`;
           else move(change.value, null, change.note ?? "");
+        } else if (change.kind === "priority") {
+          if (t.priority === change.value)
+            reason = `Já está com prioridade ${priorities[change.value]}`;
+          else
+            this.mutate("set_task_priority", {
+              p_task: t.id,
+              p_version: t.version,
+              p_priority: change.value,
+            });
         } else if (!canChangeDue(this.data, t, demoUser))
           reason = "Sem permissão para mudar o prazo desta tarefa";
         else {
@@ -202,6 +235,7 @@ export class DemoStore {
         status: x.status,
         assignee_id: x.assignee_id,
         due_date: x.due_date,
+        priority: x.priority,
       });
       results.push({
         id: t.id,
@@ -685,7 +719,8 @@ export class DemoStore {
             p_contract: s.contract_id,
             p_project: s.project_id,
             p_team: s.team_id,
-            p_priority: a.p_kind === "bug" ? "high" : "normal",
+            // Bugs too: Alta/Urgente are marked by people (20270130090000).
+            p_priority: "normal",
             p_due: dateKey(due),
             p_custom: {},
           });
@@ -704,6 +739,9 @@ export class DemoStore {
             );
           assignee = picked.user_id;
         }
+        // Mirrors mavi_private.guard_task_priority.
+        if (isPrioritized(a.p_priority) && !canPrioritize(this.data, assignee, demoUser))
+          throw Error(PRIORITY_RULE);
         // The templates that apply add their fields, and the required ones
         // must be filled in.
         const fields = byTeam
@@ -759,6 +797,8 @@ export class DemoStore {
           status: "progress",
           status_changed_at: now,
           priority: a.p_priority ?? "normal",
+          priority_set_by: isPrioritized(a.p_priority) ? demoUser : null,
+          priority_set_at: isPrioritized(a.p_priority) ? now : null,
           creator_id: demoUser,
           assignee_id: assignee,
           due_date: due,
@@ -845,6 +885,24 @@ export class DemoStore {
         task.due_smart = false;
         task.version++;
         this.dueChanged(task, old, String(a.p_reason), "task");
+        break;
+      }
+      case "set_task_priority": {
+        // Mirrors public.set_task_priority (migration 20270130090000): only
+        // the priority changes; Alta/Urgente by whoever may prioritize.
+        if (!task || task.archived) throw Error("Tarefa não encontrada");
+        if (task.version !== a.p_version)
+          throw Error("A tarefa mudou. Atualize antes de continuar.");
+        if (!(a.p_priority in priorities)) throw Error("Prioridade inválida");
+        if (a.p_priority === task.priority)
+          throw Error("A tarefa já tem essa prioridade.");
+        if (!canSetPriority(this.data, task, a.p_priority, demoUser))
+          throw Error(
+            isPrioritized(a.p_priority) || isPrioritized(task.priority)
+              ? PRIORITY_RULE
+              : "Sem permissão para mudar a prioridade desta tarefa",
+          );
+        this.setPriority(task, a.p_priority);
         break;
       }
       case "set_task_custom_fields": {
@@ -1084,6 +1142,11 @@ export class DemoStore {
         const isLeader = callerRole === "admin" || callerRole === "manager";
         if (task.creator_id !== demoUser && !isLeader)
           throw Error("Sem permissão para editar");
+        if (
+          a.p_priority !== task.priority &&
+          !canSetPriority(this.data, task, a.p_priority, demoUser)
+        )
+          throw Error(PRIORITY_RULE);
         // Mirrors public.update_task: another client takes the subtasks along.
         let moved: Record<string, unknown> = {};
         if (a.p_contract && a.p_contract !== task.contract_id) {

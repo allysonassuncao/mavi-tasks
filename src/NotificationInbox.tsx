@@ -7,6 +7,7 @@ import {
   Check,
   CheckCheck,
   Inbox,
+  Flag,
   ListChecks,
   Sparkles,
   Thermometer,
@@ -83,6 +84,10 @@ export function InboxList({
                 <span className="inbox-system" aria-hidden="true">
                   <ListChecks size={15} />
                 </span>
+              ) : n.kind === "tasks_priority" ? (
+                <span className="inbox-system due-risk" aria-hidden="true">
+                  <Flag size={15} />
+                </span>
               ) : n.kind === "radar_report" || n.kind === "radar_alert" ? (
                 <span className="inbox-system temperature" aria-hidden="true">
                   <Radar size={15} />
@@ -117,6 +122,7 @@ export function InboxList({
                 n.kind === "radar_alert" ||
                 n.kind === "media_balance" ||
                 n.kind === "tasks_assigned" ||
+                n.kind === "tasks_priority" ||
                 n.kind === "due_risk" ||
                 n.kind === "notice" ? (
                   <span className="inbox-line">

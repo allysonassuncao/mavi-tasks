@@ -22,6 +22,8 @@ export type TaskSearchParams = {
   /** Due date range (yyyy-mm-dd). */
   from?: string;
   to?: string;
+  /** Only Alta and Urgente ("Prioritárias"; search_task_rows only). */
+  priority?: boolean;
   offset?: number;
   /** Page size (the database caps it at 100). */
   limit?: number;
@@ -92,7 +94,8 @@ export function hasCriteria(p: TaskSearchParams) {
     p.creator ||
     p.status ||
     p.from ||
-    p.to
+    p.to ||
+    p.priority
   );
 }
 
@@ -156,6 +159,7 @@ export async function searchTaskRows(
       p_status: p.status || null,
       p_from: p.from || null,
       p_to: p.to || null,
+      p_priority: !!p.priority,
       p_limit: SEARCH_CAP - rows.length,
       p_offset: rows.length,
     })) ?? []) as Row[];

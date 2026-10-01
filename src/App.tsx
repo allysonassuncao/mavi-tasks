@@ -191,6 +191,8 @@ import {
   TaskTotal,
   type Playing,
 } from "./TaskTable";
+import { PriorityTag, priorityClass } from "./TaskPriority";
+import { isPrioritized } from "./task-priority";
 import { NotificationInbox } from "./NotificationInbox";
 import { NotificationMenu } from "./NotificationMenu";
 import { NotificationSettings } from "./NotificationSettings";
@@ -490,6 +492,8 @@ export default function App() {
     [legacyMine, setLegacyMine] = useUrlState<boolean>("minhas", false),
     [scopeParam, setScope] = useUrlState<string>("escopo", ""),
     [late, setLate] = useUrlState<boolean>("atrasadas", false),
+    // Only Alta and Urgente (src/task-priority.ts).
+    [prioritized, setPrioritized] = useUrlState<boolean>("prioritarias", false),
     [clientFilter, setClientFilter] = useUrlState<string>("cliente", ""),
     [projectFilter, setProjectFilter] = useUrlState<string>("projeto", ""),
     [offset, setOffset] = useUrlState<number>("pagina", 0),
@@ -997,6 +1001,7 @@ export default function App() {
           page: page === "tasks" && !groupedList ? offset : 0,
           all: page === "tasks" && groupedList,
           late: page === "tasks" ? late : false,
+          priority: page === "tasks" ? prioritized : false,
           client: page === "tasks" ? clientFilter : "",
           project: page === "tasks" ? projectFilter : "",
           order: page === "tasks" ? sortBy : undefined,
@@ -1047,6 +1052,7 @@ export default function App() {
     user,
     offset,
     late,
+    prioritized,
     clientFilter,
     projectFilter,
     refresh,
@@ -1079,6 +1085,7 @@ export default function App() {
           user,
           page: 0,
           late,
+          priority: prioritized,
           client: clientFilter,
           project: projectFilter,
           onlyMineOrCreated: false,
@@ -1106,6 +1113,7 @@ export default function App() {
     product,
     user,
     late,
+    prioritized,
     clientFilter,
     projectFilter,
     refresh,
@@ -2025,6 +2033,7 @@ export default function App() {
           // Delivered tasks only appear when filtering by "Entregue".
           (status ? t.status === status : t.status !== "done") &&
           (!late || isLate(t, today)) &&
+          (!prioritized || isPrioritized(t.priority)) &&
           (!product ||
             nameLookup.contracts.get(t.contract_id)?.product_id === product),
       ),
@@ -2037,6 +2046,7 @@ export default function App() {
       status,
       user,
       late,
+      prioritized,
       today,
       product,
     ],
@@ -2131,6 +2141,7 @@ export default function App() {
     product,
     listScope,
     late,
+    prioritized,
     clientFilter,
     projectFilter,
     view,
@@ -2172,6 +2183,7 @@ export default function App() {
         user,
         page: 0,
         late,
+        priority: prioritized,
         client: clientFilter,
         project: projectFilter,
         onlyMineOrCreated: !isLeader,
@@ -2236,6 +2248,7 @@ export default function App() {
     product,
     scope: listScope,
     late,
+    priority: prioritized,
     client: clientFilter,
     project: projectFilter,
   });
@@ -2245,6 +2258,7 @@ export default function App() {
     setProduct(c.product ?? "");
     setScope(c.scope ?? "");
     setLate(!!c.late);
+    setPrioritized(!!c.priority);
     setClientFilter(c.client ?? "");
     setProjectFilter(c.project ?? "");
     setGroupBy(c.group ?? "auto");
@@ -3388,6 +3402,17 @@ export default function App() {
                     >
                       <SlidersHorizontal size={15} /> Atrasadas
                     </Button>
+                    <Button
+                      className={`filter-chip priority-chip ${prioritized ? "selected" : ""}`}
+                      aria-pressed={prioritized}
+                      title="Só as tarefas com prioridade Alta ou Urgente"
+                      onClick={() => {
+                        setPrioritized(!prioritized);
+                        setOffset(0);
+                      }}
+                    >
+                      <Flag size={15} /> Prioritárias
+                    </Button>
                   </div>
                   {scheduleView && (
                     <Suspense fallback={<Loading variant="field" />}>
@@ -3478,10 +3503,11 @@ export default function App() {
                                   playing = activeTimer?.task_id === t.id;
                                 return (
                                   <Button
-                                    className={`task-card${playing ? " is-playing" : ""}`}
+                                    className={`task-card${playing ? " is-playing" : ""} ${priorityClass(t.priority)}`.trimEnd()}
                                     key={t.id}
                                     onClick={() => setSelected(t.id)}
                                   >
+                                    <PriorityTag priority={t.priority} />
                                     <small>
                                       {n.client?.name} · {n.product?.name}
                                     </small>
@@ -4772,6 +4798,7 @@ const LIST_PARAMS = [
   "produto",
   "escopo",
   "atrasadas",
+  "prioritarias",
   "cliente",
   "projeto",
   "agrupar",

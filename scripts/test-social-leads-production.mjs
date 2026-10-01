@@ -198,7 +198,8 @@ await check(
         "select priority, assignee_id, team_id from tasks t join social_leads_posts x on x.task_id=t.id where x.plan_id=$1 and x.number=4",
         [planId],
       ),
-      { priority: "high", assignee_id: outsider, team_id: null },
+      // O anúncio nasce Normal desde 20270130090000 (Alta é marcada por pessoas).
+      { priority: "normal", assignee_id: outsider, team_id: null },
     );
   },
 );

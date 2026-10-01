@@ -36,6 +36,8 @@ export interface Filters {
   user: string;
   page: number;
   late: boolean;
+  /** Only Alta and Urgente ("Prioritárias"). */
+  priority?: boolean;
   client: string;
   project: string;
   schedule?: { view: "calendar" | "gantt"; start: string; end: string };
@@ -171,7 +173,8 @@ const LIST_COLUMNS =
   "requires_client_approval,internal_approved_by,client_approved_by," +
   "client_approval_note,delivered_at,status_changed_at,executor_id," +
   "participant_ids,recurrence_id,due_manual,due_rule_id,due_tight_reason," +
-  "due_smart,due_rule_date,due_smart_date,revision,version,archived,created_at";
+  "due_smart,due_rule_date,due_smart_date,priority_set_by,priority_set_at,priority_weight," +
+  "revision,version,archived,created_at";
 
 // TTL configurations in milliseconds
 export const CACHE_TTL = {
@@ -297,6 +300,7 @@ function hashFilters(filters: Filters): string {
     u: filters.user,
     pg: filters.page,
     l: filters.late,
+    pri: filters.priority,
     c: filters.client,
     pr: filters.project,
     sch: filters.schedule,
@@ -390,6 +394,7 @@ function filteredTasks(
     }).format(new Date());
     query = query.lt("due_date", today).neq("status", "done");
   }
+  if (filters.priority) query = query.gt("priority_weight", 0);
   if (filters.schedule) {
     const { view, start, end } = filters.schedule;
     query = query.gte("due_date", start);
@@ -448,7 +453,10 @@ export function applyScope<
     : others;
 }
 
-/** The list's order ("Ordenar por"); the id keeps pages from overlapping. */
+/**
+ * The list's order ("Ordenar por"), Urgente and Alta first (as
+ * task-grouping.compareTasks); the id keeps pages from overlapping.
+ */
 function orderTasks<
   Q extends {
     order: (c: string, o?: { ascending?: boolean }) => Q;
@@ -463,7 +471,10 @@ function orderTasks<
       title: ["title", true],
     } as const
   )[order];
-  return query.order(column, { ascending }).order("id");
+  return query
+    .order("priority_weight", { ascending: false })
+    .order(column, { ascending })
+    .order("id");
 }
 
 /** A view of the task list the person saved (only they see theirs). */

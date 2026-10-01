@@ -1,4 +1,5 @@
 import { dateKey, isLate, type NameLookup } from "./domain";
+import { priorityWeight } from "./task-priority";
 import { listedStatuses, statuses, type Task } from "./types";
 
 /**
@@ -85,13 +86,18 @@ function sortKey(sort: ListSort, a: Task, b: Task) {
   }
 }
 /**
- * Tasks in the sort's order; ties by id, as the server pages them.
- * "Relevância" keeps the order they came in.
+ * Tasks in the sort's order, Urgente and Alta first in each section
+ * (Prioridades); ties by id, as the server pages them. "Relevância" keeps the
+ * order they came in after the prioritized ones.
  */
 export function compareTasks(sort: ListSort) {
-  if (sort === "relevance") return () => 0;
+  const first = (a: Task, b: Task) =>
+    priorityWeight(b.priority) - priorityWeight(a.priority);
+  if (sort === "relevance") return first;
   return (a: Task, b: Task) =>
-    sortKey(sort, a, b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    first(a, b) ||
+    sortKey(sort, a, b) ||
+    (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 /** Splits whose sections keep their own order whatever the sort. */
@@ -366,6 +372,8 @@ export interface TaskViewConfig {
   product?: string;
   scope?: string;
   late?: boolean;
+  /** Only Alta and Urgente ("Prioritárias"). */
+  priority?: boolean;
   client?: string;
   project?: string;
 }
@@ -378,6 +386,7 @@ const VIEW_KEYS: (keyof TaskViewConfig)[] = [
   "product",
   "scope",
   "late",
+  "priority",
   "client",
   "project",
 ];

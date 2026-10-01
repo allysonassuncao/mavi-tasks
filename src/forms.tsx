@@ -132,6 +132,13 @@ import { CopilotBadge, TaskCopilot, useCopilotFeedback } from "./TaskCopilot";
 import { TaskDueEdit } from "./DueRuleHint";
 import { DueRiskNote, ReplanModal } from "./DueAssist";
 import { TaskDueValue } from "./TaskDueChange";
+import { TaskPriorityValue } from "./TaskPriority";
+import {
+  PRIORITY_RULE,
+  canPrioritize,
+  canSetPriority,
+  isPrioritized,
+} from "./task-priority";
 import { dueSources } from "./task-due";
 import { canManageDueScope } from "./dueRules";
 import { MIN_REVIEW, copilotExtras, useTaskCopilot } from "./copilot";
@@ -543,6 +550,8 @@ export function CreateForm({
 const PANEL_KEY = "mavi:task-panel";
 const statusLabel = (value: unknown) =>
   statuses[value as Status]?.label ?? String(value);
+const priorityLabel = (value: unknown) =>
+  priorities[value as Task["priority"]] ?? String(value);
 /** How the history names each event, old linear-flow actions included. */
 function eventLabel(e: TaskEvent) {
   const { from, to } = e.detail;
@@ -550,6 +559,11 @@ function eventLabel(e: TaskEvent) {
   if (e.action === "due_changed")
     return `Prazo alterado · ${dateLabel(String(e.detail.old_due))} → ${dateLabel(String(e.detail.new_due))}`;
   if (e.action === "bulk_undone") return "Alteração em massa desfeita";
+  // Prioridades (migração 20270130090000): quem mudou vai na linha de baixo.
+  if (e.action === "priority")
+    return e.detail.system
+      ? `Prioridade ajustada pela regra de prioridades · ${priorityLabel(from)} → ${priorityLabel(to)}`
+      : `Prioridade · ${priorityLabel(from)} → ${priorityLabel(to)}`;
   // Editar tarefa: o cliente (produto contratado) trocado.
   if (e.action === "edited" && e.detail.new_client)
     return `Cliente alterado · ${String(e.detail.old_client)} (${String(e.detail.old_product)}) → ${String(e.detail.new_client)} (${String(e.detail.new_product)})`;
@@ -1431,6 +1445,15 @@ export function TaskDetail({
             <span>/</span>
             {n.project?.name ?? "Sem projeto"}
           </div>
+          {isPrioritized(task.priority) && (
+            <span
+              className={`priority-banner priority-tag-${task.priority}`}
+              role="note"
+            >
+              <Flag size={13} fill="currentColor" aria-hidden="true" />
+              Prioridade {priorities[task.priority]}
+            </span>
+          )}
           <div className="detail-title">
             <h2>{task.title}</h2>
             <div className="detail-title-actions">
@@ -1530,12 +1553,13 @@ export function TaskDetail({
                 <span className="property-label">
                   <Flag size={15} /> Prioridade
                 </span>
-                <div className="property-value">
-                  <span className={`priority-flag priority-${task.priority}`}>
-                    <Flag size={13} fill="currentColor" />
-                    {priorities[task.priority]}
-                  </span>
-                </div>
+                <TaskPriorityValue
+                  task={task}
+                  data={data}
+                  user={user}
+                  mutate={mutate}
+                  notify={notify}
+                />
               </div>
               {extras.recurrence && (
                 <RecurrenceRow
@@ -1810,11 +1834,20 @@ export function TaskDetail({
                   Prioridade
                   <Select name="priority" defaultValue={task.priority}>
                     {Object.entries(priorities).map(([k, v]) => (
-                      <SelectOption value={k} key={k}>
+                      <SelectOption
+                        value={k}
+                        key={k}
+                        disabled={
+                          !canSetPriority(data, task, k as Task["priority"], user)
+                        }
+                      >
                         {v}
                       </SelectOption>
                     ))}
                   </Select>
+                  {!canPrioritize(data, task.assignee_id, user) && (
+                    <small>{PRIORITY_RULE}</small>
+                  )}
                 </label>
                 {copilotOn && <CopilotBadge state={copilot} />}
                 <div className="form-footer">
@@ -2295,6 +2328,12 @@ export function TaskDetail({
                         </small>
                         {!!e.detail.note && (
                           <RichTextContent value={String(e.detail.note)} />
+                        )}
+                        {e.action === "priority" && !e.detail.system && (
+                          <span className="event-reason">
+                            {isPrioritized(String(e.detail.to)) ? "Marcada" : "Alterada"} por{" "}
+                            {memberName(e.actor_id)}
+                          </span>
                         )}
                         {/* Mudança de prazo (migration 20270110090000): quem, onde e por quê. */}
                         {e.action === "due_changed" && !!e.detail.reason && (

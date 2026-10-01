@@ -34,6 +34,7 @@ function configParts(c: TaskViewConfig, data: Snapshot) {
     c.client ? data.clients.find((x) => x.id === c.client)?.name ?? "" : "",
     c.project ? data.projects.find((p) => p.id === c.project)?.name ?? "" : "",
     c.late ? "Atrasadas" : "",
+    c.priority ? "Prioritárias" : "",
   ].filter(Boolean);
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Search, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, Flag, Search, TriangleAlert, X } from "lucide-react";
 import { Button, Input, Select, SelectOption } from "./ui";
 import { Empty, Loading } from "./components";
 import { buildNameLookup, dateKey } from "./domain";
@@ -50,6 +50,7 @@ const FILTER_PARAMS = [
   "situacao",
   "de",
   "ate",
+  "prioritarias",
   "ordenar",
   "agrupar",
   "depois",
@@ -110,6 +111,7 @@ export function TaskSearch({
   const [status, setStatus] = useUrlState<string>("situacao", "");
   const [from, setFrom] = useUrlState<string>("de", "");
   const [to, setTo] = useUrlState<string>("ate", "");
+  const [prioritized, setPrioritized] = useUrlState<boolean>("prioritarias", false);
   const [sortParam, setSortParam] = useUrlState<string>("ordenar", "");
   const [groupParam, setGroupParam] = useUrlState<string>("agrupar", "none");
   const [thenParam, setThenParam] = useUrlState<string>("depois", "none");
@@ -157,6 +159,7 @@ export function TaskSearch({
     situacao: status,
     de: from,
     ate: to,
+    prioritarias: prioritized ? "1" : "",
     ordenar: sortParam,
     agrupar: groupParam === "none" ? "" : groupParam,
     depois: thenParam === "none" ? "" : thenParam,
@@ -189,8 +192,9 @@ export function TaskSearch({
       status,
       from,
       to,
+      priority: prioritized,
     }),
-    [query, fields, client, project, assignee, creator, status, from, to],
+    [query, fields, client, project, assignee, creator, status, from, to, prioritized],
   );
   const active = hasCriteria(params);
 
@@ -265,6 +269,7 @@ export function TaskSearch({
     setStatus("");
     setFrom("");
     setTo("");
+    setPrioritized(false);
   }
 
   const clients = data.clients
@@ -442,6 +447,14 @@ export function TaskSearch({
             onChange={(e) => setTo(e.target.value)}
           />
         </label>
+        <Button
+          className={`filter-chip priority-chip ${prioritized ? "selected" : ""}`}
+          aria-pressed={prioritized}
+          title="Só as tarefas com prioridade Alta ou Urgente"
+          onClick={() => setPrioritized(!prioritized)}
+        >
+          <Flag size={15} /> Prioritárias
+        </Button>
         {active && (
           <Button className="text-btn" onClick={clearAll}>
             Limpar tudo <X size={14} />

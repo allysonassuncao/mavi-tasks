@@ -97,6 +97,13 @@ export interface Task {
   description: string;
   status: Status;
   priority: "low" | "normal" | "high" | "urgent";
+  /**
+   * Prioridades (migração 20270130090000): quem marcou Alta/Urgente e quando
+   * (null nas outras), e o peso que ordena a lista (2 Urgente, 1 Alta, 0).
+   */
+  priority_set_by?: string | null;
+  priority_set_at?: string | null;
+  priority_weight?: number;
   creator_id: string;
   assignee_id: string;
   due_date: string;
@@ -167,7 +174,11 @@ export interface AppNotification {
     /** Radar do cliente: um aviso de uma regra da pessoa (link /radar?item=<id>) ou o resumo do dia (link /radar). */
     | "radar_alert"
     /** Financeiro › Mídia: o saldo de uma conta ficou baixo ou negativo (link /financeiro/midia?contrato=<id>). */
-    | "media_balance";
+    | "media_balance"
+    /** Prioridades: a tarefa da pessoa subiu para Alta ou Urgente (headline: "marcou como prioridade Urgente"). */
+    | "priority"
+    /** Prioridades em massa: "Ana marcou 3 tarefas suas como prioridade Alta" (link /tarefas?escopo=mine&prioritarias=1). */
+    | "tasks_priority";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

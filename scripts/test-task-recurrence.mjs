@@ -103,7 +103,8 @@ const create = (
       project,
       team,
       "Legenda e arte",
-      "high",
+      // Alta/Urgente só por gestor ou supervisor (20270130090000).
+      "normal",
       90,
       false,
       null,

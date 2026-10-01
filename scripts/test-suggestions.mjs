@@ -140,7 +140,8 @@ await check(
     assert.equal(t.team_id, pd);
     assert.equal(t.contract_id, pdContract);
     assert.equal(t.project_id, roadmap);
-    assert.equal(t.priority, "high");
+    // Desde 20270130090000 o bug também nasce Normal (Alta é marcada por pessoas).
+    assert.equal(t.priority, "normal");
     assert.equal(t.description, "Detalhes");
   },
 );
@@ -149,10 +150,10 @@ await check("bug vence em 2 dias; funcionalidade em 1 semana", async () => {
   const bug = await suggest(seller, "bug", "Erro ao salvar");
   const feature = await suggest(seller, "feature", "Exportar em PDF");
   const [b, f] = await sql(
-    "select (due_date-current_date) as days,priority from tasks where id=any($1) order by priority",
+    "select (due_date-current_date) as days,priority from tasks where id=any($1) order by due_date",
     [[bug, feature]],
   );
-  assert.deepEqual(b, { days: 2, priority: "high" });
+  assert.deepEqual(b, { days: 2, priority: "normal" });
   assert.deepEqual(f, { days: 7, priority: "normal" });
 });
 
