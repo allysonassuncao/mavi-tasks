@@ -4430,6 +4430,23 @@ export default function App() {
                                       Várias tarefas ao mesmo tempo
                                     </span>
                                   )}
+                                  {isLeader &&
+                                    (m.role === "admin" || m.role === "manager") &&
+                                    (m.lesson_alerts_copilot ||
+                                      m.lesson_alerts_mavi) && (
+                                      <span
+                                        className="member-email"
+                                        title="Recebe na caixa de entrada os aprendizados novos do Painel da MAVI (Recursos extras, em Editar usuário)"
+                                      >
+                                        Avisos de aprendizados:{" "}
+                                        {[
+                                          m.lesson_alerts_copilot && "Copiloto",
+                                          m.lesson_alerts_mavi && "MAVI",
+                                        ]
+                                          .filter(Boolean)
+                                          .join(" e ")}
+                                      </span>
+                                    )}
                                 </div>
                                 <span className="role-tag">
                                   {ROLE_LABELS[m.role]}

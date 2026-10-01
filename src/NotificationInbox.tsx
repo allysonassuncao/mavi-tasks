@@ -3,11 +3,13 @@ import {
   ArrowRight,
   AtSign,
   BellRing,
+  Brain,
   CalendarClock,
   Check,
   CheckCheck,
   Inbox,
   Flag,
+  GraduationCap,
   ListChecks,
   Sparkles,
   Thermometer,
@@ -96,6 +98,14 @@ export function InboxList({
                 <span className="inbox-system due-risk" aria-hidden="true">
                   <Wallet size={15} />
                 </span>
+              ) : n.kind === "copilot_lessons" ? (
+                <span className="inbox-system" aria-hidden="true">
+                  <GraduationCap size={15} />
+                </span>
+              ) : n.kind === "mavi_lessons" ? (
+                <span className="inbox-system" aria-hidden="true">
+                  <Brain size={15} />
+                </span>
               ) : n.kind === "ai_skill" ? (
                 <span className="inbox-system" aria-hidden="true">
                   <Puzzle size={15} />
@@ -123,6 +133,8 @@ export function InboxList({
                 n.kind === "media_balance" ||
                 n.kind === "tasks_assigned" ||
                 n.kind === "tasks_priority" ||
+                n.kind === "copilot_lessons" ||
+                n.kind === "mavi_lessons" ||
                 n.kind === "due_risk" ||
                 n.kind === "notice" ? (
                   <span className="inbox-line">

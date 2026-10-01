@@ -1038,6 +1038,27 @@ export class DemoStore {
         );
         break;
       }
+      case "set_member_lesson_alerts": {
+        // Mirrors public.set_member_lesson_alerts (migration 20270203090000).
+        const target = this.data.members.find((m) => m.user_id === a.p_user);
+        const me = this.data.members.find((m) => m.user_id === demoUser);
+        if (
+          !target ||
+          (me?.role !== "admin" && me?.role !== "manager") ||
+          (a.p_user !== demoUser &&
+            !canManageDueScope(this.data, demoUser, { project_id: null, client_id: null, team_id: null, user_id: a.p_user })) ||
+          (target.role === "admin" && me?.role !== "admin")
+        )
+          throw Error("Administradores liberam para todos; gestores, para as pessoas das suas equipes");
+        if ((a.p_copilot || a.p_mavi) && target.role === "member")
+          throw Error("Os avisos de aprendizados são só para administradores e gestores, que abrem o Painel da MAVI");
+        this.data.members = this.data.members.map((m) =>
+          m.user_id === a.p_user
+            ? { ...m, lesson_alerts_copilot: !!a.p_copilot, lesson_alerts_mavi: !!a.p_mavi }
+            : m,
+        );
+        break;
+      }
       case "set_member_multi_timer": {
         // Mirrors public.set_member_multi_timer (migration 20270202090000).
         const target = this.data.members.find((m) => m.user_id === a.p_user);

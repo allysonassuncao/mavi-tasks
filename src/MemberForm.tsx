@@ -26,7 +26,9 @@ const roles: { id: Role; label: string }[] = [
  * nobody changes their own profile or deactivates themselves. Admins also
  * pick the modules the person sees (set_member_pages); admins and managers
  * turn on the extras, such as timing several tasks at once
- * (set_member_multi_timer).
+ * (set_member_multi_timer) and, for admins and managers (who open the Painel
+ * da MAVI), the inbox notices of the Copiloto's and the MAVI's new learnings
+ * (set_member_lesson_alerts).
  */
 export function MemberForm({
   member,
@@ -55,6 +57,10 @@ export function MemberForm({
   const [role, setRole] = useState<Role>(member.role);
   const [active, setActive] = useState(member.active);
   const [multiTimer, setMultiTimer] = useState(!!member.multi_timer);
+  const [copilotAlerts, setCopilotAlerts] = useState(
+    !!member.lesson_alerts_copilot,
+  );
+  const [maviAlerts, setMaviAlerts] = useState(!!member.lesson_alerts_mavi);
   const [teams, setTeams] = useState<string[]>(
     data.teamMembers
       .filter((tm) => tm.user_id === member.user_id)
@@ -115,6 +121,20 @@ export function MemberForm({
           p_company: company,
           p_user: member.user_id,
           p_on: multiTimer,
+        });
+      // Only leaders open the Painel da MAVI: a collaborator can't keep them.
+      const leader = role === "admin" || role === "manager";
+      const copilotOn = leader && copilotAlerts;
+      const maviOn = leader && maviAlerts;
+      if (
+        copilotOn !== !!member.lesson_alerts_copilot ||
+        maviOn !== !!member.lesson_alerts_mavi
+      )
+        await mutate("set_member_lesson_alerts", {
+          p_company: company,
+          p_user: member.user_id,
+          p_copilot: copilotOn,
+          p_mavi: maviOn,
         });
       if (canEditPhone && phonesChanged(phones, savedPhones))
         setSavedPhones(await saveMemberPhones(company, member.user_id, phones));
@@ -295,6 +315,45 @@ export function MemberForm({
               <small className="form-hint" role="status">
                 Ao salvar, só a tarefa iniciada por último continua rodando.
               </small>
+            )}
+            {role === "admin" || role === "manager" ? (
+              <>
+                <label className="checkbox-label">
+                  <Checkbox
+                    checked={copilotAlerts}
+                    onCheckedChange={(on) => setCopilotAlerts(on === true)}
+                  />
+                  <span>
+                    Avisos de aprendizados do Copiloto
+                    <small className="member-module-note">
+                      {copilotAlerts
+                        ? "na caixa de entrada, quando a MAVI aprender algo novo em Painel da MAVI › Copiloto (um aviso por lote)"
+                        : "desligado: os aprendizados novos ficam só no Painel da MAVI"}
+                    </small>
+                  </span>
+                </label>
+                <label className="checkbox-label">
+                  <Checkbox
+                    checked={maviAlerts}
+                    onCheckedChange={(on) => setMaviAlerts(on === true)}
+                  />
+                  <span>
+                    Avisos de aprendizados da MAVI
+                    <small className="member-module-note">
+                      {maviAlerts
+                        ? "na caixa de entrada, quando a MAVI aprender algo novo em Painel da MAVI › Aprendizado da MAVI (um aviso por lote)"
+                        : "desligado: os aprendizados novos ficam só no Painel da MAVI"}
+                    </small>
+                  </span>
+                </label>
+              </>
+            ) : (
+              (member.lesson_alerts_copilot || member.lesson_alerts_mavi) && (
+                <small className="form-hint" role="status">
+                  Ao salvar, os avisos de aprendizados da MAVI são desligados:
+                  só administradores e gestores abrem o Painel da MAVI.
+                </small>
+              )
             )}
           </fieldset>
           <label className="checkbox-label member-active">

@@ -45,6 +45,12 @@ export interface Member {
    * running (set_member_multi_timer, by admins and managers).
    */
   multi_timer?: boolean;
+  /**
+   * Avisos na caixa de entrada dos aprendizados novos do Copiloto e da MAVI
+   * (Painel da MAVI; set_member_lesson_alerts, só administradores e gestores).
+   */
+  lesson_alerts_copilot?: boolean;
+  lesson_alerts_mavi?: boolean;
 }
 export interface Client {
   id: string;
@@ -183,7 +189,11 @@ export interface AppNotification {
     /** Prioridades: a tarefa da pessoa subiu para Alta ou Urgente (headline: "marcou como prioridade Urgente"). */
     | "priority"
     /** Prioridades em massa: "Ana marcou 3 tarefas suas como prioridade Alta" (link /tarefas?escopo=mine&prioritarias=1). */
-    | "tasks_priority";
+    | "tasks_priority"
+    /** Copiloto: aprendizados novos da MAVI para conferir, um aviso por lote (link /mavi#copiloto). */
+    | "copilot_lessons"
+    /** Aprendizado da MAVI: aprendizados novos das respostas para conferir (link /mavi#aprendizado). */
+    | "mavi_lessons";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */
