@@ -238,6 +238,11 @@ export function DashboardAssistant({
   useEffect(() => {
     list.current?.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [bubbles, busy]);
+  // Com esta conversa aberta, a bolinha da MAVI some (são duas MAVIs na tela).
+  useEffect(() => {
+    document.body.classList.add("dash-mavi-open");
+    return () => document.body.classList.remove("dash-mavi-open");
+  }, []);
   // Aberta por outro painel com a conversa já aberta: a MAVI pergunta dele.
   useEffect(() => {
     if (!focus || focus.id === lastFocus.current) return;
