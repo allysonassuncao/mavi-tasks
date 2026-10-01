@@ -86,6 +86,7 @@ export default function RichTextEditor({
   images = true,
   onUploading,
   onTextChange,
+  onChange,
   appendRef,
 }: {
   name?: string;
@@ -101,6 +102,8 @@ export default function RichTextEditor({
   onUploading?: (busy: boolean) => void;
   /** O texto puro a cada mudança (o Assistente MAVI lê o rascunho). */
   onTextChange?: (text: string) => void;
+  /** O valor serializado a cada mudança ("" sem conteúdo): o rascunho guardado. */
+  onChange?: (value: string) => void;
   /** Recebe a função que acrescenta um parágrafo no fim ("Aplicar na descrição"). */
   appendRef?: MutableRefObject<((text: string) => void) | null>;
 }) {
@@ -109,6 +112,8 @@ export default function RichTextEditor({
   imagesOn.current = images;
   const textListener = useRef(onTextChange);
   textListener.current = onTextChange;
+  const valueListener = useRef(onChange);
+  valueListener.current = onChange;
   people.current = mentions ?? [];
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -172,7 +177,9 @@ export default function RichTextEditor({
     },
     onCreate: ({ editor }) => textListener.current?.(readableText(editor)),
     onUpdate: ({ editor }) => {
-      setValue(serializeDescription(editor.getJSON()));
+      const next = serializeDescription(editor.getJSON());
+      setValue(next);
+      valueListener.current?.(next);
       textListener.current?.(readableText(editor));
     },
   });

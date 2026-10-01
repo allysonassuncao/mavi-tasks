@@ -46,6 +46,7 @@ import {
   CircleX,
   Pencil,
   X,
+  Minus,
   ArrowUpRight,
   ChevronRight,
 } from "lucide-react";
@@ -96,6 +97,7 @@ import {
   useTaskAudios,
 } from "./TaskAudios";
 import { AudioRecorder, type Recording } from "./AudioRecorder";
+import type { TaskUnsaved } from "./TaskTray";
 import { AudioPlayer } from "./AudioPlayer";
 import { formatBytes } from "./drive";
 import {
@@ -740,10 +742,15 @@ export function TaskDetail({
   busy,
   demo,
   demoStore,
-  refresh,
+  refresh: liveRefresh,
   mutate,
   onClose,
   notify,
+  hidden = false,
+  onMinimize,
+  initialComment,
+  onUnsaved,
+  onCommentDraft,
 }: {
   task: Task;
   currentRunning: import("./types").TimeEntry | null;
@@ -756,7 +763,21 @@ export function TaskDetail({
   mutate: Mutate;
   onClose: () => void;
   notify: (s: string) => void;
+  /** Minimizada no rodapé: fica montada, escondida, com o que estava sendo feito. */
+  hidden?: boolean;
+  onMinimize?: () => void;
+  /** O comentário em rascunho guardado no rodapé (TaskTray). */
+  initialComment?: string;
+  /** O que há por enviar (comentário, edição, mudança de status, áudio). */
+  onUnsaved?: (state: TaskUnsaved) => void;
+  /** O comentário a cada mudança ("" depois de enviado). */
+  onCommentDraft?: (value: string) => void;
 }) {
+  // Escondida, não recarrega a cada aviso ao vivo; ao voltar, busca tudo de
+  // novo uma vez (comentários e histórico podem ter chegado nesse meio tempo).
+  const shownRefresh = useRef(liveRefresh);
+  if (!hidden) shownRefresh.current = liveRefresh;
+  const refresh = shownRefresh.current;
   const [tab, setTab] = useState("comments"),
     [extras, setExtras] = useState<{
       comments: Comment[];
@@ -781,6 +802,11 @@ export function TaskDetail({
   const [commentAudio, setCommentAudio] = useState<Recording | null>(null);
   const [commentRecording, setCommentRecording] = useState(false);
   const [sendingAudio, setSendingAudio] = useState(false);
+  // The comment kept from the tray, only for the composer's first editor.
+  const [savedComment] = useState(initialComment);
+  const [commentFilled, setCommentFilled] = useState(!!initialComment);
+  // Recording a description audio (while editing).
+  const [descRecording, setDescRecording] = useState(false);
   // Assistente MAVI na edição: confere só o que a pessoa mudar.
   const [editTitle, setEditTitle] = useState(task.title);
   // The count of the due rule starts at the start date being edited.
@@ -987,6 +1013,22 @@ export function TaskDetail({
       alive = false;
     };
   }, [task.id, demo, demoStore, refresh, localRefresh]);
+  const wasHidden = useRef(hidden);
+  useEffect(() => {
+    if (wasHidden.current && !hidden) {
+      invalidateTaskExtras(task.id);
+      setLocalRefresh((v) => v + 1);
+    }
+    wasHidden.current = hidden;
+  }, [hidden, task.id]);
+  const unsavedListener = useRef(onUnsaved);
+  unsavedListener.current = onUnsaved;
+  const dirty =
+    editing || !!action || commentFilled || !!commentAudio || commentRecording;
+  const recording = commentRecording || (editing && descRecording);
+  useEffect(() => {
+    unsavedListener.current?.({ dirty: dirty || recording, recording });
+  }, [dirty, recording]);
   const durations = useMemo(
     () => statusDurations(task, extras.events),
     // Recomputed when the task or its history changes, not on every tick.
@@ -1121,6 +1163,8 @@ export function TaskDetail({
       form.reset();
       setReplyTo(null);
       setCommentRevision((v) => v + 1);
+      setCommentFilled(false);
+      onCommentDraft?.("");
       setLocalRefresh((v) => v + 1);
     } catch (e) {
       setError((e as Error).message);
@@ -1158,6 +1202,8 @@ export function TaskDetail({
       form.reset();
       setReplyTo(null);
       setCommentRevision((v) => v + 1);
+      setCommentFilled(false);
+      onCommentDraft?.("");
       void processAudio(a.id)
         .catch(() => {})
         .finally(refreshExtras);
@@ -1351,6 +1397,20 @@ export function TaskDetail({
       onClose={onClose}
       busy={busy || uploading || editorUploading}
       wide
+      hidden={hidden}
+      actions={
+        onMinimize && (
+          <button
+            type="button"
+            className="icon-btn modal-head-action"
+            onClick={onMinimize}
+            aria-label="Minimizar"
+            title="Minimizar: a tarefa fica no rodapé enquanto você navega pelo sistema"
+          >
+            <Minus size={20} />
+          </button>
+        )
+      }
     >
       <div
         className={`task-detail task-workspace${panelOpen ? "" : " panel-collapsed"}`}
@@ -1716,6 +1776,7 @@ export function TaskDetail({
                   demo={demo}
                   disabled={busy}
                   nameOf={memberName}
+                  onRecording={setDescRecording}
                 />
                 <label>
                   Início planejado (opcional)
@@ -2292,6 +2353,13 @@ export function TaskDetail({
                     company={task.company_id}
                     demo={demo}
                     mentions={mentionPeople}
+                    defaultValue={
+                      commentRevision === 0 ? (savedComment ?? "") : ""
+                    }
+                    onChange={(value) => {
+                      setCommentFilled(!!value);
+                      onCommentDraft?.(value);
+                    }}
                     name="body"
                     label={replyTo ? "Resposta" : "Comentário"}
                     disabled={busy}

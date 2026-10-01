@@ -37,6 +37,8 @@ export function Modal({
   wide = false,
   busy = false,
   className = "",
+  hidden = false,
+  actions,
 }: {
   title: string;
   children: ReactNode;
@@ -45,19 +47,24 @@ export function Modal({
   busy?: boolean;
   /** Extra class on the dialog (e.g. a width of its own). */
   className?: string;
+  /** Closed but kept mounted, with its state (a minimized task). */
+  hidden?: boolean;
+  /** Buttons of its own beside the close one. */
+  actions?: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const d = ref.current;
-    d?.showModal();
+    if (!d || hidden) return;
+    d.showModal();
     // showModal() moves focus to the close button, undoing the form's
     // autoFocus (which ran while the dialog was still closed).
     if (!wide)
-      d?.querySelector<HTMLElement>(
+      d.querySelector<HTMLElement>(
         ".entity-form input:not([type=hidden]):not([tabindex='-1']):not(:disabled):not([readonly])",
       )?.focus();
-    return () => d?.close();
-  }, []);
+    return () => d.close();
+  }, [hidden]);
   return (
     <dialog
       ref={ref}
@@ -70,6 +77,7 @@ export function Modal({
     >
       <div className="modal-head">
         <h2>{title}</h2>
+        {actions}
         <button
           type="button"
           className="icon-btn"

@@ -27969,3 +27969,328 @@ a.radar-task-chip:hover {
   max-width: 420px;
   accent-color: #4a3aa7;
 }
+
+/* Tarefas minimizadas (TaskTray): abas no rodapé no computador, pílula e
+   lista por baixo no celular. Deixa o lugar da bolinha da MAVI. */
+.modal-head .modal-head-action {
+  margin-left: auto;
+  margin-right: -6px;
+}
+.task-dock {
+  position: fixed;
+  z-index: 80;
+  right: 22px;
+  bottom: 22px;
+  left: calc(248px + 22px);
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+.task-dock.with-fab {
+  right: calc(22px + 50px + 12px);
+}
+.sidebar-collapsed .task-dock {
+  left: calc(76px + 22px);
+}
+.task-dock-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.task-dock-tab {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  flex: 0 1 270px;
+  min-width: 150px;
+  height: 50px;
+  padding-right: 6px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 10px 28px #1c272826;
+  animation: task-dock-in 0.18s ease-out;
+}
+.task-dock-open {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 6px 0 14px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  border-radius: 14px 0 0 14px;
+}
+.task-dock-open > i,
+.task-dock-pill-open > i,
+.task-dock-row > i {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.task-dock-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+.task-dock-max {
+  flex: none;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.task-dock-open:hover .task-dock-max,
+.task-dock-open:focus-visible .task-dock-max {
+  opacity: 1;
+}
+.task-dock-tab .icon-btn {
+  flex: none;
+  width: 30px;
+  height: 30px;
+}
+.task-dock-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: #f1f4ea;
+  color: #4d6b2c;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.task-dock-mark.compact {
+  padding: 4px;
+}
+.task-dock-mark.recording {
+  background: #fdecec;
+  color: #c43d3d;
+}
+.task-dock-mark.recording svg {
+  animation: task-dock-rec 1.2s ease-in-out infinite;
+}
+.task-dock-pill,
+.task-dock-backdrop,
+.task-dock-sheet {
+  display: none;
+}
+@keyframes task-dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes task-dock-rec {
+  50% {
+    opacity: 0.35;
+  }
+}
+/* O rodapé não cobre o fim da página nem a barra de seleção em massa. */
+.app-shell:has(.task-dock) main {
+  padding-bottom: 72px;
+}
+.app-shell:has(.task-dock) .bulk-bar,
+.app-shell:has(.task-dock) .bulk-toast {
+  bottom: 84px;
+}
+@media (max-width: 1200px) {
+  .task-dock {
+    left: calc(220px + 22px);
+  }
+}
+@media (max-width: 900px) {
+  .task-dock {
+    left: 16px;
+    right: 16px;
+    bottom: calc(22px + env(safe-area-inset-bottom));
+  }
+  .task-dock.with-fab {
+    right: calc(22px + 50px + 10px);
+  }
+  .task-dock-tabs {
+    display: none;
+  }
+  .task-dock-pill {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    max-width: 420px;
+    height: 50px;
+    margin-right: 0;
+    background: var(--sidebar);
+    color: #e8eeec;
+    border-radius: 25px;
+    box-shadow: 0 10px 28px #1c272840;
+    transition:
+      transform 0.18s ease,
+      opacity 0.18s ease;
+    animation: task-dock-in 0.18s ease-out;
+    touch-action: pan-y;
+  }
+  .task-dock-pill-open {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0 8px 0 18px;
+    border: 0;
+    background: none;
+    color: inherit;
+    text-align: left;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .task-dock-pill-open > span,
+  .task-dock-row > span {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .task-dock-pill-open strong,
+  .task-dock-row strong {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 0.86rem;
+    font-weight: 600;
+  }
+  .task-dock-pill-open small,
+  .task-dock-row small {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    opacity: 0.8;
+  }
+  .task-dock-pill .task-dock-mark {
+    padding: 0 6px;
+    background: #ffffff1f;
+    color: var(--green);
+  }
+  .task-dock-pill .task-dock-mark.recording {
+    background: #c43d3d;
+    color: #fff;
+  }
+  .task-dock-pill-more {
+    flex: none;
+    display: grid;
+    place-items: center;
+    min-width: 40px;
+    height: 36px;
+    margin-right: 7px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 18px;
+    background: #ffffff1a;
+    color: var(--green);
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+  .task-dock-backdrop {
+    pointer-events: auto;
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 94;
+    background: #18251c66;
+  }
+  .task-dock-sheet {
+    pointer-events: auto;
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 95;
+    max-height: 70dvh;
+    overflow-y: auto;
+    padding: 6px 0 calc(12px + env(safe-area-inset-bottom));
+    background: #fff;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -12px 40px #1c272833;
+    animation: task-dock-sheet 0.2s ease-out;
+  }
+  .task-dock-sheet header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px 8px 20px;
+  }
+  .task-dock-sheet h3 {
+    margin: 0;
+    font-size: 0.95rem;
+  }
+  .task-dock-sheet ul {
+    margin: 0;
+    padding: 0 8px;
+    list-style: none;
+  }
+  .task-dock-sheet li {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-top: 1px solid var(--border);
+  }
+  .task-dock-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    min-height: 58px;
+    padding: 8px 12px;
+    border: 0;
+    background: none;
+    color: var(--ink);
+    text-align: left;
+  }
+  .task-dock-row small {
+    color: var(--muted);
+    opacity: 1;
+  }
+  .app-shell:has(.task-dock) .bulk-bar,
+  .app-shell:has(.task-dock) .bulk-toast {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+}
+@media (max-width: 600px) {
+  .task-dock {
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  .task-dock.with-fab {
+    right: calc(16px + 50px + 10px);
+  }
+}
+@keyframes task-dock-sheet {
+  from {
+    transform: translateY(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-dock-tab,
+  .task-dock-pill,
+  .task-dock-sheet,
+  .task-dock-mark.recording svg {
+    animation: none;
+  }
+}

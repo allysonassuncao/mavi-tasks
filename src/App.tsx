@@ -229,6 +229,7 @@ import {
   moduleOn,
 } from "./modules";
 import { OnlineMembers, PresenceDot } from "./OnlineMembers";
+import { TaskDock, useTaskTray } from "./TaskTray";
 import { usePresence } from "./presence";
 import {
   notificationState,
@@ -524,22 +525,54 @@ export default function App() {
       : null;
   }, [location]);
   const taskBackground = useRef<string | null>(null);
-  const [detailTask, setDetailTask] = useState<Task | null>(null);
+  // The open task and the minimized ones opened in this visit (TaskTray):
+  // each stays mounted, the minimized hidden, in the order they were opened
+  // (moving an open <dialog> in the page would close it).
+  const [openTasks, setOpenTasks] = useState<Task[]>([]);
+  const openTasksRef = useRef(openTasks);
+  openTasksRef.current = openTasks;
   const [detailError, setDetailError] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
   function setSelected(id: string | null) {
+    // From the address, not the render: push notifications call an old copy.
+    const current = taskIdFromPath(window.location.pathname);
     if (!id) {
-      if (selected)
+      if (current)
         navigate(taskBackground.current ?? pageUrl("tasks", companyPath), true);
       taskBackground.current = null;
       return;
     }
-    const target = data.tasks.find((t) => t.id === id);
-    taskBackground.current = location;
+    if (id === current) return;
+    // Another task open: minimized when it has something unsent (or is
+    // already in the tray), and the new one returns to where that one came
+    // from. Otherwise it closes, as before, and closing the new one goes
+    // back to it.
+    const open = current
+      ? openTasksRef.current.find((t) => t.id === current)
+      : undefined;
+    if (open && (tray.has(open.id) || tray.isUnsaved(open.id))) {
+      if (!tray.add(open)) return;
+    } else {
+      taskBackground.current = location;
+    }
+    const target =
+      data.tasks.find((t) => t.id === id) ??
+      openTasksRef.current.find((t) => t.id === id);
     navigate(
       taskUrl(target ?? { id, title: "tarefa" }, companyPath) +
         window.location.search,
     );
+  }
+  // Minimizar: the task goes to the tray and the person back to where they
+  // were (the Tarefas list when it was opened by its link).
+  function minimizeTask(task: Task) {
+    if (!tray.add(task)) return;
+    navigate(taskBackground.current ?? pageUrl("tasks", companyPath), true);
+    taskBackground.current = null;
+  }
+  function closeTask(id: string) {
+    tray.remove(id);
+    setSelected(null);
   }
   // Search of the settings page's Pessoas tab.
   const [memberQuery, setMemberQuery] = useState("");
@@ -578,6 +611,7 @@ export default function App() {
     // The live refresh the task list last loaded (see the snapshot below).
     shownLiveTick = useRef(0),
     user = demo ? demoUser : (session?.user.id ?? "");
+  const tray = useTaskTray(company, user);
   const currentCompany = data.companies.find((c) => c.id === company),
     member = data.members.find((m) => m.user_id === user),
     isAdmin = member?.role === "admin",
@@ -700,12 +734,17 @@ export default function App() {
             // assignee, the team's supervisors); the demo mirrors that.
             (demo && !canSeeTask(demoStore.current.data, t, user))
           ) {
-            setDetailTask(null);
+            setOpenTasks((list) => list.filter((x) => x.id !== selected));
+            tray.remove(selected);
             setDetailError(
               "Tarefa não encontrada ou você não tem acesso a ela.",
             );
           } else {
-            setDetailTask(t);
+            setOpenTasks((list) =>
+              list.some((x) => x.id === t.id)
+                ? list.map((x) => (x.id === t.id ? t : x))
+                : [...list, t],
+            );
           }
         }
       })
@@ -1646,7 +1685,11 @@ export default function App() {
           ...d,
           tasks: d.tasks.map((t) => (t.id === updated.id ? updated : t)),
         }));
-        setDetailTask((t) => (t && t.id === updated.id ? updated : t));
+        setOpenTasks((list) =>
+          list.some((t) => t.id === updated.id)
+            ? list.map((t) => (t.id === updated.id ? updated : t))
+            : list,
+        );
         // Lists are refetched, not patched: the task may now belong in other
         // ones (status, assignee, tab). With live notices on, the database's
         // notice of this very change triggers that reload.
@@ -1922,15 +1965,48 @@ export default function App() {
       navigate("/login", true);
     }
   }
-  const selectedTask =
-    detailTask?.id === selected && detailTask.company_id === company
-      ? detailTask
-      : undefined;
+  const selectedTask = openTasks.find(
+    (t) => t.id === selected && t.company_id === company,
+  );
+  // Mounted: the open task and the minimized ones of this company — and one
+  // left with something unsent however it was left (a link straight to
+  // another task, the browser's back), which the effect below minimizes.
+  const mountedTasks = openTasks.filter(
+    (t) =>
+      t.company_id === company &&
+      (t.id === selected || tray.has(t.id) || tray.isUnsaved(t.id)),
+  );
+  const mountedKey = mountedTasks.map((t) => t.id).join();
+  useEffect(() => {
+    for (const t of mountedTasks)
+      if (t.id !== selected && !tray.has(t.id) && !tray.add(t))
+        tray.forget(t.id);
+    // The rest leave, with whatever they had unsent.
+    const keep = new Set(mountedKey.split(","));
+    const gone = openTasksRef.current.filter((t) => !keep.has(t.id));
+    if (!gone.length) return;
+    gone.forEach((t) => tray.forget(t.id));
+    setOpenTasks((list) => list.filter((t) => keep.has(t.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mountedKey, selected]);
   const nameLookup: NameLookup = useMemo(() => buildNameLookup(data), [data]);
   const taskLookup = useMemo(
     () => new Map(data.tasks.map((t) => [t.id, t])),
     [data.tasks],
   );
+  // The tray's titles and status follow the newest copy the app has.
+  useEffect(() => {
+    tray.sync((id) => {
+      const listed = taskLookup.get(id),
+        open = openTasks.find((t) => t.id === id);
+      return listed && open
+        ? listed.version > open.version
+          ? listed
+          : open
+        : (listed ?? open);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskLookup, openTasks, tray.items.length]);
   // Every filter but the leaders' scope tab (the tabs count from this).
   const unscoped = useMemo(
     () =>
@@ -4559,10 +4635,11 @@ export default function App() {
           )}
         </Modal>
       )}
-      {selectedTask && (
+      {mountedTasks.map((task) => (
         <TaskDetail
-          key={selectedTask.id}
-          task={selectedTask}
+          key={task.id}
+          task={task}
+          hidden={task.id !== selected}
           currentRunning={currentRunning}
           data={data}
           user={user}
@@ -4571,8 +4648,20 @@ export default function App() {
           demoStore={demoStore.current}
           refresh={refresh + extrasTick}
           mutate={mutate}
-          onClose={() => setSelected(null)}
+          onClose={() => closeTask(task.id)}
+          onMinimize={() => minimizeTask(task)}
+          initialComment={tray.has(task.id) ? tray.draftOf(task.id) : undefined}
+          onUnsaved={(state) => tray.report(task.id, state)}
+          onCommentDraft={(value) => tray.setComment(task.id, value)}
           notify={notify}
+        />
+      ))}
+      {/* Behind an open task it couldn't be used: it comes back on closing. */}
+      {company && member && !selected && (
+        <TaskDock
+          tray={tray}
+          withFab={!demo && moduleOn("assistant", member.role, hiddenPages)}
+          onOpen={(id) => setSelected(id)}
         />
       )}
     </div>
