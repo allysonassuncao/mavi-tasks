@@ -42,6 +42,7 @@ import { Button, Checkbox, Input, Select, SelectOption, Loading } from "./ui";
 import { Empty } from "./components";
 import { Paged } from "./Pagination";
 import { DropOverlay, useFileDrop } from "./useFileDrop";
+import { useMarqueeSelect } from "./useMarqueeSelect";
 import { ShareFolderDialog } from "./ShareFolderDialog";
 import { DriveThumb, FileTypeIcon } from "./DriveThumb";
 import { thumbAfterUpload, useDriveThumbs } from "./drive-thumbs";
@@ -837,6 +838,15 @@ function DriveTree({
       files: movableFiles.map((f) => f.id),
       folders: movableFolders.map((f) => f.id),
     });
+  // Clique e arraste no vazio: um retângulo escolhe o que toca.
+  const marquee = useMarqueeSelect(
+    !virtual && !moving && movableFiles.length + movableFolders.length > 0,
+    selected,
+    setSelected,
+  );
+  /** Marca o item para o retângulo de escolha (só os que se movem). */
+  const selectable = (kind: keyof DriveMoveItems, id: string, allowed: boolean) =>
+    allowed ? { "data-select-kind": kind, "data-select-id": id } : {};
 
   const who = (id: string) =>
     data.members.find((m) => m.user_id === id)?.name ?? "—";
@@ -918,6 +928,7 @@ function DriveTree({
               <tr
                 key={f.id}
                 className={isSelected("files", f.id) ? "selected" : ""}
+                {...selectable("files", f.id, writable)}
                 {...dragSource(
                   () => itemsFor("files", f.id),
                   writable && !renaming,
@@ -1192,6 +1203,7 @@ function DriveTree({
             className={`drive-card ${busyId === f.id ? "busy" : ""} ${
               isSelected("files", f.id) ? "selected" : ""
             }`}
+            {...selectable("files", f.id, writable)}
             {...dragSource(() => itemsFor("files", f.id), writable && !renaming)}
           >
             <div className="drive-card-head">
@@ -1435,7 +1447,21 @@ function DriveTree({
         selectedCount ? "selecting" : ""
       } ${dragging ? "moving" : ""}`}
       {...drop.handlers}
+      ref={marquee.ref}
+      onPointerDown={marquee.onPointerDown}
     >
+      {marquee.box && (
+        <div
+          className="drive-marquee"
+          aria-hidden="true"
+          style={{
+            left: marquee.box.left,
+            top: marquee.box.top,
+            width: marquee.box.width,
+            height: marquee.box.height,
+          }}
+        />
+      )}
       {!virtual && (
         <div className="drive-toolbar">
           <span className="drive-search">
@@ -1650,7 +1676,8 @@ function DriveTree({
             {selectedCount === 1 ? "1 escolhido" : `${selectedCount} escolhidos`}
           </strong>
           <small className="hide-mobile">
-            Arraste até uma pasta ou use Mover para…
+            Arraste até uma pasta ou use Mover para… · Shift, Ctrl ou ⌘ somam
+            à escolha
           </small>
           {selectedCount < movableFiles.length + movableFolders.length && (
             <Button className="btn secondary" onClick={selectAll}>
@@ -2015,6 +2042,7 @@ function DriveTree({
                               />
                             ),
                             props: {
+                              ...selectable("folders", f.id, canWrite),
                               ...dragSource(
                                 () => itemsFor("folders", f.id),
                                 canWrite,

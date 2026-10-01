@@ -28743,3 +28743,17 @@ a.radar-task-chip:hover {
   background: #f2eefb;
   color: #4f3d8f;
 }
+/* Clique e arraste no vazio para escolher vários (useMarqueeSelect). */
+.drive-marquee {
+  position: absolute;
+  z-index: 15;
+  pointer-events: none;
+  border: 1px solid #7fa94a;
+  border-radius: 3px;
+  background: #c8ed8d33;
+}
+.drive-page.marquee,
+.drive-page.marquee * {
+  user-select: none;
+  cursor: default;
+}
