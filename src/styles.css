@@ -28084,6 +28084,27 @@ a.radar-task-chip:hover {
 .task-dock-mark.recording svg {
   animation: task-dock-rec 1.2s ease-in-out infinite;
 }
+/* Cronômetro rodando numa tarefa minimizada: verde, com o pulso e o tempo. */
+.task-dock-tab.running {
+  background: #f4faea;
+  border-color: #b9dc8c;
+  box-shadow:
+    0 0 0 3px #c8ed8d66,
+    0 10px 28px #1c272826;
+}
+.task-dock-open > .playing-pulse,
+.task-dock-pill-open > .playing-pulse,
+.task-dock-row > .playing-pulse {
+  flex: none;
+  margin: 0 1px;
+}
+.task-dock-time {
+  flex: none;
+  color: #3b742e;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .task-dock-pill,
 .task-dock-backdrop,
 .task-dock-sheet {
@@ -28188,6 +28209,27 @@ a.radar-task-chip:hover {
   .task-dock-pill .task-dock-mark.recording {
     background: #c43d3d;
     color: #fff;
+  }
+  .task-dock-pill.running {
+    box-shadow:
+      0 0 0 3px #8cc152,
+      0 10px 28px #1c272840;
+  }
+  .task-dock-pill.running .playing-pulse {
+    background: var(--green);
+  }
+  .task-dock-pill.running .playing-pulse::after {
+    border-color: var(--green);
+  }
+  .task-dock-pill.running small {
+    font-variant-numeric: tabular-nums;
+    color: var(--green);
+    opacity: 1;
+  }
+  .task-dock-sheet li.running small {
+    color: #3b742e;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
   .task-dock-pill-more {
     flex: none;

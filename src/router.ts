@@ -43,8 +43,36 @@ function subscribe(listener: () => void) {
 function snapshot() {
   return window.location.pathname + window.location.search;
 }
+/**
+ * A página de onde a tarefa aberta veio. Fica no histórico do navegador
+ * (history.state), então vale no Voltar/Avançar e ao recarregar.
+ */
+export function taskBackground(): string | null {
+  if (!taskIdFromPath(window.location.pathname)) return null;
+  const bg = (window.history.state as { taskBackground?: unknown } | null)
+    ?.taskBackground;
+  return typeof bg === "string" && bg.startsWith("/") ? bg : null;
+}
+/**
+ * From one task to another, the page under it stays — unless it is a task
+ * itself (closing a task opened from another goes back to that one, which
+ * then has the Tarefas list under it, as when opened by its link).
+ */
+function carried() {
+  const bg = taskBackground();
+  return bg && !taskIdFromPath(bg.split(/[?#]/)[0]) ? bg : null;
+}
+/** What the page shows: under an open task, the page it came from. */
+function pageSnapshot() {
+  return taskBackground() ?? snapshot();
+}
+/** The page's address (under an open task, the page it came from). */
 export function useLocation() {
   // No servidor (testes que renderizam em texto) não há endereço.
+  return useSyncExternalStore(subscribe, pageSnapshot, () => "");
+}
+/** The address bar itself (with a task open, the task's). */
+export function useAddress() {
   return useSyncExternalStore(subscribe, snapshot, () => "");
 }
 function subscribeHash(listener: () => void) {
@@ -206,10 +234,29 @@ export function resolvePage(path: string): Page | null {
     ) ?? null
   );
 }
-export function navigate(url: string, replace = false) {
+/**
+ * `background`: for a task's address, the page shown under it. Left out, a
+ * task opened from a page keeps that page; from another task, that task's.
+ */
+export function navigate(
+  url: string,
+  replace = false,
+  background?: string | null,
+) {
   // The hash counts: it picks the settings page's tab.
   if (url === snapshot() + window.location.hash) return;
-  window.history[replace ? "replaceState" : "pushState"](null, "", url);
+  const bg = !taskIdFromPath(url.split(/[?#]/)[0])
+    ? null
+    : background !== undefined
+      ? background
+      : taskIdFromPath(window.location.pathname)
+        ? carried()
+        : snapshot() + window.location.hash;
+  window.history[replace ? "replaceState" : "pushState"](
+    bg ? { taskBackground: bg } : null,
+    "",
+    url,
+  );
   window.dispatchEvent(new Event(routeEvent));
 }
 export function pageUrl(page: Page, company = "") {
@@ -219,7 +266,7 @@ export function pageUrl(page: Page, company = "") {
   );
 }
 export function usePage() {
-  const url = useSyncExternalStore(subscribe, snapshot);
+  const url = useSyncExternalStore(subscribe, pageSnapshot);
   return resolvePage(url.split("?")[0]);
 }
 export function readParam<T extends string | number | boolean>(

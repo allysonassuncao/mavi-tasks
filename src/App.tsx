@@ -11,6 +11,8 @@ import {
   usePage,
   useUrlState,
   useLocation,
+  useAddress,
+  taskBackground,
   useHash,
   settingsTab,
   type SettingsTab,
@@ -366,9 +368,12 @@ export default function App() {
         : emptySnapshot;
     }),
     [companyRef, setCompanyRef] = useUrlState<string>("empresa", "");
+  // The page shown (under an open task, the one it was opened from) and the
+  // address bar itself (the task's).
   const location = useLocation();
+  const address = useAddress();
   const settingsView = settingsTab(useHash());
-  const isLogin = location.split("?")[0].replace(/\/+$/, "") === "/login";
+  const isLogin = address.split("?")[0].replace(/\/+$/, "") === "/login";
   const requestedCompany = data.companies.find(
     (c) => c.id === companyRef || companySlug(c, data.companies) === companyRef,
   );
@@ -509,7 +514,7 @@ export default function App() {
   );
   const [accessLogsMember, setAccessLogsMember] = useState<Member | null>(null);
   const [formPreset, setFormPreset] = useState<FormPreset>({});
-  const selected = taskIdFromPath(location.split("?")[0]);
+  const selected = taskIdFromPath(address.split("?")[0]);
   // People a dashboard is shared with open it by its link (the module itself
   // is for leaders).
   const openDashboard = dashboardIdFromPath(location.split("?")[0]);
@@ -524,7 +529,6 @@ export default function App() {
       ? { slug, ...(Number.isInteger(version) && version > 0 ? { version } : {}) }
       : null;
   }, [location]);
-  const taskBackground = useRef<string | null>(null);
   // The open task and the minimized ones opened in this visit (TaskTray):
   // each stays mounted, the minimized hidden, in the order they were opened
   // (moving an open <dialog> in the page would close it).
@@ -538,22 +542,22 @@ export default function App() {
     const current = taskIdFromPath(window.location.pathname);
     if (!id) {
       if (current)
-        navigate(taskBackground.current ?? pageUrl("tasks", companyPath), true);
-      taskBackground.current = null;
+        navigate(taskBackground() ?? pageUrl("tasks", companyPath), true);
       return;
     }
     if (id === current) return;
-    // Another task open: minimized when it has something unsent (or is
-    // already in the tray), and the new one returns to where that one came
-    // from. Otherwise it closes, as before, and closing the new one goes
-    // back to it.
+    // The page under the task (router.taskBackground) stays the one it was
+    // opened from. Another task open: minimized when it has something unsent
+    // (or is already in the tray), and the new one keeps that one's page.
+    // Otherwise it closes, as before, and closing the new one goes back to it.
     const open = current
       ? openTasksRef.current.find((t) => t.id === current)
       : undefined;
+    let background: string | undefined;
     if (open && (tray.has(open.id) || tray.isUnsaved(open.id))) {
       if (!tray.add(open)) return;
-    } else {
-      taskBackground.current = location;
+    } else if (current) {
+      background = window.location.pathname + window.location.search;
     }
     const target =
       data.tasks.find((t) => t.id === id) ??
@@ -561,14 +565,15 @@ export default function App() {
     navigate(
       taskUrl(target ?? { id, title: "tarefa" }, companyPath) +
         window.location.search,
+      false,
+      background,
     );
   }
-  // Minimizar: the task goes to the tray and the person back to where they
-  // were (the Tarefas list when it was opened by its link).
+  // Minimizar: the task goes to the tray and the person back to the page
+  // under it (the Tarefas list when it was opened by its link).
   function minimizeTask(task: Task) {
     if (!tray.add(task)) return;
-    navigate(taskBackground.current ?? pageUrl("tasks", companyPath), true);
-    taskBackground.current = null;
+    navigate(taskBackground() ?? pageUrl("tasks", companyPath), true);
   }
   function closeTask(id: string) {
     tray.remove(id);
@@ -764,7 +769,7 @@ export default function App() {
   useEffect(() => {
     if (!authReady || (session && needsPassword)) return;
     if (!demo && !session && !isLogin) {
-      navigate(loginDestination(location), true);
+      navigate(loginDestination(address), true);
     } else if ((demo || session) && isLogin) {
       const retorno = new URLSearchParams(window.location.search).get(
         "retorno",
@@ -773,7 +778,7 @@ export default function App() {
       if (consent) window.location.replace(consent);
       else navigate(safeReturnPath(retorno), true);
     }
-  }, [authReady, demo, session, isLogin, location, needsPassword]);
+  }, [authReady, demo, session, isLogin, address, needsPassword]);
   useEffect(() => {
     if (!authReady || !member || isLogin) return;
     if (page && !allowed(page) && !(page === "dashboards" && openDashboard)) {
@@ -4506,7 +4511,7 @@ export default function App() {
             company={company}
             data={catalogData}
             user={user}
-            location={location}
+            location={address}
             notify={notify}
           />
         )}
@@ -4661,6 +4666,7 @@ export default function App() {
         <TaskDock
           tray={tray}
           withFab={!demo && moduleOn("assistant", member.role, hiddenPages)}
+          playing={playingTimer}
           onOpen={(id) => setSelected(id)}
         />
       )}

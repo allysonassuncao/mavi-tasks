@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TaskDock, TRAY_LIMIT, trayWith, type TaskTray, type TrayItem } from "./TaskTray";
+import type { TimeEntry } from "./types";
 
 const item = (n: number, extra: Partial<TrayItem> = {}): TrayItem => ({
   id: `t${n}`,
@@ -55,7 +56,7 @@ const fakeTray = (items: TrayItem[], unsaved: TaskTray["unsaved"] = {}) =>
 describe("TaskDock", () => {
   it("vazio: nada na tela", () => {
     expect(
-      renderToStaticMarkup(<TaskDock tray={fakeTray([])} withFab onOpen={() => {}} />),
+      renderToStaticMarkup(<TaskDock tray={fakeTray([])} withFab playing={null} onOpen={() => {}} />),
     ).toBe("");
   });
 
@@ -66,6 +67,7 @@ describe("TaskDock", () => {
           t2: { dirty: true, recording: true },
         })}
         withFab
+        playing={null}
         onOpen={() => {}}
       />,
     );
@@ -80,9 +82,37 @@ describe("TaskDock", () => {
 
   it("sem a bolinha da MAVI, ocupa o canto todo", () => {
     const html = renderToStaticMarkup(
-      <TaskDock tray={fakeTray([item(1)])} withFab={false} onOpen={() => {}} />,
+      <TaskDock tray={fakeTray([item(1)])} withFab={false} playing={null} onOpen={() => {}} />,
     );
     expect(html).toContain('class="task-dock"');
     expect(html).toContain('aria-label="Ver tarefa minimizada"');
+  });
+
+  it("cronômetro rodando: a aba fica verde com o tempo e a pílula mostra ela", () => {
+    const started = new Date(Date.now() - 65_000).toISOString();
+    const entry = {
+      id: "e1",
+      company_id: "c1",
+      task_id: "t1",
+      user_id: "u1",
+      started_at: started,
+      ended_at: null,
+    } as unknown as TimeEntry;
+    const html = renderToStaticMarkup(
+      <TaskDock
+        tray={fakeTray([item(1), item(2)])}
+        withFab
+        playing={{ entry, hours: [entry], company: "c1", demo: true }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(html).toContain('class="task-dock-tab running"');
+    expect(html.match(/class="task-dock-tab"/g)).toHaveLength(1);
+    expect(html).toContain("task-dock-time");
+    expect(html).toContain("playing-pulse");
+    // A pílula fica com a tarefa em execução, mesmo não sendo a mais recente.
+    expect(html).toMatch(/task-dock-pill running/);
+    expect(html).toMatch(/task-dock-pill-open[^>]*aria-label="Abrir Tarefa 1"/);
+    expect(html).toContain("Em execução · 0h 01m 0");
   });
 });

@@ -8,6 +8,7 @@ import {
 } from "react";
 import { ChevronUp, Maximize2, Mic, PenLine, X } from "lucide-react";
 import { statuses, type Status, type Task } from "./types";
+import { TaskTotal, type Playing } from "./TaskTable";
 
 /**
  * Tarefas minimizadas: a tarefa sai da frente e fica no rodapé enquanto a
@@ -269,9 +270,12 @@ export type TaskTray = ReturnType<typeof useTaskTray>;
 export function TaskDock({
   tray,
   withFab,
+  playing,
   onOpen,
 }: {
   tray: TaskTray;
+  /** O cronômetro da pessoa: a tarefa em execução ganha destaque e o tempo. */
+  playing: Playing | null;
   /** A bolinha da MAVI está na tela: o rodapé deixa o lugar dela. */
   withFab: boolean;
   onOpen: (id: string) => void;
@@ -290,8 +294,34 @@ export function TaskDock({
     return () => window.removeEventListener("keydown", onKey);
   }, [listOpen]);
   if (!items.length) return null;
-  const latest = items.reduce((a, b) => (b.at > a.at ? b : a));
+  const runningId = playing?.entry.task_id;
+  // A pílula mostra a tarefa em execução; sem ela, a minimizada por último.
+  const latest =
+    items.find((i) => i.id === runningId) ??
+    items.reduce((a, b) => (b.at > a.at ? b : a));
   const others = items.length - 1;
+  const isRunning = (item: TrayItem) => !!playing && item.id === runningId;
+  // O ponto do status vira o pulso de "em execução".
+  const dot = (item: TrayItem) =>
+    isRunning(item) ? (
+      <span className="playing-pulse" aria-hidden="true" />
+    ) : (
+      <i style={{ background: statuses[item.status].color }} />
+    );
+  const clock = (item: TrayItem) =>
+    playing && isRunning(item) ? (
+      <span className="task-dock-time" title="Cronômetro rodando nesta tarefa (tempo total)">
+        <TaskTotal playing={playing} />
+      </span>
+    ) : null;
+  const statusLine = (item: TrayItem) =>
+    playing && isRunning(item) ? (
+      <>
+        Em execução · <TaskTotal playing={playing} />
+      </>
+    ) : (
+      statuses[item.status].label
+    );
 
   function close(item: TrayItem) {
     if (
@@ -340,15 +370,19 @@ export function TaskDock({
     >
       <ul className="task-dock-tabs">
         {items.map((item) => (
-          <li key={item.id} className="task-dock-tab">
+          <li
+            key={item.id}
+            className={`task-dock-tab${isRunning(item) ? " running" : ""}`}
+          >
             <button
               type="button"
               className="task-dock-open"
               onClick={() => open(item.id)}
-              title={`${item.title} — ${statuses[item.status].label}. Clique para abrir.`}
+              title={`${item.title} — ${isRunning(item) ? "em execução" : statuses[item.status].label}. Clique para abrir.`}
             >
-              <i style={{ background: statuses[item.status].color }} />
+              {dot(item)}
               <span className="task-dock-title">{item.title}</span>
+              {clock(item)}
               {marks(item, true)}
               <Maximize2 size={14} className="task-dock-max" />
             </button>
@@ -366,6 +400,9 @@ export function TaskDock({
       </ul>
       <Pill
         item={latest}
+        running={isRunning(latest)}
+        dot={dot(latest)}
+        status={statusLine(latest)}
         others={others}
         marks={marks(latest)}
         onOpen={() => open(latest.id)}
@@ -394,17 +431,17 @@ export function TaskDock({
               {[...items]
                 .sort((a, b) => b.at - a.at)
                 .map((item) => (
-                  <li key={item.id}>
+                  <li key={item.id} className={isRunning(item) ? "running" : undefined}>
                     <button
                       type="button"
                       className="task-dock-row"
                       onClick={() => open(item.id)}
                     >
-                      <i style={{ background: statuses[item.status].color }} />
+                      {dot(item)}
                       <span>
                         <strong>{item.title}</strong>
                         <small>
-                          {statuses[item.status].label}
+                          {statusLine(item)}
                           {marks(item)}
                         </small>
                       </span>
@@ -430,6 +467,9 @@ export function TaskDock({
 /** A pílula do celular: toque abre, arrastar para o lado fecha. */
 function Pill({
   item,
+  running,
+  dot,
+  status,
   others,
   marks,
   onOpen,
@@ -437,6 +477,9 @@ function Pill({
   onSwipe,
 }: {
   item: TrayItem;
+  running: boolean;
+  dot: ReactNode;
+  status: ReactNode;
   others: number;
   marks: ReactNode;
   onOpen: () => void;
@@ -472,7 +515,7 @@ function Pill({
   useEffect(() => setDx(0), [item.id]);
   return (
     <div
-      className="task-dock-pill"
+      className={`task-dock-pill${running ? " running" : ""}`}
       style={
         dx
           ? {
@@ -499,11 +542,11 @@ function Pill({
         }}
         aria-label={`Abrir ${item.title}`}
       >
-        <i style={{ background: statuses[item.status].color }} />
+        {dot}
         <span>
           <strong>{item.title}</strong>
           <small>
-            {statuses[item.status].label}
+            {status}
             {marks}
           </small>
         </span>
