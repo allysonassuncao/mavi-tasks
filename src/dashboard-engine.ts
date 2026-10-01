@@ -2,6 +2,7 @@ import { dateKey } from "./domain";
 import type { Snapshot, Task, TimeEntry } from "./types";
 import {
   addDays,
+  attributionOf,
   daysBetween,
   metricDef,
   type DashboardFilters,
@@ -102,8 +103,20 @@ function series(
         return r.task.project_id;
       case "team":
         return r.task.team_id;
-      case "person":
-        return q.source === "hours" ? r.entry!.user_id : r.task.assignee_id;
+      case "person": {
+        if (q.source === "hours") return r.entry!.user_id;
+        // Migration 20270131090000: who the task counts for. The demo keeps
+        // no status history: whoever executed it last stands for everyone
+        // who did, and for whoever had it when the due date passed.
+        const mode = attributionOf(q);
+        if (mode === "assignee") return r.task.assignee_id;
+        if (
+          mode === "roles" &&
+          (q.metric === "tight_due" || q.metric === "shorter_than_smart")
+        )
+          return r.task.creator_id;
+        return r.task.executor_id ?? r.task.assignee_id;
+      }
       case "creator":
         return r.task.creator_id;
       case "executor":

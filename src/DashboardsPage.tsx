@@ -30,6 +30,8 @@ import { DashboardCanvas, type PanelLoader } from "./DashboardCanvas";
 import { PanelChart } from "./DashboardCharts";
 import { runPanel } from "./dashboard-engine";
 import {
+  attributionOf,
+  attributionOptions,
   buildDisplay,
   dashboardLinkUrl,
   dashboardMembers,
@@ -41,6 +43,7 @@ import {
   listDashboards,
   newPanelId,
   panelData,
+  panelNotes,
   parseFormula,
   previewPanel,
   rangeOptions,
@@ -60,6 +63,7 @@ import {
   type Dashboard,
   type DashboardFilters,
   type DashboardRange,
+  type Attribution,
   type DashboardVariables,
   type FilterField,
   type LinkAccess,
@@ -1243,6 +1247,13 @@ const blankQuery = (ref: string, source: Source = "tasks"): Query => ({
   dateField: sources[source].dateFields[0].key,
   filters: [],
 });
+/** Every Tarefas query of the panel counts people the same way. */
+const withAttribution = (queries: Query[], attribution: Attribution) =>
+  queries.map((q) =>
+    q.source === "tasks"
+      ? { ...q, attribution: attribution === "roles" ? undefined : attribution }
+      : q,
+  );
 
 function PanelEditor({
   panel,
@@ -1318,6 +1329,9 @@ function PanelEditor({
     [result, specKey],
   ); // eslint-disable-line react-hooks/exhaustive-deps
   const categorical = !["none", "time"].includes(spec.groupBy);
+  const taskQuery = spec.queries.find((q) => q.source === "tasks");
+  const attribution = taskQuery ? attributionOf(taskQuery) : "roles";
+  const notes = panelNotes(spec);
   return (
     <Modal
       title={panel ? "Editar painel" : "Novo painel"}
@@ -1385,10 +1399,10 @@ function PanelEditor({
                     (r) => !spec.queries.some((q) => q.ref === r),
                   )!;
                   update({
-                    queries: [
-                      ...spec.queries,
-                      blankQuery(ref, spec.queries[0]?.source),
-                    ],
+                    queries: withAttribution(
+                      [...spec.queries, blankQuery(ref, spec.queries[0]?.source)],
+                      attribution,
+                    ),
                   });
                 }}
               >
@@ -1502,6 +1516,39 @@ function PanelEditor({
               </label>
             )}
           </div>
+          {taskQuery && (
+            <label>
+              Tarefas contam para
+              <Select
+                value={attribution}
+                onValueChange={(v) =>
+                  update({
+                    queries: withAttribution(spec.queries, v as Attribution),
+                  })
+                }
+              >
+                {attributionOptions.map((o) => (
+                  <SelectOption key={o.key} value={o.key}>
+                    {o.label}
+                    {o.key === "roles" ? " (padrão)" : ""}
+                  </SelectOption>
+                ))}
+              </Select>
+              <small className="muted">
+                {spec.groupBy === "executor"
+                  ? "Agrupado por quem executou: cada tarefa conta para todos que a executaram."
+                  : attributionOptions.find((o) => o.key === attribution)?.hint}
+              </small>
+            </label>
+          )}
+          {notes.length > 0 && (
+            <div className="dash-notes" role="note">
+              <strong>O que cada pessoa conta</strong>
+              {notes.map((n) => (
+                <p key={n}>{n}</p>
+              ))}
+            </div>
+          )}
           <div className="form-columns">
             <label>
               Unidade
@@ -1596,8 +1643,8 @@ function PanelEditor({
                   h: panel?.h ?? (spec.viz === "stat" ? 3 : 5),
                   spec: {
                     ...spec,
-                    queries: spec.queries.map((q) =>
-                      spec.formula ? q : { ...q, hidden: undefined },
+                    queries: withAttribution(spec.queries, attribution).map(
+                      (q) => (spec.formula ? q : { ...q, hidden: undefined }),
                     ),
                   },
                 })

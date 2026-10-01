@@ -66,6 +66,7 @@
     "test:db:storage": "node scripts/test-storage-uploads.mjs",
     "test:db:dashboards": "node scripts/test-dashboards.mjs",
     "test:db:performance": "node scripts/test-task-performance.mjs",
+    "test:db:person-roles": "node scripts/test-dashboard-person-roles.mjs",
     "test:db:agenda": "node scripts/test-google-calendar.mjs",
     "test:db:campaigns": "node scripts/test-ad-campaigns.mjs",
     "test:db:make-leads": "node scripts/test-make-leads.mjs",

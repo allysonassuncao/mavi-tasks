@@ -65,6 +65,14 @@ export type FilterField =
   | "severity"
   | "state";
 
+/**
+ * Tarefas (migration 20270131090000): who each task counts for when the
+ * panel shows people. "roles" (the default, also for panels saved before
+ * the choice existed): each one their part; "executor": everyone who
+ * executed it; "assignee": who has it now.
+ */
+export type Attribution = "roles" | "executor" | "assignee";
+
 export type QueryFilter = {
   field: FilterField;
   op?: "in" | "not_in";
@@ -81,6 +89,8 @@ export type Query = {
   /** Termômetro, metric "indicator": which indicator (its key). */
   indicator?: string;
   label?: string;
+  /** Tarefas: who each task counts for (absent = "roles"). */
+  attribution?: Attribution;
 };
 export type PanelSpec = {
   viz: Viz;
@@ -376,7 +386,7 @@ export const sources: Record<
       },
       {
         key: "hours",
-        label: "Tempo no status (horas)",
+        label: "Tempo com a tarefa no status (horas, não é cronômetro)",
         unit: "hours",
         additive: true,
       },
@@ -628,7 +638,7 @@ export const filterLabels: Record<FilterField, string> = {
   priority: "Prioridade",
   late: "Atraso",
   entry_source: "Origem do apontamento",
-  executor: "Quem executou",
+  executor: "Quem executou (todos)",
   previous: "Responsável anterior",
   validator: "Quem validou",
   level: "Nível do aviso",
@@ -722,7 +732,7 @@ export const groupOptions: {
   },
   {
     key: "person",
-    label: "Pessoa (responsável, quem registrou, quem enviou, quem recebeu ou quem mudou o prazo)",
+    label: "Pessoa (veja no ⓘ do painel o que cada dado conta)",
     sources: [
       "tasks",
       "hours",
@@ -736,7 +746,7 @@ export const groupOptions: {
   },
   {
     key: "executor",
-    label: "Quem executou a tarefa",
+    label: "Quem executou a tarefa (todos que executaram)",
     sources: ["tasks"],
   },
   {
@@ -777,6 +787,96 @@ export const groupsFor = (queries: Pick<Query, "source">[]) =>
   groupOptions.filter((g) =>
     queries.every((q) => g.sources.includes(q.source)),
   );
+
+// ------------------------------------------------------------ people
+export const attributionOptions: {
+  key: Attribution;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    key: "roles",
+    label: "Cada um a sua parte",
+    hint: "A tarefa conta para todos que a executaram; a atrasada, para quem estava com ela quando o prazo venceu; o prazo apertado, para quem criou.",
+  },
+  {
+    key: "executor",
+    label: "Todos que executaram",
+    hint: "Tudo da tarefa conta para quem esteve com ela em Em andamento, Alteração ou Correção.",
+  },
+  {
+    key: "assignee",
+    label: "Responsável atual",
+    hint: "Conta para quem está com a tarefa agora. Em validação, é quem valida, não quem executou.",
+  },
+];
+export const attributionOf = (q: Pick<Query, "attribution">): Attribution =>
+  q.attribution ?? "roles";
+
+const PEOPLE_GROUPS: GroupBy[] = ["person", "executor", "previous", "validator"];
+const EXECUTORS =
+  "Conta para todos que executaram a tarefa (Em andamento, Alteração ou Correção), não para quem a valida. Feita por duas pessoas, aparece nas duas; o total conta a tarefa uma vez.";
+const HELD_TIME =
+  "É o tempo em que a tarefa ficou com a pessoa nesse status, não horas trabalhadas (essas vêm do cronômetro). Em validação, o tempo é de quem valida; em Devolvida, de quem precisa responder.";
+
+/** What one query counts for each person, in words (null: nothing to say). */
+export function personNote(q: Query, group: GroupBy): string | null {
+  const people = PEOPLE_GROUPS.includes(group);
+  if (q.source === "status_history" && (q.metric === "hours" || q.metric === "avg_hours"))
+    return HELD_TIME;
+  if (!people) return null;
+  switch (q.source) {
+    case "tasks": {
+      const mode = group === "executor" ? "executor" : attributionOf(q);
+      if (mode === "assignee")
+        return "Conta para quem está com a tarefa agora. Em validação, é quem valida, não quem executou.";
+      if (q.metric === "estimated_hours")
+        return "Horas estimadas de quem executou, divididas entre as pessoas quando mais de uma executou. Não são horas do cronômetro.";
+      if (mode === "executor") return EXECUTORS;
+      if (q.metric === "late")
+        return "Conta para quem estava com a tarefa quando o prazo venceu: se ela já estava em validação, o atraso é de quem validava; se foi enviada depois do prazo, é de quem executou.";
+      if (q.metric === "tight_due" || q.metric === "shorter_than_smart")
+        return "Conta para quem criou a tarefa (quem definiu o prazo).";
+      return EXECUTORS;
+    }
+    case "hours":
+      return "Horas do cronômetro e dos apontamentos, de quem registrou.";
+    case "status_history":
+      return group === "previous"
+        ? "Conta para quem estava com a tarefa antes de ela entrar no status."
+        : q.metric === "entries"
+          ? "Vezes em que a tarefa entrou no status com a pessoa. Devolvida conta para quem devolveu."
+          : "Conta para quem estava com a tarefa no status.";
+    case "reviews":
+      return group === "validator"
+        ? "Conta para quem validou (ou está validando)."
+        : "Conta para quem enviou para validação.";
+    case "due_changes":
+      return "Conta para quem mudou o prazo.";
+    case "notices":
+      return "Conta para quem recebeu o aviso.";
+    case "radar":
+      return "Conta para o responsável pelo item do Radar.";
+    case "social_leads":
+      return "Conta para quem decidiu (ou para o responsável pelo cliente).";
+    default:
+      return null;
+  }
+}
+
+/** The panel's ⓘ: what each visible query counts, without repeating. */
+export function panelNotes(spec: PanelSpec): string[] {
+  const notes = spec.queries
+    .filter((q) => !q.hidden || spec.formula)
+    .map((q) => ({ name: queryName(q), text: personNote(q, spec.groupBy) }))
+    .filter((n): n is { name: string; text: string } => !!n.text);
+  const texts = [...new Set(notes.map((n) => n.text))];
+  if (texts.length <= 1) return texts;
+  return texts.map((text) => {
+    const names = notes.filter((n) => n.text === text).map((n) => n.name);
+    return `${names.join(", ")}: ${text}`;
+  });
+}
 
 export const vizOptions: { key: Viz; label: string }[] = [
   { key: "stat", label: "Número" },
@@ -1391,7 +1491,7 @@ export function starterPanels(): Panel[] {
         queries: [
           q("A", "tasks", "count", { label: "Tarefas" }),
           q("B", "tasks", "late", { label: "Atrasadas" }),
-          q("C", "hours", "hours", { label: "Horas" }),
+          q("C", "hours", "hours", { label: "Horas registradas" }),
         ],
       },
     },
@@ -1812,7 +1912,7 @@ export function performancePanels(): Panel[] {
     },
     {
       id: "horas-status",
-      title: "Horas em cada status, por pessoa",
+      title: "Tempo com a tarefa em cada status, por pessoa",
       x: 6,
       y: 9,
       w: 6,
@@ -1888,6 +1988,36 @@ export function performancePanels(): Panel[] {
         queries: [
           q("A", "reviews", "approved", { label: "Aprovadas" }),
           q("B", "reviews", "reproved", { label: "Reprovadas" }),
+        ],
+      },
+    },
+    // Migration 20270131090000: each one's part of the time, apart from the
+    // hours worked (the timer).
+    {
+      id: "tempo-papel",
+      title: "Tempo por papel, por pessoa",
+      x: 0,
+      y: 32,
+      w: 12,
+      h: 6,
+      spec: {
+        viz: "table",
+        groupBy: "person",
+        limit: 30,
+        queries: [
+          q("A", "hours", "hours", { label: "Horas registradas (cronômetro)" }),
+          q("B", "status_history", "hours", {
+            label: "Executando",
+            filters: [
+              {
+                field: "status",
+                op: "in",
+                values: ["progress", "rejected", "correction"],
+              },
+            ],
+          }),
+          inStatus("C", "hours", "review", "Validando"),
+          inStatus("D", "hours", "returned", "Aguardando informação"),
         ],
       },
     },

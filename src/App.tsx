@@ -2415,18 +2415,29 @@ export default function App() {
   const byPerson = useMemo(
     () =>
       demo
-        ? data.members.map((m) => ({
-            id: m.user_id,
-            name: m.name,
-            tasks: data.tasks.filter(
+        ? data.members.map((m) => {
+            // As report_summary (migration 20270131090000): the load by
+            // role, and the hours the person registered in the period.
+            const mine = data.tasks.filter(
               (t) => t.assignee_id === m.user_id && t.status !== "done",
-            ).length,
-            estimated: data.tasks
-              .filter((t) => t.assignee_id === m.user_id && t.status !== "done")
-              .reduce((s, t) => s + t.estimated_minutes, 0),
-          }))
+            );
+            const executing = mine.filter((t) =>
+              ["open", "progress", "rejected", "correction"].includes(t.status),
+            );
+            return {
+              id: m.user_id,
+              name: m.name,
+              tasks: executing.length,
+              estimated: executing.reduce((s, t) => s + t.estimated_minutes, 0),
+              reviewing: mine.filter((t) => t.status === "review").length,
+              returned: mine.filter((t) => t.status === "returned").length,
+              minutes: periodHours
+                .filter((h) => h.user_id === m.user_id)
+                .reduce((s, h) => s + minutes(h, demoNow), 0),
+            };
+          })
         : (summary?.by_person ?? []),
-    [demo, data.members, data.tasks, summary],
+    [demo, data.members, data.tasks, periodHours, demoNow, summary],
   );
   const reportPeople = isLeader
     ? byPerson

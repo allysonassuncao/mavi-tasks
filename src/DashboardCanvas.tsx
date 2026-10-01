@@ -5,10 +5,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import * as Popover from "@radix-ui/react-popover";
 import {
   AlertCircle,
   Copy,
   GripVertical,
+  Info,
   Pencil,
   Table2,
   Trash2,
@@ -19,6 +21,7 @@ import {
   GRID_COLUMNS,
   buildDisplay,
   compact,
+  panelNotes,
   placePanel,
   type Panel,
   type PanelResult,
@@ -56,6 +59,36 @@ export type PanelLoader = (
   panel: Panel,
   fresh: boolean,
 ) => Promise<PanelResult>;
+
+/** The panel's ⓘ: who each figure counts for (migration 20270131090000). */
+function PanelNotes({ notes }: { notes: string[] }) {
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <Button
+          className="icon-btn"
+          aria-label="O que este painel conta"
+          title="O que este painel conta"
+        >
+          <Info size={14} />
+        </Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          className="dash-notes-pop"
+          align="end"
+          sideOffset={6}
+          collisionPadding={12}
+        >
+          <strong>O que este painel conta</strong>
+          {notes.map((n) => (
+            <p key={n}>{n}</p>
+          ))}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
 
 function PanelCard({
   panel,
@@ -126,6 +159,11 @@ function PanelCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [result, specKey],
   );
+  const notes = useMemo(
+    () => panelNotes(panel.spec),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [specKey],
+  );
   const canTable = panel.spec.viz !== "stat" && panel.spec.viz !== "table";
   const spec =
     asTable && canTable ? { ...panel.spec, viz: "table" as const } : panel.spec;
@@ -156,6 +194,7 @@ function PanelCard({
           className="dash-panel-actions"
           onPointerDown={(e) => e.stopPropagation()}
         >
+          {notes.length > 0 && <PanelNotes notes={notes} />}
           {canTable && !editing && (
             <Button
               className={`icon-btn ${asTable ? "active" : ""}`}

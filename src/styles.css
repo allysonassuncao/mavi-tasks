@@ -1552,6 +1552,13 @@ tbody tr:last-child td {
   font-weight: 500;
   color: #7f9369;
 }
+.workload > div > span.workload-figures {
+  flex: none;
+  text-align: right;
+}
+.workload-figures small {
+  margin-top: 3px;
+}
 .report-note {
   grid-column: 1/-1;
   display: flex;
@@ -10543,6 +10550,38 @@ label .input-control .ui-input {
 .dash-panel-actions .icon-btn.active {
   background: #eef5e4;
   color: #4d6b2c;
+}
+/* Migration 20270131090000: who each figure counts for. */
+.dash-notes-pop {
+  background: #fff;
+  color: var(--ink);
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 38px #152c2026;
+  border-radius: 12px;
+  z-index: 101;
+  width: 340px;
+  max-width: calc(100vw - 28px);
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.dash-notes-pop p,
+.dash-notes p {
+  margin: 0;
+  color: var(--muted);
+}
+.dash-notes {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f4f7f1;
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 .dash-refreshing {
   width: 7px;

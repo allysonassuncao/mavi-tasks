@@ -62,7 +62,21 @@ export interface Summary {
   done: number;
   minutes: number;
   by_client: { id: string; name: string; minutes: number }[];
-  by_person: { id: string; name: string; tasks: number; estimated: number }[];
+  /**
+   * Migration 20270131090000: tasks and estimated (minutes) are the open
+   * tasks being executed by the person; reviewing and returned, those in
+   * validation and returned with them; minutes, their hours registered in
+   * the period.
+   */
+  by_person: {
+    id: string;
+    name: string;
+    tasks: number;
+    estimated: number;
+    reviewing?: number;
+    returned?: number;
+    minutes?: number;
+  }[];
 }
 
 export interface CompanyLookups {

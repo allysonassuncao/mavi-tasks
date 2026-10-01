@@ -219,9 +219,13 @@ await check("Dashboards: acerto da MAVI e da regra, erro médio e prazos apertad
       (metric, i) => ({ ref: "ABCDE"[i], source: "tasks", metric, filters: [], dateField: "delivered_at" }),
     ),
   }, "2026-01-01", "2027-12-31", {}]);
-  const value = (ref) => Number(res.series[ref].find((r) => r.k === ana).v);
+  // Cada um a sua parte (migração 20270131090000): a entrega é de quem
+  // executou; o prazo apertado, de quem criou a tarefa.
+  const value = (ref, who = ana) => Number(res.series[ref].find((r) => r.k === who).v);
   const run = async (metric) =>
-    value({ smart_hit_rate: "A", rule_hit_rate: "B", smart_error_days: "C", tight_due: "D" }[metric]);
+    metric === "tight_due"
+      ? value("D", admin)
+      : value({ smart_hit_rate: "A", rule_hit_rate: "B", smart_error_days: "C" }[metric]);
   assert.equal(Math.round(await run("smart_hit_rate")), 67);
   assert.equal(Math.round(await run("rule_hit_rate")), 67);
   assert.equal(Number((await run("smart_error_days")).toFixed(2)), 0.67);

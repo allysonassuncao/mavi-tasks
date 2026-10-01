@@ -15,6 +15,7 @@ import {
   noticesPanels,
   groupsFor,
   metricDef,
+  panelNotes,
   sources,
   type Panel,
   type PanelResult,
@@ -578,5 +579,53 @@ describe("Motor da demonstração", () => {
     ]);
     expect(r.series.B.find((x) => x.k === "bia")?.v).toBe(3);
     expect(r.series.C.every((x) => x.v === 100)).toBe(true);
+  });
+});
+
+describe("Pessoa nos painéis", () => {
+  const q = (ref: string, source: PanelSpec["queries"][number]["source"], metric: string, extra = {}) => ({
+    ref,
+    source,
+    metric,
+    filters: [],
+    ...extra,
+  });
+  it("explica o que cada consulta conta, sem repetir", () => {
+    const notes = panelNotes({
+      viz: "table",
+      groupBy: "person",
+      queries: [
+        q("A", "tasks", "count", { label: "Tarefas" }),
+        q("B", "tasks", "late", { label: "Atrasadas" }),
+        q("C", "hours", "hours", { label: "Horas registradas" }),
+      ],
+    });
+    expect(notes).toHaveLength(3);
+    expect(notes[0]).toMatch(/^Tarefas: Conta para todos que executaram/);
+    expect(notes[1]).toMatch(/^Atrasadas: .*quando o prazo venceu/);
+    expect(notes[2]).toMatch(/de quem registrou/);
+  });
+  it("responsável atual avisa que em validação é quem valida", () => {
+    const [note] = panelNotes({
+      viz: "table",
+      groupBy: "person",
+      queries: [q("A", "tasks", "count", { attribution: "assignee" })],
+    });
+    expect(note).toMatch(/Em validação, é quem valida/);
+  });
+  it("tempo no status nunca passa por horas trabalhadas", () => {
+    const notes = panelNotes({
+      viz: "stat",
+      groupBy: "none",
+      queries: [q("A", "status_history", "hours")],
+    });
+    expect(notes[0]).toMatch(/não horas trabalhadas/);
+    expect(
+      panelNotes({ viz: "stat", groupBy: "none", queries: [q("A", "tasks", "count")] }),
+    ).toEqual([]);
+  });
+  it("o modelo inicial e o de performance explicam os painéis por pessoa", () => {
+    for (const p of [...starterPanels(), ...performancePanels()])
+      if (p.spec.groupBy === "person") expect(panelNotes(p.spec).length).toBeGreaterThan(0);
   });
 });

@@ -4,6 +4,18 @@ import { duration } from "./domain";
 import { Paged } from "./Pagination";
 import type { Summary } from "./api";
 
+/** "2 em execução · 6 em validação · 1 devolvida". */
+function workload(p: Summary["by_person"][number]) {
+  const parts = [
+    `${p.tasks} em execução`,
+    p.reviewing ? `${p.reviewing} em validação` : "",
+    p.returned
+      ? `${p.returned} ${p.returned === 1 ? "devolvida" : "devolvidas"}`
+      : "",
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
 export default function Reports({
   byClient,
   byPerson,
@@ -67,8 +79,8 @@ export default function Reports({
             <h2>{personal ? "Sua carga de trabalho" : "Carga de trabalho"}</h2>
             <p>
               {personal
-                ? "Suas tarefas abertas e horas estimadas"
-                : "Tarefas abertas e horas estimadas totais"}
+                ? "Suas horas registradas no período e as tarefas com você hoje"
+                : "Horas registradas no período e as tarefas com cada pessoa hoje"}
             </p>
           </div>
           <Users size={20} />
@@ -81,9 +93,16 @@ export default function Reports({
                   <Avatar name={p.name} src={avatarOf?.(p.id)} />
                   <span>
                     <strong>{p.name}</strong>
-                    <small>{p.tasks} tarefas abertas</small>
+                    <small>{workload(p)}</small>
                   </span>
-                  <b>{duration(p.estimated)}</b>
+                  <span className="workload-figures">
+                    <b title="Registradas no cronômetro e nos apontamentos, no período">
+                      {duration(p.minutes ?? 0)} registradas
+                    </b>
+                    <small title="Estimativa das tarefas em execução com a pessoa (não inclui as que ela está validando)">
+                      {duration(p.estimated)} estimadas em execução
+                    </small>
+                  </span>
                 </div>
               ))
             }
@@ -91,7 +110,10 @@ export default function Reports({
         </div>
       </section>
       <div className="report-note">
-        Estimativas não representam capacidade disponível.
+        As horas registradas são de quem usou o cronômetro ou fez o
+        apontamento. As tarefas em validação ficam com quem valida, mas as
+        horas estimadas delas não entram na carga dessa pessoa. Estimativas não
+        representam capacidade disponível.
       </div>
     </div>
   );
