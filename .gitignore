@@ -20,3 +20,7 @@ gcs-credentials.json
 .social-leads-export/
 # SQL gerado por scripts/import-meeting-recordings.mjs (transcrições de clientes).
 /meeting-recordings-import/
+# Dumps do MASO (usuarios_maso traz senhas) e o SQL gerado por
+# scripts/import-maso-tasks.mjs (tarefas de clientes).
+/maso-tarefas/
+/maso-tarefas-import*/

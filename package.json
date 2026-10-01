@@ -75,6 +75,7 @@
     "test:db:campaigns": "node scripts/test-ad-campaigns.mjs",
     "test:db:make-leads": "node scripts/test-make-leads.mjs",
     "test:db:import-maso": "node scripts/test-import-maso.mjs",
+    "test:db:import-maso-tasks": "node --experimental-strip-types --no-warnings scripts/test-import-maso-tasks.mjs",
     "test:db:member-modules": "node scripts/test-member-modules.mjs",
     "test:db:access-logs": "node scripts/test-access-logs.mjs",
     "test:db:public-api": "node scripts/test-public-api.mjs",
