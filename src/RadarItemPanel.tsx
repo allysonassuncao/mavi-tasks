@@ -44,6 +44,7 @@ export function RadarItemPanel({
   data,
   user,
   onNewTask,
+  onTaskLinked,
   notify,
 }: {
   company: string;
@@ -55,6 +56,8 @@ export function RadarItemPanel({
   data?: Snapshot;
   user?: string;
   onNewTask?: (preset: FormPreset) => void;
+  /** A tarefa criada pelo painel ficou ligada ao item. */
+  onTaskLinked?: (item: string) => void;
   notify?: (message: string) => void;
 }) {
   const [item, setItem] = useState<RadarItemDetail | null>(null);
@@ -98,7 +101,10 @@ export function RadarItemPanel({
       ...preset,
       onCreated: (task) =>
         void linkTask(company, id, task)
-          .then(() => notify?.("Tarefa criada e ligada ao item do Radar."))
+          .then(() => {
+            notify?.("Tarefa criada e ligada ao item do Radar.");
+            onTaskLinked?.(id);
+          })
           .catch((e) => notify?.(`A tarefa foi criada, mas não ficou ligada ao item: ${(e as Error).message}`)),
     });
   }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { AlertTriangle, BellRing, CalendarClock, ChevronDown, ChevronUp, FileText, Info, Layers, List, RefreshCw, Settings2, X } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { Empty } from "./components";
-import type { Snapshot } from "./types";
+import { statuses, type Snapshot, type Status } from "./types";
 import { appPath, openInApp } from "./temperature";
 import { RadarItemPanel, SeverityDot } from "./RadarItemPanel";
 import { RadarThemes } from "./RadarThemes";
@@ -12,6 +12,7 @@ import { navigate, useLocation } from "./router";
 import type { FormPreset } from "./forms";
 import {
   dateBr,
+  loadItem,
   loadItems,
   loadOverview,
   overdue,
@@ -494,6 +495,7 @@ export function RadarPage({
                   {topic.severity && <th>{topic.severity_label}</th>}
                   {topic.has_due && <th>Prazo</th>}
                   <th>Responsável</th>
+                  <th>Tarefas</th>
                   <th className="num">Vezes</th>
                   <th>Última vez</th>
                 </tr>
@@ -549,6 +551,9 @@ export function RadarPage({
                             <span className="muted">—</span>
                           )}
                       </td>
+                      <td>
+                        <RadarItemTasks tasks={i.tasks ?? []} />
+                      </td>
                       <td className="num">{i.mentions}</td>
                       <td>{dateBr(i.last_seen_at)}</td>
                     </tr>
@@ -587,6 +592,13 @@ export function RadarPage({
           onNewTask={onNewTask}
           notify={notify}
           onClose={() => setOpen(null)}
+          onTaskLinked={(id) =>
+            void loadItem(company, id)
+              .then((next) =>
+                setItems((list) => list?.map((x) => (x.id === id ? { ...x, tasks: next.tasks } : x)) ?? list),
+              )
+              .catch(() => undefined)
+          }
           onChanged={(next) => {
             setItems((list) => list?.map((x) => (x.id === next.id ? { ...x, ...next } : x)) ?? list);
             loadTop();
@@ -594,6 +606,43 @@ export function RadarPage({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * As tarefas criadas a partir do item, cada uma pelo status (o título no
+ * balão); até duas e o resto contado. Clicar abre a tarefa.
+ */
+function RadarItemTasks({ tasks }: { tasks: NonNullable<RadarItem["tasks"]> }) {
+  if (!tasks.length) return <span className="muted">—</span>;
+  const shown = tasks.slice(0, 2);
+  return (
+    <span className="radar-row-tasks">
+      {shown.map((t) => {
+        const st = statuses[t.status as Status];
+        return (
+          <a
+            key={t.id}
+            className="radar-status radar-task-chip"
+            style={{ "--status": st?.color ?? "#a3acab" } as CSSProperties}
+            href={appPath(`/tarefas/${t.id}`)}
+            title={t.title}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              openInApp(`/tarefas/${t.id}`);
+            }}
+          >
+            {st?.label ?? t.status}
+          </a>
+        );
+      })}
+      {tasks.length > shown.length && (
+        <small className="muted" title={tasks.slice(2).map((t) => t.title).join("\n")}>
+          +{tasks.length - shown.length}
+        </small>
+      )}
+    </span>
   );
 }
 

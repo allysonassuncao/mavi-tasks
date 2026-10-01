@@ -27021,6 +27021,18 @@ main:has(> .mavi-chat) > .error-banner {
   border-radius: 50%;
   background: var(--status);
 }
+.radar-row-tasks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+a.radar-task-chip {
+  text-decoration: none;
+}
+a.radar-task-chip:hover {
+  background: color-mix(in srgb, var(--status) 24%, #fff);
+}
 .radar-sev {
   --sev: #a3acab;
   display: inline-flex;

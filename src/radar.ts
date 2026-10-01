@@ -114,6 +114,8 @@ export type RadarItem = {
   theme_locked: boolean;
   /** Esperando a MAVI escolher o tema. */
   theme_pending: boolean;
+  /** As tarefas criadas a partir do item, as mais novas primeiro (20270128090000). */
+  tasks?: RadarTask[];
 };
 export type RadarTask = {
   id: string;
@@ -1070,7 +1072,12 @@ function demoSeed(): DemoItem[] {
       "em_tratamento", 1, [
         occ(2, "whatsapp", "De novo o logo antigo na arte de hoje.", "Ricardo", "client", 'Grupo "Norte Coffee"'),
         occ(9, "whatsapp", "Essa arte está com o logo errado.", "Ricardo", "client", 'Grupo "Norte Coffee"'),
-      ]),
+      ], {
+        tasks: [
+          { id: "t-radar-2", title: "Trocar o logo nas artes do feed", status: "review", due_date: daysAgo(-2).slice(0, 10), assignee_name: "Bruna" },
+          { id: "t-radar-1", title: "Conferir o kit de marca da Norte Coffee", status: "done", due_date: null, assignee_name: "Bruna" },
+        ],
+      }),
     item("demo-3", PROBLEMS, c3, null, "Demora para responder no grupo",
       "O cliente reclamou que esperou dois dias por uma resposta sobre o relatório.",
       "aberto", 3, [
@@ -1150,8 +1157,9 @@ for (const [item, theme] of [
 // Os outros esperam a MAVI agrupar.
 for (const i of demo.items) i.theme_pending = !i.theme_id;
 const themeTitle = (id: string | null) => demo.themes.find((t) => t.id === id)?.title ?? null;
-const strip = ({ occurrences: _o, tasks: _t, ...rest }: DemoItem): RadarItem => ({ // eslint-disable-line @typescript-eslint/no-unused-vars
+const strip = ({ occurrences: _o, ...rest }: DemoItem): RadarItem => ({ // eslint-disable-line @typescript-eslint/no-unused-vars
   ...rest,
+  tasks: rest.tasks ?? [],
   theme_title: themeTitle(rest.theme_id),
 });
 function demoThemes(f: RadarThemeFilters): RadarThemesPage {
