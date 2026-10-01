@@ -8,7 +8,7 @@ import {
 } from "react";
 import { ChevronUp, Maximize2, Mic, PenLine, X } from "lucide-react";
 import { statuses, type Status, type Task } from "./types";
-import { TaskTotal, type Playing } from "./TaskTable";
+import { TaskTotal, runningOn, type Playing } from "./TaskTable";
 
 /**
  * Tarefas minimizadas: a tarefa sai da frente e fica no rodapé enquanto a
@@ -274,7 +274,7 @@ export function TaskDock({
   onOpen,
 }: {
   tray: TaskTray;
-  /** O cronômetro da pessoa: a tarefa em execução ganha destaque e o tempo. */
+  /** Os cronômetros da pessoa: as tarefas em execução ganham destaque e o tempo. */
   playing: Playing | null;
   /** A bolinha da MAVI está na tela: o rodapé deixa o lugar dela. */
   withFab: boolean;
@@ -294,13 +294,18 @@ export function TaskDock({
     return () => window.removeEventListener("keydown", onKey);
   }, [listOpen]);
   if (!items.length) return null;
-  const runningId = playing?.entry.task_id;
-  // A pílula mostra a tarefa em execução; sem ela, a minimizada por último.
+  const isRunning = (item: TrayItem) => !!runningOn(playing, item.id);
+  // A pílula mostra uma tarefa em execução (a iniciada por último); sem
+  // nenhuma, a minimizada por último.
   const latest =
-    items.find((i) => i.id === runningId) ??
-    items.reduce((a, b) => (b.at > a.at ? b : a));
+    [...items]
+      .filter(isRunning)
+      .sort(
+        (a, b) =>
+          Date.parse(runningOn(playing, b.id)!.started_at) -
+          Date.parse(runningOn(playing, a.id)!.started_at),
+      )[0] ?? items.reduce((a, b) => (b.at > a.at ? b : a));
   const others = items.length - 1;
-  const isRunning = (item: TrayItem) => !!playing && item.id === runningId;
   // O ponto do status vira o pulso de "em execução".
   const dot = (item: TrayItem) =>
     isRunning(item) ? (
@@ -311,13 +316,13 @@ export function TaskDock({
   const clock = (item: TrayItem) =>
     playing && isRunning(item) ? (
       <span className="task-dock-time" title="Cronômetro rodando nesta tarefa (tempo total)">
-        <TaskTotal playing={playing} />
+        <TaskTotal playing={playing} taskId={item.id} />
       </span>
     ) : null;
   const statusLine = (item: TrayItem) =>
     playing && isRunning(item) ? (
       <>
-        Em execução · <TaskTotal playing={playing} />
+        Em execução · <TaskTotal playing={playing} taskId={item.id} />
       </>
     ) : (
       statuses[item.status].label

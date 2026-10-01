@@ -102,7 +102,7 @@ describe("TaskDock", () => {
       <TaskDock
         tray={fakeTray([item(1), item(2)])}
         withFab
-        playing={{ entry, hours: [entry], company: "c1", demo: true }}
+        playing={{ entries: [entry], hours: [entry], company: "c1", demo: true }}
         onOpen={() => {}}
       />,
     );

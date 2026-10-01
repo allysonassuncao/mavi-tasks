@@ -189,6 +189,7 @@ import {
   PlayingBadge,
   TaskTable,
   TaskTotal,
+  runningOn,
   type Playing,
 } from "./TaskTable";
 import { PriorityTag, priorityClass } from "./TaskPriority";
@@ -243,6 +244,7 @@ import {
 } from "./notifications";
 import {
   canCreateTaskIn,
+  canTimeTask,
   contractParts,
   contractProductLabel,
   teamClientIds,
@@ -668,15 +670,18 @@ export default function App() {
       thenBy !== "none");
   const today = dateKey(new Date(), currentCompany?.timezone);
   const [periodValue, setPeriod] = useUrlState<string>("periodo", "");
-  const [currentRunning, setCurrentRunning] = useState<
-    import("./types").TimeEntry | null
-  >(null);
-  const activeTimer = currentRunning;
-  const playingTimer: Playing | null = activeTimer
-    ? { entry: activeTimer, hours: data.hours, company, demo }
+  // The person's running timers, oldest first: one, or several when an
+  // administrator or manager turned on Várias tarefas ao mesmo tempo for
+  // them (memberships.multi_timer, migration 20270202090000).
+  const [runningTimers, setRunningTimers] = useState<TimeEntry[]>([]);
+  const multiTimer = !!member?.multi_timer;
+  // Play/pause on the rows of "Para você": the task being saved.
+  const [rowTimerTask, setRowTimerTask] = useState<string | null>(null);
+  const playingTimer: Playing | null = runningTimers.length
+    ? { entries: runningTimers, hours: data.hours, company, demo }
     : null;
-  // The person's running timer is read on sign-in and again only when it may
-  // have changed: live notices of their time entries (and resyncs after a
+  // The person's running timers are read on sign-in and again only when they
+  // may have changed: live notices of their time entries (and resyncs after a
   // dropped connection) bump timerTick, and so do their own timer actions.
   // No polling: with thousands of people signed in, a request every few
   // seconds each would load the database for nothing.
@@ -686,22 +691,22 @@ export default function App() {
     async function syncTimer() {
       timerSyncedAt.current = Date.now();
       if (demo) {
-        setCurrentRunning(
-          demoStore.current.data.hours.find(
-            (h) => h.user_id === user && !h.ended_at,
-          ) ?? null,
+        setRunningTimers(
+          demoStore.current.data.hours
+            .filter((h) => h.user_id === user && !h.ended_at)
+            .sort((a, b) => a.started_at.localeCompare(b.started_at)),
         );
         return;
       }
       if (!session) {
-        setCurrentRunning(null);
+        setRunningTimers([]);
         return;
       }
       try {
-        const timer = await api.currentTimer();
-        if (alive) setCurrentRunning(timer);
+        const timers = await api.currentTimers();
+        if (alive) setRunningTimers(timers);
       } catch {
-        /* Keep the last confirmed timer on temporary connectivity loss. */
+        /* Keep the last confirmed timers on temporary connectivity loss. */
       }
     }
     void syncTimer();
@@ -1686,10 +1691,10 @@ export default function App() {
       let createdTask: Task | null | undefined = null;
       if (demo) {
         setData({ ...demoStore.current.data });
-        setCurrentRunning(
-          demoStore.current.data.hours.find(
-            (h) => h.user_id === user && !h.ended_at,
-          ) ?? null,
+        setRunningTimers(
+          demoStore.current.data.hours
+            .filter((h) => h.user_id === user && !h.ended_at)
+            .sort((a, b) => a.started_at.localeCompare(b.started_at)),
         );
         setRefresh((v) => v + 1);
       } else if (TASK_ROW_MUTATIONS.has(name) && result) {
@@ -1717,7 +1722,22 @@ export default function App() {
         setTimerTick((v) => v + 1);
       } else if (TIMER_ROW_MUTATIONS.has(name) && result) {
         const entry = result as TimeEntry;
-        setCurrentRunning(entry.ended_at ? null : entry);
+        // Starting pauses the others, unless the person may run several
+        // (then only those of other companies pause, in the database).
+        setRunningTimers((list) =>
+          entry.ended_at
+            ? list.filter((e) => e.id !== entry.id)
+            : [
+                ...(multiTimer
+                  ? list.filter(
+                      (e) =>
+                        e.company_id === entry.company_id &&
+                        e.task_id !== entry.task_id,
+                    )
+                  : []),
+                entry,
+              ],
+        );
         setData((d) => ({ ...d, hours: upsertById(d.hours, entry) }));
         api.patchCachedHours(company, entry);
       } else if (name === "stop_task_recurrence" && args.p_task) {
@@ -2664,13 +2684,22 @@ export default function App() {
             {playingTimer && (
               <Button
                 className="timer-live"
-                title="Tempo total da tarefa em execução"
+                title={
+                  runningTimers.length > 1
+                    ? `${runningTimers.length} tarefas em execução — o tempo é o da iniciada por último`
+                    : "Tempo total da tarefa em execução"
+                }
                 onClick={() => {
                   go("hours");
                 }}
               >
                 <span className="pulse" />
                 <TaskTotal playing={playingTimer} />
+                {runningTimers.length > 1 && (
+                  <span className="timer-live-more">
+                    +{runningTimers.length - 1}
+                  </span>
+                )}
               </Button>
             )}
             <InstallApp notify={notify} />
@@ -3474,6 +3503,35 @@ export default function App() {
                         lookup={nameLookup}
                         today={today}
                         playing={playingTimer}
+                        timer={
+                          listScope === "mine"
+                            ? {
+                                canStart: (t) => canTimeTask(t, user),
+                                pending: rowTimerTask,
+                                startNote: !runningTimers.length
+                                  ? undefined
+                                  : multiTimer
+                                    ? "as outras continuam rodando"
+                                    : "pausa a tarefa em andamento",
+                                toggle: (t, running) => {
+                                  setRowTimerTask(t.id);
+                                  void mutate(
+                                    running ? "stop_timer" : "start_timer",
+                                    running
+                                      ? { p_entry: running.id }
+                                      : { p_task: t.id },
+                                  )
+                                    .then(() => {
+                                      // Play and pause are posted as comments.
+                                      api.invalidateTaskExtras(t.id);
+                                      setExtrasTick((v) => v + 1);
+                                    })
+                                    .catch(() => {})
+                                    .finally(() => setRowTimerTask(null));
+                                },
+                              }
+                            : undefined
+                        }
                         onSelect={setSelected}
                         selection={{
                           picked,
@@ -3511,7 +3569,7 @@ export default function App() {
                               .filter((t) => t.status === key)
                               .map((t) => {
                                 const n = namesFrom(nameLookup, t),
-                                  playing = activeTimer?.task_id === t.id;
+                                  playing = !!runningOn(playingTimer, t.id);
                                 return (
                                   <Button
                                     className={`task-card${playing ? " is-playing" : ""} ${priorityClass(t.priority)}`.trimEnd()}
@@ -3524,7 +3582,10 @@ export default function App() {
                                     </small>
                                     <h4>{t.title}</h4>
                                     {playing && playingTimer && (
-                                      <PlayingBadge playing={playingTimer} />
+                                      <PlayingBadge
+                                        playing={playingTimer}
+                                        taskId={t.id}
+                                      />
                                     )}
                                     <footer>
                                       <span
@@ -3772,45 +3833,78 @@ export default function App() {
                     </div>
                     <div>
                       <small>
-                        {activeTimer
-                          ? "CRONÔMETRO EM ANDAMENTO"
-                          : "TEMPO DE CONCENTRAÇÃO"}
+                        {runningTimers.length > 1
+                          ? `${runningTimers.length} CRONÔMETROS EM ANDAMENTO`
+                          : runningTimers.length
+                            ? "CRONÔMETRO EM ANDAMENTO"
+                            : "TEMPO DE CONCENTRAÇÃO"}
                       </small>
-                      <h2>
-                        {activeTimer ? (
-                          <LiveDuration entry={activeTimer} />
-                        ) : (
-                          "Pronto para começar?"
-                        )}
-                      </h2>
-                      <p>
-                        {activeTimer
-                          ? (data.tasks.find(
-                              (t) => t.id === activeTimer.task_id,
-                            )?.title ?? "Tarefa em andamento")
-                          : "Abra uma tarefa para iniciar o cronômetro ou registre suas horas manualmente."}
-                      </p>
+                      {runningTimers.length > 1 ? (
+                        <ul className="timer-panel-list">
+                          {runningTimers.map((e) => (
+                            <li key={e.id}>
+                              <span>
+                                <strong>
+                                  <LiveDuration entry={e} />
+                                </strong>
+                                {data.tasks.find((t) => t.id === e.task_id)
+                                  ?.title ?? "Tarefa em andamento"}
+                              </span>
+                              <Button
+                                className="btn secondary"
+                                disabled={busy}
+                                onClick={() =>
+                                  void mutate("stop_timer", {
+                                    p_entry: e.id,
+                                  }).catch(() => {})
+                                }
+                              >
+                                <Square size={14} /> Parar
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <>
+                          <h2>
+                            {runningTimers[0] ? (
+                              <LiveDuration entry={runningTimers[0]} />
+                            ) : (
+                              "Pronto para começar?"
+                            )}
+                          </h2>
+                          <p>
+                            {runningTimers[0]
+                              ? (data.tasks.find(
+                                  (t) => t.id === runningTimers[0].task_id,
+                                )?.title ?? "Tarefa em andamento")
+                              : "Abra uma tarefa para iniciar o cronômetro ou registre suas horas manualmente."}
+                          </p>
+                        </>
+                      )}
                     </div>
-                    {activeTimer ? (
+                    {runningTimers.length === 1 ? (
                       <Button
                         className="btn primary"
                         disabled={busy}
                         loading={busy}
                         onClick={() =>
                           void mutate("stop_timer", {
-                            p_entry: activeTimer.id,
+                            p_entry: runningTimers[0].id,
                           }).catch(() => {})
                         }
                       >
                         <Square size={15} /> Parar
                       </Button>
                     ) : (
-                      <Button
-                        className="btn primary"
-                        onClick={() => go("tasks")}
-                      >
-                        <Play size={16} /> Escolher tarefa
-                      </Button>
+                      !runningTimers.length && (
+                        <Button
+                          className="btn primary"
+                          onClick={() => go("tasks")}
+                        >
+                          <Play size={16} /> Escolher tarefa
+                        </Button>
+                      )
                     )}
                   </section>
                   <section className="panel">
@@ -4328,6 +4422,14 @@ export default function App() {
                                           : "módulos ligados"}
                                       </span>
                                     )}
+                                  {isLeader && m.multi_timer && (
+                                    <span
+                                      className="member-email"
+                                      title="Iniciar uma tarefa não pausa as outras (Recursos extras, em Editar usuário)"
+                                    >
+                                      Várias tarefas ao mesmo tempo
+                                    </span>
+                                  )}
                                 </div>
                                 <span className="role-tag">
                                   {ROLE_LABELS[m.role]}
@@ -4682,7 +4784,8 @@ export default function App() {
           key={task.id}
           task={task}
           hidden={task.id !== selected}
-          currentRunning={currentRunning}
+          runningTimers={runningTimers}
+          multiTimer={multiTimer}
           data={data}
           user={user}
           busy={busy}

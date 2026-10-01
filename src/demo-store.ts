@@ -1038,6 +1038,33 @@ export class DemoStore {
         );
         break;
       }
+      case "set_member_multi_timer": {
+        // Mirrors public.set_member_multi_timer (migration 20270202090000).
+        const target = this.data.members.find((m) => m.user_id === a.p_user);
+        const me = this.data.members.find((m) => m.user_id === demoUser);
+        if (
+          !target ||
+          !canManageDueScope(this.data, demoUser, { project_id: null, client_id: null, team_id: null, user_id: a.p_user }) ||
+          (target.role === "admin" && me?.role !== "admin")
+        )
+          throw Error("Administradores liberam para todos; gestores, para as pessoas das suas equipes");
+        this.data.members = this.data.members.map((m) =>
+          m.user_id === a.p_user ? { ...m, multi_timer: !!a.p_on } : m,
+        );
+        if (!a.p_on) {
+          const open = this.data.hours
+            .filter((h) => h.user_id === a.p_user && !h.ended_at)
+            .sort((x, y) => y.started_at.localeCompare(x.started_at));
+          for (const h of open.slice(1)) {
+            h.ended_at = now;
+            timerComment(h.task_id, transitionComment(
+              "Pausou o trabalho (várias tarefas ao mesmo tempo foi desligado)",
+              "",
+            ));
+          }
+        }
+        break;
+      }
       case "set_member_workload": {
         // Mirrors public.set_member_workload.
         if (!canManageDueScope(this.data, demoUser, { project_id: null, client_id: null, team_id: null, user_id: a.p_user }))
@@ -1386,14 +1413,20 @@ export class DemoStore {
       }
       case "start_timer":
         {
-          const active = this.data.hours.find(
+          const open = this.data.hours.filter(
             (h) => h.user_id === demoUser && !h.ended_at,
           );
-          if (active && active.task_id === a.p_task) return active.id;
-          if (active) {
-            active.ended_at = now;
-            timerComment(active.task_id, pauseComment(active, true));
-          }
+          const same = open.find((h) => h.task_id === a.p_task);
+          if (same) return same.id;
+          // With Várias tarefas ao mesmo tempo, the others keep running.
+          const multi = this.data.members.find(
+            (m) => m.user_id === demoUser,
+          )?.multi_timer;
+          if (!multi)
+            for (const active of open) {
+              active.ended_at = now;
+              timerComment(active.task_id, pauseComment(active, true));
+            }
         }
         timerComment(a.p_task, transitionComment("Iniciou o trabalho", ""));
         this.data.hours.unshift({

@@ -1471,6 +1471,48 @@ tbody tr:last-child td {
   align-items: center;
   font-size: 0.75rem;
   color: #73954c;
+  white-space: nowrap;
+}
+/* Mais de uma tarefa em execução (Várias tarefas ao mesmo tempo). */
+.timer-live-more {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e3f1cf;
+  color: #3d5a24;
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+.timer-panel-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.timer-panel-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f6f9f2;
+  border: 1px solid #dfe8d5;
+}
+.timer-panel-list li > span {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: #6b7d5a;
+}
+.timer-panel-list strong {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #576a45;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .pulse {
   height: 6px;
@@ -12957,7 +12999,8 @@ tr:hover .campaign-edit-record,
   }
 }
 /* Módulos visíveis por pessoa (formulário do usuário). */
-.member-modules .checkbox-label > span {
+.member-modules .checkbox-label > span,
+.member-extras .checkbox-label > span {
   display: flex;
   flex-direction: column;
 }
@@ -25274,6 +25317,56 @@ label.drive-pick-file {
 }
 .task-table tr.is-subtask .task-title strong {
   font-weight: 500;
+}
+/* Play/pause na linha ("Para você"): aparece ao passar o mouse (ou com o
+   foco do teclado) e fica sempre na tarefa em execução, como pausa. */
+.row-timer {
+  flex: none;
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid #dfe7da;
+  background: #fff;
+  color: #6f9a45;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+.task-table tr:hover .row-timer,
+.row-timer:focus-visible,
+.row-timer.ui-button-loading,
+.row-timer.is-running {
+  opacity: 1;
+}
+.row-timer:hover:not(:disabled) {
+  background: #eef6e4;
+  border-color: #b9d69a;
+}
+.row-timer.is-running {
+  background: #5f9a2f;
+  border-color: #5f9a2f;
+  color: #fff;
+}
+.row-timer.is-running:hover:not(:disabled) {
+  background: #4e8423;
+  border-color: #4e8423;
+}
+.row-timer:disabled {
+  cursor: default;
+}
+.row-timer .skeleton-button {
+  border-radius: 50%;
+}
+/* Sem mouse, não há hover: o botão fica, discreto. */
+@media (hover: none) {
+  .row-timer {
+    opacity: 0.75;
+  }
 }
 .select-banner {
   display: flex;

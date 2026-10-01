@@ -852,18 +852,19 @@ export async function taskById(
   );
 }
 
-export async function currentTimer(): Promise<TimeEntry | null> {
-  if (!supabase) return null;
+/** The person's running timers, oldest first (more than one with multi_timer). */
+export async function currentTimers(): Promise<TimeEntry[]> {
+  if (!supabase) return [];
   const { data: session } = await supabase.auth.getSession();
-  if (!session.session) return null;
+  if (!session.session) return [];
   const { data, error } = await supabase
     .from("time_entries")
     .select("*")
     .eq("user_id", session.session.user.id)
     .is("ended_at", null)
-    .maybeSingle();
+    .order("started_at");
   if (error) throw error;
-  return data as TimeEntry | null;
+  return (data ?? []) as TimeEntry[];
 }
 
 class SessionExpiredError extends Error {

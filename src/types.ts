@@ -40,6 +40,11 @@ export interface Member {
   work_minutes?: number | null;
   /** The weekdays they work, 1 = Monday … 5 = Friday (null: all five). */
   work_days?: number[] | null;
+  /**
+   * Várias tarefas ao mesmo tempo: starting a timer leaves the others
+   * running (set_member_multi_timer, by admins and managers).
+   */
+  multi_timer?: boolean;
 }
 export interface Client {
   id: string;
@@ -204,6 +209,12 @@ export interface TimeEntry {
   ended_at: string | null;
   note: string;
   source: "timer" | "manual";
+  /**
+   * Until when the person's entries started before this one cover it
+   * ('infinity' while one runs): in per-person totals, two tasks timed
+   * together count once (migration 20270202090000).
+   */
+  covered_until?: string | null;
 }
 export interface Comment {
   id: string;

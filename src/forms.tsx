@@ -68,6 +68,7 @@ import {
 import {
   canApproveTask,
   canCreateTaskIn,
+  canTimeTask,
   contractOpen,
   contractProductLabel,
   dateLabel,
@@ -750,7 +751,8 @@ function prependParagraphs(note: string, lines: string[]) {
 }
 export function TaskDetail({
   task,
-  currentRunning,
+  runningTimers,
+  multiTimer,
   data,
   user,
   busy,
@@ -767,7 +769,10 @@ export function TaskDetail({
   onCommentDraft,
 }: {
   task: Task;
-  currentRunning: import("./types").TimeEntry | null;
+  /** The person's running timers (several with Várias tarefas ao mesmo tempo). */
+  runningTimers: import("./types").TimeEntry[];
+  /** Starting this one leaves the others running. */
+  multiTimer: boolean;
   data: Snapshot;
   user: string;
   busy: boolean;
@@ -979,17 +984,15 @@ export function TaskDetail({
     const el = sideBody.current;
     if (el && tab === "comments") el.scrollTop = el.scrollHeight;
   }, [tab, panelOpen, loading, extras.comments.length]);
-  const running = currentRunning;
-  const isRunning = running?.task_id === task.id;
+  // The person's timer on this task, and whether one runs on another.
+  const running = runningTimers.find((e) => e.task_id === task.id) ?? null;
+  const isRunning = !!running;
+  const runsElsewhere = runningTimers.some((e) => e.task_id !== task.id);
   // A delivered task hides the button; a clock still running can be stopped.
   const showPlay = isRunning || task.status !== "done";
   // No play (and no description blur) while the task waits on validation, was
   // returned or delivered, or for its creator — unless the creator is doing it.
-  const canPlay =
-    task.status !== "review" &&
-    task.status !== "returned" &&
-    task.status !== "done" &&
-    (task.creator_id !== user || task.assignee_id === user);
+  const canPlay = canTimeTask(task, user);
   const totalSeconds = useTaskSeconds({
     company: task.company_id,
     taskId: task.id,
@@ -1662,8 +1665,8 @@ export function TaskDetail({
                 disabled={busy || editorUploading || (!isRunning && !canPlay)}
                 onClick={() =>
                   void mutate(
-                    isRunning ? "stop_timer" : "start_timer",
-                    isRunning ? { p_entry: running.id } : { p_task: task.id },
+                    running ? "stop_timer" : "start_timer",
+                    running ? { p_entry: running.id } : { p_task: task.id },
                   )
                     .then(() => {
                       // Play and pause are posted as comments.
@@ -1725,8 +1728,10 @@ export function TaskDetail({
                       : task.creator_id === user
                         ? "Você criou esta tarefa; o tempo é registrado por quem a executa."
                         : "Sem registro de tempo enquanto a tarefa está nesta etapa."
-                    : running
-                      ? "Ao iniciar, sua outra tarefa em andamento é pausada automaticamente."
+                    : runsElsewhere
+                      ? multiTimer
+                        ? "Ao iniciar, suas outras tarefas em andamento continuam rodando."
+                        : "Ao iniciar, sua outra tarefa em andamento é pausada automaticamente."
                       : totalSeconds > 0
                         ? "Clique em Iniciar para continuar registrando."
                         : "Inicie para ver a descrição e registrar seu tempo."}

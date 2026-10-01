@@ -6,6 +6,8 @@ import {
   ChevronRight,
   Flag,
   Layers,
+  Pause,
+  Play,
   TriangleAlert,
 } from "lucide-react";
 import { Button, Select, SelectOption } from "./ui";
@@ -26,30 +28,56 @@ import {
 import { statuses, type Task, type TimeEntry } from "./types";
 import { useTaskSeconds } from "./useTaskTime";
 
-/** The user's running timer, as the task list needs it to mark its task. */
+/**
+ * The user's running timers, as the lists need them to mark their tasks —
+ * more than one with Várias tarefas ao mesmo tempo (memberships.multi_timer).
+ */
 export type Playing = {
-  entry: TimeEntry;
+  /** Oldest first. */
+  entries: TimeEntry[];
   hours: TimeEntry[];
   company: string;
   demo: boolean;
 };
-/** Live total time of the task being played (every session, not just this one). */
-export function TaskTotal({ playing }: { playing: Playing }) {
+/** The running entry on a task, if any. */
+export function runningOn(playing: Playing | null | undefined, taskId: string) {
+  return playing?.entries.find((e) => e.task_id === taskId);
+}
+/**
+ * Live total time of a task being played (every session, not just this
+ * one): the given task, or the one started last.
+ */
+export function TaskTotal({
+  playing,
+  taskId,
+}: {
+  playing: Playing;
+  taskId?: string;
+}) {
+  const entry =
+    (taskId ? runningOn(playing, taskId) : undefined) ??
+    playing.entries[playing.entries.length - 1];
   const seconds = useTaskSeconds({
     company: playing.company,
-    taskId: playing.entry.task_id,
+    taskId: entry.task_id,
     hours: playing.hours,
-    running: playing.entry,
+    running: entry,
     demo: playing.demo,
   });
   return <>{durationWithSeconds(seconds)}</>;
 }
-/** Marks the task whose timer the user is running, with the task's total time. */
-export function PlayingBadge({ playing }: { playing: Playing }) {
+/** Marks a task whose timer the user is running, with the task's total time. */
+export function PlayingBadge({
+  playing,
+  taskId,
+}: {
+  playing: Playing;
+  taskId: string;
+}) {
   return (
     <span className="playing-badge" title="Seu cronômetro está nesta tarefa">
       <span className="playing-pulse" aria-hidden="true" />
-      Em execução · <TaskTotal playing={playing} />
+      Em execução · <TaskTotal playing={playing} taskId={taskId} />
     </span>
   );
 }
@@ -60,6 +88,7 @@ export function TaskTable({
   lookup,
   today,
   playing,
+  timer,
   onSelect,
   selection,
   parentTitle,
@@ -76,8 +105,20 @@ export function TaskTable({
   me?: string;
   lookup: NameLookup;
   today: string;
-  /** The user's running timer, marked on its task. */
+  /** The user's running timers, marked on their tasks. */
   playing?: Playing | null;
+  /**
+   * Play/pause on the rows (the "Para você" tab): shown on hover, and always
+   * on a task whose timer runs; not on tasks the person cannot time.
+   */
+  timer?: {
+    canStart: (t: Task) => boolean;
+    toggle: (t: Task, running?: TimeEntry) => void;
+    /** The task whose play or pause is being saved. */
+    pending?: string | null;
+    /** What starting does to the other running tasks (the tooltip). */
+    startNote?: string;
+  };
   onSelect: (id: string) => void;
   /** Checkboxes for a bulk edit: per task, per section and the whole page. */
   selection?: {
@@ -174,7 +215,8 @@ export function TaskTable({
   ) => {
     const n = namesFrom(lookup, t),
       creator = lookup.members.get(t.creator_id),
-      isPlaying = playing?.entry.task_id === t.id,
+      runningEntry = runningOn(playing, t.id),
+      isPlaying = !!runningEntry,
       mineToDo = !!me && t.assignee_id === me,
       mineCreated = !!me && t.creator_id === me,
       kids = opts.kids ?? [],
@@ -246,7 +288,9 @@ export function TaskTable({
                   )}
                 </small>
                 {renderNote?.(t)}
-                {isPlaying && playing && <PlayingBadge playing={playing} />}
+                {isPlaying && playing && (
+                  <PlayingBadge playing={playing} taskId={t.id} />
+                )}
                 <span className="mobile-status">
                   <Badge status={t.status} />
                 </span>
@@ -256,6 +300,26 @@ export function TaskTable({
               <span className="subtask-count">
                 {kids.length} {kids.length === 1 ? "subtarefa" : "subtarefas"}
               </span>
+            )}
+            {timer && (runningEntry || timer.canStart(t)) && (
+              <Button
+                className={`row-timer${runningEntry ? " is-running" : ""}`}
+                loading={timer.pending === t.id}
+                disabled={!!timer.pending}
+                title={
+                  runningEntry
+                    ? "Pausar o cronômetro"
+                    : `Iniciar o cronômetro${timer.startNote ? ` — ${timer.startNote}` : ""}`
+                }
+                aria-label={`${runningEntry ? "Pausar" : "Iniciar"} o cronômetro de ${t.title}`}
+                onClick={() => timer.toggle(t, runningEntry)}
+              >
+                {runningEntry ? (
+                  <Pause size={13} fill="currentColor" aria-hidden="true" />
+                ) : (
+                  <Play size={13} fill="currentColor" aria-hidden="true" />
+                )}
+              </Button>
             )}
           </div>
         </td>

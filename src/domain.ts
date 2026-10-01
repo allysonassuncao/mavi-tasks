@@ -20,6 +20,23 @@ export function dateKey(date = new Date(), timezone = "America/Sao_Paulo") {
 export function isLate(task: Task, today = dateKey()) {
   return task.status !== "done" && task.due_date < today;
 }
+/**
+ * Who can start the timer on a task (the play in the task and in the list):
+ * no play while it waits on validation, was returned or delivered, nor for
+ * its creator — unless the creator is doing it. A running clock can always
+ * be stopped.
+ */
+export function canTimeTask(
+  task: Pick<Task, "status" | "creator_id" | "assignee_id">,
+  user: string,
+) {
+  return (
+    task.status !== "review" &&
+    task.status !== "returned" &&
+    task.status !== "done" &&
+    (task.creator_id !== user || task.assignee_id === user)
+  );
+}
 export function minutes(entry: TimeEntry, now = Date.now()) {
   return Math.max(
     0,

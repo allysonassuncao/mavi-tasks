@@ -24,7 +24,9 @@ const roles: { id: Role; label: string }[] = [
  * Admins and managers edit a person's name, access profile, teams and status.
  * Mirrors update_member: managers cannot touch admins or grant admin, and
  * nobody changes their own profile or deactivates themselves. Admins also
- * pick the modules the person sees (set_member_pages).
+ * pick the modules the person sees (set_member_pages); admins and managers
+ * turn on the extras, such as timing several tasks at once
+ * (set_member_multi_timer).
  */
 export function MemberForm({
   member,
@@ -52,6 +54,7 @@ export function MemberForm({
   const [name, setName] = useState(member.name);
   const [role, setRole] = useState<Role>(member.role);
   const [active, setActive] = useState(member.active);
+  const [multiTimer, setMultiTimer] = useState(!!member.multi_timer);
   const [teams, setTeams] = useState<string[]>(
     data.teamMembers
       .filter((tm) => tm.user_id === member.user_id)
@@ -107,6 +110,12 @@ export function MemberForm({
         p_active: active,
         p_teams: teams,
       });
+      if (multiTimer !== !!member.multi_timer)
+        await mutate("set_member_multi_timer", {
+          p_company: company,
+          p_user: member.user_id,
+          p_on: multiTimer,
+        });
       if (canEditPhone && phonesChanged(phones, savedPhones))
         setSavedPhones(await saveMemberPhones(company, member.user_id, phones));
       const before = [...hiddenModules(member)].sort().join();
@@ -266,6 +275,28 @@ export function MemberForm({
               </div>
             </fieldset>
           )}
+          <fieldset className="member-teams member-extras">
+            <legend>Recursos extras</legend>
+            <label className="checkbox-label">
+              <Checkbox
+                checked={multiTimer}
+                onCheckedChange={(on) => setMultiTimer(on === true)}
+              />
+              <span>
+                Várias tarefas ao mesmo tempo
+                <small className="member-module-note">
+                  {multiTimer
+                    ? "iniciar uma tarefa não pausa as outras; cada uma registra o tempo cheio e, nas horas da pessoa, o tempo junto conta uma vez"
+                    : "desligado: iniciar uma tarefa pausa a que estava rodando"}
+                </small>
+              </span>
+            </label>
+            {!multiTimer && member.multi_timer && (
+              <small className="form-hint" role="status">
+                Ao salvar, só a tarefa iniciada por último continua rodando.
+              </small>
+            )}
+          </fieldset>
           <label className="checkbox-label member-active">
             <Checkbox
               checked={active}
