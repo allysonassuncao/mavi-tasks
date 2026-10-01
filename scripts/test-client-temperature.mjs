@@ -298,6 +298,26 @@ await check("as respostas do Jev viram a temperatura de hoje, sem aviso na prime
   assert.equal(usage.input_tokens, 8000);
 });
 
+await check("as leituras do WhatsApp mostram o grupo e as mensagens do cliente", async () => {
+  await as(member);
+  const t = await rpc("client_temperature", [A, client, 30, 40]);
+  const wa = t.signals.find((s) => s.type === "whatsapp");
+  assert.equal(wa.group, "4282 - Tráfego");
+  assert.equal(typeof wa.client_lines, "number");
+  assert.deepEqual(t.sources.whatsapp, { read: 1, pending: 0, failed: 0, skipped: 1, groups: 1 });
+  assert.deepEqual(t.sources.meeting, { read: 1, pending: 0, failed: 0, skipped: 0 });
+  // Uma fonte não esconde a outra: o limite vale por fonte.
+  const one = await rpc("client_temperature", [A, client, 30, 1]);
+  assert.deepEqual(one.signals.map((s) => s.type).sort(), ["meeting", "whatsapp"]);
+  // Só o que o Jev leu como [cliente]: sem a agência e sem o Bruno do time.
+  const m = await rpc("temperature_signal_messages", [A, whatsappSignal]);
+  assert.equal(m.group_id, GROUP);
+  assert.deepEqual(m.messages.map((x) => [x.who, x.text]), [["Carlos", "Não gostei dos resultados."]]);
+  await rejects(() => rpc("temperature_signal_messages", [A, meetingSignal]), /Sem acesso/);
+  await as(outsider);
+  await rejects(() => rpc("temperature_signal_messages", [A, whatsappSignal]), /Sem acesso/);
+});
+
 await check("o texto da MAVI recebe o que mais pesou e fica guardado", async () => {
   await as(null);
   const [s] = await rpc("ai_temperature_summary_claim", [SECRET, 6]);

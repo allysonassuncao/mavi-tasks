@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   AlertTriangle,
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
   MessageCircle,
   RefreshCw,
@@ -17,6 +19,7 @@ import {
   bandOf,
   dateBr,
   loadClientTemperature,
+  loadSignalMessages,
   openInApp,
   scoreLabel,
   signalPath,
@@ -24,7 +27,10 @@ import {
   trendLabel,
   trendTone,
   type ClientTemperature as Data,
+  type SignalMessage,
   type TemperatureBand,
+  type TemperatureSignal,
+  type TemperatureSource,
 } from "./temperature";
 
 /**
@@ -247,77 +253,255 @@ export function ClientTemperature({
       )}
 
       {data.signals.length > 0 && (
-        <section className="thermo-block" aria-label="Leituras">
-          <h3>
-            Leituras recentes <small>cada reunião ou dia de grupo que o Jev leu</small>
-          </h3>
-          <ul className="thermo-signals">
-            {data.signals.map((s) => {
-              const path = signalPath(s);
-              const notes = Object.entries(s.answers).filter(([, a]) => (a.e ?? 1) >= 0.3);
-              const flags = Object.entries(s.flags).filter(([, p]) => p >= data.settings.flag_threshold);
-              return (
-                <li key={s.id}>
-                  <span className={`thermo-signal-icon ${s.type}`} aria-hidden="true">
-                    {s.type === "meeting" ? <Video size={15} /> : <MessageCircle size={15} />}
-                  </span>
-                  <div>
-                    <div className="thermo-signal-head">
-                      <strong>{signalTitle(s)}</strong>
-                      <span className="thermo-signal-meta">
-                        <time dateTime={s.date}>{dateBr(s.date)}</time>
-                        {s.status === "pending" && <small className="thermo-pending">na fila</small>}
-                      </span>
-                    </div>
-                    {(notes.length > 0 || flags.length > 0 || s.reason) && (
-                      <div className="thermo-chips">
-                        {notes.map(([k, a]) => {
-                          const b = bandOf(bands, bandIndex(bands, a.v));
-                          return (
-                            <span
-                              key={k}
-                              className="thermo-chip"
-                              style={{ "--band": b?.color ?? "#a3acab" } as CSSProperties}
-                            >
-                              {names.get(k) ?? k} <strong>{scoreLabel(a.v)}</strong>
-                            </span>
-                          );
-                        })}
-                        {flags.map(([k]) => (
-                          <span key={k} className="thermo-chip flag">
-                            <AlertTriangle size={11} aria-hidden="true" /> {names.get(k) ?? k}
-                          </span>
-                        ))}
-                        {s.reason && (
-                          <span className="thermo-chip reason">
-                            {reasonLabel.get(s.reason)?.split(" (")[0] ?? s.reason}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    {s.excerpt && <p className="thermo-excerpt">{s.excerpt}</p>}
-                  </div>
-                  {path && (
-                    <a
-                      href={appPath(path)}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        openInApp(path);
-                      }}
-                      className="thermo-open"
-                    >
-                      Abrir <ExternalLink size={12} aria-hidden="true" />
-                    </a>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+        <Signals company={company} data={data} names={names} reasonLabel={reasonLabel} />
       )}
     </section>
   );
 }
+
+type SourceFilter = "all" | TemperatureSource;
+
+/**
+ * As leituras que entraram no cálculo, com o filtro por fonte. Cada dia de
+ * grupo abre as mensagens do cliente que o Jev leu (as do time ficam de fora).
+ */
+function Signals({
+  company,
+  data,
+  names,
+  reasonLabel,
+}: {
+  company: string;
+  data: Data;
+  names: Map<string, string>;
+  reasonLabel: Map<string, string>;
+}) {
+  const [filter, setFilter] = useState<SourceFilter>("all");
+  const count = (t: TemperatureSource) => data.signals.filter((s) => s.type === t).length;
+  const shown = filter === "all" ? data.signals : data.signals.filter((s) => s.type === filter);
+  const wa = data.sources?.whatsapp;
+  const tabs: { id: SourceFilter; label: string; n: number }[] = [
+    { id: "all", label: "Todas", n: data.signals.length },
+    { id: "meeting", label: "Reuniões", n: count("meeting") },
+    { id: "whatsapp", label: "WhatsApp", n: count("whatsapp") },
+  ];
+  return (
+    <section className="thermo-block" aria-label="Leituras">
+      <div className="thermo-signals-head">
+        <h3>
+          Leituras recentes <small>cada reunião ou dia de grupo que o Jev leu</small>
+        </h3>
+        <div className="drive-view" role="tablist" aria-label="Fonte das leituras">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={filter === t.id}
+              className={filter === t.id ? "selected" : ""}
+              onClick={() => setFilter(t.id)}
+            >
+              {t.id === "meeting" && <Video size={13} aria-hidden="true" />}
+              {t.id === "whatsapp" && <MessageCircle size={13} aria-hidden="true" />}
+              {t.label} <small>{t.n}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      {filter === "whatsapp" && wa && (
+        <p className="thermo-source-note">
+          {wa.groups === 0
+            ? "Nenhum grupo de WhatsApp está ligado a este cliente. Um administrador liga o grupo em Configurações › Grupos do Whatsapp."
+            : [
+                `${wa.groups} ${wa.groups === 1 ? "grupo ligado" : "grupos ligados"}`,
+                `${wa.read} ${wa.read === 1 ? "dia lido" : "dias lidos"}`,
+                wa.pending > 0 && `${wa.pending} na fila`,
+                wa.failed > 0 && `${wa.failed} com erro`,
+                wa.skipped > 0 &&
+                  `${wa.skipped} ${wa.skipped === 1 ? "dia" : "dias"} só com mensagens do time (fora do cálculo)`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+        </p>
+      )}
+      {shown.length === 0 ? (
+        <p className="thermo-source-note">
+          {filter === "whatsapp"
+            ? "Nenhum dia de grupo com mensagem do cliente ainda."
+            : "Nenhuma reunião gravada com o cliente ainda."}
+        </p>
+      ) : (
+        <ul className="thermo-signals">
+          {shown.map((s) => (
+            <SignalItem
+              key={s.id}
+              company={company}
+              signal={s}
+              data={data}
+              names={names}
+              reasonLabel={reasonLabel}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function SignalItem({
+  company,
+  signal: s,
+  data,
+  names,
+  reasonLabel,
+}: {
+  company: string;
+  signal: TemperatureSignal;
+  data: Data;
+  names: Map<string, string>;
+  reasonLabel: Map<string, string>;
+}) {
+  const bands = data.settings.bands;
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<SignalMessage[] | null>(null);
+  const [error, setError] = useState("");
+  const path = signalPath(s);
+  const notes = Object.entries(s.answers).filter(([, a]) => (a.e ?? 1) >= 0.3);
+  const flags = Object.entries(s.flags).filter(([, p]) => p >= data.settings.flag_threshold);
+  const whatsapp = s.type === "whatsapp";
+  const lines = s.client_lines ?? 0;
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !messages) {
+      setError("");
+      loadSignalMessages(company, s.id)
+        .then(setMessages)
+        .catch((e) => setError((e as Error).message));
+    }
+  };
+  const messagePath = (m: SignalMessage) =>
+    s.group_id ? `/drive?whatsapp=${s.group_id}&msg=${m.id}` : null;
+  return (
+    <li>
+      <span className={`thermo-signal-icon ${s.type}`} aria-hidden="true">
+        {whatsapp ? <MessageCircle size={15} /> : <Video size={15} />}
+      </span>
+      <div>
+        <div className="thermo-signal-head">
+          <strong>{whatsapp && s.group ? s.group : signalTitle(s)}</strong>
+          <span className="thermo-signal-meta">
+            <time dateTime={s.date}>{whatsapp ? dateBr(s.day) : dateBr(s.date)}</time>
+            {whatsapp && lines > 0 && (
+              <span>
+                {lines} {lines === 1 ? "mensagem do cliente" : "mensagens do cliente"}
+              </span>
+            )}
+            {s.status === "pending" && <small className="thermo-pending">na fila</small>}
+          </span>
+        </div>
+        {(notes.length > 0 || flags.length > 0 || s.reason) && (
+          <div className="thermo-chips">
+            {notes.map(([k, a]) => {
+              const b = bandOf(bands, bandIndex(bands, a.v));
+              return (
+                <span
+                  key={k}
+                  className="thermo-chip"
+                  style={{ "--band": b?.color ?? "#a3acab" } as CSSProperties}
+                >
+                  {names.get(k) ?? k} <strong>{scoreLabel(a.v)}</strong>
+                </span>
+              );
+            })}
+            {flags.map(([k]) => (
+              <span key={k} className="thermo-chip flag">
+                <AlertTriangle size={11} aria-hidden="true" /> {names.get(k) ?? k}
+              </span>
+            ))}
+            {s.reason && (
+              <span className="thermo-chip reason">
+                {reasonLabel.get(s.reason)?.split(" (")[0] ?? s.reason}
+              </span>
+            )}
+          </div>
+        )}
+        {!open && s.excerpt && <p className="thermo-excerpt">{s.excerpt}</p>}
+        {whatsapp && (
+          <button
+            type="button"
+            className="thermo-messages-toggle"
+            aria-expanded={open}
+            onClick={toggle}
+          >
+            {open ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}
+            {open ? "Esconder as mensagens" : "Ver as mensagens do cliente"}
+          </button>
+        )}
+        {open && (
+          <div className="thermo-messages" aria-live="polite">
+            {error ? (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            ) : !messages ? (
+              <Loading compact label="Carregando as mensagens" />
+            ) : messages.length === 0 ? (
+              <p className="thermo-source-note">Nenhuma mensagem do cliente neste dia.</p>
+            ) : (
+              <ol>
+                {messages.map((m) => {
+                  const to = messagePath(m);
+                  return (
+                    <li key={m.id}>
+                      <span className="thermo-message-meta">
+                        <time dateTime={m.at}>{timeBr(m.at)}</time>
+                        <strong>{m.who}</strong>
+                        {m.edited && <small>editada</small>}
+                      </span>
+                      <p>{m.text}</p>
+                      {to && (
+                        <a
+                          href={appPath(to)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            openInApp(to);
+                          }}
+                          className="thermo-open"
+                        >
+                          Ver na conversa <ExternalLink size={11} aria-hidden="true" />
+                        </a>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </div>
+        )}
+      </div>
+      {path && (
+        <a
+          href={appPath(path)}
+          onClick={(e) => {
+            e.preventDefault();
+            openInApp(path);
+          }}
+          className="thermo-open"
+        >
+          Abrir <ExternalLink size={12} aria-hidden="true" />
+        </a>
+      )}
+    </li>
+  );
+}
+
+const timeBr = (iso: string) =>
+  new Date(iso).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  });
 
 function Trend({
   label,

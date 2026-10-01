@@ -103,6 +103,28 @@ export type TemperatureSignal = {
   flags: Record<string, number>;
   reason: string | null;
   excerpt: string;
+  /** Quantas mensagens (ou falas) do cliente o Jev leu. */
+  client_lines?: number;
+  /** WhatsApp: o nome do grupo. */
+  group?: string | null;
+};
+/** As leituras de uma fonte: lidas, na fila, com erro e sem fala do cliente. */
+export type SourceCounts = {
+  read: number;
+  pending: number;
+  failed: number;
+  skipped: number;
+  /** WhatsApp: os grupos ligados ao cliente. */
+  groups?: number;
+};
+/** Uma mensagem do cliente num dia de grupo (o que o Jev leu como [cliente]). */
+export type SignalMessage = {
+  id: string;
+  at: string;
+  who: string;
+  kind: string;
+  text: string;
+  edited: boolean;
 };
 export type ClientIndicator = {
   key: string;
@@ -122,6 +144,8 @@ export type ClientTemperature = {
   refreshed_at: string | null;
   history: { day: string; score: number | null; band: number | null; flags: string[] }[] | null;
   signals: TemperatureSignal[];
+  /** Ausente antes da migration 20270129090000. */
+  sources?: { meeting: SourceCounts; whatsapp: SourceCounts };
   pending: number;
   failed: number;
   jev: boolean;
@@ -231,6 +255,15 @@ export async function loadClientTemperature(company: string, client: string) {
     p_days: 180,
     p_signals: 40,
   });
+}
+/** As mensagens do cliente num dia de grupo (a leitura do WhatsApp aberta). */
+export async function loadSignalMessages(company: string, signal: string) {
+  if (offline(company)) return demoMessages(signal);
+  const r = await rpc<{ messages: SignalMessage[] }>("temperature_signal_messages", {
+    p_company: company,
+    p_signal: signal,
+  });
+  return r.messages ?? [];
 }
 export async function loadPortfolio(company: string, clients: { id: string; name: string; color: string }[] = []) {
   if (offline(company)) return demoPortfolio(clients);
@@ -542,6 +575,7 @@ function demoClient(): ClientTemperature {
         answers: { relacao: { v: 35, e: 0.8 }, engajamento: { v: 55, e: 0.5 } },
         flags: { cobranca_prazo: 0.91 }, reason: "prazos",
         excerpt: "Pessoal, o relatório da semana passada ainda não chegou.",
+        client_lines: 3, group: "4282 - Tráfego",
       },
       {
         id: "s3", type: "whatsapp", source_id: "demo", group_id: null, message_id: null,
@@ -549,13 +583,31 @@ function demoClient(): ClientTemperature {
         answers: { satisfacao: { v: 74, e: 0.7 }, relacao: { v: 82, e: 0.9 } },
         flags: {}, reason: "elogio",
         excerpt: "Adorei as artes novas, ficaram muito boas!",
+        client_lines: 2, group: "4282 - Tráfego",
       },
     ],
+    sources: {
+      meeting: { read: 6, pending: 0, failed: 0, skipped: 0 },
+      whatsapp: { read: 17, pending: 0, failed: 0, skipped: 4, groups: 1 },
+    },
     pending: 0,
     failed: 0,
     jev: true,
     can_configure: true,
   };
+}
+function demoMessages(signal: string): SignalMessage[] {
+  const at = (day: number, time: string) => `${isoDay(day)}T${time}:00-03:00`;
+  if (signal === "s3")
+    return [
+      { id: "m4", at: at(-9, "10:30"), who: "Carla (cliente)", kind: "text", text: "Adorei as artes novas, ficaram muito boas!", edited: false },
+      { id: "m5", at: at(-9, "10:32"), who: "Carla (cliente)", kind: "text", text: "Podem seguir nessa linha para outubro.", edited: false },
+    ];
+  return [
+    { id: "m1", at: at(-1, "10:05"), who: "Carla (cliente)", kind: "text", text: "Pessoal, o relatório da semana passada ainda não chegou.", edited: false },
+    { id: "m2", at: at(-1, "10:06"), who: "Carla (cliente)", kind: "audio", text: "[áudio 00:42] Preciso desse relatório até amanhã, porque vou apresentar para a diretoria na quinta.", edited: false },
+    { id: "m3", at: at(-1, "16:40"), who: "Carla (cliente)", kind: "text", text: "Alguma novidade?", edited: false },
+  ];
 }
 function demoPortfolio(clients: { id: string; name: string; color: string }[]): Portfolio {
   const scores = [38, 82, 64, 22, 91, 55, 47, 73];

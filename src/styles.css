@@ -23814,6 +23814,89 @@ label.drive-pick-file {
   overflow: hidden;
 }
 
+/* Leituras: o filtro por fonte e as mensagens do cliente no dia de grupo. */
+.thermo-signals-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.thermo-signals-head h3 {
+  margin: 0;
+}
+.thermo-signals-head .drive-view button small {
+  font-weight: 400;
+  opacity: 0.75;
+}
+.thermo-source-note {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.thermo-messages-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #2f8f57;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.thermo-messages-toggle:hover {
+  text-decoration: underline;
+}
+.thermo-messages {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f4faf6;
+  border: 1px solid #dcefe2;
+}
+.thermo-messages ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.thermo-signals .thermo-messages li {
+  display: block;
+  padding: 0;
+  border: 0;
+}
+.thermo-message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.thermo-message-meta strong {
+  color: #2d3e3f;
+  font-weight: 600;
+}
+.thermo-messages p {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #2d3a3b;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.thermo-messages .thermo-open {
+  margin-top: 2px;
+}
+
 /* A carteira (/termometro). */
 .thermo-page {
   display: flex;
