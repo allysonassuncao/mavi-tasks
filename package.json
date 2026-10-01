@@ -68,6 +68,7 @@
     "test:db:dashboards": "node scripts/test-dashboards.mjs",
     "test:db:performance": "node scripts/test-task-performance.mjs",
     "test:db:person-roles": "node scripts/test-dashboard-person-roles.mjs",
+    "test:db:team-people": "node scripts/test-dashboard-team-people.mjs",
     "test:db:dashboard-mavi": "node scripts/test-dashboard-mavi.mjs",
     "test:db:agenda": "node scripts/test-google-calendar.mjs",
     "test:db:campaigns": "node scripts/test-ad-campaigns.mjs",

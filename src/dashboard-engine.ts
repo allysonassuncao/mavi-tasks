@@ -101,8 +101,6 @@ function series(
         return k?.product_id ?? null;
       case "project":
         return r.task.project_id;
-      case "team":
-        return r.task.team_id;
       case "person": {
         if (q.source === "hours") return r.entry!.user_id;
         // Migration 20270131090000: who the task counts for. The demo keeps
@@ -131,6 +129,18 @@ function series(
         return null;
     }
   };
+  // Migration 20270209090000: a team is its people — the teams of whoever
+  // the row counts for ("Pessoa"), each once.
+  const teamsOf = (r: Row) => {
+    const person = field(r, "person");
+    return [
+      ...new Set(
+        data.teamMembers
+          .filter((m) => m.user_id === person)
+          .map((m) => m.team_id),
+      ),
+    ];
+  };
   const allFilters = [
     ...q.filters,
     ...(
@@ -154,8 +164,8 @@ function series(
         const wanted = f.values[0] === "true";
         return (late(r.task) === wanted) === ((f.op ?? "in") === "in");
       }
-      const v = field(r, f.field);
-      const hit = v !== null && f.values.includes(v);
+      const values = f.field === "team" ? teamsOf(r) : [field(r, f.field)];
+      const hit = values.some((v) => v !== null && f.values.includes(v));
       return (f.op ?? "in") === "in" ? hit : !hit;
     });
   });
@@ -254,11 +264,18 @@ function series(
   if (group === "none") return [{ k: "total", v: measure(kept) }];
   const groups = new Map<string | null, Row[]>();
   for (const r of kept) {
-    const key =
-      group === "time" ? bucketStart(dateOf(r)!, interval) : field(r, group);
-    const list = groups.get(key);
-    if (list) list.push(r);
-    else groups.set(key, [r]);
+    const teams = group === "team" ? teamsOf(r) : [];
+    const keys: (string | null)[] =
+      group === "time"
+        ? [bucketStart(dateOf(r)!, interval)]
+        : group === "team"
+          ? teams.length ? teams : [null]
+          : [field(r, group)];
+    for (const key of keys) {
+      const list = groups.get(key);
+      if (list) list.push(r);
+      else groups.set(key, [r]);
+    }
   }
   const additive = metricDef(q)?.additive ?? true;
   if (group === "time") {

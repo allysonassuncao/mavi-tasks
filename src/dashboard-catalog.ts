@@ -812,6 +812,10 @@ export const attributionOf = (q: Pick<Query, "attribution">): Attribution =>
 const PEOPLE_GROUPS: GroupBy[] = ["person", "executor", "previous", "validator"];
 const EXECUTORS =
   "Conta para todos que executaram a tarefa (Em andamento, Alteração ou Correção), não para quem a valida. Feita por duas pessoas, aparece nas duas; o total conta a tarefa uma vez.";
+// Migration 20270209090000: on tasks and hours, a team is its people.
+const TEAM_BY_PEOPLE: Query["source"][] = ["tasks", "hours", "status_history", "reviews", "due_changes"];
+const TEAM_PEOPLE =
+  "Cada equipe conta o que as pessoas dela contariam no filtro Pessoa, mesmo nas tarefas entregues direto a alguém. Quem está em duas equipes aparece nas duas; quem não está em nenhuma, em Sem equipe.";
 const HELD_TIME =
   "É o tempo em que a tarefa ficou com a pessoa nesse status, não horas trabalhadas (essas vêm do cronômetro). Em validação, o tempo é de quem valida; em Devolvida, de quem precisa responder.";
 
@@ -820,6 +824,7 @@ export function personNote(q: Query, group: GroupBy): string | null {
   const people = PEOPLE_GROUPS.includes(group);
   if (q.source === "status_history" && (q.metric === "hours" || q.metric === "avg_hours"))
     return HELD_TIME;
+  if (group === "team" && TEAM_BY_PEOPLE.includes(q.source)) return TEAM_PEOPLE;
   if (!people) return null;
   switch (q.source) {
     case "tasks": {

@@ -524,6 +524,33 @@ describe("Motor da demonstração", () => {
     expect(r.series.A[2].v).toBe(0.5);
     expect(r.series.A[14].v).toBe(1);
   });
+  it("Equipe são as pessoas da equipe, mesmo sem equipe na tarefa", () => {
+    const withTeams: Snapshot = {
+      ...data,
+      teams: [
+        { id: "design", company_id: "c", name: "Design" },
+        { id: "midia", company_id: "c", name: "Mídia" },
+      ] as Snapshot["teams"],
+      teamMembers: [
+        { company_id: "c", team_id: "design", user_id: "ana" },
+        { company_id: "c", team_id: "midia", user_id: "bia" },
+      ],
+    };
+    const go = (spec: PanelSpec, filters = {}) =>
+      runPanel(withTeams, spec, range, filters, "America/Sao_Paulo", new Date("2026-09-24T15:00:00Z"));
+    const stat = (filters = {}) =>
+      go(
+        { viz: "stat", groupBy: "none", queries: [q("A", "tasks", "count"), q("B", "hours", "hours")] },
+        filters,
+      );
+    const design = stat({ teams: ["design"] });
+    expect([design.series.A[0].v, design.series.B[0].v]).toEqual([1, 2]);
+    const byTeam = go({ viz: "table", groupBy: "team", queries: [q("A", "tasks", "count")] });
+    expect(byTeam.series.A).toEqual([
+      { k: "midia", l: "Mídia", v: 3 },
+      { k: "design", l: "Design", v: 1 },
+    ]);
+  });
   it("acerto das datas da MAVI e da regra", () => {
     const delivered = (id: string, day: string, rule: string, smart: string) =>
       task(id, {
@@ -604,6 +631,17 @@ describe("Pessoa nos painéis", () => {
     expect(notes[0]).toMatch(/^Tarefas: Conta para todos que executaram/);
     expect(notes[1]).toMatch(/^Atrasadas: .*quando o prazo venceu/);
     expect(notes[2]).toMatch(/de quem registrou/);
+  });
+  it("por equipe explica que a equipe são as pessoas dela", () => {
+    const [note] = panelNotes({
+      viz: "hbar",
+      groupBy: "team",
+      queries: [q("A", "tasks", "count")],
+    });
+    expect(note).toMatch(/entregues direto a alguém/);
+    expect(
+      panelNotes({ viz: "hbar", groupBy: "team", queries: [q("A", "temperature", "score")] }),
+    ).toEqual([]);
   });
   it("responsável atual avisa que em validação é quem valida", () => {
     const [note] = panelNotes({
