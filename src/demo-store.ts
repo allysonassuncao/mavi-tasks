@@ -439,6 +439,7 @@ export class DemoStore {
         created_at: new Date().toISOString(),
       });
     const statusBefore = task?.status;
+    const assigneeBefore = task?.assignee_id;
     switch (name) {
       case "update_client":
       case "update_product":
@@ -1572,6 +1573,29 @@ export class DemoStore {
         break;
       default:
         throw Error("Operação indisponível na demonstração");
+    }
+    // Mirrors mavi_private.pause_on_reassign: a new responsible (same status)
+    // pauses the timer of whoever had the task.
+    if (
+      task &&
+      assigneeBefore &&
+      task.assignee_id !== assigneeBefore &&
+      task.status === statusBefore
+    ) {
+      const receiver = this.data.members.find(
+        (m) => m.user_id === task.assignee_id,
+      );
+      for (const h of this.data.hours)
+        if (h.task_id === task.id && h.user_id === assigneeBefore && !h.ended_at) {
+          h.ended_at = new Date().toISOString();
+          timerComment(
+            task.id,
+            transitionComment(
+              `Pausou o trabalho (tarefa transferida para ${receiver?.name.split(" ")[0] ?? "outra pessoa"})`,
+              `Sessão de ${sessionLabel(h.started_at, h.ended_at)}`,
+            ),
+          );
+        }
     }
     // Mirrors mavi_private.pause_on_status_change: a new status pauses every
     // timer running on the task.

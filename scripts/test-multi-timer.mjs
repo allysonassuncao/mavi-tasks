@@ -135,6 +135,38 @@ await check("ao desligar, só a iniciada por último continua", async () => {
   assert.equal(note.length, 2, "uma para cada pausada");
 });
 
+await check("trocar o responsável pausa o cronômetro de quem tinha a tarefa (migração 20270206090000)", async () => {
+  // A Bia segue com t3 rodando; o Gil (gestor) também cronometra t3.
+  assert.deepEqual(await running(bia), [t3]);
+  await as(gil);
+  await rpc("start_timer", [t3]);
+  await sql("update tasks set assignee_id=$1 where id=$2", [caio, t3]);
+  assert.deepEqual(await running(bia), [], "a Bia saiu da tarefa");
+  assert.deepEqual(await running(gil), [t3], "quem não era o responsável segue");
+  const moved = await sql(
+    "select author_id from comments where task_id=$1 and body like '%tarefa transferida para Caio%'",
+    [t3],
+  );
+  assert.deepEqual(moved.map((c) => c.author_id), [bia]);
+  // Mesmo responsável de novo (só outro campo): nada pausa.
+  await as(caio);
+  await rpc("start_timer", [t3]);
+  await sql("update tasks set assignee_id=$1, title='Outro título' where id=$2", [caio, t3]);
+  assert.deepEqual(await running(caio), [t3]);
+  // Status e responsável juntos: pausa tudo, com o comentário do status, uma vez por sessão.
+  await sql("update tasks set assignee_id=$1, status='review' where id=$2", [bia, t3]);
+  assert.deepEqual([...(await running(caio)), ...(await running(gil))], []);
+  const pauses = await sql(
+    "select author_id, body from comments where task_id=$1 and body like '%Pausou o trabalho%' order by created_at",
+    [t3],
+  );
+  const caioPauses = pauses.filter((c) => c.author_id === caio);
+  assert.equal(caioPauses.length, 1, "a do Caio, uma vez só");
+  assert.ok(caioPauses[0].body.includes("status alterado para Em validação"));
+  assert.ok(pauses.some((c) => c.author_id === gil && c.body.includes("status alterado")));
+  await sql("update tasks set status='progress' where id=$1", [t3]);
+});
+
 // ------------------------------------------------------------ sobreposição
 await sql("update time_entries set ended_at = greatest(now(), started_at + interval '1 millisecond') where ended_at is null");
 await sql("delete from time_entries where user_id=$1", [bia]);
