@@ -1319,6 +1319,23 @@ export default function App() {
     if (demo) demoStore.current.readNotifications(user, [n.id]);
     else void api.readNotifications(company, [n.id]).catch(() => {});
   }
+  // "Marcar como não lida": back to unread, for later.
+  function unreadNotification(n: AppNotification) {
+    if (!n.read_at) return;
+    setInbox((list) =>
+      list.map((x) => (x.id === n.id ? { ...x, read_at: null } : x)),
+    );
+    setInboxUnread((count) => count + 1);
+    window.dispatchEvent(
+      new CustomEvent("mavi:inbox", { detail: { unread: [n.id] } }),
+    );
+    if (demo) demoStore.current.unreadNotifications(user, [n.id]);
+    else
+      void api.unreadNotifications(company, [n.id]).catch(() => {
+        notify("Não deu para marcar como não lida. Tente de novo.");
+        void loadInbox();
+      });
+  }
   function readAllNotifications() {
     const at = new Date().toISOString();
     setInbox((list) => list.map((x) => ({ ...x, read_at: x.read_at ?? at })));
@@ -2750,6 +2767,7 @@ export default function App() {
               pageHref={pageUrl("inbox", companyPath)}
               onOpen={openNotification}
               onRead={readNotification}
+              onUnread={unreadNotification}
               onReadAll={readAllNotifications}
               onLoadMore={loadMoreInbox}
             />
@@ -4083,6 +4101,7 @@ export default function App() {
                     unread={inboxUnread}
                     onOpen={openNotification}
                     onRead={readNotification}
+                    onUnread={unreadNotification}
                     onReadAll={readAllNotifications}
                     notify={notify}
                   />

@@ -1538,3 +1538,8 @@ export async function testPush(): Promise<{
 export async function readNotifications(company: string, ids?: string[]) {
   await rpc("read_notifications", { p_company: company, p_ids: ids ?? null });
 }
+
+/** "Marcar como não lida": the given notices go back to unread. */
+export async function unreadNotifications(company: string, ids: string[]) {
+  await rpc("unread_notifications", { p_company: company, p_ids: ids });
+}

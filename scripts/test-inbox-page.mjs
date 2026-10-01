@@ -137,6 +137,27 @@ await check("não lidas e a contagem total", async () => {
   assert.ok(!unread.some((r) => r.id === first.id));
 });
 
+await check("marcar como não lida (20270216090000)", async () => {
+  await as(member);
+  const [first] = await page(1);
+  assert.ok(first.read_at);
+  // Outra pessoa não mexe nos avisos de quem não é ela.
+  await as(other);
+  assert.equal(await rpc("unread_notifications", [A, [first.id]]), 0);
+  await as(member);
+  assert.equal(await rpc("unread_notifications", [A, [first.id]]), 1);
+  assert.equal(await rpc("my_inbox_unread", [A]), 6);
+  assert.equal((await page(1))[0].read_at, null);
+  // Já não lida: nada muda; sem ids, nada muda.
+  assert.equal(await rpc("unread_notifications", [A, [first.id]]), 0);
+  assert.equal(await rpc("unread_notifications", [A, null]), 0);
+  // Volta como estava para as próximas verificações.
+  await rpc("read_notifications", [A, [first.id]]);
+  assert.equal(await rpc("my_inbox_unread", [A]), 5);
+  await as(null);
+  await assert.rejects(rpc("unread_notifications", [A, [first.id]]));
+});
+
 await check("por tipo, por quem enviou e os automáticos", async () => {
   assert.deepEqual(
     titles(await page(100, null, { kinds: ["temperature", "media_balance"] })).sort(),

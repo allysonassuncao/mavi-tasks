@@ -322,6 +322,10 @@ export class DemoStore {
       if (n.user_id === user && !n.read_at && (!ids || ids.includes(n.id)))
         n.read_at = at;
   }
+  unreadNotifications(user: string, ids: string[]) {
+    for (const n of this.notifications)
+      if (n.user_id === user && ids.includes(n.id)) n.read_at = null;
+  }
   /** Mirrors mavi_private.comment_mentions: participants and notifications. */
   private mentionsIn(comment: Comment) {
     const task = this.data.tasks.find((t) => t.id === comment.task_id);

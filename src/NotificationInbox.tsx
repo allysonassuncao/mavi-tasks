@@ -9,6 +9,7 @@ import {
   CheckCheck,
   Inbox,
   Flag,
+  Mail,
   GraduationCap,
   ListChecks,
   Sparkles,
@@ -41,19 +42,22 @@ function when(value: string) {
 /**
  * The notices, one per row: who did what, and where. Opening one marks it
  * read and opens the task (or the notice's place); the check beside an
- * unread one marks just it read, without opening anything. Shared by the
- * top bar's panel and the "Caixa de entrada" page.
+ * unread one marks just it read, without opening anything, and the envelope
+ * beside a read one marks it unread again. Shared by the top bar's panel
+ * and the "Caixa de entrada" page.
  */
 export function InboxList({
   items,
   members,
   onOpen,
   onRead,
+  onUnread,
 }: {
   items: AppNotification[];
   members: Member[];
   onOpen: (n: AppNotification) => void;
   onRead: (n: AppNotification) => void;
+  onUnread: (n: AppNotification) => void;
 }) {
   return (
     <ul className="inbox-list">
@@ -160,7 +164,17 @@ export function InboxList({
               </span>
               <time dateTime={n.created_at}>{when(n.created_at)}</time>
             </button>
-            {!n.read_at && (
+            {n.read_at ? (
+              <button
+                type="button"
+                className="inbox-read"
+                title="Marcar como não lida"
+                aria-label="Marcar como não lida"
+                onClick={() => onUnread(n)}
+              >
+                <Mail size={13} />
+              </button>
+            ) : (
               <button
                 type="button"
                 className="inbox-read"
@@ -206,6 +220,7 @@ export function NotificationInbox({
   pageHref,
   onOpen,
   onRead,
+  onUnread,
   onReadAll,
   onLoadMore,
 }: {
@@ -219,6 +234,7 @@ export function NotificationInbox({
   pageHref: string;
   onOpen: (n: AppNotification) => void;
   onRead: (n: AppNotification) => void;
+  onUnread: (n: AppNotification) => void;
   onReadAll: () => void;
   onLoadMore: () => void;
 }) {
@@ -263,6 +279,7 @@ export function NotificationInbox({
               onOpen(n);
             }}
             onRead={onRead}
+            onUnread={onUnread}
           />
         ) : (
           <InboxEmpty />

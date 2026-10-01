@@ -44,6 +44,7 @@ export function InboxPage({
   unread,
   onOpen,
   onRead,
+  onUnread,
   onReadAll,
   notify,
 }: {
@@ -57,6 +58,7 @@ export function InboxPage({
   unread: number;
   onOpen: (n: AppNotification) => void;
   onRead: (n: AppNotification) => void;
+  onUnread: (n: AppNotification) => void;
   onReadAll: () => void;
   notify: (message: string) => void;
 }) {
@@ -185,8 +187,23 @@ export function InboxPage({
     const onInbox = (event: Event) => {
       const detail = (event as CustomEvent).detail as {
         read?: string[] | "all";
+        unread?: string[];
         at?: string;
       };
+      if (detail?.unread) {
+        const back = detail.unread;
+        // "Não lidas" shows only unread ones: the notice comes back in.
+        if (state.current.filters.unread) loadHead(true);
+        else
+          setItems((list) =>
+            list
+              ? list.map((n) =>
+                  back.includes(n.id) ? { ...n, read_at: null } : n,
+                )
+              : list,
+          );
+        return;
+      }
       if (!detail?.read) {
         loadHead(true);
         return;
@@ -349,6 +366,7 @@ export function InboxPage({
             members={members}
             onOpen={onOpen}
             onRead={onRead}
+            onUnread={onUnread}
           />
           {more && (
             <div className="inbox-page-more">
