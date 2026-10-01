@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Check,
   ChevronRight,
+  Flag,
   Layers,
   TriangleAlert,
 } from "lucide-react";
@@ -425,7 +426,11 @@ export function TaskTable({
   };
   const head = (g: TaskGroup, level: 0 | 1) => {
     const closed = collapsed.has(g.key),
-      late = g.tasks.filter((t) => isLate(t, today)).length;
+      late = g.tasks.filter((t) => isLate(t, today)).length,
+      // Prioridades: as abertas com Urgente e com Alta, cada uma no seu selo.
+      open = g.tasks.filter((t) => t.status !== "done"),
+      urgent = open.filter((t) => t.priority === "urgent").length,
+      high = open.filter((t) => t.priority === "high").length;
     const flipGroup = () => {
       touched.current = true;
       toggle(g.key);
@@ -449,6 +454,24 @@ export function TaskTable({
             />
             <strong>{g.label}</strong>
             <span className="task-group-count">{g.tasks.length}</span>
+            {urgent > 0 && (
+              <span
+                className="task-group-priority priority-tag-urgent"
+                title={`${urgent} ${urgent === 1 ? "tarefa" : "tarefas"} com prioridade Urgente`}
+              >
+                <Flag size={11} fill="currentColor" aria-hidden="true" />
+                {urgent} {urgent === 1 ? "urgente" : "urgentes"}
+              </span>
+            )}
+            {high > 0 && (
+              <span
+                className="task-group-priority priority-tag-high"
+                title={`${high} ${high === 1 ? "tarefa" : "tarefas"} com prioridade Alta`}
+              >
+                <Flag size={11} fill="currentColor" aria-hidden="true" />
+                {high} {high === 1 ? "alta" : "altas"}
+              </span>
+            )}
             {late > 0 && (
               <span className="task-group-late">
                 <TriangleAlert size={12} aria-hidden="true" />

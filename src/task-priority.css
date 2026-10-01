@@ -91,3 +91,24 @@
 .priority-banner.priority-tag-high {
   margin-right: 0;
 }
+
+/* The section's header: how many open tasks are Urgente and Alta. */
+.task-group-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.task-group-priority.priority-tag-urgent {
+  border: 1px solid #f0c3b4;
+}
+.task-group-priority.priority-tag-high {
+  border: 1px solid #ecd6a6;
+}
+.task-group-head .task-group-priority svg {
+  color: currentColor;
+}
