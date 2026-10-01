@@ -32,7 +32,7 @@ import { MEMBER_OPT_IN, MODULES } from "./modules";
 import { canChangeDue, dueChangeError, dueReasonError } from "./task-due";
 import {
   PRIORITY_RULE,
-  canPrioritize,
+  mayPrioritize,
   canSetPriority,
   isPrioritized,
 } from "./task-priority";
@@ -740,7 +740,7 @@ export class DemoStore {
           assignee = picked.user_id;
         }
         // Mirrors mavi_private.guard_task_priority.
-        if (isPrioritized(a.p_priority) && !canPrioritize(this.data, assignee, demoUser))
+        if (isPrioritized(a.p_priority) && !mayPrioritize(this.data, demoUser))
           throw Error(PRIORITY_RULE);
         // The templates that apply add their fields, and the required ones
         // must be filled in.
@@ -1056,6 +1056,21 @@ export class DemoStore {
           m.user_id === a.p_user
             ? { ...m, lesson_alerts_copilot: !!a.p_copilot, lesson_alerts_mavi: !!a.p_mavi }
             : m,
+        );
+        break;
+      }
+      case "set_member_task_priority": {
+        // Mirrors public.set_member_task_priority (migration 20270205090000).
+        const target = this.data.members.find((m) => m.user_id === a.p_user);
+        const me = this.data.members.find((m) => m.user_id === demoUser);
+        if (
+          !target ||
+          !canManageDueScope(this.data, demoUser, { project_id: null, client_id: null, team_id: null, user_id: a.p_user }) ||
+          (target.role === "admin" && me?.role !== "admin")
+        )
+          throw Error("Administradores liberam para todos; gestores, para as pessoas das suas equipes");
+        this.data.members = this.data.members.map((m) =>
+          m.user_id === a.p_user ? { ...m, task_priority: !!a.p_on } : m,
         );
         break;
       }

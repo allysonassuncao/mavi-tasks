@@ -136,7 +136,7 @@ import { TaskDueValue } from "./TaskDueChange";
 import { TaskPriorityValue } from "./TaskPriority";
 import {
   PRIORITY_RULE,
-  canPrioritize,
+  mayPrioritize,
   canSetPriority,
   isPrioritized,
 } from "./task-priority";
@@ -1850,7 +1850,7 @@ export function TaskDetail({
                       </SelectOption>
                     ))}
                   </Select>
-                  {!canPrioritize(data, task.assignee_id, user) && (
+                  {!mayPrioritize(data, user) && (
                     <small>{PRIORITY_RULE}</small>
                   )}
                 </label>

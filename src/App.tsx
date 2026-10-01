@@ -4422,6 +4422,16 @@ export default function App() {
                                           : "módulos ligados"}
                                       </span>
                                     )}
+                                  {isLeader &&
+                                    m.task_priority &&
+                                    m.role === "member" && (
+                                      <span
+                                        className="member-email"
+                                        title="Dá e tira a prioridade Alta ou Urgente (Recursos extras, em Editar usuário)"
+                                      >
+                                        Marca prioridade
+                                      </span>
+                                    )}
                                   {isLeader && m.multi_timer && (
                                     <span
                                       className="member-email"

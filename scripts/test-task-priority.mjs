@@ -1,5 +1,6 @@
-// Prioridades (migration 20270130090000_task_priority_rules): Alta e Urgente
-// só por administrador, gestor ou supervisor de uma equipe do responsável,
+// Prioridades (migrations 20270130090000_task_priority_rules e
+// 20270205090000_task_priority_feature): Alta e Urgente só por administrador,
+// gestor ou quem tem o recurso extra "Marcar prioridade" (nas que vê),
 // em todo caminho (criação, Editar, direto na tarefa, em massa); quem marcou,
 // o histórico, o aviso ao responsável, o desfazer do lote, o filtro da Busca
 // avançada, as regras automáticas que passam a Normal e a limpeza das
@@ -66,7 +67,7 @@ async function rejects(fn, pattern) {
   await assert.rejects(fn, pattern);
   await db.exec("reset role");
 }
-const NOT_ALLOWED = /Só administradores, gestores e o supervisor/;
+const NOT_ALLOWED = /Só administradores, gestores e quem tem o recurso/;
 
 await as(admin);
 // Sara supervisiona Design, onde a Bia está; Caio supervisiona Vendas.
@@ -77,6 +78,9 @@ const service = await rpc("create_team", [A, "Atendimento", [gil, eva], []]);
 const client = await rpc("create_client", [A, "Cliente X", "", [design, sales, service]]);
 const product = await rpc("create_product", [A, "Social"]);
 const contract = await rpc("create_contract", [A, client, product, "Social X"]);
+// Recurso extra "Marcar prioridade" (20270205090000): Sara tem; Caio, também
+// supervisor, não.
+await rpc("set_member_task_priority", [A, sara, true]);
 
 const row = async (id) => (await sql("select * from tasks where id=$1", [id]))[0];
 async function create(user, priority, { assignee = bia, team = null } = {}) {
@@ -99,7 +103,37 @@ const events = (id) =>
 const notices = (user, kind = "priority") =>
   sql("select * from notifications where user_id=$1 and kind=$2 order by created_at", [user, kind]);
 
-await check("criar com Alta/Urgente: admin, gestor e supervisor da equipe do responsável; os outros não", async () => {
+await check("o recurso: desligado por padrão; admin liga para todos, gestor para as suas equipes", async () => {
+  assert.equal((await sql("select task_priority from memberships where user_id=$1", [bia]))[0].task_priority, false);
+  await as(eva);
+  await rejects(() => rpc("set_member_task_priority", [A, bia, true]), /Administradores liberam/);
+  // Gil (gestor) atende com a Eva: liga e desliga para ela, não para a Bia nem para a admin.
+  await as(gil);
+  await rpc("set_member_task_priority", [A, eva, true]);
+  assert.equal((await sql("select task_priority from memberships where user_id=$1", [eva]))[0].task_priority, true);
+  await as(gil);
+  await rpc("set_member_task_priority", [A, eva, false]);
+  await as(gil);
+  await rejects(() => rpc("set_member_task_priority", [A, bia, true]), /Administradores liberam/);
+  await as(gil);
+  await rejects(() => rpc("set_member_task_priority", [A, admin, true]), /Administradores liberam/);
+});
+
+await check("com o recurso: qualquer tarefa que a pessoa vê; sem ver, não", async () => {
+  await as(gil);
+  await rpc("set_member_task_priority", [A, eva, true]);
+  const own = await row(await create(eva, "urgent"));
+  assert.equal(own.priority_set_by, eva);
+  // Da admin para o Caio, sem a Eva: ela não vê.
+  const hidden = await create(admin, "normal", { assignee: caio });
+  await rejects(() => setPriority(eva, hidden, "high"), /Sem permissão/);
+  await as(gil);
+  await rpc("set_member_task_priority", [A, eva, false]);
+  // Desligado, não marca mais (nem na que já criou).
+  await rejects(() => setPriority(eva, own.id, "high"), NOT_ALLOWED);
+});
+
+await check("criar com Alta/Urgente: admin, gestor e quem tem o recurso; os outros não", async () => {
   for (const user of [admin, gil, sara]) {
     const t = await row(await create(user, "urgent"));
     assert.equal(t.priority, "urgent");
@@ -107,7 +141,7 @@ await check("criar com Alta/Urgente: admin, gestor e supervisor da equipe do res
     assert.equal(t.priority_set_by, user);
     assert.ok(t.priority_set_at);
   }
-  // A criadora (colaboradora) e o supervisor de outra equipe.
+  // A criadora (colaboradora) e um supervisor sem o recurso.
   await rejects(() => create(eva, "high"), NOT_ALLOWED);
   await rejects(() => create(caio, "urgent"), NOT_ALLOWED);
   // Baixa e Normal, qualquer um que cria.
@@ -117,7 +151,7 @@ await check("criar com Alta/Urgente: admin, gestor e supervisor da equipe do res
   assert.equal(low.priority_weight, 0);
 });
 
-await check("para a equipe: vale o supervisor da equipe que recebe", async () => {
+await check("para a equipe: quem tem o recurso; supervisor sem ele, não", async () => {
   const t = await row(await create(sara, "high", { team: design }));
   assert.ok([bia, sara].includes(t.assignee_id));
   assert.equal(t.priority, "high");
@@ -154,7 +188,7 @@ await check("direto na tarefa: só a prioridade muda, com histórico, quem marco
 });
 
 await check("o próprio responsável marcando não se avisa; o aviso respeita Meu perfil › Notificações", async () => {
-  // Sara supervisiona a própria equipe (Design): marca a tarefa dela mesma.
+  // Sara (com o recurso) marca a tarefa dela mesma.
   const own = await create(admin, "normal", { assignee: sara });
   await setPriority(sara, own, "high");
   assert.equal((await notices(sara)).length, 0);
@@ -232,15 +266,19 @@ await check("sem pessoa (rotina, Make) e cópia da repetição passam", async ()
   );
 });
 
-await check("em massa: só as tarefas que a pessoa pode, aviso agrupado, histórico e desfazer", async () => {
+await check("em massa: só quem pode, aviso agrupado por responsável, histórico e desfazer", async () => {
   const mine = [await create(eva, "normal"), await create(eva, "low")];
   const other = await create(admin, "normal", { assignee: caio });
+  // Sem o recurso, a Eva fica de fora em todas.
+  await as(eva);
+  const no = await rpc("bulk_update_tasks", [A, mine, { kind: "priority", value: "high" }, true]);
+  assert.equal(no.applied, 0);
+  assert.match(no.results[0].reason, /Só administradores, gestores e quem tem o recurso/);
+  // A Sara vê as três (supervisiona uma equipe do cliente).
   await as(sara);
   const r = await rpc("bulk_update_tasks", [A, [...mine, other], { kind: "priority", value: "high" }, false]);
-  assert.equal(r.applied, 2);
-  const refused = r.results.find((x) => x.id === other);
-  assert.equal(refused.ok, false);
-  assert.match(refused.reason, /Só administradores/);
+  assert.equal(r.applied, 3);
+  assert.equal((await notices(caio, "tasks_priority")).length, 1);
   for (const id of mine) {
     const t = await row(id);
     assert.equal(t.priority, "high");
@@ -252,7 +290,7 @@ await check("em massa: só as tarefas que a pessoa pode, aviso agrupado, histór
   const [grouped] = await notices(bia, "tasks_priority");
   assert.equal(grouped.title, "Sara Supervisora marcou 2 tarefas suas como prioridade Alta");
   assert.equal(grouped.link, `/tarefas?escopo=mine&prioritarias=1&lote=${r.operation}`);
-  assert.equal((await row(other)).priority, "normal");
+  assert.equal((await row(other)).priority, "high");
   // Já está, e a prévia não muda nada.
   const again = await rpc("bulk_update_tasks", [A, mine, { kind: "priority", value: "high" }, true]);
   assert.equal(again.applied, 0);
@@ -265,9 +303,10 @@ await check("em massa: só as tarefas que a pessoa pode, aviso agrupado, histór
   // Desfazer: volta a de antes e o aviso some.
   await as(sara);
   const u = await rpc("undo_task_bulk", [r.operation]);
-  assert.equal(u.restored, 2);
+  assert.equal(u.restored, 3);
   assert.deepEqual([(await row(mine[0])).priority, (await row(mine[1])).priority], ["normal", "low"]);
   assert.equal((await notices(bia, "tasks_priority")).length, 0);
+  assert.equal((await notices(caio, "tasks_priority")).length, 0);
 });
 
 await check("Busca avançada: o filtro Prioritárias; a lista ordena por priority_weight", async () => {

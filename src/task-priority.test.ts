@@ -4,17 +4,16 @@ import { compareTasks } from "./task-grouping";
 import { describeChange, sides } from "./task-bulk";
 import {
   canChangePriority,
-  canPrioritize,
-  canPrioritizeTeam,
   canSetPriority,
   isPrioritized,
   priorityBlock,
+  mayPrioritize,
   priorityWeight,
 } from "./task-priority";
 import type { Snapshot, Task } from "./types";
 
 // Lucas and Júlia are members, Marina a manager, Allyson an admin; Pedro
-// supervises team-3, where Lucas is.
+// supervises team-3, where Lucas is; Bruna has the extra "Marcar prioridade".
 const demo = demoSnapshot();
 const data: Snapshot = {
   ...demo,
@@ -24,6 +23,12 @@ const data: Snapshot = {
       ...demo.members.find((m) => m.user_id === "user-lucas")!,
       user_id: "user-pedro",
       name: "Pedro",
+    },
+    {
+      ...demo.members.find((m) => m.user_id === "user-lucas")!,
+      user_id: "user-bruna",
+      name: "Bruna",
+      task_priority: true,
     },
   ],
   teamMembers: [
@@ -41,22 +46,24 @@ const task = (extra: Partial<Task> = {}): Task => ({
 });
 
 describe("Quem dá ou tira Alta/Urgente", () => {
-  it("administrador, gestor e o supervisor da equipe do responsável", () => {
-    for (const u of ["user-allyson", "user-marina", "user-pedro"])
-      expect(canPrioritize(data, "user-lucas", u)).toBe(true);
+  it("administrador, gestor e quem tem o recurso Marcar prioridade", () => {
+    for (const u of ["user-allyson", "user-marina", "user-bruna"])
+      expect(mayPrioritize(data, u)).toBe(true);
   });
-  it("não a criadora colaboradora, nem o próprio responsável", () => {
-    expect(canPrioritize(data, "user-lucas", "user-julia")).toBe(false);
-    expect(canPrioritize(data, "user-lucas", "user-lucas")).toBe(false);
+  it("sem o recurso, nem colaborador nem supervisor", () => {
+    for (const u of ["user-julia", "user-lucas", "user-pedro"])
+      expect(mayPrioritize(data, u)).toBe(false);
   });
-  it("o supervisor não vale para quem é de outra equipe", () => {
-    expect(canPrioritize(data, "user-julia", "user-pedro")).toBe(false);
+  it("com o recurso, em qualquer tarefa que vê, de quem for", () => {
+    const other = task({ assignee_id: "user-julia", creator_id: "user-allyson" });
+    expect(canSetPriority(data, other, "urgent", "user-bruna")).toBe(true);
   });
-  it("para a equipe: o supervisor dela", () => {
-    expect(canPrioritizeTeam(data, "team-3", "user-pedro")).toBe(true);
-    expect(canPrioritizeTeam(data, "team-1", "user-pedro")).toBe(false);
-    expect(canPrioritizeTeam(data, "team-1", "user-marina")).toBe(true);
-    expect(canPrioritizeTeam(data, "", "user-pedro")).toBe(false);
+  it("desativada, a pessoa perde o recurso", () => {
+    const off: Snapshot = {
+      ...data,
+      members: data.members.map((m) => (m.user_id === "user-bruna" ? { ...m, active: false } : m)),
+    };
+    expect(mayPrioritize(off, "user-bruna")).toBe(false);
   });
 });
 
@@ -70,14 +77,15 @@ describe("Mudar a prioridade de uma tarefa", () => {
   it("tirar a Alta também é só de quem pode marcar", () => {
     const t = task({ priority: "high" });
     expect(canSetPriority(data, t, "normal", "user-julia")).toBe(false);
-    expect(canSetPriority(data, t, "normal", "user-pedro")).toBe(true);
+    expect(canSetPriority(data, t, "normal", "user-bruna")).toBe(true);
+    expect(canSetPriority(data, t, "normal", "user-pedro")).toBe(false);
     expect(canChangePriority(data, t, "user-julia")).toBe(false);
   });
   it("o responsável que não edita a tarefa não muda nada", () => {
     expect(canChangePriority(data, task(), "user-lucas")).toBe(false);
   });
-  it("o supervisor muda mesmo sem editar a tarefa", () => {
-    expect(canChangePriority(data, task(), "user-pedro")).toBe(true);
+  it("quem tem o recurso muda mesmo sem editar a tarefa", () => {
+    expect(canChangePriority(data, task(), "user-bruna")).toBe(true);
   });
 });
 

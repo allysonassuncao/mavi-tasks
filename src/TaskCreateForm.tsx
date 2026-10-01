@@ -29,8 +29,7 @@ import {
 } from "./types";
 import {
   PRIORITY_RULE,
-  canPrioritize,
-  canPrioritizeTeam,
+  mayPrioritize,
   isPrioritized,
 } from "./task-priority";
 import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
@@ -233,14 +232,11 @@ export function TaskCreateForm({
   )
     ? assignTeam
     : "";
-  // Alta e Urgente só por quem pode marcar para quem recebe (gestor, admin,
-  // supervisor da equipe; src/task-priority.ts). Escolhida antes de trocar
-  // para alguém que a pessoa não pode marcar, volta a Normal.
-  const mayPrioritize = byTeam
-    ? canPrioritizeTeam(data, team, user)
-    : canPrioritize(data, assignee, user);
+  // Alta e Urgente só por gestor, admin ou quem tem o recurso "Marcar
+  // prioridade" (src/task-priority.ts).
+  const canMark = mayPrioritize(data, user);
   const priority =
-    !mayPrioritize && isPrioritized(pickedPriority) ? "normal" : pickedPriority;
+    !canMark && isPrioritized(pickedPriority) ? "normal" : pickedPriority;
   const dueSuggestion = useMemo(
     () =>
       contract
@@ -918,13 +914,13 @@ export function TaskCreateForm({
                           <SelectOption
                             key={id}
                             value={id}
-                            disabled={!mayPrioritize && isPrioritized(id)}
+                            disabled={!canMark && isPrioritized(id)}
                           >
                             {label}
                           </SelectOption>
                         ))}
                       </Select>
-                      {!mayPrioritize && <small>{PRIORITY_RULE}</small>}
+                      {!canMark && <small>{PRIORITY_RULE}</small>}
                     </label>
                     <label>
                       Estimativa em horas

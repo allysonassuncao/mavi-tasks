@@ -89,7 +89,7 @@ export function describeChange(
     case "rule":
       return "Recalcular o prazo de cada tarefa pela regra de prazo que vale para ela, contando do início planejado ou do dia em que foi criada.";
     case "priority":
-      return `Mudar a prioridade para ${priorities[change.value]}. Alta e Urgente só mudam nas tarefas em que você pode marcar (administrador, gestor ou supervisor da equipe do responsável).`;
+      return `Mudar a prioridade para ${priorities[change.value]}. Alta e Urgente só mudam se você é administrador, gestor ou tem o recurso "Marcar prioridade".`;
   }
 }
 

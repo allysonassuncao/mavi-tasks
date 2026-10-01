@@ -26,7 +26,9 @@ const roles: { id: Role; label: string }[] = [
  * nobody changes their own profile or deactivates themselves. Admins also
  * pick the modules the person sees (set_member_pages); admins and managers
  * turn on the extras, such as timing several tasks at once
- * (set_member_multi_timer) and, for admins and managers (who open the Painel
+ * (set_member_multi_timer), marking tasks Alta/Urgente
+ * (set_member_task_priority; admins and managers always can) and, for admins
+ * and managers (who open the Painel
  * da MAVI), the inbox notices of the Copiloto's and the MAVI's new learnings
  * (set_member_lesson_alerts).
  */
@@ -57,6 +59,7 @@ export function MemberForm({
   const [role, setRole] = useState<Role>(member.role);
   const [active, setActive] = useState(member.active);
   const [multiTimer, setMultiTimer] = useState(!!member.multi_timer);
+  const [taskPriority, setTaskPriority] = useState(!!member.task_priority);
   const [copilotAlerts, setCopilotAlerts] = useState(
     !!member.lesson_alerts_copilot,
   );
@@ -122,8 +125,15 @@ export function MemberForm({
           p_user: member.user_id,
           p_on: multiTimer,
         });
-      // Only leaders open the Painel da MAVI: a collaborator can't keep them.
       const leader = role === "admin" || role === "manager";
+      // Leaders always mark Alta/Urgente: the switch is for everyone else.
+      if (!leader && taskPriority !== !!member.task_priority)
+        await mutate("set_member_task_priority", {
+          p_company: company,
+          p_user: member.user_id,
+          p_on: taskPriority,
+        });
+      // Only leaders open the Painel da MAVI: a collaborator can't keep them.
       const copilotOn = leader && copilotAlerts;
       const maviOn = leader && maviAlerts;
       if (
@@ -316,6 +326,23 @@ export function MemberForm({
                 Ao salvar, só a tarefa iniciada por último continua rodando.
               </small>
             )}
+            <label className="checkbox-label">
+              <Checkbox
+                checked={role === "admin" || role === "manager" || taskPriority}
+                disabled={role === "admin" || role === "manager"}
+                onCheckedChange={(on) => setTaskPriority(on === true)}
+              />
+              <span>
+                Marcar prioridade
+                <small className="member-module-note">
+                  {role === "admin" || role === "manager"
+                    ? "administradores e gestores sempre dão e tiram a prioridade Alta ou Urgente"
+                    : taskPriority
+                      ? "dá e tira a prioridade Alta ou Urgente nas tarefas que vê; elas ficam em destaque e no topo da lista"
+                      : "desligado: marca só Baixa ou Normal (nas tarefas que edita)"}
+                </small>
+              </span>
+            </label>
             {role === "admin" || role === "manager" ? (
               <>
                 <label className="checkbox-label">

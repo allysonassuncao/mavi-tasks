@@ -1,11 +1,11 @@
-import { supervisesPerson } from "./domain";
 import { priorities, type Snapshot, type Task } from "./types";
 
 /**
- * Prioridades (migração 20270130090000_task_priority_rules): Alta e Urgente
- * são o destaque da lista de Tarefas e só administradores, gestores e o
- * supervisor de uma equipe do responsável dão ou tiram. Baixa ↔ Normal
- * continua com quem edita a tarefa. O banco confere de novo.
+ * Prioridades (migrações 20270130090000 e 20270205090000): Alta e Urgente
+ * são o destaque da lista de Tarefas e só administradores, gestores e quem
+ * tem o recurso extra "Marcar prioridade" (memberships.task_priority) dão ou
+ * tiram, em qualquer tarefa que veem. Baixa ↔ Normal continua com quem edita
+ * a tarefa. O banco confere de novo.
  */
 export type Priority = Task["priority"];
 
@@ -19,7 +19,7 @@ export function isPrioritized(p: Priority | string | null | undefined) {
 }
 
 export const PRIORITY_RULE =
-  "Só administradores, gestores e o supervisor da equipe do responsável dão ou tiram a prioridade Alta ou Urgente.";
+  'Só administradores, gestores e quem tem o recurso "Marcar prioridade" dão ou tiram a prioridade Alta ou Urgente.';
 
 function activeMember(data: Snapshot, userId: string) {
   return data.members.find((m) => m.user_id === userId && m.active);
@@ -30,34 +30,12 @@ function leads(data: Snapshot, userId: string) {
 }
 
 /**
- * Mirrors mavi_private.can_prioritize: admin or manager, or a supervisor of
- * a team the assignee belongs to.
+ * Mirrors mavi_private.can_prioritize_as: admin or manager, or the extra
+ * "Marcar prioridade" on — for any task the person sees, whoever receives it
+ * (the list only holds tasks they see).
  */
-export function canPrioritize(
-  data: Snapshot,
-  assigneeId: string | null | undefined,
-  userId: string,
-) {
-  if (leads(data, userId)) return true;
-  return !!assigneeId && supervisesPerson(data, assigneeId, userId);
-}
-/**
- * For a task going to a team (the database picks who): its supervisors, since
- * whoever receives it is in that team.
- */
-export function canPrioritizeTeam(
-  data: Snapshot,
-  teamId: string | null | undefined,
-  userId: string,
-) {
-  if (leads(data, userId)) return true;
-  return (
-    !!teamId &&
-    !!activeMember(data, userId) &&
-    data.teamMembers.some(
-      (tm) => tm.team_id === teamId && tm.user_id === userId && tm.supervisor,
-    )
-  );
+export function mayPrioritize(data: Snapshot, userId: string) {
+  return leads(data, userId) || !!activeMember(data, userId)?.task_priority;
 }
 /** Mirrors the tasks policy for editing (mavi_private.can_edit). */
 function editsTask(data: Snapshot, task: Task, userId: string) {
@@ -75,7 +53,7 @@ export function canSetPriority(
   userId: string,
 ) {
   if (next === task.priority) return true;
-  if (canPrioritize(data, task.assignee_id, userId)) return true;
+  if (mayPrioritize(data, userId)) return true;
   return (
     !isPrioritized(next) &&
     !isPrioritized(task.priority) &&

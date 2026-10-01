@@ -46,6 +46,11 @@ export interface Member {
    */
   multi_timer?: boolean;
   /**
+   * Marcar prioridade: gives and removes Alta/Urgente on any task the person
+   * sees (set_member_task_priority, by admins and managers; they always can).
+   */
+  task_priority?: boolean;
+  /**
    * Avisos na caixa de entrada dos aprendizados novos do Copiloto e da MAVI
    * (Painel da MAVI; set_member_lesson_alerts, só administradores e gestores).
    */

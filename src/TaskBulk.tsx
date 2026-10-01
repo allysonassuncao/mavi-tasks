@@ -27,7 +27,7 @@ import {
   type Status,
   type Task,
 } from "./types";
-import { PRIORITY_RULE, isPrioritized } from "./task-priority";
+import { PRIORITY_RULE, isPrioritized, mayPrioritize } from "./task-priority";
 import {
   NOTE_STATUSES,
   appliedMessage,
@@ -551,9 +551,9 @@ function StatusPanel({ onPick }: { onPick: (change: BulkChange) => void }) {
 }
 
 /**
- * Alta e Urgente só para quem pode marcar em alguma tarefa (gestor, admin ou
- * supervisor de uma equipe); o banco confere cada tarefa e deixa de fora as
- * outras.
+ * Alta e Urgente só para quem pode marcar (gestor, admin ou quem tem o
+ * recurso "Marcar prioridade"); o banco confere cada tarefa e deixa de fora
+ * as que a pessoa não pode mudar.
  */
 function PriorityPanel({
   data,
@@ -564,11 +564,7 @@ function PriorityPanel({
   me: string;
   onPick: (change: BulkChange) => void;
 }) {
-  const member = data.members.find((m) => m.user_id === me && m.active);
-  const mayMark =
-    member?.role === "admin" ||
-    member?.role === "manager" ||
-    (!!member && data.teamMembers.some((tm) => tm.user_id === me && tm.supervisor));
+  const mayMark = mayPrioritize(data, me);
   const order: Task["priority"][] = ["urgent", "high", "normal", "low"];
   return (
     <>
