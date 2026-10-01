@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Save,
   Share2,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -77,6 +78,8 @@ import {
 import { priorities, statuses, type Snapshot } from "./types";
 import { loadTemperatureConfig } from "./temperature";
 import { loadThemeOptions } from "./radar";
+import { DashboardAssistant } from "./DashboardAssistant";
+import { applyProposal, type ProposalItem } from "./dashboard-mavi";
 
 type Notify = (message: string) => void;
 
@@ -191,6 +194,29 @@ export function DashboardsPage({
   /** The in-app address of a dashboard, for people it is shared with. */
   internalUrl: (id: string) => string;
 }) {
+  // A dashboard started with the MAVI: unsaved until the first Salvar.
+  const [newWithMavi, setNewWithMavi] = useState(false);
+  if (newWithMavi && !dashboardId)
+    return (
+      <DashboardView
+        key="new"
+        id={null}
+        data={data}
+        company={company}
+        demo={demo}
+        isLeader={isLeader}
+        canCreate={canList}
+        user={user}
+        notify={notify}
+        onBack={() => setNewWithMavi(false)}
+        onCreated={(id) => {
+          setNewWithMavi(false);
+          onOpen(id);
+        }}
+        onDeleted={() => setNewWithMavi(false)}
+        internalUrl={internalUrl}
+      />
+    );
   if (dashboardId)
     return (
       <DashboardView
@@ -223,6 +249,7 @@ export function DashboardsPage({
       user={user}
       notify={notify}
       onOpen={onOpen}
+      onMavi={demo ? undefined : () => setNewWithMavi(true)}
       canEdit={isLeader || canList}
       isLeader={isLeader}
     />
@@ -237,6 +264,7 @@ function DashboardList({
   user,
   notify,
   onOpen,
+  onMavi,
   canEdit,
   isLeader,
 }: {
@@ -246,6 +274,8 @@ function DashboardList({
   user: string;
   notify: Notify;
   onOpen: (id: string) => void;
+  /** Starts a dashboard in conversation with the MAVI (not in the demo). */
+  onMavi?: () => void;
   /** Creates dashboards: leaders and collaborators with the module on. */
   canEdit: boolean;
   /** Leaders manage every dashboard; the others, the ones they created. */
@@ -311,9 +341,16 @@ function DashboardList({
             : ""}
         </span>
         {canEdit && (
-          <Button className="btn primary" onClick={() => setCreating(true)}>
-            <Plus size={16} /> Novo dashboard
-          </Button>
+          <span className="dash-list-actions">
+            {onMavi && (
+              <Button className="btn secondary" onClick={onMavi}>
+                <Sparkles size={16} /> Criar com a MAVI
+              </Button>
+            )}
+            <Button className="btn primary" onClick={() => setCreating(true)}>
+              <Plus size={16} /> Novo dashboard
+            </Button>
+          </span>
         )}
       </div>
       {error && (
@@ -399,9 +436,16 @@ function DashboardList({
             title="Seu primeiro dashboard"
             body="Monte painéis com indicadores de tarefas, status, validações, horas e Social Leads da agência: números, gráficos e tabelas, com filtros por período, cliente, produto, equipe e pessoa."
             action={
-              <Button className="btn primary" onClick={() => setCreating(true)}>
-                <Plus size={16} /> Novo dashboard
-              </Button>
+              <span className="dash-list-actions">
+                {onMavi && (
+                  <Button className="btn secondary" onClick={onMavi}>
+                    <Sparkles size={16} /> Criar com a MAVI
+                  </Button>
+                )}
+                <Button className="btn primary" onClick={() => setCreating(true)}>
+                  <Plus size={16} /> Novo dashboard
+                </Button>
+              </span>
             }
           />
           )}
@@ -721,10 +765,12 @@ function DashboardView({
   user,
   notify,
   onBack,
+  onCreated,
   onDeleted,
   internalUrl,
 }: {
-  id: string;
+  /** null: a new dashboard started with the MAVI, not saved yet. */
+  id: string | null;
   data: Snapshot;
   company: string;
   demo: boolean;
@@ -734,16 +780,45 @@ function DashboardView({
   user: string;
   notify: Notify;
   onBack?: () => void;
+  /** The new dashboard (id null) was saved. */
+  onCreated?: (id: string) => void;
   onDeleted: () => void;
   internalUrl: (id: string) => string;
 }) {
   const tz =
     data.companies.find((c) => c.id === company)?.timezone ??
     "America/Sao_Paulo";
+  const isNew = id === null;
   const [saved, setSaved] = useState<Dashboard | null>(null);
   const [error, setError] = useState("");
-  const [draft, setDraft] = useState<Dashboard | null>(null);
-  const [vars, setVars] = useState<DashboardVariables>({});
+  const [draft, setDraft] = useState<Dashboard | null>(() =>
+    isNew
+      ? {
+          id: "",
+          company_id: company,
+          name: "",
+          description: "",
+          panels: [],
+          variables: { range: { preset: "30d" }, filters: {} },
+          link_access: "none",
+          share_token: "",
+          has_password: false,
+          version: 0,
+          created_by: user,
+          updated_by: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+      : null,
+  );
+  const [vars, setVars] = useState<DashboardVariables>(() =>
+    isNew ? { range: { preset: "30d" }, filters: {} } : {},
+  );
+  // The conversation with the MAVI (and the panel it was opened from).
+  const [mavi, setMavi] = useState<{ open: boolean; focus: Panel | null }>({
+    open: isNew,
+    focus: null,
+  });
   const [refresh, setRefresh] = useState(0);
   const [auto, setAuto] = useState(0);
   const [editingPanel, setEditingPanel] = useState<Panel | "new" | null>(null);
@@ -785,6 +860,7 @@ function DashboardView({
   const lookups = useLookups(data, indicators, radarOptions, !isLeader);
 
   useEffect(() => {
+    if (id === null) return;
     let current = true;
     (demo
       ? Promise.resolve(
@@ -817,7 +893,10 @@ function DashboardView({
 
   const dash = draft ?? saved;
   // Edits: leaders, and the collaborator who created it (module on).
-  const editor = isLeader || (canCreate && !!saved && saved.created_by === user);
+  const editor =
+    isLeader || (canCreate && (isNew || (!!saved && saved.created_by === user)));
+  // The MAVI builds and explains panels (not in the demo: no server there).
+  const canMavi = editor && !demo;
   const range = useMemo(() => resolveRange(vars.range, tz), [vars.range, tz]);
   const filters = vars.filters ?? {};
   const editing = !!draft;
@@ -838,7 +917,7 @@ function DashboardView({
       // through the dashboard, with the 60-second cache.
       if (editing) return previewPanel(company, panel.spec, range, { filters });
       return panelData(
-        { kind: "app", dashboard: id },
+        { kind: "app", dashboard: id! },
         panel.id,
         range,
         editor ? vars : null,
@@ -861,11 +940,15 @@ function DashboardView({
     setDraft((d) => (d ? { ...d, panels } : d));
   async function save() {
     if (!draft) return;
+    if (draft.name.trim().length < 2) {
+      notify("Dê um nome ao dashboard antes de salvar.");
+      return;
+    }
     setSaving(true);
     try {
       const body = {
-        id: draft.id,
-        version: draft.version,
+        // New (started with the MAVI): no id, the database creates one.
+        ...(draft.id ? { id: draft.id, version: draft.version } : {}),
         name: draft.name,
         description: draft.description,
         panels: draft.panels,
@@ -874,9 +957,13 @@ function DashboardView({
       const next = demo
         ? demoSave(company, user, body)
         : await saveDashboard(company, body);
+      notify(isNew ? "Dashboard criado." : "Dashboard salvo.");
+      if (isNew) {
+        onCreated?.(next.id);
+        return;
+      }
       setSaved(next);
       setDraft(null);
-      notify("Dashboard salvo.");
     } catch (e) {
       notify((e as Error).message);
     } finally {
@@ -884,6 +971,14 @@ function DashboardView({
     }
   }
   function cancel() {
+    if (isNew) {
+      if (
+        (!draft?.panels.length && !draft?.name) ||
+        window.confirm("Descartar este dashboard? Ele ainda não foi salvo.")
+      )
+        onBack?.();
+      return;
+    }
     if (
       draft &&
       JSON.stringify(draft) !== JSON.stringify(saved) &&
@@ -893,9 +988,20 @@ function DashboardView({
     setDraft(null);
     if (saved) setVars(saved.variables ?? {});
   }
+  /** What the MAVI proposed and the person chose: into the dashboard being edited. */
+  function applyMavi(items: ProposalItem[]) {
+    const base = draft ?? structuredClone(saved!);
+    const next = applyProposal(base, items);
+    setDraft({ ...base, name: next.name, description: next.description, panels: next.panels });
+    if (next.range) setVars((v) => ({ ...v, range: { preset: next.range! } }));
+    setMavi((m) => ({ ...m, focus: null }));
+    notify("Aplicado. Confira e clique em Salvar.");
+  }
+  const preset =
+    vars.range && "from" in vars.range ? "custom" : (vars.range?.preset ?? "30d");
   const { label: linkLabel, Icon: LinkIcon } = linkBadge[dash.link_access];
   return (
-    <div className="dash-view">
+    <div className={`dash-view ${mavi.open ? "with-mavi" : ""}`}>
       <div className="dash-view-head">
         {onBack && (
           <Button
@@ -914,6 +1020,7 @@ function DashboardView({
             <>
               <Input
                 aria-label="Nome do dashboard"
+                placeholder="Nome do dashboard"
                 value={draft.name}
                 maxLength={120}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
@@ -937,6 +1044,14 @@ function DashboardView({
         </div>
         {editor && (
           <div className="dash-view-actions">
+            {canMavi && !mavi.open && (
+              <Button
+                className="btn secondary"
+                onClick={() => setMavi({ open: true, focus: null })}
+              >
+                <Sparkles size={15} /> MAVI
+              </Button>
+            )}
             {editing ? (
               <>
                 <Button
@@ -964,6 +1079,7 @@ function DashboardView({
                 <Button
                   className="btn secondary"
                   onClick={() => setSharing(true)}
+                  disabled={!saved}
                 >
                   <Share2 size={15} /> Compartilhar
                 </Button>
@@ -1014,6 +1130,7 @@ function DashboardView({
           editing={editing}
           onLayout={setPanels}
           onEditPanel={(p) => setEditingPanel(p)}
+          onAskPanel={canMavi ? (p) => setMavi({ open: true, focus: p }) : undefined}
           onDuplicatePanel={(p) => {
             if (!draft) return;
             const spot = freeSpot(draft.panels, p.w, p.h);
@@ -1037,9 +1154,11 @@ function DashboardView({
           <Empty
             title="Nenhum painel ainda"
             body={
-              editor
-                ? "Clique em Editar e adicione o primeiro painel."
-                : "Este dashboard ainda não tem painéis."
+              mavi.open
+                ? "Conte à MAVI, ao lado, o que você quer acompanhar: ela monta os painéis e mostra a prévia antes de aplicar."
+                : editor
+                  ? "Clique em Editar e adicione o primeiro painel, ou peça à MAVI."
+                  : "Este dashboard ainda não tem painéis."
             }
           />
         </div>
@@ -1064,6 +1183,30 @@ function DashboardView({
               );
             setEditingPanel(null);
           }}
+        />
+      )}
+      {mavi.open && (
+        <DashboardAssistant
+          company={company}
+          context={() => {
+            const d = draft ?? saved!;
+            return {
+              name: d.name,
+              description: d.description,
+              panels: d.panels,
+              range: { ...range, preset },
+              filters,
+              focus: null,
+              isNew,
+            };
+          }}
+          focus={mavi.focus}
+          onClearFocus={() => setMavi((m) => ({ ...m, focus: null }))}
+          preview={(spec, p) =>
+            previewPanel(company, spec, p ? resolveRange({ preset: p }, tz) : range, { filters })
+          }
+          onApply={applyMavi}
+          onClose={() => setMavi({ open: false, focus: null })}
         />
       )}
       {sharing && saved && (

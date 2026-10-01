@@ -222,6 +222,7 @@ export type AiFeature =
   | "mavi_rerank"
   | "conversation_summary"
   | "skill_coach"
+  | "dashboard_builder"
   | "client_radar"
   | "client_radar_check"
   | "client_radar_themes"
@@ -348,6 +349,14 @@ export const FEATURES: FeatureInfo[] = [
     conversation: false,
     env: "AI_MODEL",
     note: "Revisa a skill ao importar, ao enviar para aprovação ou quando pedem, e conduz a conversa de quem cria. Um modelo forte escreve skills melhores. Sem escolha, usa o padrão da empresa.",
+  },
+  {
+    id: "dashboard_builder",
+    group: "MAVI · poderes",
+    label: "Dashboards: criar e ajustar painéis com a MAVI",
+    conversation: false,
+    env: "AI_MODEL",
+    note: "A conversa ao lado do dashboard: pergunta o que falta, confere os nomes e roda a prévia de cada painel antes de propor. Um modelo forte acerta mais os painéis. Sem escolha, usa o padrão da empresa.",
   },
   {
     id: "image_generation",
@@ -610,6 +619,7 @@ export function serverModel(
     case "mavi_rerank":
     case "conversation_summary":
     case "skill_coach":
+    case "dashboard_builder":
       return env.AI_MODEL || fallback;
     case "meetings_ask":
       return env.MEETINGS_MODEL || fallback;

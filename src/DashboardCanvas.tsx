@@ -12,6 +12,7 @@ import {
   GripVertical,
   Info,
   Pencil,
+  Sparkles,
   Table2,
   Trash2,
 } from "lucide-react";
@@ -101,6 +102,7 @@ function PanelCard({
   onEdit,
   onDuplicate,
   onDelete,
+  onAsk,
 }: {
   panel: Panel;
   loader: PanelLoader;
@@ -114,6 +116,8 @@ function PanelCard({
   onEdit?: () => void;
   onDuplicate?: () => void;
   onDelete?: () => void;
+  /** Conversar com a MAVI sobre este painel. */
+  onAsk?: () => void;
 }) {
   const ref = useRef<HTMLElement>(null);
   const [visible, setVisible] = useState(false);
@@ -195,6 +199,16 @@ function PanelCard({
           onPointerDown={(e) => e.stopPropagation()}
         >
           {notes.length > 0 && <PanelNotes notes={notes} />}
+          {onAsk && (
+            <Button
+              className="icon-btn"
+              aria-label={`Perguntar à MAVI sobre ${panel.title}`}
+              title="Explicar ou mudar com a MAVI"
+              onClick={onAsk}
+            >
+              <Sparkles size={14} />
+            </Button>
+          )}
           {canTable && !editing && (
             <Button
               className={`icon-btn ${asTable ? "active" : ""}`}
@@ -272,6 +286,7 @@ export function DashboardCanvas({
   editing = false,
   onLayout,
   onEditPanel,
+  onAskPanel,
   onDuplicatePanel,
   onDeletePanel,
 }: {
@@ -282,6 +297,7 @@ export function DashboardCanvas({
   editing?: boolean;
   onLayout?: (panels: Panel[]) => void;
   onEditPanel?: (panel: Panel) => void;
+  onAskPanel?: (panel: Panel) => void;
   onDuplicatePanel?: (panel: Panel) => void;
   onDeletePanel?: (panel: Panel) => void;
 }) {
@@ -360,6 +376,7 @@ export function DashboardCanvas({
           onEdit={() => onEditPanel?.(panel)}
           onDuplicate={() => onDuplicatePanel?.(panel)}
           onDelete={() => onDeletePanel?.(panel)}
+          onAsk={onAskPanel ? () => onAskPanel(panel) : undefined}
         />
       ))}
     </div>

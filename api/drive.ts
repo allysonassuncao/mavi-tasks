@@ -26,6 +26,7 @@ import { handleNotices } from "./_notices.js";
 import { handleNoticeWriter } from "./_notice-writer.js";
 import { handleReportWriter } from "./_campaign-report-writer.js";
 import { handleSkillCoach } from "./_skill-coach.js";
+import { handleDashboardBuilder } from "./_dashboard-mavi.js";
 import { handleNoticeAnimate } from "./_notice-animation.js";
 import { claudeComplete } from "./_social-leads.js";
 import { openAiEmbedder } from "./_ai-embeddings.js";
@@ -470,6 +471,13 @@ export default async function handler(
         model: serverModel("skill_coach", process.env),
       };
       result = await handleSkillCoach(body, authorization, env, aiDeps(env));
+    } else if (action === "dashboard-mavi") {
+      // A MAVI nos Dashboards (funcionalidade 'dashboard_builder').
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("dashboard_builder", process.env),
+      };
+      result = await handleDashboardBuilder(body, authorization, env, aiDeps(env));
     } else if (action === "notice-animate") {
       // A animação do aviso: responde na hora e gera em segundo plano
       // (na Vercel, até o maxDuration desta função).

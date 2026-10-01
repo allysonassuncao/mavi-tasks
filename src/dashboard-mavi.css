@@ -1,0 +1,237 @@
+/* MAVI nos Dashboards: a conversa fica fixa à direita; o dashboard abre
+   espaço para ela em telas largas e fica por baixo nas estreitas. */
+.dash-mavi {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: min(420px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-color: #d7e4c8;
+  box-shadow: 0 18px 48px #152c2024;
+}
+@media (min-width: 1280px) {
+  .dash-view.with-mavi {
+    padding-right: 436px;
+  }
+}
+.dash-mavi > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.dash-mavi > header > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #56793a;
+}
+.dash-mavi > header > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dash-mavi > header strong {
+  font-size: 0.9rem;
+}
+.dash-mavi > header small {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.dash-mavi-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px;
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dash-mavi-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 94%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.dash-mavi-msg p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.dash-mavi-msg.assistant {
+  align-self: flex-start;
+  background: #f3f6f1;
+  color: var(--ink);
+}
+.dash-mavi-msg.user {
+  align-self: flex-end;
+  background: #263334;
+  color: #fff;
+}
+.dash-mavi-q {
+  font-weight: 650;
+}
+.dash-mavi-dropped {
+  font-size: 0.72rem;
+  color: #8a5a12;
+}
+.dash-mavi-msg.typing {
+  flex-direction: row;
+  gap: 4px;
+  padding: 12px;
+}
+.dash-mavi-msg.typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #84908f;
+  animation: dash-mavi-dot 1.2s ease-in-out infinite;
+}
+.dash-mavi-msg.typing span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.dash-mavi-msg.typing span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes dash-mavi-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-mavi-msg.typing span {
+    animation: none;
+  }
+}
+.dash-mavi-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dash-mavi-options > button {
+  padding: 6px 11px;
+  border: 1px solid #cfdcc2;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.76rem;
+  line-height: 1.3;
+  text-align: left;
+  color: #34521f;
+}
+.dash-mavi-options > button:hover,
+.dash-mavi-options > button.on {
+  border-color: #56793a;
+  background: #eef5e6;
+}
+.dash-mavi-focus {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: #eef5e6;
+  font-size: 0.72rem;
+  color: #34521f;
+}
+.dash-mavi-focus button {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+}
+.dash-mavi-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.dash-mavi-input textarea {
+  flex: 1;
+  min-height: 44px;
+  resize: vertical;
+  font-size: 0.8rem;
+}
+
+/* A proposta: o que entra, muda ou sai, com a prévia de cada painel. */
+.dash-mavi-proposal {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+  padding: 10px;
+  border: 1px solid #d7e4c8;
+  border-radius: 10px;
+  background: #fff;
+}
+.dash-mavi-proposal > strong {
+  font-size: 0.78rem;
+}
+.dash-mavi-proposal.applied > strong {
+  color: #34521f;
+}
+.dash-mavi-proposal.discarded {
+  opacity: 0.6;
+}
+.dash-mavi-proposal ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.dash-mavi-proposal li {
+  display: grid;
+  gap: 4px;
+}
+.dash-mavi-proposal li.off > label span {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.dash-mavi-proposal li .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.dash-mavi-proposal li small {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.dash-panel.dash-mavi-preview {
+  height: 170px;
+  padding: 8px;
+}
+.dash-panel.dash-mavi-preview.stat {
+  height: 110px;
+}
+.dash-mavi-loading {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.dash-mavi-proposal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.dash-list-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

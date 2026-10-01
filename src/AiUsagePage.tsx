@@ -64,6 +64,7 @@ const MODULE_LABELS: Record<string, string> = {
   clients: "Termômetro do cliente",
   radar: "Radar do cliente",
   campaigns: "Campanhas",
+  dashboards: "Dashboards (MAVI)",
 };
 
 const money = (v: number) => {
