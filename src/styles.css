@@ -11499,6 +11499,13 @@ p.task-search-mavi,
   gap: 22px;
   padding: 20px 24px 24px;
 }
+/* The wide sheet (.modal.sheet[open]) doesn't scroll itself: the editor does. */
+.modal.sheet > .dash-editor {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .dash-editor-form {
   display: grid;
   align-content: start;
@@ -11607,7 +11614,7 @@ p.task-search-mavi,
 }
 .dash-editor-preview {
   position: sticky;
-  top: 80px;
+  top: 0;
   align-self: start;
   display: grid;
   gap: 10px;
