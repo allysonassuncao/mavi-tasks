@@ -364,3 +364,7 @@
 #config-checklists {
   margin-top: 18px;
 }
+/* Typed a moment ago, still being saved (no spinner: it just settles). */
+.checklist-item.pending > .checklist-row .ui-checkbox {
+  opacity: 0.55;
+}

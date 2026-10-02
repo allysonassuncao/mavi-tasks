@@ -7,6 +7,7 @@ import {
   parseChecklistText,
   suggestedChecklistTemplates,
   withItemDone,
+  withPendingItems,
 } from "./checklist";
 import { DemoStore } from "./demo-store";
 import { demoUser } from "./demo";
@@ -125,5 +126,15 @@ describe("checklist", () => {
       "required_on",
       "checklist_added",
     ]);
+  });
+  it("itens digitados ainda não salvos não somem quando o banco responde", () => {
+    const shown = list([item("a"), item("tmp:1"), item("tmp:2")]);
+    // The answer for tmp:1 (now saved as "b"); tmp:2 is still on its way.
+    const answer = list([item("a"), item("b")]);
+    expect(
+      withPendingItems([answer], [shown], "tmp:1")[0].items.map((i) => i.id),
+    ).toEqual(["a", "b", "tmp:2"]);
+    // A reload with nothing pending keeps the database's copy as it is.
+    expect(withPendingItems([answer], [answer])[0]).toBe(answer);
   });
 });

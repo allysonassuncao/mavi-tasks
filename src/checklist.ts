@@ -210,3 +210,25 @@ export function checklistLogLabel(
       return e.action;
   }
 }
+
+/** Items shown before the database confirms them ("Enter" adds at once). */
+export const PENDING_ITEM = "tmp:";
+export const isPendingItem = (id: string) => id.startsWith(PENDING_ITEM);
+
+/**
+ * The database's checklists plus the items still on their way (typed after
+ * the request that answered), so they never blink out and back in. `settled`
+ * is the pending item this answer is for: the real one is in the answer.
+ */
+export function withPendingItems(
+  server: TaskChecklist[],
+  shown: TaskChecklist[],
+  settled?: string,
+): TaskChecklist[] {
+  return server.map((l) => {
+    const waiting = (shown.find((x) => x.id === l.id)?.items ?? []).filter(
+      (i) => isPendingItem(i.id) && i.id !== settled,
+    );
+    return waiting.length ? { ...l, items: [...l.items, ...waiting] } : l;
+  });
+}

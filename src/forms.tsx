@@ -101,6 +101,7 @@ import {
   checklistGateMessage,
   checklistLogLabel,
   openChecklistItems,
+  withPendingItems,
 } from "./checklist";
 import { getGcsPublicUrl } from "./gcs";
 import type { DemoStore } from "./demo-store";
@@ -827,6 +828,10 @@ export function TaskDetail({
     }>({ comments: [], attachments: [], events: [] }),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false),
+    // The skeleton only while the task's extras arrive the first time: live
+    // reloads keep what is on screen (no blink, the field being typed in
+    // keeps its focus).
+    [loadedTask, setLoadedTask] = useState(""),
     [editing, setEditing] = useState(false),
     [localRefresh, setLocalRefresh] = useState(0),
     [action, setAction] = useState(""),
@@ -985,16 +990,38 @@ export function TaskDetail({
     task.checklist_required && openItems > 0
       ? checklistGateMessage(openItems)
       : undefined;
+  // Checklist changes on their way: a reload that started before one of them
+  // answered keeps the checklists on screen instead of an older copy.
+  const checklistSync = useRef({ pending: 0, version: 0 });
+  /** An optimistic change (a mark, an item just typed), shown at once. */
+  function patchChecklists(change: (lists: TaskChecklist[]) => TaskChecklist[]) {
+    checklistSync.current.version++;
+    setExtras((x) => ({ ...x, checklists: change(x.checklists ?? []) }));
+  }
   /** A checklist function: demo store or database; the panel gets the lists. */
-  async function runChecklist(name: string, args: Record<string, unknown>) {
-    const lists = (
-      demo ? demoStore.mutate(name, args) : await rpc(name, args)
-    ) as TaskChecklist[];
-    invalidateTaskExtras(task.id);
-    setExtras((x) => ({ ...x, checklists: lists }));
-    // The Histórico picks up what was recorded.
-    if (demo) setLocalRefresh((v) => v + 1);
-    return lists;
+  async function runChecklist(
+    name: string,
+    args: Record<string, unknown>,
+    opts: { settles?: string } = {},
+  ) {
+    const sync = checklistSync.current;
+    sync.pending++;
+    sync.version++;
+    try {
+      const lists = (await (demo
+        ? demoStore.mutate(name, args)
+        : rpc(name, args))) as TaskChecklist[];
+      invalidateTaskExtras(task.id);
+      setExtras((x) => ({
+        ...x,
+        checklists: withPendingItems(lists, x.checklists ?? [], opts.settles),
+      }));
+      // The Histórico picks up what was recorded.
+      if (demo) setLocalRefresh((v) => v + 1);
+      return lists;
+    } finally {
+      sync.pending--;
+    }
   }
   const loadChecklistHistory = useCallback(
     () =>
@@ -1055,7 +1082,12 @@ export function TaskDetail({
   useEffect(() => {
     let alive = true;
     if (demo) {
-      setExtras({
+      setExtras((shown) => ({
+        // Same rule as below: while a change is on its way, what is on screen.
+        checklists:
+          checklistSync.current.pending > 0
+            ? shown.checklists
+            : demoStore.checklistsOf(task.id),
         comments: demoStore.comments.filter((c) => c.task_id === task.id),
         attachments: [],
         // O principal do registro do checklist entra no histórico, como em
@@ -1076,17 +1108,25 @@ export function TaskDetail({
               detail: { ...e.detail, kind: e.action },
             })),
         ].sort((a, b) => b.created_at.localeCompare(a.created_at)),
-        checklists: demoStore.checklistsOf(task.id),
         recurrence: demoStore.recurrences.find(
           (r) => r.id === task.recurrence_id,
         ),
-      });
+      }));
+      setLoadedTask(task.id);
       return;
     }
     setLoading(true);
+    const started = checklistSync.current.version;
     taskExtras(task.id, refresh > 0 || localRefresh > 0)
       .then((x) => {
-        if (alive) setExtras(x);
+        if (!alive) return;
+        const sync = checklistSync.current;
+        setExtras((shown) =>
+          sync.pending > 0 || sync.version !== started
+            ? { ...x, checklists: shown.checklists }
+            : x,
+        );
+        setLoadedTask(task.id);
       })
       .catch((e) => setError(e.message))
       .finally(() => {
@@ -2290,7 +2330,7 @@ export function TaskDetail({
               <h3>{current.label}</h3>
             </header>
             <div className="task-side-body" ref={sideBody}>
-              {loading ? (
+              {loading && loadedTask !== task.id ? (
                 <Loading compact />
               ) : tab === "comments" ? (
                 <div className="comment-list">
@@ -2326,9 +2366,7 @@ export function TaskDetail({
                   mutate={mutate}
                   notify={notify}
                   loadHistory={loadChecklistHistory}
-                  onLists={(checklists) =>
-                    setExtras((x) => ({ ...x, checklists }))
-                  }
+                  patch={patchChecklists}
                 />
               ) : tab === "drive" && n.client ? (
                 <TaskDrive

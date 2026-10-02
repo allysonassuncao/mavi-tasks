@@ -29,7 +29,9 @@ import {
   checklistLogLabel,
   checklistProgress,
   checklistTree,
+  isPendingItem,
   openChecklistItems,
+  PENDING_ITEM,
   withItemDone,
 } from "./checklist";
 import {
@@ -50,7 +52,13 @@ type Mutate = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 export type ChecklistRun = (
   name: string,
   args: Record<string, unknown>,
+  /** The item shown before the answer, which this answer confirms. */
+  opts?: { settles?: string },
 ) => Promise<TaskChecklist[]>;
+/** Changes the checklists on screen right away (before the database answers). */
+export type ChecklistPatch = (
+  change: (lists: TaskChecklist[]) => TaskChecklist[],
+) => void;
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", {
@@ -79,7 +87,7 @@ export function TaskChecklistPanel({
   mutate,
   notify,
   loadHistory,
-  onLists,
+  patch,
 }: {
   task: Task;
   data: Snapshot;
@@ -94,8 +102,8 @@ export function TaskChecklistPanel({
   mutate: Mutate;
   notify: (message: string) => void;
   loadHistory: () => Promise<ChecklistLogEntry[]>;
-  /** An optimistic change (a mark), before the database answers. */
-  onLists: (lists: TaskChecklist[]) => void;
+  /** An optimistic change (a mark, an item typed), before the database answers. */
+  patch: ChecklistPatch;
 }) {
   const [error, setError] = useState("");
   const [creating, setCreating] = useState("");
@@ -113,10 +121,14 @@ export function TaskChecklistPanel({
   const total = lists.reduce((n, l) => n + l.items.length, 0);
   const required = !!task.checklist_required;
 
-  async function act(name: string, args: Record<string, unknown>) {
+  async function act(
+    name: string,
+    args: Record<string, unknown>,
+    opts?: { settles?: string },
+  ) {
     setError("");
     try {
-      return await run(name, args);
+      return await run(name, args, opts);
     } catch (e) {
       setError((e as Error).message);
       throw e;
@@ -251,15 +263,13 @@ export function TaskChecklistPanel({
           focusAdd={focusList === l.id}
           memberName={memberName}
           act={act}
-          onLists={(next) =>
-            onLists(lists.map((x) => (x.id === l.id ? next : x)))
+          patchList={(change) =>
+            patch((all) => all.map((x) => (x.id === l.id ? change(x) : x)))
           }
           onMove={(by) => move(l, by)}
           onSaveAsModel={() => setSaving(l)}
           onFocused={() => setFocusList("")}
           onError={setError}
-          lists={lists}
-          restore={onLists}
         />
       ))}
       {!lists.length && (
@@ -361,7 +371,6 @@ function Progress({ done, total }: { done: number; total: number }) {
 /** One checklist: its name, progress, items and subitems, and the composer. */
 function ChecklistCard({
   list,
-  lists,
   user,
   canManage,
   isLeader,
@@ -370,15 +379,13 @@ function ChecklistCard({
   focusAdd,
   memberName,
   act,
-  onLists,
-  restore,
+  patchList,
   onMove,
   onSaveAsModel,
   onFocused,
   onError,
 }: {
   list: TaskChecklist;
-  lists: TaskChecklist[];
   user: string;
   canManage: boolean;
   isLeader: boolean;
@@ -389,9 +396,10 @@ function ChecklistCard({
   act: (
     name: string,
     args: Record<string, unknown>,
+    opts?: { settles?: string },
   ) => Promise<TaskChecklist[]>;
-  onLists: (next: TaskChecklist) => void;
-  restore: (lists: TaskChecklist[]) => void;
+  /** Changes this checklist on screen right away. */
+  patchList: (change: (list: TaskChecklist) => TaskChecklist) => void;
   onMove: (by: -1 | 1) => void;
   onSaveAsModel: () => void;
   onFocused: () => void;
@@ -403,7 +411,6 @@ function ChecklistCard({
   const [collapsed, setCollapsed] = useState(finished);
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [adding, setAdding] = useState("");
   const [subFor, setSubFor] = useState("");
   const [editing, setEditing] = useState("");
   const [drag, setDrag] = useState<{
@@ -421,23 +428,53 @@ function ChecklistCard({
   const tree = checklistTree(list.items);
 
   function toggle(item: ChecklistItem, next: boolean) {
-    const before = lists;
-    onLists(withItemDone(list, item.id, next, user));
+    patchList((l) => withItemDone(l, item.id, next, user));
     act("set_checklist_item_done", { p_item: item.id, p_done: next }).catch(
-      () => restore(before),
+      () => patchList((l) => withItemDone(l, item.id, !next, user)),
     );
   }
-  async function add(title: string, parent: string | null) {
-    const text = title.trim();
-    if (!text) return false;
+  /**
+   * The item shows up the moment Enter is pressed (and the field is ready for
+   * the next one); the database confirms it in the background, in order.
+   */
+  function show(title: string, parent: string | null) {
+    const id = `${PENDING_ITEM}${crypto.randomUUID()}`;
+    patchList((l) => {
+      const level = l.items.filter((i) => i.parent_id === parent);
+      return {
+        ...l,
+        completed_at: null,
+        completed_by: null,
+        items: [
+          ...l.items,
+          {
+            id,
+            parent_id: parent,
+            title,
+            position: level.length
+              ? Math.max(...level.map((i) => i.position)) + 1
+              : 0,
+            done: false,
+            done_by: null,
+            done_at: null,
+            created_by: user,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      };
+    });
+    return id;
+  }
+  async function save(id: string, title: string, parent: string | null) {
     try {
-      await act("add_checklist_item", {
-        p_checklist: list.id,
-        p_title: text,
-        p_parent: parent,
-      });
+      await act(
+        "add_checklist_item",
+        { p_checklist: list.id, p_title: title, p_parent: parent },
+        { settles: id },
+      );
       return true;
     } catch {
+      patchList((l) => ({ ...l, items: l.items.filter((i) => i.id !== id) }));
       return false;
     }
   }
@@ -451,12 +488,12 @@ function ChecklistCard({
     const ids = level.map((i) => i.id).filter((id) => id !== drag.id);
     ids.splice(ids.indexOf(target.id), 0, drag.id);
     const position = new Map(ids.map((id, n) => [id, n]));
-    onLists({
-      ...list,
-      items: list.items.map((i) =>
+    patchList((l) => ({
+      ...l,
+      items: l.items.map((i) =>
         position.has(i.id) ? { ...i, position: position.get(i.id)! } : i,
       ),
-    });
+    }));
     act("reorder_checklist_items", {
       p_checklist: list.id,
       p_parent: drag.parent,
@@ -469,11 +506,13 @@ function ChecklistCard({
     const kids = parent
       ? []
       : (tree.find((t) => t.item.id === item.id)?.children ?? []);
-    const editable = mayChange(item.created_by);
+    // Typed a moment ago and still being saved: shown, not yet changeable.
+    const pending = isPendingItem(item.id);
+    const editable = !pending && mayChange(item.created_by);
     return (
       <li
         key={item.id}
-        className={`checklist-item${item.done ? " done" : ""}${drag?.id === item.id ? " dragging" : ""}`}
+        className={`checklist-item${item.done ? " done" : ""}${pending ? " pending" : ""}${drag?.id === item.id ? " dragging" : ""}`}
         onDragOver={(e) => {
           if (drag && drag.parent === item.parent_id && drag.id !== item.id)
             e.preventDefault();
@@ -487,7 +526,7 @@ function ChecklistCard({
         <div className="checklist-row">
           <span
             className="checklist-grip"
-            draggable
+            draggable={!pending}
             title="Arraste para reordenar"
             aria-hidden="true"
             onDragStart={(e) => {
@@ -508,6 +547,7 @@ function ChecklistCard({
                   : false
             }
             aria-label={`${item.done ? "Desmarcar" : "Marcar"} ${item.title}`}
+            disabled={pending}
             onCheckedChange={() => toggle(item, !item.done)}
           />
           {editing === item.id ? (
@@ -540,7 +580,7 @@ function ChecklistCard({
               )}
             </span>
           )}
-          {editing !== item.id && (
+          {editing !== item.id && !pending && (
             <span className="checklist-actions">
               {!parent && (
                 <button
@@ -594,7 +634,10 @@ function ChecklistCard({
                 <QuickAdd
                   placeholder="Novo subitem — Enter para adicionar"
                   autoFocus
-                  onAdd={(title) => add(title, item.id)}
+                  onAdd={(title) => {
+                    const id = show(title, item.id);
+                    return () => save(id, title, item.id);
+                  }}
                   onClose={() => setSubFor("")}
                 />
               </li>
@@ -748,7 +791,10 @@ function ChecklistCard({
             <QuickAdd
               inputRef={addInput}
               placeholder="Adicionar item — Enter para o próximo"
-              onAdd={(title) => add(title, null)}
+              onAdd={(title) => {
+                const id = show(title, null);
+                return () => save(id, title, null);
+              }}
             />
           </div>
         </>
@@ -780,25 +826,31 @@ function QuickAdd({
   placeholder: string;
   autoFocus?: boolean;
   inputRef?: RefObject<HTMLInputElement | null>;
-  onAdd: (title: string) => Promise<boolean>;
+  /** Shows the item at once; the function returned saves it. */
+  onAdd: (title: string) => () => Promise<boolean>;
   onClose?: () => void;
 }) {
   const [value, setValue] = useState("");
-  // The field empties right away for the next item; the items go out one
-  // after the other, in the order typed (a failed one comes back).
+  // The item appears and the field empties right away for the next one; the
+  // items are saved one after the other, in the order typed (a failed one
+  // comes back to the field).
   const queue = useRef(Promise.resolve());
   function submit() {
     const title = value.trim();
     if (!title) return;
     setValue("");
+    const saveItem = onAdd(title);
     queue.current = queue.current.then(async () => {
-      if (!(await onAdd(title))) setValue((v) => v || title);
+      if (!(await saveItem())) setValue((v) => v || title);
     });
   }
   function key(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
       submit();
+      // The field moves down with each item: it stays in view.
+      const field = e.currentTarget;
+      requestAnimationFrame(() => field.scrollIntoView({ block: "nearest" }));
     } else if (e.key === "Escape" && onClose) {
       e.preventDefault();
       e.stopPropagation();
