@@ -6,6 +6,7 @@ import {
   copilotRelated,
   dossierContext,
   handleDossierWorker,
+  modelLabel,
   parseDossierOps,
   draftMessage,
   promptNotes,
@@ -464,6 +465,10 @@ describe("análise em tempo real", () => {
     expect(checked.checked).toBe(true);
     const done = events.at(-1) as Extract<CopilotEvent, { type: "done" }>;
     expect(done.version).toBe(3);
+    // O modelo da análise, com o nome do catálogo (padrão do servidor).
+    expect(done.model).toBe("claude-sonnet-5");
+    expect(done.modelLabel).toBe("Claude Sonnet 5");
+    expect(done.provider).toBeNull();
     expect(done.verdict.status).toBe("attention");
     expect(done.alerts[0].quote).toBe("não usem vermelho nas artes");
     expect(done.alerts[0].sources.map((s) => s.type)).toEqual(["whatsapp"]);
@@ -687,5 +692,15 @@ describe("dossiê (worker)", () => {
     expect(
       calls.find((c) => c.url.includes("rpc/ai_dossier_fail"))!.body.p_client,
     ).toBe(clientB);
+  });
+});
+
+describe("modelLabel", () => {
+  it("usa o nome cadastrado, o do catálogo ou o id sem o fornecedor", () => {
+    expect(modelLabel("openai/gpt-5.6-luna", "GPT 5.6 Luna")).toBe(
+      "GPT 5.6 Luna",
+    );
+    expect(modelLabel("claude-haiku-4-5")).toBe("Claude Haiku 4.5");
+    expect(modelLabel("openai/gpt-5.6-luna", " ")).toBe("gpt-5.6-luna");
   });
 });

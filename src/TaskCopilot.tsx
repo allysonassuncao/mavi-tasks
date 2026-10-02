@@ -21,6 +21,7 @@ import {
   X,
   BookMarked,
   CornerDownLeft,
+  Cpu,
 } from "lucide-react";
 import { sourceLabel, sourceUrl, type AiSource } from "./ai";
 import {
@@ -487,6 +488,20 @@ function CopilotResult({
         <strong>{heading}</strong>
       </div>
       <p>{text}</p>
+      {state.model && (
+        <small
+          className="copilot-result-model"
+          title={`Esta análise foi feita com ${state.model.label}${
+            state.model.provider
+              ? ` (${state.model.provider}), pela regra do Painel da MAVI`
+              : ", o padrão do servidor"
+          }. A escolha fica no Painel da MAVI › Regras › Por funcionalidade › Assistente MAVI.`}
+        >
+          <Cpu size={11} aria-hidden="true" />
+          {state.model.label}
+          {state.model.provider && ` · ${state.model.provider}`}
+        </small>
+      )}
       {state.stale && (
         <small className="copilot-result-stale">
           O texto mudou: a MAVI confere de novo quando você parar de digitar.

@@ -20822,6 +20822,24 @@ button.copilot-chip:hover {
 .copilot-result-stale {
   color: var(--muted);
 }
+/* O modelo da análise: discreto, no canto, com o detalhe no balão. */
+.copilot-result-model {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  color: var(--muted);
+  opacity: 0.75;
+  cursor: help;
+}
+.copilot-result-model:hover {
+  opacity: 1;
+}
 .copilot-result.flash {
   animation: copilot-flash 1.6s ease-out;
 }

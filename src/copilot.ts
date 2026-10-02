@@ -167,11 +167,14 @@ export type CopilotEffort = {
   level: "simple" | "normal" | "complex";
   why: string;
 };
+/** O modelo que fez a análise (o nome para a tela e o provedor da regra). */
+export type CopilotModel = { label: string; provider: string | null };
 type ReviewResult = {
   alerts: CopilotAlert[];
   version: number;
   verdict: CopilotVerdict;
   effort?: CopilotEffort | null;
+  model?: CopilotModel | null;
 };
 export type CopilotAction =
   "applied" | "useful" | "not_useful" | "dismissed" | "ignored" | "opened";
@@ -313,6 +316,9 @@ export async function streamReview(
           text: "",
         },
         effort: e.effort ?? null,
+        model: e.model
+          ? { label: e.modelLabel || e.model, provider: e.provider ?? null }
+          : null,
       };
     else if (e.type === "error")
       throw Error(e.error ?? "A MAVI não respondeu.");
@@ -514,6 +520,8 @@ export type CopilotState = {
   verdict: CopilotVerdict | null;
   /** O tamanho da entrega da última análise (para o prazo sugerido). */
   effort: CopilotEffort | null;
+  /** O modelo que fez a última análise. */
+  model: CopilotModel | null;
   /** A análise está rodando (os alertas ainda podem chegar). */
   reviewing: boolean;
   /** Em que passo a análise está: 1 lendo, 2 histórico, 3 escrevendo. */
@@ -538,6 +546,7 @@ export function useTaskCopilot(
   const [alerts, setAlerts] = useState<CopilotAlert[]>([]);
   const [verdict, setVerdict] = useState<CopilotVerdict | null>(null);
   const [effort, setEffort] = useState<CopilotEffort | null>(null);
+  const [model, setModel] = useState<CopilotModel | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [step, setStep] = useState(0);
   const [status, setStatus] = useState("");
@@ -597,6 +606,7 @@ export function useTaskCopilot(
       setAlerts(cached.alerts);
       setVerdict(cached.verdict);
       setEffort(cached.effort ?? null);
+      setModel(cached.model ?? null);
       setReviewedKey(key);
       return;
     }
@@ -628,6 +638,7 @@ export function useTaskCopilot(
             setAlerts(r.alerts);
             setVerdict(r.verdict);
             setEffort(r.effort);
+            setModel(null);
             remember(reviewCache, key, {
               alerts: r.alerts,
               version: 0,
@@ -664,6 +675,7 @@ export function useTaskCopilot(
           setAlerts(result.alerts);
           setVerdict(result.verdict);
           setEffort(result.effort ?? null);
+          setModel(result.model ?? null);
           setReviewedKey(key);
         } catch (e) {
           if (abort.signal.aborted) return;
@@ -694,6 +706,7 @@ export function useTaskCopilot(
       alerts,
       verdict,
       effort,
+      model,
       reviewing,
       step,
       status,
@@ -710,6 +723,7 @@ export function useTaskCopilot(
       alerts,
       verdict,
       effort,
+      model,
       reviewing,
       step,
       status,

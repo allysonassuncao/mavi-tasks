@@ -19,6 +19,7 @@ import {
   type ProviderConfig,
   type ResolvedRoute,
 } from "./_ai-providers.js";
+import { CATALOG } from "../src/ai-providers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
 
@@ -841,9 +842,26 @@ export type CopilotEvent =
       /** Versão do dossiê usada (a tela descarta análises de outra versão). */
       version: number;
       model: string;
+      /** O nome do modelo para a tela (o cadastrado no Painel da MAVI). */
+      modelLabel: string;
+      /** O provedor da regra (nulo: o padrão do servidor). */
+      provider: string | null;
     }
   | { type: "throttled" }
   | { type: "error"; error: string; status: number };
+
+/**
+ * O nome do modelo como a pessoa reconhece: o cadastrado no provedor, o do
+ * catálogo ou o id sem o prefixo do fornecedor ("openai/gpt-x" → "gpt-x").
+ */
+export function modelLabel(id: string, label?: string | null) {
+  return (
+    label?.trim() ||
+    CATALOG.flatMap((c) => c.models).find((m) => m.id === id)?.label ||
+    id.split("/").pop() ||
+    id
+  );
+}
 
 const todayKey = (now: number) =>
   new Intl.DateTimeFormat("en-CA", {
@@ -1032,6 +1050,11 @@ async function review(
     effort: reader.effort(),
     version: ctx.dossier?.version ?? 0,
     model,
+    modelLabel: modelLabel(
+      model,
+      model === provider?.config.model ? provider.config.price?.label : null,
+    ),
+    provider: provider?.config.name ?? null,
   });
   // O registro da análise (para conferir depois por que um alerta apareceu).
   await callRpc(env, deps.fetch, auth, "copilot_log_run", {
