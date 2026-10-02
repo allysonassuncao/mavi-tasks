@@ -59,12 +59,29 @@ export interface AdCycle {
   destination: AdDestination;
   landing_pages: string[];
   niche: string;
+  /**
+   * The turnover day this cycle shares with the previous one (it starts on
+   * the day that one ends): where it counts. Null: no shared day, or a cycle
+   * imported from the MASO (counts in both). Migration 20270301090000.
+   */
+  shared_day?: SharedDayChoice | null;
   created_by: string;
   created_at: string;
   updated_at: string;
   version: number;
   links: AdCycleLink[];
 }
+/**
+ * Where a turnover day counts, for the platform campaigns (and Make pages)
+ * both cycles have: in the cycle that starts (recommended), in the one that
+ * ends, or in both (twice in the campaign's totals and the media balance).
+ */
+export type SharedDayChoice = "later" | "earlier" | "both";
+export const sharedDayLabels: Record<SharedDayChoice, string> = {
+  later: "no ciclo novo",
+  earlier: "no ciclo que termina",
+  both: "nos dois ciclos",
+};
 export interface AdCampaignEvent {
   id: number;
   campaign_id: string;
@@ -182,12 +199,43 @@ export function cyclesOf(data: CampaignData, campaignId: string) {
 export function currentCycle(data: CampaignData, campaign: AdCampaign) {
   return data.cycles.find((y) => y.id === campaign.current_cycle_id) ?? null;
 }
-/** The first cycle, among the others, that starts after `cycle` ends. */
+/**
+ * The first cycle, among the others, that starts after `cycle` ends — or on
+ * its last day (the turnover day).
+ */
 export function nextCycle(cycles: AdCycle[], cycle: AdCycle) {
   return (
-    cycles.find((y) => y.id !== cycle.id && y.start_date > cycle.end_date) ??
-    null
+    cycles.find(
+      (y) =>
+        y.id !== cycle.id &&
+        y.start_date >= cycle.end_date &&
+        y.start_date > cycle.start_date,
+    ) ?? null
   );
+}
+/**
+ * The cycles a period shares a turnover day with: the one ending on its
+ * first day and the one starting on its last (others than `own`).
+ */
+export function turnover(
+  cycles: AdCycle[],
+  start: string,
+  end: string,
+  own?: string,
+) {
+  const others = cycles.filter((y) => y.id !== own);
+  return {
+    before:
+      start < end
+        ? (others.find((y) => y.end_date === start && y.start_date < start) ??
+          null)
+        : null,
+    after:
+      start < end
+        ? (others.find((y) => y.start_date === end && y.end_date > end) ??
+          null)
+        : null,
+  };
 }
 /** Days before the end when the investment for the next cycle is due. */
 export const BILLING_NOTICE_DAYS = 10;
@@ -212,7 +260,10 @@ export function cycleAlert(
   const cycles = cyclesOf(data, campaign.id);
   if (!cycles.length) return { kind: "no_cycle" };
   const current = currentCycle(data, campaign);
-  const covering = cycles.find((y) => cycleState(y, today) === "running");
+  // On a turnover day, the cycle that starts.
+  const covering = [...cycles]
+    .reverse()
+    .find((y) => cycleState(y, today) === "running");
   if (!current)
     return {
       kind: "no_current",
@@ -248,6 +299,10 @@ export interface CycleDraft {
   landing_pages: string;
   niche: string;
   links: AdCycleLink[];
+  /** Where the turnover day with the previous cycle counts ("": not chosen). */
+  shared_start: SharedDayChoice | "";
+  /** The same, with the next cycle (stored in the next one). */
+  shared_end: SharedDayChoice | "";
 }
 /** One month after `start`, minus a day: 01/09 → 30/09 (short months clamp: 31/08 → 29/09). */
 export function monthlyEnd(start: string) {
@@ -260,13 +315,16 @@ export function monthlyEnd(start: string) {
 /**
  * A new cycle continues the last one: it starts the day after it ends, runs
  * for a month and repeats objective, goal, budget, M, destination and links
- * (the MASO copied links and M from the previous cycle as well).
+ * (the MASO copied links and M from the previous cycle as well). Without
+ * links in the last one, they come from `linksFrom` (the latest with links).
  */
 export function nextCycleDraft(
   last: AdCycle | null,
   today: string,
+  linksFrom?: AdCycle | null,
 ): CycleDraft {
   const start = last ? addDays(last.end_date, 1) : today;
+  const links = last?.links.length ? last.links : (linksFrom?.links ?? []);
   return {
     competence: start.slice(0, 7),
     start_date: start,
@@ -278,7 +336,9 @@ export function nextCycleDraft(
     destination: last?.destination ?? "external_page",
     landing_pages: last?.landing_pages.join(", ") ?? "",
     niche: last?.niche ?? "",
-    links: last?.links.map((l) => ({ ...l })) ?? [],
+    links: links.map((l) => ({ ...l })),
+    shared_start: "",
+    shared_end: "",
   };
 }
 export function cycleDraft(cycle: AdCycle): CycleDraft {
@@ -294,6 +354,9 @@ export function cycleDraft(cycle: AdCycle): CycleDraft {
     landing_pages: cycle.landing_pages.join(", "),
     niche: cycle.niche,
     links: cycle.links.map((l) => ({ ...l })),
+    shared_start: cycle.shared_day ?? "",
+    // The next cycle's choice (the form fills it in).
+    shared_end: "",
   };
 }
 /** "1.234,56" or "1234.56" → 1234.56; NaN when it isn't a number. */
@@ -328,6 +391,9 @@ export type CycleInput = {
   landing_pages: string[];
   niche: string;
   links: AdCycleLink[];
+  /** Turnover days: where each counts (null keeps the saved choice). */
+  shared_start?: SharedDayChoice | null;
+  shared_end?: SharedDayChoice | null;
 };
 /** Checks a draft the way the database will, with friendlier messages. */
 export function cycleInput(
@@ -375,6 +441,8 @@ export function cycleInput(
       landing_pages: draft.destination === "make_landing_page" ? pages : [],
       niche: draft.niche.trim(),
       links,
+      shared_start: draft.shared_start || null,
+      shared_end: draft.shared_end || null,
     },
   };
 }
@@ -867,6 +935,18 @@ const CAMPAIGN_COLUMNS =
   "id,company_id,contract_id,name,platform,status,current_cycle_id,briefing_url,media_plan_url,notes,archived,created_by,created_at,updated_at,version";
 const CYCLE_COLUMNS =
   "id,company_id,campaign_id,competence_month,start_date,end_date,objective,goal_results,budget,multiplier,destination,landing_pages,niche,created_by,created_at,updated_at,version";
+/** With the turnover day's choice (migration 20270301090000). */
+const CYCLE_COLUMNS_SHARED = `${CYCLE_COLUMNS},shared_day`;
+const cyclesOfCampaign = (company: string, campaign: string, columns: string) =>
+  fetchAllRows<Omit<AdCycle, "links">>((count) =>
+    supabase!
+      .from("ad_cycles")
+      // A column list built at runtime (the rows are typed above).
+      .select(columns as "*", count ? { count } : undefined)
+      .eq("company_id", company)
+      .eq("campaign_id", campaign)
+      .order("id"),
+  );
 
 function cycleArgs(input: CycleInput) {
   return {
@@ -881,6 +961,9 @@ function cycleArgs(input: CycleInput) {
     p_landing_pages: input.landing_pages,
     p_niche: input.niche,
     p_links: input.links,
+    // Only with a turnover day (older databases don't take them).
+    ...(input.shared_start ? { p_shared_start: input.shared_start } : {}),
+    ...(input.shared_end ? { p_shared_end: input.shared_end } : {}),
   };
 }
 
@@ -939,13 +1022,11 @@ export const supabaseCampaigns: CampaignsBackend = {
           if (error) throw error;
           return (data ?? []) as AdCampaign[];
         }),
-      fetchAllRows<Omit<AdCycle, "links">>((count) =>
-        supabase!
-          .from("ad_cycles")
-          .select(CYCLE_COLUMNS, count ? { count } : undefined)
-          .eq("company_id", company)
-          .eq("campaign_id", id)
-          .order("id"),
+      cyclesOfCampaign(company, id, CYCLE_COLUMNS_SHARED).catch((e: Error) =>
+        // Before the migration: without the column.
+        /shared_day/.test(e.message)
+          ? cyclesOfCampaign(company, id, CYCLE_COLUMNS)
+          : Promise.reject(e),
       ),
     ]);
     const ids = cycles.map((y) => y.id);

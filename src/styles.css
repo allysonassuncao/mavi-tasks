@@ -13485,6 +13485,83 @@ tr:hover .campaign-edit-record,
 .campaign-lead-notice > span {
   flex: 1 1 240px;
 }
+/* Campanhas: o dia de virada (um ciclo começa no dia em que o outro termina). */
+.campaign-copied {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f1f6ee;
+  color: #4f6447;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.campaign-same-day {
+  align-self: flex-start;
+}
+.campaign-shared-day {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0;
+  padding: 12px 14px;
+  border: 1px solid #b8cdf4;
+  border-radius: 12px;
+  background: #f5f8fe;
+  min-width: 0;
+}
+.campaign-shared-day.warn {
+  border-color: #e7c27d;
+  background: #fdf7ea;
+}
+.campaign-shared-day legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  color: #2f4f7f;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.campaign-shared-day p {
+  margin: 0;
+  color: #44546a;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.campaign-shared-day .campaign-shared-example {
+  color: #5d6b80;
+  font-style: italic;
+}
+.campaign-shared-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+.campaign-shared-options .share-toggle {
+  display: flex;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
+.campaign-shared-options .share-toggle:has(input:checked) {
+  border-color: #2f6fdb;
+  background: #eef4fe;
+}
+.campaign-shared-options input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 3px 0 0;
+  padding: 0;
+  accent-color: #2f6fdb;
+}
+.campaign-shared-day > small {
+  color: #6b7a8f;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
 .campaign-lead-forms h4 {
   margin: 0 0 6px;
   font-size: 0.82rem;

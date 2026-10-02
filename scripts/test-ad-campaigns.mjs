@@ -248,11 +248,17 @@ await check("ativar exige ciclo atual e motivo", async () => {
 });
 
 await check(
-  "períodos de ciclos da mesma campanha não se sobrepõem",
+  "períodos de ciclos da mesma campanha não se sobrepõem (só o dia de virada)",
   async () => {
     await assert.rejects(
-      cycle(admin, main, { start: "2026-09-30", end: "2026-10-29" }),
+      cycle(admin, main, { start: "2026-09-29", end: "2026-10-29" }),
       /conflita com o ciclo de 31\/08\/2026 a 30\/09\/2026/,
+    );
+    // Começar no dia em que o anterior termina passa, com a escolha de onde
+    // o dia conta (scripts/test-campaign-shared-day.mjs).
+    await assert.rejects(
+      cycle(admin, main, { start: "2026-09-30", end: "2026-10-29" }),
+      /Escolha em qual ciclo conta o dia de virada \(30\/09\/2026\)/,
     );
     await assert.rejects(
       cycle(admin, main, { start: "2026-10-10", end: "2026-10-01" }),

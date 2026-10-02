@@ -10,6 +10,7 @@ import {
   mapLimit,
   metaResults,
   missingSnapshots,
+  sharedLinks,
   syncWindow,
   usesMakeLeads,
   type SyncEnv,
@@ -1040,5 +1041,166 @@ describe("POST /api/ads-sync", () => {
       p_secret: null,
       p_campaign: "00000000-0000-4000-8000-000000000001",
     });
+  });
+});
+
+describe("dia de virada (ciclo que começa no dia em que o anterior termina)", () => {
+  const links = (...ids: string[]) =>
+    ids.map((id) => ({ account_id: "111", campaign_id: id, manager_id: "" }));
+  it("o que os dois ciclos contam, conta a conta", () => {
+    // Campanhas marcadas nos dois: só as em comum.
+    expect(sharedLinks("meta", links("c1", "c2"), links("c2", "c3"))).toEqual(
+      links("c2"),
+    );
+    // Nenhuma em comum: nada a tirar.
+    expect(sharedLinks("meta", links("c1"), links("c3"))).toEqual([]);
+    // Um com a conta inteira: as campanhas do outro.
+    expect(sharedLinks("meta", links(""), links("c2"))).toEqual(links("c2"));
+    expect(sharedLinks("meta", links("c1"), links(""))).toEqual(links("c1"));
+    expect(sharedLinks("meta", links(""), links(""))).toEqual(links(""));
+    // Outra conta não divide nada; "act_" é a mesma conta.
+    expect(
+      sharedLinks("meta", links("c1"), [{ account_id: "222", campaign_id: "c1" }]),
+    ).toEqual([]);
+    expect(
+      sharedLinks("meta", links("c1"), [{ account_id: "act_111", campaign_id: "c1" }]),
+    ).toEqual(links("c1"));
+  });
+
+  it("Meta: o ciclo que termina deixa de contar, no dia, as campanhas que estão no novo", async () => {
+    let batch = [
+      target({
+        start_date: "2026-09-01",
+        end_date: "2026-09-30",
+        today: "2026-10-02",
+        links: links("c1", "c2"),
+      }),
+    ];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [
+        /rpc\/ad_sync_shared_days/,
+        () =>
+          json([
+            { day: "2026-09-30", links: links("c2", "c3"), landing_pages: [] },
+          ]),
+      ],
+      [
+        /act_111\/insights/,
+        (call) => {
+          const q = new URL(call.url).searchParams;
+          const range = JSON.parse(q.get("time_range")!);
+          const ids = JSON.parse(q.get("filtering")!)[0].value;
+          // A leitura só do dia de virada, só das campanhas em comum.
+          if (range.since === "2026-09-30") {
+            expect(ids).toEqual(["c2"]);
+            return json({
+              data: [{ date_start: "2026-09-30", spend: "40", impressions: "400" }],
+            });
+          }
+          if (q.get("time_increment"))
+            return json({
+              data: [
+                { date_start: "2026-09-29", spend: "100", impressions: "1000" },
+                { date_start: "2026-09-30", spend: "100", impressions: "1000" },
+              ],
+            });
+          return json({ data: [{ spend: "200", impressions: "2000" }] });
+        },
+      ],
+      [/rpc\/ad_sync_store/, () => json(30)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(result.body).toEqual({ synced: 1, errors: [] });
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    const day = (d: string) =>
+      stored.p_days.find((x: { day: string }) => x.day === d);
+    expect(day("2026-09-29")).toMatchObject({ spend: 100, impressions: 1000 });
+    expect(day("2026-09-30")).toMatchObject({ spend: 60, impressions: 600 });
+    expect(stored.p_snapshot).toMatchObject({ spend: 160, impressions: 1600 });
+  });
+
+  it("sem dia de virada (ou sem a migração), sincroniza como antes", async () => {
+    let batch = [target()];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [/rpc\/ad_sync_shared_days/, () => json({ message: "not found" }, 404)],
+      [/act_111\/insights/, () => json({ data: [] })],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(result.body).toEqual({ synced: 1, errors: [] });
+    expect(calls.filter((c) => c.url.includes("insights"))).toHaveLength(2);
+  });
+
+  it("página da Make: tira do dia os cadastros das páginas que os dois contam", async () => {
+    let batch = [
+      target({
+        objective: "lead",
+        destination: "make_landing_page",
+        landing_pages: ["sq1", "sq2"],
+        start_date: "2026-09-01",
+        end_date: "2026-09-30",
+        today: "2026-10-02",
+      }),
+    ];
+    const counts: string[] = [];
+    const { fetch, calls } = network([
+      [
+        /rpc\/ad_sync_targets/,
+        () => {
+          const now = batch;
+          batch = [];
+          return json(now);
+        },
+      ],
+      [
+        /rpc\/ad_sync_shared_days/,
+        () =>
+          json([{ day: "2026-09-30", links: links("c9"), landing_pages: ["sq2", "sq3"] }]),
+      ],
+      [/act_111\/insights/, () => json({ data: [] })],
+      [
+        /rpc\/make_leads_count/,
+        (call) => {
+          const body = JSON.parse(call.body!);
+          counts.push(body.p_squeezes.join(","));
+          return body.p_since === "2026-09-30"
+            ? json({ days: { "2026-09-30": 2 }, total: 2, firsts: { "2026-09-30": 2 } })
+            : json({
+                days: { "2026-09-29": 3, "2026-09-30": 5 },
+                total: 8,
+                firsts: { "2026-09-29": 3, "2026-09-30": 5 },
+              });
+        },
+      ],
+      [/rpc\/ad_sync_store/, () => json(30)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(result.body).toEqual({ synced: 1, errors: [] });
+    expect(counts).toEqual(["sq1,sq2", "sq2"]);
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    const day = (d: string) =>
+      stored.p_days.find((x: { day: string }) => x.day === d);
+    expect(day("2026-09-30")).toMatchObject({ conversions: 3 });
+    expect(stored.p_snapshot.conversions).toBe(6);
   });
 });

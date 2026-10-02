@@ -38,6 +38,7 @@ import { contractParts, dateKey } from "./domain";
 import { useUrlState } from "./router";
 import type { Snapshot } from "./types";
 import {
+  addDays,
   campaignStatuses,
   connectionResult,
   currentCycle,
@@ -52,14 +53,17 @@ import {
   destinations,
   goalCost,
   monthLabel,
+  monthlyEnd,
   money,
   parseAmount,
   nextCycleDraft,
   objectives,
   platforms,
+  sharedDayLabels,
   shortDate,
   splitList,
   supabaseCampaigns,
+  turnover,
   type AdCampaign,
   type AdCampaignEvent,
   type AdCampaignStatus,
@@ -76,6 +80,7 @@ import {
   type CycleAlert,
   type CycleDraft,
   type CycleInput,
+  type SharedDayChoice,
 } from "./campaigns";
 import { demoCampaigns } from "./campaigns-demo";
 import {
@@ -1301,6 +1306,15 @@ function CampaignDetail({
                               <small className="cell-note">
                                 {cycleDays(y)} dias
                               </small>
+                              {turnover(cycles, y.start_date, y.end_date, y.id)
+                                .before && (
+                                <small
+                                  className="cell-note"
+                                  title="O ciclo começa no dia em que o anterior termina: o dia de virada, nas campanhas que estão nos dois ciclos, conta onde foi escolhido."
+                                >
+                                  {`Dia de virada ${shortDate(y.start_date).slice(0, 5)}: ${y.shared_day ? sharedDayLabels[y.shared_day] : "nos dois ciclos (sem escolha)"}`}
+                                </small>
+                              )}
                             </td>
                             <td data-label="Competência">
                               {monthLabel(y.competence_month)}
@@ -1508,6 +1522,17 @@ function describeEvent(e: AdCampaignEvent, state: CampaignData) {
       return `liberou ${money(Number(d.shortfall))} acima do saldo de mídia no ciclo de ${period(e.cycle_id)} (disponível ${money(Number(d.available))}, o ciclo precisava de ${money(Number(d.need))}). Motivo: ${String(d.reason ?? "")}`;
     case "cycle_created":
       return `cadastrou o ciclo de ${shortDate(String(d.start_date))} a ${shortDate(String(d.end_date))} (${money(Number(d.budget))}, meta de ${d.goal_results}).`;
+    case "shared_day": {
+      const span = (y: unknown) => {
+        const c = y as { start_date?: string; end_date?: string } | null;
+        return c?.start_date && c.end_date
+          ? `${shortDate(c.start_date)} a ${shortDate(c.end_date)}`
+          : "removido";
+      };
+      const where = (v: unknown) =>
+        sharedDayLabels[v as SharedDayChoice] ?? "nos dois ciclos";
+      return `escolheu onde conta o dia de virada ${shortDate(String(d.day))}, entre o ciclo de ${span(d.earlier)} e o de ${span(d.later)}: ${where(d.to)}${d.from ? ` (antes: ${where(d.from)})` : ""}.`;
+    }
     case "updated":
     case "cycle_updated": {
       const changes = Object.entries(
@@ -1742,9 +1767,24 @@ function CycleForm({
 }) {
   const cycles = cyclesOf(state, campaign.id);
   const last = cycles[cycles.length - 1] ?? null;
+  // A new cycle's links come from the latest cycle that has any.
+  const linked = [...cycles].reverse().find((y) => y.links.length) ?? null;
+  // Editing: the next cycle's choice, when this one ends on its first day.
+  const after = cycle
+    ? turnover(cycles, cycle.start_date, cycle.end_date, cycle.id).after
+    : null;
   const [draft, setDraft] = useState<CycleDraft>(() =>
-    cycle ? cycleDraft(cycle) : nextCycleDraft(last, today),
+    cycle
+      ? { ...cycleDraft(cycle), shared_end: after?.shared_day ?? "" }
+      : nextCycleDraft(last, today, linked),
   );
+  // The turnover days of the period: asked when the shared day is new (an
+  // imported cycle that already shared it keeps counting in both).
+  const shared = turnover(cycles, draft.start_date, draft.end_date, cycle?.id);
+  const askStart =
+    !!shared.before && (!cycle || draft.start_date !== cycle.start_date);
+  const askEnd =
+    !!shared.after && (!cycle || draft.end_date !== cycle.end_date);
   const [makeCurrent, setMakeCurrent] = useState(
     !cycle && !campaign.current_cycle_id,
   );
@@ -1770,11 +1810,20 @@ function CycleForm({
     if (saving) return;
     const result = cycleInput(draft);
     if ("error" in result) return setError(result.error);
+    if ((askStart && !draft.shared_start) || (askEnd && !draft.shared_end))
+      return setError(
+        `Escolha em qual ciclo conta o dia de virada (${shortDate(askStart && !draft.shared_start ? draft.start_date : draft.end_date)}).`,
+      );
+    const input: CycleInput = {
+      ...result.input,
+      shared_start: shared.before ? result.input.shared_start : null,
+      shared_end: shared.after ? result.input.shared_end : null,
+    };
     const blocked = cycleMediaBlocked(
       media.room,
       cycle ?? null,
-      result.input.end_date,
-      result.input.budget,
+      input.end_date,
+      input.budget,
       today,
       release,
     );
@@ -1785,7 +1834,7 @@ function CycleForm({
     setError("");
     setSaving(true);
     try {
-      await onSave(result.input, makeCurrent, release.trim() || null);
+      await onSave(input, makeCurrent, release.trim() || null);
     } catch (err) {
       setError((err as Error).message);
       setSaving(false);
@@ -1820,6 +1869,20 @@ function CycleForm({
             last &&
             ` · continua o ciclo de ${shortDate(last.start_date)} a ${shortDate(last.end_date)}`}
         </p>
+        {!cycle && last && (
+          <p className="campaign-copied" role="status">
+            Objetivo, meta, verba, M, destino
+            {draft.links.length ? ", contas e campanhas marcadas" : ""} vieram
+            do ciclo anterior
+            {linked && linked !== last && draft.links.length
+              ? ` (os vínculos, do ciclo de ${shortDate(linked.start_date)} a ${shortDate(linked.end_date)})`
+              : ""}
+            .
+            {campaign.platform === "meta" &&
+              " Os formulários do Facebook integrados ao cliente continuam valendo."}{" "}
+            Confira e ajuste o que mudou.
+          </p>
+        )}
         <fieldset className="create-fields" disabled={saving}>
           <div className="form-columns campaign-three">
             <label>
@@ -1833,6 +1896,11 @@ function CycleForm({
                     ...d,
                     start_date: start,
                     competence: d.competence || start.slice(0, 7),
+                    // Another turnover day: chosen again.
+                    shared_start:
+                      cycle && start === cycle.start_date
+                        ? (cycle.shared_day ?? "")
+                        : "",
                   }));
                 }}
                 required
@@ -1844,7 +1912,17 @@ function CycleForm({
                 type="date"
                 value={draft.end_date}
                 min={draft.start_date}
-                onChange={(e) => set("end_date", e.target.value)}
+                onChange={(e) => {
+                  const end = e.target.value;
+                  setDraft((d) => ({
+                    ...d,
+                    end_date: end,
+                    shared_end:
+                      cycle && end === cycle.end_date
+                        ? (after?.shared_day ?? "")
+                        : "",
+                  }));
+                }}
                 required
               />
             </label>
@@ -1862,6 +1940,46 @@ function CycleForm({
             {days !== null ? `${days} dias de ciclo. ` : ""}O fim do ciclo é
             quando o próximo investimento precisa entrar.
           </small>
+          {!cycle && last && draft.start_date === addDays(last.end_date, 1) && (
+            <Button
+              type="button"
+              className="text-btn campaign-same-day"
+              onClick={() =>
+                setDraft((d) => ({
+                  ...d,
+                  start_date: last.end_date,
+                  end_date: monthlyEnd(last.end_date),
+                  shared_start: "",
+                }))
+              }
+            >
+              <CalendarClock size={14} /> Começar em{" "}
+              {shortDate(last.end_date)}, no dia em que o ciclo anterior
+              termina
+            </Button>
+          )}
+          {shared.before && (
+            <SharedDayPicker
+              day={draft.start_date}
+              earlier={shared.before}
+              later={{ start_date: draft.start_date, end_date: draft.end_date }}
+              own="later"
+              value={draft.shared_start}
+              asked={askStart}
+              onChange={(v) => set("shared_start", v)}
+            />
+          )}
+          {shared.after && (
+            <SharedDayPicker
+              day={draft.end_date}
+              earlier={{ start_date: draft.start_date, end_date: draft.end_date }}
+              later={shared.after}
+              own="earlier"
+              value={draft.shared_end}
+              asked={askEnd}
+              onChange={(v) => set("shared_end", v)}
+            />
+          )}
           <div className="form-columns campaign-three">
             <label>
               Objetivo
@@ -2031,6 +2149,101 @@ function CycleForm({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Where a turnover day counts (migration 20270301090000): explained with an
+ * example, the recommended choice first, saved in the campaign's history.
+ */
+function SharedDayPicker({
+  day,
+  earlier,
+  later,
+  own,
+  value,
+  asked,
+  onChange,
+}: {
+  day: string;
+  earlier: Pick<AdCycle, "start_date" | "end_date">;
+  later: Pick<AdCycle, "start_date" | "end_date">;
+  /** Which of the two is the cycle in the form. */
+  own: "earlier" | "later";
+  value: SharedDayChoice | "";
+  /** The shared day is new: a choice is needed to save. */
+  asked: boolean;
+  onChange: (value: SharedDayChoice) => void;
+}) {
+  const span = (y: Pick<AdCycle, "start_date" | "end_date">, mine: boolean) =>
+    `${mine ? "este ciclo" : "o ciclo"} (${shortDate(y.start_date).slice(0, 5)} a ${shortDate(y.end_date).slice(0, 5)})`;
+  const ending = span(earlier, own === "earlier"),
+    starting = span(later, own === "later");
+  const d = shortDate(day).slice(0, 5);
+  const next = shortDate(addDays(day, 1)).slice(0, 5);
+  const options: [SharedDayChoice, string, string][] = [
+    [
+      "later",
+      "No ciclo novo (recomendado)",
+      `Os R$ 200 e os 10 resultados entram em ${starting}. ${ending.charAt(0).toUpperCase()}${ending.slice(1)} deixa de contar esse dia só nas campanhas que estão nos dois; as que estão só nele continuam contando lá.`,
+    ],
+    [
+      "earlier",
+      "No ciclo que termina",
+      `Os R$ 200 e os 10 resultados ficam em ${ending}. ${starting.charAt(0).toUpperCase()}${starting.slice(1)} começa a contar essas campanhas em ${next}.`,
+    ],
+    [
+      "both",
+      "Nos dois ciclos",
+      `Cada ciclo mostra os R$ 200 e os 10 resultados: a campanha soma R$ 400 nesse dia, e o saldo de mídia (Financeiro › Mídia) é debitado duas vezes.`,
+    ],
+  ];
+  return (
+    <fieldset
+      className={`campaign-shared-day${asked && !value ? " warn" : ""}`}
+    >
+      <legend>
+        <CalendarClock size={15} /> Dia de virada: {shortDate(day)}
+      </legend>
+      <p>
+        {d} é o último dia de {ending} e o primeiro de {starting}. Nas
+        campanhas da plataforma marcadas nos dois ciclos, o gasto e os
+        resultados desse dia contariam duas vezes — nos números do ciclo, nos
+        relatórios e no saldo de mídia. Escolha onde o dia conta.
+      </p>
+      <p className="campaign-shared-example">
+        Exemplo: uma campanha que está nos dois ciclos gastou R$ 200 e trouxe
+        10 resultados em {d}.
+      </p>
+      <div
+        className="campaign-shared-options"
+        role="radiogroup"
+        aria-label={`Onde conta ${d}`}
+      >
+        {options.map(([choice, label, hint]) => (
+          <label key={choice} className="share-toggle">
+            <input
+              type="radio"
+              name={`shared-${day}`}
+              checked={value === choice}
+              onChange={() => onChange(choice)}
+            />
+            <span>
+              <strong>{label}</strong>
+              <small>{hint}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+      <small>
+        {!asked && !value
+          ? "Sem escolha (ciclos importados do MASO): o dia conta nos dois. Escolha para corrigir. "
+          : ""}
+        Boa prática: contar no ciclo novo — o dia de virada costuma ser quando
+        a verba nova entra, e assim nada conta duas vezes. A escolha fica no
+        histórico da campanha e pode ser trocada editando o ciclo.
+      </small>
+    </fieldset>
   );
 }
 

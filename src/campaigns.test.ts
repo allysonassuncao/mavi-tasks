@@ -12,9 +12,11 @@ import {
   goalCost,
   monthLabel,
   monthlyEnd,
+  nextCycle,
   nextCycleDraft,
   parseAmount,
   PHONE_CALLS,
+  turnover,
   type AdCampaign,
   type AdCycle,
   type CampaignData,
@@ -254,10 +256,18 @@ describe("demonstração segue as regras do banco", () => {
     await expect(
       backend.createCycle(
         a,
-        { ...input, start_date: "2026-09-30", end_date: "2026-10-29" },
+        { ...input, start_date: "2026-09-29", end_date: "2026-10-29" },
         false,
       ),
     ).rejects.toThrow(/conflita com o ciclo de 01\/09\/2026 a 30\/09\/2026/);
+    // The turnover day passes, with the choice (below).
+    await expect(
+      backend.createCycle(
+        a,
+        { ...input, start_date: "2026-09-30", end_date: "2026-10-29" },
+        false,
+      ),
+    ).rejects.toThrow(/Escolha em qual ciclo conta o dia de virada/);
     await backend.createCycle(
       a,
       {
@@ -647,5 +657,89 @@ describe("conversões do Google que contam (demonstração)", () => {
     expect(events[0].action).toBe("conversion_actions");
     await backend.setConversionActions(cycle, []);
     expect((await ads.conversionActions(company, cycle.id)).counted).toBe(42);
+  });
+});
+
+describe("dia de virada (ciclo que começa no dia em que o anterior termina)", () => {
+  const sept = cycle("sept", "2026-08-31", "2026-09-30");
+  const oct = cycle("oct", "2026-09-30", "2026-10-29", { shared_day: "later" });
+  it("acha o ciclo que termina no início e o que começa no término", () => {
+    expect(turnover([sept, oct], "2026-09-30", "2026-10-29", "oct")).toEqual({
+      before: sept,
+      after: null,
+    });
+    expect(turnover([sept, oct], "2026-08-31", "2026-09-30", "sept")).toEqual({
+      before: null,
+      after: oct,
+    });
+    // Um ciclo de um dia só não divide (seria todo o dia de virada).
+    expect(turnover([sept], "2026-09-30", "2026-09-30").before).toBeNull();
+  });
+  it("o próximo ciclo pode começar no último dia do atual", () => {
+    expect(nextCycle([sept, oct], sept)).toBe(oct);
+    expect(nextCycle([sept, oct], oct)).toBeNull();
+    // No dia de virada, o ciclo que cobre hoje é o que começa: sem o aviso
+    // de "terminando" para o anterior quando o novo já existe.
+    expect(cycleAlert({ campaigns: [], cycles: [sept, oct] }, campaign("sept"), "2026-09-25")).toEqual({
+      kind: "none",
+    });
+    expect(
+      cycleAlert({ campaigns: [], cycles: [sept, oct] }, campaign(null), "2026-09-30"),
+    ).toMatchObject({ kind: "no_current", suggestion: { id: "oct" } });
+  });
+  it("o ciclo novo copia os vínculos do último que tem algum", () => {
+    const empty = cycle("nov", "2026-10-30", "2026-11-28", { links: [] });
+    const draft = nextCycleDraft(empty, "2026-10-01", oct);
+    expect(draft.links).toEqual(oct.links);
+    expect(draft).toMatchObject({ shared_start: "", shared_end: "" });
+  });
+  it("demonstração: pede a escolha, grava, registra e só o dia de virada passa", async () => {
+    const data = demoSnapshot();
+    const contract = data.contracts.find((k) => k.name.startsWith("Make Ads"))!.id;
+    const company = data.companies[0].id;
+    const backend = demoCampaigns(() => data, demoUser);
+    const id = await backend.createCampaign(company, {
+      contract_id: contract,
+      name: "Virada",
+      platform: "meta",
+      briefing_url: "",
+      media_plan_url: "",
+      notes: "",
+    });
+    const a = (await backend.campaign(company, id)).campaigns[0];
+    const input = {
+      competence: "2026-09-01",
+      start_date: "2026-08-31",
+      end_date: "2026-09-30",
+      objective: "lead" as const,
+      goal_results: 50,
+      budget: 0,
+      multiplier: 1,
+      destination: "lead_form" as const,
+      landing_pages: [],
+      niche: "",
+      links: [],
+    };
+    await backend.createCycle(a, input, true);
+    const next = { ...input, start_date: "2026-09-30", end_date: "2026-10-29" };
+    await expect(backend.createCycle(a, next, false)).rejects.toThrow(/dia de virada \(30\/09\/2026\)/);
+    expect((await backend.campaign(company, id)).cycles).toHaveLength(1);
+    const later = await backend.createCycle(a, { ...next, shared_start: "later" }, false);
+    let state = await backend.campaign(company, id);
+    const y = state.cycles.find((c) => c.id === later)!;
+    expect(y.shared_day).toBe("later");
+    const [event] = (await backend.events(company, id)).filter((e) => e.action === "shared_day");
+    expect(event.detail).toMatchObject({ day: "2026-09-30", from: null, to: "later" });
+    // Edição sem mexer no período: mantém, sem pedir.
+    await backend.updateCycle(y, { ...next, budget: 10 });
+    state = await backend.campaign(company, id);
+    expect(state.cycles.find((c) => c.id === later)!.shared_day).toBe("later");
+    // Outro início: deixa de dividir e perde a escolha.
+    await backend.updateCycle(state.cycles.find((c) => c.id === later)!, {
+      ...next,
+      start_date: "2026-10-01",
+    });
+    state = await backend.campaign(company, id);
+    expect(state.cycles.find((c) => c.id === later)!.shared_day).toBeNull();
   });
 });

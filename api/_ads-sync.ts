@@ -713,6 +713,89 @@ export async function makeLeads(
 export const leadsUpTo = (firsts: Map<string, number>, end: string) =>
   [...firsts].reduce((sum, [day, n]) => (day <= end ? sum + n : sum), 0);
 
+// ------------------------------------------------------------ turnover day
+/**
+ * A cycle may start on the day the previous one ends (migration
+ * 20270301090000_campaign_shared_day); on that day, what both cycles count
+ * goes to the one chosen. Each turnover day this cycle gives away comes with
+ * the other cycle's links and, when it counts them too, its Make pages.
+ */
+export type SharedDay = {
+  day: string;
+  links: { account_id: string; campaign_id: string }[];
+  landing_pages: string[];
+};
+async function sharedDays(
+  env: SyncEnv,
+  fetchImpl: Fetch,
+  t: SyncTarget,
+  auth: { authorization: string | null; secret: string | null },
+): Promise<SharedDay[]> {
+  // Before the migration (or failing once): nothing given away; the next
+  // sync reads the whole cycle again.
+  const found = await callRpc<SharedDay[]>(
+    env,
+    fetchImpl,
+    auth.authorization,
+    "ad_sync_shared_days",
+    { p_secret: auth.secret, p_cycle: t.cycle_id },
+  ).catch(() => null);
+  return found?.ok && Array.isArray(found.data) ? found.data : [];
+}
+/**
+ * What both cycles count, account by account: the campaigns both linked,
+ * or the other's (or this one's) when one linked the whole account.
+ */
+export function sharedLinks(
+  platform: "meta" | "google",
+  own: SyncTarget["links"],
+  other: SharedDay["links"],
+): SyncTarget["links"] {
+  const account = (l: { account_id: string }) =>
+    accountId(platform, l.account_id);
+  // The campaigns the readers filter by (none: the whole account).
+  const campaigns = (links: SharedDay["links"], id: string) =>
+    links
+      .filter((l) => account(l) === id)
+      .map((l) => l.campaign_id)
+      .filter((c) => (platform === "google" ? /^[0-9]+$/.test(c) : !!c));
+  const out: SyncTarget["links"] = [];
+  for (const id of new Set(own.map(account))) {
+    if (!id || !other.some((l) => account(l) === id)) continue;
+    const mine = campaigns(own, id),
+      theirs = campaigns(other, id);
+    const manager = own.find((l) => account(l) === id)?.manager_id ?? "";
+    const both = !mine.length
+      ? theirs
+      : !theirs.length
+        ? mine
+        : mine.filter((c) => theirs.includes(c));
+    if (mine.length && theirs.length && !both.length) continue;
+    if (!both.length)
+      out.push({ account_id: id, campaign_id: "", manager_id: manager });
+    for (const c of new Set(both))
+      out.push({ account_id: id, campaign_id: c, manager_id: manager });
+  }
+  return out;
+}
+const minus = (a: Totals, b: Totals): Totals => {
+  const out = { ...a };
+  for (const k of Object.keys(out) as (keyof Totals)[])
+    out[k] = Math.max(0, a[k] - b[k]);
+  return out;
+};
+/** Takes a turnover day's part out of the day and the cumulatives after it. */
+function dropDay(
+  days: Map<string, Totals>,
+  totals: Map<string, Totals>,
+  day: string,
+  part: Totals,
+) {
+  days.set(day, minus(days.get(day) ?? zero(), part));
+  for (const [end, sum] of totals)
+    if (end >= day) totals.set(end, minus(sum, part));
+}
+
 // ------------------------------------------------------------ run
 const round = (t: Totals) => ({
   ...t,
@@ -756,6 +839,24 @@ export async function syncCycle(
       window.until,
       ends,
     );
+    // The turnover days given away: what both cycles count leaves this one
+    // (the day's reach too, so the cumulative's is approximate there).
+    const shared = (await sharedDays(env, fetchImpl, t, auth)).filter(
+      (s) => s.day >= window.since && s.day <= window.until,
+    );
+    for (const s of shared) {
+      const links = sharedLinks(t.platform, t.links, s.links);
+      if (!links.length) continue;
+      const part = await read(
+        env,
+        fetchImpl,
+        { ...t, links },
+        s.day,
+        s.day,
+        [],
+      );
+      dropDay(days, totals, s.day, part.days.get(s.day) ?? zero());
+    }
     // The capture page's leads are the result (Google adds its calls and
     // WhatsApp/purchase actions to them, as the MASO did).
     if (usesMakeLeads(t)) {
@@ -780,6 +881,16 @@ export async function syncCycle(
           ? leadsUpTo(leads.firsts, end)
           : (await makeLeads(env, fetchImpl, pages, window.since, end)).total;
     }
+    // The turnover day's leads of the pages both cycles count.
+    if (usesMakeLeads(t))
+      for (const s of shared) {
+        const pages = (t.landing_pages ?? []).filter((p) =>
+          s.landing_pages.includes(p),
+        );
+        if (!pages.length) continue;
+        const { total } = await makeLeads(env, fetchImpl, pages, s.day, s.day);
+        dropDay(days, totals, s.day, { ...zero(), conversions: total });
+      }
     // Days without delivery are stored as zero, so gaps read as zero.
     const list = [];
     for (let d = window.since; d <= window.until; d = addDays(d, 1))

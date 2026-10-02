@@ -21,6 +21,7 @@ import {
   type CampaignData,
   type CampaignsBackend,
   type CycleInput,
+  type SharedDayChoice,
 } from "./campaigns";
 import { contractParts, dateKey } from "./domain";
 import { cycleFit, demoMediaRoom } from "./campaign-media";
@@ -88,11 +89,22 @@ export function demoCampaigns(
           y.campaign_id === a.id &&
           y.id !== except &&
           y.start_date <= input.end_date &&
-          y.end_date >= input.start_date,
+          y.end_date >= input.start_date &&
+          // The turnover day (migration 20270301090000).
+          !(
+            y.end_date === input.start_date &&
+            y.start_date < input.start_date &&
+            input.end_date > input.start_date
+          ) &&
+          !(
+            y.start_date === input.end_date &&
+            y.end_date > input.end_date &&
+            input.start_date < input.end_date
+          ),
       );
     if (other)
       throw Error(
-        `O período conflita com o ciclo de ${fmt(other.start_date)} a ${fmt(other.end_date)} desta campanha`,
+        `O período conflita com o ciclo de ${fmt(other.start_date)} a ${fmt(other.end_date)} desta campanha. Só o dia de virada pode ser dividido: o ciclo pode começar no dia em que o outro termina`,
       );
     // As in the database: a platform campaign belongs to one campaign.
     for (const l of input.links) {
@@ -112,6 +124,77 @@ export function demoCampaigns(
           `A campanha ${l.campaign_name || l.campaign_id} da plataforma já está vinculada à campanha "${store.campaigns.find((c) => c.id === taken.campaign_id)?.name}"`,
         );
     }
+  }
+  // As in the database: where a turnover day counts, on the cycle that
+  // starts on it (asked when the shared day is new), in the history too.
+  function setSharedDay(
+    a: AdCampaign,
+    later: AdCycle,
+    choice: SharedDayChoice | null | undefined,
+    required: boolean,
+  ) {
+    const earlier = store.cycles.find(
+      (y) =>
+        y.campaign_id === a.id &&
+        y.id !== later.id &&
+        y.end_date === later.start_date &&
+        y.start_date < later.start_date,
+    );
+    if (!earlier) return;
+    if (!choice && !later.shared_day && required)
+      throw Error(
+        `Escolha em qual ciclo conta o dia de virada (${fmt(later.start_date)})`,
+      );
+    if (!choice || choice === later.shared_day) return;
+    const from = later.shared_day ?? null;
+    later.shared_day = choice;
+    later.version++;
+    later.updated_at = now();
+    log(a, later.id, "shared_day", {
+      day: later.start_date,
+      from,
+      to: choice,
+      earlier: {
+        id: earlier.id,
+        start_date: earlier.start_date,
+        end_date: earlier.end_date,
+      },
+      later: {
+        id: later.id,
+        start_date: later.start_date,
+        end_date: later.end_date,
+      },
+    });
+  }
+  function sharedDays(
+    a: AdCampaign,
+    y: AdCycle,
+    input: CycleInput,
+    changed: { start: boolean; end: boolean },
+  ) {
+    // Those no longer sharing a day lose their choice.
+    for (const z of store.cycles)
+      if (
+        z.campaign_id === a.id &&
+        z.shared_day &&
+        !store.cycles.some(
+          (x) =>
+            x.campaign_id === a.id &&
+            x.id !== z.id &&
+            x.end_date === z.start_date &&
+            x.start_date < z.start_date,
+        )
+      )
+        z.shared_day = null;
+    setSharedDay(a, y, input.shared_start, changed.start);
+    const next = store.cycles.find(
+      (x) =>
+        x.campaign_id === a.id &&
+        x.id !== y.id &&
+        x.start_date === y.end_date &&
+        x.end_date > y.end_date,
+    );
+    if (next) setSharedDay(a, next, input.shared_end, changed.end);
   }
   // As in the database: the budget must fit the client's media available.
   const mediaRoomOf = (a: AdCampaign) => {
@@ -420,8 +503,20 @@ export function demoCampaigns(
         updated_at: now(),
         version: 1,
         links: linksOf(a, input.links),
+        shared_day: null,
       };
+      // A missing turnover choice stores nothing.
       store.cycles.push(y);
+      try {
+        sharedDays(a, y, input, { start: true, end: true });
+      } catch (e) {
+        store.cycles.splice(store.cycles.indexOf(y), 1);
+        throw e;
+      }
+      // Google: the conversions that count come from the previous cycle.
+      const counted = previous && demoConversionChoice.get(previous.id);
+      if (a.platform === "google" && counted)
+        demoConversionChoice.set(y.id, [...counted]);
       log(a, y.id, "cycle_created", {
         start_date: y.start_date,
         end_date: y.end_date,
@@ -463,9 +558,24 @@ export function demoCampaigns(
         landing_pages: input.landing_pages,
         niche: input.niche,
         links: linksOf(a, input.links),
+        // Another start: another turnover day, another choice.
+        shared_day:
+          input.start_date === before.start_date ? before.shared_day : null,
         updated_at: now(),
         version: y.version + 1,
       });
+      // As in the database, a missing turnover choice changes nothing.
+      const saved = store.cycles.map((z) => [z, z.shared_day] as const);
+      try {
+        sharedDays(a, y, input, {
+          start: input.start_date !== before.start_date,
+          end: input.end_date !== before.end_date,
+        });
+      } catch (e) {
+        for (const [z, v] of saved) z.shared_day = v;
+        Object.assign(y, before);
+        throw e;
+      }
       const diff = changes(before, { ...y }, [
         "competence_month",
         "start_date",
