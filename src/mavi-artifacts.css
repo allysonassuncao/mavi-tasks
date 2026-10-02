@@ -1325,3 +1325,46 @@
     padding: 7px 10px;
   }
 }
+
+/* O botão "Ver na Busca avançada" (MaviSearchCard.tsx). */
+.mavi-search-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  padding: 10px 14px;
+  border: 1px solid #d5e2c6;
+  border-radius: 12px;
+  background: #fbfdf8;
+  color: #3f6a24;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+.mavi-search-card:hover {
+  border-color: #b9d39a;
+  background: #f3f9ea;
+}
+.mavi-search-card:focus-visible {
+  outline: 2px solid #83a657;
+  outline-offset: 2px;
+}
+.mavi-search-card > svg {
+  flex-shrink: 0;
+}
+.mavi-search-card > span {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.mavi-search-card strong {
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+.mavi-search-card small {
+  overflow: hidden;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

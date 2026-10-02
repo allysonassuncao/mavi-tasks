@@ -2,6 +2,12 @@ import { callRpc } from "./_drive.js";
 import type { CostTurn } from "./_ai-cost.js";
 import { vectorLiteral, type Embedder } from "./_ai-embeddings.js";
 import type { ToolSpec } from "./_ai-llm.js";
+import {
+  cleanTerms,
+  searchLinkQuery,
+  termKey,
+  type MaviSearchFilters,
+} from "../src/task-search-mavi.js";
 
 /**
  * IA do MAVI · ferramentas que o modelo usa para achar informação.
@@ -272,6 +278,60 @@ export const TOOLS: ToolSpec[] = [
       },
       limit: { type: "integer", minimum: 1, maximum: 40 },
     }),
+  },
+  {
+    name: "find_tasks",
+    description:
+      "Localiza tarefas pelo que foi escrito nelas (título, descrição, comentários e áudios transcritos), inclusive as entregues, com a mesma busca da Busca avançada: qualquer um dos termos e também pelo sentido do assunto, sob os filtros. Use para achar tarefas por assunto ou pedido: 'acha a tarefa do logo da Clínica', 'o que a Ana entregou de Black Friday em setembro', 'aquela tarefa em que pediram o vídeo vertical', 'já fizemos landing page para algum cliente de odontologia?'. Escreva você os termos: as palavras-chave do assunto e as variações que o time usaria (singular e plural, sinônimos, abreviações, termos em inglês do marketing, erros comuns de digitação), sem os nomes que já viraram filtro nem palavras genéricas (tarefa, fazer, cliente). Devolve as tarefas mais relevantes com [S#] para citar, onde cada uma foi achada, o total e um botão que abre a Busca avançada com a mesma busca. Para listas só por situação (atrasadas, em validação, o que a Fulana está fazendo), list_tasks basta.",
+    parameters: obj(
+      {
+        request: {
+          type: "string",
+          description:
+            "O pedido da pessoa em poucas palavras, como ela diria (aparece no campo da Busca avançada). Ex.: 'logo da Clínica Sorriso entregue em setembro'.",
+        },
+        terms: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 8,
+          description:
+            "De 1 a 8 palavras ou expressões curtas que provavelmente aparecem escritas nas tarefas (ex.: ['logo', 'logotipo', 'logomarca', 'identidade visual']). Vazio quando o pedido é só de filtros.",
+        },
+        topic: {
+          type: "string",
+          description:
+            "O assunto numa frase curta e descritiva, para a busca por significado (ex.: 'criação ou ajuste do logotipo e da identidade visual da marca'). Vazio quando o pedido é só de filtros.",
+        },
+        client_id: { type: "string", description: "Cliente (id). Omita para todos." },
+        project_id: { type: "string", description: "Projeto (id), quando o pedido citar um." },
+        assignee: {
+          type: "string",
+          description: "Nome (ou parte) de quem executa a tarefa (o responsável: 'da Ana', 'que o João entregou').",
+        },
+        creator: { type: "string", description: "Nome (ou parte) de quem criou ou pediu a tarefa." },
+        status: {
+          type: "string",
+          enum: Object.keys(STATUS_LABELS).filter((s) => s !== "open"),
+          description:
+            "Um status, quando o pedido disser (entregues = done, em validação = review). Para vários status (pendentes, abertas), omita.",
+        },
+        from: dateField("Prazo da tarefa a partir de"),
+        to: dateField("Prazo da tarefa até"),
+        priority: { type: "boolean", description: "Só as prioritárias (Alta ou Urgente)." },
+        fields: {
+          type: "array",
+          items: { type: "string", enum: ["title", "description", "comments"] },
+          description: "Só quando a pessoa disser onde procurar os termos (título, descrição, comentários).",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 30,
+          description: "Quantas tarefas trazer (padrão 15).",
+        },
+      },
+      ["request"],
+    ),
   },
   {
     name: "client_temperature",
@@ -687,6 +747,148 @@ async function listTasks(ctx: ToolContext, input: Record<string, unknown>) {
     .join("\n");
 }
 
+/** Uma pessoa da empresa pelo nome (ou parte): o id, ou por que não deu. */
+function personByName(ctx: ToolContext, name: string, role: string) {
+  const want = termKey(name).trim();
+  if (!want) return { id: "" };
+  const all = [...ctx.members].map(([id, p]) => ({ id, name: p.name, key: termKey(p.name) }));
+  const exact = all.filter((p) => p.key === want);
+  const found = exact.length ? exact : all.filter((p) => p.key.includes(want));
+  if (found.length === 1) return { id: found[0].id };
+  if (!found.length) return { error: `Ninguém da empresa com o nome "${name}" (${role}).` };
+  return {
+    error: `Mais de uma pessoa com "${name}" (${role}): ${found
+      .slice(0, 8)
+      .map((p) => p.name)
+      .join(", ")}. Pergunte qual ou use o nome completo.`,
+  };
+}
+
+const MATCH_WHERE: Record<string, string> = {
+  title: "no título",
+  description: "na descrição",
+  comment: "num comentário",
+  meaning: "pelo sentido",
+};
+
+/** O cartão da Busca avançada com a busca desta resposta (só nas conversas). */
+export type SearchLinkCard = { query: string; request: string; total: number };
+
+/**
+ * find_tasks: a busca da Busca avançada (search_task_rows_mavi, como a
+ * pessoa) com os termos, o assunto e os filtros que o modelo da conversa
+ * escreveu. Nas conversas, o cartão "Ver na Busca avançada" leva à mesma
+ * busca (onCard devolve a referência dele).
+ */
+export async function findTasks(
+  ctx: ToolContext,
+  input: Record<string, unknown>,
+  onCard?: (card: SearchLinkCard) => string,
+) {
+  const request = str(input.request).slice(0, 200);
+  const terms = cleanTerms(input.terms);
+  const topic = str(input.topic).slice(0, 300);
+  const client = clientOf(ctx, input);
+  const projectId = str(input.project_id);
+  const project = ctx.scope.project ?? (UUID.test(projectId) ? projectId : undefined);
+  const people: Record<"assignee" | "creator", string> = { assignee: "", creator: "" };
+  for (const [key, role] of [
+    ["assignee", "responsável"],
+    ["creator", "quem criou"],
+  ] as const) {
+    if (!str(input[key])) continue;
+    const who = personByName(ctx, str(input[key]), role);
+    if (who.error) return who.error;
+    people[key] = who.id ?? "";
+  }
+  const status = str(input.status);
+  const filters: MaviSearchFilters = {
+    ...(client ? { client } : {}),
+    ...(project ? { project } : {}),
+    ...(people.assignee ? { assignee: people.assignee } : {}),
+    ...(people.creator ? { creator: people.creator } : {}),
+    ...(status in STATUS_LABELS && status !== "open" ? { status } : {}),
+    ...(DATE.test(str(input.from)) ? { from: str(input.from) } : {}),
+    ...(DATE.test(str(input.to)) ? { to: str(input.to) } : {}),
+    ...(input.priority === true ? { priority: true } : {}),
+  };
+  const fields = Array.isArray(input.fields)
+    ? ["title", "description", "comments"].filter((f) => (input.fields as unknown[]).includes(f))
+    : [];
+  if (fields.length) filters.fields = fields;
+  if (!terms.length && topic.length < 3 && !Object.keys(filters).length)
+    return "Diga o que procurar: os termos, o assunto ou algum filtro (cliente, responsável, status, prazo).";
+  const embedding =
+    topic.length >= 3
+      ? await embedOnce(ctx, topic)
+          .then((out) => (out.vectors[0] ? vectorLiteral(out.vectors[0]) : null))
+          .catch(() => null)
+      : null;
+  const args = {
+    p_company: ctx.company,
+    p_terms: terms,
+    p_embedding: embedding,
+    p_in: fields.length ? fields : ["title", "description", "comments"],
+    p_client: filters.client ?? null,
+    p_project: filters.project ?? null,
+    p_assignee: filters.assignee ?? null,
+    p_creator: filters.creator ?? null,
+    p_status: filters.status ?? null,
+    p_from: filters.from ?? null,
+    p_to: filters.to ?? null,
+    p_priority: !!filters.priority,
+    p_limit: int(input.limit, 15, 1, 30),
+    p_offset: 0,
+  };
+  type Row = {
+    task: { id: string; title: string; status: string; due_date: string; assignee_id: string; created_at: string };
+    match_in: string;
+    snippet: string;
+    total: number;
+  };
+  let r = await callRpc<Row[]>(ctx, ctx.fetch, ctx.auth, "search_task_rows_mavi", args);
+  // O banco desistiu pelo tempo com o sentido: os termos sozinhos ainda acham.
+  if (!r.ok && embedding && terms.length && /statement timeout/i.test(r.error))
+    r = await callRpc<Row[]>(ctx, ctx.fetch, ctx.auth, "search_task_rows_mavi", { ...args, p_embedding: null });
+  if (!r.ok) throw new Error(r.error);
+  const rows = r.data ?? [];
+  const total = rows.length ? Number(rows[0].total) : 0;
+  const ref = onCard
+    ? onCard({
+        query: searchLinkQuery({
+          request: request || terms.join(", ") || topic,
+          prepared: { terms, topic, summary: "Busca montada na conversa com a MAVI." },
+          filters,
+        }),
+        request: request || terms.join(", ") || topic,
+        total,
+      })
+    : "";
+  const card = ref
+    ? `\nO botão que abre a Busca avançada com esta mesma busca (a lista inteira, para agrupar e editar em massa) está pronto como ${ref}: escreva [[${ref}]] sozinho numa linha, no fim da resposta.`
+    : "";
+  if (!rows.length) return `Nenhuma tarefa encontrada com essa busca.${card}`;
+  const lines = rows.map((row) => {
+    const t = row.task;
+    const cited = cite(ctx, { type: "task", id: t.id, title: t.title, date: t.created_at, client_id: client ?? null });
+    const late = t.status !== "done" && t.due_date < ctx.today;
+    const where = MATCH_WHERE[row.match_in];
+    const snippet = row.snippet ? `: “${row.snippet.replace(/\s+/g, " ").slice(0, 200)}”` : "";
+    return `[${cited}] "${t.title}" · ${STATUS_LABELS[t.status] ?? t.status} · responsável ${ctx.members.get(t.assignee_id)?.name ?? "?"} · prazo ${brDate(t.due_date)}${late ? " (atrasada)" : ""}${where ? ` · achada ${where}${snippet}` : ""}`;
+  });
+  const head =
+    total === 1
+      ? "1 tarefa encontrada."
+      : `${total} tarefas encontradas${
+          total > rows.length
+            ? rows.length === 1
+              ? " (aqui a mais relevante)"
+              : ` (aqui as ${rows.length} mais relevantes)`
+            : ""
+        }.`;
+  return `${head}\n${lines.join("\n")}${card}`;
+}
+
 type ClientRow = {
   id: string;
   name: string;
@@ -969,6 +1171,10 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
         : "as tarefas";
     return `Conferindo ${what}${inClient}${str(input.assignee) ? ` de ${str(input.assignee)}` : ""}`;
   }
+  if (name === "find_tasks") {
+    const what = str(input.request) || cleanTerms(input.terms).join(", ") || str(input.topic);
+    return `Localizando tarefas${what ? ` “${what.slice(0, 80)}”` : ""}${inClient}`;
+  }
   if (name === "find_clients") {
     const terms = clientTerms(str(input.query));
     return terms.length > 1
@@ -1014,6 +1220,10 @@ export function summarizeStep(name: string, output: string) {
     return refs
       ? `${refs} ${refs === 1 ? "tarefa" : "tarefas"}`
       : "nenhuma tarefa";
+  if (name === "find_tasks") {
+    const total = Number(/^(\d+) tarefas? encontradas?/m.exec(output)?.[1] ?? 0);
+    return total ? `${total} ${total === 1 ? "tarefa encontrada" : "tarefas encontradas"}` : "nenhuma tarefa";
+  }
   if (name === "campaign_results")
     return refs
       ? `${refs} ${refs === 1 ? "campanha" : "campanhas"}`
@@ -1681,6 +1891,7 @@ export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "read_more") return readMore(ctx, input);
   if (name === "list_meetings") return listMeetings(ctx, input);
   if (name === "list_tasks") return listTasks(ctx, input);
+  if (name === "find_tasks") return findTasks(ctx, input);
   if (name === "find_clients") return findClients(ctx, input);
   if (name === "campaign_results") return campaignResults(ctx, input);
   if (name === "client_temperature") return clientTemperature(ctx, input);

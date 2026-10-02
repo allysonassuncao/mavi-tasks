@@ -67,3 +67,65 @@ export function cleanTerms(list: unknown): string[] {
   }
   return out;
 }
+
+/** O parâmetro da URL de cada filtro da Busca avançada. */
+export const MAVI_PARAM: Record<MaviFilterKey, string> = {
+  client: "cli",
+  project: "proj",
+  assignee: "resp",
+  creator: "criador",
+  status: "situacao",
+  from: "de",
+  to: "ate",
+};
+const SEARCH_FIELD_IDS = ["title", "description", "comments"];
+
+/**
+ * Uma busca já montada pela MAVI da conversa (bolinha e módulo MAVI, a
+ * ferramenta find_tasks): a Busca avançada abre com ela sem perguntar de
+ * novo; só o vetor do assunto é refeito.
+ */
+export type PreparedSearch = { terms: string[]; topic: string; summary: string };
+
+/** ?termo=…&mavi=…&cli=… da Busca avançada com a busca da conversa. */
+export function searchLinkQuery(input: {
+  request: string;
+  prepared: PreparedSearch;
+  filters: MaviSearchFilters;
+}) {
+  const q = new URLSearchParams();
+  q.set("termo", input.request.replace(/\s+/g, " ").trim().slice(0, 200));
+  q.set(
+    "mavi",
+    JSON.stringify({
+      t: cleanTerms(input.prepared.terms),
+      a: input.prepared.topic.slice(0, 300),
+      s: input.prepared.summary.slice(0, 300),
+    }),
+  );
+  const f = input.filters;
+  for (const k of MAVI_FILTER_KEYS) if (f[k]) q.set(MAVI_PARAM[k], f[k]!);
+  if (f.priority) q.set("prioritarias", "1");
+  const fields = (f.fields ?? []).filter((x) => SEARCH_FIELD_IDS.includes(x));
+  if (fields.length && fields.length < SEARCH_FIELD_IDS.length) q.set("em", fields.join(","));
+  return q.toString();
+}
+
+/** O "mavi" da URL lido de volta (null: ausente ou estragado). */
+export function readPrepared(raw: unknown): PreparedSearch | null {
+  let data: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  const terms = cleanTerms(d.t ?? d.terms);
+  const pick = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 300) : "");
+  const topic = pick(d.a ?? d.topic);
+  if (!terms.length && topic.length < 3) return null;
+  return { terms, topic, summary: pick(d.s ?? d.summary) };
+}

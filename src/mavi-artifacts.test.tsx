@@ -17,6 +17,8 @@ import {
   type AiRoute,
 } from "./ai-providers";
 import { aiTab } from "./router";
+import { SearchCard, searchCardUrl } from "./MaviSearchCard";
+import { readPrepared, searchLinkQuery } from "./task-search-mavi";
 
 const company = "00000000-0000-4000-8000-000000000001";
 const uuid = "00000000-0000-4000-8000-000000000002";
@@ -164,6 +166,55 @@ describe("a resposta com anexos", () => {
     expect(hidePartial("Veja:\n[[V1]")).toBe("Veja:\n");
     expect(hidePartial("Veja:\n[[V1]]")).toBe("Veja:\n[[V1]]");
     expect(hidePartial("Fonte [S1")).toBe("Fonte ");
+  });
+});
+
+describe("o botão da Busca avançada (find_tasks)", () => {
+  const query = searchLinkQuery({
+    request: "logo da Clínica",
+    prepared: { terms: ["logo", "logotipo"], topic: "logotipo da marca", summary: "Na conversa." },
+    filters: { client: uuid, status: "done", priority: true, fields: ["title", "comments"] },
+  });
+  it("o link leva termo, termos, assunto e filtros; lido de volta igual", () => {
+    const q = new URLSearchParams(query);
+    expect(q.get("termo")).toBe("logo da Clínica");
+    expect(q.get("cli")).toBe(uuid);
+    expect(q.get("situacao")).toBe("done");
+    expect(q.get("prioritarias")).toBe("1");
+    expect(q.get("em")).toBe("title,comments");
+    expect(readPrepared(q.get("mavi"))).toEqual({
+      terms: ["logo", "logotipo"],
+      topic: "logotipo da marca",
+      summary: "Na conversa.",
+    });
+    expect(readPrepared("{quebrado")).toBeNull();
+    expect(readPrepared(JSON.stringify({ t: [], a: "" }))).toBeNull();
+  });
+  it("o cartão é saneado, conta como anexo B e abre a Busca da agência aberta", () => {
+    const card = sanitizeArtifact({ id: "abcd1", ref: "B1", type: "search", query, request: "logo", total: 12 });
+    expect(card).toMatchObject({ type: "search", ref: "B1", total: 12 });
+    expect(sanitizeArtifact({ id: "abcd1", ref: "B1", type: "search", query: "sem=termo", total: 1 })).toBeNull();
+    expect(artifactSummary(card!)).toBe("botão da Busca avançada com “logo” (12 tarefas)");
+    expect(searchCardUrl(query, "/agencias/make-agency/mavi")).toBe(`/agencias/make-agency/tarefas/busca?${query}`);
+    // Na bolinha, a linha [[B1]] some (o botão aparece abaixo da resposta).
+    const bubble = renderToStaticMarkup(<AnswerText text={"Achei estas.\n[[B1]]"} below={["B1"]} />);
+    expect(bubble).not.toContain("B1");
+    expect(bubble).not.toContain("módulo MAVI");
+  });
+  it("o cartão diz quantas achou e o pedido", () => {
+    const g = globalThis as unknown as { window?: unknown };
+    const had = g.window;
+    g.window = { location: { pathname: "/agencias/make-agency/mavi" } };
+    try {
+      const html = renderToStaticMarkup(
+        <SearchCard artifact={{ id: "abcd1", ref: "B1", type: "search", query, request: "logo", total: 12 }} />,
+      );
+      expect(html).toContain("Ver na Busca avançada");
+      expect(html).toContain("12 tarefas encontradas · “logo”");
+      expect(html).toContain('href="/agencias/make-agency/tarefas/busca?');
+    } finally {
+      g.window = had;
+    }
   });
 });
 

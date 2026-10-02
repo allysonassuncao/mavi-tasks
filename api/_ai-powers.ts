@@ -682,7 +682,7 @@ export type PowerKit = {
   /** Imagens das respostas anteriores da conversa (ref → caminho). */
   priorImages: Map<string, string>;
   /** O próximo número de cada tipo de referência (V, I, A, D). */
-  next: Record<"V" | "I" | "A" | "D" | "Q" | "T", number>;
+  next: Record<"V" | "I" | "A" | "D" | "Q" | "T" | "B", number>;
   /** Documentos, apresentações e planilhas das respostas anteriores (ref → anexo). */
   priorCanvas: Map<string, CanvasArtifact>;
   /** As imagens das respostas anteriores com o HTML das artes (read_art, revises). */
@@ -713,7 +713,7 @@ const fold = (s: string) =>
 
 export function add<T extends AiArtifact>(
   kit: PowerKit,
-  letter: "V" | "I" | "A" | "D" | "Q" | "T",
+  letter: "V" | "I" | "A" | "D" | "Q" | "T" | "B",
   a: Omit<T, "id" | "ref">,
 ) {
   const artifact = {

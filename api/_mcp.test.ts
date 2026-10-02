@@ -144,6 +144,7 @@ describe("servidor MCP", () => {
       "list_meetings",
       "campaign_results",
       "list_tasks",
+      "find_tasks",
       "client_temperature",
       "client_radar",
       "media_account",

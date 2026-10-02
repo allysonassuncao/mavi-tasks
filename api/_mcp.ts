@@ -61,6 +61,7 @@ export function mcpTools() {
     list_meetings: "Listar reuniões gravadas",
     campaign_results: "Resultados das campanhas",
     list_tasks: "Listar tarefas",
+    find_tasks: "Localizar tarefas",
     client_temperature: "Termômetro do cliente",
     client_radar: "Radar do cliente",
     media_account: "Conta de mídia (Financeiro › Mídia)",

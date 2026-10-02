@@ -8,6 +8,7 @@ import { listedStatuses, statuses } from "../src/types.js";
 import {
   MAVI_FILTER_KEYS,
   cleanTerms,
+  readPrepared,
   termKey,
   type MaviSearch,
   type MaviSearchFilters,
@@ -247,9 +248,12 @@ export async function handleTaskSearch(
   if (!UUID.test(company)) return fail(400, "Empresa inválida.");
   if (query.length < 2) return fail(400, "Escreva o que você procura.");
   const current = currentFilters(req.filters);
+  // Montada pela MAVI da conversa ("Ver na Busca avançada"): termos e
+  // filtros já vêm prontos; só o vetor do assunto é refeito.
+  const prepared = readPrepared(req.prepared);
 
   let meter: Meter | undefined;
-  let embedded: { tokens: number; model: string } | null = null;
+  let embedded = null as { tokens: number; model: string } | null;
   let provider: Awaited<ReturnType<typeof featureProvider>> = null;
   try {
     const rest: Rest = async <T>(path: string) => {
@@ -259,24 +263,48 @@ export async function handleTaskSearch(
       if (!res.ok) throw new SearchError(res.status === 401 ? 401 : 502, "Não foi possível ler os dados.");
       return (await res.json()) as T[];
     };
+    // O assunto vira um vetor para a busca por significado; sem a chave da
+    // OpenAI ou se falhar, a busca segue só com os termos.
+    const embedTopic = async (topic: string) => {
+      if (topic.length < 3 || !env.openaiKey) return null;
+      try {
+        const out = await deps.embed([topic]);
+        embedded = { tokens: out.tokens, model: out.model };
+        return out.vectors[0] ? vectorLiteral(out.vectors[0]) : null;
+      } catch {
+        return null;
+      }
+    };
     const user = userIdFrom(authorization);
     const [me, cat, limits, route] = await Promise.all([
       rest<{ active: boolean; name: string }>(
         `memberships?select=active,name&company_id=eq.${company}&user_id=eq.${user}`,
       ),
-      searchCatalog(rest, company),
+      prepared ? null : searchCatalog(rest, company),
       callRpc<{ blocked: boolean; message: string | null }>(env, deps.fetch, authorization, "ai_check_limits", {
         p_company: company,
         p_client: null,
         p_contract: null,
         p_project: null,
       }),
-      featureProvider(env, deps.fetch, authorization, company, "task_search", {}),
+      prepared ? null : featureProvider(env, deps.fetch, authorization, company, "task_search", {}),
     ]);
     if (!me[0]?.active) throw new SearchError(403, "Sem acesso a esta empresa.");
     provider = route;
     if (limits.ok && limits.data?.blocked)
       throw new SearchError(429, limits.data.message ?? "Limite de uso da MAVI atingido.");
+    if (prepared) {
+      const embedding = await embedTopic(prepared.topic);
+      const search: MaviSearch = {
+        query,
+        terms: prepared.terms,
+        embedding,
+        summary: prepared.summary,
+        filters: {},
+      };
+      return { status: 200, body: search as unknown as Record<string, unknown> };
+    }
+    if (!cat) throw new SearchError(502, "Não foi possível ler os dados.");
     if (!provider && !env.anthropicKey)
       throw new SearchError(
         503,
@@ -308,17 +336,7 @@ export async function handleTaskSearch(
     const filters = keepFilters(answer.filters, cat);
     const terms = cleanTerms(answer.terms);
     const topic = str(answer.topic, 300);
-    // O assunto vira um vetor para a busca por significado; sem a chave da
-    // OpenAI ou se falhar, a busca segue só com os termos.
-    let embedding: string | null = null;
-    if (topic.length >= 3 && env.openaiKey)
-      try {
-        const out = await deps.embed([topic]);
-        embedded = { tokens: out.tokens, model: out.model };
-        if (out.vectors[0]) embedding = vectorLiteral(out.vectors[0]);
-      } catch {
-        embedding = null;
-      }
+    const embedding = await embedTopic(topic);
     const search: MaviSearch = {
       query,
       terms,

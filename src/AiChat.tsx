@@ -27,7 +27,13 @@ import {
   Wallet,
 } from "lucide-react";
 import { answerPieces, type ChatTurn } from "./meetings";
-import { ARTIFACT_LINE, type ActionArtifact, type AiArtifact } from "./mavi-artifacts";
+import {
+  ARTIFACT_LINE,
+  type ActionArtifact,
+  type AiArtifact,
+  type SearchArtifact,
+} from "./mavi-artifacts";
+import { SearchCard } from "./MaviSearchCard";
 import { MaviMarkdown } from "./MaviMarkdown";
 import { QuestionCard } from "./MaviQuestions";
 import {
@@ -162,7 +168,7 @@ export function AnswerText({
       return;
     }
     // Uma referência no meio da frase não aparece (o anexo tem o seu lugar).
-    const line = raw.replace(/\s?\[\[[VIADQT]\d{1,2}\]\]/g, "");
+    const line = raw.replace(/\s?\[\[[VIADQTB]\d{1,2}\]\]/g, "");
     const item = line.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/);
     if (item) list.push(<li key={i}>{render(item[1])}</li>);
     else {
@@ -271,7 +277,7 @@ export function useTypewriter(target: string, animate: boolean) {
 
 /** Esconde o fim ainda incompleto: "[S1" ou "[[V1]" sem fechar, "**" sem par, "*" solto. */
 export function hidePartial(text: string) {
-  let t = text.replace(/\[\[[VIADQT]?\d{0,2}\]?$/, "").replace(/\[[^\]\n]*$/, "");
+  let t = text.replace(/\[\[[VIADQTB]?\d{0,2}\]?$/, "").replace(/\[[^\]\n]*$/, "");
   if ((t.match(/\*\*/g) ?? []).length % 2) t = t.slice(0, t.lastIndexOf("**"));
   return t.replace(/(^|[^*])\*$/, "$1");
 }
@@ -555,6 +561,9 @@ const drawnActions = (list: AiArtifact[] | undefined) =>
   (list ?? []).filter(
     (a): a is ActionArtifact => a.type === "action" && a.action.kind === "campaign_alert",
   );
+/** O botão "Ver na Busca avançada" das buscas de tarefas (find_tasks). */
+const drawnSearches = (list: AiArtifact[] | undefined) =>
+  (list ?? []).filter((a): a is SearchArtifact => a.type === "search");
 
 export function AiChat({
   intro,
@@ -661,7 +670,10 @@ export function AiChat({
                       text,
                       typing ? [] : (t.sources ?? []),
                       typing,
-                      renderAction ? drawnActions(t.artifacts).map((a) => a.ref) : [],
+                      [
+                        ...(renderAction ? drawnActions(t.artifacts) : []),
+                        ...drawnSearches(t.artifacts),
+                      ].map((a) => a.ref),
                     )
                   }
                 />
@@ -670,6 +682,12 @@ export function AiChat({
                 drawnActions(t.artifacts).map((a) => (
                   <div key={a.id} className="answer-artifact">
                     {renderAction(a, busy || !!t.streaming)}
+                  </div>
+                ))}
+              {!t.streaming &&
+                drawnSearches(t.artifacts).map((a) => (
+                  <div key={a.id} className="answer-artifact">
+                    <SearchCard artifact={a} />
                   </div>
                 ))}
               {t.artifacts?.map((a) =>

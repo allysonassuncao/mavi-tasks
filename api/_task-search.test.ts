@@ -127,6 +127,34 @@ describe("a MAVI na Busca avançada", () => {
     for (const x of [empty, off, blocked]) expect(x.llm).not.toHaveBeenCalled();
   });
 
+  it("busca já montada na conversa: sem chamar o modelo, só refaz o vetor do assunto", async () => {
+    const { d, llm, embed, calls } = deps();
+    const res = await handleTaskSearch(
+      {
+        company,
+        query: "logo da Clínica",
+        prepared: { terms: ["logo", "logotipo"], topic: "logotipo da marca", summary: "Busca montada na conversa." },
+      },
+      token,
+      env,
+      d,
+    );
+    expect(res).toEqual({
+      status: 200,
+      body: {
+        query: "logo da Clínica",
+        terms: ["logo", "logotipo"],
+        embedding: "[0.1,0.2]",
+        summary: "Busca montada na conversa.",
+        filters: {},
+      },
+    });
+    expect(llm).not.toHaveBeenCalled();
+    expect(embed).toHaveBeenCalledWith(["logotipo da marca"]);
+    expect(calls.some((c) => c.url.endsWith("/ai_resolve_route"))).toBe(false);
+    expect(calls.find((c) => c.url.endsWith("/ai_log_usage"))?.body).toMatchObject({ p_embedding: 9 });
+  });
+
   it("resposta que não é JSON vira erro (a tela busca pelas palavras exatas)", async () => {
     const { d } = deps("Não sei.");
     expect((await handleTaskSearch({ company, query: "logo" }, token, env, d)).status).toBe(502);

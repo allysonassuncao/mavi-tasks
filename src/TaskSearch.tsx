@@ -42,8 +42,10 @@ import {
 } from "./task-search";
 import {
   MAVI_FILTER_KEYS,
-  type MaviFilterKey,
+  MAVI_PARAM,
+  readPrepared,
   type MaviSearch,
+  type PreparedSearch,
   type MaviSearchFilters,
 } from "./task-search-mavi";
 
@@ -74,16 +76,6 @@ const MATCH_LABEL: Record<TaskSearchHit["match_in"], string> = {
   comment: "Comentário",
   meaning: "Pelo sentido",
   filters: "",
-};
-/** The URL param of each filter the MAVI fills. */
-const MAVI_PARAM: Record<MaviFilterKey, string> = {
-  client: "cli",
-  project: "proj",
-  assignee: "resp",
-  creator: "criador",
-  status: "situacao",
-  from: "de",
-  to: "ate",
 };
 
 /** The MAVI on a request: asking, what she understood, or why she couldn't. */
@@ -170,9 +162,11 @@ export function TaskSearch({
   useEffect(() => {
     const url = new URL(window.location.href);
     const saved = readFilters<Record<string, string>>("search", company, user);
-    // A link with filters of its own (a person's "Ver tarefas") shows just
-    // those: neither the saved filters nor the saved term.
-    const linked = FILTER_PARAMS.some((k) => url.searchParams.has(k));
+    // A link with filters of its own (a person's "Ver tarefas", the MAVI's
+    // "Ver na Busca avançada") shows just those: neither the saved filters
+    // nor the saved term.
+    const linked =
+      FILTER_PARAMS.some((k) => url.searchParams.has(k)) || url.searchParams.has("mavi");
     if (saved) {
       if (!linked)
         for (const k of FILTER_PARAMS)
@@ -247,13 +241,30 @@ export function TaskSearch({
   const maviRequest = useRef(0);
   const paramsRef = useRef(params);
   paramsRef.current = params;
+  // A search the MAVI built in the conversation ("Ver na Busca avançada"):
+  // its terms and filters come in the link (read once, as the page opens);
+  // only the subject's vector is made again. Its part leaves the URL.
+  const fromLink = useRef<{ query: string; search: PreparedSearch } | null | undefined>(undefined);
+  if (fromLink.current === undefined) {
+    const link = new URL(window.location.href).searchParams;
+    const search = readPrepared(link.get("mavi"));
+    fromLink.current = search ? { query: (link.get("termo") ?? "").trim(), search } : null;
+  }
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("mavi")) return;
+    url.searchParams.delete("mavi");
+    navigate(url.pathname + url.search + url.hash, true);
+  }, []);
   useEffect(() => {
     if (!query || demo) {
       maviRequest.current++;
       setMavi(null);
       return;
     }
-    const cached = forceAsk.current ? null : readMaviSearch(maviKey);
+    const prepared =
+      fromLink.current?.query === query ? fromLink.current.search : null;
+    const cached = forceAsk.current || prepared ? null : readMaviSearch(maviKey);
     forceAsk.current = false;
     if (cached) {
       setMavi({ key: maviKey, status: "ready", search: cached });
@@ -277,11 +288,14 @@ export function TaskSearch({
         priority: now.priority,
         fields: now.fields,
       },
+      ...(prepared ? { prepared } : {}),
     })
       .then((search) => {
         if (id !== maviRequest.current) return;
         writeMaviSearch(maviKey, search);
-        applyMaviFilters(search.filters);
+        // The prepared search's filters are already on the screen.
+        if (prepared) fromLink.current = null;
+        else applyMaviFilters(search.filters);
         setMavi({ key: maviKey, status: "ready", search });
       })
       .catch((e) => {

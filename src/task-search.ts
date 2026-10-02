@@ -7,6 +7,7 @@ import {
   MAVI_SEARCH_WAIT_MS,
   cleanTerms,
   type MaviSearch,
+  type PreparedSearch,
 } from "./task-search-mavi";
 import type { Comment, Snapshot, Status, Task } from "./types";
 
@@ -368,6 +369,8 @@ export async function requestMaviSearch(input: {
     priority?: boolean;
     fields?: string[];
   };
+  /** Already built by the MAVI in the conversation: only the vector is made. */
+  prepared?: PreparedSearch;
 }): Promise<MaviSearch> {
   const token = supabase
     ? (await supabase.auth.getSession()).data.session?.access_token

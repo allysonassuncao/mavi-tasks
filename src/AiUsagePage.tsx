@@ -42,6 +42,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_meetings: "Listar reuniões",
   campaign_results: "Resultados das campanhas",
   list_tasks: "Listar tarefas",
+  find_tasks: "Localizar tarefas (Busca avançada)",
   client_temperature: "Termômetro do cliente",
   client_radar: "Radar do cliente",
   show_chart: "Gráfico (Visualizações)",

@@ -32,6 +32,7 @@ import type { FormPreset } from "./forms";
 import { CanvasCard } from "./MaviCanvas";
 import { QuestionCard } from "./MaviQuestions";
 import { TaskCard } from "./MaviTaskCard";
+import { SearchCard } from "./MaviSearchCard";
 import { runMcpAction } from "./mavi-mcp";
 import { CampaignAlertCard, StateChip } from "./MaviCampaignAlertCard";
 import type {
@@ -106,6 +107,8 @@ export function ArtifactView({
     );
   if (artifact.type === "task")
     return <TaskCard artifact={artifact} readOnly={host.readOnly} notify={host.notify} />;
+  if (artifact.type === "search")
+    return <SearchCard artifact={artifact} />;
   if (artifact.action.kind === "mcp_call")
     return <McpActionCard artifact={artifact} host={host} />;
   if (artifact.action.kind === "campaign_alert")

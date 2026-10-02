@@ -298,7 +298,22 @@ export type AiArtifact =
   | ActionArtifact
   | CanvasArtifact
   | QuestionArtifact
-  | TaskArtifact;
+  | TaskArtifact
+  | SearchArtifact;
+
+// ------------------------------------------------------------ busca de tarefas
+/**
+ * O botão "Ver na Busca avançada" da ferramenta find_tasks: a mesma busca
+ * (termos, assunto e filtros) na página da Busca, com a lista inteira.
+ */
+export type SearchArtifact = Base & {
+  type: "search";
+  /** ?termo=…&mavi=…&cli=… da Busca avançada (searchLinkQuery). */
+  query: string;
+  /** O pedido, como aparece no campo da Busca. */
+  request: string;
+  total: number;
+};
 
 export type ImageSize = "square" | "portrait" | "landscape";
 export const IMAGE_SIZES: Record<ImageSize, string> = {
@@ -314,12 +329,12 @@ export const IMAGE_SIZES: Record<ImageSize, string> = {
 export const CAPPED_DETAIL = "limite de passos";
 
 /** Uma linha só com [[V1]]: o lugar do anexo na resposta. */
-export const ARTIFACT_LINE = /^\s*\[\[([VIADQT]\d{1,2})\]\]\s*$/;
+export const ARTIFACT_LINE = /^\s*\[\[([VIADQTB]\d{1,2})\]\]\s*$/;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ID = /^[A-Za-z0-9_-]{4,64}$/;
-const REF = /^[VIADQT]\d{1,2}$/;
+const REF = /^[VIADQTB]\d{1,2}$/;
 
 const text = (v: unknown, max: number) =>
   typeof v === "string"
@@ -712,6 +727,20 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       cap: Math.max(num(a.cap) ?? 0, 0),
     };
   }
+  if (a.type === "search") {
+    const query = text(a.query, 3000);
+    const params = new URLSearchParams(query);
+    if (!params.get("termo") || /[\s#]/.test(query)) return null;
+    const total = num(a.total);
+    return {
+      id,
+      ref,
+      type: "search",
+      query,
+      request: text(a.request, 200) || (params.get("termo") ?? ""),
+      total: total && total > 0 ? Math.round(total) : 0,
+    };
+  }
   if (a.type === "action") {
     const action = sanitizeAction(a.action);
     if (!action) return null;
@@ -767,6 +796,8 @@ export function artifactSummary(a: AiArtifact): string {
     return `arte ${a.width ?? "?"}×${a.height ?? "?"}${a.edited_from ? ` (ajuste de ${a.edited_from})` : ""}: ${a.prompt.slice(0, 120)} (para ajustar, leia o HTML com read_art)`;
   if (a.type === "image")
     return `imagem${a.edited_from ? ` (edição de ${a.edited_from})` : ""}: ${a.prompt.slice(0, 120)}`;
+  if (a.type === "search")
+    return `botão da Busca avançada com “${a.request}” (${a.total} tarefas)`;
   if (a.type === "question")
     return `perguntas para a pessoa: ${a.questions.map((q) => `“${q.question}”`).join("; ")}`;
   if (a.type === "task")

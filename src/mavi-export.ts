@@ -37,7 +37,7 @@ export function saveBlob(name: string, blob: Blob) {
 export const clean = (t: string) =>
   t
     .replace(/\s?\[S\d{1,3}\]/g, "")
-    .replace(/\s?\[\[[VIADQT]\d{1,2}\]\]/g, "")
+    .replace(/\s?\[\[[VIADQTB]\d{1,2}\]\]/g, "")
     .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, "$1");
 /** Negrito e itálico viram pedaços; o resto do Markdown sai como texto. */
 export function runs(t: string) {

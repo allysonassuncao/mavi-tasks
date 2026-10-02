@@ -22,6 +22,7 @@ import {
 } from "./_ai-llm.js";
 import {
   describeStep,
+  findTasks,
   runTool,
   summarizeStep,
   temperatureLine,
@@ -62,6 +63,7 @@ import {
   type CanvasArtifact,
   type ImageArtifact,
   type Power,
+  type SearchArtifact,
   type TaskArtifact,
 } from "../src/mavi-artifacts.js";
 import {
@@ -187,6 +189,7 @@ Como trabalhar:
 - Para qualquer pergunta sobre fatos (o que foi dito, combinado, pedido, prometido, decidido, reclamado), busque antes de responder. Nunca responda de memória nem invente.
 - Use search_knowledge com os termos que provavelmente aparecem no texto. Para perguntas amplas, faça 2 a 4 buscas com formulações diferentes na mesma rodada (em paralelo).
 - Use list_meetings e list_tasks para perguntas de lista, contagem ou situação atual ("quais", "quantas", "a última", "o que está atrasado"). Status, responsável e prazo das tarefas vêm atualizados dessas ferramentas.
+- Para localizar tarefas pelo assunto ou pelo que foi pedido ("acha a tarefa do logo da Clínica", "o que a Ana entregou de Black Friday em setembro", "já fizemos landing page para dentista?"), use find_tasks: a mesma busca da Busca avançada, nos títulos, descrições, comentários e áudios, inclusive nas entregues, por termos e pelo sentido. Escreva você os termos e as variações (singular e plural, sinônimos, abreviações, inglês do marketing) e o assunto numa frase; nomes de cliente, pessoa, status e datas vão nos filtros, não nos termos. Cite as tarefas encontradas e coloque o botão da Busca avançada que a ferramenta devolver. Se não achar, tente outra vez com outras palavras antes de dizer que não existe.
 - Para desempenho, verba e resultados de anúncios, use campaign_results (os números vêm dos dias sincronizados; nunca calcule de cabeça o que a ferramenta já traz). Para evolução no tempo, "dia a dia" ou "por dia", peça by_day: o sistema tem os números de cada dia de cada campanha. Anotações e ciclos das campanhas também aparecem na busca.
 - Documentos do cliente (propostas, contratos, briefings, planilhas, apresentações) estão nos arquivos do Drive; o briefing e os planos mensais do Social Leads (com os 8 posts e a decisão do cliente) também entram na busca.
 - Cases de sucesso aprovados (resultados em números, nichos, produtos, links e contatos do cliente) entram na busca com o tipo case: use quando pedirem prova social, exemplos de resultado ou "tem case de…". Diga o cliente, o nicho e os números, e cite.
@@ -873,7 +876,7 @@ async function ask(
   const priorImages = new Map<string, string>();
   const priorArts = new Map<string, ImageArtifact>();
   const priorCanvas = new Map<string, CanvasArtifact>();
-  const next = { V: 1, I: 1, A: 1, D: 1, Q: 1, T: 1 };
+  const next = { V: 1, I: 1, A: 1, D: 1, Q: 1, T: 1, B: 1 };
   for (const m of past)
     for (const a of sanitizeArtifacts(m.artifacts)) {
       const letter = a.ref[0] as keyof typeof next;
@@ -1221,6 +1224,11 @@ async function ask(
               if (out.startsWith("Plano montado")) planned = true;
               return out;
             })
+          : name === "find_tasks"
+            ? // A busca de tarefas: o botão da Busca avançada com a mesma busca.
+              findTasks(ctx, input as Record<string, unknown>, (card) =>
+                add<SearchArtifact>(kit, "B", { type: "search", ...card }).ref,
+              )
           : kind === "read"
             ? runTool(ctx, name, input)
             : runPowerTool(kit, name, input);
