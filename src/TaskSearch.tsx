@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Flag, Sparkles, TriangleAlert, X } from "lucide-react";
-import { Button, Input, Select, SelectOption } from "./ui";
+import { Button, Input } from "./ui";
+import { MultiPick } from "./MultiPick";
 import { Empty, Loading } from "./components";
 import { buildNameLookup, dateKey } from "./domain";
 import { navigate, useUrlState } from "./router";
@@ -43,6 +44,7 @@ import {
 import {
   MAVI_FILTER_KEYS,
   MAVI_PARAM,
+  filterValues,
   readPrepared,
   type MaviSearch,
   type PreparedSearch,
@@ -306,13 +308,15 @@ export function TaskSearch({
   }, [maviKey, query, demo, retry]);
   const understood =
     mavi?.key === maviKey && mavi.status === "ready" ? mavi.search : null;
-  // Nothing to search with (no terms, no subject, no filter): the exact words.
+  // Nothing to search with (no terms, no subject, no filter on the screen):
+  // the exact words.
   const usable =
     understood &&
     (understood.terms.length ||
       understood.embedding ||
       MAVI_FILTER_KEYS.some((k) => understood.filters[k]) ||
-      understood.filters.priority)
+      understood.filters.priority ||
+      hasCriteria({ ...params, query: "" }))
       ? understood
       : null;
   const asking = !!query && !demo && (mavi?.key !== maviKey || mavi.status === "asking");
@@ -326,12 +330,19 @@ export function TaskSearch({
       value ? url.searchParams.set(param, value) : url.searchParams.delete(param);
     for (const k of MAVI_FILTER_KEYS)
       if (typeof f[k] === "string") set(MAVI_PARAM[k], f[k]!);
-    // A project brings its client; a client of its own clears another's project.
-    const projectId = url.searchParams.get("proj");
-    const contract = data.projects.find((p) => p.id === projectId)?.contract_id;
-    const owner = data.contracts.find((k) => k.id === contract)?.client_id;
-    if (f.project && owner) set("cli", owner);
-    else if (projectId && f.client && owner !== f.client) set("proj", "");
+    // Projects bring their clients; clients of her own drop the projects of
+    // other clients.
+    const ownerOf = (id: string) => {
+      const contract = data.projects.find((p) => p.id === id)?.contract_id;
+      return data.contracts.find((k) => k.id === contract)?.client_id ?? "";
+    };
+    const picked = filterValues(url.searchParams.get("proj"));
+    if (f.project && picked.length)
+      set("cli", [...new Set(picked.map(ownerOf).filter(Boolean))].join(","));
+    else if (picked.length && f.client) {
+      const allowed = filterValues(f.client);
+      set("proj", picked.filter((id) => allowed.includes(ownerOf(id))).join(","));
+    }
     if (typeof f.priority === "boolean") set("prioritarias", f.priority ? "1" : "");
     if (f.fields?.length)
       set("em", f.fields.length >= SEARCH_FIELDS.length ? "" : f.fields.join(","));
@@ -440,9 +451,10 @@ export function TaskSearch({
   const clients = data.clients
     .filter((c) => !c.archived)
     .sort((a, b) => a.name.localeCompare(b.name));
+  const pickedClients = filterValues(client);
   const contractIds = new Set(
     data.contracts
-      .filter((k) => !client || k.client_id === client)
+      .filter((k) => !pickedClients.length || pickedClients.includes(k.client_id))
       .map((k) => k.id),
   );
   const projects = data.projects
@@ -566,61 +578,59 @@ export function TaskSearch({
       </div>
 
       <div className="task-search-filters">
-        <Select
-          aria-label="Cliente"
-          value={client}
-          onValueChange={(v) => {
-            setClient(v);
-            setProject("");
+        <MultiPick
+          label="Cliente"
+          allLabel="Todos os clientes"
+          noun="clientes"
+          options={clients.map((c) => ({ value: c.id, label: c.name }))}
+          value={pickedClients}
+          onChange={(next) => {
+            setClient(next.join(","));
+            // The projects of clients no longer picked leave too.
+            const owners = new Set(
+              data.contracts
+                .filter((k) => !next.length || next.includes(k.client_id))
+                .map((k) => k.id),
+            );
+            setProject(
+              filterValues(project)
+                .filter((id) => owners.has(data.projects.find((p) => p.id === id)?.contract_id ?? ""))
+                .join(","),
+            );
           }}
-        >
-          <SelectOption value="">Todos os clientes</SelectOption>
-          {clients.map((c) => (
-            <SelectOption key={c.id} value={c.id}>
-              {c.name}
-            </SelectOption>
-          ))}
-        </Select>
-        <Select aria-label="Projeto" value={project} onValueChange={setProject}>
-          <SelectOption value="">Todos os projetos</SelectOption>
-          {projects.map((p) => (
-            <SelectOption key={p.id} value={p.id}>
-              {p.name}
-            </SelectOption>
-          ))}
-        </Select>
-        <Select
-          aria-label="Responsável"
-          value={assignee}
-          onValueChange={setAssignee}
-        >
-          <SelectOption value="">Qualquer responsável</SelectOption>
-          {people.map((m) => (
-            <SelectOption key={m.user_id} value={m.user_id}>
-              {m.name}
-            </SelectOption>
-          ))}
-        </Select>
-        <Select
-          aria-label="Criado por"
-          value={creator}
-          onValueChange={setCreator}
-        >
-          <SelectOption value="">Qualquer criador</SelectOption>
-          {people.map((m) => (
-            <SelectOption key={m.user_id} value={m.user_id}>
-              {m.name}
-            </SelectOption>
-          ))}
-        </Select>
-        <Select aria-label="Status" value={status} onValueChange={setStatus}>
-          <SelectOption value="">Todos os status</SelectOption>
-          {listedStatuses.map((k) => (
-            <SelectOption key={k} value={k}>
-              {statuses[k].label}
-            </SelectOption>
-          ))}
-        </Select>
+        />
+        <MultiPick
+          label="Projeto"
+          allLabel="Todos os projetos"
+          noun="projetos"
+          options={projects.map((p) => ({ value: p.id, label: p.name }))}
+          value={filterValues(project)}
+          onChange={(next) => setProject(next.join(","))}
+        />
+        <MultiPick
+          label="Responsável"
+          allLabel="Qualquer responsável"
+          noun="responsáveis"
+          options={people.map((m) => ({ value: m.user_id, label: m.name }))}
+          value={filterValues(assignee)}
+          onChange={(next) => setAssignee(next.join(","))}
+        />
+        <MultiPick
+          label="Criado por"
+          allLabel="Qualquer criador"
+          noun="criadores"
+          options={people.map((m) => ({ value: m.user_id, label: m.name }))}
+          value={filterValues(creator)}
+          onChange={(next) => setCreator(next.join(","))}
+        />
+        <MultiPick
+          label="Status"
+          allLabel="Todos os status"
+          noun="status"
+          options={listedStatuses.map((k) => ({ value: k, label: statuses[k].label }))}
+          value={filterValues(status)}
+          onChange={(next) => setStatus(next.join(","))}
+        />
         <label className="task-search-date">
           <span>Prazo de</span>
           <Input
@@ -791,7 +801,7 @@ function MaviUnderstood({
           {search.terms.map((t) => (
             <span key={t} className="task-search-term">
               {t}
-              {search.terms.length > 1 || search.embedding ? (
+              {search.terms.length ? (
                 <button
                   type="button"
                   aria-label={`Tirar “${t}” da busca`}

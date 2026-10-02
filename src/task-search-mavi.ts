@@ -6,6 +6,8 @@
  * servidor compartilham.
  */
 
+import { statuses } from "./types.js";
+
 /** Os filtros da tela que a MAVI preenche ("" limpa; ausente mantém). */
 export const MAVI_FILTER_KEYS = [
   "client",
@@ -17,6 +19,10 @@ export const MAVI_FILTER_KEYS = [
   "to",
 ] as const;
 export type MaviFilterKey = (typeof MAVI_FILTER_KEYS)[number];
+/**
+ * Cliente, projeto, responsável, quem criou e status aceitam vários valores,
+ * separados por vírgula (qualquer um deles); prazo de/até, um só.
+ */
 export type MaviSearchFilters = Partial<Record<MaviFilterKey, string>> & {
   priority?: boolean;
   /** Onde procurar os termos ("title", "description", "comments"). */
@@ -128,4 +134,41 @@ export function readPrepared(raw: unknown): PreparedSearch | null {
   const topic = pick(d.a ?? d.topic);
   if (!terms.length && topic.length < 3) return null;
   return { terms, topic, summary: pick(d.s ?? d.summary) };
+}
+
+/** Os filtros que aceitam vários valores. */
+export const MULTI_FILTER_KEYS = ["client", "project", "assignee", "creator", "status"] as const;
+
+/** Os valores de um filtro ("a,b" → ["a", "b"]), sem vazios nem repetidos. */
+export function filterValues(value: string | null | undefined): string[] {
+  return [...new Set((value ?? "").split(",").map((v) => v.trim()).filter(Boolean))];
+}
+
+/**
+ * Palavras que só repetem um filtro e, como termo, exigiriam estar escritas
+ * na tarefa ("tarefas em andamento" com o termo "andamento" não achava
+ * nada): os status, as palavras genéricas e os nomes já escolhidos.
+ */
+const FILTER_WORDS = [
+  ...Object.values(statuses).flatMap((s) => s.label.split(" ")),
+  "entregues", "devolvidas", "alteracoes", "correcoes", "validacoes", "concluida", "concluidas",
+  "finalizada", "finalizadas", "pendente", "pendentes", "aberta", "abertas", "atrasada", "atrasadas",
+  "prioritaria", "prioritarias", "urgente", "urgentes", "status", "tarefa", "tarefas", "cliente",
+  "clientes", "projeto", "projetos", "responsavel", "prazo",
+];
+const SMALL_WORDS = new Set(["em", "de", "da", "do", "das", "dos", "e", "a", "o", "as", "os", "no", "na", "para", "com"]);
+
+/** Os termos sem os que só repetem um filtro (status, nomes escolhidos). */
+export function withoutFilterWords(terms: string[], names: string[] = []) {
+  const words = new Set(
+    [...FILTER_WORDS, ...names.flatMap((n) => n.split(/\s+/))]
+      .map((w) => termKey(w).replace(/[^a-z0-9]/g, ""))
+      .filter((w) => w.length >= 2),
+  );
+  return terms.filter((term) => {
+    const parts = termKey(term)
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w && !SMALL_WORDS.has(w));
+    return parts.length > 0 && !parts.every((w) => words.has(w));
+  });
 }

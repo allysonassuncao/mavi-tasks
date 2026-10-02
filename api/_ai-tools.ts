@@ -6,6 +6,7 @@ import {
   cleanTerms,
   searchLinkQuery,
   termKey,
+  withoutFilterWords,
   type MaviSearchFilters,
 } from "../src/task-search-mavi.js";
 
@@ -310,10 +311,10 @@ export const TOOLS: ToolSpec[] = [
         },
         creator: { type: "string", description: "Nome (ou parte) de quem criou ou pediu a tarefa." },
         status: {
-          type: "string",
-          enum: Object.keys(STATUS_LABELS).filter((s) => s !== "open"),
+          type: "array",
+          items: { type: "string", enum: Object.keys(STATUS_LABELS).filter((s) => s !== "open") },
           description:
-            "Um status, quando o pedido disser (entregues = done, em validação = review). Para vários status (pendentes, abertas), omita.",
+            "Os status, quando o pedido disser (entregues = done, em validação = review; pendentes ou abertas = todos menos done). Vale qualquer um da lista.",
         },
         from: dateField("Prazo da tarefa a partir de"),
         to: dateField("Prazo da tarefa até"),
@@ -786,7 +787,7 @@ export async function findTasks(
   onCard?: (card: SearchLinkCard) => string,
 ) {
   const request = str(input.request).slice(0, 200);
-  const terms = cleanTerms(input.terms);
+  let terms = cleanTerms(input.terms);
   const topic = str(input.topic).slice(0, 300);
   const client = clientOf(ctx, input);
   const projectId = str(input.project_id);
@@ -801,13 +802,15 @@ export async function findTasks(
     if (who.error) return who.error;
     people[key] = who.id ?? "";
   }
-  const status = str(input.status);
+  const statuses = (Array.isArray(input.status) ? input.status : [input.status]).filter(
+    (x): x is string => typeof x === "string" && x in STATUS_LABELS && x !== "open",
+  );
   const filters: MaviSearchFilters = {
     ...(client ? { client } : {}),
     ...(project ? { project } : {}),
     ...(people.assignee ? { assignee: people.assignee } : {}),
     ...(people.creator ? { creator: people.creator } : {}),
-    ...(status in STATUS_LABELS && status !== "open" ? { status } : {}),
+    ...(statuses.length ? { status: [...new Set(statuses)].join(",") } : {}),
     ...(DATE.test(str(input.from)) ? { from: str(input.from) } : {}),
     ...(DATE.test(str(input.to)) ? { to: str(input.to) } : {}),
     ...(input.priority === true ? { priority: true } : {}),
@@ -816,6 +819,12 @@ export async function findTasks(
     ? ["title", "description", "comments"].filter((f) => (input.fields as unknown[]).includes(f))
     : [];
   if (fields.length) filters.fields = fields;
+  // Termos que só repetem um filtro (o status, os nomes escolhidos) saem: como
+  // termo, exigiriam estar escritos na tarefa.
+  terms = withoutFilterWords(terms, [
+    client ? (ctx.clients.get(client) ?? "") : "",
+    ...[people.assignee, people.creator].map((id) => (id ? (ctx.members.get(id)?.name ?? "") : "")),
+  ]);
   if (!terms.length && topic.length < 3 && !Object.keys(filters).length)
     return "Diga o que procurar: os termos, o assunto ou algum filtro (cliente, responsável, status, prazo).";
   const embedding =
@@ -833,7 +842,8 @@ export async function findTasks(
     p_project: filters.project ?? null,
     p_assignee: filters.assignee ?? null,
     p_creator: filters.creator ?? null,
-    p_status: filters.status ?? null,
+    p_status: null,
+    p_statuses: statuses.length ? [...new Set(statuses)] : null,
     p_from: filters.from ?? null,
     p_to: filters.to ?? null,
     p_priority: !!filters.priority,

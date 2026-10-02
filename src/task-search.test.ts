@@ -3,7 +3,7 @@ vi.mock("./api", () => ({ rpc: vi.fn() }));
 const { rpc } = await import("./api");
 const { fold, highlightParts, highlightTerms, searchSnippet, searchTasksLocal } =
   await import("./task-search");
-const { cleanTerms } = await import("./task-search-mavi");
+const { cleanTerms, filterValues, withoutFilterWords } = await import("./task-search-mavi");
 const { searchTaskRowsMavi } = await import("./task-search");
 const { demoSnapshot, demoUser } = await import("./demo");
 const { serializeDescription } = await import("./rich-text");
@@ -63,6 +63,46 @@ describe("Busca avançada", () => {
     await expect(
       searchTaskRowsMavi("c", { terms: ["logo"], embedding: "[0.1]" }, { query: "logo", fields: ["title"] }),
     ).rejects.toThrow("outro");
+  });
+  it("vários itens por filtro: qualquer um deles; e vai em listas para o banco", async () => {
+    const data = demoSnapshot();
+    const statuses = [...new Set(data.tasks.filter((t) => !t.archived).map((t) => t.status))].slice(0, 2);
+    const all = ["title", "description", "comments"] as const;
+    const one = searchTasksLocal(data, [], demoUser, { query: "", fields: [...all], status: statuses[0], limit: 500 });
+    const two = searchTasksLocal(data, [], demoUser, {
+      query: "",
+      fields: [...all],
+      status: statuses.join(","),
+      limit: 500,
+    });
+    expect(one.length).toBeGreaterThan(0);
+    expect(two.length).toBeGreaterThan(one.length);
+    expect(two.every((h) => statuses.includes(h.status))).toBe(true);
+    const calls: Record<string, unknown>[] = [];
+    vi.mocked(rpc).mockImplementation(async (_name, args) => {
+      calls.push(args as Record<string, unknown>);
+      return [];
+    });
+    await searchTaskRowsMavi("c", { terms: [], embedding: null }, {
+      query: "x",
+      fields: [...all],
+      status: "progress,review",
+      assignee: "a,b,a",
+    });
+    expect(calls[0]).toMatchObject({
+      p_statuses: ["progress", "review"],
+      p_assignees: ["a", "b"],
+      p_clients: null,
+    });
+    expect(filterValues(" a, ,b ")).toEqual(["a", "b"]);
+  });
+  it("termos que só repetem um filtro saem (\"andamento\" não vira palavra a procurar)", () => {
+    expect(
+      withoutFilterWords(
+        ["andamento", "Em andamento", "entregues", "tarefas", "Ana Souza", "logo", "arte do feed", "cliente oculto"],
+        ["Ana Souza"],
+      ),
+    ).toEqual(["logo", "arte do feed", "cliente oculto"]);
   });
   it("mostra o trecho ao redor do termo", () => {
     const text = "a ".repeat(100) + "logotipo azul" + " b".repeat(100);

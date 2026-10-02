@@ -8048,6 +8048,13 @@ p.task-search-mavi,
   padding: 7px 12px;
   font-size: 0.78rem;
 }
+/* Cliente, projeto, responsável, criador e status: vários de cada. */
+.task-search-filters .multi-pick {
+  min-width: 170px;
+  max-width: 240px;
+  min-height: 38px;
+  padding: 0 12px;
+}
 .task-search-date {
   display: flex;
   flex-direction: row;
@@ -8190,9 +8197,11 @@ p.task-search-mavi,
   .task-search {
     padding: 18px 16px 22px;
   }
-  .task-search-filters .ui-select {
+  .task-search-filters .ui-select,
+  .task-search-filters .multi-pick {
     flex: 1 1 45%;
     min-width: 0;
+    max-width: none;
   }
   .task-search-date {
     flex: 1 1 45%;

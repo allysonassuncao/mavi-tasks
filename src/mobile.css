@@ -107,7 +107,8 @@ label input.ui-search-select-native {
 
 @media (max-width: 600px) {
   /* Busca avançada: um filtro por linha, datas com o rótulo alinhado. */
-  .task-search-filters .ui-select {
+  .task-search-filters .ui-select,
+  .task-search-filters .multi-pick {
     flex-basis: 100%;
   }
   .task-search-date {

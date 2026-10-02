@@ -6,6 +6,7 @@ import {
   MAVI_FILTER_KEYS,
   MAVI_SEARCH_WAIT_MS,
   cleanTerms,
+  filterValues,
   type MaviSearch,
   type PreparedSearch,
 } from "./task-search-mavi";
@@ -22,6 +23,10 @@ export const SEARCH_PAGE = 30;
 export type TaskSearchParams = {
   query: string;
   fields: SearchField[];
+  /**
+   * Cliente, projeto, responsável, criador e status: um valor ou vários
+   * separados por vírgula ("a,b": qualquer um deles).
+   */
   client?: string;
   project?: string;
   assignee?: string;
@@ -208,13 +213,17 @@ export async function searchTaskRowsMavi(
 }
 
 function filterArgs(p: TaskSearchParams) {
+  const list = (v?: string) => {
+    const values = filterValues(v);
+    return values.length ? values : null;
+  };
   return {
     p_in: p.fields,
-    p_client: p.client || null,
-    p_project: p.project || null,
-    p_assignee: p.assignee || null,
-    p_creator: p.creator || null,
-    p_status: p.status || null,
+    p_clients: list(p.client),
+    p_projects: list(p.project),
+    p_assignees: list(p.assignee),
+    p_creators: list(p.creator),
+    p_statuses: list(p.status),
     p_from: p.from || null,
     p_to: p.to || null,
     p_priority: !!p.priority,
@@ -286,15 +295,19 @@ export function searchTasksLocal(
   const term = fold(p.query.trim());
   const client = (t: Task) =>
     data.contracts.find((k) => k.id === t.contract_id)?.client_id;
+  const anyOf = (picked: string | undefined, value: string | null | undefined) => {
+    const values = filterValues(picked);
+    return !values.length || values.includes(value ?? "");
+  };
   const base = data.tasks.filter(
     (t) =>
       !t.archived &&
       canSeeTask(data, t, user) &&
-      (!p.client || client(t) === p.client) &&
-      (!p.project || t.project_id === p.project) &&
-      (!p.assignee || t.assignee_id === p.assignee) &&
-      (!p.creator || t.creator_id === p.creator) &&
-      (!p.status || t.status === p.status) &&
+      anyOf(p.client, client(t)) &&
+      anyOf(p.project, t.project_id) &&
+      anyOf(p.assignee, t.assignee_id) &&
+      anyOf(p.creator, t.creator_id) &&
+      anyOf(p.status, t.status) &&
       (!p.from || t.due_date >= p.from) &&
       (!p.to || t.due_date <= p.to),
   );

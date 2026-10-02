@@ -8,8 +8,10 @@ import { listedStatuses, statuses } from "../src/types.js";
 import {
   MAVI_FILTER_KEYS,
   cleanTerms,
+  filterValues,
   readPrepared,
   termKey,
+  withoutFilterWords,
   type MaviSearch,
   type MaviSearchFilters,
 } from "../src/task-search-mavi.js";
@@ -126,17 +128,17 @@ export const SEARCH_INSTRUCTIONS = `Você é a MAVI, a inteligência do sistema 
 Responda SÓ com um JSON, sem texto antes ou depois e sem cercas de código:
 {"filters": {...}, "terms": [...], "topic": "...", "summary": "..."}
 
-filters — só o que o pedido diz; um filtro que você não mencionar fica como está na tela. Use "" para tirar um filtro que o pedido desfaz (ex.: "de todos os clientes").
-- client: id do cliente. project: id do projeto (o cliente dele vem junto).
+filters — só o que o pedido diz; um filtro que você não mencionar fica como está na tela. Use "" para tirar um filtro que o pedido desfaz (ex.: "de todos os clientes"). client, project, assignee, creator e status aceitam uma lista quando o pedido citar mais de um ("da Ana ou do João", "em andamento ou em validação"): vale qualquer um deles.
+- client: id do cliente (ou lista). project: id do projeto (o cliente dele vem junto).
 - assignee: id de quem executa a tarefa (o responsável: "da Ana", "que o João fez/entregou/está fazendo"). "minhas tarefas", "o que eu fiz" = quem pede.
 - creator: id de quem criou ou pediu a tarefa ("que a Ana pediu/abriu/criou").
-- status: um destes ids: ${STATUS_LINES}. "entregues", "concluídas", "finalizadas" = done; "em aprovação" = review; "reprovadas" = rejected. Quando o pedido abrange vários status (ex.: "pendentes", "abertas"), não use status e diga no summary.
+- status: um destes ids (ou lista): ${STATUS_LINES}. "entregues", "concluídas", "finalizadas" = done; "em aprovação" = review; "reprovadas" = rejected; "pendentes", "abertas", "não entregues" = todos menos done.
 - from, to: o prazo da tarefa (aaaa-mm-dd), só quando o pedido fala de um período ("de setembro", "da semana passada", "deste mês", "vencidas até ontem"). Use a data de hoje que vier na mensagem.
 - priority: true quando pedir prioritárias, urgentes ou de alta prioridade.
 - fields: só quando a pessoa disser onde procurar os termos: "title" (título), "description" (descrição), "comments" (comentários).
 Use só ids das listas da mensagem; nunca invente. Um nome que não está nas listas não é filtro: vira termo. Um nome que serve a mais de uma pessoa ou cliente: não escolha, diga no summary.
 
-terms — de 1 a 8 palavras ou expressões curtas que provavelmente aparecem escritas no título, na descrição ou nos comentários das tarefas: as palavras-chave do assunto e as variações que o time usaria (singular e plural, sinônimos, abreviações, termos em inglês do marketing, erros comuns de digitação). Ex.: "logo da marca" → ["logo", "logotipo", "logomarca", "identidade visual"]; "post de Black Friday" → ["black friday", "blackfriday", "post", "arte"]. Não repita o que já virou filtro (nomes de cliente, pessoa, status, datas) nem palavras genéricas (tarefa, fazer, cliente, coisa). Vazio quando o pedido é só de filtros ("tarefas da Ana entregues em setembro").
+terms — de 1 a 8 palavras ou expressões curtas que provavelmente aparecem escritas no título, na descrição ou nos comentários das tarefas: as palavras-chave do assunto e as variações que o time usaria (singular e plural, sinônimos, abreviações, termos em inglês do marketing, erros comuns de digitação). Ex.: "logo da marca" → ["logo", "logotipo", "logomarca", "identidade visual"]; "post de Black Friday" → ["black friday", "blackfriday", "post", "arte"]. Nunca repita o que já virou filtro (nomes de cliente, pessoa, status como "andamento" ou "entregue", datas) nem palavras genéricas (tarefa, fazer, cliente, coisa): um termo exige estar escrito na tarefa. Vazio quando o pedido é só de filtros ("tarefas em andamento", "tarefas da Ana entregues em setembro").
 
 topic — o assunto do pedido numa frase curta e descritiva, para a busca por significado (ex.: "criação ou ajuste do logotipo e da identidade visual da marca"). "" quando o pedido é só de filtros.
 
@@ -194,14 +196,21 @@ export function keepFilters(raw: unknown, cat: SearchCatalog): MaviSearchFilters
     assignee: new Set(cat.people.map((p) => p.id)),
     creator: new Set(cat.people.map((p) => p.id)),
   };
+  // Um id, uma lista ou "a,b": só os que a pessoa enxerga (vários = qualquer um).
+  const many = (v: unknown) => (Array.isArray(v) ? v.join(",") : typeof v === "string" ? v : "");
   for (const key of ["client", "project", "assignee", "creator"] as const) {
     const v = f[key];
-    if (v === "") out[key] = "";
-    else if (typeof v === "string" && ids[key].has(v.trim())) out[key] = v.trim();
+    if (v === "" || (Array.isArray(v) && !v.length)) out[key] = "";
+    else {
+      const kept = filterValues(many(v)).filter((id) => ids[key].has(id));
+      if (kept.length) out[key] = kept.join(",");
+    }
   }
-  if (f.status === "") out.status = "";
-  else if (typeof f.status === "string" && (listedStatuses as string[]).includes(f.status))
-    out.status = f.status;
+  if (f.status === "" || (Array.isArray(f.status) && !f.status.length)) out.status = "";
+  else {
+    const kept = filterValues(many(f.status)).filter((x) => (listedStatuses as string[]).includes(x));
+    if (kept.length) out.status = kept.join(",");
+  }
   for (const key of ["from", "to"] as const) {
     const v = f[key];
     if (v === "") out[key] = "";
@@ -221,9 +230,15 @@ function currentFilters(raw: unknown): MaviSearchFilters {
   const f = (raw && typeof raw === "object" ? raw : {}) as Row;
   const out: MaviSearchFilters = {};
   for (const key of MAVI_FILTER_KEYS) {
-    const v = str(f[key], 40);
-    if (v && (key === "from" || key === "to" ? DATE.test(v) : key === "status" || UUID.test(v)))
-      out[key] = v;
+    const v = str(f[key], 2000);
+    if (key === "from" || key === "to") {
+      if (DATE.test(v)) out[key] = v;
+      continue;
+    }
+    const kept = filterValues(v)
+      .filter((x) => (key === "status" ? /^[a-z]{2,20}$/.test(x) : UUID.test(x)))
+      .slice(0, 40);
+    if (kept.length) out[key] = kept.join(",");
   }
   if (f.priority === true) out.priority = true;
   if (Array.isArray(f.fields)) {
@@ -334,7 +349,17 @@ export async function handleTaskSearch(
     const answer = parseSearch(result.text);
     if (!answer) throw new SearchError(502, "A MAVI não conseguiu montar a busca.");
     const filters = keepFilters(answer.filters, cat);
-    const terms = cleanTerms(answer.terms);
+    // Termos que só repetem um filtro (o status, os nomes escolhidos) saem:
+    // como termo, exigiriam estar escritos na tarefa.
+    const chosen = { ...current, ...filters };
+    const named = [
+      ...filterValues(chosen.client).map((id) => cat.clients.find((c) => c.id === id)?.name ?? ""),
+      ...filterValues(chosen.project).map((id) => cat.projects.find((p) => p.id === id)?.name ?? ""),
+      ...[...filterValues(chosen.assignee), ...filterValues(chosen.creator)].map(
+        (id) => cat.people.find((p) => p.id === id)?.name ?? "",
+      ),
+    ].filter(Boolean);
+    const terms = withoutFilterWords(cleanTerms(answer.terms), named);
     const topic = str(answer.topic, 300);
     const embedding = await embedTopic(topic);
     const search: MaviSearch = {

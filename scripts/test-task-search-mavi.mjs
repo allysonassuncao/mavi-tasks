@@ -143,6 +143,25 @@ await check("cada um só encontra o que já podia ver, pelos termos e pelo senti
   await assert.rejects(() => search(), /permission denied/);
 });
 
+await check("vários itens por filtro: qualquer um deles; filtros diferentes, todos valem", async () => {
+  await as(admin);
+  await sql(`update tasks set status = 'review' where id = $1`, [visual]);
+  const ids = async (args, params) =>
+    (await db.query(`select * from search_task_rows_mavi($1, '{}', null, ${args})`, [A, ...params])).rows
+      .map((r) => r.task.id)
+      .sort();
+  assert.deepEqual(await ids(`p_statuses => $2`, [["review"]]), [visual]);
+  assert.equal((await ids(`p_statuses => $2`, [["progress", "review"]])).length, 6);
+  assert.deepEqual(await ids(`p_assignees => $2`, [[other]]), [hidden]);
+  assert.equal((await ids(`p_assignees => $2`, [[other, doer]])).length, 6);
+  assert.deepEqual(await ids(`p_assignees => $2, p_statuses => $3`, [[other, doer], ["review"]]), [visual]);
+  assert.equal((await ids(`p_clients => $2, p_creators => $3`, [[client], [admin]])).length, 6);
+  // A busca de sempre também.
+  const old = (await db.query(`select * from search_task_rows($1, '', p_statuses => $2)`, [A, ["review"]])).rows;
+  assert.deepEqual(old.map((r) => r.task.id), [visual]);
+  await sql(`update tasks set status = 'progress' where id = $1`, [visual]);
+});
+
 await check("o texto de busca acompanha título, comentário editado ou apagado e áudio", async () => {
   const find = async (terms) => {
     await as(admin);

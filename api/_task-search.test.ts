@@ -127,6 +127,22 @@ describe("a MAVI na Busca avançada", () => {
     for (const x of [empty, off, blocked]) expect(x.llm).not.toHaveBeenCalled();
   });
 
+  it("\"tarefas em andamento\": o status vira filtro e não sobra como termo; listas valem", async () => {
+    const { d } = deps(
+      JSON.stringify({
+        filters: { status: ["progress", "review", "inventado"], assignee: [ana, "x"], client: `${client},${otherClient}` },
+        terms: ["andamento", "em andamento", "Ana Souza", "Clínica", "Padaria Pão", "logo"],
+        topic: "",
+        summary: "Tarefas em andamento ou em validação da Ana.",
+      }),
+    );
+    const res = await handleTaskSearch({ company, query: "tarefas em andamento ou em validação da Ana" }, token, env, d);
+    expect(res.body).toMatchObject({
+      terms: ["logo"],
+      filters: { status: "progress,review", assignee: ana, client: `${client},${otherClient}` },
+    });
+  });
+
   it("busca já montada na conversa: sem chamar o modelo, só refaz o vetor do assunto", async () => {
     const { d, llm, embed, calls } = deps();
     const res = await handleTaskSearch(

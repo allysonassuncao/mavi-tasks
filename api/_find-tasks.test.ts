@@ -72,7 +72,7 @@ describe("find_tasks: a busca da Busca avançada na conversa da MAVI", () => {
         topic: "criação do logotipo da marca",
         client_id: client,
         assignee: "ana souza",
-        status: "done",
+        status: ["done"],
         from: "2026-09-01",
         to: "2026-09-30",
       },
@@ -88,7 +88,7 @@ describe("find_tasks: a busca da Busca avançada na conversa da MAVI", () => {
       p_embedding: "[0.1,0.2]",
       p_client: client,
       p_assignee: ana,
-      p_status: "done",
+      p_statuses: ["done"],
       p_from: "2026-09-01",
       p_to: "2026-09-30",
       p_limit: 15,
@@ -139,6 +139,18 @@ describe("find_tasks: a busca da Busca avançada na conversa da MAVI", () => {
     expect(calls.map((x) => x.body.p_embedding)).toEqual(["[0.1,0.2]", null]);
     expect(out).toContain("Criar logotipo da clínica");
     expect(out).not.toContain("[[B");
+  });
+
+  it("termos que só repetem um filtro saem (\"em andamento\" não vira palavra a procurar)", async () => {
+    const { fetchImpl, calls } = database([ROW]);
+    await findTasks(ctx(fetchImpl), {
+      request: "tarefas em andamento da Ana Souza na Clínica",
+      terms: ["em andamento", "andamento", "Ana Souza", "Clínica Sorriso", "tarefas"],
+      status: ["progress", "review"],
+      assignee: "Ana Souza",
+      client_id: client,
+    });
+    expect(calls[0].body).toMatchObject({ p_terms: [], p_statuses: ["progress", "review"], p_assignee: ana });
   });
 
   it("o cliente do módulo aberto manda sobre o do pedido", async () => {
