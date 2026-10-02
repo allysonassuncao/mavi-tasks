@@ -1065,7 +1065,7 @@ export function withTaskIndex(objects) {
 }
 
 /** Copia os anexos dentro do bucket e envia as imagens; pula o que já está lá. */
-async function send(dir, credentials, log) {
+export async function send(dir, credentials, log) {
   const manifest = JSON.parse(await readFile(join(dir, "arquivos.json"), "utf8"));
   // O token vale uma hora: renovado a cada 45 minutos.
   let auth = null;

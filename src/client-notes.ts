@@ -31,7 +31,8 @@ export type ClientNote = {
 export type ClientNoteVersion = {
   version: number;
   title: string;
-  action: "create" | "save" | "restore";
+  /** import: uma versão do bloco de notas do MASO. */
+  action: "create" | "save" | "restore" | "import";
   restored_from: number | null;
   saved_by: string | null;
   saved_by_name: string | null;

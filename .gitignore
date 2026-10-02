@@ -26,3 +26,7 @@ gcs-credentials.json
 /maso-tarefas-import*/
 # SQL gerado por scripts/import-maso-media.mjs (entradas de mídia dos clientes).
 /maso-midia-import*/
+# Bloco de notas do MASO (acessos e senhas dos clientes) e o SQL gerado por
+# scripts/import-maso-notes.mjs (secretos já cifrados, mas o resto em texto).
+/maso-notes/
+/maso-notes-import*/

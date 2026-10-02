@@ -3,6 +3,9 @@
 // não perde (versão base); restaurar vira versão nova; excluir e restaurar;
 // o secreto guardado só cifrado, aberto com registro de quem viu; a MAVI
 // acha a anotação (só quem vê o cliente) com o secreto apenas pelo nome.
+// Parte 2 (20270227090000_client_notes_legacy): as imagens do texto ficam
+// presas à anotação (todos que veem o cliente veem, a limpeza não apaga) e
+// o que veio do MASO mostra o autor original.
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
@@ -244,6 +247,65 @@ await check("excluir tira da lista e da MAVI; restaurar devolve", async () => {
   assert.equal(await rpc("client_notes_count", [A, client]), 1);
   await index();
   assert.equal((await sql(`select count(*)::int n from ai_documents where source_id=$1`, [note.id]))[0].n, 1);
+});
+
+await check("as imagens do texto ficam presas à anotação e todos do cliente veem", async () => {
+  await as(member);
+  const img = await rpc("prepare_inline_image", [A, "print.png", 1000]);
+  const withImg = doc(p(t("Print do painel")), { type: "inlineImage", attrs: { imageId: img.id, alt: "print.png" } });
+  const n = await rpc("client_note_create", [A, client, "Com imagem", withImg]);
+  const [row] = await sql(`select note_id, task_id from inline_images where id=$1`, [img.id]);
+  assert.equal(row.note_id, n.id);
+  await as(admin);
+  assert.equal((await db.query(`select count(*)::int n from inline_images where id=$1`, [img.id])).rows[0].n, 1);
+  await as(outsider);
+  assert.equal((await db.query(`select count(*)::int n from inline_images where id=$1`, [img.id])).rows[0].n, 0);
+  // Uma imagem de outra pessoa (ou já de outro lugar) não muda de dono.
+  await as(admin);
+  const other = await rpc("prepare_inline_image", [A, "outra.png", 1000]);
+  await as(member);
+  const saved = await rpc("client_note_save", [n.id, "Com imagem",
+    doc(p(t("x")), { type: "inlineImage", attrs: { imageId: other.id, alt: "o" } }), n.version]);
+  assert.equal(saved.version, n.version + 1);
+  assert.equal((await sql(`select note_id from inline_images where id=$1`, [other.id]))[0].note_id, null);
+  // A limpeza das imagens soltas (24 h) deixa a da anotação.
+  await sql(`update inline_images set created_at = now() - interval '2 days'`);
+  await sql(`select * from mavi_private.claim_storage_cleanup()`);
+  assert.equal((await sql(`select count(*)::int n from inline_images where id=$1`, [img.id]))[0].n, 1);
+  assert.equal((await sql(`select count(*)::int n from inline_images where id=$1`, [other.id]))[0].n, 0);
+});
+
+await check("o que veio do MASO mostra o autor original; quem salva depois assume", async () => {
+  const id = "00000000-0000-4000-8000-000000000099";
+  await sql(
+    `insert into client_notes(id, company_id, client_id, title, body, version, created_at, updated_at,
+       legacy_created_by, legacy_updated_by, updated_by)
+     values ($1,$2,$3,'Bloco de notas do MASO',$4,2,'2021-01-01','2022-01-01','Lorena Amaral','Arthur Teixeira',null)`,
+    [id, A, client, doc(p(t("Senha: "), { type: "noteSecret", attrs: { secretId: secret.id, label: "Senha" } }))],
+  );
+  await sql(
+    `insert into client_note_versions(company_id, note_id, version, title, body, action, saved_by, legacy_saved_by, saved_at)
+     values ($1,$2,1,'Bloco de notas do MASO','a','import',null,'Lorena Amaral','2021-01-01'),
+            ($1,$2,2,'Bloco de notas do MASO','b','import',$3,'Allyson','2022-01-01')`,
+    [A, id, member],
+  );
+  await as(member);
+  const got = await rpc("client_note_get", [id]);
+  assert.equal(got.created_by_name, "Lorena Amaral (MASO)");
+  assert.equal(got.updated_by_name, "Arthur Teixeira (MASO)");
+  const versions = await rpc("client_note_versions", [id]);
+  assert.deepEqual(versions.map((v) => [v.version, v.action, v.saved_by_name]), [
+    [2, "import", "Bruno Colab"],
+    [1, "import", "Lorena Amaral (MASO)"],
+  ]);
+  await as(admin);
+  const e = await fails(() => rpc("client_note_save", [id, "X", "y", 1]), /40001/);
+  assert.match(e.message, /Arthur Teixeira \(MASO\) salvou/);
+  const saved = await rpc("client_note_save", [id, "Bloco de notas do MASO", "novo", 2]);
+  assert.equal(saved.updated_by_name, "Ana Admin");
+  assert.equal(saved.created_by_name, "Lorena Amaral (MASO)");
+  const ctx = await rpc("client_notes_context", [A, client, 20]);
+  assert.equal(ctx.find((x) => x.id === id).updated_by_name, "Ana Admin");
 });
 
 await check("o Dossiê da MAVI também lê as anotações", async () => {

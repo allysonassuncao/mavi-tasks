@@ -47,6 +47,7 @@
     "test:db:mavi-person": "node scripts/test-mavi-person.mjs",
     "test:db:whatsapp": "node scripts/test-whatsapp-groups.mjs",
     "test:db:client-notes": "node scripts/test-client-notes.mjs",
+    "test:db:import-maso-notes": "node scripts/test-import-maso-notes.mjs",
     "test:db:cases": "node scripts/test-success-cases.mjs",
     "test:db:notices": "node scripts/test-notice-board.mjs",
     "test:db:copilot": "node scripts/test-task-copilot.mjs",

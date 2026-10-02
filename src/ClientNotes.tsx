@@ -608,6 +608,7 @@ const ACTION_LABEL = {
   create: "Criada",
   save: "Salva",
   restore: "Restaurada",
+  import: "Importada do MASO",
 } as const;
 
 function NoteHistory({
