@@ -4,7 +4,6 @@ import {
   ArrowDownRight,
   ArrowUp,
   ArrowUpRight,
-  Ban,
   Check,
   CheckSquare,
   Download,
@@ -34,6 +33,7 @@ import { CanvasCard } from "./MaviCanvas";
 import { QuestionCard } from "./MaviQuestions";
 import { TaskCard } from "./MaviTaskCard";
 import { runMcpAction } from "./mavi-mcp";
+import { CampaignAlertCard, StateChip } from "./MaviCampaignAlertCard";
 import type {
   ActionArtifact,
   ActionProposal,
@@ -108,6 +108,8 @@ export function ArtifactView({
     return <TaskCard artifact={artifact} readOnly={host.readOnly} notify={host.notify} />;
   if (artifact.action.kind === "mcp_call")
     return <McpActionCard artifact={artifact} host={host} />;
+  if (artifact.action.kind === "campaign_alert")
+    return <CampaignAlertCard artifact={artifact} host={host} />;
   return <ActionCard artifact={artifact} host={host} />;
 }
 
@@ -567,7 +569,7 @@ function ActionCard({ artifact, host }: { artifact: ActionArtifact; host: Artifa
   const [error, setError] = useState("");
   // "Criar e continuar" no formulário: só a primeira tarefa responde à proposta.
   const decided = useRef(false);
-  const a = artifact.action as Exclude<ActionProposal, { kind: "mcp_call" }>;
+  const a = artifact.action as Exclude<ActionProposal, { kind: "mcp_call" | "campaign_alert" }>;
   const waiting = host.streaming || !host.conversation;
   const decide = async (
     next: "confirmed" | "cancelled",
@@ -858,21 +860,5 @@ function McpActionCard({ artifact, host }: { artifact: ActionArtifact; host: Art
         ) : null}
       </footer>
     </section>
-  );
-}
-
-function StateChip({ state }: { state: ActionArtifact["state"] }) {
-  const map = {
-    pending: ["Aguardando você", null],
-    confirmed: ["Confirmada", <Check key="i" size={12} aria-hidden="true" />],
-    cancelled: ["Cancelada", <Ban key="i" size={12} aria-hidden="true" />],
-    failed: ["Não deu certo", <X key="i" size={12} aria-hidden="true" />],
-  } as const;
-  const [label, icon] = map[state];
-  return (
-    <span className={`mavi-action-state ${state}`}>
-      {icon}
-      {label}
-    </span>
   );
 }

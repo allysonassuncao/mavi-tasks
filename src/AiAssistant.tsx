@@ -18,6 +18,7 @@ import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import { navigate } from "./router";
 import { AiChat, AnswerText, entriesFrom, type ChatEntry } from "./AiChat";
+import { CampaignAlertCard } from "./MaviCampaignAlertCard";
 import {
   askAi,
   conversationMessages,
@@ -421,11 +422,24 @@ export function AiAssistant({
                   },
                 }));
             }}
-            renderAnswer={(text, sources) => (
+            renderAnswer={(text, sources, _typing, below) => (
               <AnswerText
                 text={text}
                 sources={sources}
                 onSource={openAiSource}
+                below={below}
+              />
+            )}
+            renderAction={(artifact, busy) => (
+              <CampaignAlertCard
+                artifact={artifact}
+                host={{
+                  company,
+                  conversation: conv?.id ?? null,
+                  readOnly: !!readOnly,
+                  streaming: busy,
+                  notify,
+                }}
               />
             )}
           />

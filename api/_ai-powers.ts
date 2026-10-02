@@ -33,6 +33,18 @@ import {
   type VisualArtifact,
 } from "../src/mavi-artifacts.js";
 import type { ProviderModel } from "../src/ai-providers.js";
+import {
+  ALERT_CONDITIONS,
+  ALERT_METRICS,
+  ALERT_OBJECTIVES,
+  ALERT_PLATFORMS,
+  describeRule,
+  ruleFromInput,
+  ruleProblem,
+  suggestedName,
+  type CampaignAlertRule,
+} from "../src/campaign-alerts.js";
+import { alertCatalog, findByName, labelRule } from "./_campaign-alerts.js";
 
 /**
  * MAVI · poderes (migração 20261212090000_mavi_powers): as ferramentas que
@@ -363,6 +375,58 @@ export const POWER_TOOLS: ToolSpec[] = [
   },
 ];
 
+/**
+ * Campanhas › Meus avisos na conversa (bolinha e módulo MAVI), para quem usa
+ * Campanhas — sem poder: são preferências da própria pessoa, e a escrita
+ * passa pelo cartão de confirmação.
+ */
+const names = (what: string) => ({
+  type: "array",
+  items: { type: "string" },
+  description: `Opcional: ${what} pelo nome (ou id). Só para avisos de várias campanhas.`,
+});
+export const CAMPAIGN_ALERT_TOOLS: ToolSpec[] = [
+  {
+    name: "campaign_alerts",
+    description:
+      "Lista os avisos de campanhas da pessoa (Campanhas › Meus avisos): id, nome, regra, alcance, se está ligado e o último disparo. Use antes de mudar, pausar, ligar ou excluir um aviso, ou quando perguntarem quais avisos ela tem.",
+    parameters: obj({}),
+  },
+  {
+    name: "propose_campaign_alert",
+    description:
+      "Propõe criar, mudar (inclusive pausar ou ligar) ou excluir um aviso de campanha da pessoa. NÃO grava: aparece um cartão para ela confirmar. Para mudar ou excluir, rule_id vem de campaign_alerts; numa mudança, mande só o que muda.",
+    parameters: obj(
+      {
+        op: { type: "string", enum: ["create", "update", "delete"] },
+        rule_id: { type: "string", description: "O aviso a mudar ou excluir (id de campaign_alerts)." },
+        name: { type: "string", description: "Nome curto do aviso (até 60 caracteres)." },
+        campaign: {
+          type: "string",
+          description: 'Uma campanha (nome ou id). Vazio ou "todas": vale para todas as campanhas ativas (com os filtros).',
+        },
+        clients: names("clientes"),
+        products: names("produtos contratados"),
+        teams: names("equipes"),
+        platforms: { type: "array", items: { type: "string", enum: [...ALERT_PLATFORMS] } },
+        objectives: { type: "array", items: { type: "string", enum: [...ALERT_OBJECTIVES] } },
+        metric: { type: "string", enum: [...ALERT_METRICS] },
+        condition: { type: "string", enum: [...ALERT_CONDITIONS] },
+        period: { type: "string", enum: ["day", "days", "cycle"] },
+        days: { type: "number" },
+        value: { type: "number" },
+        tolerance: { type: "number" },
+        with_m: { type: "boolean" },
+        repeat: { type: "string", enum: ["once", "daily", "every"] },
+        repeat_days: { type: "number" },
+        channel: { type: "string", enum: ["now", "digest"] },
+        active: { type: "boolean" },
+      },
+      ["op"],
+    ),
+  },
+];
+
 /** Perguntar antes de seguir: nas duas MAVIs, sem poder (é o jeito de trabalhar). */
 export const ASK_TOOL: ToolSpec = {
   name: "ask_user",
@@ -448,6 +512,9 @@ export const REGISTRY: Record<string, ToolMeta> = {
   read_art: { kind: "image", power: "images", timeoutMs: 5_000 },
   propose_task: { kind: "action", power: "actions", timeoutMs: 20_000 },
   propose_comment: { kind: "action", power: "actions", timeoutMs: 20_000 },
+  // Os avisos de campanhas: sem poder (só para quem usa Campanhas).
+  campaign_alerts: { kind: "action", timeoutMs: 20_000 },
+  propose_campaign_alert: { kind: "action", timeoutMs: 30_000 },
   // Com escritor, outro modelo escreve o conteúdo inteiro: pode demorar.
   create_document: { kind: "canvas", power: "canvas", timeoutMs: 170_000 },
   create_presentation: { kind: "canvas", power: "canvas", timeoutMs: 170_000 },
@@ -1198,6 +1265,99 @@ async function proposeComment(kit: PowerKit, input: Record<string, unknown>) {
   return `Proposta pronta como ${a.ref}: a pessoa confirma no card. Nada foi enviado ainda. Na resposta, escreva [[${a.ref}]] sozinho numa linha.`;
 }
 
+// ------------------------------------------------------------ avisos de campanhas
+async function myCampaignAlerts(kit: PowerKit) {
+  const { ctx } = kit;
+  const r = await callRpc<CampaignAlertRule[]>(ctx, ctx.fetch, ctx.auth, "campaign_alert_rules", {
+    p_company: ctx.company,
+    p_campaign: null,
+  });
+  if (!r.ok) throw new Error(r.error);
+  return r.data;
+}
+async function listCampaignAlerts(kit: PowerKit) {
+  const rules = await myCampaignAlerts(kit);
+  if (!rules.length) return "A pessoa ainda não tem avisos de campanhas.";
+  return rules
+    .map(
+      (r) =>
+        `- ${r.id} | ${r.name} | ${describeRule(r)}${r.active ? "" : " | desligado"}${
+          r.last_hit ? ` | último disparo em ${r.last_hit.day}: ${r.last_hit.detail}` : " | nunca disparou"
+        }`,
+    )
+    .join("\n");
+}
+async function proposeCampaignAlert(kit: PowerKit, input: Record<string, unknown>) {
+  const op = (["create", "update", "delete"] as const).find((o) => o === input.op) ?? "create";
+  let base: CampaignAlertRule | null = null;
+  if (op !== "create") {
+    const wanted = str(input.rule_id);
+    const rules = await myCampaignAlerts(kit);
+    base =
+      rules.find((r) => r.id === wanted) ??
+      (findByName(rules.map((r) => ({ ...r, id: r.id! })), wanted).length === 1
+        ? findByName(rules.map((r) => ({ ...r, id: r.id! })), wanted)[0]
+        : null);
+    if (!base) return "Não achei esse aviso: use campaign_alerts para ver os avisos da pessoa e o id.";
+  }
+  if (op === "delete" && base) {
+    const a = add<ActionArtifact>(kit, "A", {
+      type: "action",
+      state: "pending",
+      action: { kind: "campaign_alert", op, rule: base },
+    });
+    return `Proposta pronta como ${a.ref}: excluir o aviso “${base.name}”. Nada foi excluído ainda; a pessoa confirma no cartão. Na resposta, escreva [[${a.ref}]] sozinho numa linha.`;
+  }
+  const cat = await alertCatalog((path) => rest(kit, path), kit.ctx.company);
+  const merged: Record<string, unknown> = { ...(base ?? {}) };
+  for (const k of ["name", "metric", "condition", "period", "days", "value", "tolerance", "with_m", "repeat",
+    "repeat_days", "channel", "active", "platforms", "objectives"])
+    if (input[k] !== undefined && input[k] !== null) merged[k] = input[k];
+  // Os nomes viram ids entre o que a pessoa enxerga.
+  const missing: string[] = [];
+  if (typeof input.campaign === "string") {
+    const wanted = input.campaign.trim();
+    if (!wanted || /^tod[ao]s/i.test(wanted)) merged.campaign_id = null;
+    else {
+      const found = findByName(cat.campaigns, wanted);
+      const active = found.filter((c) => c.status === "active");
+      const pick = active.length === 1 ? active : found;
+      if (!pick.length) return `Não achei a campanha “${wanted}” entre as que a pessoa enxerga. Confirme o nome com ela.`;
+      if (pick.length > 1)
+        return `Há mais de uma campanha com esse nome: ${pick
+          .slice(0, 8)
+          .map((c) => `${c.name} (${c.client} › ${c.product}, ${c.platform})`)
+          .join("; ")}. Pergunte à pessoa qual.`;
+      merged.campaign_id = pick[0].id;
+    }
+  }
+  const resolve = (key: string, list: { id: string; name: string }[], label: string) => {
+    if (!Array.isArray(input[key])) return;
+    const out: string[] = [];
+    for (const raw of input[key] as unknown[]) {
+      const found = findByName(list, str(raw));
+      if (found.length === 1) out.push(found[0].id);
+      else missing.push(`${label} “${str(raw)}”${found.length > 1 ? " (mais de um com esse nome)" : ""}`);
+    }
+    merged[key.replace(/s$/, "_ids")] = out;
+  };
+  resolve("clients", cat.clients, "cliente");
+  resolve("products", cat.products, "produto");
+  resolve("teams", cat.teams, "equipe");
+  if (missing.length) return `Não achei: ${missing.join("; ")}. Confirme os nomes com a pessoa.`;
+  const rule = ruleFromInput({ ...merged, id: base?.id, origin: "mavi" }).rule;
+  if (!rule.name) rule.name = suggestedName(rule);
+  const problem = ruleProblem(rule);
+  if (problem) return `O aviso ainda não fecha: ${problem} Ajuste e proponha de novo (ou pergunte à pessoa).`;
+  const labeled = labelRule(rule, cat);
+  const a = add<ActionArtifact>(kit, "A", {
+    type: "action",
+    state: "pending",
+    action: { kind: "campaign_alert", op, rule: labeled },
+  });
+  return `Proposta pronta como ${a.ref}: ${labeled.name} — ${describeRule(labeled)}. Nada foi gravado ainda; a pessoa confirma no cartão. Na resposta, escreva [[${a.ref}]] sozinho numa linha.`;
+}
+
 export async function runPowerTool(kit: PowerKit, name: string, raw: unknown): Promise<ToolOutput> {
   const input =
     raw && typeof raw === "object" && !Array.isArray(raw)
@@ -1211,6 +1371,8 @@ export async function runPowerTool(kit: PowerKit, name: string, raw: unknown): P
   if (name === "brand_kit" || name === "render_art" || name === "read_art") return runArtTool(kit, name, input);
   if (name === "propose_task") return proposeTask(kit, input);
   if (name === "propose_comment") return proposeComment(kit, input);
+  if (name === "campaign_alerts") return listCampaignAlerts(kit);
+  if (name === "propose_campaign_alert") return proposeCampaignAlert(kit, input);
   return `Ferramenta desconhecida: ${name}.`;
 }
 
@@ -1234,11 +1396,17 @@ export function describePowerStep(name: string, raw: unknown) {
   if (name === "read_art") return `Lendo a arte ${str(input.ref).toUpperCase()}`;
   if (name === "propose_task") return `Preparando a tarefa${t ? ` “${t}”` : ""} para você confirmar`;
   if (name === "propose_comment") return "Preparando o comentário para você confirmar";
+  if (name === "campaign_alerts") return "Lendo os seus avisos de campanhas";
+  if (name === "propose_campaign_alert")
+    return input.op === "delete"
+      ? "Preparando a exclusão do aviso para você confirmar"
+      : `Preparando o aviso${str(input.name) ? ` “${str(input.name).slice(0, 60)}”` : ""} para você confirmar`;
   return "Trabalhando";
 }
 export function summarizePowerStep(name: string, output: string) {
   if (name === "brand_kit" || name === "render_art" || name === "read_art") return summarizeArtStep(name, output);
   if (/^As perguntas/.test(output)) return "esperando suas respostas";
+  if (name === "campaign_alerts") return /^A pessoa ainda/.test(output) ? "nenhum aviso" : `${output.split("\n").length} avisos`;
   if (/^(Mostrado|Imagem pronta|Proposta pronta|Pronto no canvas)/.test(output))
     return name.startsWith("propose_") ? "aguardando sua confirmação" : "pronto";
   return "não deu";

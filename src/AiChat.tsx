@@ -26,7 +26,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { answerPieces, type ChatTurn } from "./meetings";
-import { ARTIFACT_LINE, type AiArtifact } from "./mavi-artifacts";
+import { ARTIFACT_LINE, type ActionArtifact, type AiArtifact } from "./mavi-artifacts";
 import { MaviMarkdown } from "./MaviMarkdown";
 import { QuestionCard } from "./MaviQuestions";
 import {
@@ -76,6 +76,7 @@ export function AnswerText({
   showSources = true,
   renderArtifact,
   rich = false,
+  below,
 }: {
   text: string;
   onTime?: (seconds: number) => void;
@@ -89,6 +90,8 @@ export function AnswerText({
   renderArtifact?: (ref: string) => ReactNode;
   /** Markdown completo (títulos, tabelas, código): o módulo MAVI. */
   rich?: boolean;
+  /** Os anexos que a bolinha desenha logo abaixo da resposta (a linha some). */
+  below?: string[];
 }) {
   const byRef = new Map(sources.map((s) => [s.ref, s]));
   const render = (line: string) =>
@@ -140,7 +143,7 @@ export function AnswerText({
   text.split("\n").forEach((raw, i) => {
     const artifact = raw.match(ARTIFACT_LINE);
     // As perguntas (Q1) a bolinha desenha logo abaixo da resposta.
-    if (artifact && !renderArtifact && artifact[1].startsWith("Q")) return;
+    if (artifact && !renderArtifact && (artifact[1].startsWith("Q") || below?.includes(artifact[1]))) return;
     if (artifact) {
       flush();
       out.push(
@@ -545,6 +548,12 @@ export function useAiTurns({
   return { turns, busy, error, submit, stop, stopping };
 }
 
+/** As ações que a bolinha desenha: os avisos de campanhas. */
+const drawnActions = (list: AiArtifact[] | undefined) =>
+  (list ?? []).filter(
+    (a): a is ActionArtifact => a.type === "action" && a.action.kind === "campaign_alert",
+  );
+
 export function AiChat({
   intro,
   placeholder,
@@ -556,6 +565,7 @@ export function AiChat({
   readOnlyNote,
   onAnswer,
   onRun,
+  renderAction,
 }: {
   intro: ReactNode;
   placeholder: string;
@@ -566,6 +576,8 @@ export function AiChat({
     text: string,
     sources: AiSource[],
     typing: boolean,
+    /** Os anexos desenhados logo abaixo da resposta (para a linha [[A1]] sumir). */
+    below: string[],
   ) => ReactNode;
   /** Uma conversa salva, aberta de novo. */
   initial?: ChatEntry[];
@@ -574,6 +586,8 @@ export function AiChat({
   onAnswer?: (answer: AiAnswer) => void;
   /** A resposta começou no servidor (a conversa já existe). */
   onRun?: (run: { id: string; conversation: string }) => void;
+  /** Os avisos de campanhas que a MAVI propõe (o cartão de confirmação). */
+  renderAction?: (artifact: ActionArtifact, busy: boolean) => ReactNode;
 }) {
   const chat = useAiTurns({ initial, send, readOnly, onAnswer, onRun });
   const { turns, busy, error } = chat;
@@ -641,10 +655,21 @@ export function AiChat({
                   text={t.content}
                   streaming={!!t.streaming}
                   render={(text, typing) =>
-                    renderAnswer(text, typing ? [] : (t.sources ?? []), typing)
+                    renderAnswer(
+                      text,
+                      typing ? [] : (t.sources ?? []),
+                      typing,
+                      renderAction ? drawnActions(t.artifacts).map((a) => a.ref) : [],
+                    )
                   }
                 />
               )}
+              {renderAction &&
+                drawnActions(t.artifacts).map((a) => (
+                  <div key={a.id} className="answer-artifact">
+                    {renderAction(a, busy || !!t.streaming)}
+                  </div>
+                ))}
               {t.artifacts?.map((a) =>
                 a.type === "question" ? (
                   <QuestionCard

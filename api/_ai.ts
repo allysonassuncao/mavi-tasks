@@ -41,8 +41,10 @@ import {
   type ResolvedRoute,
 } from "./_ai-providers.js";
 import { serverModel, embeddingModel } from "../src/ai-providers.js";
+import { ALERT_CHAT_RULES } from "./_campaign-alerts.js";
 import {
   ASK_RULES,
+  CAMPAIGN_ALERT_TOOLS,
   REGISTRY,
   add,
   describePowerStep,
@@ -432,11 +434,12 @@ export async function buildContext(
       role: string;
       active: boolean;
       hidden_pages?: string[] | null;
+      shown_pages?: string[] | null;
     }>(
       env,
       deps,
       auth,
-      `memberships?select=user_id,name,email,role,active,hidden_pages&company_id=eq.${company}`,
+      `memberships?select=user_id,name,email,role,active,hidden_pages,shown_pages&company_id=eq.${company}`,
     ),
     rest<{ id: string; name: string }>(
       env,
@@ -560,6 +563,12 @@ export async function buildContext(
     today,
     /** Os módulos que um administrador escondeu de quem pergunta. */
     hidden: me.hidden_pages ?? [],
+    /** Quem pergunta usa Campanhas (os avisos de campanhas entram na conversa). */
+    campaigns:
+      !(me.hidden_pages ?? []).includes("campaigns") &&
+      (me.role === "admin" ||
+        me.role === "manager" ||
+        (me.role === "member" && (me.shown_pages ?? []).includes("campaigns"))),
   };
 }
 
@@ -1094,6 +1103,8 @@ async function ask(
     ),
     ...(mcp?.tools ?? []),
     ...(attachments.some((a) => a.status === "ready") ? ATTACH_TOOLS : []),
+    // Os avisos de campanhas: para quem usa Campanhas, nas duas MAVIs.
+    ...(base.campaigns ? CAMPAIGN_ALERT_TOOLS : []),
     // Tarefas longas: só no módulo MAVI (a conversa fica salva e o card aparece).
     ...(onPage ? [PLAN_TOOL] : []),
   ];
@@ -1402,6 +1413,7 @@ async function ask(
     (skills.catalog.size || picked.length ? SKILL_RULES : "") +
     (mcp?.tools.length ? MCP_RULES : "") +
     (attachments.length ? ATTACH_RULES : "") +
+    (base.campaigns ? ALERT_CHAT_RULES : "") +
     (onPage ? TASK_RULES : "");
   const turnContext =
     base.context +

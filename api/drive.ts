@@ -25,6 +25,7 @@ import { handleCases } from "./_cases.js";
 import { handleNotices } from "./_notices.js";
 import { handleNoticeWriter } from "./_notice-writer.js";
 import { handleReportWriter } from "./_campaign-report-writer.js";
+import { handleCampaignAlertWriter } from "./_campaign-alerts.js";
 import { handleSkillCoach } from "./_skill-coach.js";
 import { handleDashboardBuilder } from "./_dashboard-mavi.js";
 import { handleNoticeAnimate } from "./_notice-animation.js";
@@ -464,6 +465,13 @@ export default async function handler(
         model: serverModel("campaign_report", process.env),
       };
       result = await handleReportWriter(body, authorization, env, aiDeps(env));
+    } else if (action === "campaign-alert-mavi") {
+      // "Descreva o aviso" em Campanhas › Meus avisos (funcionalidade 'campaign_alerts').
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("campaign_alerts", process.env),
+      };
+      result = await handleCampaignAlertWriter(body, authorization, env, aiDeps(env));
     } else if (action === "skill-mavi") {
       // O validador e o assistente das skills (funcionalidade 'skill_coach').
       const env = {

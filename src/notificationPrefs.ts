@@ -61,6 +61,11 @@ export const NOTICE_TYPES: {
     hint: "Quando um relatório do Radar que você pediu ou agendou fica pronto.",
   },
   {
+    key: "campaign_alert",
+    label: "Meus avisos de campanhas",
+    hint: "Os avisos que você criou em Campanhas › Meus avisos, na hora ou no resumo das 11h.",
+  },
+  {
     key: "media_balance",
     label: "Saldo de mídia",
     hint: "Quando a conta de mídia de um cliente seu (Financeiro › Mídia) fica abaixo do saldo mínimo ou negativa.",

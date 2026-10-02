@@ -213,7 +213,13 @@ describe("poderes no módulo MAVI", () => {
     const { fetchImpl, calls } = world(base(["visuals"]));
     let failed = "";
     const llm: LlmAdapter = async (r) => {
-      expect(r.tools.map((t) => t.name)).toEqual([...TOOLS.map((t) => t.name), "ask_user"]);
+      // Sem poderes; os avisos de campanhas entram para quem usa Campanhas (sem poder).
+      expect(r.tools.map((t) => t.name)).toEqual([
+        ...TOOLS.map((t) => t.name),
+        "ask_user",
+        "campaign_alerts",
+        "propose_campaign_alert",
+      ]);
       await r.execute("show_chart", {}).catch((e) => (failed = e.message));
       return answer("Ok.");
     };

@@ -200,7 +200,9 @@ export interface AppNotification {
     /** Copiloto: aprendizados novos da MAVI para conferir, um aviso por lote (link /mavi#copiloto). */
     | "copilot_lessons"
     /** Aprendizado da MAVI: aprendizados novos das respostas para conferir (link /mavi#aprendizado). */
-    | "mavi_lessons";
+    | "mavi_lessons"
+    /** Campanhas › Meus avisos: uma regra da pessoa disparou (link /campanhas?campanha=<id>) ou o resumo do dia (link /campanhas?avisos=historico). */
+    | "campaign_alert";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

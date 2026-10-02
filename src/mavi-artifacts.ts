@@ -9,6 +9,9 @@
  * Uma ação é só uma proposta: nada muda até a pessoa confirmar.
  */
 
+// Com .js: este arquivo também roda no servidor (api/), que não completa a extensão.
+import { ruleFromInput, type CampaignAlertRule } from "./campaign-alerts.js";
+
 export type Power =
   | "visuals"
   | "images"
@@ -147,6 +150,12 @@ export type ActionProposal =
       text: string;
     }
   | {
+      /** Campanhas › Meus avisos: criar, mudar ou excluir um aviso da pessoa. */
+      kind: "campaign_alert";
+      op: "create" | "update" | "delete";
+      rule: CampaignAlertRule;
+    }
+  | {
       /** Uma ferramenta de uma conexão (MCP) que altera algo no serviço. */
       kind: "mcp_call";
       server_id: string;
@@ -190,6 +199,8 @@ export type ActionArtifact = Base & {
   result?: {
     task_id?: string;
     comment_id?: string;
+    /** O aviso de campanha criado ou mudado. */
+    rule_id?: string;
     error?: string;
     /** O que a conexão (MCP) respondeu. */
     text?: string;
@@ -608,6 +619,13 @@ function sanitizeAction(raw: unknown): ActionProposal | null {
       text: body,
     };
   }
+  if (a.kind === "campaign_alert") {
+    const op = pick(a.op, ["create", "update", "delete"] as const, "create");
+    const { rule, error } = ruleFromInput(a.rule);
+    if (op !== "create" && !rule.id) return null;
+    if (op !== "delete" && error) return null;
+    return { kind: "campaign_alert", op, rule };
+  }
   if (a.kind === "mcp_call") {
     const server_id = text(a.server_id, 40);
     const tool = text(a.tool, 128);
@@ -702,6 +720,7 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       ? {
           ...(UUID.test(text(r.task_id, 40)) ? { task_id: text(r.task_id, 40) } : {}),
           ...(text(r.comment_id, 40) ? { comment_id: text(r.comment_id, 40) } : {}),
+          ...(UUID.test(text(r.rule_id, 40)) ? { rule_id: text(r.rule_id, 40) } : {}),
           ...(text(r.error, 300) ? { error: text(r.error, 300) } : {}),
           ...(text(r.text, 1600) ? { text: text(r.text, 1600) } : {}),
           ...(r.running === true ? { running: true } : {}),
@@ -773,6 +792,8 @@ export function artifactSummary(a: AiArtifact): string {
       ? `criar a tarefa “${a.action.title}”`
       : a.action.kind === "mcp_call"
         ? `${a.action.server_name} › ${a.action.tool_title || a.action.tool}`
+        : a.action.kind === "campaign_alert"
+          ? `${{ create: "criar", update: "mudar", delete: "excluir" }[a.action.op]} o aviso de campanha “${a.action.rule.name}”`
         : `comentar na tarefa “${a.action.task_title}”`;
   const said = a.result?.text
     ? ` (resposta: ${a.result.text.slice(0, 400)})`

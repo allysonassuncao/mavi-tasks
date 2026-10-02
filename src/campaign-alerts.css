@@ -1,0 +1,436 @@
+/* Campanhas › Meus avisos (CampaignAlerts.tsx). */
+.modal.calert-modal {
+  width: 820px;
+}
+.calert {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 24px 24px;
+}
+.calert-note,
+.calert-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.calert-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.calert-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+.calert-tabs button[aria-selected="true"] {
+  border-bottom-color: #4a3aa7;
+  color: var(--ink);
+}
+.calert-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.calert-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+.calert-filter,
+.calert-scope {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f6f7f8;
+}
+.calert-filter button,
+.calert-scope button {
+  max-width: 260px;
+  padding: 5px 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.calert-filter button[aria-pressed="true"],
+.calert-scope button[aria-checked="true"] {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+.calert-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.85rem;
+}
+.calert-empty strong {
+  color: var(--ink);
+}
+.calert-empty svg {
+  color: #4a3aa7;
+}
+.calert-list,
+.calert-hits {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.calert-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+}
+.calert-list li.off .calert-item {
+  opacity: 0.55;
+}
+.calert-list .template-switch {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.calert-item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.calert-item strong {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.calert-item > span {
+  font-size: 0.88rem;
+}
+.calert-item small {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.calert-last {
+  overflow-wrap: anywhere;
+}
+.calert-mavi {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #efeafe;
+  color: #4a3aa7;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.calert-item-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+.calert-hits li {
+  display: flex;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.calert-hits li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.calert-hits small {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.calert-hits .text-btn {
+  padding: 0;
+  font-size: inherit;
+}
+.calert-hit-day {
+  flex-shrink: 0;
+  min-width: 44px;
+  color: #4a3aa7;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Formulário */
+.calert-mavi-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #ddd5fb;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #f7f4ff, #fff);
+}
+.calert-mavi-box > label {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 6px;
+  color: #4a3aa7;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.calert-mavi-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.calert-mavi-row textarea {
+  flex: 1;
+  min-height: 44px;
+  resize: vertical;
+}
+.calert-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.calert-examples .chip {
+  cursor: pointer;
+}
+.calert-mavi-note {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.calert-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.calert-fieldset legend {
+  padding: 0 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.calert-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+.calert-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.calert-pick,
+.calert-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.calert-pick > span,
+.calert-checks > span {
+  min-width: 112px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.calert-pick > div {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.calert-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.calert-chip button {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.calert-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.calert-picker .chip {
+  align-self: flex-start;
+  cursor: pointer;
+}
+.calert-picker ul {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  list-style: none;
+}
+.calert-picker li + li {
+  border-top: 1px solid var(--border);
+}
+.calert-picker li button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.calert-picker li button:hover {
+  background: #f6f7f8;
+}
+.calert-picker small,
+.calert-picked small {
+  color: var(--muted);
+}
+.calert-picked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #f6f7f8;
+}
+.calert-m {
+  align-self: flex-start;
+}
+.calert-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f1f7e6;
+  color: #2d3e27;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+.calert-summary svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.calert-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.calert-preview > small {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.calert-preview ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.calert-preview li {
+  display: grid;
+  grid-template-columns: 10px minmax(140px, 1fr) 2fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+.calert-preview li small {
+  color: var(--muted);
+}
+.calert-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c9d3cf;
+}
+.calert-preview li.met .calert-dot {
+  background: #e0574f;
+}
+.calert-preview li.met b {
+  color: #b23c35;
+}
+.calert-preview li.na {
+  opacity: 0.6;
+}
+.calert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .calert-list li {
+    flex-wrap: wrap;
+  }
+  .calert-item-actions {
+    margin-left: auto;
+  }
+  .calert-mavi-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .calert-preview li {
+    grid-template-columns: 10px 1fr;
+  }
+  .calert-preview li > small {
+    grid-column: 2;
+  }
+  .calert-pick > span,
+  .calert-checks > span {
+    min-width: 100%;
+  }
+}

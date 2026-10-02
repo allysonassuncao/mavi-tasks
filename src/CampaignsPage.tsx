@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   ArrowLeft,
+  BellRing,
   CalendarClock,
   CirclePause,
   CirclePlay,
@@ -104,6 +105,7 @@ import {
   type ReportsBackend,
 } from "./campaign-reports";
 import { GoogleConversions } from "./CampaignConversions";
+import { CampaignAlerts, type AlertCampaignOption } from "./CampaignAlerts";
 
 type Props = {
   demo: boolean;
@@ -202,6 +204,15 @@ export function CampaignsPage({
   const [, setViewedCycle] = useUrlState<string>("ciclo", "");
   const [, setTimelineTab] = useUrlState<string>("linha", "");
   const [, setOpenReport] = useUrlState<string>("relatorio", "");
+  // Meus avisos (lista, historico ou novo): aberto da lista ou de uma campanha.
+  const [alertsView, setAlertsView] = useUrlState<string>("avisos", "");
+  const searchCampaigns = useCallback(
+    (term: string): Promise<AlertCampaignOption[]> =>
+      backend
+        .page(company, { scope: "active", search: term, platform: "", attention: false, limit: 20, offset: 0 })
+        .then((r) => r.rows.map((row) => ({ id: row.campaign.id, name: row.campaign.name, client: row.client_name }))),
+    [backend, company],
+  );
   const [campaignForm, setCampaignForm] = useState<CampaignFormState>(null);
   const [cycleForm, setCycleForm] = useState<CycleFormState>(null);
   const [statusForm, setStatusForm] = useState<StatusFormState>(null);
@@ -277,6 +288,7 @@ export function CampaignsPage({
           connectionTick={connectionTick}
           onPending={setPending}
           canEdit={canEdit}
+          onAlerts={() => setAlertsView("lista")}
           onBack={() => {
             setTab("");
             setViewedCycle("");
@@ -310,7 +322,32 @@ export function CampaignsPage({
           onOpen={(id) => setSelected(id)}
           onNew={() => setCampaignForm({})}
           onConnections={canEdit ? () => setConnections(true) : undefined}
+          onAlerts={() => setAlertsView("lista")}
           demo={demo}
+        />
+      )}
+      {alertsView && (
+        <CampaignAlerts
+          company={company}
+          data={data}
+          campaign={
+            campaign
+              ? {
+                  id: campaign.id,
+                  name: campaign.name,
+                  client: contractParts(data, campaign.contract_id).client?.name ?? "",
+                }
+              : null
+          }
+          view={alertsView}
+          onView={setAlertsView}
+          onClose={() => setAlertsView("")}
+          onOpenCampaign={(id) => {
+            setAlertsView("");
+            setSelected(id);
+          }}
+          searchCampaigns={searchCampaigns}
+          notify={notify}
         />
       )}
       {canEdit && campaignForm && (
@@ -543,6 +580,7 @@ function CampaignList({
   onOpen,
   onNew,
   onConnections,
+  onAlerts,
   demo,
 }: {
   backend: CampaignsBackend;
@@ -556,6 +594,8 @@ function CampaignList({
   onNew: () => void;
   /** Absent: read-only (no "Conexões"). */
   onConnections?: () => void;
+  /** Meus avisos. */
+  onAlerts: () => void;
   demo: boolean;
 }) {
   const [query, setQuery] = useUrlState<string>("busca", "");
@@ -710,6 +750,13 @@ function CampaignList({
             <span aria-hidden="true" />
             {withM ? "Com M aplicado" : "Sem M"}
           </button>
+          <Button
+            className="btn secondary"
+            onClick={onAlerts}
+            title="Avisos que você configura sobre os números das campanhas"
+          >
+            <BellRing size={16} /> Meus avisos
+          </Button>
           {onConnections && (
             <Button
               className="btn secondary"
@@ -927,6 +974,7 @@ function CampaignDetail({
   connectionTick,
   onPending,
   canEdit,
+  onAlerts,
   onBack,
   onEdit,
   onStatus,
@@ -949,6 +997,8 @@ function CampaignDetail({
   onPending: (id: string) => void;
   /** False: a collaborator's read-only view. */
   canEdit: boolean;
+  /** Meus avisos, com os desta campanha primeiro. */
+  onAlerts: () => void;
   onBack: () => void;
   onEdit: () => void;
   onStatus: (to: AdCampaignStatus) => void;
@@ -985,8 +1035,16 @@ function CampaignDetail({
         ? alert.suggestion
         : null;
 
-  const actions = canEdit && (
+  const alertsButton = (
+    <Button className="btn secondary" onClick={onAlerts} title="Avisos desta campanha (Meus avisos)">
+      <BellRing size={15} /> Avisos
+    </Button>
+  );
+  const actions = !canEdit ? (
+    alertsButton
+  ) : (
     <>
+      {alertsButton}
       <Button className="btn secondary" onClick={onEdit}>
         <Pencil size={15} /> Editar
       </Button>

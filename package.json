@@ -24,6 +24,7 @@
     "test:db:meeting-shares": "node scripts/test-meeting-shares.mjs",
     "test:db:campaign-reports": "node scripts/test-campaign-reports.mjs",
     "test:db:finance-media": "node scripts/test-finance-media.mjs",
+    "test:db:campaign-alerts": "node scripts/test-campaign-alerts.mjs",
     "test:db:ai": "node scripts/test-ai-knowledge.mjs",
     "test:db:ai-assistant": "node scripts/test-ai-assistant.mjs",
     "test:db:ai-sources": "node scripts/test-ai-sources.mjs",

@@ -51,6 +51,8 @@ const TOOL_LABELS: Record<string, string> = {
   generate_image: "Gerar ou editar imagem (Imagens)",
   propose_task: "Propor tarefa (Ações)",
   propose_comment: "Propor comentário (Ações)",
+  campaign_alerts: "Ler os avisos de campanhas",
+  propose_campaign_alert: "Propor aviso de campanha",
 };
 const MODULE_LABELS: Record<string, string> = {
   assistant: "Assistente (MAVI)",
