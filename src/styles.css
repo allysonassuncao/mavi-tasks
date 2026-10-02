@@ -28234,7 +28234,8 @@ a.radar-task-chip:hover {
 
 /* Painel do item */
 .modal.sheet.radar-sheet {
-  width: 720px;
+  /* Largura para a tabela de tarefas caber com todas as colunas da lista. */
+  width: min(800px, 100vw);
   inset: 0 0 0 auto;
   height: 100dvh;
   max-height: 100dvh;
@@ -28644,31 +28645,26 @@ a.radar-task-chip:hover {
   justify-content: space-between;
   gap: 10px;
 }
-.radar-tasks ul {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.radar-tasks li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  padding: 8px 12px;
+/* As tarefas do item, na mesma tabela da lista de Tarefas. */
+.radar-task-table {
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  background: #fff;
 }
-.radar-tasks li a {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  color: var(--ink);
+/* O painel é mais estreito que a página: menos respiro, e a tarefa com espaço. */
+.radar-task-table .task-table th,
+.radar-task-table .task-table td {
+  padding: 12px 10px;
 }
-.radar-tasks li small,
+.radar-task-table .task-table th:first-child,
+.radar-task-table .task-table td:first-child {
+  min-width: 220px;
+  padding-left: 14px;
+}
+.radar-task-table tbody tr:last-child td {
+  border-bottom: 0;
+}
 .radar-tasks p {
   margin: 0;
   color: var(--muted);

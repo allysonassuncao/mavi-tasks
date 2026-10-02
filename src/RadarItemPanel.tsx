@@ -1,10 +1,13 @@
-import { useEffect, useState, type CSSProperties } from "react";
-import { AlertTriangle, CheckSquare, ExternalLink, Layers, MessageCircle, Plus, RotateCcw, Video } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { AlertTriangle, ExternalLink, Layers, MessageCircle, Plus, RotateCcw, Video } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import { Modal } from "./components";
-import { statuses, type Member, type Snapshot, type Status } from "./types";
+import { type Member, type Snapshot, type Task } from "./types";
 import type { FormPreset } from "./forms";
 import { appPath, openInApp } from "./temperature";
+import { tasksByIds } from "./api";
+import { buildNameLookup, dateKey } from "./domain";
+import { TaskTable } from "./TaskTable";
 import {
   SEVERITY_COLORS,
   clock,
@@ -20,6 +23,7 @@ import {
   updateItem,
   type RadarItemDetail,
   type RadarPatch,
+  type RadarTask,
   type ThemeMove,
 } from "./radar";
 
@@ -27,6 +31,24 @@ const NONE = "__none__";
 const AUTO = "__auto__";
 const NEW = "__new__";
 const ROLE: Record<string, string> = { client: "cliente", team: "time", unknown: "não identificado" };
+const UUID = /^[0-9a-f-]{36}$/i;
+/**
+ * Uma tarefa que a lista não trouxe (a demonstração, uma linha fora do
+ * alcance da pessoa): o que o Radar sabe dela, com o produto do item.
+ */
+function stub(t: RadarTask, item: RadarItemDetail, members: Member[], data?: Snapshot) {
+  const contract = data?.contracts.find((c) => c.client_id === item.client_id && c.product_id === item.product_id);
+  const person = members.find((m) => m.name === t.assignee_name);
+  return {
+    ...t,
+    company_id: "",
+    contract_id: contract?.id ?? "",
+    parent_id: null,
+    assignee_id: person?.user_id ?? "",
+    creator_id: "",
+    priority: null,
+  } as unknown as Task;
+}
 
 /**
  * Um item do Radar: o que a MAVI entendeu, o andamento (status,
@@ -67,6 +89,9 @@ export function RadarItemPanel({
   const [summary, setSummary] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [newTheme, setNewTheme] = useState<string | null>(null);
+  // As tarefas do item como a lista de Tarefas as mostra (as colunas da lista).
+  const [rows, setRows] = useState<Task[] | null>(null);
+  const taskIds = item?.tasks.map((t) => t.id).join(",") ?? "";
 
   useEffect(() => {
     loadItem(company, itemId)
@@ -78,6 +103,30 @@ export function RadarItemPanel({
       })
       .catch((e) => setError((e as Error).message));
   }, [company, itemId]);
+
+  useEffect(() => {
+    if (!item) return;
+    const known = item.tasks;
+    if (!known.length) {
+      setRows([]);
+      return;
+    }
+    let alive = true;
+    // Na demonstração, as tarefas do exemplo; no banco, as linhas atuais.
+    (UUID.test(company) ? tasksByIds(company, known.map((t) => t.id)) : Promise.resolve([] as Task[]))
+      .catch(() => [] as Task[])
+      .then((found) => {
+        if (!alive) return;
+        const byId = new Map([...(data?.tasks ?? []), ...found].map((t) => [t.id, t]));
+        setRows(known.map((t) => byId.get(t.id) ?? stub(t, item, members, data)));
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company, taskIds]);
+  const lookup = useMemo(() => (data ? buildNameLookup(data) : null), [data]);
+  const today = dateKey(new Date(), data?.companies.find((c) => c.id === company)?.timezone);
 
   async function save(patch: RadarPatch) {
     if (!item) return;
@@ -393,30 +442,23 @@ export function RadarItemPanel({
                 )}
               </div>
               {item.tasks.length ? (
-                <ul>
-                  {item.tasks.map((t) => {
-                    const st = statuses[t.status as Status];
-                    return (
-                      <li key={t.id}>
-                        <a
-                          href={appPath(`/tarefas/${t.id}`)}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            onClose();
-                            openInApp(`/tarefas/${t.id}`);
-                          }}
-                        >
-                          <CheckSquare size={14} aria-hidden="true" /> {t.title}
-                        </a>
-                        <small>
-                          {st?.label ?? t.status}
-                          {t.assignee_name && ` · ${t.assignee_name}`}
-                          {t.due_date && ` · até ${dateBr(t.due_date)}`}
-                        </small>
-                      </li>
-                    );
-                  })}
-                </ul>
+                !rows || !lookup ? (
+                  <Loading variant="list" />
+                ) : (
+                  <div className="radar-task-table">
+                    <TaskTable
+                      tasks={rows}
+                      me={user}
+                      lookup={lookup}
+                      today={today}
+                      onSelect={(id) => {
+                        onClose();
+                        openInApp(`/tarefas/${id}`);
+                      }}
+                      parentTitle={(id) => data?.tasks.find((t) => t.id === id)?.title}
+                    />
+                  </div>
+                )
               ) : (
                 <p className="muted">Nenhuma tarefa ainda. A tarefa criada aqui já vem com as falas e o link do item.</p>
               )}

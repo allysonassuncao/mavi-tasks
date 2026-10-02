@@ -868,6 +868,22 @@ export async function taskById(
   );
 }
 
+/**
+ * A few known tasks (e.g. the ones made from a Radar item) with the list's
+ * columns, as the task list shows them; RLS drops what the person can't see.
+ */
+export async function tasksByIds(company: string, ids: string[]): Promise<Task[]> {
+  if (!supabase || !ids.length) return [];
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(LIST_COLUMNS)
+    .eq("company_id", company)
+    .eq("archived", false)
+    .in("id", ids);
+  if (error) throw error;
+  return (data ?? []) as unknown as Task[];
+}
+
 /** The person's running timers, oldest first (more than one with multi_timer). */
 export async function currentTimers(): Promise<TimeEntry[]> {
   if (!supabase) return [];
