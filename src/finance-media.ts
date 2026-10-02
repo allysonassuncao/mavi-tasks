@@ -123,6 +123,13 @@ export interface MediaBackend {
   setMinBalance(contract: string, min: number | null): Promise<void>;
   /** Uploads a receipt of the entry (the GCS, as task attachments). */
   attach(entry: string, file: File): Promise<void>;
+  /**
+   * How much administrators and managers may release above the available
+   * when registering a campaign cycle (migration 20270222090000).
+   */
+  overrideCap(): Promise<number>;
+  /** Administrators only. */
+  setOverrideCap(cap: number): Promise<number>;
 }
 
 const num = (v: unknown) => (v === null || v === undefined ? 0 : Number(v));
@@ -233,6 +240,17 @@ export function supabaseMedia(company: string): MediaBackend {
         throw error;
       }
       await rpc("confirm_media_receipt", { p_receipt: receipt.id });
+    },
+    async overrideCap() {
+      const r = (await rpc("media_settings", { p_company: company })) as { override_cap: number };
+      return num(r.override_cap);
+    },
+    async setOverrideCap(cap) {
+      const r = (await rpc("set_media_override_cap", {
+        p_company: company,
+        p_cap: cap,
+      })) as { override_cap: number };
+      return num(r.override_cap);
     },
   };
 }
@@ -477,6 +495,7 @@ export function demoMedia(data: () => Snapshot, user: string): MediaBackend {
     entries: 0,
   }));
   const mins = new Map<string, number | null>();
+  let overrideCap = 1000;
   const entries: DemoEntry[] = [];
   // Four active accounts and one of a former client (the "Arquivados" filter).
   const contracts = [
@@ -740,6 +759,13 @@ export function demoMedia(data: () => Snapshot, user: string): MediaBackend {
         created_at: new Date().toISOString(),
       });
       await later(null);
+    },
+    async overrideCap() {
+      return later(overrideCap);
+    },
+    async setOverrideCap(cap) {
+      overrideCap = Math.round(cap * 100) / 100;
+      return later(overrideCap);
     },
   };
 }

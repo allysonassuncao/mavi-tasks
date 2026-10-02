@@ -8,6 +8,7 @@ import {
   Paperclip,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Tags,
   Undo2,
   Wallet,
@@ -114,6 +115,14 @@ export function FinanceMediaPage({
   const [statuses, setStatuses] = useState<ClientStatus[]>(["active"]);
   const [entryFor, setEntryFor] = useState<{ contract: string; kind: MediaKind } | null>(null);
   const [showCategories, setShowCategories] = useState(false);
+  const [showCap, setShowCap] = useState(false);
+  // From a campaign's "Lançar entrada" (?contrato=<id>&lancar=entrada).
+  const [launch, setLaunch] = useUrlState<string>("lancar", "");
+  useEffect(() => {
+    if (launch !== "entrada") return;
+    setLaunch("");
+    setEntryFor({ contract: selected, kind: "credit" });
+  }, [launch, setLaunch, selected]);
   // Bumped on each change heard live: the statement reloads itself.
   const [tick, setTick] = useState(0);
 
@@ -320,6 +329,15 @@ export function FinanceMediaPage({
               <Tags size={15} aria-hidden="true" /> Categorias
             </Button>
           )}
+          {list.is_admin && (
+            <Button
+              className="btn secondary"
+              onClick={() => setShowCap(true)}
+              title="Quanto administradores e gestores podem liberar acima do saldo ao cadastrar um ciclo de campanha"
+            >
+              <ShieldCheck size={15} aria-hidden="true" /> Liberação
+            </Button>
+          )}
           <Button
             className="btn primary"
             onClick={() => setEntryFor({ contract: selected, kind: "credit" })}
@@ -427,6 +445,16 @@ export function FinanceMediaPage({
             if (contract !== selected) setSelected(contract);
             if (!accounts.some((a) => a.contract_id === contract)) setAll(true);
             changed(contract);
+          }}
+        />
+      )}
+      {showCap && (
+        <OverrideCapModal
+          media={media}
+          onClose={() => setShowCap(false)}
+          onSaved={(cap) => {
+            setShowCap(false);
+            notify(cap > 0 ? `Liberação de até ${money(cap)} acima do saldo.` : "Liberação acima do saldo desligada.");
           }}
         />
       )}
@@ -1114,6 +1142,72 @@ function MinBalanceModal({
           </Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** The release cap of the cycles' budget (migration 20270222090000). */
+function OverrideCapModal({
+  media,
+  onClose,
+  onSaved,
+}: {
+  media: MediaBackend;
+  onClose: () => void;
+  onSaved: (cap: number) => void;
+}) {
+  const [value, setValue] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    media
+      .overrideCap()
+      .then((cap) => setValue(cap.toLocaleString("pt-BR", { minimumFractionDigits: 2 })))
+      .catch((e) => {
+        setValue("");
+        setError((e as Error).message);
+      });
+  }, [media]);
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (saving || value === null) return;
+    const cap = value.trim() ? parseMoney(value) : 0;
+    if (Number.isNaN(cap) || cap < 0) return setError("Informe um valor em reais, zero ou mais.");
+    setSaving(true);
+    setError("");
+    try {
+      onSaved(await media.setOverrideCap(Math.round(cap * 100) / 100));
+    } catch (err) {
+      setError((err as Error).message);
+      setSaving(false);
+    }
+  }
+  return (
+    <Modal title="Liberação acima do saldo" onClose={() => !saving && onClose()} busy={saving}>
+      {value === null ? (
+        <Loading compact />
+      ) : (
+        <form className="entity-form" onSubmit={submit}>
+          <label>
+            Valor máximo da liberação (R$)
+            <Input inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Ex.: 2.000,00" />
+            <small>
+              Nas Campanhas, a verba de um ciclo precisa caber no saldo de mídia do cliente (saldo menos o que os ciclos
+              abertos ainda vão gastar). Administradores e gestores podem passar por cima, com um motivo, até este valor
+              acima do disponível; a liberação fica no histórico da campanha. Zero desliga a liberação.
+            </small>
+          </label>
+          {error && <p className="form-error">{error}</p>}
+          <div className="form-footer">
+            <Button type="button" className="btn secondary" onClick={onClose} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button type="submit" className="btn primary" loading={saving}>
+              Salvar
+            </Button>
+          </div>
+        </form>
+      )}
     </Modal>
   );
 }

@@ -76,6 +76,7 @@
     "test:db:dashboard-mavi": "node scripts/test-dashboard-mavi.mjs",
     "test:db:agenda": "node scripts/test-google-calendar.mjs",
     "test:db:campaigns": "node scripts/test-ad-campaigns.mjs",
+    "test:db:campaign-media": "node scripts/test-campaign-media-room.mjs",
     "test:db:make-leads": "node scripts/test-make-leads.mjs",
     "test:db:import-maso": "node scripts/test-import-maso.mjs",
     "test:db:import-maso-tasks": "node --experimental-strip-types --no-warnings scripts/test-import-maso-tasks.mjs",

@@ -3,9 +3,10 @@
 // sync of a campaign's current cycle — conditions, windows, M, repetition,
 // delivery (now or the day's digest), who may create and who receives.
 import assert from "node:assert/strict";
-import { createTestDatabase } from "./database-fixture.mjs";
+import { createTestDatabase, fundMediaAccounts } from "./database-fixture.mjs";
 
 const db = await createTestDatabase();
+await fundMediaAccounts(db);
 const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const [A, admin, trafego, other] = [1, 10, 12, 13].map(uid);
 await db.query(`insert into auth.users select unnest($1::uuid[])`, [[admin, trafego, other]]);

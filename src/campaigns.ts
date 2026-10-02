@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { fetchAllRows, rpc } from "./api";
 import type { MetricsBackend } from "./campaign-metrics";
+import { loadMediaRoom, type MediaRoom } from "./campaign-media";
 
 /**
  * Campanhas (tráfego pago): each belongs to a contracted product and goes
@@ -481,12 +482,23 @@ export interface CampaignsBackend {
   setCurrentCycle(campaign: AdCampaign, cycle: string): Promise<void>;
   /** Google: which conversion actions count (null: by category). */
   setConversionActions(cycle: AdCycle, actions: string[] | null): Promise<void>;
+  /**
+   * `override`: the reason an administrator or manager gives to release a
+   * budget above the client's media balance (migration 20270222090000).
+   */
   createCycle(
     campaign: AdCampaign,
     input: CycleInput,
     makeCurrent: boolean,
+    override?: string | null,
   ): Promise<string>;
-  updateCycle(cycle: AdCycle, input: CycleInput): Promise<void>;
+  updateCycle(
+    cycle: AdCycle,
+    input: CycleInput,
+    override?: string | null,
+  ): Promise<void>;
+  /** The client's media balance, reserved and available (Financeiro › Mídia). */
+  mediaRoom(campaign: AdCampaign): Promise<MediaRoom>;
   /** The platforms' accounts and campaigns, read live (api/_ads.ts). */
   ads: AdsBackend;
   /** Each cycle's numbers (the daily sync, api/_ads-sync.ts). */
@@ -1030,20 +1042,23 @@ export const supabaseCampaigns: CampaignsBackend = {
       p_actions: actions,
     });
   },
-  async createCycle(campaign, input, makeCurrent) {
+  async createCycle(campaign, input, makeCurrent, override) {
     return (await rpc("create_ad_cycle", {
       p_campaign: campaign.id,
       ...cycleArgs(input),
       p_make_current: makeCurrent,
+      p_media_override: override || null,
     })) as string;
   },
-  async updateCycle(cycle, input) {
+  async updateCycle(cycle, input, override) {
     await rpc("update_ad_cycle", {
       p_cycle: cycle.id,
       p_version: cycle.version,
       ...cycleArgs(input),
+      p_media_override: override || null,
     });
   },
+  mediaRoom: (campaign) => loadMediaRoom(campaign.id),
   ads: serverAds,
   // Loaded on demand (and keeps campaign-metrics.ts out of this module).
   metrics: {

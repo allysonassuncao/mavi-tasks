@@ -3,9 +3,10 @@
 // by hand. Administrators and managers use the module; a collaborator only
 // reads it when an administrator turns it on (20270105090000).
 import assert from "node:assert/strict";
-import { createTestDatabase } from "./database-fixture.mjs";
+import { createTestDatabase, fundMediaAccounts } from "./database-fixture.mjs";
 
 const db = await createTestDatabase();
+await fundMediaAccounts(db);
 const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const [A, B, admin, admin2, manager, trafego, outsider] = [
   1, 2, 10, 11, 12, 13, 14,

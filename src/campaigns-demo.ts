@@ -4,6 +4,7 @@ import {
   addDays,
   currentCycle,
   cycleAlert,
+  money,
   monthlyEnd,
   shortDate,
   type AdCampaign,
@@ -21,7 +22,8 @@ import {
   type CampaignsBackend,
   type CycleInput,
 } from "./campaigns";
-import { dateKey } from "./domain";
+import { contractParts, dateKey } from "./domain";
+import { cycleFit, demoMediaRoom } from "./campaign-media";
 import {
   dateRange,
   type CampaignMetrics,
@@ -110,6 +112,70 @@ export function demoCampaigns(
           `A campanha ${l.campaign_name || l.campaign_id} da plataforma já está vinculada à campanha "${store.campaigns.find((c) => c.id === taken.campaign_id)?.name}"`,
         );
     }
+  }
+  // As in the database: the budget must fit the client's media available.
+  const mediaRoomOf = (a: AdCampaign) => {
+    const today = dateKey(new Date());
+    const parts = contractParts(data(), a.contract_id);
+    const open = store.cycles
+      .filter((y) => y.end_date >= today)
+      .flatMap((y) => {
+        const c = store.campaigns.find((x) => x.id === y.campaign_id);
+        return c && !c.archived && c.contract_id === a.contract_id
+          ? [
+              {
+                cycle_id: y.id,
+                campaign_id: c.id,
+                campaign_name: c.name,
+                start_date: y.start_date,
+                end_date: y.end_date,
+                budget: y.budget,
+                spent: 0,
+                remaining: y.budget,
+              },
+            ]
+          : [];
+      });
+    return demoMediaRoom(
+      {
+        id: a.contract_id,
+        client: parts.client?.name ?? "",
+        product: parts.product?.name ?? "",
+      },
+      open,
+    );
+  };
+  function mediaGuard(
+    a: AdCampaign,
+    cycle: string | null,
+    input: CycleInput,
+    override?: string | null,
+  ) {
+    const room = mediaRoomOf(a);
+    const fit = cycleFit(
+      room,
+      { id: cycle, end_date: input.end_date, budget: input.budget },
+      dateKey(new Date()),
+    );
+    if (!fit.shortfall) return null;
+    const reason = (override ?? "").trim();
+    if (!reason)
+      throw Error(
+        `Saldo de mídia insuficiente: o disponível para ciclos é ${money(fit.available)}, e o ciclo precisa de ${money(fit.need)}. Faltam ${money(fit.shortfall)}.`,
+      );
+    if (fit.shortfall > room.override_cap)
+      throw Error(
+        `A liberação acima do saldo vai até ${money(room.override_cap)} nesta empresa, e faltam ${money(fit.shortfall)}.`,
+      );
+    if (reason.length < 3) throw Error("Escreva o motivo da liberação");
+    return {
+      shortfall: fit.shortfall,
+      available: fit.available,
+      need: fit.need,
+      budget: input.budget,
+      cap: room.override_cap,
+      reason,
+    };
   }
   const linksOf = (a: AdCampaign, links: AdCycleLink[]) =>
     links.map((l) => ({
@@ -327,9 +393,10 @@ export function demoCampaigns(
       bump(a);
       log(a, cycle, "current_cycle", { from, to: cycle });
     },
-    async createCycle(campaign, input, makeCurrent) {
+    async createCycle(campaign, input, makeCurrent, override) {
       const a = campaignOf(campaign.id);
       checkCycle(a, input);
+      const release = mediaGuard(a, null, input, override);
       const previous = store.cycles
         .filter((y) => y.campaign_id === a.id)
         .sort((x, y) => y.start_date.localeCompare(x.start_date))[0];
@@ -364,6 +431,7 @@ export function demoCampaigns(
         multiplier: y.multiplier,
         links: y.links,
       });
+      if (release) log(a, y.id, "media_override", release);
       if (makeCurrent) {
         const from = a.current_cycle_id;
         a.current_cycle_id = y.id;
@@ -372,7 +440,7 @@ export function demoCampaigns(
       }
       return y.id;
     },
-    async updateCycle(cycle, input) {
+    async updateCycle(cycle, input, override) {
       const y = store.cycles.find((c) => c.id === cycle.id);
       if (!y) throw Error("Sem permissão");
       const a = campaignOf(y.campaign_id);
@@ -381,6 +449,7 @@ export function demoCampaigns(
           "O ciclo foi alterado por outra pessoa. Recarregue e tente de novo.",
         );
       checkCycle(a, input, y.id);
+      const release = mediaGuard(a, y.id, input, override);
       const before = { ...y, competence_month: y.competence_month };
       Object.assign(y, {
         competence_month: input.competence,
@@ -411,6 +480,10 @@ export function demoCampaigns(
         "links",
       ]);
       if (Object.keys(diff).length) log(a, y.id, "cycle_updated", diff);
+      if (release) log(a, y.id, "media_override", release);
+    },
+    async mediaRoom(campaign) {
+      return mediaRoomOf(campaignOf(campaign.id));
     },
   };
 }

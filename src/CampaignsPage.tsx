@@ -106,6 +106,12 @@ import {
 } from "./campaign-reports";
 import { GoogleConversions } from "./CampaignConversions";
 import { CampaignAlerts, type AlertCampaignOption } from "./CampaignAlerts";
+import {
+  CampaignMediaBalance,
+  CycleMediaFit,
+  cycleMediaBlocked,
+  useMediaRoom,
+} from "./CampaignMediaBalance";
 
 type Props = {
   demo: boolean;
@@ -394,13 +400,19 @@ export function CampaignsPage({
           connectionTick={connectionTick}
           onPending={setPending}
           onClose={() => setCycleForm(null)}
-          onSave={async (input, makeCurrent) => {
+          backend={backend}
+          onSave={async (input, makeCurrent, override) => {
             if (cycleForm.cycle) {
-              await backend.updateCycle(cycleForm.cycle, input);
+              await backend.updateCycle(cycleForm.cycle, input, override);
               setCycleForm(null);
               await afterChange("Ciclo atualizado");
             } else {
-              await backend.createCycle(cycleForm.campaign, input, makeCurrent);
+              await backend.createCycle(
+                cycleForm.campaign,
+                input,
+                makeCurrent,
+                override,
+              );
               setCycleForm(null);
               await afterChange(
                 makeCurrent
@@ -1064,7 +1076,7 @@ function CampaignDetail({
       )}
     </>
   );
-  const banner =
+  const alertBanner =
     alert.kind !== "none" ? (
       <div
         className={`campaign-alert ${alert.kind === "ended" ? "danger" : "warn"}`}
@@ -1111,6 +1123,19 @@ function CampaignDetail({
         )}
       </div>
     ) : null;
+  // The client's media balance (Financeiro › Mídia), over the cycle's alert.
+  const banner = (
+    <>
+      <CampaignMediaBalance
+        backend={backend}
+        campaign={campaign}
+        current={current}
+        today={today}
+        refresh={`${eventsTick}:${cycles.map((y) => `${y.id}.${y.version}`).join()}`}
+      />
+      {alertBanner}
+    </>
+  );
 
   return (
     <div className="campaign-detail">
@@ -1444,6 +1469,8 @@ function describeEvent(e: AdCampaignEvent, state: CampaignData) {
       return `${d.to === "active" ? "ativou" : "inativou"} a campanha. Motivo: ${String(d.reason ?? "")}`;
     case "current_cycle":
       return `definiu como atual o ciclo de ${period(d.to)}.`;
+    case "media_override":
+      return `liberou ${money(Number(d.shortfall))} acima do saldo de mídia no ciclo de ${period(e.cycle_id)} (disponível ${money(Number(d.available))}, o ciclo precisava de ${money(Number(d.need))}). Motivo: ${String(d.reason ?? "")}`;
     case "cycle_created":
       return `cadastrou o ciclo de ${shortDate(String(d.start_date))} a ${shortDate(String(d.end_date))} (${money(Number(d.budget))}, meta de ${d.goal_results}).`;
     case "updated":
@@ -1654,6 +1681,7 @@ function CycleForm({
   client,
   connectionTick,
   onPending,
+  backend,
   onClose,
   onSave,
 }: {
@@ -1667,8 +1695,15 @@ function CycleForm({
   client: { id: string; name: string } | null;
   connectionTick: number;
   onPending: (id: string) => void;
+  /** The client's media balance: the budget must fit it. */
+  backend: CampaignsBackend;
   onClose: () => void;
-  onSave: (input: CycleInput, makeCurrent: boolean) => Promise<void>;
+  onSave: (
+    input: CycleInput,
+    makeCurrent: boolean,
+    /** The reason to release a budget above the media balance. */
+    override: string | null,
+  ) => Promise<void>;
 }) {
   const cycles = cyclesOf(state, campaign.id);
   const last = cycles[cycles.length - 1] ?? null;
@@ -1680,6 +1715,9 @@ function CycleForm({
   );
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Read fresh on opening: the budget must fit the media available.
+  const media = useMediaRoom(backend, campaign, null);
+  const [release, setRelease] = useState("");
   const set = <K extends keyof CycleDraft>(key: K, value: CycleDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
   const budget = parseAmount(draft.budget),
@@ -1697,16 +1735,36 @@ function CycleForm({
     if (saving) return;
     const result = cycleInput(draft);
     if ("error" in result) return setError(result.error);
+    const blocked = cycleMediaBlocked(
+      media.room,
+      cycle ?? null,
+      result.input.end_date,
+      result.input.budget,
+      today,
+      release,
+    );
+    if (blocked)
+      return setError(
+        "A verba não cabe no saldo de mídia do cliente. Veja o que falta logo abaixo da verba.",
+      );
     setError("");
     setSaving(true);
     try {
-      await onSave(result.input, makeCurrent);
+      await onSave(result.input, makeCurrent, release.trim() || null);
     } catch (err) {
       setError((err as Error).message);
       setSaving(false);
     }
   }
   const result = objectives[draft.objective].result;
+  const mediaBlocked = cycleMediaBlocked(
+    media.room,
+    cycle ?? null,
+    draft.end_date,
+    budget,
+    today,
+    release,
+  );
   return (
     <Modal
       title={
@@ -1812,6 +1870,25 @@ function CycleForm({
               ? `Meta de custo por resultado: ${money(cost)} (verba ÷ quantidade esperada).`
               : "Com a verba e a meta, calculamos o custo esperado por resultado."}
           </small>
+          <CycleMediaFit
+            room={media.room}
+            error={media.error}
+            cycle={cycle ?? null}
+            endDate={draft.end_date}
+            budget={budget}
+            today={today}
+            reason={release}
+            onReason={setRelease}
+            onUseAvailable={(value) =>
+              set(
+                "budget",
+                value.toLocaleString("pt-BR", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }),
+              )
+            }
+          />
           <label className="campaign-narrow">
             Índice de performance (M)
             <Input
@@ -1903,7 +1980,17 @@ function CycleForm({
           >
             {first ? "Depois" : "Cancelar"}
           </Button>
-          <Button type="submit" className="btn primary" loading={saving}>
+          <Button
+            type="submit"
+            className="btn primary"
+            loading={saving}
+            disabled={mediaBlocked}
+            title={
+              mediaBlocked
+                ? "A verba precisa caber no saldo de mídia do cliente"
+                : undefined
+            }
+          >
             {cycle ? "Salvar ciclo" : "Cadastrar ciclo"}
           </Button>
         </div>

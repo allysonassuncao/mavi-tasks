@@ -1,0 +1,200 @@
+/* Campanhas × Financeiro › Mídia: o saldo no detalhe da campanha e a
+   conferência da verba no formulário do ciclo (CampaignMediaBalance). */
+.media-room {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 18px;
+}
+.media-room.is-loading {
+  min-height: 112px;
+  background: linear-gradient(90deg, #fbfcfb, #f2f5f2, #fbfcfb);
+}
+.media-room .neg {
+  color: #b8403d;
+}
+.media-room .pos {
+  color: #3e7a2d;
+}
+.media-room-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.media-room-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-weight: 650;
+  font-size: 0.92rem;
+}
+.media-room-title small {
+  font-weight: 400;
+  color: var(--muted, #6b7472);
+  font-size: 0.76rem;
+}
+.media-room-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.media-room-links .btn {
+  text-decoration: none;
+}
+.media-room-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+.media-room-grid > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #e8ece8;
+  border-radius: 10px;
+  background: #fbfcfb;
+  min-width: 0;
+}
+.media-room-grid dt {
+  font-size: 0.72rem;
+  color: var(--muted, #6b7472);
+}
+.media-room-grid dd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 1.02rem;
+  font-variant-numeric: tabular-nums;
+}
+.media-room-grid small {
+  font-size: 0.72rem;
+  color: var(--muted, #6b7472);
+}
+.media-room-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.74rem;
+  padding: 0;
+}
+.media-room-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.media-room-table td,
+.media-room-table th {
+  font-size: 0.8rem;
+}
+.media-room-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+.media-room-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.media-room-note.warn {
+  background: #fff8e8;
+  border: 1px solid #efdcb4;
+  color: #7d5810;
+}
+.media-room-note.danger {
+  background: #fdeeec;
+  border: 1px solid #f1cdc8;
+  color: #9a3a32;
+}
+.media-room-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted, #6b7472);
+}
+/* The same chips as Financeiro › Mídia (whose CSS loads with its page). */
+.media-room .media-level {
+  font-size: 0.68rem;
+  font-weight: 650;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.media-room .media-level.low {
+  background: #fbefd8;
+  color: #8a5a07;
+}
+.media-room .media-level.negative {
+  background: #f8dfde;
+  color: #9b2f2c;
+}
+
+/* The form: under "Verba do ciclo". */
+.media-fit {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted, #6b7472);
+}
+.media-fit.ok {
+  color: #3e7a2d;
+}
+.media-fit.danger {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fdeeec;
+  border: 1px solid #f1cdc8;
+  color: #9a3a32;
+}
+.media-fit.danger > p {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+}
+.media-fit.danger > p svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.media-fit-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.media-fit-actions .btn {
+  text-decoration: none;
+}
+.media-fit-release {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: #6e2c26;
+}
+.media-fit-release > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .media-room {
+    padding: 12px;
+  }
+  .media-room-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

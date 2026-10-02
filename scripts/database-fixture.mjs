@@ -46,3 +46,21 @@ export async function applyMigration(db, name) {
   );
   await db.exec(await readFile(`supabase/migrations/${file}`, "utf8"));
 }
+
+/**
+ * Gives every contracted product (and each one created later) more media
+ * balance than any test spends, for tests of other things that register
+ * cycles: the cycle's budget must fit the balance (migration
+ * 20270222090000_campaign_media_room).
+ */
+export async function fundMediaAccounts(db) {
+  await db.exec(`create function public.test_fund_contract() returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+ insert into public.media_entries(company_id, contract_id, kind, amount, occurred_on, source, category_id, reason, created_by)
+ select new.company_id, new.id, 'credit', 100000000, current_date - 365, 'manual', c.id, 'Saldo dos testes',
+  (select m.user_id from public.memberships m where m.company_id = new.company_id order by m.role = 'admin' desc, m.user_id limit 1)
+ from public.media_categories c where c.company_id = new.company_id and c.name = 'Saldo inicial';
+ return null;
+end $$;
+create trigger test_fund_contract after insert on public.contracts for each row execute function public.test_fund_contract();`);
+}
