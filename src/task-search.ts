@@ -189,12 +189,21 @@ export async function searchTaskRowsMavi(
   mavi: Pick<MaviSearch, "terms" | "embedding">,
   p: TaskSearchParams,
 ): Promise<TaskSearchRows> {
-  return readRows("search_task_rows_mavi", {
+  const args = {
     p_company: company,
     p_terms: mavi.terms,
     p_embedding: mavi.embedding,
     ...filterArgs(p),
-  });
+  };
+  try {
+    return await readRows("search_task_rows_mavi", args);
+  } catch (e) {
+    // The database gave up on time (statement timeout) with the search by
+    // meaning: the terms alone still find what was written.
+    if ((e as { code?: string })?.code !== "57014" || !mavi.embedding || !mavi.terms.length)
+      throw e;
+    return readRows("search_task_rows_mavi", { ...args, p_embedding: null });
+  }
 }
 
 function filterArgs(p: TaskSearchParams) {

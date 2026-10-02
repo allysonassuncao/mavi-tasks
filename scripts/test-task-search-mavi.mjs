@@ -143,6 +143,40 @@ await check("cada um só encontra o que já podia ver, pelos termos e pelo senti
   await assert.rejects(() => search(), /permission denied/);
 });
 
+await check("o texto de busca acompanha título, comentário editado ou apagado e áudio", async () => {
+  const find = async (terms) => {
+    await as(admin);
+    return (await db.query(`select * from search_task_rows_mavi($1, $2, null)`, [A, terms])).rows;
+  };
+  await sql(`update tasks set title = 'Relatório de Orçamento' where id = $1`, [report]);
+  const byTitle = await find(["orcamento"]);
+  assert.deepEqual(byTitle.map((r) => [r.task.id, r.match_in]), [[report, "title"]]);
+  assert.match(byTitle[0].snippet, /Orçamento/);
+  const [{ id: note }] = await sql(
+    `insert into comments(company_id, task_id, author_id, body) values ($1,$2,$3,'Primeira versão do Roteiro.') returning id`,
+    [A, report, admin],
+  );
+  assert.deepEqual((await find(["roteiro"])).map((r) => r.comment_id), [note]);
+  await sql(`update comments set body = 'Agora fala de outra coisa.' where id = $1`, [note]);
+  assert.equal((await find(["roteiro"])).length, 0);
+  assert.equal((await find(["outra coisa"])).length, 1);
+  await sql(`delete from comments where id = $1`, [note]);
+  assert.equal((await find(["outra coisa"])).length, 0);
+  // O áudio da descrição conta como descrição; o de um comentário, como comentário.
+  await sql(
+    `insert into task_audios(company_id, task_id, purpose, uploaded_by, path, mime, size_bytes, duration_seconds, transcript)
+     values ($1,$2,'description',$3,$4,'audio/webm',10,3,'Lembrar da Paleta pastel.')`,
+    [A, report, admin, `${A}/audio/${uid(99)}`],
+  );
+  const audio = await find(["paleta"]);
+  assert.deepEqual(audio.map((r) => [r.task.id, r.match_in]), [[report, "description"]]);
+  assert.match(audio[0].snippet, /Paleta pastel/);
+  // A busca de sempre lê o mesmo texto.
+  await as(admin);
+  const old = (await db.query(`select * from search_task_rows($1,'paleta')`, [A])).rows;
+  assert.deepEqual(old.map((r) => [r.task.id, r.match_in]), [[report, "description"]]);
+});
+
 await check("'task_search' entra em Quem usa qual modelo", async () => {
   await as(admin);
   await rpc("ai_set_route", [A, "feature", null, null, "", "task_search"]);

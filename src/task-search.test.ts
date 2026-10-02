@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 vi.mock("./api", () => ({ rpc: vi.fn() }));
+const { rpc } = await import("./api");
 const { fold, highlightParts, highlightTerms, searchSnippet, searchTasksLocal } =
   await import("./task-search");
 const { cleanTerms } = await import("./task-search-mavi");
+const { searchTaskRowsMavi } = await import("./task-search");
 const { demoSnapshot, demoUser } = await import("./demo");
 const { serializeDescription } = await import("./rich-text");
 
@@ -41,6 +43,26 @@ describe("Busca avançada", () => {
     ).toEqual(["Logo", "logotipo", "identidade visual"]);
     expect(cleanTerms("logo")).toEqual([]);
     expect(cleanTerms(Array.from({ length: 20 }, (_, i) => `termo ${i}`))).toHaveLength(10);
+  });
+  it("se o banco desiste pelo tempo com o sentido, busca só pelos termos", async () => {
+    const calls: Record<string, unknown>[] = [];
+    vi.mocked(rpc).mockImplementation(async (_name, args) => {
+      calls.push(args as Record<string, unknown>);
+      if ((args as { p_embedding?: unknown }).p_embedding)
+        throw Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" });
+      return [];
+    });
+    const found = await searchTaskRowsMavi(
+      "c",
+      { terms: ["logo"], embedding: "[0.1]" },
+      { query: "logo", fields: ["title"] },
+    );
+    expect(found.total).toBe(0);
+    expect(calls.map((c) => c.p_embedding)).toEqual(["[0.1]", null]);
+    vi.mocked(rpc).mockRejectedValueOnce(Object.assign(new Error("outro"), { code: "42501" }));
+    await expect(
+      searchTaskRowsMavi("c", { terms: ["logo"], embedding: "[0.1]" }, { query: "logo", fields: ["title"] }),
+    ).rejects.toThrow("outro");
   });
   it("mostra o trecho ao redor do termo", () => {
     const text = "a ".repeat(100) + "logotipo azul" + " b".repeat(100);
