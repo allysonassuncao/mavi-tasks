@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Lock, RefreshCw } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { DashboardCanvas, type PanelLoader } from "./DashboardCanvas";
+import type { RecordsLoader } from "./DashboardRecords";
 import {
   panelData,
+  panelRecords,
   rangeOptions,
   resolveRange,
   sharedDashboard,
@@ -49,6 +51,20 @@ export function PublicDashboard({ token }: { token: string }) {
         panel.id,
         dates!,
         null,
+        fresh,
+      ),
+    [token, accepted, dates],
+  );
+  // The records below each panel, when the dashboard shows them on the link.
+  const recordsLoader: RecordsLoader = useCallback(
+    (panel, ref, selection, fresh) =>
+      panelRecords(
+        { kind: "link", token, password: accepted },
+        panel.id,
+        ref,
+        dates!,
+        null,
+        selection,
         fresh,
       ),
     [token, accepted, dates],
@@ -166,6 +182,8 @@ export function PublicDashboard({ token }: { token: string }) {
         <DashboardCanvas
           panels={state.panels}
           loader={loader}
+          recordsLoader={state.records ? recordsLoader : undefined}
+          tz={state.timezone}
           loadKey={`${dates.from}|${dates.to}`}
           refresh={refresh}
         />

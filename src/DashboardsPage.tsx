@@ -29,7 +29,8 @@ import { Empty, Modal } from "./components";
 import { MultiPick, type PickOption } from "./MultiPick";
 import { DashboardCanvas, type PanelLoader } from "./DashboardCanvas";
 import { PanelChart } from "./DashboardCharts";
-import { runPanel } from "./dashboard-engine";
+import { runPanel, runRecords } from "./dashboard-engine";
+import type { RecordsLoader } from "./DashboardRecords";
 import {
   attributionOf,
   attributionOptions,
@@ -45,6 +46,7 @@ import {
   newPanelId,
   panelData,
   panelNotes,
+  panelRecords,
   parseFormula,
   previewPanel,
   rangeOptions,
@@ -930,6 +932,37 @@ function DashboardView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [demo, data, range, loadKey, id, company, saved],
   );
+  // The records below each panel (migration 20270224090000): of the saved
+  // dashboard, not while editing (the draft's panels aren't saved yet).
+  const recordsLoader: RecordsLoader | undefined = useMemo(
+    () =>
+      editing
+        ? undefined
+        : (panel, ref, selection, fresh) =>
+            demo
+              ? Promise.resolve(
+                  runRecords(
+                    data,
+                    panel.spec,
+                    ref,
+                    range,
+                    editor ? filters : (saved?.variables.filters ?? {}),
+                    tz,
+                    selection,
+                  ),
+                )
+              : panelRecords(
+                  { kind: "app", dashboard: id! },
+                  panel.id,
+                  ref,
+                  range,
+                  editor ? vars : null,
+                  selection,
+                  fresh,
+                ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [demo, data, range, loadKey, id, saved, editing, tz],
+  );
 
   if (error)
     return (
@@ -1128,6 +1161,8 @@ function DashboardView({
         <DashboardCanvas
           panels={dash.panels}
           loader={loader}
+          recordsLoader={recordsLoader}
+          tz={tz}
           loadKey={loadKey}
           refresh={refresh}
           editing={editing}
@@ -2021,6 +2056,7 @@ function ShareDialog({
   onDeleted: () => void;
 }) {
   const [access, setAccess] = useState<LinkAccess>(dashboard.link_access);
+  const [records, setRecords] = useState(!!dashboard.link_records);
   const [password, setPassword] = useState("");
   const [users, setUsers] = useState<string[]>([]);
   const [teams, setTeams] = useState<string[]>([]);
@@ -2060,6 +2096,7 @@ function ShareDialog({
             ...dashboard,
             link_access: access,
             has_password: access === "password",
+            link_records: records,
           }
         : await setDashboardSharing(dashboard.id, {
             link_access: access,
@@ -2067,6 +2104,7 @@ function ShareDialog({
             users,
             teams,
             newLink,
+            linkRecords: records,
           });
       onSaved(next);
       notify(
@@ -2204,6 +2242,23 @@ function ShareDialog({
               <RefreshCw size={14} /> Gerar novo link (o atual deixa de
               funcionar)
             </Button>
+          )}
+          {access !== "none" && (
+            <label className="dash-link-records">
+              <input
+                type="checkbox"
+                checked={records}
+                onChange={(e) => setRecords(e.target.checked)}
+              />
+              <span>
+                <strong>Mostrar os registros no link</strong>
+                <small>
+                  Embaixo de cada painel, quem abre o link vê a lista do que
+                  forma o número: tarefas, clientes, pessoas e horas. Desligado,
+                  o link mostra só os números e gráficos.
+                </small>
+              </span>
+            </label>
           )}
           <small className="muted">
             Quem abre pelo link vê os números do dashboard com os filtros salvos

@@ -668,7 +668,7 @@ const db = () => {
   return supabase;
 };
 const DASHBOARD_COLUMNS =
-  "id,company_id,name,description,panels,variables,link_access,share_token,has_password,version,created_by,updated_by,created_at,updated_at";
+  "id,company_id,name,description,panels,variables,link_access,share_token,has_password,link_records,version,created_by,updated_by,created_at,updated_at";
 
 export async function listDashboards(company: string): Promise<Dashboard[]> {
   const { data, error } = await db()
@@ -721,6 +721,8 @@ export type DashboardSharing = {
   users: string[];
   teams: string[];
   newLink?: boolean;
+  /** The link also shows each panel's records (undefined: as it is). */
+  linkRecords?: boolean;
 };
 export async function setDashboardSharing(
   id: string,
@@ -733,6 +735,7 @@ export async function setDashboardSharing(
     p_users: s.users,
     p_teams: s.teams,
     p_new_link: !!s.newLink,
+    p_link_records: s.linkRecords ?? null,
   });
   if (error) throw error;
   return data as Dashboard;
@@ -781,6 +784,133 @@ export async function panelData(
   return data as PanelResult;
 }
 
+// ------------------------------------------------------------ records
+/**
+ * Migration 20270224090000: what each record of a panel's query is, and so
+ * which columns it shows. task: a task; entry: a time entry; person: who
+ * registered hours; period: a time a task spent in a status (also the
+ * validations); due_change: a change of due date; receipt: a notice
+ * reaching a person; notice: a notice; client: a client (Termômetro,
+ * Radar); sl_event / sl_post / sl_plan / sl_contract: Social Leads'
+ * decisions, posts, plans and clients; radar_item / mention: the Radar.
+ */
+export type RecordKind =
+  | "task"
+  | "entry"
+  | "person"
+  | "period"
+  | "due_change"
+  | "receipt"
+  | "notice"
+  | "client"
+  | "sl_event"
+  | "sl_post"
+  | "sl_plan"
+  | "sl_contract"
+  | "radar_item"
+  | "mention";
+/**
+ * One record: its id, category (k, l: the bar it is in), its part of the
+ * value (v: the metric over this record alone), its date (d, the panel's
+ * date field), how many rows of the source it gathers (n: the days of a
+ * client's temperature, the entries of a task…) and what to show of it.
+ */
+export type RecordRow = {
+  id: string;
+  k: string | null;
+  l: string | null;
+  v: number | null;
+  d: string | null;
+  n: number;
+  task?: string;
+  item?: string;
+  notice?: string;
+  title?: string;
+  status?: string;
+  priority?: string;
+  client?: string | null;
+  product?: string | null;
+  project?: string | null;
+  person?: string | null;
+  assignee?: string | null;
+  executors?: string[];
+  creator?: string | null;
+  previous?: string | null;
+  ended_by?: string | null;
+  from_status?: string | null;
+  to_status?: string | null;
+  created_at?: string;
+  due_date?: string;
+  original_due_date?: string;
+  delivered_at?: string | null;
+  estimated_minutes?: number;
+  started_at?: string;
+  ended_at?: string | null;
+  source?: string;
+  note?: string;
+  old_due?: string;
+  new_due?: string;
+  reason?: string;
+  level?: string;
+  require_ack?: boolean;
+  seen_at?: string | null;
+  acked_at?: string | null;
+  publish_at?: string | null;
+  plan?: string | null;
+  number?: number;
+  decision?: string;
+  via?: string;
+  stage?: string;
+  topic?: string;
+  severity?: number | null;
+  state?: string;
+  mentions?: number;
+  last_seen_at?: string;
+  quote?: string;
+  speaker?: string | null;
+  occurred_at?: string;
+};
+export type PanelRecords = {
+  kind: RecordKind;
+  /** The metric over all the records (also beyond the first 1000). */
+  value: number | null;
+  /** How many records there are (only the 1000 most recent come). */
+  total: number;
+  rows: RecordRow[];
+  /** Opens the tasks (people of the company; not through the link). */
+  can_open: boolean;
+  computed_at: string;
+};
+/** Which categories: the bar clicked (keys) or all but the shown ("Outros"). */
+export type RecordSelection = { keys?: string[]; exclude?: string[] };
+
+export async function panelRecords(
+  source: PanelSource,
+  panel: string,
+  ref: string,
+  range: { from: string; to: string },
+  vars: DashboardVariables | null,
+  selection: RecordSelection,
+  fresh = false,
+): Promise<PanelRecords> {
+  const { data, error } = await db().rpc("dashboard_panel_records", {
+    p_dashboard: source.kind === "app" ? source.dashboard : null,
+    p_panel: panel,
+    p_ref: ref,
+    p_from: range.from,
+    p_to: range.to,
+    p_vars: vars,
+    p_keys: selection.keys ?? null,
+    p_exclude: selection.exclude ?? null,
+    p_token: source.kind === "link" ? source.token : null,
+    p_password: source.kind === "link" ? (source.password ?? null) : null,
+    p_fresh: fresh,
+  });
+  if (error) throw error;
+  if (data?.error) throw Error(data.error);
+  return data as PanelRecords;
+}
+
 export async function previewPanel(
   company: string,
   spec: PanelSpec,
@@ -811,6 +941,8 @@ export type SharedDashboard =
       updated_at: string;
       timezone: string;
       company: string;
+      /** The link shows each panel's records. */
+      records?: boolean;
     };
 export async function sharedDashboard(
   token: string,

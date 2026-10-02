@@ -143,6 +143,8 @@ export type Dashboard = {
   link_access: LinkAccess;
   share_token: string;
   has_password: boolean;
+  /** Migration 20270224090000: the link also shows each panel's records. */
+  link_records?: boolean;
   version: number;
   created_by: string;
   updated_by: string | null;

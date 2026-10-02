@@ -22,7 +22,8 @@ import {
   type PanelSpec,
 } from "./dashboards";
 import { niceTicks } from "./DashboardCharts";
-import { runPanel } from "./dashboard-engine";
+import { runPanel, runRecords } from "./dashboard-engine";
+import { recordsLine } from "./DashboardCanvas";
 import { emptySnapshot, type Snapshot, type Task } from "./types";
 
 const calc = (expr: string, values: Record<string, number | null>) => {
@@ -510,6 +511,37 @@ describe("Motor da demonstração", () => {
       { k: "__other__", l: "Outros", v: 1 },
     ]);
   });
+  it("registros: a barra clicada, Outros e o total conferem com o painel", () => {
+    const spec: PanelSpec = {
+      viz: "hbar",
+      groupBy: "client",
+      limit: 1,
+      queries: [q("A", "tasks", "count")],
+    };
+    const records = (selection = {}) =>
+      runRecords(data, spec, "A", range, {}, "America/Sao_Paulo", selection, new Date("2026-09-24T15:00:00Z"));
+    const aurora = records({ keys: ["aurora"] });
+    expect(aurora.value).toBe(3);
+    expect(aurora.rows.map((r) => r.id).sort()).toEqual(["t1", "t2", "t3"]);
+    expect(aurora.rows[0].client).toBe("Aurora");
+    const other = records({ exclude: ["aurora"] });
+    expect([other.value, other.rows.map((r) => r.id)]).toEqual([1, ["t4"]]);
+    expect(records().total).toBe(4);
+  });
+  it("registros: horas por lançamento e taxa com 0 e 100", () => {
+    const go = (spec: PanelSpec) =>
+      runRecords(data, spec, "A", range, {}, "America/Sao_Paulo", {}, new Date("2026-09-24T15:00:00Z"));
+    const hours = go({ viz: "stat", groupBy: "none", queries: [q("A", "hours", "hours")] });
+    expect(hours.kind).toBe("entry");
+    expect(Object.fromEntries(hours.rows.map((r) => [r.id, r.v]))).toEqual({ h1: 2, h2: 0.5, h3: 1 });
+    const onTime = go({
+      viz: "stat",
+      groupBy: "none",
+      queries: [q("A", "tasks", "on_time_rate", { dateField: "delivered_at" })],
+    });
+    expect(onTime.value).toBe(50);
+    expect(Object.fromEntries(onTime.rows.map((r) => [r.id, r.v]))).toEqual({ t1: 100, t2: 0 });
+  });
   it("série diária preenchida e filtro do dashboard", () => {
     const r = run(
       {
@@ -665,5 +697,24 @@ describe("Pessoa nos painéis", () => {
   it("o modelo inicial e o de performance explicam os painéis por pessoa", () => {
     for (const p of [...starterPanels(), ...performancePanels()])
       if (p.spec.groupBy === "person") expect(panelNotes(p.spec).length).toBeGreaterThan(0);
+  });
+});
+
+describe("registros abaixo do painel", () => {
+  const p = (id: string, x: number, y: number, w: number, h: number): Panel => ({
+    id,
+    title: id,
+    x,
+    y,
+    w,
+    h,
+    spec: { viz: "stat", groupBy: "none", queries: [] },
+  });
+  it("vão para a primeira linha que nenhum painel atravessa", () => {
+    const panels = [p("a", 0, 0, 6, 3), p("b", 6, 0, 6, 5), p("c", 0, 3, 6, 4), p("d", 0, 7, 12, 3)];
+    expect(recordsLine(panels, "a")).toBe(7);
+    expect(recordsLine(panels, "b")).toBe(7);
+    expect(recordsLine(panels, "d")).toBe(10);
+    expect(recordsLine(panels, "x")).toBeNull();
   });
 });

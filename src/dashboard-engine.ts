@@ -6,7 +6,10 @@ import {
   daysBetween,
   metricDef,
   type DashboardFilters,
+  type PanelRecords,
   type PanelResult,
+  type RecordRow,
+  type RecordSelection,
   type PanelSpec,
   type Query,
   type SeriesRow,
@@ -15,7 +18,8 @@ import {
 /**
  * The query engine of the database (mavi_private.dashboard_sql), in memory,
  * for the demonstration: same metrics, filters, groupings, top N with
- * "Outros" and zero-filled time buckets, over the demo's tasks and hours.
+ * "Outros" and zero-filled time buckets, over the demo's tasks and hours —
+ * and the records behind each figure (migration 20270224090000).
  */
 
 type Row = { task: Task; entry?: TimeEntry };
@@ -42,7 +46,12 @@ function bucketStart(day: string, interval: PanelResult["interval"]) {
   return day;
 }
 
-function series(
+/**
+ * The rows a query keeps (the period, its filters and the dashboard's), how
+ * a list of them measures, the categories of a row and their names; null
+ * for the sources the demo has no data of.
+ */
+function prepare(
   data: Snapshot,
   q: Query,
   group: PanelSpec["groupBy"],
@@ -50,10 +59,9 @@ function series(
   from: string,
   to: string,
   filters: DashboardFilters,
-  limit: number | null,
   tz: string,
   now: Date,
-): SeriesRow[] {
+) {
   // Social Leads lives in its own store, and the demo keeps no status
   // history (status_history, reviews), notice deliveries, Radar items nor
   // due date changes: no figures here.
@@ -66,7 +74,7 @@ function series(
     q.source === "temperature" ||
     q.source === "radar"
   )
-    return group === "none" ? [{ k: "total", v: 0 }] : [];
+    return null;
   const today = dateKey(now, tz);
   const contract = new Map(data.contracts.map((k) => [k.id, k]));
   const taskById = new Map(data.tasks.map((t) => [t.id, t]));
@@ -261,17 +269,50 @@ function series(
         return null;
     }
   };
+  const keysOf = (r: Row): (string | null)[] => {
+    if (group === "none") return [null];
+    if (group === "time") return [bucketStart(dateOf(r)!, interval)];
+    if (group === "team") {
+      const teams = teamsOf(r);
+      return teams.length ? teams : [null];
+    }
+    return [field(r, group)];
+  };
+  const name = (key: string | null) => {
+    if (key === null) return null;
+    const lookup = {
+      client: data.clients,
+      product: data.products,
+      project: data.projects,
+      team: data.teams,
+    }[group as "client"];
+    if (lookup) return lookup.find((x) => x.id === key)?.name ?? null;
+    if (group === "person" || group === "creator" || group === "executor")
+      return data.members.find((m) => m.user_id === key)?.name ?? null;
+    return key;
+  };
+  return { kept, measure, keysOf, name, dateOf, contract };
+}
+
+function series(
+  data: Snapshot,
+  q: Query,
+  group: PanelSpec["groupBy"],
+  interval: PanelResult["interval"],
+  from: string,
+  to: string,
+  filters: DashboardFilters,
+  limit: number | null,
+  tz: string,
+  now: Date,
+): SeriesRow[] {
+  const p = prepare(data, q, group, interval, from, to, filters, tz, now);
+  if (!p) return group === "none" ? [{ k: "total", v: 0 }] : [];
+  const { kept, measure, keysOf, name } = p;
   if (group === "none") return [{ k: "total", v: measure(kept) }];
   const groups = new Map<string | null, Row[]>();
   for (const r of kept) {
-    const teams = group === "team" ? teamsOf(r) : [];
-    const keys: (string | null)[] =
-      group === "time"
-        ? [bucketStart(dateOf(r)!, interval)]
-        : group === "team"
-          ? teams.length ? teams : [null]
-          : [field(r, group)];
-    for (const key of keys) {
+    for (const key of keysOf(r)) {
       const list = groups.get(key);
       if (list) list.push(r);
       else groups.set(key, [r]);
@@ -290,19 +331,6 @@ function series(
     }
     return out;
   }
-  const name = (key: string | null) => {
-    if (key === null) return null;
-    const lookup = {
-      client: data.clients,
-      product: data.products,
-      project: data.projects,
-      team: data.teams,
-    }[group as "client"];
-    if (lookup) return lookup.find((x) => x.id === key)?.name ?? null;
-    if (group === "person" || group === "creator" || group === "executor")
-      return data.members.find((m) => m.user_id === key)?.name ?? null;
-    return key;
-  };
   const ranked = [...groups]
     .map(([k, list]) => ({ k, l: name(k), v: measure(list) }))
     .sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity));
@@ -318,6 +346,18 @@ function series(
   return top;
 }
 
+/** The panel's time buckets ("auto": by the length of the period). */
+function intervalOf(spec: PanelSpec, range: { from: string; to: string }) {
+  const days = daysBetween(range.from, range.to);
+  return !spec.interval || spec.interval === "auto"
+    ? days <= 62
+      ? "day"
+      : days <= 366
+        ? "week"
+        : "month"
+    : spec.interval;
+}
+
 /** A panel's result, as dashboard_run returns it. */
 export function runPanel(
   data: Snapshot,
@@ -328,14 +368,7 @@ export function runPanel(
   now = new Date(),
 ): PanelResult {
   const days = daysBetween(range.from, range.to);
-  const interval =
-    !spec.interval || spec.interval === "auto"
-      ? days <= 62
-        ? "day"
-        : days <= 366
-          ? "week"
-          : "month"
-      : spec.interval;
+  const interval = intervalOf(spec, range);
   const limit = spec.formula?.expr
     ? null
     : Math.min(Math.max(spec.limit ?? 10, 1), 50);
@@ -365,5 +398,138 @@ export function runPanel(
         : {},
     interval,
     computed_at: now.toISOString(),
+  };
+}
+
+/**
+ * The records behind one query of a panel, as dashboard_panel_records
+ * returns them: one per task (or time entry, task with hours, person) and
+ * category, with its part of the value; the value over the categories
+ * chosen. Same rules as the database: nothing that adds 0 to a sum or a
+ * count, zeros kept in averages and rates (and in hours).
+ */
+export function runRecords(
+  data: Snapshot,
+  spec: PanelSpec,
+  ref: string,
+  range: { from: string; to: string },
+  filters: DashboardFilters,
+  tz: string,
+  selection: RecordSelection,
+  now = new Date(),
+): PanelRecords {
+  const q = spec.queries.find((x) => x.ref === ref) ?? spec.queries[0];
+  const kind: PanelRecords["kind"] =
+    q.source !== "hours"
+      ? "task"
+      : q.metric === "tasks"
+        ? "task"
+        : q.metric === "people"
+          ? "person"
+          : "entry";
+  const empty: PanelRecords = {
+    kind,
+    value: null,
+    total: 0,
+    rows: [],
+    can_open: true,
+    computed_at: now.toISOString(),
+  };
+  const p = prepare(
+    data,
+    q,
+    spec.groupBy,
+    intervalOf(spec, range),
+    range.from,
+    range.to,
+    filters,
+    tz,
+    now,
+  );
+  if (!p) return empty;
+  const wanted = (key: string | null) => {
+    const k = key ?? "__null__";
+    if (selection.keys?.length) return selection.keys.includes(k);
+    if (selection.exclude?.length) return !selection.exclude.includes(k);
+    return true;
+  };
+  const idOf = (r: Row) =>
+    kind === "task"
+      ? (r.entry?.task_id ?? r.task.id)
+      : kind === "person"
+        ? r.entry!.user_id
+        : r.entry!.id;
+  const chosen: Row[] = [];
+  const groups = new Map<string, { id: string; k: string | null; rows: Row[] }>();
+  for (const r of p.kept)
+    for (const key of p.keysOf(r)) {
+      if (!wanted(key)) continue;
+      chosen.push(r);
+      const id = idOf(r);
+      const g = groups.get(`${id}|${key}`);
+      if (g) g.rows.push(r);
+      else groups.set(`${id}|${key}`, { id, k: key, rows: [r] });
+    }
+  const def = metricDef(q);
+  const additive = def?.additive ?? true;
+  const distinct = q.source === "hours" && (q.metric === "tasks" || q.metric === "people");
+  const member = (id: string | null | undefined) =>
+    data.members.find((m) => m.user_id === id)?.name ?? null;
+  const detail = (r: Row): Partial<RecordRow> => {
+    const k = p.contract.get(r.task.contract_id);
+    const where = {
+      client: data.clients.find((c) => c.id === k?.client_id)?.name ?? null,
+      product: data.products.find((x) => x.id === k?.product_id)?.name ?? null,
+    };
+    if (kind === "person") return { person: member(r.entry!.user_id) };
+    if (kind === "entry")
+      return {
+        ...where,
+        task: r.task.id,
+        title: r.task.title,
+        status: r.task.status,
+        person: member(r.entry!.user_id),
+        started_at: r.entry!.started_at,
+        ended_at: r.entry!.ended_at,
+        source: r.entry!.source,
+      };
+    const executor = r.task.executor_id ? member(r.task.executor_id) : null;
+    return {
+      ...where,
+      task: r.task.id,
+      title: r.task.title,
+      status: r.task.status,
+      priority: r.task.priority,
+      assignee: member(r.task.assignee_id),
+      executors: executor ? [executor] : [],
+      creator: member(r.task.creator_id),
+      created_at: r.task.created_at,
+      due_date: r.task.due_date,
+      original_due_date: r.task.original_due_date,
+      delivered_at: r.task.delivered_at,
+      estimated_minutes: r.task.estimated_minutes,
+    };
+  };
+  const rows: RecordRow[] = [...groups.values()]
+    .map((g) => ({
+      id: g.id,
+      k: g.k,
+      l: p.name(g.k),
+      v: p.measure(g.rows),
+      d: g.rows.map((r) => p.dateOf(r) ?? "").sort().at(-1) ?? null,
+      n: g.rows.length,
+      ...detail(g.rows[0]),
+    }))
+    .filter((r) =>
+      q.source === "hours" || (!additive && !distinct)
+        ? r.v !== null
+        : (r.v ?? 0) !== 0,
+    )
+    .sort((a, b) => (b.d ?? "").localeCompare(a.d ?? "") || a.id.localeCompare(b.id));
+  return {
+    ...empty,
+    value: p.measure(chosen),
+    total: rows.length,
+    rows: rows.slice(0, 1000),
   };
 }

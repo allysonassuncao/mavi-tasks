@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
 } from "react";
@@ -21,7 +22,27 @@ import {
  * donut and table. Every chart has a hover tooltip and, with two or more
  * series, a legend; values are always written out (the table view and the
  * tooltips), so colour is never the only way to tell series apart.
+ * With onSelect, clicking a bar, slice, point or row picks its category
+ * (the records below the panel, migration 20270224090000).
  */
+
+/** Clicking a category or time bucket (its key in Display.keys). */
+type Select = { onSelect?: (key: string) => void; selected?: string | null };
+/** A clickable row (horizontal bars, legend, table) works with the keyboard too. */
+const pick = (key: string, onSelect?: (key: string) => void) =>
+  onSelect
+    ? {
+        role: "button" as const,
+        tabIndex: 0,
+        onClick: () => onSelect(key),
+        onKeyDown: (e: KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelect(key);
+          }
+        },
+      }
+    : {};
 
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -159,13 +180,18 @@ const PAD = { top: 10, right: 12, bottom: 24, left: 44 };
 function TimeChart({
   display,
   kind,
+  onSelect,
+  selected,
 }: {
   display: Display;
   kind: "line" | "area" | "bar";
-}) {
+} & Select) {
   const [ref, { width, height }] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const n = display.keys.length;
+  const chosen = selected ? display.keys.indexOf(selected) : -1;
+  const lit = (i: number) =>
+    hover === null ? chosen < 0 || chosen === i : hover === i;
   const all = display.series.flatMap((s) =>
     s.values.filter((v): v is number => v !== null),
   );
@@ -277,7 +303,7 @@ function TimeChart({
                         height={Math.max(1, bottom - top)}
                         rx={Math.min(4, barW / 2)}
                         fill={s.color}
-                        opacity={hover === null || hover === i ? 1 : 0.55}
+                        opacity={lit(i) ? 1 : 0.55}
                       />
                     );
                   }),
@@ -311,13 +337,13 @@ function TimeChart({
                     )}
                   </g>
                 ))}
-            {hover !== null && kind !== "bar" && (
+            {kind !== "bar" && (hover ?? (chosen >= 0 ? chosen : null)) !== null && (
               <line
-                x1={x(hover)}
-                x2={x(hover)}
+                x1={x(hover ?? chosen)}
+                x2={x(hover ?? chosen)}
                 y1={PAD.top}
                 y2={PAD.top + h}
-                className="dash-crosshair"
+                className={`dash-crosshair ${hover === null ? "chosen" : ""}`}
               />
             )}
             <rect
@@ -326,8 +352,19 @@ function TimeChart({
               width={w}
               height={h}
               fill="transparent"
+              className={onSelect ? "dash-pickable" : undefined}
               onPointerMove={move}
               onPointerLeave={() => setHover(null)}
+              onClick={(e) => {
+                if (!onSelect || !n) return;
+                const box = e.currentTarget.getBoundingClientRect();
+                const px = e.clientX - box.left;
+                const i =
+                  kind === "bar"
+                    ? Math.floor(px / (band || 1))
+                    : Math.round((px / (w || 1)) * (n - 1));
+                onSelect(display.keys[Math.min(Math.max(i, 0), n - 1)]);
+              }}
             />
           </svg>
         )}
@@ -342,12 +379,17 @@ function TimeChart({
 function CategoryChart({
   display,
   horizontal,
+  onSelect,
+  selected,
 }: {
   display: Display;
   horizontal: boolean;
-}) {
+} & Select) {
   const [ref, { width, height }] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
+  const chosen = selected ? display.keys.indexOf(selected) : -1;
+  const lit = (i: number) =>
+    hover === null ? chosen < 0 || chosen === i : hover === i;
   const n = display.keys.length;
   const count = display.series.length;
   const all = display.series.flatMap((s) =>
@@ -382,9 +424,11 @@ function CategoryChart({
           {display.keys.map((key, i) => (
             <div
               key={key}
-              className={`dash-hbar ${hover === i ? "hover" : ""}`}
+              className={`dash-hbar ${hover === i ? "hover" : ""} ${chosen === i ? "chosen" : ""} ${onSelect ? "dash-pickable" : ""}`}
               onPointerEnter={() => setHover(i)}
               onPointerLeave={() => setHover(null)}
+              aria-pressed={onSelect ? chosen === i : undefined}
+              {...pick(key, onSelect)}
             >
               <span className="dash-hbar-label" title={display.labels[i]}>
                 {display.labels[i]}
@@ -473,7 +517,7 @@ function CategoryChart({
                       height={Math.max(1, bottom - top)}
                       rx={Math.min(4, barW / 2)}
                       fill={colorOf(key, s.color)}
-                      opacity={hover === null || hover === i ? 1 : 0.55}
+                      opacity={lit(i) ? 1 : 0.55}
                     />
                   );
                 })}
@@ -491,8 +535,10 @@ function CategoryChart({
                   width={band}
                   height={h}
                   fill="transparent"
+                  className={onSelect ? "dash-pickable" : undefined}
                   onPointerEnter={() => setHover(i)}
                   onPointerLeave={() => setHover(null)}
+                  onClick={onSelect ? () => onSelect(key) : undefined}
                 />
               </g>
             ))}
@@ -509,7 +555,11 @@ function CategoryChart({
 }
 
 // ------------------------------------------------------------ donut
-function DonutChart({ display }: { display: Display }) {
+function DonutChart({
+  display,
+  onSelect,
+  selected,
+}: { display: Display } & Select) {
   const [ref, { width, height }] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const s = display.series[0];
@@ -552,7 +602,9 @@ function DonutChart({ display }: { display: Display }) {
         : `M${p(a0, r)}A${r},${r} 0 ${large} 1 ${p(a1, r)}L${p(a1, inner)}A${inner},${inner} 0 ${large} 0 ${p(a0, inner)}Z`;
     return { ...sl, d, color: colorAt(i, sl.key) };
   });
-  const focus = hover === null ? null : arcs[hover];
+  const chosen = selected ? arcs.findIndex((a) => a.key === selected) : -1;
+  const focusAt = hover ?? (chosen >= 0 ? chosen : null);
+  const focus = focusAt === null ? null : arcs[focusAt];
   return (
     <div className="dash-donut">
       <div className="dash-donut-chart" ref={ref}>
@@ -571,9 +623,11 @@ function DonutChart({ display }: { display: Display }) {
                 stroke="#fff"
                 strokeWidth={2}
                 fillRule="evenodd"
-                opacity={hover === null || hover === i ? 1 : 0.5}
+                opacity={focusAt === null || focusAt === i ? 1 : 0.5}
+                className={onSelect ? "dash-pickable" : undefined}
                 onPointerEnter={() => setHover(i)}
                 onPointerLeave={() => setHover(null)}
+                onClick={onSelect ? () => onSelect(a.key) : undefined}
               />
             ))}
             <text
@@ -599,8 +653,11 @@ function DonutChart({ display }: { display: Display }) {
         {arcs.map((a, i) => (
           <li
             key={a.key}
+            className={`${chosen === i ? "chosen" : ""} ${onSelect ? "dash-pickable" : ""}`}
             onPointerEnter={() => setHover(i)}
             onPointerLeave={() => setHover(null)}
+            aria-pressed={onSelect ? chosen === i : undefined}
+            {...pick(a.key, onSelect)}
           >
             <i style={{ background: a.color }} aria-hidden="true" />
             <span>{a.label}</span>
@@ -621,7 +678,12 @@ function DonutChart({ display }: { display: Display }) {
 }
 
 // ------------------------------------------------------------ table
-function TableView({ display, group }: { display: Display; group: string }) {
+function TableView({
+  display,
+  group,
+  onSelect,
+  selected,
+}: { display: Display; group: string } & Select) {
   return (
     <div className="dash-table-wrap">
       <table className="dash-table">
@@ -637,7 +699,12 @@ function TableView({ display, group }: { display: Display; group: string }) {
         </thead>
         <tbody>
           {display.keys.map((key, i) => (
-            <tr key={key}>
+            <tr
+              key={key}
+              className={`${selected === key ? "chosen" : ""} ${onSelect ? "dash-pickable" : ""}`}
+              aria-pressed={onSelect ? selected === key : undefined}
+              {...pick(key, onSelect)}
+            >
               <td>{display.labels[i]}</td>
               {display.series.map((s) => (
                 <td key={s.id} className="num">
@@ -669,17 +736,25 @@ const groupHeading: Record<string, string> = {
 export const PanelChart = memo(function PanelChart({
   display,
   spec,
+  onSelect,
+  selected,
 }: {
   display: Display;
   spec: PanelSpec;
-}): ReactNode {
+} & Select): ReactNode {
   if (spec.viz === "stat") return <StatView display={display} spec={spec} />;
   if (!hasData(display)) return <Empty />;
+  // A total has no category to pick.
+  const sel = spec.groupBy === "none" ? {} : { onSelect, selected };
   if (spec.viz === "table")
     return (
-      <TableView display={display} group={groupHeading[spec.groupBy] ?? ""} />
+      <TableView
+        display={display}
+        group={groupHeading[spec.groupBy] ?? ""}
+        {...sel}
+      />
     );
-  if (spec.viz === "donut") return <DonutChart display={display} />;
+  if (spec.viz === "donut") return <DonutChart display={display} {...sel} />;
   if (spec.groupBy === "time")
     return (
       <TimeChart
@@ -687,9 +762,16 @@ export const PanelChart = memo(function PanelChart({
         kind={
           spec.viz === "hbar" ? "bar" : (spec.viz as "line" | "area" | "bar")
         }
+        {...sel}
       />
     );
   if (spec.viz === "line" || spec.viz === "area")
-    return <CategoryChart display={display} horizontal={false} />;
-  return <CategoryChart display={display} horizontal={spec.viz === "hbar"} />;
+    return <CategoryChart display={display} horizontal={false} {...sel} />;
+  return (
+    <CategoryChart
+      display={display}
+      horizontal={spec.viz === "hbar"}
+      {...sel}
+    />
+  );
 });
