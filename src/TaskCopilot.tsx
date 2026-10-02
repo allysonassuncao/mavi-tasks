@@ -495,7 +495,7 @@ function CopilotResult({
             state.model.provider
               ? ` (${state.model.provider}), pela regra do Painel da MAVI`
               : ", o padrão do servidor"
-          }. A escolha fica no Painel da MAVI › Regras › Por funcionalidade › Assistente MAVI.`}
+          }. A escolha fica no Painel da MAVI › Quem usa qual modelo › Por funcionalidade › Assistente MAVI na criação e edição de tarefas.`}
         >
           <Cpu size={11} aria-hidden="true" />
           {state.model.label}
