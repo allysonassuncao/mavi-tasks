@@ -654,7 +654,8 @@ function demoList(f: PersonalFilters): PersonalList {
   const status = f.status ?? "open";
   const mine = demo.items;
   const q = (f.q ?? "").toLowerCase();
-  const items = mine.filter(
+  // Por ordem de chegada: a última fala do cliente, da mais recente para a mais antiga.
+  const items = [...mine].sort((a, b) => b.last_at.localeCompare(a.last_at)).filter(
     (i) =>
       (status === "all" ||
         (status === "open" && i.status === "open" && i.state === "open") ||

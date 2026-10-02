@@ -837,4 +837,15 @@ await check("Juntar com…: a pessoa junta à mão e isso vira aprendizado", asy
   assert.match(f.summary, /juntou nesta situação: "Devolutiva por e-mail"/);
 });
 
+await check("a lista vem por ordem de chegada (a mais recente primeiro), não pela urgência", async () => {
+  await sql(`update personal_radar_items set urgency = 3, last_at = now() - interval '3 days' where id = $1`, [cpl]);
+  await sql(`update personal_radar_items set urgency = 0, last_at = now() where id = $1`, [parts[2]]);
+  await as(member);
+  const r = await rpc("personal_radar_items", [A, null, JSON.stringify({ status: "open" })]);
+  const at = r.items.map((i) => i.last_at);
+  assert.deepEqual(at, [...at].sort().reverse());
+  assert.equal(r.items[0].id, parts[2]);
+  assert.ok(r.items.findIndex((i) => i.id === cpl) > 0);
+});
+
 console.log(`\n${passed} verificações do Radar pessoal passaram.`);
