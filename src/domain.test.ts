@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   dateKey,
+  deliveryOffset,
+  deliveryOffsetLabel,
   isLate,
   minutes,
   duration,
@@ -368,4 +370,35 @@ describe("Datas da repetição (espelho de mavi_private.next_recurrence)", () =>
   ] as const)("%s a partir de %s, depois de %s: %s", (f, anchor, after, want) =>
     expect(nextRecurrence(f, anchor, after)).toBe(want),
   );
+});
+
+describe("Entrega em relação ao prazo", () => {
+  const done = (due_date: string, delivered_at: string | null) => ({
+    status: "done" as const,
+    due_date,
+    delivered_at,
+  });
+  it("conta dias corridos pelo dia da entrega no fuso da empresa", () => {
+    expect(deliveryOffset(done("2026-09-18", "2026-09-21T15:00:00Z"))).toBe(3);
+    // 01:00 UTC do dia 19 ainda é dia 18 em São Paulo.
+    expect(deliveryOffset(done("2026-09-18", "2026-09-19T01:00:00Z"))).toBe(0);
+    expect(deliveryOffset(done("2026-09-18", "2026-09-16T12:00:00Z"))).toBe(-2);
+  });
+  it("só vale para tarefas entregues com data", () => {
+    expect(deliveryOffset({ ...done("2026-09-18", null) })).toBeNull();
+    expect(
+      deliveryOffset({
+        status: "review",
+        due_date: "2026-09-18",
+        delivered_at: "2026-09-20T12:00:00Z",
+      }),
+    ).toBeNull();
+  });
+  it("escreve o texto do selo", () => {
+    expect(deliveryOffsetLabel(1)).toBe("Entregue com 1 dia de atraso");
+    expect(deliveryOffsetLabel(4)).toBe("Entregue com 4 dias de atraso");
+    expect(deliveryOffsetLabel(0)).toBe("Entregue no dia");
+    expect(deliveryOffsetLabel(-1)).toBe("Entregue 1 dia antes");
+    expect(deliveryOffsetLabel(-3)).toBe("Entregue 3 dias antes");
+  });
 });

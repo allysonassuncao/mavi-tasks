@@ -1970,6 +1970,31 @@ textarea::placeholder {
   font-size: 0.72rem;
   font-weight: 400;
 }
+/* Delivered tasks: how they landed against the due date. */
+.delivery-offset {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--tone-bg);
+  color: var(--tone);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: default;
+}
+.delivery-offset.late {
+  --tone: #c8514f;
+  --tone-bg: #fcefee;
+}
+.delivery-offset.on-time {
+  --tone: #56793a;
+  --tone-bg: #eef5e6;
+}
+.delivery-offset.early {
+  --tone: #2f8a5b;
+  --tone-bg: #e6f5ec;
+}
 .priority-flag {
   display: inline-flex;
   align-items: center;

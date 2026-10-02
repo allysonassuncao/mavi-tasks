@@ -74,8 +74,11 @@ import {
   canTimeTask,
   contractOpen,
   contractProductLabel,
+  dateKey,
   dateLabel,
   defaultContractName,
+  deliveryOffset,
+  deliveryOffsetLabel,
   isLate,
   duration,
   names,
@@ -1079,6 +1082,10 @@ export function TaskDetail({
   const timeRatio =
     task.estimated_minutes > 0 ? totalSeconds / 60 / task.estimated_minutes : 0;
   const late = Boolean(task.due_date) && isLate(task);
+  const timezone = data.companies.find(
+    (c) => c.id === task.company_id,
+  )?.timezone;
+  const deliveredDays = deliveryOffset(task, timezone);
   useEffect(() => {
     let alive = true;
     if (demo) {
@@ -1654,6 +1661,27 @@ export function TaskDetail({
                   {durations[task.status] ? (
                     <small>há {shortSpan(durations[task.status]!)}</small>
                   ) : null}
+                  {deliveredDays !== null && (
+                    <span
+                      className={`delivery-offset ${
+                        deliveredDays > 0
+                          ? "late"
+                          : deliveredDays < 0
+                            ? "early"
+                            : "on-time"
+                      }`}
+                      title={`Prazo ${dateLabel(task.due_date)} · entregue ${dateLabel(
+                        dateKey(new Date(task.delivered_at!), timezone),
+                      )}${
+                        task.original_due_date &&
+                        task.original_due_date !== task.due_date
+                          ? ` · prazo original ${dateLabel(task.original_due_date)}`
+                          : ""
+                      }`}
+                    >
+                      {deliveryOffsetLabel(deliveredDays)}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="property-row">

@@ -671,6 +671,34 @@ export function statusDurations(
   if (Number.isFinite(entered)) add(task.status, now - entered);
   return result;
 }
+/**
+ * How a delivered task landed against its due date, in calendar days — the
+ * same rule as the Dashboards (delivery day in the company's timezone minus
+ * the due date): positive is late, negative is early, 0 is on the day.
+ * Null while it isn't delivered or has no due date.
+ */
+export function deliveryOffset(
+  task: Pick<Task, "status" | "due_date" | "delivered_at">,
+  timezone = "America/Sao_Paulo",
+) {
+  if (task.status !== "done" || !task.delivered_at || !task.due_date)
+    return null;
+  const delivered = new Date(task.delivered_at);
+  if (Number.isNaN(delivered.getTime())) return null;
+  const day = (key: string) => Date.parse(`${key}T00:00:00Z`) / 86400000;
+  const days = Math.round(
+    day(dateKey(delivered, timezone)) - day(task.due_date),
+  );
+  return Number.isFinite(days) ? days : null;
+}
+/** "Entregue com 3 dias de atraso", "Entregue no dia", "Entregue 1 dia antes". */
+export function deliveryOffsetLabel(days: number) {
+  const n = Math.abs(days);
+  const span = n === 1 ? "1 dia" : `${n} dias`;
+  if (days > 0) return `Entregue com ${span} de atraso`;
+  if (days < 0) return `Entregue ${span} antes`;
+  return "Entregue no dia";
+}
 /** "3 d", "5 h", "12 min" — a compact time-in-status label. */
 export function shortSpan(ms: number) {
   const min = Math.floor(ms / 60000);
