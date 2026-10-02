@@ -11,6 +11,17 @@ import {
   type Destination,
   type Objective,
 } from "./_conversions.js";
+import { metaResults } from "./_ads-sync.js";
+import {
+  currentRule,
+  metaActionFamilies,
+  metaActionLabel,
+  metaDefaultLabel,
+  metaDefaultTypes,
+  ruleOn,
+  type CustomConversions,
+  type MetaConversionRule,
+} from "./_meta-conversions.js";
 import {
   platformDetail,
   platformList,
@@ -845,6 +856,189 @@ async function googleConversionActions(
   };
 }
 
+/** Clicks, views and engagement: listed apart from the conversions. */
+const ENGAGEMENT_TYPES = new Set([
+  "link_click",
+  "landing_page_view",
+  "post_engagement",
+  "page_engagement",
+  "post_reaction",
+  "post_interaction_gross",
+  "comment",
+  "post",
+  "like",
+  "photo_view",
+  "video_view",
+  "onsite_conversion.post_save",
+  "onsite_conversion.post_net_like",
+  "onsite_conversion.post_net_save",
+  "onsite_conversion.post_net_comment",
+  "onsite_conversion.post_unlike",
+  "post_net_like",
+  "post_net_save",
+  "post_net_comment",
+  "post_unlike",
+]);
+
+/**
+ * "Conversões que contam" on Meta: every action type of the cycle's
+ * campaigns in the cycle up to yesterday (before it starts, the last 30
+ * days), with its count, plus the account's custom conversions, and which
+ * count — the cycle's rules or, without them, the objective's
+ * (api/_meta-conversions.ts, the same as the daily sync).
+ */
+async function metaConversionActions(
+  env: AdsEnv,
+  fetchImpl: Fetch,
+  authorization: string,
+  company: string,
+  cycle: string,
+) {
+  const ctx = await rpc<{
+    company_id: string;
+    platform: string;
+    objective: Objective;
+    destination: Destination;
+    start_date: string;
+    end_date: string;
+    today: string;
+    meta_conversions: MetaConversionRule[] | null;
+    links: { account_id: string; campaign_id: string }[];
+  }>(env, fetchImpl, authorization, "ad_cycle_conversion_context", {
+    p_cycle: cycle,
+  });
+  if (ctx.company_id !== company || ctx.platform !== "meta")
+    throw new AdsError(400, "Este ciclo não é de uma campanha do Meta Ads.");
+  const dayShift = (date: string, n: number) => {
+    const d = new Date(`${date}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const yesterday = dayShift(ctx.today, -1);
+  const until = [ctx.end_date, yesterday].sort()[0];
+  const inCycle = ctx.start_date <= until;
+  const period = inCycle
+    ? { since: ctx.start_date, until, cycle: true }
+    : { since: dayShift(ctx.today, -30), until: yesterday, cycle: false };
+  const rules = ctx.meta_conversions;
+  const current = currentRule(rules);
+  const defaults = metaDefaultTypes(ctx.objective, ctx.destination);
+  const base = {
+    objective: ctx.objective,
+    destination: ctx.destination,
+    start_date: ctx.start_date,
+    end_date: ctx.end_date,
+    today: ctx.today,
+    rules,
+    current: current?.actions ?? null,
+    inherited: !!current?.inherited,
+    default_label: metaDefaultLabel(ctx.objective, ctx.destination),
+    make_page: ctx.destination === "make_landing_page",
+  };
+  const accounts = new Map<string, string[]>();
+  for (const l of ctx.links) {
+    const id = accountId("meta", l.account_id);
+    if (!id) continue;
+    const list = accounts.get(id) ?? [];
+    if (l.campaign_id) list.push(l.campaign_id);
+    accounts.set(id, list);
+  }
+  if (!accounts.size)
+    return { ...base, period: null, actions: [], counted: null };
+  const counts = new Map<string, number>();
+  const customs: CustomConversions = new Map();
+  const archived = new Set<string>();
+  let counted = 0;
+  for (const [account, campaigns] of accounts) {
+    const token = await metaAccountToken(
+      env,
+      fetchImpl,
+      authorization,
+      company,
+      account,
+    );
+    const [daily, list] = await Promise.all([
+      graphAll<{
+        date_start?: string;
+        inline_link_clicks?: string;
+        actions?: { action_type: string; value: string }[];
+      }>(env, fetchImpl, token, `/act_${account}/insights`, {
+        level: "account",
+        fields: "inline_link_clicks,actions",
+        time_increment: "1",
+        time_range: JSON.stringify({ since: period.since, until: period.until }),
+        limit: "500",
+        ...(campaigns.length
+          ? {
+              filtering: JSON.stringify([
+                { field: "campaign.id", operator: "IN", value: campaigns },
+              ]),
+            }
+          : {}),
+      }),
+      // Without the permission to list them, only their ids show.
+      graphAll<{
+        id?: string;
+        name?: string;
+        custom_event_type?: string;
+        is_archived?: boolean;
+      }>(env, fetchImpl, token, `/act_${account}/customconversions`, {
+        fields: "id,name,custom_event_type,is_archived",
+        limit: "500",
+      }).catch(() => []),
+    ]);
+    for (const c of list) {
+      if (!c.id) continue;
+      customs.set(c.id, {
+        name: c.name || c.id,
+        event: c.custom_event_type ?? "",
+      });
+      if (c.is_archived) archived.add(c.id);
+    }
+    for (const row of daily) {
+      for (const a of row.actions ?? [])
+        counts.set(
+          a.action_type,
+          (counts.get(a.action_type) ?? 0) + (Number(a.value) || 0),
+        );
+      if (inCycle && row.date_start)
+        counted += metaResults(
+          ctx.objective,
+          ctx.destination,
+          row,
+          ruleOn(rules, row.date_start),
+        ).conversions;
+    }
+  }
+  // What happened, the active custom conversions and whatever was chosen.
+  const types = new Set<string>(counts.keys());
+  for (const [id] of customs)
+    if (!archived.has(id)) types.add(`offsite_conversion.custom.${id}`);
+  for (const r of rules ?? []) for (const t of r.actions ?? []) types.add(t);
+  const actions = [...types]
+    .map((type) => ({
+      type,
+      ...metaActionLabel(type, customs),
+      conversions: Math.round(counts.get(type) ?? 0),
+      by_default: defaults.includes(type),
+      families: metaActionFamilies(type, customs),
+      engagement: ENGAGEMENT_TYPES.has(type),
+    }))
+    .sort(
+      (a, b) =>
+        Number(a.engagement) - Number(b.engagement) ||
+        b.conversions - a.conversions ||
+        a.label.localeCompare(b.label, "pt-BR"),
+    );
+  return {
+    ...base,
+    period,
+    actions,
+    // The platform's part only (the Make's leads are added apart).
+    counted: inCycle ? Math.round(counted) : null,
+  };
+}
+
 // ------------------------------------------------------------ handlers
 export type AdsRequest =
   | { action: "status"; company: string }
@@ -885,6 +1079,13 @@ export type AdsRequest =
       action: "conversion-actions";
       company: string;
       provider: "google";
+      cycle: string;
+    }
+  /** Meta: the cycle's action types and which of them count. */
+  | {
+      action: "meta-conversions";
+      company: string;
+      provider: "meta";
       cycle: string;
     }
   /** Meta: the Pages the account's profile manages. */
@@ -1338,6 +1539,22 @@ export async function handleAds(
       return {
         status: 200,
         body: await googleConversionActions(
+          env,
+          fetchImpl,
+          authorization,
+          company,
+          String(req.cycle),
+        ),
+      };
+    }
+
+    if (req.action === "meta-conversions") {
+      if (provider !== "meta") return fail(400, "Só no Meta Ads.");
+      if (!UUID.test(String(req.cycle ?? "")))
+        return fail(400, "Ciclo inválido.");
+      return {
+        status: 200,
+        body: await metaConversionActions(
           env,
           fetchImpl,
           authorization,

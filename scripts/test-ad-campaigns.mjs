@@ -1866,6 +1866,175 @@ await check(
   },
 );
 
+// Migration 20270302090000_campaign_meta_conversions: the Meta action types
+// that count, for the whole cycle or from today on, inherited by the next cycle.
+await check(
+  "conversões do Meta que contam: ciclo inteiro, daqui para frente e herança",
+  async () => {
+    const [{ today }] = await sql(
+      "select mavi_private.company_today($1)::text as today",
+      [A],
+    );
+    const shift = (n) => {
+      const d = new Date(`${today}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+    const meta = await campaign(admin, { name: "Meta conversões" });
+    const links = [{ account_id: "act_1", campaign_id: "c-conv" }];
+    const old = await cycle(admin, meta, {
+      start: shift(-60),
+      end: shift(-31),
+      objective: "lead",
+      links,
+    });
+    const y = await cycle(admin, meta, {
+      start: shift(-10),
+      end: shift(19),
+      objective: "lead",
+      links,
+    });
+    const set = (who, cycleId, actions, mode) =>
+      as(who).then(() =>
+        rpc("set_ad_cycle_meta_conversions", [cycleId, actions, mode]),
+      );
+    const rules = async (cycleId) =>
+      (
+        await sql(
+          "select meta_conversions as r, meta_conversions_recount as recount from ad_cycles where id=$1",
+          [cycleId],
+        )
+      )[0];
+    await assert.rejects(set(trafego, y, ["lead"], "all"), /Sem permissão/);
+    await assert.rejects(set(admin, y, ["Lead!"], "all"), /Conversão inválida/);
+    await assert.rejects(set(admin, y, ["lead"], "sometimes"), /Escolha recalcular/);
+    const google = await campaign(admin, { name: "Google x", platform: "google" });
+    const gy = await cycle(admin, google, {
+      start: shift(-5),
+      end: shift(5),
+      links: [{ account_id: "3329986472", campaign_id: "g-x" }],
+    });
+    await assert.rejects(set(admin, gy, ["lead"], "all"), /não é de uma campanha do Meta/);
+
+    // The whole cycle: one rule, and the cumulatives to count again.
+    await set(manager, y, ["offsite_conversion.custom.9", "lead", "lead"], "all");
+    let now = await rules(y);
+    assert.deepEqual(now.r, [
+      { from: null, actions: ["lead", "offsite_conversion.custom.9"] },
+    ]);
+    assert.equal(now.recount, true);
+    await sql(
+      `insert into ad_cycle_snapshots(company_id, campaign_id, cycle_id, taken_on, period_start, period_end,
+        spend, conversions, source) values
+       ($1,$2,$3,$4,$5,$6,100,1,'meta'), ($1,$2,$3,$7,$5,$8,150,1,'maso')`,
+      [A, meta, y, shift(-2), shift(-10), shift(-3), shift(-1), shift(-2)],
+    );
+    await as(admin);
+    const [target] = await rpc("ad_sync_targets", [null, meta, 15]);
+    assert.equal(target.cycle_id, y);
+    assert.deepEqual(target.meta_conversions, now.r);
+    // Only the sync's own (the MASO's are kept).
+    assert.deepEqual(target.recount_snapshots, [shift(-3)]);
+    await as(null);
+    await assert.rejects(
+      rpc("ad_sync_recount", [null, y, JSON.stringify([])]),
+      /Sem permissão/,
+    );
+    await as(admin);
+    assert.equal(
+      await rpc("ad_sync_recount", [
+        null,
+        y,
+        JSON.stringify([
+          { period_end: shift(-3), conversions: 7 },
+          { period_end: shift(-2), conversions: 9 },
+        ]),
+      ]),
+      1,
+    );
+    const snaps = await sql(
+      "select source, conversions::float as c from ad_cycle_snapshots where cycle_id=$1 order by taken_on",
+      [y],
+    );
+    assert.deepEqual(snaps, [
+      { source: "meta", c: 7 },
+      { source: "maso", c: 1 },
+    ]);
+    assert.equal((await rules(y)).recount, false);
+    await as(admin);
+    assert.equal(
+      (await rpc("ad_sync_targets", [null, meta, 15])).find((t) => t.cycle_id === y)
+        .recount_snapshots,
+      null,
+    );
+
+    // From today on: the days before keep the rule they had.
+    await set(admin, y, ["lead"], "forward");
+    now = await rules(y);
+    assert.deepEqual(now.r, [
+      { from: null, actions: ["lead", "offsite_conversion.custom.9"] },
+      { from: today, actions: ["lead"] },
+    ]);
+    assert.equal(now.recount, false);
+    // Changed again today: today's rule is replaced; back to the old one: one rule.
+    await set(admin, y, ["onsite_conversion.lead_grouped"], "forward");
+    assert.deepEqual((await rules(y)).r[1], {
+      from: today,
+      actions: ["onsite_conversion.lead_grouped"],
+    });
+    await set(admin, y, ["offsite_conversion.custom.9", "lead"], "forward");
+    assert.equal((await rules(y)).r.length, 1);
+    const events = await sql(
+      "select detail from ad_campaign_events where cycle_id=$1 and action='meta_conversions' order by id",
+      [y],
+    );
+    assert.equal(events.length, 4);
+    assert.equal(events[0].detail.mode, "all");
+    assert.equal(events[1].detail.mode, "forward");
+    assert.equal(events[1].detail.since, today);
+    // The context of the window has the choice.
+    await as(manager);
+    assert.deepEqual(
+      (await rpc("ad_cycle_conversion_context", [y])).meta_conversions,
+      (await rules(y)).r,
+    );
+
+    // An ended cycle: only the whole cycle, and the sync takes it again.
+    await assert.rejects(set(admin, old, ["lead"], "forward"), /já terminou/);
+    await as(admin);
+    assert.ok(
+      !(await rpc("ad_sync_targets", [null, meta, 15])).some((t) => t.cycle_id === old),
+    );
+    await set(admin, old, ["lead"], "all");
+    await as(admin);
+    assert.ok(
+      (await rpc("ad_sync_targets", [null, meta, 15])).some((t) => t.cycle_id === old),
+    );
+
+    // The next cycle inherits what counts at the end of this one.
+    await set(admin, y, ["lead"], "forward");
+    const next = await cycle(admin, meta, {
+      start: shift(20),
+      end: shift(49),
+      objective: "lead",
+      links,
+    });
+    assert.deepEqual((await rules(next)).r, [
+      { from: null, actions: ["lead"], inherited: true },
+    ]);
+    // Back to the default: no list.
+    await set(admin, next, [], "all");
+    assert.equal((await rules(next)).r, null);
+    // Reports read it.
+    await as(admin);
+    const sources = await rpc("ad_report_sources", [meta, shift(-10), shift(19)]);
+    assert.deepEqual(
+      sources.cycles.find((c) => c.id === y).meta_conversions,
+      (await rules(y)).r,
+    );
+  },
+);
+
 // Migration 20270105090000_member_opt_in_modules: an administrator turns
 // Campanhas on for a collaborator; read-only, only the clients of their teams.
 await check(

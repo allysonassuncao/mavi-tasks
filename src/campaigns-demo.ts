@@ -22,6 +22,7 @@ import {
   type CampaignsBackend,
   type CycleInput,
   type SharedDayChoice,
+  type MetaConversionRule,
 } from "./campaigns";
 import { contractParts, dateKey } from "./domain";
 import { cycleFit, demoMediaRoom } from "./campaign-media";
@@ -464,6 +465,35 @@ export function demoCampaigns(
       log(campaignOf(y.campaign_id), y.id, "conversion_actions", {
         from,
         to: v,
+      });
+    },
+    async setMetaConversions(cycle, actions, mode) {
+      const y = store.cycles.find((c) => c.id === cycle.id);
+      if (!y) throw Error("Sem permissão");
+      const v = actions?.length ? [...new Set(actions)].sort() : null;
+      const today = dateKey();
+      const from = demoMetaChoice.get(y.id) ?? null;
+      let to: MetaConversionRule[] | null;
+      if (mode === "all" || today <= y.start_date)
+        to = v ? [{ from: null, actions: v }] : null;
+      else {
+        const kept = (from ?? []).filter((r) => !r.from || r.from < today);
+        if (!kept.length) kept.push({ from: null, actions: null });
+        const last = kept[kept.length - 1].actions;
+        to =
+          JSON.stringify(last) === JSON.stringify(v)
+            ? kept
+            : [...kept, { from: today, actions: v }];
+        if (!to.some((r) => r.actions)) to = null;
+      }
+      if (JSON.stringify(from) === JSON.stringify(to)) return;
+      demoMetaChoice.set(y.id, to);
+      log(campaignOf(y.campaign_id), y.id, "meta_conversions", {
+        from,
+        to,
+        mode,
+        actions: v,
+        since: mode === "forward" ? today : null,
       });
     },
     async setCurrentCycle(campaign, cycle) {
@@ -937,6 +967,47 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
         }),
       );
     },
+    async metaConversions(_company, cycle) {
+      await wait();
+      const y = store.cycles.find((c) => c.id === cycle);
+      const a = store.campaigns.find((c) => c.id === y?.campaign_id);
+      if (!y || !a || a.platform !== "meta")
+        throw new AdsApiError("Este ciclo não é de uma campanha do Meta Ads.");
+      const rules = demoMetaChoice.get(y.id) ?? null;
+      const current = rules?.[rules.length - 1] ?? null;
+      const message = y.objective === "message";
+      const byDefault = message
+        ? "onsite_conversion.messaging_first_reply"
+        : "offsite_conversion.fb_pixel_lead";
+      const picked = current?.actions ?? [byDefault];
+      return {
+        objective: y.objective,
+        destination: y.destination,
+        start_date: y.start_date,
+        end_date: y.end_date,
+        today: dateKey(),
+        rules,
+        current: current?.actions ?? null,
+        inherited: !!current?.inherited,
+        default_label: message
+          ? "as primeiras respostas nas mensagens"
+          : "os leads do pixel no site",
+        make_page: y.destination === "make_landing_page",
+        period: {
+          since: y.start_date,
+          until: addDays(dateKey(), -1),
+          cycle: true,
+        },
+        actions: DEMO_META_ACTIONS.map((x) => ({
+          ...x,
+          by_default: x.type === byDefault,
+        })),
+        counted: DEMO_META_ACTIONS.filter((x) => picked.includes(x.type)).reduce(
+          (n, x) => n + x.conversions,
+          0,
+        ),
+      };
+    },
     async conversionActions(_company, cycle) {
       await wait();
       const y = store.cycles.find((c) => c.id === cycle);
@@ -1039,6 +1110,75 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
     },
   };
 }
+
+/** Meta action types of the demonstration (any Meta cycle). */
+const DEMO_META_ACTIONS = [
+  {
+    type: "onsite_conversion.messaging_conversation_started_7d",
+    label: "Conversas por mensagem iniciadas",
+    detail: "",
+    conversions: 64,
+    families: ["messaging"],
+    engagement: false,
+  },
+  {
+    type: "onsite_conversion.messaging_first_reply",
+    label: "Primeiras respostas nas mensagens",
+    detail: "",
+    conversions: 52,
+    families: ["messaging"],
+    engagement: false,
+  },
+  {
+    type: "lead",
+    label: "Leads (site e formulário)",
+    detail: "",
+    conversions: 41,
+    families: ["lead_site", "lead_form"],
+    engagement: false,
+  },
+  {
+    type: "offsite_conversion.fb_pixel_lead",
+    label: "Leads no site",
+    detail: "Pixel",
+    conversions: 29,
+    families: ["lead_site"],
+    engagement: false,
+  },
+  {
+    type: "offsite_conversion.custom.555",
+    label: "Obrigado — formulário",
+    detail: "Conversão personalizada",
+    conversions: 27,
+    families: ["lead_site"],
+    engagement: false,
+  },
+  {
+    type: "onsite_conversion.lead_grouped",
+    label: "Leads no formulário do Facebook",
+    detail: "",
+    conversions: 12,
+    families: ["lead_form"],
+    engagement: false,
+  },
+  {
+    type: "link_click",
+    label: "Cliques no link",
+    detail: "",
+    conversions: 812,
+    families: [],
+    engagement: true,
+  },
+  {
+    type: "landing_page_view",
+    label: "Visualizações da página de destino",
+    detail: "",
+    conversions: 530,
+    families: [],
+    engagement: true,
+  },
+];
+const demoMetaChoice = new Map<string, MetaConversionRule[] | null>();
 
 /** Google conversion actions of the demonstration (any Google cycle). */
 const DEMO_CONVERSION_ACTIONS = [

@@ -17,6 +17,11 @@ import {
   type SyncTarget,
 } from "./_ads-sync";
 import { seal } from "./_google";
+import {
+  metaActionFamilies,
+  metaActionLabel,
+  ruleOn,
+} from "./_meta-conversions";
 
 const key = crypto.randomBytes(32);
 const env: SyncEnv = {
@@ -1041,6 +1046,175 @@ describe("POST /api/ads-sync", () => {
       p_secret: null,
       p_campaign: "00000000-0000-4000-8000-000000000001",
     });
+  });
+});
+
+describe("Meta: conversões que contam", () => {
+  const row = {
+    inline_link_clicks: "40",
+    actions: [
+      { action_type: "offsite_conversion.fb_pixel_lead", value: "3" },
+      { action_type: "offsite_conversion.custom.987", value: "5" },
+      {
+        action_type: "onsite_conversion.messaging_conversation_started_7d",
+        value: "7",
+      },
+    ],
+  };
+  it("a escolha soma os tipos marcados, em qualquer objetivo", () => {
+    expect(
+      metaResults("lead", "external_page", row, [
+        "offsite_conversion.custom.987",
+        "onsite_conversion.messaging_conversation_started_7d",
+      ]).conversions,
+    ).toBe(12);
+    expect(
+      metaResults("traffic", "external_page", row, [
+        "offsite_conversion.fb_pixel_lead",
+      ]).conversions,
+    ).toBe(3);
+    // Without a choice: the objective's rule.
+    expect(metaResults("lead", "external_page", row, null).conversions).toBe(3);
+    expect(metaResults("lead", "external_page", row, []).conversions).toBe(3);
+  });
+
+  it("cada dia com a regra que valia nele", () => {
+    const rules = [
+      { from: null, actions: null },
+      { from: "2026-09-22", actions: ["offsite_conversion.custom.987"] },
+    ];
+    expect(ruleOn(rules, "2026-09-20")).toBeNull();
+    expect(ruleOn(rules, "2026-09-22")).toEqual([
+      "offsite_conversion.custom.987",
+    ]);
+    expect(ruleOn(null, "2026-09-22")).toBeNull();
+  });
+
+  it("parecidas que podem contar o mesmo lead", () => {
+    const customs = new Map([["987", { name: "Lead LP", event: "LEAD" }]]);
+    const share = (a: string, b: string) =>
+      metaActionFamilies(a, customs).some((f) =>
+        metaActionFamilies(b, customs).includes(f),
+      );
+    expect(share("lead", "offsite_conversion.fb_pixel_lead")).toBe(true);
+    expect(share("lead", "onsite_conversion.lead_grouped")).toBe(true);
+    expect(share("leadgen_grouped", "onsite_conversion.lead_grouped")).toBe(
+      true,
+    );
+    expect(
+      share("offsite_conversion.custom.987", "offsite_conversion.fb_pixel_lead"),
+    ).toBe(true);
+    expect(
+      share("offsite_conversion.fb_pixel_lead", "onsite_conversion.lead_grouped"),
+    ).toBe(false);
+    expect(share("purchase", "offsite_conversion.fb_pixel_purchase")).toBe(true);
+    expect(metaActionLabel("offsite_conversion.custom.987", customs).label).toBe(
+      "Lead LP",
+    );
+  });
+
+  const daily = () =>
+    json({
+      data: [
+        {
+          date_start: "2026-09-21",
+          spend: "10",
+          actions: [
+            { action_type: "offsite_conversion.fb_pixel_lead", value: "2" },
+            { action_type: "offsite_conversion.custom.987", value: "4" },
+          ],
+        },
+        {
+          date_start: "2026-09-22",
+          spend: "10",
+          actions: [
+            { action_type: "offsite_conversion.fb_pixel_lead", value: "1" },
+            { action_type: "offsite_conversion.custom.987", value: "6" },
+          ],
+        },
+      ],
+    });
+
+  it("daqui para frente: os dias antes ficam com a regra antiga, o acumulado é a soma", async () => {
+    let batch = [
+      target({
+        objective: "lead",
+        meta_conversions: [
+          { from: null, actions: null },
+          { from: "2026-09-22", actions: ["offsite_conversion.custom.987"] },
+        ],
+      }),
+    ];
+    const { fetch, calls } = network([
+      [/rpc\/ad_sync_targets/, () => json(batch.splice(0))],
+      [/act_111\/insights.*time_increment=1/, daily],
+      [
+        /act_111\/insights/,
+        () =>
+          json({
+            data: [
+              {
+                spend: "20",
+                reach: "900",
+                actions: [
+                  { action_type: "offsite_conversion.fb_pixel_lead", value: "3" },
+                ],
+              },
+            ],
+          }),
+      ],
+      [/rpc\/ad_sync_store/, () => json(4)],
+    ]);
+    await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    const stored = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_store"))!.body!,
+    );
+    expect(stored.p_days[1]).toMatchObject({ day: "2026-09-21", conversions: 2 });
+    expect(stored.p_days[2]).toMatchObject({ day: "2026-09-22", conversions: 6 });
+    expect(stored.p_snapshot).toMatchObject({ conversions: 8, reach: 900 });
+    expect(calls.some((c) => c.url.includes("ad_sync_recount"))).toBe(false);
+  });
+
+  it("recalcular o ciclo inteiro: refaz os acumulados já gravados", async () => {
+    let batch = [
+      target({
+        objective: "lead",
+        meta_conversions: [
+          { from: null, actions: ["offsite_conversion.custom.987"] },
+        ],
+        recount_snapshots: ["2026-09-21", "2026-09-22"],
+      }),
+    ];
+    const { fetch, calls } = network([
+      [/rpc\/ad_sync_targets/, () => json(batch.splice(0))],
+      [/act_111\/insights.*time_increment=1/, daily],
+      [
+        /act_111\/insights/,
+        () =>
+          json({
+            data: [
+              {
+                spend: "20",
+                actions: [
+                  { action_type: "offsite_conversion.custom.987", value: "10" },
+                ],
+              },
+            ],
+          }),
+      ],
+      [/rpc\/ad_sync_store/, () => json(4)],
+      [/rpc\/ad_sync_recount/, () => json(2)],
+    ]);
+    const result = await handleAdsSync({}, `Bearer ${env.secret}`, env, fetch);
+    expect(result.body).toEqual({ synced: 1, errors: [] });
+    const recount = JSON.parse(
+      calls.find((c) => c.url.includes("ad_sync_recount"))!.body!,
+    );
+    expect(recount.p_secret).toBe(env.secret);
+    expect(recount.p_snapshots).toEqual([
+      { period_end: "2026-09-21", conversions: 4 },
+      { period_end: "2026-09-22", conversions: 10 },
+    ]);
   });
 });
 

@@ -13706,6 +13706,47 @@ tr:hover .campaign-edit-record,
   margin: 0;
   font-size: 0.85rem;
 }
+/* Campanhas: "Conversões do Meta que contam". */
+/* The window scrolls when the warning and the choice of how to apply show. */
+.modal.sheet > .campaign-conversions {
+  min-height: 0;
+  overflow-y: auto;
+}
+.modal.sheet > .campaign-conversions > * {
+  flex-shrink: 0;
+}
+.campaign-conversion-list.is-default {
+  opacity: 0.55;
+}
+.campaign-conversion-list li.campaign-conversion-more {
+  justify-content: flex-start;
+}
+.campaign-conversion-rules {
+  margin: 0;
+  padding-left: 18px;
+}
+.campaign-conversion-mode {
+  margin: 0;
+}
+.campaign-conversion-mode .share-toggle {
+  display: flex;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.campaign-conversion-mode .share-toggle:has(input:checked) {
+  border-color: #b9d39a;
+  background: #f5faee;
+}
+.campaign-conversion-mode input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 3px 0 0;
+  padding: 0;
+  accent-color: #547b31;
+}
 
 /* ------------------------------------------------------------ Onboarding › Social Leads */
 .sl-muted {

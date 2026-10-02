@@ -110,7 +110,7 @@ import {
   supabaseReports,
   type ReportsBackend,
 } from "./campaign-reports";
-import { GoogleConversions } from "./CampaignConversions";
+import { GoogleConversions, MetaConversions } from "./CampaignConversions";
 import { CampaignAlerts, type AlertCampaignOption } from "./CampaignAlerts";
 import { CampaignMavi } from "./CampaignMavi";
 import {
@@ -1443,7 +1443,28 @@ function CampaignDetail({
           </>
         }
       />
-      {conversions && (
+      {conversions && campaign.platform === "meta" && (
+        <MetaConversions
+          ads={backend.ads}
+          backend={backend}
+          company={company}
+          cycle={conversions}
+          onClose={() => setConversions(null)}
+          onSaved={async (message) => {
+            // The cycle again, with the new choice (and its cumulatives).
+            const result = await backend.metrics.sync(company, campaign.id);
+            setConversions(null);
+            setMetricsTick((t) => t + 1);
+            setEditsTick((t) => t + 1);
+            notify(
+              result.errors.length
+                ? `Escolha salva, mas a sincronização deu erro: ${result.errors[0].message}`
+                : message,
+            );
+          }}
+        />
+      )}
+      {conversions && campaign.platform === "google" && (
         <GoogleConversions
           ads={backend.ads}
           backend={backend}
@@ -1549,6 +1570,15 @@ function describeEvent(e: AdCampaignEvent, state: CampaignData) {
       return d.to
         ? `escolheu as conversões do Google que contam no ciclo de ${period(e.cycle_id)} (${(d.to as string[]).length} ${(d.to as string[]).length === 1 ? "ação" : "ações"}).`
         : `voltou as conversões do Google do ciclo de ${period(e.cycle_id)} para as categorias do objetivo.`;
+    case "meta_conversions": {
+      const actions = d.actions as string[] | null;
+      const what = actions
+        ? `escolheu as conversões do Meta que contam no ciclo de ${period(e.cycle_id)} (${actions.length} ${actions.length === 1 ? "tipo" : "tipos"})`
+        : `voltou as conversões do Meta do ciclo de ${period(e.cycle_id)} para a regra do objetivo`;
+      return d.mode === "forward"
+        ? `${what}, a partir de ${shortDate(String(d.since))}; os dias anteriores ficaram como estavam.`
+        : `${what}, recalculando o ciclo inteiro.`;
+    }
     case "daily_edited":
     case "snapshot_edited": {
       const changes = Object.entries(

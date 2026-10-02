@@ -663,11 +663,15 @@ function CampaignSummary({
                 {syncing ? "Sincronizando…" : "Sincronizar"}
               </Button>
               )}
-              {campaign.platform === "google" && cycle && onConversions && (
+              {cycle && onConversions && (
                 <Button
                   className="text-btn"
                   onClick={() => onConversions(cycle)}
-                  title="Quais ações de conversão do Google contam como resultado deste ciclo"
+                  title={
+                    campaign.platform === "google"
+                      ? "Quais ações de conversão do Google contam como resultado deste ciclo"
+                      : "Quais resultados do Meta contam como conversão deste ciclo"
+                  }
                 >
                   <ListChecks size={13} /> Conversões que contam
                 </Button>

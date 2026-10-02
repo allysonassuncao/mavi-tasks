@@ -1,5 +1,6 @@
 import { AdsError, graph, graphAll, type AdsEnv, type Fetch } from "./_ads.js";
 import { metaResults } from "./_ads-sync.js";
+import { ruleOn, type MetaConversionRule } from "./_meta-conversions.js";
 
 /**
  * Campanhas › Plataforma and Relatórios: the Meta ad account read live, as
@@ -945,6 +946,8 @@ export type ReportSources = {
     end_date: string;
     objective: Parameters<typeof metaResults>[0];
     destination: Parameters<typeof metaResults>[1];
+    /** The cycle's "Conversões que contam" (null: by objective). */
+    meta_conversions?: MetaConversionRule[] | null;
   }[];
   links: { account_id: string; campaign_id: string }[];
 };
@@ -1024,7 +1027,8 @@ export async function reportMeta(
     (c) =>
       c.destination !== "make_landing_page" ||
       c.objective === "traffic" ||
-      c.objective === "engagement",
+      c.objective === "engagement" ||
+      !!c.meta_conversions?.some((r) => r.actions?.length),
   );
   // Each account, with the campaigns linked (none: the whole account).
   const accounts = new Map<string, Set<string> | null>();
@@ -1112,7 +1116,12 @@ export async function reportMeta(
       const day = String(row.date_start ?? "");
       const cycle = cycleOn(day);
       const results = cycle
-        ? metaResults(cycle.objective, cycle.destination, row as never).conversions
+        ? metaResults(
+            cycle.objective,
+            cycle.destination,
+            row as never,
+            ruleOn(cycle.meta_conversions, day),
+          ).conversions
         : 0;
       const d: ReportDay = {
         d: day,

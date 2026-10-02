@@ -15,6 +15,11 @@ import {
   classifyActions,
   type ConversionAction,
 } from "./_conversions.js";
+import {
+  ruleOn,
+  splitRules,
+  type MetaConversionRule,
+} from "./_meta-conversions.js";
 
 /**
  * Campanhas: the daily sync of each cycle's numbers (migration
@@ -66,6 +71,13 @@ export type SyncTarget = {
   landing_pages?: string[];
   /** Google: the conversion actions chosen for the cycle (null: by category). */
   conversion_actions?: string[] | null;
+  /** Meta: the action types that count, by day (null: by objective). */
+  meta_conversions?: MetaConversionRule[] | null;
+  /**
+   * Meta, after "recalcular o ciclo inteiro": the period ends of the
+   * cumulatives taken before today, to count again (null: none to redo).
+   */
+  recount_snapshots?: string[] | null;
   today: string;
   last_day: string | null;
   /** The days that already have the cycle's cumulative (absent: fill none). */
@@ -187,7 +199,10 @@ export function missingSnapshots(t: SyncTarget) {
  *    add_to_cart, initiate_checkout); PERSONALIZADA
  *    offsite_conversion.fb_pixel_custom; MENSAGEM
  *    onsite_conversion.messaging_first_reply (the MASO's since 19/07/2023);
- *    VIDEO video_view; LEAD and the rest offsite_conversion.fb_pixel_lead.
+ *    VIDEO video_view; LEAD and the rest offsite_conversion.fb_pixel_lead;
+ *  - unless the cycle chose the action types that count ("Conversões que
+ *    contam", api/_meta-conversions.ts): then their sum, whatever the
+ *    objective (on the Make capture page, added to the Make's leads).
  *
  * Google:
  *  - TRÁFEGO: clicks; ENGAJAMENTO: impressions; VIDEO: TrueView views;
@@ -220,6 +235,8 @@ export function metaResults(
   objective: Objective,
   destination: Destination,
   row: { actions?: MetaAction[]; inline_link_clicks?: string },
+  /** The action types the cycle chose (null: the objective's rule). */
+  picked?: string[] | null,
 ): Pick<
   Totals,
   "conversions" | "view_content" | "add_to_cart" | "initiate_checkout"
@@ -229,6 +246,19 @@ export function metaResults(
     num(actions.find((a) => a.action_type === type)?.value);
   const has = (type: string) => actions.some((a) => a.action_type === type);
   const none = { view_content: 0, add_to_cart: 0, initiate_checkout: 0 };
+  const funnel = objective === "sale" || objective === "custom";
+  if (picked?.length)
+    return {
+      conversions: picked.reduce((n, type) => n + value(type), 0),
+      view_content:
+        funnel && destination === "external_page" ? value("landing_page_view") : 0,
+      add_to_cart:
+        funnel && destination === "external_page" ? value("add_to_cart") : 0,
+      initiate_checkout:
+        funnel && destination === "external_page"
+          ? value("initiate_checkout")
+          : 0,
+    };
   if (objective === "traffic")
     return { conversions: num(row.inline_link_clicks), ...none };
   if (objective === "engagement")
@@ -243,7 +273,6 @@ export function metaResults(
     };
   // The Make capture page's leads come from the Make server.
   if (destination === "make_landing_page") return { conversions: 0, ...none };
-  const funnel = objective === "sale" || objective === "custom";
   return {
     conversions:
       objective === "sale"
@@ -261,15 +290,35 @@ export function metaResults(
   };
 }
 
-function metaTotals(t: SyncTarget, row: MetaRow): Totals {
+/** A row's totals with the rule of `day` (a period: the rule in force). */
+function metaTotals(t: SyncTarget, row: MetaRow, day: string): Totals {
   return {
     spend: num(row.spend),
     impressions: num(row.impressions),
     reach: num(row.reach),
     clicks: num(row.inline_link_clicks),
-    ...metaResults(t.objective, t.destination, row),
+    ...metaResults(
+      t.objective,
+      t.destination,
+      row,
+      ruleOn(t.meta_conversions, day),
+    ),
   };
 }
+/** The days' results up to `end` (the conversions are per day). */
+const resultsUpTo = (days: Map<string, Totals>, end: string) =>
+  [...days].reduce(
+    (sum, [day, d]) =>
+      day <= end
+        ? {
+            conversions: sum.conversions + d.conversions,
+            view_content: sum.view_content + d.view_content,
+            add_to_cart: sum.add_to_cart + d.add_to_cart,
+            initiate_checkout: sum.initiate_checkout + d.initiate_checkout,
+          }
+        : sum,
+    { conversions: 0, view_content: 0, add_to_cart: 0, initiate_checkout: 0 },
+  );
 
 /** The days of the window and the cycle-to-date totals up to each end. */
 type Reading = { days: Map<string, Totals>; totals: Map<string, Totals> };
@@ -343,12 +392,21 @@ async function readMeta(
       throw e;
     });
     for (const row of daily)
-      if (row.date_start) addTo(days, row.date_start, metaTotals(t, row));
+      if (row.date_start)
+        addTo(days, row.date_start, metaTotals(t, row, row.date_start));
     ends.forEach((end, i) => {
       const [total] = cumulative[i];
-      if (total) addTo(totals, end, metaTotals(t, total));
+      if (total) addTo(totals, end, metaTotals(t, total, end));
     });
   }
+  // A choice "daqui para frente" splits the cycle in rules: each day counted
+  // its own, so the cumulatives are the days' sum (the window is the whole
+  // cycle up to yesterday).
+  if (splitRules(t.meta_conversions))
+    for (const end of ends) {
+      const sum = totals.get(end)!;
+      totals.set(end, { ...sum, ...resultsUpTo(days, end) });
+    }
   return { days, totals };
 }
 
@@ -857,6 +915,10 @@ export async function syncCycle(
       );
       dropDay(days, totals, s.day, part.days.get(s.day) ?? zero());
     }
+    // The platform's results by day, before the Make's leads (the recount
+    // below adds the period's distinct ones).
+    const platformDays = new Map(days);
+    let makeUpTo: ((end: string) => Promise<number>) | null = null;
     // The capture page's leads are the result (Google adds its calls and
     // WhatsApp/purchase actions to them, as the MASO did).
     if (usesMakeLeads(t)) {
@@ -876,10 +938,14 @@ export async function syncCycle(
       // Each past cumulative counts the period's distinct leads (MASO).
       // The earlier cumulatives: from the first-seen days of the same
       // answer, or (older Make servers) one call each, one at a time.
+      makeUpTo = async (end) =>
+        end >= window.until
+          ? leads.total
+          : leads.firsts
+            ? leadsUpTo(leads.firsts, end)
+            : (await makeLeads(env, fetchImpl, pages, window.since, end)).total;
       for (const end of ends.slice(1))
-        totals.get(end)!.conversions += leads.firsts
-          ? leadsUpTo(leads.firsts, end)
-          : (await makeLeads(env, fetchImpl, pages, window.since, end)).total;
+        totals.get(end)!.conversions += await makeUpTo(end);
     }
     // The turnover day's leads of the pages both cycles count.
     if (usesMakeLeads(t))
@@ -895,12 +961,17 @@ export async function syncCycle(
     const list = [];
     for (let d = window.since; d <= window.until; d = addDays(d, 1))
       list.push({ day: d, ...round(days.get(d) ?? zero()) });
+    // A cycle over for more than the usual 8 days is synced only to count
+    // again with a new choice: no cumulative "taken today".
+    const stale = t.today > addDays(t.end_date, 8);
     const saved = await store("ok", {
       p_days: list,
-      p_snapshot: {
-        period_end: window.until,
-        ...round(totals.get(window.until)!),
-      },
+      p_snapshot: stale
+        ? null
+        : {
+            period_end: window.until,
+            ...round(totals.get(window.until)!),
+          },
       // Sent only when there is something to fill (older databases don't
       // take it).
       ...(past.length
@@ -913,6 +984,31 @@ export async function syncCycle(
         : {}),
     });
     if (!saved.ok) throw new AdsError(saved.status, saved.error);
+    // "Recalcular o ciclo inteiro": the cumulatives already taken, with the
+    // new choice (the days' sum, as their own reading would give).
+    if (t.platform === "meta" && t.recount_snapshots) {
+      const snapshots = [];
+      for (const end of t.recount_snapshots) {
+        if (end < t.start_date || end > window.until) continue;
+        const make = makeUpTo ? await makeUpTo(end) : 0;
+        snapshots.push({
+          period_end: end,
+          conversions: round({
+            ...zero(),
+            conversions: resultsUpTo(platformDays, end).conversions + make,
+          }).conversions,
+        });
+      }
+      const recounted = await callRpc<number>(
+        env,
+        fetchImpl,
+        auth.authorization,
+        "ad_sync_recount",
+        { p_secret: auth.secret, p_cycle: t.cycle_id, p_snapshots: snapshots },
+      );
+      if (!recounted.ok)
+        throw new AdsError(recounted.status, recounted.error);
+    }
     return { cycle: t.cycle_id, status: "ok" as const, days: saved.data };
   } catch (e) {
     const message = (e as Error).message;

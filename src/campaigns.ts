@@ -551,6 +551,15 @@ export interface CampaignsBackend {
   /** Google: which conversion actions count (null: by category). */
   setConversionActions(cycle: AdCycle, actions: string[] | null): Promise<void>;
   /**
+   * Meta: which action types count (null: by objective), for the whole
+   * cycle or from today on (migration 20270302090000).
+   */
+  setMetaConversions(
+    cycle: AdCycle,
+    actions: string[] | null,
+    mode: MetaConversionMode,
+  ): Promise<void>;
+  /**
    * `override`: the reason an administrator or manager gives to release a
    * budget above the client's media balance (migration 20270222090000).
    */
@@ -670,6 +679,8 @@ export interface AdsBackend {
     company: string,
     cycle: string,
   ): Promise<ConversionActionsView>;
+  /** Meta: the cycle's action types and which of them count. */
+  metaConversions(company: string, cycle: string): Promise<MetaConversionsView>;
   /** The forms linked (a client's, or all). */
   leadForms(company: string, client?: string | null): Promise<LinkedLeadForm[]>;
   unlinkForm(id: string): Promise<void>;
@@ -694,6 +705,47 @@ export type ConversionActionsView = {
   phone_calls: number;
   calls_counted: boolean;
   counted: number;
+};
+/** "Conversões que contam" on Meta (api/_meta-conversions.ts). */
+export type MetaConversionRule = {
+  from: string | null;
+  actions: string[] | null;
+  inherited?: boolean;
+};
+export type MetaConversionMode = "all" | "forward";
+export type MetaConversionRow = {
+  /** The insights' action_type. */
+  type: string;
+  label: string;
+  /** Where it comes from (Pixel, Conversão personalizada…). */
+  detail: string;
+  conversions: number;
+  by_default: boolean;
+  /** Two choices sharing one may count the same lead twice. */
+  families: string[];
+  /** Clicks, views and engagement (listed apart). */
+  engagement: boolean;
+};
+export type MetaConversionsView = {
+  objective: AdObjective;
+  destination: AdDestination;
+  start_date: string;
+  end_date: string;
+  today: string;
+  rules: MetaConversionRule[] | null;
+  /** What counts now (null: the objective's rule). */
+  current: string[] | null;
+  /** The choice came from the previous cycle. */
+  inherited: boolean;
+  /** What the objective's rule counts, in words. */
+  default_label: string;
+  /** Make capture page: its leads always count. */
+  make_page: boolean;
+  /** The period read: the cycle up to yesterday, or the last 30 days. */
+  period: { since: string; until: string; cycle: boolean } | null;
+  actions: MetaConversionRow[];
+  /** What counts today in the period (the platform's part). */
+  counted: number | null;
 };
 /** Campaign objectives that collect leads with Facebook forms (MASO rule). */
 export const LEAD_OBJECTIVES = ["OUTCOME_LEADS", "LEAD_GENERATION"];
@@ -890,6 +942,8 @@ export const serverAds: AdsBackend = {
   },
   forms: (company, account, page) =>
     adsServer({ action: "forms", company, provider: "meta", account, page }),
+  metaConversions: (company, cycle) =>
+    adsServer({ action: "meta-conversions", company, provider: "meta", cycle }),
   conversionActions: (company, cycle) =>
     adsServer({
       action: "conversion-actions",
@@ -1121,6 +1175,13 @@ export const supabaseCampaigns: CampaignsBackend = {
     await rpc("set_ad_cycle_conversion_actions", {
       p_cycle: cycle.id,
       p_actions: actions,
+    });
+  },
+  async setMetaConversions(cycle, actions, mode) {
+    await rpc("set_ad_cycle_meta_conversions", {
+      p_cycle: cycle.id,
+      p_actions: actions,
+      p_mode: mode,
     });
   },
   async createCycle(campaign, input, makeCurrent, override) {
