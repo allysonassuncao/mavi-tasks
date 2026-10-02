@@ -173,7 +173,7 @@ export function RadarThemes({
         />
       ) : (
         <div className="drive-table-wrap">
-          <table className="drive-table radar-table">
+          <table className="drive-table radar-table stack-mobile stack-3">
             <thead>
               <tr>
                 <th>Tema</th>
@@ -204,21 +204,21 @@ export function RadarThemes({
                       {t.clients > t.client_names.length && ` e mais ${t.clients - t.client_names.length}`}
                     </small>
                   </td>
-                  <td>{t.product_name ?? <span className="muted">Geral</span>}</td>
-                  <td className="num">
+                  <td data-label="Produto">{t.product_name ?? <span className="muted">Geral</span>}</td>
+                  <td className="num" data-label="Clientes">
                     <strong>{t.clients}</strong>
                   </td>
-                  <td className="num">
+                  <td className="num" data-label="Em aberto">
                     {t.open_items}
                     <small className="muted"> / {t.items}</small>
                   </td>
-                  <td className="num">{t.mentions}</td>
+                  <td className="num" data-label="Vezes">{t.mentions}</td>
                   {topic.severity && (
-                    <td>
+                    <td data-label="Mais sério">
                       <SeverityDot topic={topic} value={t.max_severity} />
                     </td>
                   )}
-                  <td>{dateBr(t.last_seen_at)}</td>
+                  <td data-label="Última vez">{dateBr(t.last_seen_at)}</td>
                 </tr>
               ))}
             </tbody>

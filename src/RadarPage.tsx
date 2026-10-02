@@ -486,7 +486,7 @@ export function RadarPage({
           />
         ) : (
           <div className="drive-table-wrap">
-            <table className="drive-table radar-table">
+            <table className="drive-table radar-table stack-mobile">
               <thead>
                 <tr>
                   <th>Item</th>
@@ -529,23 +529,23 @@ export function RadarPage({
                           )}
                         </small>
                       </td>
-                      <td>{i.product_name ?? <span className="muted">Geral</span>}</td>
-                      <td>
+                      <td data-label="Produto">{i.product_name ?? <span className="muted">Geral</span>}</td>
+                      <td data-label="Status">
                         <span className="radar-status" style={{ "--status": s?.color ?? "#a3acab" } as CSSProperties}>
                           {s?.label ?? i.status}
                         </span>
                       </td>
                       {topic.severity && (
-                        <td>
+                        <td data-label={topic.severity_label}>
                           <SeverityDot topic={topic} value={i.severity} />
                         </td>
                       )}
                       {topic.has_due && (
-                        <td className={late ? "radar-late" : ""}>
+                        <td className={late ? "radar-late" : ""} data-label="Prazo">
                           {i.due_date ? dateBr(i.due_date) : <span className="muted">—</span>}
                         </td>
                       )}
-                      <td>
+                      <td data-label="Responsável">
                         <span data-person={i.assignee_id ?? undefined}>
                           {i.assignee_name ??
                             data.members.find((m) => m.user_id === i.assignee_id)?.name ?? (
@@ -553,11 +553,11 @@ export function RadarPage({
                             )}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Tarefas">
                         <RadarItemTasks tasks={i.tasks ?? []} />
                       </td>
-                      <td className="num">{i.mentions}</td>
-                      <td>{dateBr(i.last_seen_at)}</td>
+                      <td className="num" data-label="Vezes">{i.mentions}</td>
+                      <td data-label="Última vez">{dateBr(i.last_seen_at)}</td>
                     </tr>
                   );
                 })}

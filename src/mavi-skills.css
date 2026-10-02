@@ -868,7 +868,12 @@ details.skill-check-diff[open] > summary {
   .skill-head {
     flex-wrap: wrap;
   }
+  /* Com base 0 o título nunca quebrava e ficava numa coluna estreita. */
+  .skill-head > div:nth-child(2) {
+    flex: 1 1 220px;
+  }
   .skill-actions {
+    flex-basis: 100%;
     max-width: none;
     justify-content: flex-start;
   }

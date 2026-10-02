@@ -519,6 +519,13 @@
   border-top: 1px solid var(--border);
   background: #fff;
 }
+@media (max-width: 600px) {
+  /* No celular o formulário tem 20px de margem: a barra acompanha. */
+  .creport-form > .form-footer {
+    margin: 0 -20px;
+    padding: 12px 20px;
+  }
+}
 
 /* The comparison. */
 .creport-compare .ui-select {
@@ -624,4 +631,24 @@
   display: block;
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  /* Tabela de campanhas/conjuntos: o nome quebra linha e fica preso à esquerda. */
+  .creport-adsets {
+    padding: 14px 12px;
+  }
+  .creport-adsets td:first-child {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 140px;
+    max-width: 180px;
+  }
+  .creport-adsets th:first-child,
+  .creport-adsets td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #fff;
+  }
 }

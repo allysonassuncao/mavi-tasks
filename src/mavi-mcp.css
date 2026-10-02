@@ -188,6 +188,8 @@
 .mcp-tools li strong {
   font-size: 0.78rem;
   font-weight: 600;
+  /* Nomes como get_contact_full_context_v2 não têm onde quebrar. */
+  overflow-wrap: anywhere;
 }
 .mcp-tools li small {
   flex-basis: 100%;

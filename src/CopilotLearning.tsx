@@ -605,7 +605,7 @@ export function CopilotLearning({
           <section className="panel learning-kinds">
             <h2>Por tipo de alerta</h2>
             {report.kinds.length ? (
-              <table>
+              <table className="stack-mobile stack-3">
                 <thead>
                   <tr>
                     <th>Tipo</th>
@@ -623,9 +623,9 @@ export function CopilotLearning({
                   {report.kinds.map((k) => (
                     <tr key={k.kind}>
                       <td>{ALERT_LABELS[k.kind] ?? k.kind}</td>
-                      <td>{count(k.up)}</td>
-                      <td>{count(k.down)}</td>
-                      <td>
+                      <td data-label="👍">{count(k.up)}</td>
+                      <td data-label="👎">{count(k.down)}</td>
+                      <td data-label="Ajudou">
                         <span className="learning-rate">
                           <span
                             style={{
@@ -635,9 +635,9 @@ export function CopilotLearning({
                         </span>
                         {pct(k.up, k.down)}
                       </td>
-                      <td>{count(k.applied)}</td>
-                      <td>{count(k.dismissed)}</td>
-                      <td>{count(k.ignored)}</td>
+                      <td data-label="Aplicados">{count(k.applied)}</td>
+                      <td data-label="Dispensados">{count(k.dismissed)}</td>
+                      <td data-label="Ignorados">{count(k.ignored)}</td>
                     </tr>
                   ))}
                 </tbody>

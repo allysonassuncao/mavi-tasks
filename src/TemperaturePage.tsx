@@ -191,7 +191,7 @@ export function TemperaturePage({
         />
       ) : (
         <div className="drive-table-wrap">
-          <table className="drive-table thermo-table">
+          <table className="drive-table thermo-table stack-mobile stack-3">
             <thead>
               <tr>
                 <th>Cliente</th>
@@ -227,7 +227,7 @@ export function TemperaturePage({
                       </a>
                       {c.summary && <small className="thermo-row-summary">{c.summary}</small>}
                     </td>
-                    <td>
+                    <td data-label="Temperatura">
                       {c.score === null ? (
                         <span className="muted">{c.pending ? "lendo…" : "sem dados"}</span>
                       ) : (
@@ -241,13 +241,13 @@ export function TemperaturePage({
                         </span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="7 dias">
                       <span className={`thermo-trend ${trendTone(c.d7)}`}>{trendLabel(c.d7) || "—"}</span>
                     </td>
-                    <td>
+                    <td data-label="30 dias">
                       <span className={`thermo-trend ${trendTone(c.d30)}`}>{trendLabel(c.d30) || "—"}</span>
                     </td>
-                    <td>
+                    <td data-label="Sinais de alerta" className="stack-full">
                       {c.flags.length ? (
                         <span className="thermo-row-flags">
                           {c.flags.map((f) => (
@@ -261,8 +261,8 @@ export function TemperaturePage({
                         <span className="muted">—</span>
                       )}
                     </td>
-                    <td>{c.reasons[0] ? c.reasons[0].label.split(" (")[0] : <span className="muted">—</span>}</td>
-                    <td className="num">{c.signals}</td>
+                    <td data-label="O que mais mexe" className="stack-span-2">{c.reasons[0] ? c.reasons[0].label.split(" (")[0] : <span className="muted">—</span>}</td>
+                    <td className="num" data-label="Leituras">{c.signals}</td>
                   </tr>
                 );
               })}

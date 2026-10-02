@@ -660,3 +660,20 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+@media (max-width: 760px) {
+  /* "A MAVI preencheu N campos": o texto tem a linha toda; Desfazer desce. */
+  .sl-ai-filled {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .sl-ai-filled > div {
+    flex: 1 1 calc(100% - 29px);
+  }
+  .sl-ai-filled > .btn {
+    margin-left: 29px;
+  }
+  .sl-ai-filled > .icon-btn {
+    margin-left: auto;
+  }
+}

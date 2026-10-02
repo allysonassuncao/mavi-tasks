@@ -3164,7 +3164,7 @@ export default function App() {
                     <section className="spotlight">
                       <span className="section-caption">SEU DIA, EM ORDEM</span>
                       <h2>
-                        O que vem
+                        O que vem{" "}
                         <br />
                         primeiro?
                       </h2>
@@ -3976,7 +3976,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="table-scroll">
-                      <table>
+                      <table className="stack-mobile stack-3">
                         <thead>
                           <tr>
                             <th>Tarefa</th>
@@ -3995,7 +3995,7 @@ export default function App() {
                                 <small className="cell-note">{h.note}</small>
                               </td>
                               {isLeader && (
-                                <td>
+                                <td data-label="Pessoa">
                                   {
                                     data.members.find(
                                       (m) => m.user_id === h.user_id,
@@ -4003,15 +4003,15 @@ export default function App() {
                                   }
                                 </td>
                               )}
-                              <td>
+                              <td data-label="Data">
                                 {new Date(h.started_at).toLocaleDateString(
                                   "pt-BR",
                                 )}
                               </td>
-                              <td>
+                              <td data-label="Origem">
                                 {h.source === "timer" ? "Cronômetro" : "Manual"}
                               </td>
-                              <td>
+                              <td data-label="Tempo">
                                 <strong>
                                   <LiveDuration entry={h} />
                                 </strong>

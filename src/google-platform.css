@@ -256,3 +256,12 @@
     border-radius: 999px;
   }
 }
+
+@media (max-width: 600px) {
+  /* Como no Meta: as seleções encolhem em vez de serem cortadas. */
+  .gplat .ui-select {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+}

@@ -740,7 +740,7 @@ function CampaignList({
           aria-busy={loading}
         >
           <div className="table-scroll">
-            <table className="campaign-table">
+            <table className="campaign-table stack-mobile">
               <thead>
                 <tr>
                   <th>Campanha</th>
@@ -784,13 +784,13 @@ function CampaignList({
                           {product_name || "Produto"}
                         </small>
                       </td>
-                      <td>
+                      <td data-label="M">
                         <PlatformLabel platform={campaign.platform} />
                       </td>
-                      <td>
+                      <td data-label="Meta do ciclo">
                         <StatusChip status={campaign.status} />
                       </td>
-                      <td>
+                      <td data-label="Orçamento diário">
                         {cycle && (
                           <span className="campaign-period">
                             {shortDate(cycle.start_date)} a{" "}
@@ -806,10 +806,10 @@ function CampaignList({
                           />
                         )}
                       </td>
-                      <td>
+                      <td data-label="Verba do ciclo">
                         {cycle ? shown(cycle.budget, cycle.multiplier) : "—"}
                       </td>
-                      <td>
+                      <td data-label="Ciclo atual" className="stack-full">
                         <DailyBudget
                           cycle={cycle}
                           spent={spent}
@@ -817,7 +817,7 @@ function CampaignList({
                           withM={withM}
                         />
                       </td>
-                      <td>
+                      <td data-label="Status">
                         {cycle ? (
                           <>
                             {cycle.goal_results}{" "}
@@ -833,7 +833,7 @@ function CampaignList({
                           "—"
                         )}
                       </td>
-                      <td>
+                      <td data-label="Plataforma">
                         {cycle ? cycle.multiplier.toLocaleString("pt-BR") : "—"}
                       </td>
                     </tr>
@@ -1152,7 +1152,7 @@ function CampaignDetail({
               </div>
               {cycles.length ? (
                 <div className="table-scroll">
-                  <table className="campaign-table">
+                  <table className="campaign-table stack-mobile">
                     <thead>
                       <tr>
                         <th>Período</th>
@@ -1184,9 +1184,13 @@ function CampaignDetail({
                                 {cycleDays(y)} dias
                               </small>
                             </td>
-                            <td>{monthLabel(y.competence_month)}</td>
-                            <td>{objectives[y.objective].label}</td>
-                            <td>
+                            <td data-label="Competência">
+                              {monthLabel(y.competence_month)}
+                            </td>
+                            <td data-label="Objetivo">
+                              {objectives[y.objective].label}
+                            </td>
+                            <td data-label="Meta">
                               {y.goal_results} {objectives[y.objective].result}
                               {goalCost(y) !== null && (
                                 <small className="cell-note">
@@ -1194,9 +1198,14 @@ function CampaignDetail({
                                 </small>
                               )}
                             </td>
-                            <td>{money(y.budget)}</td>
-                            <td>{y.multiplier.toLocaleString("pt-BR")}</td>
-                            <td>
+                            <td data-label="Verba">{money(y.budget)}</td>
+                            <td data-label="M">
+                              {y.multiplier.toLocaleString("pt-BR")}
+                            </td>
+                            <td
+                              data-label="Destino e vínculos"
+                              className="stack-full"
+                            >
                               {destinations[y.destination]}
                               <small
                                 className="cell-note"
@@ -1212,7 +1221,7 @@ function CampaignDetail({
                                   ` · LPs: ${y.landing_pages.join(", ")}`}
                               </small>
                             </td>
-                            <td>
+                            <td data-label="Situação">
                               {isCurrent && (
                                 <span className="campaign-chip current">
                                   Atual

@@ -560,6 +560,13 @@
   .ai-power-head {
     flex-wrap: wrap;
   }
+  /* O texto fica ao lado do ícone; o botão Ligado/Desligado desce. */
+  .ai-power-head > div {
+    flex-basis: calc(100% - 52px);
+  }
+  .ai-power-head > .template-switch {
+    margin-left: 52px;
+  }
   .ai-power-audience {
     padding-left: 0;
   }
@@ -728,6 +735,12 @@
   padding: 7px 12px;
   border-bottom: 1px solid #eef0ef;
   vertical-align: top;
+  /* A conversa quebra em qualquer ponto (overflow-wrap: anywhere); na tabela
+     isso partia valores ao meio em vez de deixar a tabela rolar. */
+  overflow-wrap: normal;
+}
+.answer-text.rich .md-table th {
+  white-space: nowrap;
 }
 .answer-text.rich .md-table tr:last-child td {
   border-bottom: 0;
@@ -1288,4 +1301,27 @@
 }
 .mavi-action-details .mavi-action-result {
   margin: 6px 0 0;
+}
+
+@media (max-width: 600px) {
+  /* Ações na conversa: sem o recuo de 54px do desktop. */
+  .mavi-action-result,
+  .mavi-action-done,
+  .mavi-action-details {
+    margin-left: 14px;
+  }
+  .mavi-action-details .mavi-action-result {
+    margin-left: 0;
+  }
+  /* Canvas: o título fica com o espaço; o ícone decorativo sai. */
+  .canvas-head {
+    gap: 2px;
+    padding: 8px 6px 8px 12px;
+  }
+  .canvas-head > .canvas-card-icon {
+    display: none;
+  }
+  .canvas-download {
+    padding: 7px 10px;
+  }
 }

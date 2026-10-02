@@ -5,6 +5,7 @@ import { ConnectionStatus } from "./ConnectionStatus";
 import { PublicFile } from "./PublicFile";
 import { PublicFolder } from "./PublicFolder";
 import "./styles.css";
+import "./mobile.css";
 import { registerServiceWorker } from "./pwa";
 import { guardStrayFileDrops } from "./useFileDrop";
 

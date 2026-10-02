@@ -846,7 +846,7 @@ function PortfolioView({
             />
           ) : (
             <div className="sl-table-wrap">
-              <table className="sl-table">
+              <table className="sl-table stack-mobile">
                 <thead>
                   <tr>
                     <th>Cliente</th>
@@ -877,7 +877,7 @@ function PortfolioView({
                             <strong>{c.name}</strong>
                           </div>
                         </td>
-                        <td className="sl-muted">
+                        <td className="sl-muted" data-label="Situação">
                           Arquivado · briefing e planos guardados
                         </td>
                         <td className="sl-row-actions">
@@ -906,7 +906,7 @@ function PortfolioView({
           />
         ) : (
           <div className="sl-table-wrap">
-            <table className="sl-table">
+            <table className="sl-table stack-mobile">
               <thead>
                 <tr>
                   <th>Cliente</th>
@@ -955,21 +955,24 @@ function PortfolioView({
                           </div>
                         </div>
                       </td>
-                      <td>
+                      <td data-label="Etapa">
                         <StageBar stage={s} />
                         <small className="sl-stage-label">
                           {stageLabel(i)}
                         </small>
                       </td>
-                      <td>{i.plan ? i.plan.label : "—"}</td>
-                      <td className={`sl-next ${next?.tone ?? ""}`}>
+                      <td data-label="Mês">{i.plan ? i.plan.label : "—"}</td>
+                      <td
+                        className={`sl-next stack-full ${next?.tone ?? ""}`}
+                        data-label="Próximo passo"
+                      >
                         {next
                           ? next.title.replace(/^[^:]+:\s*/, "")
                           : s === 2
                             ? `Aguardando o cliente · link enviado ${relativeDays(i.plan?.shared_at)}`
                             : `Atualizado ${relativeDays(i.plan?.updated_at ?? i.briefing?.updated_at)}`}
                       </td>
-                      <td>
+                      <td data-label="Responsável">
                         {who ? (
                           <span className="sl-person" data-person={who.user_id}>
                             <Avatar
