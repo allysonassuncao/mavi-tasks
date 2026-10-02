@@ -133,6 +133,7 @@ import {
 } from "./task-audio";
 import {
   parseDescription,
+  richTextClipboard,
   richTextPlain,
   serializeDescription,
 } from "./rich-text";
@@ -846,6 +847,32 @@ export function TaskDetail({
     [uploading, setUploading] = useState(false),
     [uploadProgress, setUploadProgress] = useState("");
   const [editorUploading, setEditorUploading] = useState(false);
+  const [descCopied, setDescCopied] = useState(false);
+  const descCopiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(descCopiedTimer.current), []);
+  /** Formatada (HTML) para e-mail/Docs e em texto puro para o resto. */
+  async function copyDescription() {
+    const { text, html } = richTextClipboard(task.description ?? "");
+    try {
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/plain": new Blob([text], { type: "text/plain" }),
+            "text/html": new Blob([html], { type: "text/html" }),
+          }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(text);
+      }
+      setError("");
+      setDescCopied(true);
+      clearTimeout(descCopiedTimer.current);
+      descCopiedTimer.current = setTimeout(() => setDescCopied(false), 2000);
+      notify("Descrição copiada.");
+    } catch {
+      setError("Não foi possível copiar. Selecione o texto e copie manualmente.");
+    }
+  }
   const [commentRevision, setCommentRevision] = useState(0);
   // The audio recorded in the comment composer, until it is sent.
   const [commentAudio, setCommentAudio] = useState<Recording | null>(null);
@@ -2086,6 +2113,20 @@ export function TaskDetail({
             <section className="detail-description">
               <div>
                 <h3>Descrição</h3>
+                {!!task.description && (
+                  <button
+                    type="button"
+                    className={`copy-description${descCopied ? " done" : ""}`}
+                    title="Copiar toda a descrição"
+                    aria-label={
+                      descCopied ? "Descrição copiada" : "Copiar descrição"
+                    }
+                    onClick={() => void copyDescription()}
+                  >
+                    {descCopied ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{descCopied ? "Copiado" : "Copiar"}</span>
+                  </button>
+                )}
               </div>
               <RichTextContent value={task.description} />
               {/* Gravar é de quem escreve o pedido: só ao criar ou editar. */}

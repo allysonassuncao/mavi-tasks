@@ -2066,6 +2066,36 @@ textarea::placeholder {
 .detail-description h3 {
   font-size: 0.85rem;
 }
+/* Copiar a descrição: discreto, ganha cor ao passar o mouse. */
+.detail-description .copy-description {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #8a968f;
+  font-size: 0.74rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s;
+}
+.detail-description .copy-description:hover {
+  color: #3f4c47;
+  background: #f5f8f2;
+  border-color: #dfe5e3;
+}
+.detail-description .copy-description:focus-visible {
+  outline: 2px solid #263334;
+  outline-offset: 2px;
+}
+.detail-description .copy-description.done {
+  color: #4f7a3a;
+}
 /* Art task from Social Leads: straight to its post in the plan. */
 .detail-description .detail-post-link {
   margin-top: 16px;

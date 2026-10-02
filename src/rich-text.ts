@@ -206,6 +206,89 @@ export function richTextPlain(value: string): string {
         : (node.content ?? []).map(text).join(node.type === "doc" ? "\n" : "");
   return text(parseDescription(value)).trim();
 }
+const escapeHtml = (s: string) =>
+  s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+/**
+ * A descrição para a área de transferência: HTML (cola formatado em e-mail,
+ * Docs, WhatsApp Web) e texto puro (campos simples). Secretos vão só com o
+ * nome e ••••••, nunca o valor; imagens viram "[Imagem: …]".
+ */
+export function richTextClipboard(value: string): {
+  text: string;
+  html: string;
+} {
+  const lines: string[] = [];
+  const inline = (node: RichNode): { text: string; html: string } => {
+    if (node.type === "text") {
+      const t = node.text ?? "";
+      let html = escapeHtml(t);
+      for (const mark of node.marks ?? []) {
+        if (mark.type === "bold") html = `<strong>${html}</strong>`;
+        if (mark.type === "italic") html = `<em>${html}</em>`;
+        if (mark.type === "strike") html = `<s>${html}</s>`;
+        const href = mark.type === "link" ? safeHref(mark.attrs?.href) : null;
+        if (href) {
+          const abs = href.startsWith("/")
+            ? window.location.origin + href
+            : href;
+          html = `<a href="${escapeHtml(abs)}">${html}</a>`;
+        }
+        if (mark.type === "textStyle" && mark.attrs?.color)
+          html = `<span style="color:${mark.attrs.color}">${html}</span>`;
+        if (mark.type === "highlight")
+          html = `<mark${mark.attrs?.color ? ` style="background-color:${mark.attrs.color}"` : ""}>${html}</mark>`;
+      }
+      return { text: t, html };
+    }
+    if (node.type === "hardBreak") return { text: "\n", html: "<br>" };
+    const plain = (t: string) => ({ text: t, html: escapeHtml(t) });
+    if (node.type === "mention") return plain(`@${node.attrs?.label ?? ""}`);
+    if (node.type === "noteSecret")
+      return plain(`${node.attrs?.label || "Secreto"}: ••••••`);
+    if (node.type === "inlineImage")
+      return plain(`[Imagem${node.attrs?.alt ? `: ${node.attrs.alt}` : ""}]`);
+    const parts = (node.content ?? []).map(inline);
+    return {
+      text: parts.map((p) => p.text).join(""),
+      html: parts.map((p) => p.html).join(""),
+    };
+  };
+  const block = (node: RichNode, depth: number): string => {
+    if (node.type === "bulletList" || node.type === "orderedList") {
+      const tag = node.type === "bulletList" ? "ul" : "ol";
+      const items = (node.content ?? []).map((item, i) => {
+        const marker = tag === "ul" ? "•" : `${i + 1}.`;
+        const pad = "  ".repeat(depth);
+        let first = true;
+        const html = (item.content ?? [])
+          .map((child) => {
+            if (child.type === "bulletList" || child.type === "orderedList")
+              return block(child, depth + 1);
+            const { text, html } = inline(child);
+            lines.push(`${pad}${first ? `${marker} ` : "   "}${text}`);
+            const out = first ? html : `<br>${html}`;
+            first = false;
+            return out;
+          })
+          .join("");
+        return `<li>${html}</li>`;
+      });
+      return `<${tag}>${items.join("")}</${tag}>`;
+    }
+    if (node.type === "paragraph") {
+      const { text, html } = inline(node);
+      lines.push(text);
+      return `<p>${html || "<br>"}</p>`;
+    }
+    return (node.content ?? []).map((n) => block(n, depth)).join("");
+  };
+  const html = block(parseDescription(value), 0);
+  return { text: lines.join("\n").trim(), html };
+}
 /**
  * Mirrors mavi_private.transition_comment: the comment posted with a
  * transition note is a bold label followed by the note's own content.
