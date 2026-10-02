@@ -20,8 +20,9 @@ import type { Role } from "./types";
  * only on the clients of their teams (Visão geral with their own numbers;
  * Radar and Campanhas configuration of the agency stays with leaders;
  * Dashboards they create show only their clients; Financeiro › Mídia
- * launches and reverses only on their clients' accounts). Migrations
- * 20270105090000, 20270107090000 and 20270114090000.
+ * launches and reverses only on their clients' accounts; Radar pessoal
+ * reads only the groups of their clients). Migrations 20270105090000,
+ * 20270107090000, 20270114090000 and 20270304090000.
  */
 export const MEMBER_OPT_IN = [
   "overview",
@@ -29,6 +30,7 @@ export const MEMBER_OPT_IN = [
   "radar",
   "dashboards",
   "financeMedia",
+  "personalRadar",
 ] as const satisfies readonly Page[];
 
 // Collaborators see these modules scoped to them: clients/projects they serve
@@ -79,6 +81,7 @@ export const MODULES = [
   { id: "cases", label: "Cases de Sucesso" },
   { id: "temperature", label: "Termômetro dos clientes" },
   { id: "radar", label: "Radar do cliente" },
+  { id: "personalRadar", label: "Radar pessoal" },
   { id: "drive", label: "Drive" },
   { id: "reports", label: "Relatórios" },
   { id: "dashboards", label: "Dashboards" },

@@ -1,0 +1,568 @@
+/* Radar › Pessoal (PersonalRadarPage.tsx). */
+.pradar {
+  --pr-question: #2a78d6;
+  --pr-request: #6b52b3;
+  --pr-complaint: #d0503c;
+  --pr-material: #2f9e6b;
+  --pr-approval: #b07c12;
+  --pr-deadline: #c2410c;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pradar .muted {
+  color: var(--muted);
+}
+.pradar .btn.quiet {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #57645f;
+}
+.pradar .btn.quiet:hover:not(:disabled) {
+  background: #edf1e9;
+}
+
+/* Ver a lista de outra pessoa */
+.pradar-viewing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.pradar-readonly {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef1f0;
+  color: #57645f;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+/* Antes de ligar */
+.pradar-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+  padding: 26px 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+}
+.pradar-setup h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.3;
+}
+.pradar-setup > p {
+  margin: 0;
+  color: #57645f;
+  line-height: 1.55;
+}
+.pradar-setup-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: #efeafb;
+  color: #6b52b3;
+}
+.pradar-setup-points {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.86rem;
+}
+.pradar-setup-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.45;
+}
+.pradar-setup-points svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #6b52b3;
+}
+.pradar-setup .btn.primary {
+  align-self: flex-start;
+}
+.pradar-warn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff6e5;
+  color: #7a5312;
+  font-size: 0.82rem;
+}
+.pradar-warn a {
+  text-decoration: underline;
+  font-weight: 600;
+}
+.pradar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.82rem;
+}
+.pradar-field > span {
+  font-weight: 600;
+}
+.pradar-field small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* Abas e filtros */
+.pradar-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pradar-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
+.pradar-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: #57645f;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.pradar-tabs button.selected {
+  background: #263334;
+  color: #fff;
+}
+.pradar-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #eef1f0;
+  color: #57645f;
+  font-size: 0.7rem;
+  text-align: center;
+}
+.pradar-tabs button.selected .pradar-count {
+  background: #ffffff2b;
+  color: #fff;
+}
+.pradar-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.pradar-cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pradar-cap-bar {
+  display: inline-block;
+  width: 90px;
+  height: 6px;
+  border-radius: 999px;
+  background: #e8ebec;
+  overflow: hidden;
+}
+.pradar-cap-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #8fbf4a;
+}
+.pradar-cap.near .pradar-cap-bar span {
+  background: #e0a42b;
+}
+.pradar-cap.full {
+  color: #b23a2a;
+}
+.pradar-cap.full .pradar-cap-bar span {
+  background: #d0503c;
+}
+
+/* Os itens */
+.pradar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pradar-item {
+  --kind: var(--pr-question);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px 14px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  overflow: hidden;
+}
+.pradar-item::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--kind);
+}
+.pradar-item.closed {
+  background: #fafbfb;
+}
+.pradar-item.closed::before {
+  opacity: 0.35;
+}
+.kind-question {
+  --kind: var(--pr-question);
+}
+.kind-request {
+  --kind: var(--pr-request);
+}
+.kind-complaint {
+  --kind: var(--pr-complaint);
+}
+.kind-material {
+  --kind: var(--pr-material);
+}
+.kind-approval {
+  --kind: var(--pr-approval);
+}
+.kind-deadline {
+  --kind: var(--pr-deadline);
+}
+.pradar-item-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 0.74rem;
+}
+.pradar-kind {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kind) 12%, #fff);
+  color: var(--kind);
+  font-weight: 700;
+}
+.pradar-urgency {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.pradar-urgency.u2 {
+  background: #fff1dc;
+  color: #a35b00;
+}
+.pradar-urgency.u3 {
+  background: #fde4e0;
+  color: #b23a2a;
+}
+.pradar-asks {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef1f0;
+  color: #435150;
+  font-weight: 600;
+}
+.pradar-where {
+  min-width: 0;
+  color: #57645f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pradar-where strong {
+  color: var(--ink);
+}
+.pradar-when {
+  margin-left: auto;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pradar-item h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+.pradar-summary {
+  margin: 0;
+  color: #435150;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.pradar-reason {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  color: #6b52b3;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.pradar-reason .muted {
+  font-weight: 500;
+}
+.pradar-quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.pradar-quotes li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f4f6f5;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.pradar-quotes li.team {
+  background: #f1f7e6;
+}
+.pradar-quote-who {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.pradar-quotes q {
+  quotes: none;
+  overflow-wrap: anywhere;
+}
+.pradar-link {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #57645f;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.pradar-more-note {
+  margin: 0;
+  font-size: 0.76rem;
+}
+.pradar-resolved {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #2f7f52;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.pradar-item-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 0.76rem;
+}
+.pradar-item-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  color: #435150;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pradar-item-links a:hover {
+  text-decoration: underline;
+}
+.pradar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pradar-dismiss {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f6f7f8;
+}
+.pradar-dismiss fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0.82rem;
+}
+.pradar-dismiss legend {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.pradar-dismiss label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.pradar-dismiss input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: #263334;
+}
+.pradar-more {
+  display: flex;
+  justify-content: center;
+}
+
+/* Configurar */
+.modal.pradar-modal {
+  width: 820px;
+}
+.pradar-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 18px 24px 24px;
+}
+.pradar-settings section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pradar-settings h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+.pradar-settings small.muted {
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.pradar-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.pradar-people {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.pradar-people th,
+.pradar-people td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+.pradar-people th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.pradar-people td:last-child {
+  width: 140px;
+}
+.pradar-hint {
+  color: #a35b00;
+}
+
+@media (max-width: 720px) {
+  .pradar-head {
+    align-items: stretch;
+  }
+  .pradar-tabs {
+    width: 100%;
+    overflow-x: auto;
+  }
+  .pradar-tabs button {
+    flex: 1 1 auto;
+    justify-content: center;
+    gap: 5px;
+    padding: 7px 6px;
+    font-size: 0.74rem;
+    white-space: nowrap;
+  }
+  .pradar-count {
+    min-width: 16px;
+    padding: 1px 4px;
+  }
+  .pradar-item {
+    padding: 14px 14px 12px 16px;
+  }
+  .pradar-when {
+    margin-left: 0;
+  }
+  .pradar-where {
+    white-space: normal;
+  }
+  .pradar-setup {
+    padding: 20px 16px;
+  }
+  .pradar-grid {
+    grid-template-columns: 1fr;
+  }
+  .pradar-people thead {
+    display: none;
+  }
+  .pradar-people tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .pradar-people td {
+    padding: 0;
+    border: 0;
+  }
+  .pradar-people td:first-child {
+    grid-column: 1 / -1;
+    font-weight: 700;
+  }
+  .pradar-people td:last-child {
+    width: auto;
+    grid-column: 1 / -1;
+  }
+  .pradar input,
+  .pradar textarea {
+    font-size: 16px;
+  }
+}

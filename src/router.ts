@@ -16,6 +16,7 @@ export const pagePaths = {
   cases: "/cases-de-sucesso",
   temperature: "/termometro",
   radar: "/radar",
+  personalRadar: "/radar/pessoal",
   notices: "/mural",
   inbox: "/caixa-de-entrada",
   hours: "/horas",

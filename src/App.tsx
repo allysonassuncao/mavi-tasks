@@ -284,6 +284,9 @@ const TemperaturePage = lazy(() =>
 const RadarPage = lazy(() =>
   import("./RadarPage").then((m) => ({ default: m.RadarPage })),
 );
+const PersonalRadarPage = lazy(() =>
+  import("./PersonalRadarPage").then((m) => ({ default: m.PersonalRadarPage })),
+);
 const InboxPage = lazy(() =>
   import("./InboxPage").then((m) => ({ default: m.InboxPage })),
 );
@@ -316,6 +319,7 @@ const navigation = [
   { id: "cases", label: "Cases de Sucesso", icon: Trophy },
   { id: "temperature", label: "Termômetro dos clientes", icon: Thermometer },
   { id: "radar", label: "Radar do cliente", icon: Radar },
+  { id: "personalRadar", label: "Radar pessoal", icon: Radar },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
@@ -1531,6 +1535,13 @@ export default function App() {
         // Radar do cliente › Relatórios listens for its own notices.
         if (change.kind === "radar") {
           window.dispatchEvent(new CustomEvent("mavi:radar", { detail: change }));
+          return;
+        }
+        // Radar pessoal: a lista de quem mudou se recarrega sozinha.
+        if (change.kind === "personal_radar") {
+          window.dispatchEvent(
+            new CustomEvent("mavi:personal-radar", { detail: change }),
+          );
           return;
         }
         // Anotações do cliente (tarefa e Drive) listen for their own notices.
@@ -2909,6 +2920,8 @@ export default function App() {
                         "A temperatura da relação com cada cliente, lida pela MAVI nas reuniões gravadas e nos grupos de WhatsApp.",
                       radar:
                         "O que os clientes reclamam e o que o time promete, anotado pela MAVI nas reuniões e nos grupos de WhatsApp, por produto.",
+                      personalRadar:
+                        "A MAVI como sua assistente: o que os clientes pedem, perguntam e reclamam com você nos grupos de WhatsApp. Só leitura.",
                       notices: isLeader
                         ? "Comunicados da agência para pessoas, equipes, clientes e projetos: popup, caixa de entrada, push e faixa no topo."
                         : "Os comunicados da agência para você, guardados em um só lugar.",
@@ -2963,6 +2976,7 @@ export default function App() {
                   page !== "cases" &&
                   page !== "temperature" &&
                   page !== "radar" &&
+                  page !== "personalRadar" &&
                   page !== "notices" &&
                   page !== "storage" &&
                   page !== "aiUsage" &&
@@ -4139,6 +4153,16 @@ export default function App() {
                     user={user}
                     data={catalogData}
                     demo={demo}
+                    notify={notify}
+                  />
+                </Suspense>
+              )}
+              {page === "personalRadar" && (
+                <Suspense fallback={<Loading variant="table" />}>
+                  <PersonalRadarPage
+                    key={company}
+                    company={company}
+                    user={user}
                     notify={notify}
                   />
                 </Suspense>

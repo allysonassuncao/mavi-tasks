@@ -231,6 +231,10 @@ function world(opts: {
   clock?: () => number;
   /** A regra "Transcrição dos áudios dos grupos" (nulo: o servidor). */
   transcribeRoute?: unknown;
+  /** Radar pessoal: os grupos que pedem os participantes e a resposta da Uazapi. */
+  membersDue?: boolean;
+  memberGroups?: { id: string; jid: string }[];
+  groupInfo?: Record<string, unknown>;
 }) {
   const calls: Call[] = [];
   let groupsClaimed = false;
@@ -250,8 +254,12 @@ function world(opts: {
         return json({
           company: "c1",
           sweep_due: opts.sweepDue ?? false,
+          members_due: opts.membersDue ?? false,
           backfill_days: 8,
         });
+      if (rpc === "whatsapp_claim_members") return json(opts.memberGroups ?? []);
+      if (rpc === "whatsapp_store_members")
+        return json(body.p_members?.length ?? 0);
       if (rpc === "whatsapp_sweep") return json(body.p_groups?.length ?? 0);
       if (rpc === "whatsapp_claim_groups") {
         const out = groupsClaimed ? [] : (opts.groups ?? []);
@@ -308,6 +316,11 @@ function world(opts: {
         nextOffset: body.offset + messages.length,
       });
     }
+    if (url === "https://uaz.example.com/group/info") {
+      const info = opts.groupInfo?.[body.groupjid];
+      if (!info) return json({ error: "Failed to retrieve group information" }, 500);
+      return json(info);
+    }
     if (url === "https://uaz.example.com/message/download")
       return json({
         fileURL: `https://cdn.example.com/${body.id}`,
@@ -337,6 +350,72 @@ function world(opts: {
 }
 const rpcCalls = (calls: Call[], name: string) =>
   calls.filter((c) => c.url.endsWith(`/rpc/${name}`)).map((c) => c.body);
+
+describe("menções", () => {
+  it("guarda quem a mensagem cita (JID ou LID), sem repetir", () => {
+    const m = normalizeMessage(
+      raw("M1", NOW, {
+        text: "@184 e @5511999990000 vejam isso",
+        content: {
+          text: "@184 e @5511999990000 vejam isso",
+          contextInfo: { mentionedJID: ["184@lid", "5511999990000@s.whatsapp.net", "184@lid", "lixo"] },
+        },
+      }),
+    );
+    expect(m?.extra.mentions).toEqual(["184@lid", "5511999990000@s.whatsapp.net"]);
+    expect(normalizeMessage(raw("M2", NOW))?.extra.mentions).toBeUndefined();
+  });
+});
+
+describe("participantes dos grupos (Radar pessoal)", () => {
+  it("lê /group/info dos grupos pedidos e grava número, LID e nome", async () => {
+    const w = world({
+      membersDue: true,
+      memberGroups: [
+        { id: "g1", jid: "1@g.us" },
+        { id: "g2", jid: "2@g.us" },
+      ],
+      groupInfo: {
+        "1@g.us": {
+          JID: "1@g.us",
+          Participants: [
+            { JID: "5511987654321@s.whatsapp.net", LID: "184@lid", IsAdmin: true, DisplayName: "Bruno" },
+            { JID: "185@lid", PhoneNumber: "5511977770000@s.whatsapp.net" },
+            { JID: "186@lid" },
+          ],
+          participant_profiles: [{ lid: "185@lid", display_name: "Duda" }],
+        },
+      },
+    });
+    const stats = await runWhatsappSync(env, w.deps);
+    // O grupo que dá erro na Uazapi ganha uma nova tentativa.
+    expect(w.calls.filter((c) => c.url.endsWith("/group/info")).map((c) => c.body.groupjid)).toEqual([
+      "1@g.us",
+      "2@g.us",
+      "2@g.us",
+    ]);
+    const stored = rpcCalls(w.calls, "whatsapp_store_members");
+    expect(stored).toHaveLength(2);
+    const ok = stored.find((s) => s.p_group === "g1");
+    expect(ok.p_error).toBeNull();
+    expect(ok.p_members).toEqual([
+      { jid: "5511987654321@s.whatsapp.net", lid: "184@lid", phone: "5511987654321", name: "Bruno", admin: true },
+      { jid: "185@lid", lid: "185@lid", phone: "5511977770000", name: "Duda", admin: false },
+      { jid: "186@lid", lid: "186@lid", phone: "", name: "", admin: false },
+    ]);
+    // Erro num grupo fica registrado nele e não para a coleta.
+    const failed = stored.find((s) => s.p_group === "g2");
+    expect(failed.p_members).toEqual([]);
+    expect(failed.p_error).toMatch(/group\/info/);
+    expect(stats.members).toBe(2);
+  });
+
+  it("sem ninguém usando o Radar pessoal, não pede participantes", async () => {
+    const w = world({});
+    await runWhatsappSync(env, w.deps);
+    expect(rpcCalls(w.calls, "whatsapp_claim_members")).toHaveLength(0);
+  });
+});
 
 describe("runWhatsappSync", () => {
   it("varredura: só grupos, com título e última mensagem", async () => {

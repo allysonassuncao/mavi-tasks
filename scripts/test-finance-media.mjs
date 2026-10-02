@@ -211,8 +211,8 @@ await check("colaborador: desligado não vê; ligado, só os clientes das equipe
   await fails(() => rpc("media_accounts", [A, false]), /Sem permissão/);
   await fails(() => rpc("media_statement", [A, contract, null, null, "", null, 100, 0]), /Sem permissão/);
   await as(admin);
-  await rpc("set_member_pages", [A, trafego, ["overview", "campaigns", "radar", "dashboards"]]);
-  await rpc("set_member_pages", [A, other, ["overview", "campaigns", "radar", "dashboards"]]);
+  await rpc("set_member_pages", [A, trafego, ["overview", "campaigns", "radar", "dashboards", "personalRadar"]]);
+  await rpc("set_member_pages", [A, other, ["overview", "campaigns", "radar", "dashboards", "personalRadar"]]);
   const [m] = await sql("select shown_pages from memberships where company_id=$1 and user_id=$2", [A, trafego]);
   assert.deepEqual(m.shown_pages, ["financeMedia"]);
   await as(trafego);

@@ -235,6 +235,19 @@ export function normalizeMessage(raw: Row): WhatsappMessage | null {
   }
   // A miniatura que o WhatsApp manda junto (poucos KB): prévia na conversa
   // e na galeria sem baixar a mídia.
+  // Quem a mensagem cita (@): JIDs ou LIDs, para o Radar pessoal saber a quem é.
+  const ctx = (content.contextInfo ?? raw.contextInfo ?? {}) as Row;
+  const mentioned = [
+    ctx.mentionedJID,
+    ctx.mentionedJid,
+    raw.mentionedJid,
+    raw.mentions,
+  ].find(Array.isArray) as unknown[] | undefined;
+  const mentions = (mentioned ?? [])
+    .map((j) => str(j))
+    .filter((j) => /@/.test(j))
+    .slice(0, 50);
+  if (mentions.length) extra.mentions = [...new Set(mentions)];
   const thumb = str(content.JPEGThumbnail);
   if ((kind === "image" || kind === "video") && thumb && thumb.length <= 12_000)
     extra.thumb = thumb;
@@ -301,6 +314,55 @@ async function uazapi<T = Row>(
     if (res.status !== 429 && res.status < 500) break;
   }
   throw new WhatsappError(502, last);
+}
+
+export type GroupMember = {
+  jid: string;
+  lid: string;
+  phone: string;
+  name: string;
+  admin: boolean;
+};
+
+const digits = (v: unknown) => str(v).replace(/@.*$/, "").replace(/\D/g, "");
+
+/**
+ * Os participantes de um grupo (/group/info): JID, LID, número (quando a
+ * Uazapi sabe) e nome. O Radar pessoal liga o número aos celulares do time.
+ */
+export async function groupMembers(
+  env: WhatsappEnv,
+  deps: WhatsappDeps,
+  jid: string,
+): Promise<GroupMember[]> {
+  const r = await uazapi<Row>(env, deps, "/group/info", { groupjid: jid });
+  const group = (r?.group && typeof r.group === "object" ? r.group : r) as Row;
+  const list: Row[] = Array.isArray(group?.Participants) ? group.Participants : [];
+  const profiles: Row[] = Array.isArray(group?.participant_profiles)
+    ? group.participant_profiles
+    : [];
+  const profileOf = (keys: string[]) =>
+    profiles.find((x) =>
+      [str(x.jid), str(x.lid), str(x.pn)].some((k) => k && keys.includes(k)),
+    );
+  return list.map((p) => {
+    const id = str(p.JID);
+    const keys = [id, str(p.LID), str(p.PhoneNumber)].filter(Boolean);
+    const prof = profileOf(keys) ?? {};
+    const lid = str(p.LID) || (id.endsWith("@lid") ? id : "") || str(prof.lid);
+    const phoneJid =
+      str(p.PhoneNumber) ||
+      (id.endsWith("@s.whatsapp.net") ? id : "") ||
+      str(prof.pn);
+    const phone = digits(phoneJid);
+    return {
+      jid: id || lid,
+      lid,
+      phone: /^\d{8,15}$/.test(phone) ? phone : "",
+      name: (str(p.DisplayName) || str(prof.display_name) || str(prof.name)).slice(0, 200),
+      admin: p.IsAdmin === true || p.IsSuperAdmin === true,
+    };
+  });
 }
 
 export type UazapiGroup = {
@@ -685,14 +747,14 @@ export async function runWhatsappSync(env: WhatsappEnv, deps: WhatsappDeps) {
     messages: 0,
     media: 0,
     contents: 0,
+    members: 0,
     errors: [] as string[],
   };
-  const state = await rpc<{ company: string; sweep_due: boolean }>(
-    env,
-    deps,
-    "whatsapp_worker_state",
-    {},
-  );
+  const state = await rpc<{
+    company: string;
+    sweep_due: boolean;
+    members_due?: boolean;
+  }>(env, deps, "whatsapp_worker_state", {});
   if (state.sweep_due) {
     try {
       const groups = await listGroups(env, deps);
@@ -708,6 +770,36 @@ export async function runWhatsappSync(env: WhatsappEnv, deps: WhatsappDeps) {
         p_groups: null,
         p_error: message,
       }).catch(() => {});
+    }
+  }
+  // Os participantes dos grupos (Radar pessoal): poucos por rodada, a cada 12 h.
+  if (state.members_due) {
+    try {
+      const claimed = await rpc<{ id: string; jid: string }[]>(
+        env,
+        deps,
+        "whatsapp_claim_members",
+        { p_limit: 10 },
+      );
+      await pool(claimed, 3, async (g) => {
+        let members: GroupMember[] | null = null;
+        let error: string | null = null;
+        try {
+          members = await groupMembers(env, deps, g.jid);
+        } catch (e) {
+          error = (e as Error).message;
+          stats.errors.push(`${g.jid} (participantes): ${error}`);
+        }
+        await rpc(env, deps, "whatsapp_store_members", {
+          p_group: g.id,
+          p_members: members ?? [],
+          p_error: error,
+        });
+        stats.members++;
+      });
+    } catch (e) {
+      // Migração ainda não aplicada: a coleta segue sem os participantes.
+      stats.errors.push(`Participantes: ${(e as Error).message}`);
     }
   }
   let groupsDone = false;

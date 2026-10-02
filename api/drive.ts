@@ -17,6 +17,7 @@ import {
 import { handleLearningWorker } from "./_copilot-learning.js";
 import { handleTemperatureWorker } from "./_temperature.js";
 import { handleRadarWorker } from "./_radar.js";
+import { handlePersonalRadarWorker } from "./_personal-radar.js";
 import { serverModel } from "../src/ai-providers.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleMcpCallback } from "./_ai-mcp.js";
@@ -409,6 +410,20 @@ export default async function handler(
         reportModel: serverModel("client_radar_report", process.env),
       };
       const result = await handleRadarWorker(authorization, env, aiDeps(env));
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+    // Radar pessoal: o worker do pg_cron (a MAVI Assistente Pessoal lê os
+    // grupos de quem usa e lista as situações de cada um, com o modelo da
+    // funcionalidade 'personal_radar'). Acordado junto com o Radar do cliente.
+    if (action === "ai-personal-radar") {
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("personal_radar", process.env),
+        personalRadarBudgetMs: Number(process.env.PERSONAL_RADAR_WORKER_BUDGET_MS) || 240_000,
+      };
+      const result = await handlePersonalRadarWorker(authorization, env, aiDeps(env));
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

@@ -287,7 +287,12 @@ export function SidebarNav({
           key: "radar",
           label: "Radar",
           icon: Radar,
-          to: { page: "radar" },
+          // Opens the first of its modules the person has.
+          to: { page: allowed("radar") || !allowed("personalRadar") ? "radar" : "personalRadar" },
+          children: [
+            { key: "radar-client", label: "Do cliente", to: { page: "radar" } },
+            { key: "radar-personal", label: "Pessoal", to: { page: "personalRadar" } },
+          ],
         },
         ...(isLeader ? [] : portfolio),
       ],

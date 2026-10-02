@@ -65,6 +65,7 @@ const MODULE_LABELS: Record<string, string> = {
   skills: "Skills da MAVI",
   clients: "Termômetro do cliente",
   radar: "Radar do cliente",
+  personal_radar: "Radar pessoal",
   campaigns: "Campanhas",
   dashboards: "Dashboards (MAVI)",
 };
