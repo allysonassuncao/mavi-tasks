@@ -7894,6 +7894,104 @@ label .input-control .ui-input {
   font-size: 0.95rem;
   color: var(--ink);
 }
+/* The box has its own clear button. */
+.task-search-box input::-webkit-search-cancel-button {
+  display: none;
+}
+.task-search-box .task-search-mavi-icon {
+  color: #83a657;
+  flex: none;
+}
+.task-search-box .task-search-go {
+  flex: none;
+  min-height: 36px;
+  padding: 0 16px;
+}
+/* What the MAVI understood of the request, under the box. */
+.task-search-mavi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid #e3eed5;
+  border-radius: 10px;
+  background: #f7fbf1;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #44523d;
+}
+p.task-search-mavi,
+.task-search-mavi > p {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+}
+.task-search-mavi svg {
+  flex: none;
+  margin-top: 3px;
+  color: #83a657;
+}
+.task-search-mavi strong {
+  font-weight: 600;
+}
+.task-search-mavi.is-asking {
+  color: var(--muted);
+}
+.task-search-mavi.is-failed {
+  align-items: center;
+  border-color: #f0dcc4;
+  background: #fdf8f1;
+  color: #7a5a32;
+}
+.task-search-mavi.is-failed svg {
+  margin-top: 0;
+  color: #c28a1e;
+}
+.task-search-mavi.is-failed .text-btn {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.task-search-mavi-terms {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-left: 22px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.task-search-term {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 9px;
+  border: 1px solid #dce8cb;
+  border-radius: 999px;
+  background: #fff;
+  color: #44523d;
+}
+.task-search-term:not(:has(button)) {
+  padding-right: 9px;
+}
+.task-search-term button {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: #8b9a82;
+  cursor: pointer;
+}
+.task-search-term button:hover {
+  background: #eef5e4;
+  color: #44523d;
+}
+.task-search-meaning {
+  font-style: italic;
+}
 .task-search-in {
   display: flex;
   flex-wrap: wrap;

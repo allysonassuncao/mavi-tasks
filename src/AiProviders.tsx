@@ -1660,10 +1660,10 @@ function FeatureRoutes({
                     <div className="ai-feature-name">
                       <span className="ai-feature-group">{f.group}</span>
                       <span className="ai-usage-name">{f.label}</span>
-                      {(outsideClaude || f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary" || f.id === "task_title") &&
+                      {(outsideClaude || f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary" || f.id === "task_title" || f.id === "task_search") &&
                         f.note && (
                         <small
-                          className={`ai-feature-note${f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary" || f.id === "task_title" ? " info" : ""}`}
+                          className={`ai-feature-note${f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary" || f.id === "task_title" || f.id === "task_search" ? " info" : ""}`}
                         >
                           {f.note}
                         </small>

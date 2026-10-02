@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Flag, Search, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, Flag, Sparkles, TriangleAlert, X } from "lucide-react";
 import { Button, Input, Select, SelectOption } from "./ui";
 import { Empty, Loading } from "./components";
 import { buildNameLookup, dateKey } from "./domain";
@@ -28,14 +28,24 @@ import {
 import {
   SEARCH_FIELDS,
   hasCriteria,
-  highlightParts,
+  highlightTerms,
+  readMaviSearch,
+  requestMaviSearch,
   searchTaskRows,
   searchTaskRowsLocal,
+  searchTaskRowsMavi,
+  writeMaviSearch,
   type SearchField,
   type TaskSearchHit,
   type TaskSearchParams,
   type TaskSearchRows,
 } from "./task-search";
+import {
+  MAVI_FILTER_KEYS,
+  type MaviFilterKey,
+  type MaviSearch,
+  type MaviSearchFilters,
+} from "./task-search-mavi";
 
 /**
  * The search's filters (URL params) kept for the next visit, with the term;
@@ -62,14 +72,38 @@ const MATCH_LABEL: Record<TaskSearchHit["match_in"], string> = {
   title: "Título",
   description: "Descrição",
   comment: "Comentário",
+  meaning: "Pelo sentido",
   filters: "",
 };
+/** The URL param of each filter the MAVI fills. */
+const MAVI_PARAM: Record<MaviFilterKey, string> = {
+  client: "cli",
+  project: "proj",
+  assignee: "resp",
+  creator: "criador",
+  status: "situacao",
+  from: "de",
+  to: "ate",
+};
+
+/** The MAVI on a request: asking, what she understood, or why she couldn't. */
+type MaviState =
+  | { key: string; status: "asking" }
+  | { key: string; status: "ready"; search: MaviSearch }
+  | { key: string; status: "failed"; error: string };
 
 /**
  * Advanced task search: title, description and comments, delivered tasks
  * included, with filters. Criteria live in the URL, so opening a result and
  * closing it comes back to the same search. The tasks found show in the task
  * list's own table: order, split, closed sections' digest, bulk edit.
+ *
+ * Every request typed goes through the MAVI (on Enter): she fills the
+ * screen's filters, writes the terms and their variations and the subject's
+ * vector, and the database searches with them (search_task_rows_mavi). What
+ * she understood is kept in the tab, so changing a filter, or opening a task
+ * and coming back, doesn't ask her again. When she fails, the exact words
+ * are searched.
  */
 export function TaskSearch({
   data,
@@ -176,12 +210,6 @@ export function TaskSearch({
       writeFilters("search", company, user, JSON.parse(savedFilters));
   }, [filtersFor, savedFilters, company, user]);
 
-  // Typing updates the URL (and so the search) after a short pause.
-  useEffect(() => {
-    const id = setTimeout(() => setQuery(text.trim()), 350);
-    return () => clearTimeout(id);
-  }, [text, setQuery]);
-
   const fields = useMemo<SearchField[]>(() => {
     const chosen = fieldsParam
       .split(",")
@@ -204,6 +232,113 @@ export function TaskSearch({
     [query, fields, client, project, assignee, creator, status, from, to, prioritized],
   );
   const active = hasCriteria(params);
+  const timezone =
+    data.companies.find((c) => c.id === company)?.timezone ??
+    "America/Sao_Paulo";
+  const today = dateKey(new Date(), timezone);
+
+  // The MAVI on the request in the URL: what she understood comes from the
+  // tab's memory or from asking her (and then fills the screen's filters).
+  const maviKey = `${company}|${user}|${query}`;
+  const [mavi, setMavi] = useState<MaviState | null>(null);
+  const [retry, setRetry] = useState(0);
+  // "Tentar de novo" asks her again even with an answer kept in the tab.
+  const forceAsk = useRef(false);
+  const maviRequest = useRef(0);
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+  useEffect(() => {
+    if (!query || demo) {
+      maviRequest.current++;
+      setMavi(null);
+      return;
+    }
+    const cached = forceAsk.current ? null : readMaviSearch(maviKey);
+    forceAsk.current = false;
+    if (cached) {
+      setMavi({ key: maviKey, status: "ready", search: cached });
+      return;
+    }
+    const id = ++maviRequest.current;
+    setMavi({ key: maviKey, status: "asking" });
+    const now = paramsRef.current;
+    requestMaviSearch({
+      company,
+      query,
+      today,
+      filters: {
+        client: now.client,
+        project: now.project,
+        assignee: now.assignee,
+        creator: now.creator,
+        status: now.status,
+        from: now.from,
+        to: now.to,
+        priority: now.priority,
+        fields: now.fields,
+      },
+    })
+      .then((search) => {
+        if (id !== maviRequest.current) return;
+        writeMaviSearch(maviKey, search);
+        applyMaviFilters(search.filters);
+        setMavi({ key: maviKey, status: "ready", search });
+      })
+      .catch((e) => {
+        if (id !== maviRequest.current) return;
+        setMavi({ key: maviKey, status: "failed", error: (e as Error).message });
+      });
+    // Asked again only when the request (or a retry) changes.
+  }, [maviKey, query, demo, retry]);
+  const understood =
+    mavi?.key === maviKey && mavi.status === "ready" ? mavi.search : null;
+  // Nothing to search with (no terms, no subject, no filter): the exact words.
+  const usable =
+    understood &&
+    (understood.terms.length ||
+      understood.embedding ||
+      MAVI_FILTER_KEYS.some((k) => understood.filters[k]) ||
+      understood.filters.priority)
+      ? understood
+      : null;
+  const asking = !!query && !demo && (mavi?.key !== maviKey || mavi.status === "asking");
+  const maviFailed =
+    mavi?.key === maviKey && mavi.status === "failed" ? mavi.error : "";
+
+  /** The filters she understood, on the screen (one URL change). */
+  function applyMaviFilters(f: MaviSearchFilters) {
+    const url = new URL(window.location.href);
+    const set = (param: string, value: string) =>
+      value ? url.searchParams.set(param, value) : url.searchParams.delete(param);
+    for (const k of MAVI_FILTER_KEYS)
+      if (typeof f[k] === "string") set(MAVI_PARAM[k], f[k]!);
+    // A project brings its client; a client of its own clears another's project.
+    const projectId = url.searchParams.get("proj");
+    const contract = data.projects.find((p) => p.id === projectId)?.contract_id;
+    const owner = data.contracts.find((k) => k.id === contract)?.client_id;
+    if (f.project && owner) set("cli", owner);
+    else if (projectId && f.client && owner !== f.client) set("proj", "");
+    if (typeof f.priority === "boolean") set("prioritarias", f.priority ? "1" : "");
+    if (f.fields?.length)
+      set("em", f.fields.length >= SEARCH_FIELDS.length ? "" : f.fields.join(","));
+    navigate(url.pathname + url.search + url.hash, true);
+  }
+  function dropTerm(term: string) {
+    if (!understood) return;
+    const search = { ...understood, terms: understood.terms.filter((t) => t !== term) };
+    writeMaviSearch(maviKey, search);
+    setMavi({ key: maviKey, status: "ready", search });
+  }
+  function submit() {
+    const next = text.trim();
+    if (next !== query) setQuery(next);
+    // The same request again, after she failed: ask her once more.
+    else if (maviFailed) askAgain();
+  }
+  function askAgain() {
+    forceAsk.current = true;
+    setRetry((n) => n + 1);
+  }
 
   // Every task found at once (up to SEARCH_CAP): the sections come whole
   // and the table shows them a batch at a time ("Carregar mais").
@@ -213,7 +348,9 @@ export function TaskSearch({
     if (!quiet) setLoading(true);
     (demo
       ? Promise.resolve(searchTaskRowsLocal(data, demoComments(), user, params))
-      : searchTaskRows(company, params)
+      : query && usable
+        ? searchTaskRowsMavi(company, usable, params)
+        : searchTaskRows(company, params)
     )
       .then((rows) => {
         if (id === request.current) setFound(rows);
@@ -232,9 +369,16 @@ export function TaskSearch({
       setLoading(false);
       return;
     }
+    // While the MAVI reads the request, the search waits for her.
+    if (asking) {
+      request.current++;
+      setLoading(true);
+      return;
+    }
     run();
-    // `run` reads the current params; re-run only when they change.
-  }, [params, active, company, demo]);
+    // `run` reads the current params; re-run only when they (or what the
+    // MAVI understood) change.
+  }, [params, active, company, demo, asking, usable]);
 
   // Tasks picked for a bulk edit, among the ones found.
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
@@ -297,10 +441,6 @@ export function TaskSearch({
 
   // The list's table: its order, its split, its sections.
   const lookup = useMemo(() => buildNameLookup(data), [data]);
-  const timezone =
-    data.companies.find((c) => c.id === company)?.timezone ??
-    "America/Sao_Paulo";
-  const today = dateKey(new Date(), timezone);
   const tasks = useMemo(
     () => [...(found?.tasks ?? [])].sort(compareTasks(sort)),
     [found, sort],
@@ -312,12 +452,15 @@ export function TaskSearch({
       return thenBy === "none" ? undefined : groupTasks(tasks, thenBy, ctx);
     return withSubgroups(groupTasks(tasks, groupBy, ctx), thenBy, ctx);
   }, [tasks, groupBy, thenBy, lookup, today, timezone, sort]);
+  const marks = usable?.terms.length ? usable.terms : [query];
   const marked = (value: string) =>
-    highlightParts(value, query).map((p, i) =>
+    highlightTerms(value, marks).map((p, i) =>
       p.match ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>,
     );
-  const titleOf = (t: Task) =>
-    found?.matches.get(t.id)?.match_in === "title" ? marked(t.title) : t.title;
+  const titleOf = (t: Task) => {
+    const m = found?.matches.get(t.id)?.match_in;
+    return m && m !== "filters" ? marked(t.title) : t.title;
+  };
   const noteOf = (t: Task) => {
     const m = found?.matches.get(t.id);
     if (!m || m.match_in === "title" || m.match_in === "filters") return null;
@@ -336,32 +479,62 @@ export function TaskSearch({
         </Button>
         <h2>Busca avançada</h2>
         <p>
-          Procure no título, na descrição e nos comentários — inclusive em
-          tarefas entregues.
+          Peça do seu jeito: a MAVI entende o pedido, preenche os filtros e
+          procura no título, na descrição e nos comentários, pelas palavras e
+          pelo sentido, inclusive em tarefas entregues.
         </p>
       </header>
 
-      <div className="task-search-box">
-        <Search size={20} aria-hidden="true" />
+      <form
+        className="task-search-box"
+        role="search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        <Sparkles size={20} aria-hidden="true" className="task-search-mavi-icon" />
         <input
           type="search"
           autoFocus
-          aria-label="Termo da busca"
-          placeholder="O que você procura? Ex.: briefing, logotipo, reunião…"
+          aria-label="O que você procura"
+          placeholder="Peça à MAVI. Ex.: artes de Black Friday que a Ana entregou em setembro"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (!e.target.value.trim()) setQuery("");
+          }}
         />
         {text && (
           <button
             type="button"
             className="icon-btn"
-            aria-label="Limpar termo"
-            onClick={() => setText("")}
+            aria-label="Limpar busca"
+            onClick={() => {
+              setText("");
+              setQuery("");
+            }}
           >
             <X size={16} />
           </button>
         )}
-      </div>
+        <Button
+          type="submit"
+          className="btn primary task-search-go"
+          disabled={!text.trim() || (asking && text.trim() === query)}
+        >
+          Buscar
+        </Button>
+      </form>
+      {query && !demo && (
+        <MaviUnderstood
+          asking={asking}
+          failed={maviFailed}
+          search={usable}
+          onDrop={dropTerm}
+          onRetry={askAgain}
+        />
+      )}
 
       <div className="task-search-in" role="group" aria-label="Procurar em">
         <span>Procurar em</span>
@@ -478,14 +651,14 @@ export function TaskSearch({
       {!active ? (
         <Empty
           title="Comece pela busca"
-          body="Digite um termo ou escolha um filtro. Tarefas entregues também aparecem aqui."
+          body="Escreva o que você procura e aperte Enter, ou escolha um filtro. Tarefas entregues também aparecem aqui."
         />
       ) : loading ? (
         <Loading compact />
       ) : !tasks.length ? (
         <Empty
           title="Nada encontrado"
-          body="Tente outro termo, procure em mais lugares ou remova algum filtro."
+          body="Peça de outro jeito, procure em mais lugares ou remova algum filtro."
         />
       ) : (
         <>
@@ -548,5 +721,80 @@ export function TaskSearch({
         onDone={afterBulk}
       />
     </section>
+  );
+}
+
+/**
+ * What the MAVI understood of the request, under the box: her sentence, the
+ * terms she searched (each can be taken out) and whether the search by
+ * meaning ran. When she fails, why — and that the exact words were searched.
+ */
+function MaviUnderstood({
+  asking,
+  failed,
+  search,
+  onDrop,
+  onRetry,
+}: {
+  asking: boolean;
+  failed: string;
+  search: MaviSearch | null;
+  onDrop: (term: string) => void;
+  onRetry: () => void;
+}) {
+  if (asking)
+    return (
+      <p className="task-search-mavi is-asking" role="status">
+        <Sparkles size={14} aria-hidden="true" /> A MAVI está entendendo o pedido…
+      </p>
+    );
+  if (failed)
+    return (
+      <p className="task-search-mavi is-failed" role="status">
+        <TriangleAlert size={14} aria-hidden="true" />
+        <span>
+          A MAVI não respondeu agora ({failed.replace(/[.\s]+$/, "")}). Mostrando
+          a busca pelas palavras exatas.
+        </span>
+        <Button className="text-btn" onClick={onRetry}>
+          Tentar de novo
+        </Button>
+      </p>
+    );
+  if (!search) return null;
+  return (
+    <div className="task-search-mavi" role="status">
+      <p title={search.model ? `Modelo: ${search.model}` : undefined}>
+        <Sparkles size={14} aria-hidden="true" />
+        <span>
+          <strong>A MAVI entendeu:</strong>{" "}
+          {search.summary || "procurando pelas palavras abaixo."}
+        </span>
+      </p>
+      {(search.terms.length > 0 || search.embedding) && (
+        <div className="task-search-mavi-terms">
+          {search.terms.length > 0 && <span>Procurando por</span>}
+          {search.terms.map((t) => (
+            <span key={t} className="task-search-term">
+              {t}
+              {search.terms.length > 1 || search.embedding ? (
+                <button
+                  type="button"
+                  aria-label={`Tirar “${t}” da busca`}
+                  onClick={() => onDrop(t)}
+                >
+                  <X size={12} />
+                </button>
+              ) : null}
+            </span>
+          ))}
+          {search.embedding && (
+            <span className="task-search-meaning">
+              {search.terms.length ? "e pelo sentido" : "Procurando pelo sentido"}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

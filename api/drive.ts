@@ -37,6 +37,7 @@ import { nextSlice, selfOrigin } from "./_ai-tasks.js";
 import { handlePublicApi } from "./_public-api.js";
 import { handleTaskAudio, taskAudioEnv } from "./_task-audio.js";
 import { handleTaskTitle } from "./_task-title.js";
+import { handleTaskSearch } from "./_task-search.js";
 import {
   handleTaskAudioCleanup,
   taskAudioCleanupEnv,
@@ -458,6 +459,13 @@ export default async function handler(
         model: serverModel("task_title", process.env),
       };
       result = await handleTaskTitle(body, authorization, env, aiDeps(env));
+    } else if (action === "task-search") {
+      // A MAVI na Busca avançada (funcionalidade 'task_search').
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("task_search", process.env),
+      };
+      result = await handleTaskSearch(body, authorization, env, aiDeps(env));
     } else if (action === "campaign-report-mavi") {
       // A análise do relatório de campanha (funcionalidade 'campaign_report').
       const env = {

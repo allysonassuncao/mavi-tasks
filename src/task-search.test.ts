@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 vi.mock("./api", () => ({ rpc: vi.fn() }));
-const { fold, highlightParts, searchSnippet, searchTasksLocal } =
+const { fold, highlightParts, highlightTerms, searchSnippet, searchTasksLocal } =
   await import("./task-search");
+const { cleanTerms } = await import("./task-search-mavi");
 const { demoSnapshot, demoUser } = await import("./demo");
 const { serializeDescription } = await import("./rich-text");
 
@@ -16,6 +17,30 @@ describe("Busca avançada", () => {
       { text: "reunião", match: true },
       { text: " hoje", match: false },
     ]);
+  });
+  it("destaca qualquer um dos termos da MAVI, o mais longo primeiro", () => {
+    expect(
+      highlightTerms("Novo Logotipo e logo da identidade visual", [
+        "logo",
+        "logotipo",
+        "IDENTIDADE VISUAL",
+      ]),
+    ).toEqual([
+      { text: "Novo ", match: false },
+      { text: "Logotipo", match: true },
+      { text: " e ", match: false },
+      { text: "logo", match: true },
+      { text: " da ", match: false },
+      { text: "identidade visual", match: true },
+    ]);
+    expect(highlightTerms("sem nada", [])).toEqual([{ text: "sem nada", match: false }]);
+  });
+  it("limpa os termos da MAVI: sem repetidos, curtos demais ou aspas", () => {
+    expect(
+      cleanTerms(["Logo", "logo", "“logotipo”", "a", 3, "  identidade   visual ", "x".repeat(41)]),
+    ).toEqual(["Logo", "logotipo", "identidade visual"]);
+    expect(cleanTerms("logo")).toEqual([]);
+    expect(cleanTerms(Array.from({ length: 20 }, (_, i) => `termo ${i}`))).toHaveLength(10);
   });
   it("mostra o trecho ao redor do termo", () => {
     const text = "a ".repeat(100) + "logotipo azul" + " b".repeat(100);

@@ -1,6 +1,13 @@
 import { rpc } from "./api";
 import { canSeeTask } from "./domain";
 import { richTextPlain } from "./rich-text";
+import { supabase } from "./supabase";
+import {
+  MAVI_FILTER_KEYS,
+  MAVI_SEARCH_WAIT_MS,
+  cleanTerms,
+  type MaviSearch,
+} from "./task-search-mavi";
 import type { Comment, Snapshot, Status, Task } from "./types";
 
 export type SearchField = "title" | "description" | "comments";
@@ -38,7 +45,8 @@ export type TaskSearchHit = {
   assignee_id: string;
   creator_id: string;
   created_at: string;
-  match_in: "title" | "description" | "comment" | "filters";
+  /** "meaning": found by the MAVI's search by meaning, not by a term. */
+  match_in: "title" | "description" | "comment" | "meaning" | "filters";
   snippet: string;
   comment_id: string | null;
   total: number;
@@ -71,15 +79,35 @@ export function searchSnippet(text: string, term: string) {
 
 /** Splits `text` into plain and matched parts, ignoring case and accents. */
 export function highlightParts(text: string, query: string) {
-  const term = fold(query.trim());
-  if (!term) return [{ text, match: false }];
+  return highlightTerms(text, [query]);
+}
+
+/**
+ * The same with several terms (the MAVI's): any of them is marked, the
+ * longest first where two start at the same place.
+ */
+export function highlightTerms(text: string, terms: string[]) {
+  const list = [...new Set(terms.map((t) => fold(t.trim())).filter(Boolean))].sort(
+    (a, b) => b.length - a.length,
+  );
+  if (!list.length) return [{ text, match: false }];
   const folded = fold(text);
   const parts: { text: string; match: boolean }[] = [];
   let at = 0;
-  for (let i = folded.indexOf(term); i >= 0; i = folded.indexOf(term, at)) {
-    if (i > at) parts.push({ text: text.slice(at, i), match: false });
-    parts.push({ text: text.slice(i, i + term.length), match: true });
-    at = i + term.length;
+  for (;;) {
+    let start = -1;
+    let size = 0;
+    for (const term of list) {
+      const i = folded.indexOf(term, at);
+      if (i >= 0 && (start < 0 || i < start)) {
+        start = i;
+        size = term.length;
+      }
+    }
+    if (start < 0) break;
+    if (start > at) parts.push({ text: text.slice(at, start), match: false });
+    parts.push({ text: text.slice(start, start + size), match: true });
+    at = start + size;
   }
   if (at < text.length) parts.push({ text: text.slice(at), match: false });
   return parts;
@@ -144,22 +172,55 @@ export async function searchTaskRows(
   company: string,
   p: TaskSearchParams,
 ): Promise<TaskSearchRows> {
+  return readRows("search_task_rows", {
+    p_company: company,
+    p_query: p.query.trim(),
+    ...filterArgs(p),
+  });
+}
+
+/**
+ * The search with what the MAVI understood (public.search_task_rows_mavi):
+ * any of her terms, and the tasks close in meaning to the subject, under the
+ * screen's filters. Changing a filter afterwards runs only this.
+ */
+export async function searchTaskRowsMavi(
+  company: string,
+  mavi: Pick<MaviSearch, "terms" | "embedding">,
+  p: TaskSearchParams,
+): Promise<TaskSearchRows> {
+  return readRows("search_task_rows_mavi", {
+    p_company: company,
+    p_terms: mavi.terms,
+    p_embedding: mavi.embedding,
+    ...filterArgs(p),
+  });
+}
+
+function filterArgs(p: TaskSearchParams) {
+  return {
+    p_in: p.fields,
+    p_client: p.client || null,
+    p_project: p.project || null,
+    p_assignee: p.assignee || null,
+    p_creator: p.creator || null,
+    p_status: p.status || null,
+    p_from: p.from || null,
+    p_to: p.to || null,
+    p_priority: !!p.priority,
+  };
+}
+
+async function readRows(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<TaskSearchRows> {
   type Row = SearchMatch & { task: Task; total: number };
   const rows: Row[] = [];
   let total = 0;
   for (;;) {
-    const page = ((await rpc("search_task_rows", {
-      p_company: company,
-      p_query: p.query.trim(),
-      p_in: p.fields,
-      p_client: p.client || null,
-      p_project: p.project || null,
-      p_assignee: p.assignee || null,
-      p_creator: p.creator || null,
-      p_status: p.status || null,
-      p_from: p.from || null,
-      p_to: p.to || null,
-      p_priority: !!p.priority,
+    const page = ((await rpc(name, {
+      ...args,
       p_limit: SEARCH_CAP - rows.length,
       p_offset: rows.length,
     })) ?? []) as Row[];
@@ -282,4 +343,83 @@ export function searchTasksLocal(
   return hits
     .slice(offset, offset + (p.limit ?? SEARCH_PAGE))
     .map(({ rank: _rank, ...h }) => ({ ...h, total: hits.length }));
+}
+
+// ------------------------------------------------------------ a MAVI
+/**
+ * Asks the MAVI what a request means (action "task-search" of /api/drive):
+ * the filters she understood, her terms and the subject's vector. Gives up
+ * after MAVI_SEARCH_WAIT_MS: the screen then searches the exact words.
+ */
+export async function requestMaviSearch(input: {
+  company: string;
+  query: string;
+  today: string;
+  filters: Partial<Record<(typeof MAVI_FILTER_KEYS)[number], string>> & {
+    priority?: boolean;
+    fields?: string[];
+  };
+}): Promise<MaviSearch> {
+  const token = supabase
+    ? (await supabase.auth.getSession()).data.session?.access_token
+    : undefined;
+  if (!token) throw Error("Entre novamente para continuar.");
+  const res = await fetch("/api/drive", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action: "task-search", ...input }),
+    signal: AbortSignal.timeout(MAVI_SEARCH_WAIT_MS),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !Array.isArray(data.terms))
+    throw Error(data.error ?? "A MAVI não respondeu.");
+  return {
+    query: input.query,
+    terms: cleanTerms(data.terms),
+    embedding: typeof data.embedding === "string" ? data.embedding : null,
+    summary: typeof data.summary === "string" ? data.summary : "",
+    filters: data.filters && typeof data.filters === "object" ? data.filters : {},
+    model: typeof data.model === "string" ? data.model : undefined,
+  };
+}
+
+/**
+ * What the MAVI understood of the last requests, kept in this tab: opening a
+ * task and coming back, or changing a filter, doesn't ask her again.
+ */
+const MAVI_CACHE = "mavi:task-search:v1";
+const MAVI_CACHE_SIZE = 8;
+type CachedSearch = MaviSearch & { key: string };
+
+export function readMaviSearch(key: string): MaviSearch | null {
+  try {
+    const list = JSON.parse(sessionStorage.getItem(MAVI_CACHE) ?? "[]");
+    const hit = Array.isArray(list)
+      ? (list as CachedSearch[]).find((x) => x?.key === key)
+      : undefined;
+    if (!hit || !Array.isArray(hit.terms)) return null;
+    const { key: _key, ...search } = hit;
+    return search;
+  } catch {
+    // Blocked storage or a broken value: ask the MAVI again.
+    return null;
+  }
+}
+
+export function writeMaviSearch(key: string, search: MaviSearch) {
+  try {
+    const list = JSON.parse(sessionStorage.getItem(MAVI_CACHE) ?? "[]");
+    const kept = (Array.isArray(list) ? (list as CachedSearch[]) : []).filter(
+      (x) => x?.key !== key,
+    );
+    sessionStorage.setItem(
+      MAVI_CACHE,
+      JSON.stringify([{ ...search, key }, ...kept].slice(0, MAVI_CACHE_SIZE)),
+    );
+  } catch {
+    // Blocked or full storage: the next visit just asks the MAVI again.
+  }
 }

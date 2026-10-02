@@ -206,6 +206,7 @@ export type AiFeature =
   | "social_leads_colors"
   | "task_copilot"
   | "task_title"
+  | "task_search"
   | "client_dossier"
   | "copilot_learning"
   | "notice_writer"
@@ -452,6 +453,14 @@ export const FEATURES: FeatureInfo[] = [
     note: "Uma chamada curta ao clicar em Criar tarefa, que espera o título antes de salvar: prefira um modelo rápido (ex.: Claude Haiku, GPT mini). Se a MAVI falhar, a tarefa salva com o começo da descrição.",
   },
   {
+    id: "task_search",
+    group: "Tarefas",
+    label: "Busca avançada: entender o pedido e procurar as tarefas",
+    conversation: false,
+    env: "TASK_SEARCH_MODEL",
+    note: "Uma chamada curta a cada busca: a MAVI lê o pedido, preenche os filtros e escreve os termos e as variações; a busca por significado usa os vetores da base. Prefira um modelo rápido (ex.: Claude Haiku, GPT mini). Se a MAVI falhar, a tela busca pelo termo exato.",
+  },
+  {
     id: "client_dossier",
     group: "Tarefas",
     label: "Dossiê do cliente (atualizado em segundo plano)",
@@ -639,6 +648,9 @@ export function serverModel(
     case "task_title":
       // Um título curto: um modelo rápido basta (o Painel da MAVI vence).
       return env.TASK_TITLE_MODEL || "claude-haiku-4-5";
+    case "task_search":
+      // Entender o pedido da busca: um modelo rápido basta (o Painel da MAVI vence).
+      return env.TASK_SEARCH_MODEL || "claude-haiku-4-5";
     case "client_dossier":
       return env.CLIENT_DOSSIER_MODEL || env.AI_MODEL || fallback;
     case "copilot_learning":
