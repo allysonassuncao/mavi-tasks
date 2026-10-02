@@ -19,6 +19,8 @@ export type AiScope = {
   project?: string;
   /** Onde a pergunta foi feita (ex.: "meetings"): só para o registro de custo. */
   module?: string;
+  /** Campanhas › Conversar com a MAVI: a campanha aberta (o foco da conversa). */
+  campaign?: string;
 };
 export type AiSource = {
   ref: string;

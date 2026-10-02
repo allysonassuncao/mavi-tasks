@@ -26,6 +26,8 @@ export type AiScope = {
   contract?: string;
   project?: string;
   module?: string;
+  /** Campanhas › Conversar com a MAVI: a campanha aberta. */
+  campaign?: string;
 };
 export type AiSource = {
   ref: string;

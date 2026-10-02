@@ -18,6 +18,7 @@ import {
   Plug,
   Plus,
   Search,
+  Sparkles,
   Star,
   TriangleAlert,
 } from "lucide-react";
@@ -106,6 +107,7 @@ import {
 } from "./campaign-reports";
 import { GoogleConversions } from "./CampaignConversions";
 import { CampaignAlerts, type AlertCampaignOption } from "./CampaignAlerts";
+import { CampaignMavi } from "./CampaignMavi";
 import {
   CampaignMediaBalance,
   CycleMediaFit,
@@ -212,6 +214,8 @@ export function CampaignsPage({
   const [, setOpenReport] = useUrlState<string>("relatorio", "");
   // Meus avisos (lista, historico ou novo): aberto da lista ou de uma campanha.
   const [alertsView, setAlertsView] = useUrlState<string>("avisos", "");
+  // Conversar com a MAVI sobre a campanha aberta (?mavi=1).
+  const [maviOpen, setMaviOpen] = useUrlState<string>("mavi", "");
   const searchCampaigns = useCallback(
     (term: string): Promise<AlertCampaignOption[]> =>
       backend
@@ -294,8 +298,12 @@ export function CampaignsPage({
           connectionTick={connectionTick}
           onPending={setPending}
           canEdit={canEdit}
+          demo={demo}
+          maviOpen={maviOpen === "1"}
+          onMavi={(open) => setMaviOpen(open ? "1" : "")}
           onAlerts={() => setAlertsView("lista")}
           onBack={() => {
+            setMaviOpen("");
             setTab("");
             setViewedCycle("");
             setTimelineTab("");
@@ -986,6 +994,9 @@ function CampaignDetail({
   connectionTick,
   onPending,
   canEdit,
+  demo,
+  maviOpen,
+  onMavi,
   onAlerts,
   onBack,
   onEdit,
@@ -1009,6 +1020,10 @@ function CampaignDetail({
   onPending: (id: string) => void;
   /** False: a collaborator's read-only view. */
   canEdit: boolean;
+  demo: boolean;
+  /** Conversar com a MAVI sobre esta campanha (painel à direita). */
+  maviOpen: boolean;
+  onMavi: (open: boolean) => void;
   /** Meus avisos, com os desta campanha primeiro. */
   onAlerts: () => void;
   onBack: () => void;
@@ -1048,9 +1063,18 @@ function CampaignDetail({
         : null;
 
   const alertsButton = (
-    <Button className="btn secondary" onClick={onAlerts} title="Avisos desta campanha (Meus avisos)">
-      <BellRing size={15} /> Avisos
-    </Button>
+    <>
+      <Button
+        className={`btn ${maviOpen ? "primary" : "secondary"}`}
+        onClick={() => onMavi(!maviOpen)}
+        title="Perguntar à MAVI sobre esta campanha (com a conta de anúncio ao vivo)"
+      >
+        <Sparkles size={15} /> Conversar com a MAVI
+      </Button>
+      <Button className="btn secondary" onClick={onAlerts} title="Avisos desta campanha (Meus avisos)">
+        <BellRing size={15} /> Avisos
+      </Button>
+    </>
   );
   const actions = !canEdit ? (
     alertsButton
@@ -1138,7 +1162,18 @@ function CampaignDetail({
   );
 
   return (
-    <div className="campaign-detail">
+    <div className={`campaign-detail${maviOpen ? " with-mavi" : ""}`}>
+      {maviOpen && (
+        <CampaignMavi
+          company={company}
+          campaign={campaign}
+          client={parts.client?.id ?? null}
+          clientName={parts.client?.name ?? ""}
+          demo={demo}
+          notify={notify}
+          onClose={() => onMavi(false)}
+        />
+      )}
       <Button className="text-btn campaign-back" onClick={onBack}>
         <ArrowLeft size={16} /> Todas as campanhas
       </Button>

@@ -77,6 +77,7 @@ import {
   type SkillKit,
 } from "./_ai-skills.js";
 import { MCP_RULES, handleMcpAction, mcpTurn, type McpCatalog } from "./_ai-mcp.js";
+import { ADS_RULES, adsTurn } from "./_ai-ads.js";
 import { logCost, meterEntries, newTurn, turnCost, turnDetail, whereOf, type TurnCost } from "./_ai-cost.js";
 import type { Meter } from "./_social-leads.js";
 import { pageForMavi, scrapePage } from "./_ai-scrape.js";
@@ -644,6 +645,7 @@ async function ask(
     project: id(raw.project),
     module:
       typeof raw.module === "string" ? raw.module.slice(0, 40) : undefined,
+    campaign: id(raw.campaign),
   };
   const conversationId = id(body.conversation) ?? null;
   const question = typeof body.question === "string" ? body.question : "";
@@ -1093,6 +1095,18 @@ async function ask(
         auth,
       )
     : null;
+  // As contas de anúncio ao vivo (Meta Ads pela conexão das Campanhas, Google
+  // Ads por GAQL na MCC), só leitura: no módulo MAVI e na conversa das Campanhas.
+  const ads =
+    base.campaigns && (onPage || scope.module === "campaigns")
+      ? await adsTurn(
+          { supabaseUrl: env.supabaseUrl, supabaseKey: env.supabaseKey },
+          deps.fetch,
+          auth,
+          company,
+          { client: scope.client, campaign: scope.campaign },
+        ).catch(() => null)
+      : null;
   // Sem catálogo e sem skill escolhida, as ferramentas das skills não entram.
   const tools = [
     ...toolsFor(powers, { writer: !!kit.writer, webResearch: !!webRoute }).filter(
@@ -1105,6 +1119,7 @@ async function ask(
     ...(attachments.some((a) => a.status === "ready") ? ATTACH_TOOLS : []),
     // Os avisos de campanhas: para quem usa Campanhas, nas duas MAVIs.
     ...(base.campaigns ? CAMPAIGN_ALERT_TOOLS : []),
+    ...(ads?.tools ?? []),
     // Tarefas longas: só no módulo MAVI (a conversa fica salva e o card aparece).
     ...(onPage ? [PLAN_TOOL] : []),
   ];
@@ -1135,14 +1150,19 @@ async function ask(
       return "O plano da tarefa longa já está no card: a pessoa confere e confirma. Escreva só uma frase curta e pare.";
     const stepId = `t${++n}`;
     const mcpTool = mcp?.meta.get(name);
+    const adsTool = !mcpTool && !!ads?.has(name);
     const meta = mcpTool
       ? { kind: "mcp" as const, power: "mcp" as const, timeoutMs: 120_000 }
-      : REGISTRY[name];
+      : adsTool
+        ? { kind: "ads" as const, power: null, timeoutMs: 90_000 }
+        : REGISTRY[name];
     const power = meta?.power ?? null;
     const kind = meta?.kind ?? "read";
     const skillTool = kind === "skill";
     const label = mcpTool
       ? `${mcpTool.write ? "Preparando" : "Consultando"} ${mcp!.label(name)}`
+      : adsTool
+      ? ads!.label(name, input)
       : skillTool
       ? describeSkillStep(skills, name, input)
       : name === "search_attachments"
@@ -1168,6 +1188,8 @@ async function ask(
       if (!allowed.has(name)) throw Error(`Ferramenta indisponível: ${name}.`);
       const work = mcpTool
         ? mcp!.run(kit, name, input)
+        : adsTool
+        ? ads!.run(name, input)
         : skillTool
         ? runSkillTool(skills, name, input)
         : name === "search_attachments" || name === "read_attachment"
@@ -1200,6 +1222,12 @@ async function ask(
           ? "proposta para você confirmar"
           : out.startsWith("Erro")
             ? "o serviço devolveu um erro"
+            : "resposta recebida"
+        : adsTool
+        ? out.startsWith("Recusado")
+          ? "fora das contas liberadas"
+          : out.startsWith("Erro")
+            ? "a plataforma devolveu um erro"
             : "resposta recebida"
         : skillTool
         ? summarizeSkillStep(name, out)
@@ -1414,6 +1442,7 @@ async function ask(
     (mcp?.tools.length ? MCP_RULES : "") +
     (attachments.length ? ATTACH_RULES : "") +
     (base.campaigns ? ALERT_CHAT_RULES : "") +
+    (ads ? ADS_RULES : "") +
     (onPage ? TASK_RULES : "");
   const turnContext =
     base.context +
@@ -1421,6 +1450,7 @@ async function ask(
     learningContext(learned) +
     catalogContext([...skills.catalog.values()], picked) +
     (mcp?.context ?? "") +
+    (ads?.context ?? "") +
     attachmentContext(attachments);
   const turnMessages = picked.length ? withSkills(messages, picked) : messages;
   // O passo a passo do custo: cada rodada do modelo (com as ferramentas que pediu).
@@ -1474,6 +1504,7 @@ async function ask(
     if (!stop.signal.aborted) throw e;
   } finally {
     await mcp?.close().catch(() => {});
+    await ads?.close().catch(() => {});
     // O custo entra mesmo quando a resposta falha no meio: uma linha por
     // modelo que respondeu (o fallback da Claude conta à parte) e a busca nos
     // vetores com o modelo dela.

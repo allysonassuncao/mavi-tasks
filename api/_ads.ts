@@ -550,7 +550,7 @@ async function googleToken(
 
 type GoogleRow = Record<string, Record<string, unknown>>;
 /** Google Ads API calls; a 401 refreshes the token once and retries. */
-function googleAds(
+export function googleAds(
   env: AdsEnv,
   fetchImpl: Fetch,
   authorization: string,
