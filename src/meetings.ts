@@ -264,6 +264,43 @@ export async function sharedRecordings(company: string, client: string) {
   })) as { recording_id: string; expires_at: string | null }[] | null;
   return new Map((rows ?? []).map((r) => [r.recording_id, r.expires_at]));
 }
+/**
+ * Levar gravações para outro cliente (migration
+ * 20270312090000_meeting_move_client): o que muda, conferido pelo banco.
+ */
+export interface MeetingMovePreview {
+  recordings: number;
+  from_clients: string[];
+  to: { client_id: string; label: string };
+  /** Com link público ativo (continua abrindo). */
+  shared: number;
+  /** Ocorrências no Radar do cliente antigo (saem e a leitura é refeita). */
+  radar_mentions: number;
+  /** Já lidas pelo Termômetro (a leitura é refeita). */
+  temperature: number;
+}
+export function previewMeetingMove(
+  company: string,
+  recordings: string[],
+  client: string,
+): Promise<MeetingMovePreview> {
+  return rpc("meeting_move_preview", {
+    p_company: company,
+    p_recordings: recordings,
+    p_client: client,
+  });
+}
+export function moveMeetingRecordings(
+  company: string,
+  recordings: string[],
+  client: string,
+): Promise<MeetingMovePreview> {
+  return rpc("move_meeting_recordings", {
+    p_company: company,
+    p_recordings: recordings,
+    p_client: client,
+  });
+}
 export function publicRecordingUrl(token: string, seconds?: number) {
   const url = new URL(`/gravacao/${token}`, window.location.origin);
   if (seconds && seconds > 0)

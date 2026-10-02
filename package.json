@@ -23,6 +23,7 @@
     "test:db:drive-move": "node scripts/test-drive-move.mjs",
     "test:db:meetings": "node scripts/test-meeting-recordings.mjs",
     "test:db:meeting-shares": "node scripts/test-meeting-shares.mjs",
+    "test:db:meeting-move": "node scripts/test-meeting-move.mjs",
     "test:db:campaign-reports": "node scripts/test-campaign-reports.mjs",
     "test:db:finance-media": "node scripts/test-finance-media.mjs",
     "test:db:campaign-alerts": "node scripts/test-campaign-alerts.mjs",

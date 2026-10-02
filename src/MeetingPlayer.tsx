@@ -28,6 +28,7 @@ import {
   Rewind,
   FastForward,
   Globe,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Loading } from "./ui";
 import { canCreateTaskIn } from "./domain";
@@ -84,6 +85,8 @@ type Props = {
   onNewTask?: (preset: FormPreset) => void;
   /** O link público foi criado, alterado ou desativado. */
   onShareChange?: () => void;
+  /** Levar a gravação para outro cliente (só para quem atende outro). */
+  onMove?: () => void;
   onClose: () => void;
 };
 
@@ -100,6 +103,7 @@ export function MeetingPlayer({
   notify,
   onNewTask,
   onShareChange,
+  onMove,
   onClose,
 }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -259,6 +263,19 @@ export function MeetingPlayer({
           >
             <Globe size={15} /> Link público
           </button>
+          {onMove && (
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => {
+                video.current?.pause();
+                onMove();
+              }}
+              title="Levar esta gravação para as Gravações da MAVI de outro cliente"
+            >
+              <ArrowRightLeft size={15} /> Mover
+            </button>
+          )}
           {time > 0 && (
             <button
               type="button"

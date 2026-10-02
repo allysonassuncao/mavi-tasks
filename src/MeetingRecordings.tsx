@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clock, Globe, Search, Sparkles, X } from "lucide-react";
-import { Input, Loading, Select, SelectOption } from "./ui";
+import * as Popover from "@radix-ui/react-popover";
+import {
+  ArrowRightLeft,
+  Clock,
+  EllipsisVertical,
+  Globe,
+  Play,
+  Search,
+  Sparkles,
+  X,
+} from "lucide-react";
+import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
 import { Empty } from "./components";
 import { Paged } from "./Pagination";
 import { fold } from "./task-search";
@@ -10,6 +20,7 @@ import type { Snapshot } from "./types";
 import type { FormPreset } from "./forms";
 import { MeetingPlayer } from "./MeetingPlayer";
 import { AiChat, AnswerText } from "./AiChat";
+import { MeetingMoveDialog, driveReadableClients } from "./MeetingMoveDialog";
 import {
   clock,
   durationLabel,
@@ -75,6 +86,17 @@ export function MeetingRecordings({
     recording: MeetingRecording;
     start?: number;
   } | null>(null);
+  // Gravações escolhidas para mover (e as que estão na janela de mover).
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [moving, setMoving] = useState<string[] | null>(null);
+  // Mover só faz sentido se a pessoa atende outro cliente.
+  const canMove = useMemo(
+    () =>
+      driveReadableClients(data, user, isLeader).some(
+        (c) => !c.archived && c.id !== client,
+      ),
+    [data, user, isLeader, client],
+  );
 
   const load = useCallback(
     () =>
@@ -181,6 +203,22 @@ export function MeetingRecordings({
   }, [hits, byId]);
 
   const filtering = who !== "all" || kind !== "all" || !!from || !!to;
+  // A escolha vale só para o que está na lista (saiu do filtro, sai dela).
+  const chosen = useMemo(
+    () => (list ?? []).filter((r) => selected.has(r.id)).map((r) => r.id),
+    [list, selected],
+  );
+  const toggle = (id: string, on: boolean) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  const moveLabel = (ids: string[]) =>
+    ids.length === 1
+      ? `“${meetingTitle(byId.get(ids[0])!)}”`
+      : `${ids.length} gravações`;
   const date = (iso: string) =>
     new Date(iso).toLocaleDateString("pt-BR", {
       day: "2-digit",
@@ -290,6 +328,37 @@ export function MeetingRecordings({
         </p>
       )}
 
+      {chosen.length > 0 && (
+        <div
+          className="drive-selection"
+          role="region"
+          aria-label="Gravações escolhidas"
+        >
+          <strong>
+            {chosen.length === 1 ? "1 escolhida" : `${chosen.length} escolhidas`}
+          </strong>
+          {chosen.length < shown.length && (
+            <Button
+              className="btn secondary"
+              onClick={() => setSelected(new Set(shown.map((r) => r.id)))}
+            >
+              Escolher todas ({shown.length})
+            </Button>
+          )}
+          <Button className="btn primary" onClick={() => setMoving(chosen)}>
+            <ArrowRightLeft size={15} /> Mover para outro cliente…
+          </Button>
+          <Button
+            className="icon-btn"
+            aria-label="Limpar escolha"
+            title="Limpar escolha"
+            onClick={() => setSelected(new Set())}
+          >
+            <X size={15} />
+          </Button>
+        </div>
+      )}
+
       {asking && (
         <section
           className="panel meetings-ask"
@@ -390,7 +459,18 @@ export function MeetingRecordings({
           {(page) => (
             <ul className="meetings-list">
               {page.map((r) => (
-                <li key={r.id}>
+                <li
+                  key={r.id}
+                  className={`meeting-item ${canMove ? "movable" : ""} ${selected.has(r.id) ? "on" : ""}`}
+                >
+                  {canMove && (
+                    <Checkbox
+                      className="meeting-check"
+                      aria-label={`Escolher ${meetingTitle(r)}`}
+                      checked={selected.has(r.id)}
+                      onCheckedChange={(on) => toggle(r.id, on === true)}
+                    />
+                  )}
                   <button
                     type="button"
                     className="panel meeting-row"
@@ -435,6 +515,46 @@ export function MeetingRecordings({
                       </small>
                     </span>
                   </button>
+                  {canMove && (
+                    <Popover.Root>
+                      <Popover.Trigger asChild>
+                        <button
+                          type="button"
+                          className="icon-btn meeting-more"
+                          aria-label={`Ações de ${meetingTitle(r)}`}
+                          title="Mais ações"
+                        >
+                          <EllipsisVertical size={16} />
+                        </button>
+                      </Popover.Trigger>
+                      <Popover.Content
+                        className="drive-menu"
+                        align="end"
+                        sideOffset={4}
+                        collisionPadding={12}
+                      >
+                        <Popover.Close asChild>
+                          <button
+                            type="button"
+                            className="drive-menu-item"
+                            onClick={() => setOpen({ recording: r })}
+                          >
+                            <Play size={15} /> Abrir
+                          </button>
+                        </Popover.Close>
+                        <Popover.Close asChild>
+                          <button
+                            type="button"
+                            className="drive-menu-item"
+                            onClick={() => setMoving([r.id])}
+                          >
+                            <ArrowRightLeft size={15} /> Mover para outro
+                            cliente…
+                          </button>
+                        </Popover.Close>
+                      </Popover.Content>
+                    </Popover.Root>
+                  )}
                 </li>
               ))}
             </ul>
@@ -464,7 +584,39 @@ export function MeetingRecordings({
           notify={notify}
           onNewTask={onNewTask}
           onShareChange={() => void loadShared()}
+          onMove={
+            canMove ? () => setMoving([open.recording.id]) : undefined
+          }
           onClose={() => setOpen(null)}
+        />
+      )}
+      {moving && (
+        <MeetingMoveDialog
+          company={company}
+          data={data}
+          user={user}
+          isLeader={isLeader}
+          from={client}
+          recordings={moving}
+          label={moveLabel(moving)}
+          onClose={() => setMoving(null)}
+          onMoved={(result) => {
+            const gone = new Set(moving);
+            setMoving(null);
+            setSelected((s) => new Set([...s].filter((id) => !gone.has(id))));
+            if (open && gone.has(open.recording.id)) setOpen(null);
+            setList((l) => l && l.filter((r) => !gone.has(r.id)));
+            const target =
+              data.clients.find((c) => c.id === result.to.client_id)?.name ??
+              "o outro cliente";
+            notify(
+              result.recordings === 1
+                ? `Gravação movida para ${target}.`
+                : `${result.recordings} gravações movidas para ${target}.`,
+            );
+            void load();
+            void loadShared();
+          }}
         />
       )}
     </div>

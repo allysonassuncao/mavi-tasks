@@ -38,6 +38,7 @@ export const auditActions: Record<string, string> = {
   recording_unshared: "Link público da gravação desativado",
   recording_public_opened: "Gravação aberta pelo link público",
   recording_public_downloaded: "Vídeo da gravação baixado pelo link público",
+  recording_moved: "Gravação movida para outro cliente",
   whatsapp_media_opened: "Mídia do Whatsapp aberta",
   note_created: "Anotação criada",
   note_saved: "Anotação salva (versão nova)",
@@ -65,7 +66,11 @@ export function auditText(data: Snapshot) {
     ].join(" › ");
   function describe(e: DriveAuditEntry) {
     const d = e.details;
-    if (e.action === "file_moved" || e.action === "folder_moved") {
+    if (
+      e.action === "file_moved" ||
+      e.action === "folder_moved" ||
+      e.action === "recording_moved"
+    ) {
       const from = d.from as DrivePlace | undefined,
         to = d.to as DrivePlace | undefined;
       const inside = [
