@@ -1542,6 +1542,10 @@ export default function App() {
           window.dispatchEvent(
             new CustomEvent("mavi:personal-radar", { detail: change }),
           );
+          // Uma situação nova da pessoa: com o app aberto, a MAVI já escreve
+          // a resposta (a fila fica no banco; sem o módulo ligado, não há fila).
+          if (change.people?.includes(user))
+            void import("./personal-radar").then((m) => m.drainDrafts(company));
           return;
         }
         // Anotações do cliente (tarefa e Drive) listen for their own notices.

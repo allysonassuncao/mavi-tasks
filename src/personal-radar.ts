@@ -1,4 +1,9 @@
 import { supabase } from "./supabase";
+import type { AiSource } from "./ai";
+import { saveMeetingShare, publicRecordingUrl } from "./meetings";
+import { setDriveVisibility } from "./drive";
+import { defaultConfig, reportUrl, supabaseReports } from "./campaign-reports";
+import type { AdObjective } from "./campaigns";
 
 /**
  * Radar pessoal (Radar › Pessoal): a MAVI Assistente Pessoal lê os grupos de
@@ -39,6 +44,45 @@ export const DISMISS_LABEL: Record<DismissReason, string> = {
 };
 export type PersonalAction = DismissReason | "resolved" | "reopened";
 
+/** O que a MAVI criaria para a resposta (a pessoa cria na tela, se quiser). */
+export type ReplyAction =
+  | { key: string; kind: "recording" | "file"; id: string; label: string }
+  | {
+      key: string;
+      kind: "report";
+      id: string;
+      label: string;
+      platform: string;
+      start: string;
+      end: string;
+      objective: string | null;
+    };
+export type PersonalReply = {
+  status: "pending" | "running" | "done" | "failed" | "rejected";
+  text?: string;
+  evidence: { title: string; detail: string; source?: AiSource }[];
+  actions: ReplyAction[];
+  checks: string[];
+  confidence?: "high" | "medium" | "low";
+  model?: string;
+  version: number;
+  error?: string;
+  updated_at: string;
+  approved_at?: string;
+  approved_text?: string;
+  stale?: boolean;
+  guidance?: string;
+};
+export const CONFIDENCE_LABEL = { high: "Tudo nas fontes", medium: "Falta algum detalhe", low: "Depende de você" } as const;
+export type RejectReason = "wrong_info" | "wrong_tone" | "incomplete" | "should_not_reply" | "other";
+export const REJECT_LABEL: Record<RejectReason, string> = {
+  wrong_info: "Informação errada",
+  wrong_tone: "Tom errado",
+  incomplete: "Incompleta",
+  should_not_reply: "Não deveria responder",
+  other: "Outro motivo",
+};
+
 export type PersonalMention = {
   message_id: string;
   role: "client" | "team";
@@ -71,6 +115,7 @@ export type PersonalItem = {
   mention_count: number;
   task?: { id: string; title: string; status: string };
   radar?: { id: string; title: string };
+  reply?: PersonalReply;
 };
 export type PersonalStatus = "open" | "resolved" | "dismissed" | "all";
 export type PersonalFilters = {
@@ -229,6 +274,113 @@ export async function act(company: string, item: string, action: PersonalAction,
   });
 }
 
+/** O texto com os links criados no lugar dos marcadores ({{A1}}…). */
+export function fillLinks(text: string, links: Record<string, string>) {
+  return text.replace(/\{\{(A\d{1,2})\}\}/g, (m, key: string) => links[key] ?? m);
+}
+/** Os marcadores que ainda faltam no texto. */
+export const pendingKeys = (text: string) => [...new Set([...text.matchAll(/\{\{(A\d{1,2})\}\}/g)].map((m) => m[1]))];
+
+/**
+ * Pede à MAVI a resposta de um item (ou, sem item, a próxima da fila).
+ * Devolve o item atualizado, ou o estado ("running", "done", "none").
+ */
+export async function requestDraft(
+  company: string,
+  item: string | null,
+  opts: { force?: boolean; guidance?: string } = {},
+): Promise<{ item?: PersonalItem; status?: string }> {
+  if (offline(company)) return demoDraft(item, opts.guidance);
+  const token = (await supabase!.auth.getSession()).data.session?.access_token;
+  const res = await fetch("/api/drive", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ action: "personal-radar-draft", company, item, ...opts }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Error(data.error ?? "A MAVI não conseguiu escrever a resposta.");
+  return "id" in data ? { item: data as PersonalItem } : (data as { status?: string });
+}
+
+/** Copiou (approved), copiou editada (edited), reprovou (rejected) ou ensinou (training). */
+export async function replyFeedback(
+  company: string,
+  item: string,
+  action: "approved" | "edited" | "rejected" | "training",
+  text = "",
+  reason: RejectReason | null = null,
+) {
+  if (offline(company)) return demoFeedback(item, action, text);
+  return rpc<PersonalItem>("personal_radar_reply_feedback", {
+    p_company: company,
+    p_item: item,
+    p_action: action,
+    p_text: text,
+    p_reason: reason,
+  });
+}
+
+/**
+ * Cria o link de uma ação, com o login da pessoa (as regras de cada módulo
+ * valem): a gravação (vídeo e resumo, sem download, por 30 dias), o arquivo
+ * do Drive (público) ou o relatório da campanha no período.
+ */
+export async function createLink(company: string, a: ReplyAction): Promise<string> {
+  if (offline(company)) return `${window.location.origin}/${a.kind === "report" ? "relatorio" : a.kind === "file" ? "arquivo" : "gravacao"}/demo-${a.key.toLowerCase()}`;
+  if (a.kind === "recording") {
+    const share = await saveMeetingShare(a.id, {
+      video: true,
+      transcript: false,
+      summary: true,
+      download: false,
+      expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    });
+    return publicRecordingUrl(share.token);
+  }
+  if (a.kind === "file") {
+    await setDriveVisibility(a.id, "public");
+    const { data, error } = await supabase!.from("drive_files").select("share_token").eq("id", a.id).single();
+    if (error || !data) throw Error(error?.message ?? "Não foi possível ler o link do arquivo.");
+    return `${window.location.origin}/arquivo/${(data as { share_token: string }).share_token}`;
+  }
+  if (a.kind !== "report") throw Error("Link desconhecido.");
+  const google = a.platform === "google";
+  const report = await supabaseReports.create(company, {
+    campaign: a.id,
+    title: a.label.slice(0, 160),
+    start: a.start,
+    end: a.end,
+    config: defaultConfig((a.objective as AdObjective | null) ?? null, google ? "google" : "meta"),
+    link: true,
+    provider: google ? "google" : "meta",
+  });
+  if (!report.link?.token) throw Error("O relatório foi criado, mas sem link.");
+  return reportUrl(report.link.token);
+}
+
+/**
+ * Escreve as respostas que faltam, uma por vez (a fila fica no banco): ao
+ * abrir a página e quando chega uma situação nova pelo Realtime, com o app
+ * aberto em qualquer página. Uma fila só por aba; o banco reserva cada
+ * resposta, então outra aba não escreve a mesma.
+ */
+let draining: Promise<void> | null = null;
+export function drainDrafts(company: string, max = 5) {
+  if (draining) return draining;
+  draining = (async () => {
+    for (let n = 0; n < max; n++) {
+      const r: { item?: PersonalItem } = await requestDraft(company, null).catch(() => ({}));
+      if (!r.item) break;
+    }
+  })().finally(() => {
+    draining = null;
+  });
+  return draining;
+}
+
 // ------------------------------------------------------------ demonstração
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
 const demo = {
@@ -268,6 +420,23 @@ const demo = {
         { message_id: "m2", role: "client", speaker: "Carlos", quote: "@Você consegue olhar hoje? Estamos perdendo verba.", at: ago(18) },
       ],
       task: { id: "demo-t1", title: "Revisar públicos da campanha de setembro", status: "progress" },
+      reply: {
+        status: "done",
+        version: 1,
+        updated_at: ago(15),
+        confidence: "high",
+        model: "claude-opus-5-5",
+        text: "Oi Carlos! Já olhei: o CPL subiu porque o público de interesse saturou na segunda. Ontem troquei para um público semelhante aos leads de agosto e hoje ele já caiu de R$ 19,40 para R$ 13,10. Te mando o relatório da semana aqui: {{A1}}. Sigo acompanhando e te aviso amanhã cedo.",
+        evidence: [
+          { title: "Campanha Leads Setembro", detail: "CPL de R$ 19,40 (seg) para R$ 13,10 (hoje), investimento estável em R$ 310/dia." },
+          { title: "Tarefa em andamento", detail: "Revisar públicos da campanha de setembro, com você, prazo amanhã." },
+          { title: "Reunião de 25/09", detail: "O cliente pediu para manter o CPL abaixo de R$ 15 até o fim do mês." },
+        ],
+        actions: [
+          { key: "A1", kind: "report", id: "demo-camp", label: "Relatório da semana", platform: "meta", start: "2026-09-26", end: "2026-10-02", objective: "lead" },
+        ],
+        checks: ["Confira o CPL de hoje antes de mandar: ele muda ao longo do dia."],
+      },
     },
     {
       id: "demo-p2", kind: "request", title: "Relatório de setembro com os leads por dia", urgency: 1, status: "open", asks: 1,
@@ -298,6 +467,36 @@ const demo = {
     },
   ] as PersonalItem[],
 };
+function demoDraft(item: string | null, guidance?: string): Promise<{ item?: PersonalItem; status?: string }> {
+  const i = demo.items.find((x) => x.id === item) ?? demo.items.find((x) => x.status === "open" && !x.reply);
+  if (!i) return Promise.resolve({ status: "none" });
+  return new Promise((done) =>
+    setTimeout(() => {
+      i.reply = {
+        status: "done",
+        version: (i.reply?.version ?? 0) + 1,
+        updated_at: new Date().toISOString(),
+        confidence: "medium",
+        model: "claude-opus-5-5",
+        text: `Oi ${i.mentions?.[0]?.speaker ?? ""}! ${guidance ? "Combinado: " : ""}Já estou vendo isso e te retorno ainda hoje com tudo certinho.`.replace("Oi !", "Oi!"),
+        evidence: [{ title: i.title, detail: i.summary }],
+        actions: [],
+        checks: ["A MAVI não achou o número exato: confirme antes de mandar."],
+        guidance,
+      };
+      done({ item: { ...i } });
+    }, 900),
+  );
+}
+function demoFeedback(id: string, action: string, text: string): PersonalItem {
+  const i = demo.items.find((x) => x.id === id)!;
+  if (i.reply) {
+    if (action === "approved" || action === "edited")
+      Object.assign(i.reply, { approved_at: new Date().toISOString(), approved_text: action === "edited" ? text : i.reply.text });
+    if (action === "rejected") Object.assign(i.reply, { status: "rejected", approved_at: undefined });
+  }
+  return { ...i };
+}
 function demoState(): PersonalState {
   return { ...demo.state, settings: { ...demo.state.settings } };
 }

@@ -469,4 +469,129 @@ await check("Quem usa qual modelo aceita as funcionalidades do Radar pessoal", a
   assert.deepEqual(routes.map((r) => r.feature), ["personal_assistant", "personal_radar"]);
 });
 
+// ------------------------------------------------------------ Fase 2: a resposta
+await check("a próxima resposta a escrever é a do item aberto mais urgente", async () => {
+  await as(member);
+  assert.equal(await rpc("personal_radar_draft_next", [A]), cpl);
+  await as(outsider);
+  assert.equal(await rpc("personal_radar_draft_next", [A]), null);
+});
+
+let draftMaterial;
+await check("começar a resposta: reserva e devolve o material com o que dá para linkar", async () => {
+  await sql(
+    `insert into meeting_recordings(id, company_id, client_id, source_id, title, recorded_at, recorded_by_email, speakers)
+     values ($1,$2,$3,'rec1','Alinhamento de setembro', now() - interval '5 days','bruno@make.com','{Bruno,Carlos}')`,
+    [uid(1100), A, client],
+  );
+  await sql(
+    `insert into drive_files(id, company_id, name, content_type, size_bytes, path, status, uploaded_by, client_id)
+     values ($1,$2,'relatorio-setembro.pdf','application/pdf',1000,'drive/a/rel.pdf','ready',$3,$4)`,
+    [uid(1101), A, admin, client],
+  );
+  await as(member);
+  draftMaterial = await rpc("personal_radar_draft_start", [A, cpl, false, null]);
+  assert.equal(draftMaterial.status, "claimed");
+  assert.equal(draftMaterial.item.title, "CPL subiu na semana");
+  assert.equal(draftMaterial.item.client_name, "4282");
+  assert.ok(draftMaterial.quotes.some((q) => /CPL/.test(q.text)));
+  assert.ok(draftMaterial.conversation.length >= 5);
+  assert.equal(draftMaterial.person.name, "Bruno Tráfego");
+  assert.match(draftMaterial.person.about, /tráfego/);
+  assert.deepEqual(draftMaterial.shareables.recordings.map((r) => r.title), ["Alinhamento de setembro"]);
+  assert.deepEqual(draftMaterial.shareables.files.map((f) => [f.name, f.can_share ?? false]), [["relatorio-setembro.pdf", false]]);
+  // Colaborador sem Campanhas: as campanhas não entram.
+  assert.deepEqual(draftMaterial.shareables.campaigns, []);
+  // Sendo escrita: a segunda vez só diz o estado.
+  assert.deepEqual(await rpc("personal_radar_draft_start", [A, cpl, false, null]), { status: "running" });
+  // A fila passa para o próximo item.
+  const next = await rpc("personal_radar_draft_next", [A]);
+  assert.ok(next && next !== cpl);
+  // Quem não é dona não começa.
+  await as(other);
+  await rejects(() => rpc("personal_radar_draft_start", [A, cpl, false, null]), /não encontrado/);
+});
+
+await check("gravar a resposta: aparece na lista, custo no teto da pessoa", async () => {
+  await as(member);
+  const item = await rpc("personal_radar_draft_store", [A, cpl, JSON.stringify({
+    reply: "Oi Carlos! Ajustei o público ontem e o CPL já voltou para R$ 12. Segue o relatório: {{A1}}",
+    evidence: [{ title: "Campanha de setembro", detail: "CPL caiu de R$ 19 para R$ 12 depois do ajuste", type: "campaign" }],
+    actions: [{ key: "A1", kind: "file", id: uid(1101), label: "Link do relatório de setembro" }, { kind: "folder", id: "x" }],
+    checks: ["Confira o CPL de hoje antes de mandar."],
+    confidence: "high",
+    model: "claude-sonnet-5-5",
+  }), JSON.stringify({ model: "claude-sonnet-5-5", input: 9000, output: 400, embedding: 200, cost: 0.04 })]);
+  assert.equal(item.reply.status, "done");
+  assert.match(item.reply.text, /\{\{A1\}\}/);
+  assert.deepEqual(item.reply.actions.map((a) => a.kind), ["file"]);
+  assert.equal(item.reply.stale, false);
+  assert.equal(item.reply.version, 1);
+  const [u] = await sql(`select user_id, kind, cost_usd::float as cost from ai_usage where kind = 'reply'`);
+  assert.deepEqual([u.user_id, u.kind, u.cost], [member, "reply", 0.04]);
+  const list = await rpc("personal_radar_items", [A, null, "{}"]);
+  assert.equal(list.items.find((i) => i.id === cpl).reply.confidence, "high");
+  // Pronta e em dia: não escreve de novo (sem pedir).
+  assert.deepEqual(await rpc("personal_radar_draft_start", [A, cpl, false, null]), { status: "done" });
+  // O gestor vê a resposta do liderado; a dele, não existe.
+  await as(manager);
+  assert.equal((await rpc("personal_radar_items", [A, member, "{}"])).items.find((i) => i.id === cpl).reply.status, "done");
+});
+
+await check("o cliente fala de novo: a resposta fica velha e volta para a fila", async () => {
+  await sql(`update personal_radar_items set last_at = now() + interval '1 minute' where id = $1`, [cpl]);
+  await as(member);
+  const list = await rpc("personal_radar_items", [A, null, "{}"]);
+  assert.equal(list.items.find((i) => i.id === cpl).reply.stale, true);
+  assert.equal(await rpc("personal_radar_draft_next", [A]), cpl);
+  // "Refazer" com instrução: a instrução vai no material.
+  const m = await rpc("personal_radar_draft_start", [A, cpl, true, "Seja mais curto e cite o relatório."]);
+  assert.equal(m.guidance, "Seja mais curto e cite o relatório.");
+  assert.match(m.previous, /Ajustei o público/);
+  await rpc("personal_radar_draft_fail", [A, cpl, "O modelo demorou."]);
+  const failed = (await rpc("personal_radar_items", [A, null, "{}"])).items.find((i) => i.id === cpl).reply;
+  assert.deepEqual([failed.status, failed.error, failed.guidance], ["failed", "O modelo demorou.", "Seja mais curto e cite o relatório."]);
+  await rpc("personal_radar_draft_start", [A, cpl, true, null]);
+  await rpc("personal_radar_draft_store", [A, cpl, JSON.stringify({ reply: "Oi Carlos! O CPL já voltou ao normal. Relatório: {{A1}}" }), "{}"]);
+});
+
+await check("copiar aprova; editar guarda o texto final; reprovar pede motivo; ensinar guarda a instrução", async () => {
+  await as(member);
+  let item = await rpc("personal_radar_reply_feedback", [A, cpl, "edited", "Oi Carlos, tudo certo! O CPL voltou a R$ 12.", null]);
+  assert.equal(item.reply.approved_text, "Oi Carlos, tudo certo! O CPL voltou a R$ 12.");
+  assert.ok(item.reply.approved_at);
+  // Aprovada, não fica velha nem volta para a fila.
+  await sql(`update personal_radar_items set last_at = now() + interval '2 minutes' where id = $1`, [cpl]);
+  assert.notEqual(await rpc("personal_radar_draft_next", [A]), cpl);
+  await rejects(() => rpc("personal_radar_reply_feedback", [A, cpl, "rejected", "", null]), /motivo/);
+  item = await rpc("personal_radar_reply_feedback", [A, cpl, "rejected", "O número está errado.", "wrong_info"]);
+  assert.equal(item.reply.status, "rejected");
+  await rejects(() => rpc("personal_radar_reply_feedback", [A, cpl, "training", " ", null]), /Escreva/);
+  await rpc("personal_radar_reply_feedback", [A, cpl, "training", "Sempre cite o CPL com o período.", null]);
+  const fb = await sql(`select action, note, snapshot->>'reason' as reason, snapshot->>'final' as final, snapshot->>'draft' as draft
+    from personal_radar_feedback where action in ('edited','rejected','training') order by created_at`);
+  assert.deepEqual(fb.map((f) => f.action), ["edited", "rejected", "training"]);
+  assert.match(fb[0].draft, /voltou ao normal/);
+  assert.match(fb[0].final, /R\$ 12/);
+  assert.equal(fb[1].reason, "wrong_info");
+  // As próximas respostas leem o que ela ensinou e o tom das aprovadas.
+  const m = await rpc("personal_radar_draft_start", [A, cpl, true, null]);
+  assert.deepEqual(m.feedback.map((f) => f.action), ["training", "rejected", "edited"]);
+  assert.deepEqual(m.style, ["Oi Carlos, tudo certo! O CPL voltou a R$ 12."]);
+  await rpc("personal_radar_draft_fail", [A, cpl, "teste"]);
+  await as(other);
+  await rejects(() => rpc("personal_radar_reply_feedback", [A, cpl, "approved", "", null]), /não encontrado/);
+});
+
+await check("no teto do mês, a MAVI não escreve", async () => {
+  await as(admin);
+  await rpc("set_personal_radar_cap", [A, member, 0.01]);
+  await as(member);
+  assert.equal(await rpc("personal_radar_draft_next", [A]), null);
+  await rejects(() => rpc("personal_radar_draft_start", [A, cpl, true, null]), /teto/);
+  await as(member);
+  await as(admin);
+  await rpc("set_personal_radar_cap", [A, member, null]);
+});
+
 console.log(`\n${passed} verificações do Radar pessoal passaram.`);

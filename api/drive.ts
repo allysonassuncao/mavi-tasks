@@ -18,6 +18,7 @@ import { handleLearningWorker } from "./_copilot-learning.js";
 import { handleTemperatureWorker } from "./_temperature.js";
 import { handleRadarWorker } from "./_radar.js";
 import { handlePersonalRadarWorker } from "./_personal-radar.js";
+import { handlePersonalDraft } from "./_personal-assistant.js";
 import { serverModel } from "../src/ai-providers.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleMcpCallback } from "./_ai-mcp.js";
@@ -474,6 +475,14 @@ export default async function handler(
         model: serverModel("task_title", process.env),
       };
       result = await handleTaskTitle(body, authorization, env, aiDeps(env));
+    } else if (action === "personal-radar-draft") {
+      // Radar pessoal: a resposta que a MAVI Assistente Pessoal daria a uma
+      // situação, com o login da pessoa (funcionalidade 'personal_assistant').
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("personal_assistant", process.env),
+      };
+      result = await handlePersonalDraft(body, authorization, env, aiDeps(env));
     } else if (action === "task-search") {
       // A MAVI na Busca avançada (funcionalidade 'task_search').
       const env = {
