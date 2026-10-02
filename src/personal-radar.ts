@@ -361,6 +361,26 @@ export async function createLink(company: string, a: ReplyAction): Promise<strin
   return reportUrl(report.link.token);
 }
 
+/** "Juntar com…": as situações escolhidas entram nesta (do mesmo grupo). */
+export async function joinItems(company: string, target: string, sources: string[]) {
+  if (offline(company)) {
+    const t = demo.items.find((x) => x.id === target)!;
+    for (const id of sources) {
+      const i = demo.items.findIndex((x) => x.id === id);
+      if (i < 0) continue;
+      const src = demo.items[i];
+      t.mentions = [...(t.mentions ?? []), ...(src.mentions ?? [])].sort((a, b) => a.at.localeCompare(b.at)).slice(-4);
+      t.mention_count += src.mention_count;
+      t.asks += src.asks;
+      t.urgency = Math.max(t.urgency, src.urgency);
+      demo.items.splice(i, 1);
+    }
+    t.reply = undefined;
+    return { ...t };
+  }
+  return rpc<PersonalItem>("personal_radar_join", { p_company: company, p_target: target, p_sources: sources, p_title: null });
+}
+
 // ------------------------------------------------------------ aprendizado
 export type LessonKind = "detection" | "reply";
 export const LESSON_KIND_LABEL: Record<LessonKind, string> = {

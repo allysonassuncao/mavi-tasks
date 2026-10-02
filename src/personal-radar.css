@@ -447,6 +447,19 @@
   padding: 0;
   accent-color: #263334;
 }
+.pradar-join {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+.pradar-join label {
+  align-items: flex-start;
+}
+.pradar-join input[type="checkbox"] {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+}
 .pradar-more {
   display: flex;
   justify-content: center;

@@ -5,6 +5,9 @@ import { newMeter } from "./_social-leads";
 import crypto from "node:crypto";
 import { seal } from "./_google";
 import {
+  consolidateMessage,
+  parseConsolidation,
+  type ConsolidateGroup,
   applyCheck,
   checkQuestions,
   learningMessage,
@@ -12,6 +15,7 @@ import {
   parseLearningOps,
   type LearningClaim,
   handlePersonalRadarWorker,
+  PERSONAL_RADAR_INSTRUCTIONS,
   parsePersonal,
   personalMessage,
   runPersonalRadar,
@@ -200,7 +204,7 @@ describe("worker do Radar pessoal", () => {
       { ...env, personalRadarBudgetMs: 400_000 },
       { fetch: fetchImpl, llm, embed, now: () => (t += 60_000) },
     );
-    expect(stats).toEqual({ groups: 1, items: 1, skipped: 0, failed: 0, learned: 0, checked: 0 });
+    expect(stats).toEqual({ groups: 1, items: 1, skipped: 0, failed: 0, merged: 0, learned: 0, checked: 0 });
     const store = calls.find((c) => c.url.includes("rpc/ai_personal_radar_store"))!;
     expect(store.body.p_secret).toBe(env.workerSecret);
     expect(store.body.p_group).toBe(group);
@@ -222,7 +226,7 @@ describe("worker do Radar pessoal", () => {
     });
     const llm = vi.fn();
     const stats = await runPersonalRadar({ ...env, personalRadarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
-    expect(stats).toEqual({ groups: 0, items: 0, skipped: 1, failed: 0, learned: 0, checked: 0 });
+    expect(stats).toEqual({ groups: 0, items: 0, skipped: 1, failed: 0, merged: 0, learned: 0, checked: 0 });
     expect(llm).not.toHaveBeenCalled();
     expect(calls.some((c) => c.url.includes("rpc/ai_personal_radar_store"))).toBe(false);
   });
@@ -407,5 +411,67 @@ describe("a leitura com o Jev e as lições", () => {
     const store = calls.find((c) => c.url.includes("rpc/ai_personal_radar_store"))!;
     expect(store.body.p_result.items.map((i: any) => i.title || i.item_id)).toEqual([item, "Quando sai a arte nova"]);
     expect(store.body.p_result.usage.cost).toBe(0.012);
+  });
+});
+
+describe("uma situação por demanda", () => {
+  const ids = ["a", "b", "c", "d"].map((x) => `00000000-0000-4000-8000-0000000003${x}${x}`);
+  const g: ConsolidateGroup = {
+    group_id: group,
+    company_id: company,
+    client_name: "5010",
+    group: "5010 - Rei do Impresso",
+    items: [
+      { id: ids[0], kind: "complaint", title: "Cobranças contestadas", summary: "CRM cobrado sem uso.", urgency: 3, asks: 3, first: "29/09 10:21", last: "29/09 11:08", quotes: ["Elaine: já tentaram cobrar CRM"] },
+      { id: ids[1], kind: "deadline", title: "Requerimento sem resposta", summary: "Pede cancelamento total.", urgency: 3, asks: 5, first: "29/09 10:13", last: "29/09 11:08" },
+      { id: ids[2], kind: "complaint", title: "WhatsApps sem funcionar", summary: "", urgency: 3, asks: 4, first: "29/09 11:03", last: "29/09 11:04" },
+      { id: ids[3], kind: "request", title: "Arte do post de Natal", summary: "", urgency: 1, asks: 1, first: "29/09 15:00", last: "29/09 15:00" },
+    ],
+  };
+  it("a regra da leitura pede um item por demanda de fundo", () => {
+    expect(PERSONAL_RADAR_INSTRUCTIONS).toMatch(/Um item por demanda de fundo/);
+    expect(PERSONAL_RADAR_INSTRUCTIONS).toMatch(/cancelamento/);
+  });
+  it("mostra as situações abertas e junta só as da mesma demanda", () => {
+    const text = consolidateMessage(g);
+    expect(text).toMatch(/S2 · cobrança de prazo · urgente · cobrou 5x · de 29\/09 10:13 a 29\/09 11:08: Requerimento sem resposta — Pede cancelamento total\./);
+    expect(text).toMatch(/\n   Elaine: já tentaram cobrar CRM/);
+    const merges = parseConsolidation(
+      JSON.stringify({
+        merge: [
+          { into: "S2", items: ["S1", "S3", "S2", "S9"], kind: "complaint", title: "Cancelamento com cobranças contestadas", summary: "Tudo junto." },
+          // A mesma situação não entra em dois grupos.
+          { into: "S1", items: ["S4"] },
+        ],
+      }),
+      g,
+    );
+    expect(merges).toEqual([
+      { into: ids[1], items: [ids[0], ids[2]], kind: "complaint", title: "Cancelamento com cobranças contestadas", summary: "Tudo junto." },
+    ]);
+    expect(parseConsolidation('{"merge":[]}', g)).toEqual([]);
+  });
+  it("o worker consolida os grupos depois da leitura", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_personal_radar_claim": [],
+      "rpc/ai_worker_route": null,
+      "rpc/ai_personal_radar_consolidate_claim": () => (claims++ === 0 ? [g] : []),
+      "rpc/ai_personal_radar_consolidate_store": 1,
+      "rpc/ai_personal_radar_learning_claim": null,
+      "rpc/ai_personal_radar_check_claim": null,
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      expect(req.instructions).toMatch(/juntar as que são a mesma demanda de fundo/);
+      const meter = newMeter("claude-sonnet-5-5");
+      meter.cost = 0.002;
+      return { text: JSON.stringify({ merge: [{ into: "S2", items: ["S1", "S3"], title: "Cancelamento" }] }), meter, rounds: 1 };
+    });
+    const stats = await runPersonalRadar({ ...env, personalRadarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
+    expect(stats.merged).toBe(1);
+    const store = calls.find((c) => c.url.includes("rpc/ai_personal_radar_consolidate_store"))!;
+    expect(store.body.p_group).toBe(group);
+    expect(store.body.p_merges).toEqual([{ into: ids[1], items: [ids[0], ids[2]], title: "Cancelamento", summary: "" }]);
+    expect(store.body.p_usage.cost).toBe(0.002);
   });
 });

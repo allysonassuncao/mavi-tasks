@@ -9,6 +9,7 @@ import {
   ExternalLink,
   EyeOff,
   GraduationCap,
+  Merge,
   Info,
   MessageCircle,
   Radar,
@@ -42,6 +43,7 @@ import {
   REJECT_LABEL,
   createLink,
   drainDrafts,
+  joinItems,
   fillLinks,
   pendingKeys,
   replyFeedback,
@@ -379,6 +381,9 @@ export function PersonalRadarPage({
                   item={i}
                   readOnly={readOnly}
                   ready={ready.has(i.kind)}
+                  siblings={list.items.filter(
+                    (x) => x.id !== i.id && x.group.id === i.group.id && x.status === "open" && x.state === "open",
+                  )}
                   onChanged={(next, message) => {
                     changeItem(next);
                     if (message) notify(message);
@@ -549,15 +554,20 @@ function ItemCard({
   item,
   readOnly,
   ready = false,
+  siblings = [],
   onChanged,
 }: {
   company: string;
   item: PersonalItem;
   readOnly: boolean;
   ready?: boolean;
+  /** As outras situações abertas do mesmo grupo (para "Juntar com…"). */
+  siblings?: PersonalItem[];
   onChanged: (item: PersonalItem, message?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
   const [dismissing, setDismissing] = useState(false);
   const [reason, setReason] = useState<DismissReason>("not_mine");
   const [note, setNote] = useState("");
@@ -737,8 +747,62 @@ function ItemCard({
               >
                 <EyeOff size={14} aria-hidden="true" /> Descartar
               </Button>
+              {siblings.length > 0 && (
+                <Button
+                  className="btn quiet compact"
+                  onClick={() => {
+                    setJoining((v) => !v);
+                    setPicked([]);
+                  }}
+                  aria-expanded={joining}
+                >
+                  <Merge size={14} aria-hidden="true" /> Juntar com…
+                </Button>
+              )}
             </>
           )}
+        </div>
+      )}
+      {joining && !closed && (
+        <div className="pradar-dismiss">
+          <fieldset className="pradar-join">
+            <legend>Quais situações são a mesma demanda desta? Elas entram aqui, com as falas e as cobranças.</legend>
+            {siblings.map((x) => (
+              <label key={x.id}>
+                <input
+                  type="checkbox"
+                  checked={picked.includes(x.id)}
+                  onChange={(e) => setPicked((p) => (e.target.checked ? [...p, x.id] : p.filter((id) => id !== x.id)))}
+                />
+                <span>
+                  <strong>{x.title}</strong> <span className="muted">· {KIND_LABEL[x.kind]} · {whenBr(x.last_at)}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <div className="pradar-actions">
+            <Button
+              className="btn primary compact"
+              loading={busy}
+              disabled={!picked.length}
+              onClick={() => {
+                setBusy(true);
+                setError("");
+                joinItems(company, item.id, picked)
+                  .then((next) => {
+                    setJoining(false);
+                    onChanged(next, "Situações juntadas. A MAVI vai escrever a resposta com tudo junto e aprender com isso.");
+                  })
+                  .catch((e) => setError((e as Error).message))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              Juntar
+            </Button>
+            <Button className="btn secondary compact" onClick={() => setJoining(false)} disabled={busy}>
+              Cancelar
+            </Button>
+          </div>
         </div>
       )}
       {dismissing && !closed && (

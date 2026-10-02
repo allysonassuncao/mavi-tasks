@@ -744,4 +744,97 @@ await check("Quem usa qual modelo: a conferência do Radar pessoal só aceita o 
   await rejects(() => rpc("ai_set_route", [A, "feature", null, uid(800), "claude-haiku-4-5", "personal_radar_check"]), /Jev/);
 });
 
+// ------------------------------------------------------------ uma situação por demanda
+const GROUP2 = uid(950);
+let parts;
+await check("três situações da mesma demanda num grupo: a consolidação junta numa só", async () => {
+  await as(admin);
+  await rpc("set_personal_radar_cap", [A, member, null]);
+  await sql(`insert into whatsapp_groups(id, company_id, jid, title, client_id, synced_until) values ($1,$2,'3@g.us','4282 - Financeiro',$3, now())`,
+    [GROUP2, A, client]);
+  await as(null);
+  await rpc("whatsapp_store_members", [WA_SECRET, GROUP2, JSON.stringify([
+    { jid: "5511987654321@s.whatsapp.net", lid: "184@lid", phone: "5511987654321", name: "Bruno" },
+    { jid: "5511911112222@s.whatsapp.net", lid: "186@lid", phone: "5511911112222", name: "Carlos" },
+  ]), null]);
+  await sql(
+    `insert into whatsapp_messages(id, company_id, group_id, wa_id, sent_at, sender, sender_phone, from_me, kind, body) values
+     ($1,$4,$5,'X1', now() - interval '20 minutes','186@lid','5511911112222',false,'text','Cobraram o CRM que nem ativamos.'),
+     ($2,$4,$5,'X2', now() - interval '15 minutes','186@lid','5511911112222',false,'text','Os WhatsApps não funcionam até hoje.'),
+     ($3,$4,$5,'X3', now() - interval '10 minutes','186@lid','5511911112222',false,'text','Quero o cancelamento total ainda hoje.')`,
+    [uid(1201), uid(1202), uid(1203), A, GROUP2],
+  );
+  const claimed = await claim();
+  assert.ok(claimed.some((c) => c.group_id === GROUP2));
+  const m = await material(GROUP2);
+  const own = [{ user_id: member, reason: "role", why: "Financeiro" }];
+  await store(GROUP2, {
+    until_at: m.until_at, until_id: m.until_id, people: [member],
+    items: [
+      { kind: "complaint", title: "Cobrança do CRM contestada", urgency: 2, owners: own, mentions: [{ message_id: uid(1201) }] },
+      { kind: "complaint", title: "WhatsApps sem funcionar", urgency: 3, owners: own, mentions: [{ message_id: uid(1202) }] },
+      { kind: "request", title: "Pedido de cancelamento", urgency: 2, owners: own, mentions: [{ message_id: uid(1203) }] },
+    ],
+    resolved: [], usage: { cost: 0 },
+  });
+  parts = (await sql(`select id, title from personal_radar_items where group_id = $1 order by first_at`, [GROUP2])).map((r) => r.id);
+  assert.equal(parts.length, 3);
+  // Uma resposta já escrita para uma delas some (vai ser escrita de novo com tudo).
+  await as(member);
+  await rpc("personal_radar_draft_start", [A, parts[2], true, null]);
+  await rpc("personal_radar_draft_store", [A, parts[2], JSON.stringify({ reply: "Oi Carlos, vamos ver o cancelamento." }), "{}"]);
+  await as(null);
+  const groups = await rpc("ai_personal_radar_consolidate_claim", [SECRET, 10]);
+  const g = groups.find((x) => x.group_id === GROUP2);
+  assert.deepEqual(g.items.map((i) => i.title), ["Cobrança do CRM contestada", "WhatsApps sem funcionar", "Pedido de cancelamento"]);
+  assert.equal(g.client_name, "4282");
+  const merged = await rpc("ai_personal_radar_consolidate_store", [SECRET, GROUP2, JSON.stringify([
+    { into: parts[2], items: [parts[0], parts[1], uid(9999)], kind: "complaint", title: "Cancelamento com cobranças contestadas",
+      summary: "O cliente pede o cancelamento total: contesta a cobrança do CRM e diz que os WhatsApps não funcionam." },
+  ]), JSON.stringify({ model: "claude-sonnet-5-5", input: 2000, cost: 0.003 })]);
+  assert.equal(merged, 1);
+  const items = await sql(`select id, title, kind, urgency, asks, reopened_at from personal_radar_items where group_id = $1`, [GROUP2]);
+  assert.deepEqual(items.map((i) => [i.id, i.title, i.kind, i.urgency, i.asks]),
+    [[parts[2], "Cancelamento com cobranças contestadas", "complaint", 3, 3]]);
+  assert.equal((await sql(`select count(*)::int as n from personal_radar_mentions where item_id = $1`, [parts[2]]))[0].n, 3);
+  assert.equal((await sql(`select count(*)::int as n from personal_radar_replies where item_id = $1`, [parts[2]]))[0].n, 0);
+  assert.equal((await sql(`select count(*)::int as n from ai_usage where kind = 'consolidate'`))[0].n, 1);
+  // Consolidado e sem mudança: não volta.
+  assert.ok(!(await rpc("ai_personal_radar_consolidate_claim", [SECRET, 10])).some((x) => x.group_id === GROUP2));
+});
+
+await check("as falas já juntadas não viram situação de novo", async () => {
+  await touch(GROUP2);
+  await claim();
+  const m = await material(GROUP2);
+  // Nada novo depois da leitura: o material volta nulo.
+  assert.equal(m, null);
+});
+
+await check("Juntar com…: a pessoa junta à mão e isso vira aprendizado", async () => {
+  await sql(
+    `insert into whatsapp_messages(id, company_id, group_id, wa_id, sent_at, sender, sender_phone, from_me, kind, body) values
+     ($1,$2,$3,'X4', now() - interval '1 minute','186@lid','5511911112222',false,'text','E a devolutiva por e-mail?')`,
+    [uid(1204), A, GROUP2],
+  );
+  await touch(GROUP2);
+  await claim();
+  const m = await material(GROUP2);
+  await store(GROUP2, {
+    until_at: m.until_at, until_id: m.until_id, people: [member],
+    items: [{ kind: "deadline", title: "Devolutiva por e-mail", owners: [{ user_id: member, reason: "role" }], mentions: [{ message_id: uid(1204) }] }],
+    resolved: [], usage: { cost: 0 },
+  });
+  const extra = (await sql(`select id from personal_radar_items where group_id = $1 and id <> $2`, [GROUP2, parts[2]]))[0].id;
+  await as(other);
+  await rejects(() => rpc("personal_radar_join", [A, parts[2], [extra], null]), /não encontrado/);
+  await as(member);
+  await rejects(() => rpc("personal_radar_join", [A, parts[2], [cpl], null]), /mesmo grupo/);
+  const item = await rpc("personal_radar_join", [A, parts[2], [extra], null]);
+  assert.equal(item.mention_count, 4);
+  assert.equal(item.asks, 4);
+  const [f] = await sql(`select action, snapshot->>'summary' as summary from personal_radar_feedback where action = 'merged'`);
+  assert.match(f.summary, /juntou nesta situação: "Devolutiva por e-mail"/);
+});
+
 console.log(`\n${passed} verificações do Radar pessoal passaram.`);
