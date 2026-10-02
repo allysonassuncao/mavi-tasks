@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Film, Plus, Trash2 } from "lucide-react";
 import { Button, Checkbox, Select, SelectOption } from "./ui";
 import { MultiPick } from "./MultiPick";
+import { FieldHistory } from "./AiSettingsLog";
 import type { AiLibrary } from "./ai";
 import type { AnimationAdmin, NoticesApi } from "./notices";
 import type { Snapshot } from "./types";
@@ -20,12 +21,15 @@ export function NoticeAnimationAdmin({
   data,
   library,
   notify,
+  onSaved,
 }: {
   api: NoticesApi;
   company: string;
   data: Snapshot;
   library: AiLibrary | null;
   notify: (message: string) => void;
+  /** Depois de salvar (o histórico de alterações recarrega). */
+  onSaved?: () => void;
 }) {
   const [config, setConfig] = useState<AnimationAdmin | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -79,15 +83,24 @@ export function NoticeAnimationAdmin({
           acima. O teto de gasto é o de Consumo e limites.
         </small>
       </header>
-      <label className="checkbox-label">
-        <Checkbox
-          checked={config.knowledge}
-          onCheckedChange={(v) => change({ ...config, knowledge: v === true })}
-          disabled={busy}
+      <div className="ai-log-field">
+        <label className="checkbox-label">
+          <Checkbox
+            checked={config.knowledge}
+            onCheckedChange={(v) =>
+              change({ ...config, knowledge: v === true })
+            }
+            disabled={busy}
+          />
+          A MAVI pode consultar a base de conhecimento ao criar animações (quem
+          cria liga ou desliga em cada uma)
+        </label>
+        <FieldHistory
+          title="Animações · consulta à base de conhecimento"
+          area="animation"
+          fields={["knowledge"]}
         />
-        A MAVI pode consultar a base de conhecimento ao criar animações (quem
-        cria liga ou desliga em cada uma)
-      </label>
+      </div>
       {config.models.length ? (
         <ul className="notice-anim-models">
           {config.models.map((m, i) => {
@@ -128,6 +141,12 @@ export function NoticeAnimationAdmin({
                     })
                   }
                   disabled={busy}
+                />
+                <FieldHistory
+                  title={`Animações · ${label}`}
+                  area="animation"
+                  subject={`${m.provider_id}|${m.model}`}
+                  fields={["model", "access"]}
                 />
                 <button
                   type="button"
@@ -197,6 +216,7 @@ export function NoticeAnimationAdmin({
                 await api.setAnimationAdmin(company, config);
                 setDirty(false);
                 notify("Modelos das animações salvos.");
+                onSaved?.();
               } catch (e) {
                 setError((e as Error).message);
               } finally {

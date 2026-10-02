@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   BarChart3,
   Boxes,
@@ -20,6 +20,7 @@ import { RadarSettings } from "./RadarSettings";
 import { AiPowersPanel } from "./AiPowersPanel";
 import { NoticeAnimationAdmin } from "./NoticeAnimationAdmin";
 import { noticesApi } from "./notices";
+import { SettingsHistory, SettingsLogProvider } from "./AiSettingsLog";
 
 const TABS: {
   id: AiTab;
@@ -29,7 +30,12 @@ const TABS: {
 }[] = [
   { id: "consumo", label: "Consumo e limites", icon: BarChart3, admin: false },
   { id: "copiloto", label: "Copiloto", icon: GraduationCap, admin: false },
-  { id: "aprendizado", label: "Aprendizado da MAVI", icon: Brain, admin: false },
+  {
+    id: "aprendizado",
+    label: "Aprendizado da MAVI",
+    icon: Brain,
+    admin: false,
+  },
   { id: "termometro", label: "Termômetro", icon: Thermometer, admin: false },
   { id: "radar", label: "Radar", icon: Radar, admin: false },
   { id: "poderes", label: "Poderes", icon: Zap, admin: false },
@@ -96,7 +102,13 @@ export function AiPage({
       ) : tab === "termometro" ? (
         <TemperatureSettings company={company} data={data} notify={notify} />
       ) : tab === "aprendizado" ? (
-        <MaviLearning company={company} data={data} demo={demo} isAdmin={isAdmin} notify={notify} />
+        <MaviLearning
+          company={company}
+          data={data}
+          demo={demo}
+          isAdmin={isAdmin}
+          notify={notify}
+        />
       ) : tab === "copiloto" ? (
         <CopilotLearning
           company={company}
@@ -145,34 +157,44 @@ function AdminTabs({
   const { library, error, reload, api, defaults } = useAiLibrary(company, demo);
   // Uma instância só (na demonstração, a de exemplo guarda em memória).
   const notices = useMemo(() => noticesApi(demo, data, ""), [demo]); // eslint-disable-line react-hooks/exhaustive-deps
-  return tab === "provedores" ? (
-    <AiProvidersPanel
-      api={api}
-      library={library}
-      error={error}
-      reload={reload}
-      notify={notify}
-    />
-  ) : (
-    <>
-      <AiRoutesPanel
-        api={api}
-        data={data}
-        library={library}
-        defaults={defaults}
-        error={error}
-        reload={reload}
-        notify={notify}
-        canManageProviders={isAdmin}
-        company={demo ? undefined : company}
-      />
-      <NoticeAnimationAdmin
-        api={notices}
-        company={company}
-        data={data}
-        library={library}
-        notify={notify}
-      />
-    </>
+  // Cada salvamento das animações recarrega o histórico (os das regras
+  // recarregam a biblioteca, que também conta).
+  const [saved, setSaved] = useState(0);
+  const version = useMemo(() => ({}), [library, saved]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <SettingsLogProvider company={demo ? undefined : company} data={data}>
+      {tab === "provedores" ? (
+        <AiProvidersPanel
+          api={api}
+          library={library}
+          error={error}
+          reload={reload}
+          notify={notify}
+        />
+      ) : (
+        <>
+          <AiRoutesPanel
+            api={api}
+            data={data}
+            library={library}
+            defaults={defaults}
+            error={error}
+            reload={reload}
+            notify={notify}
+            canManageProviders={isAdmin}
+            company={demo ? undefined : company}
+          />
+          <NoticeAnimationAdmin
+            api={notices}
+            company={company}
+            data={data}
+            library={library}
+            notify={notify}
+            onSaved={() => setSaved((n) => n + 1)}
+          />
+          <SettingsHistory data={data} version={version} />
+        </>
+      )}
+    </SettingsLogProvider>
   );
 }

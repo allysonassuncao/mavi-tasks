@@ -18015,6 +18015,185 @@ td.ai-empty-cell {
   flex-direction: column;
   gap: 10px;
 }
+/* Histórico de alterações: o ícone ao lado de cada campo. */
+.ai-log-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ai-log-field > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.ai-usage-company > .ai-log-field {
+  flex-direction: row;
+  gap: 4px;
+}
+.icon-btn.ai-log-btn {
+  width: 28px;
+  height: 28px;
+  color: #8a9592;
+}
+.icon-btn.ai-log-btn:hover,
+.icon-btn.ai-log-btn:focus-visible {
+  color: #293435;
+}
+.ai-provider-card > footer .ai-log-btn {
+  margin: -4px 0 -4px auto;
+}
+td.ai-log-actions {
+  white-space: nowrap;
+}
+/* A seção no fim da aba e o histórico de um campo. */
+.ai-log {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px 18px;
+}
+.ai-log > header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ai-log > header strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.86rem;
+}
+.ai-log > header small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+.ai-log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ai-log-filters > * {
+  flex: 0 1 200px;
+  min-width: 150px;
+}
+.ai-log-filters > .text-btn {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+/* Aberto de dentro de uma célula da tabela: não herda o alinhamento dela. */
+.modal.ai-log-dialog {
+  width: 640px;
+  text-align: left;
+  white-space: normal;
+  font-weight: 400;
+}
+.ai-log-modal {
+  max-height: calc(90vh - 70px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 28px 28px;
+  overflow-y: auto;
+}
+.ai-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.ai-log-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px 10px 26px;
+  border-top: 1px solid #f0f3ee;
+  font-size: 0.78rem;
+  position: relative;
+}
+.ai-log-item:first-child {
+  border-top: 0;
+}
+/* Um ponto: verde quando entra, vermelho quando sai, azul quando troca. */
+.ai-log-item::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 16px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5a8bc4;
+}
+.ai-log-item.created::before {
+  background: #6a9a3f;
+}
+.ai-log-item.removed::before {
+  background: #c46a4a;
+}
+.ai-log-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ai-log-head strong {
+  font-weight: 600;
+}
+.ai-log-head time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+.ai-log-where {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.ai-log-change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.ai-log-change s {
+  color: var(--muted);
+}
+.ai-log-change svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.ai-log-change b {
+  font-weight: 600;
+}
+.ai-log-cause {
+  align-self: flex-start;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #fdf5e4;
+  color: #8a5a00;
+  font-size: 0.7rem;
+}
+.ai-log-more {
+  align-self: center;
+}
+@media (max-width: 600px) {
+  .ai-log-modal {
+    padding: 18px 16px 24px;
+  }
+  .ai-log-filters > * {
+    flex: 1 1 100%;
+  }
+  /* De e Até lado a lado. */
+  .ai-log-filters > :nth-child(3),
+  .ai-log-filters > :nth-child(4) {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+}
 /* Por funcionalidade. */
 .ai-features {
   padding: 16px 18px 6px;
@@ -23432,7 +23611,7 @@ fieldset.notice-studio-refs {
 }
 .notice-anim-models li {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
   padding: 8px 10px;
@@ -23447,8 +23626,13 @@ fieldset.notice-studio-refs {
   max-width: 420px;
 }
 @media (max-width: 860px) {
+  /* O nome, o histórico e tirar na primeira linha; quem usa embaixo. */
   .notice-anim-models li {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr auto auto;
+  }
+  .notice-anim-models li > .multi-pick {
+    grid-column: 1 / -1;
+    order: 1;
   }
 }
 

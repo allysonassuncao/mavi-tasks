@@ -26,6 +26,7 @@ import { contractProductLabel } from "./domain";
 import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import { listSkills, type SkillSummary } from "./mavi-skills";
+import { FieldHistory } from "./AiSettingsLog";
 import {
   deleteProvider,
   fetchProviderModels,
@@ -564,6 +565,7 @@ function ProviderCard({
         <button type="button" className="text-btn danger" onClick={onRemove}>
           <Trash2 size={14} /> Remover
         </button>
+        <FieldHistory title={p.name} area="provider" subject={p.id} />
       </footer>
     </article>
   );
@@ -1143,22 +1145,38 @@ function SkillRoutes({
                       </div>
                     </td>
                     <td>
-                      <Select
-                        aria-label={`Modelo da skill ${s.current?.name ?? s.slug}`}
-                        value={r ? `${r.provider_id}|${r.model}` : SERVER}
-                        onValueChange={(v) => onSet(s.id, v)}
-                      >
-                        <SelectOption value={SERVER}>O modelo da conversa</SelectOption>
-                        {choices}
-                      </Select>
+                      <div className="ai-log-field">
+                        <Select
+                          aria-label={`Modelo da skill ${s.current?.name ?? s.slug}`}
+                          value={r ? `${r.provider_id}|${r.model}` : SERVER}
+                          onValueChange={(v) => onSet(s.id, v)}
+                        >
+                          <SelectOption value={SERVER}>O modelo da conversa</SelectOption>
+                          {choices}
+                        </Select>
+                        <FieldHistory
+                          title={`${s.current?.name ?? s.slug} · modelo`}
+                          area="skill"
+                          subject={s.id}
+                          fields={["model"]}
+                        />
+                      </div>
                     </td>
                     <td>
-                      <EffortSelect
-                        label={s.current?.name ?? s.slug}
-                        value={efforts[`skill:${s.id}`]}
-                        auto="Automático · pelo menos Alto"
-                        onChange={(e) => onEffort(`skill:${s.id}`, e)}
-                      />
+                      <div className="ai-log-field">
+                        <EffortSelect
+                          label={s.current?.name ?? s.slug}
+                          value={efforts[`skill:${s.id}`]}
+                          auto="Automático · pelo menos Alto"
+                          onChange={(e) => onEffort(`skill:${s.id}`, e)}
+                        />
+                        <FieldHistory
+                          title={`${s.current?.name ?? s.slug} · esforço`}
+                          area="skill"
+                          subject={s.id}
+                          fields={["effort"]}
+                        />
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1404,14 +1422,17 @@ export function AiRoutesPanel({
             específica.
           </small>
         </div>
-        <Select
-          aria-label="Modelo padrão da empresa"
-          value={companyRoute ? `${companyRoute.provider_id}|${companyRoute.model}` : SERVER}
-          onValueChange={(v) => void set("company", null, v)}
-        >
-          <SelectOption value={SERVER}>Padrão do servidor</SelectOption>
-          {choices}
-        </Select>
+        <div className="ai-log-field">
+          <Select
+            aria-label="Modelo padrão da empresa"
+            value={companyRoute ? `${companyRoute.provider_id}|${companyRoute.model}` : SERVER}
+            onValueChange={(v) => void set("company", null, v)}
+          >
+            <SelectOption value={SERVER}>Padrão do servidor</SelectOption>
+            {choices}
+          </Select>
+          <FieldHistory title="Padrão da empresa" area="company" fields={["model"]} />
+        </div>
       </section>
 
       <FeatureRoutes
@@ -1493,7 +1514,13 @@ export function AiRoutesPanel({
                         {choices}
                       </Select>
                     </td>
-                    <td className="num">
+                    <td className="num ai-log-actions">
+                      <FieldHistory
+                        title={name}
+                        area={tab}
+                        subject={r.scope_id ?? ""}
+                        fields={["model"]}
+                      />
                       <button
                         type="button"
                         className="icon-btn"
@@ -1644,51 +1671,67 @@ function FeatureRoutes({
                     </div>
                   </td>
                   <td>
-                    <Select
-                      aria-label={`Modelo de ${f.label}`}
-                      value={r ? `${r.provider_id}|${r.model}` : SERVER}
-                      onValueChange={(v) => onSet(f.id, v)}
-                    >
-                      <SelectOption value={SERVER}>
+                    <div className="ai-log-field">
+                      <Select
+                        aria-label={`Modelo de ${f.label}`}
+                        value={r ? `${r.provider_id}|${r.model}` : SERVER}
+                        onValueChange={(v) => onSet(f.id, v)}
+                      >
+                        <SelectOption value={SERVER}>
+                          {f.decisions
+                            ? "Automático · o Jev cadastrado num provedor OpenRouter"
+                            : f.transcription || f.images
+                              ? `${serverLabel(f.id)} (OpenAI)`
+                              : f.id === "web_search"
+                                ? "Sem modelo próprio · a MAVI do módulo busca (se for Claude)"
+                                : f.id === "canvas_writer"
+                                  ? "Sem modelo próprio · a MAVI do módulo escreve"
+                                  : f.id === "mavi_rerank"
+                                    ? "Sem reordenação · fica a ordem da busca"
+                                  : bubble
+                                    ? `Segue a bolinha · ${routeLabel(bubble)}`
+                                    : companyLabel
+                                ? `Padrão da empresa · ${companyLabel}`
+                                : serverLabel(f.id)}
+                        </SelectOption>
                         {f.decisions
-                          ? "Automático · o Jev cadastrado num provedor OpenRouter"
-                          : f.transcription || f.images
-                            ? `${serverLabel(f.id)} (OpenAI)`
-                            : f.id === "web_search"
-                              ? "Sem modelo próprio · a MAVI do módulo busca (se for Claude)"
-                              : f.id === "canvas_writer"
-                                ? "Sem modelo próprio · a MAVI do módulo escreve"
-                                : f.id === "mavi_rerank"
-                                  ? "Sem reordenação · fica a ordem da busca"
-                                : bubble
-                                  ? `Segue a bolinha · ${routeLabel(bubble)}`
-                                  : companyLabel
-                              ? `Padrão da empresa · ${companyLabel}`
-                              : serverLabel(f.id)}
-                      </SelectOption>
-                      {f.decisions
-                        ? jevChoices
-                        : f.transcription
-                          ? transcribeChoices
-                          : f.images
-                            ? imageChoices
-                            : f.web
-                              ? webChoices
-                              : choices}
-                    </Select>
+                          ? jevChoices
+                          : f.transcription
+                            ? transcribeChoices
+                            : f.images
+                              ? imageChoices
+                              : f.web
+                                ? webChoices
+                                : choices}
+                      </Select>
+                      <FieldHistory
+                        title={`${f.label} · modelo`}
+                        area="feature"
+                        subject={f.id}
+                        fields={["model"]}
+                      />
+                    </div>
                   </td>
                   <td>
                     {EFFORT_FEATURES.has(f.id) ? (
-                      <EffortSelect
-                        label={f.label}
-                        value={efforts[f.id]}
-                        auto={
-                          f.id === "mavi_page" && efforts.assistant
-                            ? `Segue a bolinha · ${effortName(efforts.assistant)}`
-                            : "Automático · padrão do modelo"
-                        }
-                        onChange={(e) => onEffort(f.id, e)}
-                      />
+                      <div className="ai-log-field">
+                        <EffortSelect
+                          label={f.label}
+                          value={efforts[f.id]}
+                          auto={
+                            f.id === "mavi_page" && efforts.assistant
+                              ? `Segue a bolinha · ${effortName(efforts.assistant)}`
+                              : "Automático · padrão do modelo"
+                          }
+                          onChange={(e) => onEffort(f.id, e)}
+                        />
+                        <FieldHistory
+                          title={`${f.label} · esforço`}
+                          area="feature"
+                          subject={f.id}
+                          fields={["effort"]}
+                        />
+                      </div>
                     ) : (
                       <span className="ai-feature-fixed">—</span>
                     )}
