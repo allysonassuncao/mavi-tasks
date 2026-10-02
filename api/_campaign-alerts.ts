@@ -8,6 +8,7 @@ import {
   ALERT_OBJECTIVE_LABELS,
   ALERT_PLATFORMS,
   CONDITION_LABELS,
+  METRIC_HELP,
   METRIC_INFO,
   ALERT_METRICS,
   describeRule,
@@ -119,7 +120,7 @@ export function keepKnown(rule: CampaignAlertRule, cat: AlertCatalog): CampaignA
 // ------------------------------------------------------------ o que a MAVI sabe
 const metricLines = ALERT_METRICS.map(
   (m) =>
-    `- ${m}: ${METRIC_INFO[m].label}${METRIC_INFO[m].cycle ? " (do ciclo atual: só above/below)" : ""}${METRIC_INFO[m].hint ? ` — ${METRIC_INFO[m].hint}` : ""}`,
+    `- ${m}: ${METRIC_INFO[m].label}${METRIC_INFO[m].cycle ? " (do ciclo atual: só above/below)" : ""} — ${METRIC_HELP[m].what} ${METRIC_HELP[m].calc}`,
 ).join("\n");
 
 /** O formato da regra (o mesmo nas duas MAVIs). */

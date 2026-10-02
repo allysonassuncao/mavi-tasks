@@ -68,6 +68,124 @@ export const METRIC_INFO: Record<
 };
 export const isMoney = (m: AlertMetric) => METRIC_INFO[m].unit === "money";
 
+/** Um aviso de exemplo de cada métrica ("Usar este exemplo" preenche a condição). */
+export type MetricSample = Pick<CampaignAlertRule, "condition" | "period" | "days" | "value" | "tolerance">;
+/**
+ * A explicação de cada métrica no formulário: o que é, como a conta é feita
+ * (a mesma do banco, campaign_alert_measure), um exemplo com números e
+ * quando vale a pena vigiar.
+ */
+export const METRIC_HELP: Record<
+  AlertMetric,
+  { what: string; calc: string; example: string; tip: string; sample: MetricSample }
+> = {
+  spend: {
+    what: "Quanto a campanha gastou na plataforma (Meta, Google…).",
+    calc: "A soma do gasto dos dias da janela: só ontem, os últimos N dias ou o ciclo até ontem. Sem M é o que a plataforma cobrou; com M, cada dia é multiplicado pelo M dele (como o cliente contratou e vê).",
+    example: "Ontem a campanha gastou R$ 48,50. Com M 1,5, o mesmo dia aparece como R$ 72,75.",
+    tip: "\"Igual por 3 dias\" pega campanha travada no limite de orçamento; \"zerado\" pega campanha que parou de entregar (pausada, reprovada ou sem saldo); \"cair 40%\" pega queda brusca de entrega.",
+    sample: { condition: "unchanged", period: "days", days: 3, value: null, tolerance: 2 },
+  },
+  conversions: {
+    what: "Os resultados do objetivo do ciclo: leads, conversas, vendas, cliques (tráfego) ou engajamentos.",
+    calc: "A soma das conversões dos dias da janela. No ciclo, vale o acumulado da plataforma (o mesmo do Dia a Dia); com página de captura da Make, contam os leads da página.",
+    example: "A campanha teve 12 leads ontem e 85 desde o começo do ciclo.",
+    tip: "\"Zerado por 2 ou 3 dias\" avisa quando a campanha gasta mas não converte (formulário quebrado, página fora do ar, criativo ruim).",
+    sample: { condition: "zero", period: "days", days: 3, value: null, tolerance: 0 },
+  },
+  cpa: {
+    what: "Quanto custou cada resultado: o CPL dos leads, o custo por conversa, o CPA das vendas.",
+    calc: "Consumo ÷ conversões da janela. Sem nenhuma conversão no período a conta não fecha e o aviso não confere (para isso, use Conversões zerado).",
+    example: "R$ 600 gastos e 20 leads nos últimos 7 dias = R$ 30,00 por lead. Com M 1,5: R$ 45,00.",
+    tip: "Use \"no ciclo\" para comparar com o combinado com o cliente, ou \"últimos 3 dias\" para pegar a piora mais cedo.",
+    sample: { condition: "above", period: "cycle", days: 1, value: 35, tolerance: 0 },
+  },
+  ctr: {
+    what: "A taxa de cliques: de cada 100 vezes que o anúncio apareceu, quantas viraram clique.",
+    calc: "Cliques ÷ impressões × 100, somando os dias da janela.",
+    example: "150 cliques em 10.000 impressões = CTR de 1,5%.",
+    tip: "CTR caindo costuma ser criativo cansado ou público errado: \"ficar abaixo de 1% nos últimos 7 dias\" ou \"cair 30%\".",
+    sample: { condition: "below", period: "days", days: 7, value: 1, tolerance: 0 },
+  },
+  cpc: {
+    what: "Quanto custou, em média, cada clique.",
+    calc: "Consumo ÷ cliques da janela.",
+    example: "R$ 300 gastos e 250 cliques = CPC de R$ 1,20.",
+    tip: "Bom para campanhas de tráfego: \"subir 30% (últimos 3 dias × 3 anteriores)\" mostra o leilão encarecendo.",
+    sample: { condition: "rise", period: "days", days: 3, value: 30, tolerance: 0 },
+  },
+  cpm: {
+    what: "Quanto custa para o anúncio aparecer mil vezes.",
+    calc: "Consumo ÷ impressões × 1.000, somando os dias da janela.",
+    example: "R$ 450 gastos em 30.000 impressões = CPM de R$ 15,00.",
+    tip: "CPM subindo muito costuma ser público pequeno ou saturado, ou concorrência alta no leilão (datas comerciais).",
+    sample: { condition: "rise", period: "days", days: 7, value: 40, tolerance: 0 },
+  },
+  impressions: {
+    what: "Quantas vezes os anúncios apareceram (a mesma pessoa pode ver várias vezes).",
+    calc: "A soma das impressões dos dias da janela.",
+    example: "8.400 impressões ontem; 52.000 nos últimos 7 dias.",
+    tip: "\"Zerado por 1 ou 2 dias\" é o sinal mais rápido de campanha parada; \"cair 50%\" mostra perda de entrega.",
+    sample: { condition: "zero", period: "days", days: 2, value: null, tolerance: 0 },
+  },
+  clicks: {
+    what: "Quantos cliques os anúncios receberam.",
+    calc: "A soma dos cliques dos dias da janela.",
+    example: "120 cliques ontem; 900 nos últimos 7 dias.",
+    tip: "\"Cair 50% (últimos 3 dias × 3 anteriores)\" avisa quando o interesse despenca mesmo com a campanha entregando.",
+    sample: { condition: "drop", period: "days", days: 3, value: 50, tolerance: 0 },
+  },
+  reach: {
+    what: "Quantas pessoas diferentes viram os anúncios.",
+    calc: "Por dia, o alcance de cada dia; nos últimos N dias, a soma dos dias (quem viu em dois dias conta duas vezes). No ciclo, o acumulado da plataforma, sem repetir pessoa.",
+    example: "5.000 pessoas ontem; 18.000 pessoas diferentes desde o começo do ciclo.",
+    tip: "Alcance caindo com o mesmo consumo costuma ser público se esgotando: combine com Frequência.",
+    sample: { condition: "drop", period: "days", days: 7, value: 40, tolerance: 0 },
+  },
+  frequency: {
+    what: "Quantas vezes, em média, cada pessoa viu os anúncios.",
+    calc: "Impressões ÷ alcance da janela. No ciclo usa o alcance acumulado da plataforma, que é o número mais fiel.",
+    example: "12.000 impressões para 4.000 pessoas = frequência 3 (cada pessoa viu 3 vezes).",
+    tip: "Acima de 3 a 4 no ciclo costuma indicar público saturado e criativo cansando: hora de renovar.",
+    sample: { condition: "above", period: "cycle", days: 1, value: 4, tolerance: 0 },
+  },
+  media_left: {
+    what: "Quanto ainda falta gastar da verba do ciclo atual.",
+    calc: "Mídia do ciclo (verba ÷ M) menos o que já foi gasto até ontem. Com M, o resultado é multiplicado pelo M (o valor como o cliente vê).",
+    example: "Ciclo de R$ 3.000 com M 1,5 = R$ 2.000 de mídia. Já gastou R$ 1.400: restam R$ 600 (com M, R$ 900).",
+    tip: "\"Ficar em ou abaixo de\" um valor avisa que a verba está acabando, a tempo de cobrar o próximo investimento.",
+    sample: { condition: "below", period: "cycle", days: 1, value: 300, tolerance: 0 },
+  },
+  daily_budget: {
+    what: "Quanto a campanha precisa gastar por dia, daqui até o fim do ciclo, para fechar a verba certinho.",
+    calc: "Mídia restante ÷ dias que faltam no ciclo (hoje incluído). Com M, multiplicado pelo M.",
+    example: "Restam R$ 600 de mídia e faltam 10 dias: orçamento diário de R$ 60,00.",
+    tip: "Se passar muito do que está configurado na plataforma, a campanha está gastando devagar e vai sobrar verba; se cair perto de zero, a verba acaba antes do fim do ciclo.",
+    sample: { condition: "above", period: "cycle", days: 1, value: 150, tolerance: 0 },
+  },
+  spend_pace: {
+    what: "Se a campanha está gastando no ritmo certo para a verba durar o ciclo inteiro.",
+    calc: "Gasto até ontem ÷ gasto esperado × 100. O esperado é a mídia do ciclo dividida igualmente pelos dias: mídia × dias que já passaram ÷ dias do ciclo. 100% = no ritmo.",
+    example: "Ciclo de 30 dias com R$ 3.000 de mídia: depois de 10 dias o esperado é R$ 1.000. Gastou R$ 1.250 → ritmo de 125% (a verba acaba antes); gastou R$ 800 → 80% (vai sobrar).",
+    tip: "\"Chegar a 115%\" avisa que vai faltar verba no fim do ciclo; \"ficar em ou abaixo de 85%\" avisa que vai sobrar.",
+    sample: { condition: "above", period: "cycle", days: 1, value: 115, tolerance: 0 },
+  },
+  results_pace: {
+    what: "Se as conversões estão no ritmo para bater a meta de resultados do ciclo.",
+    calc: "Conversões até ontem ÷ conversões esperadas × 100. O esperado é a meta dividida igualmente pelos dias: meta × dias que já passaram ÷ dias do ciclo. Precisa de meta cadastrada no ciclo.",
+    example: "Meta de 100 leads em 30 dias: depois de 15 dias o esperado é 50. Com 40 leads, o ritmo é 80% (abaixo da meta); com 60, 120%.",
+    tip: "\"Ficar em ou abaixo de 80%\" avisa cedo que a meta do cliente está em risco.",
+    sample: { condition: "below", period: "cycle", days: 1, value: 80, tolerance: 0 },
+  },
+  cost_vs_goal: {
+    what: "Se o custo por resultado está acima ou abaixo do combinado com o cliente.",
+    calc: "Custo por resultado do ciclo ÷ custo da meta × 100. O custo da meta é a mídia do ciclo ÷ a meta de resultados. 100% = exatamente o combinado; acima, mais caro.",
+    example: "R$ 2.000 de mídia para 100 leads = meta de R$ 20 por lead. Se o ciclo está em R$ 26 por lead, o custo × meta é 130%.",
+    tip: "Funciona para qualquer cliente sem ajustar o valor: \"chegar a 120%\" avisa quando o custo passa 20% do combinado.",
+    sample: { condition: "above", period: "cycle", days: 1, value: 120, tolerance: 0 },
+  },
+};
+
 export const ALERT_CONDITIONS = ["above", "below", "unchanged", "zero", "rise", "drop"] as const;
 export type AlertCondition = (typeof ALERT_CONDITIONS)[number];
 export const CONDITION_LABELS: Record<AlertCondition, string> = {

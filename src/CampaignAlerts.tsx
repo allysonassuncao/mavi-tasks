@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BellRing,
   History,
+  Info,
+  Wand2,
   Loader2,
   Pencil,
   Plus,
@@ -20,6 +22,7 @@ import {
   ALERT_PLATFORMS,
   ALERT_PLATFORM_LABELS,
   CONDITION_LABELS,
+  METRIC_HELP,
   METRIC_INFO,
   blankRule,
   channelText,
@@ -711,7 +714,11 @@ function AlertForm({
               </label>
             )}
           </div>
-          {info.hint && <p className="calert-hint">{info.hint}</p>}
+          <MetricHelp
+            metric={rule.metric}
+            onUse={(sample) => set(sample)}
+            onPick={(m) => pickMetric(m)}
+          />
           {isMoney(rule.metric) && (
             <button
               type="button"
@@ -838,6 +845,85 @@ function PreviewResult({ preview }: { preview: AlertPreview }) {
         </ul>
       )}
       <small>Nada foi enviado: os avisos de verdade chegam depois da sincronização de cada manhã.</small>
+    </section>
+  );
+}
+
+// ------------------------------------------------------------ explicação das métricas
+const UNIT_LABEL = { money: "em R$", percent: "em %", number: "em quantidade" } as const;
+
+/**
+ * O que a métrica escolhida mede, como a conta é feita, um exemplo com
+ * números e quando vale a pena vigiar — com um aviso de exemplo que preenche
+ * a condição e a lista de todas as métricas para comparar.
+ */
+function MetricHelp({
+  metric,
+  onUse,
+  onPick,
+}: {
+  metric: AlertMetric;
+  onUse: (sample: (typeof METRIC_HELP)[AlertMetric]["sample"]) => void;
+  onPick: (metric: AlertMetric) => void;
+}) {
+  const [all, setAll] = useState(false);
+  const info = METRIC_INFO[metric];
+  const help = METRIC_HELP[metric];
+  const sample = normalizeRule({ ...blankRule(), metric, ...help.sample });
+  return (
+    <section className="calert-help" aria-label={`Sobre a métrica ${info.label}`}>
+      <header>
+        <Info size={15} aria-hidden="true" />
+        <strong>{info.label}</strong>
+        <span className="calert-help-tag">
+          {info.cycle ? "do ciclo atual" : "do dia a dia"} · {UNIT_LABEL[info.unit]}
+        </span>
+      </header>
+      <p className="calert-help-what">{help.what}</p>
+      <dl>
+        <div>
+          <dt>Como é calculado</dt>
+          <dd>{help.calc}</dd>
+        </div>
+        <div>
+          <dt>Exemplo</dt>
+          <dd>{help.example}</dd>
+        </div>
+        <div>
+          <dt>Quando usar</dt>
+          <dd>{help.tip}</dd>
+        </div>
+      </dl>
+      <footer>
+        <button type="button" className="calert-help-use" onClick={() => onUse(help.sample)}>
+          <Wand2 size={14} aria-hidden="true" /> Usar o exemplo: {conditionText(sample).replace(/, (com|sem) M$/, "")}
+        </button>
+        <button type="button" className="text-btn" aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? "Fechar a lista" : "Comparar todas as métricas"}
+        </button>
+      </footer>
+      {all && (
+        <ul className="calert-help-all">
+          {ALERT_METRICS.map((m) => (
+            <li key={m}>
+              <button
+                type="button"
+                aria-current={m === metric}
+                onClick={() => {
+                  onPick(m);
+                  setAll(false);
+                }}
+              >
+                <b>
+                  {METRIC_INFO[m].label}
+                  <small>{METRIC_INFO[m].cycle ? " · ciclo" : " · dia a dia"}</small>
+                </b>
+                <span>{METRIC_HELP[m].what}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

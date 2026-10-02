@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALERT_METRICS,
+  METRIC_HELP,
   blankRule,
   conditionText,
   conditionsFor,
@@ -47,6 +49,16 @@ describe("regras de aviso de campanha", () => {
     });
     expect(normalizeRule({ ...blankRule(), metric: "daily_budget", condition: "above", period: "days", days: 4 }))
       .toMatchObject({ period: "cycle", days: 1 });
+  });
+
+  it("cada métrica tem explicação completa e um exemplo de aviso que fecha", () => {
+    for (const metric of ALERT_METRICS) {
+      const help = METRIC_HELP[metric];
+      for (const text of [help.what, help.calc, help.example, help.tip]) expect(text.length).toBeGreaterThan(20);
+      expect(conditionsFor(metric)).toContain(help.sample.condition);
+      const rule = normalizeRule({ ...blankRule(), name: "Exemplo", metric, ...help.sample });
+      expect(ruleProblem(rule), metric).toBeNull();
+    }
   });
 
   it("as mesmas mensagens do banco para o que falta", () => {
