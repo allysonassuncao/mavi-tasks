@@ -7190,24 +7190,121 @@ label .input-control .ui-input {
 .drive-folder-card .drive-folder > svg:last-child {
   display: none;
 }
-.drive-folder-actions {
+/* O menu ⋮ da pasta fica num espaço só dele: o nome nunca passa por baixo. */
+.drive-folder-card.has-menu .drive-folder {
+  padding-right: 46px;
+}
+.drive-folder-more {
   position: absolute;
   top: 50%;
   right: 8px;
   transform: translateY(-50%);
-  display: flex;
-  gap: 2px;
-  opacity: 0;
+  width: 30px;
+  height: 30px;
+  color: #84908f;
+  opacity: 0.6;
   transition: opacity 0.12s ease;
 }
-.drive-folder-card:hover .drive-folder-actions,
-.drive-folder-card:focus-within .drive-folder-actions {
+.drive-folder-card:hover .drive-folder-more,
+.drive-folder-card:focus-within .drive-folder-more,
+.drive-folder-more[data-state="open"] {
   opacity: 1;
 }
-.drive-folder-actions .icon-btn {
-  width: 26px;
-  height: 26px;
+.drive-folder-more:hover {
+  background: #eef3e8;
+  color: var(--ink);
+}
+@media (hover: none) {
+  .drive-folder-more {
+    opacity: 1;
+  }
+}
+
+/* Lista: pastas, produtos e clientes em linhas, como a tabela dos arquivos. */
+.drive-folders.as-list {
+  grid-template-columns: 1fr;
+  gap: 0;
   background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.drive-folders.as-list > .drive-folder-card .drive-folder,
+.drive-folders.as-list > .drive-folder-card.editing {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.drive-folders.as-list > .drive-folder-card:first-child .drive-folder,
+.drive-folders.as-list > .drive-folder-card.editing:first-child {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+.drive-folders.as-list > .drive-folder-card:last-child .drive-folder,
+.drive-folders.as-list > .drive-folder-card.editing:last-child {
+  border-bottom: 0;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+/* Com ou sem ⋮, as colunas ficam alinhadas. */
+.drive-folders.as-list .drive-folder {
+  padding-right: 46px;
+}
+.drive-folders.as-list .drive-folder:hover {
+  background: #f8faf5;
+  box-shadow: none;
+}
+.drive-folders.as-list .drive-folder > span {
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+}
+.drive-folders.as-list .drive-folder strong {
+  flex: 1;
+  min-width: 0;
+}
+.drive-folders.as-list .drive-folder-detail {
+  flex: 0 0 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-folders.as-list .drive-folder-path {
+  flex: 0 1 280px;
+  min-width: 0;
+}
+.drive-page.moving .drive-folders.as-list [data-drop-target] .drive-folder {
+  outline-offset: -3px;
+}
+@media (max-width: 700px) {
+  .drive-folders.as-list .drive-folder > span {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .drive-folders.as-list .drive-folder strong {
+    max-width: 100%;
+  }
+  .drive-folders.as-list .drive-folder-detail,
+  .drive-folders.as-list .drive-folder-path {
+    flex: none;
+    max-width: 100%;
+  }
+}
+@container (max-width: 700px) {
+  .task-drive .drive-folders.as-list .drive-folder > span {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .task-drive .drive-folders.as-list .drive-folder-detail,
+  .task-drive .drive-folders.as-list .drive-folder-path {
+    flex: none;
+    max-width: 100%;
+  }
 }
 .drive-folder-card.editing {
   padding: 8px 10px;
@@ -28557,16 +28654,35 @@ a.radar-task-chip:hover {
   width: 34px;
   padding-right: 0 !important;
 }
+/* A largura mínima é do nome, não da coluna de escolher (que vem antes). */
+.drive-table td.drive-select-cell {
+  min-width: 0;
+}
+.drive-table .drive-select-cell + td {
+  min-width: 180px;
+}
+@container (max-width: 520px) {
+  .task-drive .drive-table td.drive-select-cell {
+    flex: 0 0 auto;
+    width: auto;
+  }
+  .task-drive .drive-table .drive-select-cell + td {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
 .drive-card .drive-select,
 .drive-folder-card .drive-select {
   flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.12s ease;
 }
+/* A caixa de escolher fica no lugar do ícone da pasta (como no Google Drive). */
 .drive-folder-card .drive-select {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: 50%;
+  left: 16px;
+  transform: translateY(-50%);
   z-index: 1;
   background: #fff;
 }
@@ -28582,6 +28698,18 @@ a.radar-task-chip:hover {
   .drive-folder-card .drive-select {
     opacity: 1;
   }
+  .drive-folder-card.has-select .drive-folder-icon {
+    opacity: 0;
+  }
+}
+.drive-folder-icon {
+  transition: opacity 0.12s ease;
+}
+.drive-folder-card.has-select:hover .drive-folder-icon,
+.drive-folder-card.has-select:focus-within .drive-folder-icon,
+.drive-folder-card.has-select.selected .drive-folder-icon,
+.drive-page.selecting .drive-folder-card.has-select .drive-folder-icon {
+  opacity: 0;
 }
 .drive-card.selected {
   background: #e3efd2;

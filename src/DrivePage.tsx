@@ -1089,6 +1089,24 @@ function DriveTree({
 
   const view = (list: DriveFile[], f: DriveFile) =>
     setViewer({ list, index: list.indexOf(f) });
+  /** Um item dos menus ⋮ (arquivos e pastas). */
+  const item = (
+    label: string,
+    icon: ReactNode,
+    action: () => void,
+    danger = false,
+  ) => (
+    <Popover.Close asChild>
+      <button
+        type="button"
+        className={`drive-menu-item ${danger ? "danger" : ""}`}
+        onClick={action}
+      >
+        {icon}
+        {label}
+      </button>
+    </Popover.Close>
+  );
   /** The ⋮ menu of a card: what the list shows as buttons. */
   const fileMenu = (
     list: DriveFile[],
@@ -1097,23 +1115,6 @@ function DriveTree({
     writable: boolean,
     renamable: boolean,
   ) => {
-    const item = (
-      label: string,
-      icon: ReactNode,
-      action: () => void,
-      danger = false,
-    ) => (
-      <Popover.Close asChild>
-        <button
-          type="button"
-          className={`drive-menu-item ${danger ? "danger" : ""}`}
-          onClick={action}
-        >
-          {icon}
-          {label}
-        </button>
-      </Popover.Close>
-    );
     return (
       <Popover.Root>
         <Popover.Trigger asChild>
@@ -1317,45 +1318,62 @@ function DriveTree({
                   : icon === "brand"
                     ? Palette
                     : Folder;
+    const detail =
+      icon === "client"
+        ? "Cliente"
+        : icon === "product"
+          ? "Produto"
+          : icon === "recordings"
+            ? `${recordingCount} ${recordingCount === 1 ? "reunião gravada" : "reuniões gravadas"}`
+            : icon === "whatsapp"
+              ? `${groupCount} ${groupCount === 1 ? "grupo" : "grupos"}`
+              : icon === "dossier"
+                ? "Gostos, regras e histórico"
+                : icon === "temperature"
+                  ? "Temperatura da relação"
+                  : icon === "radar"
+                    ? "Problemas e promessas"
+                    : icon === "brand"
+                      ? "Logos, fontes e cores"
+                      : "Pasta";
+    const hasMenu = !!(
+      actions?.rename ||
+      actions?.remove ||
+      actions?.share ||
+      actions?.move ||
+      actions?.history
+    );
     return (
       <div
-        className={`drive-folder-card ${more?.selected ? "selected" : ""}`}
+        className={`drive-folder-card ${more?.selected ? "selected" : ""} ${
+          more?.select ? "has-select" : ""
+        } ${hasMenu ? "has-menu" : ""}`}
         key={key}
         {...more?.props}
       >
         {more?.select}
         <button type="button" className="drive-folder" onClick={open}>
           <Icon
+            className="drive-folder-icon"
             size={20}
             style={{ color: color ?? "#9eb975" }}
             fill={icon === "folder" ? "currentColor" : "none"}
             fillOpacity={0.18}
           />
           <span>
-            <strong>{title}</strong>
-            <small>
-              {icon === "client"
-                ? "Cliente"
-                : icon === "product"
-                  ? "Produto"
-                  : icon === "recordings"
-                    ? `${recordingCount} ${recordingCount === 1 ? "reunião gravada" : "reuniões gravadas"}`
-                    : icon === "whatsapp"
-                      ? `${groupCount} ${groupCount === 1 ? "grupo" : "grupos"}`
-                      : icon === "dossier"
-                        ? "Gostos, regras e histórico"
-                        : icon === "temperature"
-                          ? "Temperatura da relação"
-                          : icon === "radar"
-                            ? "Problemas e promessas"
-                          : icon === "brand"
-                            ? "Logos, fontes e cores"
-                            : "Pasta"}
+            <strong title={title}>{title}</strong>
+            <small className="drive-folder-detail">
+              {detail}
               {isPublic && (
-                <span className="drive-folder-badge" title="Link público ativo">
+                <>
                   {" · "}
-                  <Globe size={11} aria-hidden="true" /> Pública
-                </span>
+                  <span
+                    className="drive-folder-badge"
+                    title="Link público ativo"
+                  >
+                    <Globe size={11} aria-hidden="true" /> Pública
+                  </span>
+                </>
               )}
             </small>
             {where && (
@@ -1365,67 +1383,52 @@ function DriveTree({
             )}
           </span>
         </button>
-        {(actions?.rename ||
-          actions?.remove ||
-          actions?.share ||
-          actions?.move ||
-          actions?.history) && (
-          <span className="drive-folder-actions">
-            {actions.share && (
-              <Button
-                className="icon-btn"
-                aria-label={`Compartilhar ${title}`}
-                title="Compartilhar"
-                onClick={actions.share}
+        {hasMenu && (
+          <Popover.Root>
+            <Popover.Trigger asChild>
+              <button
+                type="button"
+                className="icon-btn drive-folder-more"
+                aria-label={`Ações de ${title}`}
+                title="Mais ações"
               >
-                <Share2 size={13} />
-              </Button>
-            )}
-            {actions.move && (
-              <Button
-                className="icon-btn"
-                aria-label={`Mover ${title}`}
-                title="Mover para…"
-                onClick={actions.move}
-              >
-                <FolderInput size={13} />
-              </Button>
-            )}
-            {actions.history && (
-              <Button
-                className="icon-btn"
-                aria-label={`Histórico de ${title}`}
-                title="Histórico"
-                onClick={actions.history}
-              >
-                <History size={13} />
-              </Button>
-            )}
-            {actions.rename && (
-              <Button
-                className="icon-btn"
-                aria-label={`Renomear ${title}`}
-                title="Renomear"
-                onClick={actions.rename}
-              >
-                <Pencil size={13} />
-              </Button>
-            )}
-            {actions.remove && (
-              <Button
-                className="icon-btn"
-                aria-label={`Excluir ${title}`}
-                title="Excluir pasta vazia"
-                onClick={actions.remove}
-              >
-                <Trash2 size={13} />
-              </Button>
-            )}
-          </span>
+                <EllipsisVertical size={16} />
+              </button>
+            </Popover.Trigger>
+            {/* Not portaled: it must work inside the task dialog too. */}
+            <Popover.Content
+              className="drive-menu"
+              align="end"
+              sideOffset={4}
+              collisionPadding={12}
+            >
+              {actions?.share &&
+                item("Compartilhar", <Share2 size={15} />, actions.share)}
+              {actions?.move &&
+                item("Mover para…", <FolderInput size={15} />, actions.move)}
+              {actions?.rename &&
+                item("Renomear", <Pencil size={14} />, actions.rename)}
+              {actions?.history &&
+                item("Histórico", <History size={15} />, actions.history)}
+              {actions?.remove && (
+                <>
+                  <hr />
+                  {item(
+                    "Excluir pasta vazia",
+                    <Trash2 size={15} />,
+                    actions.remove,
+                    true,
+                  )}
+                </>
+              )}
+            </Popover.Content>
+          </Popover.Root>
         )}
       </div>
     );
   };
+  /** Pastas, produtos e clientes seguem a mesma Grade/Lista dos arquivos. */
+  const foldersClass = `drive-folders ${fileView === "list" ? "as-list" : ""}`;
 
   // Reached through a share, without access to the client: the path shown
   // starts at the shared folder, not at a client the person can't open.
@@ -1818,7 +1821,7 @@ function DriveTree({
               resetKey={query}
             >
               {(page) => (
-                <div className="drive-folders">
+                <div className={foldersClass}>
                   {page.map((m) =>
                     folderCard(
                       m.key,
@@ -2068,7 +2071,7 @@ function DriveTree({
               resetKey={locationKey}
             >
               {(page) => (
-                <div className="drive-folders">
+                <div className={foldersClass}>
                   {editing?.kind === "new-folder" && (
                     <div className="drive-folder-card editing">
                       {nameForm("Nome da nova pasta")}
@@ -2085,7 +2088,7 @@ function DriveTree({
               aria-label="Pastas compartilhadas com você"
             >
               <h3>Compartilhadas comigo</h3>
-              <div className="drive-folders">
+              <div className={foldersClass}>
                 {sharedWithMe.map((f) =>
                   folderCard(`shared-${f.id}`, f.name, "folder", () =>
                     go({
