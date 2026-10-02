@@ -335,9 +335,10 @@ export function TaskCreateForm({
             data,
             contract,
             byTeam ? { team } : { assignee },
+            project || null,
           ).map((t) => t.id)
         : [],
-    [data, contract, byTeam, team, assignee],
+    [data, contract, project, byTeam, team, assignee],
   );
   const chosenChecklists = (pickedChecklists ?? suggestedChecklists).filter(
     (id) => checklistModels.some((m) => m.id === id),
@@ -1046,7 +1047,7 @@ export function TaskCreateForm({
                             <small>
                               {n} {n === 1 ? "item" : "itens"}
                               {suggestedChecklists.includes(m.id) &&
-                                " · sugerido para este produto ou equipe"}
+                                " · sugerido para esta tarefa"}
                             </small>
                           </label>
                         );

@@ -96,6 +96,40 @@ describe("checklist", () => {
     expect(ids({ team: "vendas" })).toEqual(["produto", "ambos"]);
   });
 
+  it("cliente e projeto: vem marcado só quando a tarefa é deles", () => {
+    const data = {
+      contracts: [
+        { id: "c", product_id: "p", client_id: "aurora" },
+        { id: "d", product_id: "p", client_id: "outro" },
+      ],
+      teamMembers: [],
+      checklistTemplates: [
+        { id: "cliente", client_id: "aurora", active: true },
+        {
+          id: "projeto",
+          client_id: "aurora",
+          project_id: "lancamento",
+          active: true,
+        },
+        { id: "so-projeto", project_id: "lancamento", active: true },
+      ],
+    } as never;
+    const ids = (contract: string, project: string | null) =>
+      suggestedChecklistTemplates(
+        data,
+        contract,
+        { assignee: "bia" },
+        project,
+      ).map((t) => t.id);
+    expect(ids("c", null)).toEqual(["cliente"]);
+    expect(ids("c", "lancamento")).toEqual([
+      "cliente",
+      "projeto",
+      "so-projeto",
+    ]);
+    expect(ids("d", null)).toEqual([]);
+  });
+
   it("demonstração: trava a entrega com item em aberto, como o banco", () => {
     const store = new DemoStore();
     const task = store.data.tasks.find(

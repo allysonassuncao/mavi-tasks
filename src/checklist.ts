@@ -138,17 +138,28 @@ export const checklistAsItems = (
 export const templateItemCount = (items: ChecklistTemplateItem[]) =>
   items.reduce((n, i) => n + 1 + (i.children?.length ?? 0), 0);
 
+/** Whether a model says where it is suggested (else: applied by hand only). */
+export const hasChecklistScope = (
+  t: Pick<
+    ChecklistTemplate,
+    "product_id" | "team_id" | "client_id" | "project_id"
+  >,
+) => !!(t.product_id || t.team_id || t.client_id || t.project_id);
+
 /**
- * The active models a new task comes with: those of its product and/or of
- * the assignee's teams (or of the team it is sent to). A model with neither
- * is only applied by hand.
+ * The active models a new task comes with: everything the model asks for
+ * matches the task — the product and client of its contracted product, its
+ * project and the assignee's teams (or the team it is sent to). A model that
+ * asks for nothing is only applied by hand.
  */
 export function suggestedChecklistTemplates(
   data: Pick<Snapshot, "checklistTemplates" | "contracts" | "teamMembers">,
   contractId: string,
   who: { assignee: string } | { team: string },
+  project: string | null = null,
 ): ChecklistTemplate[] {
-  const product = data.contracts.find((c) => c.id === contractId)?.product_id;
+  const contract = data.contracts.find((c) => c.id === contractId);
+  const product = contract?.product_id;
   const teams =
     "team" in who
       ? new Set([who.team])
@@ -160,8 +171,10 @@ export function suggestedChecklistTemplates(
   return (data.checklistTemplates ?? []).filter(
     (t) =>
       t.active &&
-      (t.product_id || t.team_id) &&
+      hasChecklistScope(t) &&
       (!t.product_id || t.product_id === product) &&
+      (!t.client_id || t.client_id === contract?.client_id) &&
+      (!t.project_id || t.project_id === project) &&
       (!t.team_id || teams.has(t.team_id)),
   );
 }

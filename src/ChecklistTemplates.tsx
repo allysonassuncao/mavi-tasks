@@ -19,12 +19,19 @@ type Mutate = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 /** Where a model is suggested, in words. */
 function suggestedIn(
   data: Snapshot,
-  t: Pick<ChecklistTemplate, "product_id" | "team_id">,
+  t: Pick<
+    ChecklistTemplate,
+    "product_id" | "team_id" | "client_id" | "project_id"
+  >,
 ) {
   const product = data.products.find((p) => p.id === t.product_id)?.name;
   const team = data.teams.find((x) => x.id === t.team_id)?.name;
-  if (!product && !team) return "Só aplicado à mão";
+  const client = data.clients.find((c) => c.id === t.client_id)?.name;
+  const project = data.projects.find((p) => p.id === t.project_id)?.name;
+  if (!product && !team && !client && !project) return "Só aplicado à mão";
   return `Sugerido em ${[
+    client && `cliente ${client}`,
+    project && `projeto ${project}`,
     product && `produto ${product}`,
     team && `equipe ${team}`,
   ]
@@ -77,8 +84,8 @@ export function ChecklistTemplatesSection({
         <div>
           <h2>Modelos de checklist</h2>
           <p>
-            Checklists prontos para aplicar nas tarefas; com produto ou equipe,
-            a Nova tarefa já vem com eles marcados
+            Checklists prontos para aplicar nas tarefas; com cliente, projeto,
+            produto ou equipe, a Nova tarefa já vem com eles marcados
           </p>
         </div>
         <Button className="btn secondary" onClick={() => setEditing("new")}>
@@ -178,6 +185,8 @@ export const saveChecklistTemplate = (
     p_product: t.product_id,
     p_team: t.team_id,
     p_active: t.active,
+    p_client: t.client_id ?? null,
+    p_project: t.project_id ?? null,
   });
 
 /**
@@ -207,6 +216,29 @@ export function ChecklistTemplateEditor({
   );
   const [product, setProduct] = useState(template?.product_id ?? "");
   const [team, setTeam] = useState(template?.team_id ?? "");
+  const [client, setClient] = useState(template?.client_id ?? "");
+  const [project, setProject] = useState(template?.project_id ?? "");
+  // A project is of one contracted product: those of the client (and of the
+  // product, when chosen).
+  const contractOf = (projectId: string) =>
+    data.contracts.find(
+      (c) =>
+        c.id === data.projects.find((p) => p.id === projectId)?.contract_id,
+    );
+  const projects = client
+    ? data.projects
+        .filter((p) => {
+          const c = data.contracts.find((x) => x.id === p.contract_id);
+          return (
+            c?.client_id === client &&
+            (!product || c.product_id === product) &&
+            (!p.archived || p.id === project)
+          );
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+    : [];
+  const projectFits = !project || projects.some((p) => p.id === project);
+  const scoped = !!(product || team || client || project);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -225,6 +257,8 @@ export function ChecklistTemplateEditor({
         items,
         product_id: product || null,
         team_id: team || null,
+        client_id: client || null,
+        project_id: projectFits ? project || null : null,
         active: template?.active ?? true,
       });
     } catch (e) {
@@ -272,6 +306,48 @@ export function ChecklistTemplateEditor({
           <legend>Já marcar na Nova tarefa de</legend>
           <div className="form-columns">
             <label>
+              Cliente
+              <Select
+                value={client}
+                onValueChange={(v) => {
+                  setClient(v);
+                  if (contractOf(project)?.client_id !== v) setProject("");
+                }}
+              >
+                <SelectOption value="">Qualquer cliente</SelectOption>
+                {data.clients
+                  .filter((c) => !c.archived || c.id === client)
+                  .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+                  .map((c) => (
+                    <SelectOption key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectOption>
+                  ))}
+              </Select>
+            </label>
+            <label>
+              Projeto
+              <Select
+                key={client}
+                value={projectFits ? project : ""}
+                onValueChange={setProject}
+                disabled={!client}
+              >
+                <SelectOption value="">
+                  {!client
+                    ? "Escolha o cliente antes"
+                    : projects.length
+                      ? "Qualquer projeto"
+                      : "Cliente sem projetos"}
+                </SelectOption>
+                {projects.map((p) => (
+                  <SelectOption key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectOption>
+                ))}
+              </Select>
+            </label>
+            <label>
               Produto
               <Select value={product} onValueChange={setProduct}>
                 <SelectOption value="">Qualquer produto</SelectOption>
@@ -295,9 +371,9 @@ export function ChecklistTemplateEditor({
             </label>
           </div>
           <small>
-            {product || team
-              ? "Quem cria pode desmarcar. Fora daí, o modelo é aplicado à mão."
-              : "Sem produto nem equipe, o modelo só é aplicado à mão, no checklist da tarefa ou na Nova tarefa."}
+            {scoped
+              ? "Vem marcado quando a tarefa bate com tudo o que foi escolhido; quem cria pode desmarcar. Fora daí, o modelo é aplicado à mão."
+              : "Sem cliente, projeto, produto nem equipe, o modelo só é aplicado à mão, no checklist da tarefa ou na Nova tarefa."}
           </small>
         </fieldset>
         {items.length > 0 && (

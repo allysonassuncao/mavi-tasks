@@ -427,6 +427,9 @@ export interface ChecklistTemplate {
   items: ChecklistTemplateItem[];
   product_id: string | null;
   team_id: string | null;
+  /** Suggested for this client (and project) too (migration 20270221090000). */
+  client_id?: string | null;
+  project_id?: string | null;
   active: boolean;
   created_by?: string;
   created_at?: string;

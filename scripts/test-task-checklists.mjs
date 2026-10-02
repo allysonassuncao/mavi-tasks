@@ -498,6 +498,102 @@ await check(
 );
 
 await check(
+  "modelos por cliente e projeto: o projeto precisa ser do cliente e do produto",
+  async () => {
+    await as(admin);
+    const other = await rpc("create_client", [A, "Cliente Y", "", [design]]);
+    const otherProduct = await rpc("create_product", [A, "Tráfego"]);
+    const [{ id: project }] = await sql(
+      "insert into projects(company_id,contract_id,name) values($1,$2,'Lançamento') returning id",
+      [A, contract],
+    );
+    const items = JSON.stringify([{ title: "Conferir" }]);
+    await as(admin);
+    const id = await rpc("save_checklist_template", [
+      A,
+      null,
+      "Lançamento",
+      items,
+      product,
+      null,
+      true,
+      client,
+      project,
+    ]);
+    const [row] = await sql(
+      "select client_id, project_id from checklist_templates where id=$1",
+      [id],
+    );
+    assert.deepEqual(row, { client_id: client, project_id: project });
+    await as(admin);
+    await rejects(
+      () =>
+        rpc("save_checklist_template", [
+          A,
+          null,
+          "Errado",
+          items,
+          null,
+          null,
+          true,
+          other,
+          project,
+        ]),
+      /outro cliente ou produto/,
+    );
+    await as(admin);
+    await rejects(
+      () =>
+        rpc("save_checklist_template", [
+          A,
+          null,
+          "Errado",
+          items,
+          otherProduct,
+          null,
+          true,
+          null,
+          project,
+        ]),
+      /outro cliente ou produto/,
+    );
+    // Só o cliente, sem projeto, também vale.
+    await as(admin);
+    await rpc("save_checklist_template", [
+      A,
+      id,
+      "Lançamento",
+      items,
+      null,
+      null,
+      true,
+      client,
+      null,
+    ]);
+    const [after] = await sql(
+      "select client_id, project_id, product_id from checklist_templates where id=$1",
+      [id],
+    );
+    assert.deepEqual(after, {
+      client_id: client,
+      project_id: null,
+      product_id: null,
+    });
+    // O app da versão anterior (sem cliente e projeto) continua salvando.
+    await as(admin);
+    await rpc("save_checklist_template", [
+      A,
+      id,
+      "Lançamento",
+      items,
+      product,
+      null,
+      true,
+    ]);
+  },
+);
+
+await check(
   "a repetição copia os checklists sem marcações, e a exigência",
   async () => {
     const src = await row();

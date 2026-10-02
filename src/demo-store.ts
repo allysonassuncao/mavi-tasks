@@ -486,6 +486,8 @@ export class DemoStore {
         items,
         product_id: a.p_product ?? null,
         team_id: a.p_team ?? null,
+        client_id: a.p_client ?? null,
+        project_id: a.p_project ?? null,
         active: a.p_active ?? true,
       };
       const list = this.data.checklistTemplates ?? [];
