@@ -13583,6 +13583,53 @@ tr:hover .campaign-edit-record,
 .campaign-lead-notice > span {
   flex: 1 1 240px;
 }
+/* Campanhas: data do ciclo fora de dia útil (fim de semana, feriado, folga). */
+.campaign-days-off {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e7a94b;
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: #fff4e0;
+  color: #7a4b0c;
+}
+.campaign-days-off > svg {
+  flex: none;
+  margin-top: 1px;
+  color: #c67b12;
+}
+.campaign-days-off > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.campaign-days-off strong {
+  font-size: 0.88rem;
+}
+.campaign-days-off p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.campaign-days-off-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: 0.8rem;
+}
+.campaign-days-off-row > span {
+  flex: 1 1 220px;
+  font-weight: 600;
+}
+.campaign-days-off-row .btn {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+}
 /* Campanhas: o dia de virada (um ciclo começa no dia em que o outro termina). */
 .campaign-copied {
   margin: 0;

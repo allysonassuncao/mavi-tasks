@@ -2,6 +2,14 @@ import { supabase } from "./supabase";
 import { fetchAllRows, rpc } from "./api";
 import type { MetricsBackend } from "./campaign-metrics";
 import { loadMediaRoom, type MediaRoom } from "./campaign-media";
+import {
+  addBusinessDays,
+  calendarEntry,
+  isBusinessDay,
+  nationalHoliday,
+  nextBusinessDay,
+} from "./dueRules";
+import type { CalendarDay } from "./types";
 
 /**
  * Campanhas (tráfego pago): each belongs to a contracted product and goes
@@ -236,6 +244,42 @@ export function turnover(
           null)
         : null,
   };
+}
+/**
+ * Why a cycle date is not a business day — weekend, national holiday or the
+ * company's day off (the calendar of the due dates, src/dueRules.ts) — or
+ * null. Starting or ending a cycle then risks the budget's pace: nobody
+ * follows the consumption on that day.
+ */
+export function dayOffReason(
+  calendar: CalendarDay[] | undefined,
+  day: string,
+): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || isBusinessDay(calendar, day))
+    return null;
+  const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+  if (weekday === 0 || weekday === 6) return "fim de semana";
+  const off = calendarEntry(calendar, day, "off");
+  if (off) return `folga da empresa (${off.name})`;
+  return `feriado (${nationalHoliday(day)})`;
+}
+/** The business days just before and just after `day`. */
+export function businessDaysAround(
+  calendar: CalendarDay[] | undefined,
+  day: string,
+) {
+  return {
+    before: addBusinessDays(calendar, day, -1),
+    after: nextBusinessDay(calendar, day),
+  };
+}
+/** "sexta-feira, 02/10". */
+export function weekdayDate(day: string) {
+  const name = new Date(`${day}T12:00:00Z`).toLocaleDateString("pt-BR", {
+    weekday: "long",
+    timeZone: "UTC",
+  });
+  return `${name}, ${shortDate(day).slice(0, 5)}`;
 }
 /** Days before the end when the investment for the next cycle is due. */
 export const BILLING_NOTICE_DAYS = 10;

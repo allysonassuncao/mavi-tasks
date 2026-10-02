@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   addDays,
   amountText,
+  businessDaysAround,
   connectionResult,
+  dayOffReason,
+  weekdayDate,
   isLeadObjective,
   cycleAlert,
   cycleDays,
@@ -741,5 +744,32 @@ describe("dia de virada (ciclo que começa no dia em que o anterior termina)", (
     });
     state = await backend.campaign(company, id);
     expect(state.cycles.find((c) => c.id === later)!.shared_day).toBeNull();
+  });
+});
+
+describe("data do ciclo fora de dia útil", () => {
+  it("fim de semana, feriado e folga da empresa, com os dias úteis ao lado", () => {
+    expect(dayOffReason(undefined, "2026-10-02")).toBeNull();
+    expect(dayOffReason(undefined, "2026-10-03")).toBe("fim de semana");
+    expect(dayOffReason(undefined, "2026-10-04")).toBe("fim de semana");
+    expect(businessDaysAround(undefined, "2026-10-03")).toEqual({
+      before: "2026-10-02",
+      after: "2026-10-05",
+    });
+    expect(dayOffReason(undefined, "2026-10-12")).toBe(
+      "feriado (Nossa Senhora Aparecida)",
+    );
+    expect(businessDaysAround(undefined, "2026-10-12")).toEqual({
+      before: "2026-10-09",
+      after: "2026-10-13",
+    });
+    const calendar = [
+      { id: "1", company_id: "co", day: "2026-10-12", yearly: true, kind: "workday" as const, name: "Expediente" },
+      { id: "2", company_id: "co", day: "2026-10-28", yearly: false, kind: "off" as const, name: "Dia do Servidor" },
+    ];
+    expect(dayOffReason(calendar, "2026-10-12")).toBeNull();
+    expect(dayOffReason(calendar, "2026-10-28")).toBe("folga da empresa (Dia do Servidor)");
+    expect(dayOffReason(undefined, "")).toBeNull();
+    expect(weekdayDate("2026-10-02")).toBe("sexta-feira, 02/10");
   });
 });

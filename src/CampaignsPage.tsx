@@ -36,9 +36,10 @@ import { Pagination } from "./Pagination";
 import { ContractPicker } from "./ContractPicker";
 import { contractParts, dateKey } from "./domain";
 import { useUrlState } from "./router";
-import type { Snapshot } from "./types";
+import type { CalendarDay, Snapshot } from "./types";
 import {
   addDays,
+  businessDaysAround,
   campaignStatuses,
   connectionResult,
   currentCycle,
@@ -49,6 +50,7 @@ import {
   cycleState,
   cycleStates,
   cyclesOf,
+  dayOffReason,
   daysLeft,
   destinations,
   goalCost,
@@ -64,6 +66,7 @@ import {
   splitList,
   supabaseCampaigns,
   turnover,
+  weekdayDate,
   type AdCampaign,
   type AdCampaignEvent,
   type AdCampaignStatus,
@@ -414,6 +417,7 @@ export function CampaignsPage({
           onPending={setPending}
           onClose={() => setCycleForm(null)}
           backend={backend}
+          calendar={data.calendarDays}
           onSave={async (input, makeCurrent, override) => {
             if (cycleForm.cycle) {
               await backend.updateCycle(cycleForm.cycle, input, override);
@@ -1772,6 +1776,7 @@ function CycleForm({
   connectionTick,
   onPending,
   backend,
+  calendar,
   onClose,
   onSave,
 }: {
@@ -1787,6 +1792,8 @@ function CycleForm({
   onPending: (id: string) => void;
   /** The client's media balance: the budget must fit it. */
   backend: CampaignsBackend;
+  /** The company's days off: a cycle date off business days is warned. */
+  calendar?: CalendarDay[];
   onClose: () => void;
   onSave: (
     input: CycleInput,
@@ -1815,6 +1822,22 @@ function CycleForm({
     !!shared.before && (!cycle || draft.start_date !== cycle.start_date);
   const askEnd =
     !!shared.after && (!cycle || draft.end_date !== cycle.end_date);
+  const setStart = (start: string) =>
+    setDraft((d) => ({
+      ...d,
+      start_date: start,
+      competence: d.competence || start.slice(0, 7),
+      // Another turnover day: chosen again.
+      shared_start:
+        cycle && start === cycle.start_date ? (cycle.shared_day ?? "") : "",
+    }));
+  const setEnd = (end: string) =>
+    setDraft((d) => ({
+      ...d,
+      end_date: end,
+      shared_end:
+        cycle && end === cycle.end_date ? (after?.shared_day ?? "") : "",
+    }));
   const [makeCurrent, setMakeCurrent] = useState(
     !cycle && !campaign.current_cycle_id,
   );
@@ -1920,19 +1943,7 @@ function CycleForm({
               <Input
                 type="date"
                 value={draft.start_date}
-                onChange={(e) => {
-                  const start = e.target.value;
-                  setDraft((d) => ({
-                    ...d,
-                    start_date: start,
-                    competence: d.competence || start.slice(0, 7),
-                    // Another turnover day: chosen again.
-                    shared_start:
-                      cycle && start === cycle.start_date
-                        ? (cycle.shared_day ?? "")
-                        : "",
-                  }));
-                }}
+                onChange={(e) => setStart(e.target.value)}
                 required
               />
             </label>
@@ -1942,17 +1953,7 @@ function CycleForm({
                 type="date"
                 value={draft.end_date}
                 min={draft.start_date}
-                onChange={(e) => {
-                  const end = e.target.value;
-                  setDraft((d) => ({
-                    ...d,
-                    end_date: end,
-                    shared_end:
-                      cycle && end === cycle.end_date
-                        ? (after?.shared_day ?? "")
-                        : "",
-                  }));
-                }}
+                onChange={(e) => setEnd(e.target.value)}
                 required
               />
             </label>
@@ -1970,6 +1971,13 @@ function CycleForm({
             {days !== null ? `${days} dias de ciclo. ` : ""}O fim do ciclo é
             quando o próximo investimento precisa entrar.
           </small>
+          <CycleDaysOff
+            calendar={calendar}
+            start={draft.start_date}
+            end={draft.end_date}
+            onStart={setStart}
+            onEnd={setEnd}
+          />
           {!cycle && last && draft.start_date === addDays(last.end_date, 1) && (
             <Button
               type="button"
@@ -2179,6 +2187,77 @@ function CycleForm({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/**
+ * A cycle date on a weekend, holiday or company day off: a highlighted
+ * recommendation (it doesn't block) to move it to the business day before
+ * or after, so the budget's consumption is followed when the cycle turns.
+ */
+function CycleDaysOff({
+  calendar,
+  start,
+  end,
+  onStart,
+  onEnd,
+}: {
+  calendar?: CalendarDay[];
+  start: string;
+  end: string;
+  onStart: (day: string) => void;
+  onEnd: (day: string) => void;
+}) {
+  const dates = (
+    [
+      ["O início", start, onStart],
+      ["O término", end, onEnd],
+    ] as const
+  ).flatMap(([label, day, change]) => {
+    const why = dayOffReason(calendar, day);
+    return why ? [{ label, day, change, why }] : [];
+  });
+  if (!dates.length) return null;
+  return (
+    <div className="campaign-days-off" role="alert">
+      <TriangleAlert size={18} />
+      <div>
+        <strong>
+          {dates.length > 1
+            ? "O início e o término caem fora de dia útil"
+            : `${dates[0].label} cai fora de dia útil`}
+        </strong>
+        <p>
+          É recomendado mudar para um dia de semana (dia útil) para não termos
+          problema de consumo: na virada do ciclo, alguém precisa acompanhar a
+          verba entrando e o orçamento na plataforma.
+        </p>
+        {dates.map(({ label, day, change, why }) => {
+          const around = businessDaysAround(calendar, day);
+          return (
+            <div key={label} className="campaign-days-off-row">
+              <span>
+                {label}: {weekdayDate(day)} — {why}.
+              </span>
+              <Button
+                type="button"
+                className="btn secondary"
+                onClick={() => change(around.before)}
+              >
+                Usar {weekdayDate(around.before)}
+              </Button>
+              <Button
+                type="button"
+                className="btn secondary"
+                onClick={() => change(around.after)}
+              >
+                Usar {weekdayDate(around.after)}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
