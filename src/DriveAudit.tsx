@@ -39,6 +39,13 @@ export const auditActions: Record<string, string> = {
   recording_public_opened: "Gravação aberta pelo link público",
   recording_public_downloaded: "Vídeo da gravação baixado pelo link público",
   whatsapp_media_opened: "Mídia do Whatsapp aberta",
+  note_created: "Anotação criada",
+  note_saved: "Anotação salva (versão nova)",
+  note_restored: "Versão antiga da anotação restaurada",
+  note_deleted: "Anotação excluída",
+  note_undeleted: "Anotação restaurada da lixeira",
+  note_secret_viewed: "Secreto da anotação mostrado",
+  note_secret_copied: "Secreto da anotação copiado",
 };
 const visibilityLabel = (v: unknown) =>
   v === "public" ? "Público" : v === "private" ? "Privado" : String(v ?? "");

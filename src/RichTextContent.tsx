@@ -2,6 +2,7 @@ import { InlineImage } from "./inline-images";
 import { Fragment, type ReactNode } from "react";
 import { parseDescription, type RichNode } from "./rich-text";
 import { navigate } from "./router";
+import { NoteSecretChip } from "./NoteSecret";
 
 /** Links do próprio app abrem a tela sem recarregar; os outros, em nova aba. */
 function internalPath(href: string) {
@@ -40,8 +41,12 @@ function RichLink({ href, children }: { href: string; children: ReactNode }) {
     </a>
   );
 }
-function renderNode(node: RichNode, key: number): ReactNode {
-  const children = node.content?.map(renderNode);
+function renderNode(
+  node: RichNode,
+  key: number,
+  note: string | null = null,
+): ReactNode {
+  const children = node.content?.map((n, i) => renderNode(n, i, note));
   if (node.type === "text") {
     let text: ReactNode = node.text;
     for (const mark of node.marks ?? []) {
@@ -79,6 +84,15 @@ function renderNode(node: RichNode, key: number): ReactNode {
           zoomable
         />
       );
+    case "noteSecret":
+      return (
+        <NoteSecretChip
+          key={key}
+          secretId={node.attrs!.secretId!}
+          label={node.attrs?.label ?? ""}
+          note={note}
+        />
+      );
     case "mention":
       return (
         <span key={key} className="mention" data-user={node.attrs?.id}>
@@ -99,11 +113,18 @@ function renderNode(node: RichNode, key: number): ReactNode {
       return <Fragment key={key}>{children}</Fragment>;
   }
 }
-export function RichTextContent({ value }: { value: string }) {
+export function RichTextContent({
+  value,
+  note = null,
+}: {
+  value: string;
+  /** A anotação do cliente de onde vem o texto (registro dos secretos). */
+  note?: string | null;
+}) {
   return (
     <div className="rich-text-content">
       {value ? (
-        renderNode(parseDescription(value), 0)
+        renderNode(parseDescription(value), 0, note)
       ) : (
         <p>Nenhuma descrição adicionada.</p>
       )}

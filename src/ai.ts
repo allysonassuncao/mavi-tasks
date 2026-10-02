@@ -43,7 +43,9 @@ export type AiSource = {
     /** Um arquivo que a pessoa anexou na conversa (id: o anexo). */
     | "attachment"
     /** Financeiro › Mídia: a conta (id: o produto contratado). */
-    | "media";
+    | "media"
+    /** Anotações do cliente (id: a anotação). */
+    | "note";
   /** Página da internet (busca na internet do módulo MAVI). */
   url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
@@ -747,6 +749,7 @@ export function sourceLabel(s: AiSource) {
   if (s.type === "campaign") return "Campanha";
   if (s.type === "case") return "Case de sucesso";
   if (s.type === "media") return "Conta de mídia";
+  if (s.type === "note") return "Anotação do cliente";
   if (s.type === "whatsapp")
     return [
       `Whatsapp ${shortDate(s.date)}`,
@@ -787,7 +790,8 @@ export function sourceUrl(s: AiSource) {
   } else if (s.type === "media") {
     page = "financeMedia";
     q.set("contrato", s.id);
-  } else {
+  } else if (s.type === "note") q.set("nota", s.id);
+  else {
     page = "campaigns";
     q.set("campanha", s.id);
   }

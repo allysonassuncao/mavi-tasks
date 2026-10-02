@@ -5,8 +5,17 @@ export type RichNode = {
   text?: string;
   content?: RichNode[];
   marks?: RichMark[];
-  /** inlineImage: imageId and alt; mention: id (the person) and label. */
-  attrs?: { imageId?: string; alt?: string; id?: string; label?: string };
+  /**
+   * inlineImage: imageId and alt; mention: id (the person) and label;
+   * noteSecret: secretId (o valor cifrado, fora do texto) and label.
+   */
+  attrs?: {
+    imageId?: string;
+    alt?: string;
+    id?: string;
+    label?: string;
+    secretId?: string;
+  };
 };
 /** Text formatting; colored ones carry `attrs.color` as "#rrggbb". */
 export type RichMark = {
@@ -99,6 +108,22 @@ export function sanitizeDescription(value: unknown): RichNode {
             },
           }
         : null;
+    // Trecho secreto das Anotações do cliente: só o nome e a referência; o
+    // valor fica cifrado no servidor (client-notes.ts).
+    if (node.type === "noteSecret")
+      return typeof node.attrs?.secretId === "string" &&
+        UUID.test(node.attrs.secretId)
+        ? {
+            type: "noteSecret",
+            attrs: {
+              secretId: node.attrs.secretId,
+              label:
+                typeof node.attrs.label === "string"
+                  ? node.attrs.label.slice(0, 120)
+                  : "",
+            },
+          }
+        : null;
     if (
       node.type === "inlineImage" &&
       typeof node.attrs?.imageId === "string" &&
@@ -166,6 +191,7 @@ export function serializeDescription(value: unknown): string {
   const hasText = (node: RichNode): boolean =>
     node.type === "inlineImage" ||
     node.type === "mention" ||
+    node.type === "noteSecret" ||
     !!node.text?.trim() ||
     !!node.content?.some(hasText);
   return hasText(doc) ? DESCRIPTION_PREFIX + JSON.stringify(doc) : "";

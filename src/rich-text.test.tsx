@@ -223,4 +223,31 @@ describe("links", () => {
     expect(outside).toContain('target="_blank"');
     expect(outside).toContain('rel="noopener noreferrer"');
   });
+  it("keeps a note secret as a reference only, never a value", () => {
+    const id = "00000000-0000-4000-8000-000000000030";
+    const doc = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "noteSecret",
+              attrs: { secretId: id, label: "Senha do Meta", value: "s3nh@" },
+            },
+            { type: "noteSecret", attrs: { secretId: "x", label: "Falso" } },
+          ],
+        },
+      ],
+    };
+    const stored = serializeDescription(doc);
+    expect(stored).not.toContain("s3nh@");
+    expect(stored).not.toContain("Falso");
+    expect(parseDescription(stored).content?.[0].content).toEqual([
+      { type: "noteSecret", attrs: { secretId: id, label: "Senha do Meta" } },
+    ]);
+    const html = renderToStaticMarkup(<RichTextContent value={stored} />);
+    expect(html).toContain("Senha do Meta");
+    expect(html).toContain("••••••");
+  });
 });

@@ -194,6 +194,7 @@ Como trabalhar:
 - Para o que os clientes reclamaram, o que o time prometeu (e se venceu) e os outros tópicos acompanhados, use client_radar: o Radar do cliente, com o que a MAVI anotou nas reuniões e nos grupos de WhatsApp, o status, a gravidade, o responsável, quantas vezes o assunto voltou, a última fala (cite) e os temas que se repetem entre os clientes; sem cliente, ela traz a carteira e o último relatório do Radar. Para a fala completa, complete com search_knowledge.
 - Para como está a relação com um cliente (satisfeito, irritado, em risco de cancelar, esfriando), use client_temperature: o termômetro que o sistema calcula lendo as reuniões e os grupos de WhatsApp, com indicadores, sinais de alerta, tendência e as leituras que mais pesaram. Sem cliente, ela lista a carteira do mais frio ao mais quente. Diga a nota e a faixa, o que puxa para cima ou para baixo e cite as leituras; para o que exatamente foi dito, complete com search_knowledge.
 - Para os valores que o cliente depositou na conta de mídia (entradas: quanto, quando, quem lançou, categoria, motivo, estornos e comprovantes), o saldo de mídia de hoje e o que entrou ou saiu num período, use media_account: o extrato do Financeiro › Mídia de cada produto do cliente, com os totais e as entradas mês a mês; sem cliente, a carteira das contas com mais entradas no período. Os totais vêm prontos (não some de cabeça) e o gasto das Campanhas × M sai da conta sozinho. Diga o produto, as datas e os valores e cite a conta. Se a ferramenta disser que a pessoa não tem o módulo, diga isso sem inventar valores.
+- As anotações do cliente (acessos às plataformas, logins, links úteis, contatos e combinados que o time guarda em Anotações, na tarefa e no Drive do cliente) entram na busca com o tipo note e na parte notes de client_overview: use quando perguntarem por acesso, login, link, painel, site, contato ou "onde está…" de um cliente, e cite. Senhas, tokens e chaves ficam em trechos secretos, que chegam só como "[Secreto: nome — valor oculto]": você sabe que o secreto existe e como se chama, mas nunca vê o valor. Nunca invente, adivinhe ou repita uma senha; diga em qual anotação ela está e que a pessoa abre a anotação e clica em Mostrar ou Copiar (fica registrado quem viu). Se uma anotação trouxer algo que parece senha em texto comum, não repita o valor: aponte a anotação e sugira guardá-lo como Secreto.
 - Para a visão geral de um ou mais clientes (como está, situação atual, passagem de carteira, comparação), use client_overview: o dossiê de até 3 clientes numa chamada (produtos, dossiê da MAVI, briefing, reuniões, tarefas em aberto, campanhas, termômetro, Radar, conta de mídia e WhatsApp). Com vários clientes, ache todos com uma chamada só de find_clients (os códigos separados por vírgula) e faça várias chamadas de client_overview na mesma rodada.
 - Use read_more quando um trecho parecer cortado ou precisar de mais contexto.
 - Pare de buscar assim que tiver o suficiente. Se nada relevante aparecer, diga claramente que não encontrou no sistema e sugira onde procurar.
@@ -427,7 +428,7 @@ export async function buildContext(
   now: number,
 ) {
   const userId = userIdFrom(auth);
-  const [members, clients, contracts, temperature, radar, media] = await Promise.all([
+  const [members, clients, contracts, temperature, radar, media, notes] = await Promise.all([
     rest<{
       user_id: string;
       name: string;
@@ -495,6 +496,16 @@ export async function buildContext(
           .then((r) => (r.ok ? r.data : null))
           .catch(() => null)
       : Promise.resolve(null),
+    // E os títulos das anotações do cliente (o texto ela lê com as ferramentas).
+    scope.client
+      ? callRpc<{ title: string }[]>(env, deps.fetch, auth, "client_notes_context", {
+          p_company: company,
+          p_client: scope.client,
+          p_limit: 30,
+        })
+          .then((r) => (r.ok ? r.data : null))
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
   const open = contracts.filter((k) => !k.archived).map((k) => k.id);
   const projects = open.length
@@ -543,6 +554,7 @@ export async function buildContext(
       temperatureLine(temperature),
       radarLine(radar),
       mediaLine(media),
+      notesLine(notes),
     );
   } else {
     lines.push(
@@ -571,6 +583,12 @@ export async function buildContext(
         me.role === "manager" ||
         (me.role === "member" && (me.shown_pages ?? []).includes("campaigns"))),
   };
+}
+
+/** As anotações do cliente que existem (os títulos), para a MAVI saber onde ler. */
+export function notesLine(notes: { title: string }[] | null) {
+  if (!notes?.length) return "";
+  return `Anotações do cliente (${notes.length}): ${notes.map((n) => `"${n.title}"`).join(", ")}. Para o conteúdo (acessos, links, combinados), leia com client_overview e sections ["notes"] ou search_knowledge com types ["note"].`;
 }
 
 /** Só as fontes citadas na resposta, na ordem em que aparecem. */

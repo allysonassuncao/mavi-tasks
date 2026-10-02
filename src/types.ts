@@ -611,6 +611,8 @@ export interface DriveLocation {
   radar?: boolean;
   /** The client's "Marca" (logos, fonts, colors), next to the products. */
   brand?: boolean;
+  /** The client's "Anotações" (acessos, links úteis), next to the products. */
+  notes?: boolean;
 }
 /** Um lugar do Drive, como o histórico guarda (ids e o caminho da época). */
 export interface DrivePlace {

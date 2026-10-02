@@ -1194,6 +1194,7 @@ const TYPE_LABELS: Record<string, string> = {
   social_briefing: "Briefing do Social Leads",
   social_plan: "Plano do Social Leads",
   campaign: "Campanha",
+  client_note: "Anotação do cliente",
 };
 
 export function dossierMessage(c: ClaimRow, m: Material) {

@@ -1,0 +1,353 @@
+/* Anotações do cliente (ClientNotes.tsx) e trechos secretos (NoteSecret.tsx). */
+.client-notes,
+.client-note-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.client-notes-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.client-notes-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.client-notes-toolbar .input-control {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.client-notes-toolbar .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.client-notes-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+.client-notes-empty strong {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+.client-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.client-notes-list > li > button,
+.client-notes-list.deleted > li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.client-notes-list > li > button:hover {
+  border-color: #c9d6bd;
+  background: #fbfcf9;
+}
+.client-notes-list.deleted > li {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: default;
+}
+.client-notes-list.deleted > li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.client-note-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+.client-note-secrets {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f3eefb;
+  color: #5b4597;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.client-note-excerpt {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #5d6b6c;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.client-note-meta {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.client-notes-trash-toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.client-notes-trash-toggle:hover {
+  color: var(--ink);
+}
+
+/* Editor. */
+.client-note-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.client-note-crumb {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.client-note-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+.client-note-title-field input {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.client-note-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #f0c9a4;
+  border-radius: 10px;
+  background: #fff7ef;
+  font-size: 0.8rem;
+}
+.client-note-alert.info {
+  border-color: #c7d9f1;
+  background: #f3f7fd;
+}
+.client-note-alert p {
+  margin: 0;
+}
+.client-note-alert > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.client-note-alert .btn {
+  align-self: flex-start;
+}
+.client-note-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.client-note-foot .client-note-meta {
+  flex: 1 1 200px;
+}
+.client-note-foot .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Histórico. */
+.client-note-versions,
+.client-note-access {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.client-note-versions > li {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+.client-note-versions > li > button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+.client-note-versions > li > button[aria-pressed="true"] {
+  background: #f6f9f2;
+}
+.client-note-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+.client-note-preview h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.client-note-preview .btn {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+}
+.client-note-subhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+}
+.client-note-access li {
+  color: #5d6b6c;
+  font-size: 0.78rem;
+}
+
+/* O trecho secreto: nome + •••••• + Mostrar/Copiar. */
+.note-secret {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  margin: 0 1px;
+  padding: 1px 3px 1px 7px;
+  border: 1px solid #dccff5;
+  border-radius: 6px;
+  background: #f6f2fd;
+  color: #4a3a86;
+  font-size: 0.85em;
+  line-height: 1.6;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+.note-secret[data-error="true"] {
+  border-color: #f0b4b4;
+  background: #fdf3f3;
+}
+.note-secret-label {
+  font-weight: 600;
+}
+.note-secret-value {
+  overflow: hidden;
+  max-width: 260px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+.note-secret.revealed .note-secret-value {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  letter-spacing: 0;
+}
+.note-secret-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.note-secret-btn:hover {
+  background: #e9e0fa;
+}
+.note-secret-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+.ProseMirror-selectednode .note-secret {
+  outline: 2px solid #8d74d6;
+  outline-offset: 1px;
+}
+.note-secret-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.note-secret-input .input-control {
+  flex: 1;
+}
+.modal .note-secret-form .muted {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 600px) {
+  .note-secret {
+    white-space: normal;
+    flex-wrap: wrap;
+  }
+  .note-secret-value {
+    max-width: 160px;
+  }
+}
+
+/* Na tarefa, a aba das anotações ganha a largura do Drive. */
+.modal.sheet .task-workspace[data-panel="notes"] {
+  --side: 540px;
+}
+@media (max-width: 1100px) {
+  .modal.sheet .task-workspace[data-panel="notes"] {
+    --side: 380px;
+  }
+}

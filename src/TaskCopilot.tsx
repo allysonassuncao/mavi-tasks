@@ -17,6 +17,7 @@ import {
   ThumbsDown,
   ThumbsUp,
   Trophy,
+  NotebookPen,
   Video,
   X,
   BookMarked,
@@ -65,6 +66,7 @@ const SOURCE_ICONS = {
   campaign: Megaphone,
   case: Trophy,
   whatsapp: MessageCircle,
+  note: NotebookPen,
 };
 const DOSSIER_KINDS: Record<string, string> = {
   prefers: "Prefere",

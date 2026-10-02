@@ -202,6 +202,7 @@ export function safeReturnPath(value: string | null) {
     "item",
     "relatorio",
     "convidar",
+    "nota",
   ]);
   for (const key of [...url.searchParams.keys()])
     if (!allowed.has(key)) url.searchParams.delete(key);
@@ -398,6 +399,7 @@ const DRIVE_VIRTUAL = {
   marca: "brand",
   termometro: "temperature",
   radar: "radar",
+  anotacoes: "notes",
 } as const;
 type DriveVirtual = (typeof DRIVE_VIRTUAL)[keyof typeof DRIVE_VIRTUAL];
 export type DriveRoute = {

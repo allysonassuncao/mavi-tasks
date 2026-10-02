@@ -118,7 +118,8 @@ export function sourceLink(origin: string, s: AiSource) {
   } else if (s.type === "media") {
     path = "/financeiro/midia";
     q.set("contrato", s.id);
-  } else {
+  } else if (s.type === "note") q.set("nota", s.id);
+  else {
     path = "/campanhas";
     q.set("campanha", s.id);
   }

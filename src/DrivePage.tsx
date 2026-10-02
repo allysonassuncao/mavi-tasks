@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   BookMarked,
+  NotebookPen,
   Building2,
   ChevronRight,
   CloudUpload,
@@ -65,6 +66,8 @@ import { ClientDossier } from "./ClientDossier";
 import { ClientTemperature } from "./ClientTemperature";
 import { ClientRadar } from "./ClientRadar";
 import { BrandKit } from "./BrandKit";
+import { ClientNotes } from "./ClientNotes";
+import { countClientNotes, getClientNote } from "./client-notes";
 import {
   countClientGroups,
   whatsappGroupById,
@@ -317,7 +320,8 @@ function DriveTree({
     !!at.dossier ||
     !!at.temperature ||
     !!at.radar ||
-    !!at.brand;
+    !!at.brand ||
+    !!at.notes;
   const canWrite =
     !virtual &&
     (isLeader ||
@@ -341,7 +345,8 @@ function DriveTree({
       at.dossier ||
       at.temperature ||
       at.radar ||
-      at.brand
+      at.brand ||
+      at.notes
     )
       return setFiles([]);
     setFiles(null);
@@ -389,6 +394,9 @@ function DriveTree({
   // Whatsapp: quantos grupos o cliente tem (o cartão) e o link de uma
   // mensagem (?whatsapp=<grupo>&msg=<mensagem>).
   const [groupCount, setGroupCount] = useState(0);
+  // Anotações: quantas o cliente tem (o cartão) e a do link ?nota=<id>.
+  const [noteCount, setNoteCount] = useState(0);
+  const [openNote, setOpenNote] = useState<string | null>(null);
   const [openWhatsapp, setOpenWhatsapp] = useState<{
     group: string;
     message?: WhatsappMessage;
@@ -414,6 +422,26 @@ function DriveTree({
       .catch(() => {});
     return () => {
       alive = false;
+    };
+  }, [company, at.client, showsProducts]);
+  useEffect(() => {
+    setNoteCount(0);
+    if (!showsProducts || !at.client) return;
+    const client = at.client;
+    let alive = true;
+    const load = () =>
+      countClientNotes(company, client)
+        .then((n) => alive && setNoteCount(n))
+        .catch(() => {});
+    void load();
+    const onNotice = (e: Event) => {
+      const d = (e as CustomEvent).detail ?? {};
+      if (!d.client || d.client === client) void load();
+    };
+    window.addEventListener("mavi:client-notes", onNotice);
+    return () => {
+      alive = false;
+      window.removeEventListener("mavi:client-notes", onNotice);
     };
   }, [company, at.client, showsProducts]);
   useEffect(() => {
@@ -446,11 +474,20 @@ function DriveTree({
     const thermo = params.get("termometro");
     // ?radar=<cliente>: a aba Radar do cliente.
     const radar = params.get("radar");
-    if (!recording && !fileId && !group && !thermo && !radar) return;
+    // ?nota=<id>: uma anotação do cliente.
+    const note = params.get("nota");
+    if (!recording && !fileId && !group && !thermo && !radar && !note) return;
     const start = Number(params.get("t")) || undefined;
     navigate(window.location.pathname, true);
     // O acesso é conferido pelo banco, ao abrir o termômetro.
     if (thermo) setAt({ client: thermo, temperature: true });
+    else if (note)
+      getClientNote(note)
+        .then((n) => {
+          setAt({ client: n.client_id, notes: true });
+          setOpenNote(n.id);
+        })
+        .catch(() => setError("Anotação não encontrada ou sem acesso."));
     else if (radar) {
       setAt({ client: radar, radar: true });
       setRadarItem(params.get("item"));
@@ -492,6 +529,7 @@ function DriveTree({
   function go(next: DriveLocation) {
     setOpenRecording(null);
     setOpenWhatsapp(null);
+    setOpenNote(null);
     if (root) setLocalAt(next.client ? next : base);
     else
       navigate(driveUrl(next, routeParts(window.location.pathname).company));
@@ -505,6 +543,7 @@ function DriveTree({
     const reset = () => {
       setOpenRecording(null);
       setOpenWhatsapp(null);
+      setOpenNote(null);
       setEditing(null);
       setQuery("");
       setError("");
@@ -573,6 +612,7 @@ function DriveTree({
     at.temperature,
     at.radar,
     at.brand,
+    at.notes,
   ].join("|");
   const clients =
     !at.client && !at.folder
@@ -1285,7 +1325,8 @@ function DriveTree({
       | "dossier"
       | "temperature"
       | "radar"
-      | "brand",
+      | "brand"
+      | "notes",
     open: () => void,
     color?: string,
     actions?: {
@@ -1317,7 +1358,9 @@ function DriveTree({
                     ? Radar
                   : icon === "brand"
                     ? Palette
-                    : Folder;
+                    : icon === "notes"
+                      ? NotebookPen
+                      : Folder;
     const detail =
       icon === "client"
         ? "Cliente"
@@ -1335,7 +1378,11 @@ function DriveTree({
                     ? "Problemas e promessas"
                     : icon === "brand"
                       ? "Logos, fontes e cores"
-                      : "Pasta";
+                      : icon === "notes"
+                        ? noteCount
+                          ? `${noteCount} ${noteCount === 1 ? "anotação" : "anotações"}`
+                          : "Acessos, links e combinados"
+                        : "Pasta";
     const hasMenu = !!(
       actions?.rename ||
       actions?.remove ||
@@ -1637,6 +1684,12 @@ function DriveTree({
             <span>Whatsapp</span>
           </>
         )}
+        {!searching && at.notes && (
+          <>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>Anotações</span>
+          </>
+        )}
         {!searching && at.dossier && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
@@ -1786,6 +1839,15 @@ function DriveTree({
           data={data}
           notify={notify}
         />
+      ) : at.notes && at.client ? (
+        <ClientNotes
+          key={at.client}
+          company={company}
+          client={at.client}
+          clientName={clientName(at.client)}
+          notify={notify}
+          initial={openNote}
+        />
       ) : at.whatsapp && at.client ? (
         <WhatsappFolder
           key={at.client}
@@ -1917,6 +1979,18 @@ function DriveTree({
                             "dossier",
                             () => go({ client: at.client, dossier: true }),
                             "#6b52b3",
+                          ),
+                      ]
+                    : []),
+                  ...(showsProducts
+                    ? [
+                        () =>
+                          folderCard(
+                            "notes",
+                            "Anotações",
+                            "notes",
+                            () => go({ client: at.client, notes: true }),
+                            "#7a5bc4",
                           ),
                       ]
                     : []),

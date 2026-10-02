@@ -169,6 +169,14 @@ describe("Drive: cada pasta tem o seu endereço", () => {
     expect(driveUrl({ client, recordings: true })).toBe(
       `/drive/cliente/${client}/gravacoes`,
     );
+    expect(driveUrl({ client, notes: true })).toBe(
+      `/drive/cliente/${client}/anotacoes`,
+    );
+    expect(driveLocationFromPath(`/drive/cliente/${client}/anotacoes`)).toEqual(
+      { client, notes: true },
+    );
+    // O link de uma anotação sobrevive ao login.
+    expect(safeReturnPath(`/drive?nota=${folder}`)).toBe(`/drive?nota=${folder}`);
     // A pasta leva o seu cliente e produto: a URL só precisa dela.
     expect(driveUrl({ client, contract, folder })).toBe(
       `/drive/pasta/${folder}`,

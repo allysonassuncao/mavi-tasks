@@ -1315,7 +1315,9 @@ export type LiveChange =
   /** Radar do cliente: um relatório entrou na fila, ficou pronto, falhou ou saiu. */
   | { kind: "radar"; report?: string; status?: string }
   /** Financeiro › Mídia: lançamentos ou comprovantes dessas contas (null: de muitas). */
-  | { kind: "media"; contracts: string[] | null };
+  | { kind: "media"; contracts: string[] | null }
+  /** Anotações do cliente: uma anotação criada, salva, excluída ou restaurada. */
+  | { kind: "client_notes"; client: string; note: string; version: number };
 
 /**
  * Whether a task notice concerns the person: always for leaders (they see

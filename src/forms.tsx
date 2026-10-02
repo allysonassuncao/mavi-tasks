@@ -38,6 +38,7 @@ import {
   KeyRound,
   Mail,
   HardDrive,
+  NotebookPen,
   ChevronsLeft,
   ChevronsRight,
   UserRoundPen,
@@ -100,6 +101,8 @@ import {
   checklistHistory,
 } from "./api";
 import { TaskChecklistPanel } from "./TaskChecklist";
+import { ClientNotes } from "./ClientNotes";
+import { countClientNotes } from "./client-notes";
 import {
   checklistGateMessage,
   checklistLogLabel,
@@ -1035,6 +1038,24 @@ export function TaskDetail({
         : checklistHistory(task.id),
     [demo, demoStore, task.id],
   );
+  // Quantas anotações o cliente tem (o número no ícone), ao vivo.
+  const noteClient = n.client?.id;
+  const [noteCount, setNoteCount] = useState(0);
+  useEffect(() => {
+    setNoteCount(0);
+    if (!noteClient || demo) return;
+    const load = () =>
+      void countClientNotes(task.company_id, noteClient)
+        .then(setNoteCount)
+        .catch(() => {});
+    load();
+    const onNotice = (e: Event) => {
+      const d = (e as CustomEvent).detail ?? {};
+      if (!d.client || d.client === noteClient) load();
+    };
+    window.addEventListener("mavi:client-notes", onNotice);
+    return () => window.removeEventListener("mavi:client-notes", onNotice);
+  }, [noteClient, task.company_id, demo]);
   const panels = [
     {
       id: "comments",
@@ -1052,7 +1073,15 @@ export function TaskDetail({
       count: extras.attachments.length,
     },
     ...(n.client
-      ? [{ id: "drive", label: "Drive do cliente", icon: HardDrive, count: 0 }]
+      ? [
+          {
+            id: "notes",
+            label: "Anotações do cliente",
+            icon: NotebookPen,
+            count: noteCount,
+          },
+          { id: "drive", label: "Drive do cliente", icon: HardDrive, count: 0 },
+        ]
       : []),
   ];
   const current = panels.find((p) => p.id === tab) ?? panels[0];
@@ -2395,6 +2424,14 @@ export function TaskDetail({
                   notify={notify}
                   loadHistory={loadChecklistHistory}
                   patch={patchChecklists}
+                />
+              ) : tab === "notes" && n.client ? (
+                <ClientNotes
+                  company={task.company_id}
+                  client={n.client.id}
+                  clientName={n.client.name}
+                  notify={notify}
+                  demo={demo}
                 />
               ) : tab === "drive" && n.client ? (
                 <TaskDrive

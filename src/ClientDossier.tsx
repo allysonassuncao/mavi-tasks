@@ -88,6 +88,7 @@ const SOURCE_LABELS: Record<string, string> = {
   social_briefing: "Social Leads",
   social_plan: "Social Leads",
   campaign: "Campanha",
+  client_note: "Anotação do cliente",
 };
 
 const DEMO: Dossier = {

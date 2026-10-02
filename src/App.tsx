@@ -1430,6 +1430,9 @@ export default function App() {
       window.dispatchEvent(new CustomEvent("mavi:meetings", { detail: {} }));
       window.dispatchEvent(new CustomEvent("mavi:cases", { detail: {} }));
       window.dispatchEvent(new CustomEvent("mavi:notices", { detail: {} }));
+      window.dispatchEvent(
+        new CustomEvent("mavi:client-notes", { detail: {} }),
+      );
       setCasesTick((n) => n + 1);
       schedule();
     };
@@ -1528,6 +1531,13 @@ export default function App() {
         // Radar do cliente › Relatórios listens for its own notices.
         if (change.kind === "radar") {
           window.dispatchEvent(new CustomEvent("mavi:radar", { detail: change }));
+          return;
+        }
+        // Anotações do cliente (tarefa e Drive) listen for their own notices.
+        if (change.kind === "client_notes") {
+          window.dispatchEvent(
+            new CustomEvent("mavi:client-notes", { detail: change }),
+          );
           return;
         }
         // Financeiro › Mídia listens for its own notices.

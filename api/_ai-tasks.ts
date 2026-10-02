@@ -367,6 +367,7 @@ const SOURCE_KIND: Record<string, string> = {
   whatsapp: "WhatsApp",
   web: "Página",
   attachment: "Anexo",
+  note: "Anotação do cliente",
 };
 
 /** O documento final: o título, a parte final (no começo), os capítulos e as fontes. */

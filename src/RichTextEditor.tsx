@@ -23,10 +23,12 @@ import {
   Undo2,
   Redo2,
   ImagePlus,
+  KeyRound,
 } from "lucide-react";
 import { parseDescription, safeHref, serializeDescription } from "./rich-text";
 import { mentionExtension, type MentionPerson } from "./mentions";
 import { Loading } from "./ui";
+import { NoteSecretForm, noteSecretExtension } from "./NoteSecret";
 /**
  * O texto para quem lê a descrição sem vê-la (o Assistente MAVI): as imagens
  * viram "[imagem]" e os links saem com o endereço — sem isso, "o briefing
@@ -34,7 +36,10 @@ import { Loading } from "./ui";
  */
 function readableText(editor: Editor) {
   const text = editor.getText({
-    textSerializers: { inlineImage: () => "[imagem]" },
+    textSerializers: {
+      inlineImage: () => "[imagem]",
+      noteSecret: ({ node }) => `[secreto: ${node.attrs.label}]`,
+    },
   });
   const links = new Set<string>();
   editor.state.doc.descendants((node) => {
@@ -88,6 +93,7 @@ export default function RichTextEditor({
   onTextChange,
   onChange,
   appendRef,
+  secrets,
 }: {
   name?: string;
   defaultValue?: string;
@@ -106,7 +112,15 @@ export default function RichTextEditor({
   onChange?: (value: string) => void;
   /** Recebe a função que acrescenta um parágrafo no fim ("Aplicar na descrição"). */
   appendRef?: MutableRefObject<((text: string) => void) | null>;
+  /**
+   * Trechos secretos (Anotações do cliente): o botão "Secreto" e a anotação
+   * aberta, para registrar onde o valor foi visto.
+   */
+  secrets?: { company: string; client: string; note: string | null };
 }) {
+  const secretContext = useRef({ note: secrets?.note ?? null });
+  secretContext.current.note = secrets?.note ?? null;
+  const [addingSecret, setAddingSecret] = useState(false);
   const people = useRef<MentionPerson[]>(mentions ?? []);
   const imagesOn = useRef(images);
   imagesOn.current = images;
@@ -123,6 +137,7 @@ export default function RichTextEditor({
   const editor = useEditor({
     extensions: [
       ImageNode,
+      noteSecretExtension(secretContext),
       mentionExtension(people),
       StarterKit.configure({
         heading: false,
@@ -350,6 +365,18 @@ export default function RichTextEditor({
               <ImagePlus size={17} />
             </button>
           )}
+          {secrets && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Adicionar secreto (senha, token)"
+              title="Secreto: senha ou token guardado criptografado"
+              disabled={disabled || uploading}
+              onClick={() => setAddingSecret(true)}
+            >
+              <KeyRound size={17} />
+            </button>
+          )}
           {images && (
             <input
               ref={fileInput}
@@ -371,6 +398,28 @@ export default function RichTextEditor({
         <EditorContent editor={editor} />
         <input type="hidden" name={name} value={value} />
       </div>
+      {addingSecret && secrets && (
+        <NoteSecretForm
+          company={secrets.company}
+          client={secrets.client}
+          onClose={() => setAddingSecret(false)}
+          onCreated={(secret) => {
+            setAddingSecret(false);
+            if (editor.isDestroyed) return;
+            editor
+              .chain()
+              .focus()
+              .insertContent([
+                {
+                  type: "noteSecret",
+                  attrs: { secretId: secret.id, label: secret.label },
+                },
+                { type: "text", text: " " },
+              ])
+              .run();
+          }}
+        />
+      )}
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -381,6 +430,9 @@ export default function RichTextEditor({
           ? "Formate o texto e insira, cole ou arraste imagens JPG, PNG e WebP (até 5 MB)."
           : "Negrito, itálico, cores, listas e links."}
         {mentions?.length ? " Digite @ para mencionar alguém." : ""}
+        {secrets
+          ? " Senhas e tokens: use o botão Secreto (a chave), nunca o texto comum."
+          : ""}
       </small>
     </div>
   );

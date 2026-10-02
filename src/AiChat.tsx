@@ -23,6 +23,7 @@ import {
   Video,
   X,
   Trophy,
+  NotebookPen,
   Wallet,
 } from "lucide-react";
 import { answerPieces, type ChatTurn } from "./meetings";
@@ -240,6 +241,7 @@ const SOURCE_ICONS = {
   web: Globe,
   attachment: Paperclip,
   media: Wallet,
+  note: NotebookPen,
 };
 function SourceIcon({ type }: { type: AiSource["type"] }) {
   const Icon = SOURCE_ICONS[type] ?? FileText;
