@@ -16,6 +16,8 @@ import {
   aiTab,
   driveLocationFromPath,
   driveUrl,
+  campaignIdFromPath,
+  campaignUrl,
 } from "./router";
 
 describe("shareable routes", () => {
@@ -193,5 +195,25 @@ describe("Drive: cada pasta tem o seu endereço", () => {
     ])
       expect(driveLocationFromPath(bad)).toBeNull();
     expect(resolvePage(`/drive/cliente/${client}/qualquer`)).toBeNull();
+  });
+});
+
+describe("endereço da campanha", () => {
+  const id = "0b7c2f4e-5d1a-4c3b-9e8f-1a2b3c4d5e6f";
+  it("abre a campanha pelo seu próprio endereço, com ou sem agência", () => {
+    expect(campaignUrl(id)).toBe(`/campanhas/${id}`);
+    expect(campaignUrl(id, "make")).toBe(`/agencias/make/campanhas/${id}`);
+    expect(campaignIdFromPath(`/campanhas/${id}`)).toBe(id);
+    expect(campaignIdFromPath(`/agencias/make/campanhas/${id}/`)).toBe(id);
+    expect(resolvePage(`/agencias/make/campanhas/${id}`)).toBe("campaigns");
+    // Sobrevive ao login, com a aba aberta.
+    expect(safeReturnPath(`/campanhas/${id}?aba=relatorios`)).toBe(
+      `/campanhas/${id}?aba=relatorios`,
+    );
+  });
+  it("recusa o que não é uma campanha", () => {
+    for (const bad of ["/campanhas", "/campanhas/abc", `/campanhas/${id}/x`])
+      expect(campaignIdFromPath(bad)).toBeNull();
+    expect(resolvePage("/campanhas/abc")).toBeNull();
   });
 });

@@ -267,7 +267,7 @@ export function PlanView({
     if (intent === "release" && plan) setModal("release");
     if (intent === "campaign" && plan) {
       if (item.campaign?.id)
-        navigate(appPath(`/campanhas?campanha=${item.campaign.id}`));
+        navigate(appPath(`/campanhas/${item.campaign.id}`));
       else setModal("campaign");
     }
     clearIntent();
@@ -504,7 +504,7 @@ export function PlanView({
                 onClick={() =>
                   item.campaign?.id
                     ? navigate(
-                        appPath(`/campanhas?campanha=${item.campaign.id}`),
+                        appPath(`/campanhas/${item.campaign.id}`),
                       )
                     : setModal("campaign")
                 }
@@ -906,7 +906,7 @@ export function PlanView({
                         "Campanha criada. Complete o ciclo e ative em Campanhas.",
                       );
                       onChanged();
-                      navigate(appPath(`/campanhas?campanha=${id}`));
+                      navigate(appPath(`/campanhas/${id}`));
                     })
                     .catch((e) => notify((e as Error).message))
                     .finally(() => setBusy(""));

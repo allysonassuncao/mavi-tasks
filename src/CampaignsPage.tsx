@@ -35,7 +35,15 @@ import { Empty, Modal } from "./components";
 import { Pagination } from "./Pagination";
 import { ContractPicker } from "./ContractPicker";
 import { contractParts, dateKey } from "./domain";
-import { useUrlState } from "./router";
+import {
+  campaignIdFromPath,
+  campaignUrl,
+  navigate,
+  pageUrl,
+  routeParts,
+  useLocation,
+  useUrlState,
+} from "./router";
 import type { CalendarDay, Snapshot } from "./types";
 import {
   addDays,
@@ -148,6 +156,11 @@ type CycleFormState = {
 type StatusFormState = { campaign: AdCampaign; to: AdCampaignStatus } | null;
 
 const emptyData: CampaignData = { campaigns: [], cycles: [] };
+/**
+ * The list's last address (filters, search): "Todas as campanhas" goes back
+ * to it. Kept for the visit, like the browser's Back.
+ */
+let lastList = "";
 
 /**
  * Campanhas: cadastro de campanhas (por produto contratado) e de seus ciclos.
@@ -214,12 +227,25 @@ export function CampaignsPage({
   );
   const [loadError, setLoadError] = useState("");
   const [listTick, setListTick] = useState(0);
-  const [selected, setSelected] = useUrlState<string>("campanha", "");
-  // The detail's own state (CampaignDayToDay), dropped on leaving it.
-  const [, setTab] = useUrlState<string>("aba", "");
-  const [, setViewedCycle] = useUrlState<string>("ciclo", "");
-  const [, setTimelineTab] = useUrlState<string>("linha", "");
-  const [, setOpenReport] = useUrlState<string>("relatorio", "");
+  // Each campaign has its own address, /campanhas/<id>: it opens in a new
+  // tab, is shared and survives a reload. The old ?campanha=<id> becomes it.
+  const location = useLocation();
+  const [locationPath, locationQuery = ""] = location.split("?");
+  const agencyPath = routeParts(locationPath).company;
+  const [legacy] = useUrlState<string>("campanha", "");
+  const selected = campaignIdFromPath(locationPath) ?? legacy;
+  const href = useCallback(
+    (id: string) => campaignUrl(id, agencyPath),
+    [agencyPath],
+  );
+  useEffect(() => {
+    if (!campaignIdFromPath(href(legacy))) return;
+    const q = new URLSearchParams(locationQuery);
+    q.delete("campanha");
+    const rest = q.toString();
+    navigate(href(legacy) + (rest ? `?${rest}` : ""), true);
+  }, [legacy, locationQuery, href]);
+  const openCampaign = (id: string) => navigate(href(id));
   // Meus avisos (lista, historico ou novo): aberto da lista ou de uma campanha.
   const [alertsView, setAlertsView] = useUrlState<string>("avisos", "");
   // Conversar com a MAVI sobre a campanha aberta (?mavi=1).
@@ -310,14 +336,15 @@ export function CampaignsPage({
           maviOpen={maviOpen === "1"}
           onMavi={(open) => setMaviOpen(open ? "1" : "")}
           onAlerts={() => setAlertsView("lista")}
-          onBack={() => {
-            setMaviOpen("");
-            setTab("");
-            setViewedCycle("");
-            setTimelineTab("");
-            setOpenReport("");
-            setSelected("");
-          }}
+          link={window.location.origin + href(campaign.id)}
+          onBack={() =>
+            navigate(
+              routeParts(lastList.split("?")[0]).company === agencyPath &&
+                lastList
+                ? lastList
+                : pageUrl("campaigns", agencyPath),
+            )
+          }
           onEdit={() => setCampaignForm({ campaign })}
           onStatus={(to) => setStatusForm({ campaign, to })}
           onNewCycle={() => setCycleForm({ campaign })}
@@ -341,7 +368,8 @@ export function CampaignsPage({
           canCreate={canCreate}
           missing={!!selected}
           tick={listTick}
-          onOpen={(id) => setSelected(id)}
+          href={href}
+          onOpen={openCampaign}
           onNew={() => setCampaignForm({})}
           onConnections={canEdit ? () => setConnections(true) : undefined}
           onAlerts={() => setAlertsView("lista")}
@@ -366,7 +394,7 @@ export function CampaignsPage({
           onClose={() => setAlertsView("")}
           onOpenCampaign={(id) => {
             setAlertsView("");
-            setSelected(id);
+            openCampaign(id);
           }}
           searchCampaigns={searchCampaigns}
           notify={notify}
@@ -395,7 +423,7 @@ export function CampaignsPage({
             await afterChange(
               "Campanha cadastrada. Agora cadastre o primeiro ciclo.",
             );
-            setSelected(id);
+            openCampaign(id);
             const [created] = (await backend.campaign(company, id)).campaigns;
             if (created) setCycleForm({ campaign: created, first: true });
           }}
@@ -448,7 +476,7 @@ export function CampaignsPage({
           notify={notify}
           onOpenCampaign={(id) => {
             setConnections(false);
-            setSelected(id);
+            openCampaign(id);
           }}
           onPending={setPending}
           refresh={connectionTick}
@@ -606,6 +634,7 @@ function CampaignList({
   canCreate,
   missing,
   tick,
+  href,
   onOpen,
   onNew,
   onConnections,
@@ -619,6 +648,8 @@ function CampaignList({
   missing: boolean;
   /** Changes after an edit elsewhere: read the page again. */
   tick: number;
+  /** A campaign's own address (the row is a link: new tab, copy). */
+  href: (id: string) => string;
   onOpen: (id: string) => void;
   onNew: () => void;
   /** Absent: read-only (no "Conexões"). */
@@ -632,6 +663,15 @@ function CampaignList({
   const [attention, setAttention] = useUrlState<boolean>("atencao", false);
   const [status, setStatus] = useUrlState<string>("status", "");
   const [withM, setWithM] = useWithM();
+  // "Todas as campanhas" comes back to these filters.
+  const location = useLocation();
+  useEffect(() => {
+    const [path, search = ""] = location.split("?");
+    if (campaignIdFromPath(path)) return;
+    const q = new URLSearchParams(search);
+    q.delete("avisos");
+    lastList = path + (q.toString() ? `?${q}` : "");
+  }, [location]);
   // Money as the client contracted it (com M) or what the platform spends.
   const shown = (value: number, m: number) => money(withM ? value : value / m);
   const scope =
@@ -846,15 +886,35 @@ function CampaignList({
                       key={campaign.id}
                       className="campaign-row"
                       tabIndex={0}
-                      onClick={() => onOpen(campaign.id)}
+                      onClick={(e) => {
+                        // Ctrl/⌘ or Shift: another tab, as a link does.
+                        if (e.metaKey || e.ctrlKey || e.shiftKey)
+                          window.open(href(campaign.id), "_blank", "noopener");
+                        else onOpen(campaign.id);
+                      }}
+                      onAuxClick={(e) => {
+                        if (e.button === 1)
+                          window.open(href(campaign.id), "_blank", "noopener");
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") onOpen(campaign.id);
                       }}
                     >
                       <td>
-                        <strong className="campaign-name">
-                          {campaign.name}
-                        </strong>
+                        {/* A real link: "Abrir em nova aba", copy the link. */}
+                        <a
+                          className="campaign-name"
+                          href={href(campaign.id)}
+                          tabIndex={-1}
+                          onClick={(e) => {
+                            if (e.metaKey || e.ctrlKey || e.shiftKey)
+                              e.stopPropagation();
+                            else e.preventDefault();
+                          }}
+                          onAuxClick={(e) => e.stopPropagation()}
+                        >
+                          <strong>{campaign.name}</strong>
+                        </a>
                         <small className="cell-note">
                           {client_name || "Cliente"} ·{" "}
                           {product_name || "Produto"}
@@ -1007,6 +1067,7 @@ function CampaignDetail({
   maviOpen,
   onMavi,
   onAlerts,
+  link,
   onBack,
   onEdit,
   onStatus,
@@ -1035,6 +1096,8 @@ function CampaignDetail({
   onMavi: (open: boolean) => void;
   /** Meus avisos, com os desta campanha primeiro. */
   onAlerts: () => void;
+  /** The campaign's own address, to share. */
+  link: string;
   onBack: () => void;
   onEdit: () => void;
   onStatus: (to: AdCampaignStatus) => void;
@@ -1082,6 +1145,18 @@ function CampaignDetail({
       </Button>
       <Button className="btn secondary" onClick={onAlerts} title="Avisos desta campanha (Meus avisos)">
         <BellRing size={15} /> Avisos
+      </Button>
+      <Button
+        className="btn secondary"
+        onClick={() =>
+          void navigator.clipboard
+            .writeText(link)
+            .then(() => notify("Link da campanha copiado"))
+            .catch(() => notify("Não foi possível copiar o link"))
+        }
+        title="Copiar o endereço desta campanha para abrir em outra aba ou compartilhar (abre para quem tem acesso a ela)"
+      >
+        <Link2 size={15} /> Copiar link
       </Button>
     </>
   );

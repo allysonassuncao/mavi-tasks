@@ -229,6 +229,7 @@ export function resolvePage(path: string): Page | null {
   if (normalized === "/consumo-ia" || normalized === "/ia") return "aiUsage";
   if (taskIdFromPath(path)) return "tasks";
   if (dashboardIdFromPath(path)) return "dashboards";
+  if (campaignIdFromPath(path)) return "campaigns";
   if (maviChatIdFromPath(path)) return "mavi";
   if (skillIdFromPath(path)) return "skills";
   if (driveLocationFromPath(path)) return "drive";
@@ -363,6 +364,22 @@ export function dashboardIdFromPath(path: string) {
       /^\/dashboards\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|demo-[0-9a-z-]{1,60})$/i,
     )?.[1] ?? null
   );
+}
+
+/**
+ * A campanha aberta: /campanhas/<id> (uuid; as da demonstração começam com
+ * "demo-"). O endereço antigo
+ * /campanhas?campanha=<id> (avisos já gravados, MCP) ainda abre e vira este.
+ */
+export function campaignIdFromPath(path: string) {
+  return (
+    routeParts(path).path.match(
+      /^\/campanhas\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|demo-[0-9a-z-]{1,60})$/i,
+    )?.[1] ?? null
+  );
+}
+export function campaignUrl(id: string, company = "") {
+  return `${pageUrl("campaigns", company)}/${id}`;
 }
 
 /** A conversa aberta no módulo MAVI: /mavi/conversas/<id>. */
