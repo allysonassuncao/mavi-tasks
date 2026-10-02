@@ -37,6 +37,7 @@ type Leaf = {
   label: string;
   to: NavTarget;
   dot?: string;
+  count?: number;
 };
 type Item = Leaf & {
   icon: LucideIcon;
@@ -76,6 +77,7 @@ export function SidebarNav({
   caseCount,
   skillCount,
   noticeCount,
+  personalRadarCount,
   products,
   href,
   onNavigate,
@@ -95,6 +97,8 @@ export function SidebarNav({
   skillCount?: number;
   /** Avisos do Mural no ar que a pessoa ainda não viu. */
   noticeCount?: number;
+  /** Radar › Pessoal: as situações em aberto da pessoa. */
+  personalRadarCount?: number;
   products: Pick<Product, "id" | "name" | "color">[];
   href: (to: NavTarget) => string;
   onNavigate: (to: NavTarget) => void;
@@ -291,7 +295,7 @@ export function SidebarNav({
           to: { page: allowed("radar") || !allowed("personalRadar") ? "radar" : "personalRadar" },
           children: [
             { key: "radar-client", label: "Do cliente", to: { page: "radar" } },
-            { key: "radar-personal", label: "Pessoal", to: { page: "personalRadar" } },
+            { key: "radar-personal", label: "Pessoal", to: { page: "personalRadar" }, count: personalRadarCount },
           ],
         },
         ...(isLeader ? [] : portfolio),
@@ -497,6 +501,12 @@ export function SidebarNav({
                         {!!item.count && (
                           <span className="nav-count">{item.count}</span>
                         )}
+                        {/* Recolhido, o número dos filhos aparece no item (ex.: Radar › Pessoal). */}
+                        {!item.count && !expanded && !!children?.some((c) => !("heading" in c) && c.count) && (
+                          <span className="nav-count">
+                            {children!.reduce((n, c) => n + (("heading" in c) ? 0 : (c.count ?? 0)), 0)}
+                          </span>
+                        )}
                       </>,
                       {
                         className: active ? "active" : "",
@@ -537,6 +547,12 @@ export function SidebarNav({
                                   />
                                 )}
                                 <span>{c.label}</span>
+                                {!!c.count && (
+                                  // O texto escuro, também no subitem ativo (que é verde).
+                                  <span className="nav-count" style={{ color: "#263334", flexShrink: 0 }}>
+                                    {c.count}
+                                  </span>
+                                )}
                               </>,
                               {
                                 className: current(c.to) ? "active" : "",

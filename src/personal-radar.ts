@@ -361,6 +361,12 @@ export async function createLink(company: string, a: ReplyAction): Promise<strin
   return reportUrl(report.link.token);
 }
 
+/** As situações em aberto da pessoa (o número no menu lateral). */
+export async function openCount(company: string) {
+  if (offline(company)) return demo.items.filter((i) => i.status === "open" && i.state === "open").length;
+  return Number(await rpc<number>("personal_radar_open_count", { p_company: company })) || 0;
+}
+
 /** "Juntar com…": as situações escolhidas entram nesta (do mesmo grupo). */
 export async function joinItems(company: string, target: string, sources: string[]) {
   if (offline(company)) {

@@ -1219,6 +1219,10 @@ export default function App() {
   // Leaders: MAVI skills waiting for approval (again when a skill notice
   // arrives in the inbox, or after a review on the Skills page).
   const [pendingSkills, setPendingSkills] = useState<number | undefined>();
+  // Radar › Pessoal no menu: as situações em aberto da pessoa; relido pelo
+  // aviso "personal_radar" do Realtime (sem consulta periódica).
+  const [personalOpen, setPersonalOpen] = useState<number | undefined>();
+  const [personalTick, setPersonalTick] = useState(0);
   const [skillsTick, setSkillsTick] = useState(0);
   const skillNotices = inbox.filter((n) => n.kind === "ai_skill").length;
   useEffect(() => {
@@ -1236,6 +1240,23 @@ export default function App() {
       alive = false;
     };
   }, [demo, company, session, isLeader, skillsTick, skillNotices]);
+  const personalAllowed = canOpenPage("personalRadar", member?.role, hiddenPages);
+  useEffect(() => {
+    if (!company || (!demo && !session) || !personalAllowed) {
+      setPersonalOpen(undefined);
+      return;
+    }
+    let alive = true;
+    import("./personal-radar")
+      .then((m) => m.openCount(company))
+      .then((n) => {
+        if (alive) setPersonalOpen(n || undefined);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [demo, company, session, personalAllowed, personalTick]);
   // The newest page again, merged into what "Carregar mais" already brought.
   // Resolves with that page (the realtime notice looks for its row there).
   const loadInbox = useCallback((): Promise<AppNotification[]> => {
@@ -1544,8 +1565,10 @@ export default function App() {
           );
           // Uma situação nova da pessoa: com o app aberto, a MAVI já escreve
           // a resposta (a fila fica no banco; sem o módulo ligado, não há fila).
-          if (change.people?.includes(user))
+          if (change.people?.includes(user)) {
             void import("./personal-radar").then((m) => m.drainDrafts(company));
+            setPersonalTick((n) => n + 1);
+          }
           return;
         }
         // Anotações do cliente (tarefa e Drive) listen for their own notices.
@@ -2665,6 +2688,7 @@ export default function App() {
             }
             caseCount={pendingCases}
             skillCount={pendingSkills}
+            personalRadarCount={personalOpen}
             noticeCount={noticeCount || undefined}
             products={data.products.filter(
               (p) =>

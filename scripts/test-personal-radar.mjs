@@ -848,4 +848,14 @@ await check("a lista vem por ordem de chegada (a mais recente primeiro), não pe
   assert.ok(r.items.findIndex((i) => i.id === cpl) > 0);
 });
 
+await check("o número do menu é o mesmo da aba Em aberto", async () => {
+  for (const u of [member, other, outsider]) {
+    await as(u);
+    const open = (await rpc("personal_radar_items", [A, null, JSON.stringify({ status: "open" })])).counts.open;
+    assert.equal(await rpc("personal_radar_open_count", [A]), open);
+  }
+  await as(member);
+  assert.ok((await rpc("personal_radar_open_count", [A])) > 0);
+});
+
 console.log(`\n${passed} verificações do Radar pessoal passaram.`);
