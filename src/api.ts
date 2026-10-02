@@ -20,6 +20,9 @@ import {
   type TimeEntry,
   type AppNotification,
   type TaskTemplate,
+  type ChecklistTemplate,
+  type ChecklistLogEntry,
+  type TaskChecklist,
   type SuggestionSettings,
   type TaskDueRule,
   type CalendarDay,
@@ -95,6 +98,7 @@ export interface CompanyLookups {
   }[];
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
   taskTemplates: TaskTemplate[];
+  checklistTemplates?: ChecklistTemplate[];
   suggestionSettings: SuggestionSettings[];
   dueRules?: TaskDueRule[];
   calendarDays?: CalendarDay[];
@@ -229,9 +233,9 @@ export async function companyLookups(
   forceRefresh = false,
 ): Promise<CompanyLookups> {
   if (!supabase) throw Error("Supabase não configurado");
-  // v5: suggestion settings, and lists no longer cut at a lower max-rows;
+  // v6: checklist models. v5: suggestion settings, and lists no longer cut at a lower max-rows;
   // bumped whenever the cached shape (or what it may hold) changes.
-  const cacheKey = `lookups:v5:${company}`;
+  const cacheKey = `lookups:v6:${company}`;
 
   return cache.fetchWithCache(
     cacheKey,
@@ -246,6 +250,7 @@ export async function companyLookups(
         teamMembers: [],
         clientTeams: [],
         taskTemplates: [],
+        checklistTemplates: [],
         suggestionSettings: [],
         dueRules: [],
         calendarDays: [],
@@ -264,6 +269,7 @@ export async function companyLookups(
         ["teamMembers", "team_members", ["team_id", "user_id"]],
         ["clientTeams", "client_teams", ["client_id", "team_id"]],
         ["taskTemplates", "task_templates", ["name", "id"]],
+        ["checklistTemplates", "checklist_templates", ["name", "id"]],
         ["suggestionSettings", "suggestion_settings", ["company_id"]],
         ["dueRules", "task_due_rules", ["id"]],
         ["calendarDays", "company_calendar_days", ["day", "id"]],
@@ -289,6 +295,7 @@ export async function companyLookups(
           // migrations run (or if they can't be read) the app works without them.
           (result[key] as unknown) =
             key === "taskTemplates" ||
+            key === "checklistTemplates" ||
             key === "suggestionSettings" ||
             key === "dueRules" ||
             key === "calendarDays" ||
@@ -769,6 +776,7 @@ export async function snapshot(
     teamMembers: lookups.teamMembers,
     clientTeams: lookups.clientTeams,
     taskTemplates: lookups.taskTemplates ?? [],
+    checklistTemplates: lookups.checklistTemplates ?? [],
     suggestionSettings: lookups.suggestionSettings ?? [],
     dueRules: lookups.dueRules ?? [],
     calendarDays: lookups.calendarDays ?? [],
@@ -786,7 +794,7 @@ export async function snapshot(
  */
 export function getCachedSnapshot(company: string): Snapshot | null {
   const companyList = cache.get<Company[]>("companies");
-  const lookups = cache.get<CompanyLookups>(`lookups:v5:${company}`);
+  const lookups = cache.get<CompanyLookups>(`lookups:v6:${company}`);
   if (!lookups) return null;
 
   const hours = cache.get<TimeEntry[]>(`hours:${company}`) ?? [];
@@ -802,6 +810,7 @@ export function getCachedSnapshot(company: string): Snapshot | null {
     teamMembers: lookups.teamMembers,
     clientTeams: lookups.clientTeams,
     taskTemplates: lookups.taskTemplates ?? [],
+    checklistTemplates: lookups.checklistTemplates ?? [],
     suggestionSettings: lookups.suggestionSettings ?? [],
     dueRules: lookups.dueRules ?? [],
     calendarDays: lookups.calendarDays ?? [],
@@ -818,6 +827,7 @@ export async function taskExtras(
   comments: Comment[];
   attachments: Attachment[];
   events: TaskEvent[];
+  checklists?: TaskChecklist[];
 }> {
   const cacheKey = `task_extras:${id}`;
   return cache.fetchWithCache(
@@ -827,6 +837,12 @@ export async function taskExtras(
     },
     { ttlMs: CACHE_TTL.TASK_EXTRAS, forceRefresh },
   );
+}
+
+/** The whole checklist record of a task (the panel's "Registro"). */
+export async function checklistHistory(task: string): Promise<ChecklistLogEntry[]> {
+  return ((await rpc("task_checklist_history", { p_task: task })) ??
+    []) as ChecklistLogEntry[];
 }
 
 export async function taskById(
@@ -1172,7 +1188,7 @@ export function patchCachedLookups(
   updater: (current: CompanyLookups) => CompanyLookups,
 ): void {
   cache.update<CompanyLookups>(
-    `lookups:v5:${company}`,
+    `lookups:v6:${company}`,
     (current) => (current ? updater(current) : null),
     CACHE_TTL.LOOKUPS,
   );
@@ -1195,7 +1211,7 @@ export function patchCachedHours(company: string, entry: TimeEntry): void {
 }
 
 export function invalidateCompanyCache(company: string): void {
-  cache.invalidate(`lookups:v5:${company}`);
+  cache.invalidate(`lookups:v6:${company}`);
   cache.invalidate(`tasks:${company}:`);
   cache.invalidate(`task_scopes:${company}:`);
   cache.invalidate(`hours:${company}`);
@@ -1204,7 +1220,7 @@ export function invalidateCompanyCache(company: string): void {
 }
 
 export function invalidateLookupsCache(company: string): void {
-  cache.invalidate(`lookups:v5:${company}`);
+  cache.invalidate(`lookups:v6:${company}`);
 }
 
 export function invalidateTasksCache(company: string): void {

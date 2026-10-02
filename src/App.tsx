@@ -332,6 +332,7 @@ const TASK_ROW_MUTATIONS = new Set([
   "update_task",
   "set_task_custom_fields",
   "set_task_due",
+  "set_task_checklist_required",
 ]);
 const TIMER_ROW_MUTATIONS = new Set(["start_timer", "stop_timer"]);
 const SELF_HANDLED_MUTATIONS = new Set(["add_comment"]);

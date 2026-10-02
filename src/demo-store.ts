@@ -24,11 +24,20 @@ import {
   type TaskEvent,
   type TaskRecurrence,
   type AppNotification,
+  type TaskChecklist,
+  type ChecklistLogEntry,
+  type ChecklistTemplateItem,
   priorities,
   statuses,
   workingStatuses,
 } from "./types";
 import { MEMBER_OPT_IN, MODULES } from "./modules";
+import {
+  checklistGateMessage,
+  openChecklistItems,
+  settleChecklist,
+  withItemDone,
+} from "./checklist";
 import { canChangeDue, dueChangeError, dueReasonError } from "./task-due";
 import {
   PRIORITY_RULE,
@@ -45,6 +54,22 @@ import {
   suggestDue,
 } from "./dueRules";
 
+const CHECKLIST_RPCS = new Set([
+  "add_task_checklist",
+  "apply_checklist_templates",
+  "set_task_checklist_required",
+  "rename_task_checklist",
+  "delete_task_checklist",
+  "complete_task_checklist",
+  "reorder_task_checklists",
+  "add_checklist_item",
+  "edit_checklist_item",
+  "delete_checklist_item",
+  "set_checklist_item_done",
+  "reorder_checklist_items",
+  "save_checklist_template",
+  "delete_checklist_template",
+]);
 /** N business days after (or before, when negative) — mavi_private.add_business_days. */
 /** Where a task's due rule starts counting: its start or the day it was created. */
 const dueBase = (t: Task) => t.start_date || dateKey(new Date(t.created_at));
@@ -57,6 +82,9 @@ export class DemoStore {
   recurrences: TaskRecurrence[] = [];
   /** The demo person's saved views of the task list. */
   views: TaskView[] = [];
+  /** Checklists of the tasks, and their record (migration task_checklists). */
+  checklists: TaskChecklist[] = [];
+  checklistLog: ChecklistLogEntry[] = [];
   /** Bulk edits that can still be undone: each task as it was before. */
   private bulkOps = new Map<
     string,
@@ -418,7 +446,251 @@ export class DemoStore {
       })),
     ];
   }
+  /** A task's checklists, as public.task_extras returns them. */
+  checklistsOf(task: string) {
+    return this.checklists
+      .filter((l) => l.task_id === task)
+      .sort((x, y) => x.position - y.position);
+  }
+  /** Mirrors the checklist functions of migration 20270220090000. */
+  private checklistMutate(name: string, a: Record<string, any>) {
+    const now = new Date().toISOString();
+    const role = this.data.members.find((m) => m.user_id === demoUser)?.role;
+    const findList = (id: string) => {
+      const l = this.checklists.find((x) => x.id === id);
+      if (!l) throw Error("Checklist não encontrado");
+      return l;
+    };
+    const listOfItem = (id: string) => {
+      const l = this.checklists.find((x) => x.items.some((i) => i.id === id));
+      if (!l) throw Error("Item não encontrado");
+      return { list: l, item: l.items.find((i) => i.id === id)! };
+    };
+    const taskId: string =
+      a.p_task ??
+      (a.p_checklist ? findList(a.p_checklist).task_id : undefined) ??
+      (a.p_item ? listOfItem(a.p_item).list.task_id : undefined);
+    const task = this.data.tasks.find((t) => t.id === taskId);
+    const leader = role === "admin" || role === "manager";
+    if (name === "save_checklist_template") {
+      if (!leader)
+        throw Error("Somente administradores e gestores configuram modelos de checklist");
+      const items = (a.p_items ?? []) as ChecklistTemplateItem[];
+      if (String(a.p_name ?? "").trim().length < 2)
+        throw Error("Dê um nome ao modelo (de 2 a 80 caracteres).");
+      if (!items.length) throw Error("Adicione ao menos um item (cada um com até 500 caracteres; no máximo 300).");
+      const template = {
+        id: a.p_id ?? crypto.randomUUID(),
+        company_id: this.data.companies[0].id,
+        name: String(a.p_name).trim(),
+        items,
+        product_id: a.p_product ?? null,
+        team_id: a.p_team ?? null,
+        active: a.p_active ?? true,
+      };
+      const list = this.data.checklistTemplates ?? [];
+      this.data.checklistTemplates = a.p_id
+        ? list.map((t) => (t.id === a.p_id ? template : t))
+        : [...list, template];
+      return template.id;
+    }
+    if (name === "delete_checklist_template") {
+      if (!leader) throw Error("Sem permissão");
+      this.data.checklistTemplates = (this.data.checklistTemplates ?? []).filter(
+        (t) => t.id !== a.p_template,
+      );
+      return undefined;
+    }
+    if (!task || task.archived) throw Error("Sem acesso à tarefa");
+    const manager = leader || task.creator_id === demoUser;
+    const log = (action: string, detail: Record<string, unknown> = {}) =>
+      this.checklistLog.unshift({
+        id: crypto.randomUUID(),
+        task_id: task.id,
+        actor_id: demoUser,
+        action,
+        detail,
+        created_at: now,
+      });
+    const settle = (l: TaskChecklist) => {
+      const after = settleChecklist(l, demoUser, now);
+      if (after.completed_at && !l.completed_at)
+        log("checklist_completed", { checklist: l.id, title: l.title });
+      if (!after.completed_at && l.completed_at)
+        log("checklist_reopened", { checklist: l.id, title: l.title });
+      Object.assign(l, after);
+    };
+    const insert = (
+      title: string,
+      items: ChecklistTemplateItem[],
+      template: string | null,
+    ) => {
+      if (!title.trim()) throw Error("Dê um nome ao checklist (até 120 caracteres).");
+      const l: TaskChecklist = {
+        id: crypto.randomUUID(),
+        task_id: task.id,
+        title: title.trim(),
+        position: this.checklistsOf(task.id).length,
+        template_id: template,
+        created_by: demoUser,
+        created_at: now,
+        completed_by: null,
+        completed_at: null,
+        items: [],
+      };
+      const row = (title: string, position: number, parent: string | null) => ({
+        id: crypto.randomUUID(),
+        parent_id: parent,
+        title: title.trim(),
+        position,
+        done: false,
+        done_by: null,
+        done_at: null,
+        created_by: demoUser,
+        created_at: now,
+      });
+      items.forEach((it, n) => {
+        const parent = row(it.title, n, null);
+        l.items.push(parent);
+        (it.children ?? []).forEach((c, m) =>
+          l.items.push(row(c.title, m, parent.id)),
+        );
+      });
+      this.checklists.push(l);
+      return l;
+    };
+    const mayChange = (author: string) => author === demoUser || manager;
+    switch (name) {
+      case "add_task_checklist": {
+        const l = insert(String(a.p_title ?? ""), a.p_items ?? [], null);
+        log("checklist_added", { checklist: l.id, title: l.title });
+        break;
+      }
+      case "set_task_checklist_required":
+      case "apply_checklist_templates": {
+        for (const id of (a.p_templates ?? []) as string[]) {
+          const tpl = this.data.checklistTemplates?.find((t) => t.id === id);
+          if (!tpl) throw Error("Modelo de checklist não encontrado");
+          const l = insert(tpl.name, tpl.items, tpl.id);
+          log("checklist_added", { checklist: l.id, title: l.title, template: tpl.name });
+        }
+        const required = a.p_required ?? null;
+        if (required !== null && required !== !!task.checklist_required) {
+          if (!manager)
+            throw Error("Só quem edita a tarefa muda a exigência do checklist");
+          task.checklist_required = required;
+          task.version++;
+          log(required ? "required_on" : "required_off");
+        }
+        break;
+      }
+      case "rename_task_checklist": {
+        const l = findList(a.p_checklist);
+        if (!mayChange(l.created_by))
+          throw Error("Só quem criou o checklist, o criador da tarefa ou um gestor o renomeia");
+        const title = String(a.p_title ?? "").trim();
+        if (!title) throw Error("Dê um nome ao checklist (até 120 caracteres).");
+        if (title !== l.title) {
+          log("checklist_renamed", { checklist: l.id, from: l.title, title });
+          l.title = title;
+        }
+        break;
+      }
+      case "delete_task_checklist": {
+        const l = findList(a.p_checklist);
+        if (!mayChange(l.created_by))
+          throw Error("Só quem criou o checklist, o criador da tarefa ou um gestor o exclui");
+        this.checklists = this.checklists.filter((x) => x.id !== l.id);
+        log("checklist_deleted", { checklist: l.id, title: l.title, items: l.items.length });
+        break;
+      }
+      case "complete_task_checklist": {
+        const l = findList(a.p_checklist);
+        if (!l.items.length) throw Error("Adicione itens ao checklist antes de concluir.");
+        l.items = l.items.map((i) =>
+          i.done ? i : { ...i, done: true, done_by: demoUser, done_at: now },
+        );
+        settle(l);
+        break;
+      }
+      case "reorder_task_checklists":
+        (a.p_ids as string[]).forEach((id, n) => {
+          const l = this.checklists.find((x) => x.id === id && x.task_id === task.id);
+          if (l) l.position = n;
+        });
+        break;
+      case "add_checklist_item": {
+        const l = findList(a.p_checklist);
+        const title = String(a.p_title ?? "").trim();
+        if (!title) throw Error("Escreva o item (até 500 caracteres).");
+        const parent = a.p_parent ? l.items.find((i) => i.id === a.p_parent) : null;
+        if (a.p_parent && !parent) throw Error("Item não encontrado");
+        if (parent?.parent_id) throw Error("Subitens não têm outros subitens.");
+        const siblings = l.items.filter((i) => i.parent_id === (parent?.id ?? null));
+        l.items.push({
+          id: crypto.randomUUID(),
+          parent_id: parent?.id ?? null,
+          title,
+          position: siblings.length ? Math.max(...siblings.map((i) => i.position)) + 1 : 0,
+          done: false,
+          done_by: null,
+          done_at: null,
+          created_by: demoUser,
+          created_at: now,
+        });
+        log("item_added", { checklist: l.id, list: l.title, title, parent: parent?.title ?? null });
+        settle(l);
+        break;
+      }
+      case "edit_checklist_item": {
+        const { list: l, item } = listOfItem(a.p_item);
+        if (!mayChange(item.created_by))
+          throw Error("Só quem criou o item, o criador da tarefa ou um gestor o altera");
+        const title = String(a.p_title ?? "").trim();
+        if (!title) throw Error("Escreva o item (até 500 caracteres).");
+        if (title !== item.title) {
+          log("item_edited", { checklist: l.id, list: l.title, from: item.title, title });
+          item.title = title;
+        }
+        break;
+      }
+      case "delete_checklist_item": {
+        const { list: l, item } = listOfItem(a.p_item);
+        if (!mayChange(item.created_by))
+          throw Error("Só quem criou o item, o criador da tarefa ou um gestor o exclui");
+        const subitems = l.items.filter((i) => i.parent_id === item.id).length;
+        l.items = l.items.filter((i) => i.id !== item.id && i.parent_id !== item.id);
+        log("item_deleted", { checklist: l.id, list: l.title, title: item.title, subitems, was_done: item.done });
+        settle(l);
+        break;
+      }
+      case "set_checklist_item_done": {
+        const { list: l, item } = listOfItem(a.p_item);
+        const done = !!a.p_done;
+        const subitems = l.items.filter((i) => i.parent_id === item.id).length;
+        const before = l.completed_at;
+        Object.assign(l, withItemDone(l, item.id, done, demoUser, now));
+        log(done ? "item_checked" : "item_unchecked", { checklist: l.id, list: l.title, title: item.title, subitems });
+        if (l.completed_at && !before) log("checklist_completed", { checklist: l.id, title: l.title });
+        if (!l.completed_at && before) log("checklist_reopened", { checklist: l.id, title: l.title });
+        break;
+      }
+      case "reorder_checklist_items": {
+        const l = findList(a.p_checklist);
+        (a.p_ids as string[]).forEach((id, n) => {
+          const i = l.items.find((x) => x.id === id && x.parent_id === (a.p_parent ?? null));
+          if (i) i.position = n;
+        });
+        break;
+      }
+    }
+    this.data = { ...this.data, tasks: [...this.data.tasks] };
+    // Like public.set_task_checklist_required, the task's row.
+    if (name === "set_task_checklist_required") return { ...task };
+    return this.checklistsOf(task.id).map((l) => ({ ...l, items: [...l.items] }));
+  }
   mutate(name: string, a: Record<string, any>) {
+    if (CHECKLIST_RPCS.has(name)) return this.checklistMutate(name, a);
     const id = crypto.randomUUID(),
       company_id = this.data.companies[0].id,
       now = new Date().toISOString();
@@ -1313,6 +1585,7 @@ export class DemoStore {
         if (!task) throw Error("Tarefa não encontrada");
         if (task.version !== a.p_version)
           throw Error("A tarefa mudou. Atualize.");
+        const before = { ...task };
         // Same rules as the status menu (and public.transition_task).
         const acts = taskActions(this.data, task, demoUser);
         const from = task.status,
@@ -1371,6 +1644,17 @@ export class DemoStore {
           next = a.p_status ?? "progress";
           if (!workingStatuses.includes(next)) throw Error("Status inválido");
         } else throw Error("Ação inválida");
+        // Mirrors mavi_private.checklist_gate (migration task_checklists).
+        const open = openChecklistItems(this.checklistsOf(task.id));
+        if (
+          task.checklist_required &&
+          open > 0 &&
+          next !== from &&
+          (next === "review" || next === "done")
+        ) {
+          Object.assign(task, before);
+          throw Error(checklistGateMessage(open));
+        }
         if (["move", "reopen"].includes(a.p_action) && next !== "review") {
           task.internal_approved_by = null;
           task.client_approved_by = null;

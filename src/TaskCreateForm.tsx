@@ -48,6 +48,7 @@ import {
 import { TaskAudioList, useTaskAudios } from "./TaskAudios";
 import { audioTranscripts, audioWorking } from "./task-audio";
 import { requestTaskTitle } from "./task-title-request";
+import { suggestedChecklistTemplates, templateItemCount } from "./checklist";
 import { TASK_TITLE_WAIT_MS, fallbackTaskTitle } from "./task-title";
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 type Mutate = (name: string, args: Record<string, unknown>) => Promise<any>;
@@ -182,6 +183,14 @@ export function TaskCreateForm({
     why: string;
   } | null>(null);
   const [repeat, setRepeat] = useState<RecurrenceFrequency | "">("");
+  // Checklist: the models picked by hand (null follows the product's and the
+  // team's suggestions) and "só entregar com o checklist concluído".
+  const [pickedChecklists, setPickedChecklists] = useState<string[] | null>(
+    null,
+  );
+  const [checklistRequired, setChecklistRequired] = useState(false);
+  // Applied once per task, even when sending the attachments again.
+  const checklistsApplied = useRef("");
   const [showDetails, setShowDetails] = useState(false);
   const [detailsMounted, setDetailsMounted] = useState(false);
   const [createAnother, setCreateAnother] = useState(false);
@@ -312,6 +321,33 @@ export function TaskCreateForm({
     [data, contract, assignee, byTeam, team],
   );
   const [customValues, setCustomValues] = useState<Record<string, unknown>>({});
+  const checklistModels = useMemo(
+    () =>
+      (data.checklistTemplates ?? [])
+        .filter((t) => t.active)
+        .sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    [data.checklistTemplates],
+  );
+  const suggestedChecklists = useMemo(
+    () =>
+      contract && (!byTeam || team)
+        ? suggestedChecklistTemplates(
+            data,
+            contract,
+            byTeam ? { team } : { assignee },
+          ).map((t) => t.id)
+        : [],
+    [data, contract, byTeam, team, assignee],
+  );
+  const chosenChecklists = (pickedChecklists ?? suggestedChecklists).filter(
+    (id) => checklistModels.some((m) => m.id === id),
+  );
+  const toggleChecklist = (id: string, on: boolean) =>
+    setPickedChecklists(
+      on
+        ? [...chosenChecklists.filter((x) => x !== id), id]
+        : chosenChecklists.filter((x) => x !== id),
+    );
   const me = activeMembers.find((m) => m.user_id === user);
   // Assistente MAVI: lê o rascunho enquanto a pessoa escreve (desligado junto
   // com o módulo "Assistente MAVI" da pessoa).
@@ -408,6 +444,8 @@ export function TaskCreateForm({
     uploads.current = { pending: [] };
     setPresetTitle("");
     setRepeat("");
+    setPickedChecklists(null);
+    setChecklistRequired(false);
     setCustomValues({});
     setStart("");
     setClientApproval(false);
@@ -519,6 +557,20 @@ export function TaskCreateForm({
       );
       // The recorded audios go into the description of the task just saved.
       if (uploads.current.taskId) await audio.bindTo(uploads.current.taskId);
+      // The checklists picked here, and whether delivery waits for them.
+      const newTask = uploads.current.taskId;
+      if (
+        newTask &&
+        checklistsApplied.current !== newTask &&
+        (chosenChecklists.length || checklistRequired)
+      ) {
+        await mutate("apply_checklist_templates", {
+          p_task: newTask,
+          p_templates: chosenChecklists,
+          p_required: checklistRequired || null,
+        });
+        checklistsApplied.current = newTask;
+      }
       if (uploads.current.taskId) onCreated?.(uploads.current.taskId);
       rememberContract(contract);
       copilotFeedback.flush(
@@ -866,7 +918,16 @@ export function TaskCreateForm({
               <ChevronDown size={16} className={showDetails ? "open" : ""} />
               {showDetails ? "Ocultar detalhes" : "Adicionar detalhes"}
               {!showDetails && (
-                <small>prioridade, estimativa, repetição…</small>
+                <small>
+                  {chosenChecklists.length
+                    ? `checklist ${chosenChecklists
+                        .map(
+                          (id) =>
+                            `“${checklistModels.find((m) => m.id === id)?.name}”`,
+                        )
+                        .join(", ")} incluído · prioridade, estimativa…`
+                    : "prioridade, estimativa, repetição, checklist…"}
+                </small>
               )}
             </button>
             {detailsMounted && (
@@ -962,6 +1023,57 @@ export function TaskCreateForm({
                     </label>
                   </div>
                   {repeat && <RepeatHint frequency={repeat} due={due} />}
+                </section>
+                <section className="details-section" aria-label="Checklist">
+                  <h4>Checklist</h4>
+                  {checklistModels.length > 0 ? (
+                    <div
+                      className="checklist-create-models"
+                      role="group"
+                      aria-label="Modelos de checklist"
+                    >
+                      {checklistModels.map((m) => {
+                        const n = templateItemCount(m.items);
+                        return (
+                          <label className="checkbox-label" key={m.id}>
+                            <Checkbox
+                              checked={chosenChecklists.includes(m.id)}
+                              onCheckedChange={(v) =>
+                                toggleChecklist(m.id, v === true)
+                              }
+                            />
+                            {m.name}
+                            <small>
+                              {n} {n === 1 ? "item" : "itens"}
+                              {suggestedChecklists.includes(m.id) &&
+                                " · sugerido para este produto ou equipe"}
+                            </small>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <small className="checklist-create-hint">
+                      Os checklists são criados no painel Checklist da tarefa,
+                      depois de salvar. Gestores montam modelos em Templates de
+                      tarefa.
+                    </small>
+                  )}
+                  <label className="checkbox-label">
+                    <Checkbox
+                      checked={checklistRequired}
+                      onCheckedChange={(v) => setChecklistRequired(v === true)}
+                    />{" "}
+                    Só entregar com o checklist concluído
+                  </label>
+                  {checklistRequired && (
+                    <small className="checklist-create-hint" role="status">
+                      A tarefa só vai para Em validação ou Entregue com todos os
+                      itens marcados.
+                      {!chosenChecklists.length &&
+                        " Crie o checklist no painel da tarefa depois de salvar."}
+                    </small>
+                  )}
                 </section>
                 <section className="details-section" aria-label="Aprovação">
                   <h4>Aprovação</h4>
@@ -1108,7 +1220,7 @@ function RepeatHint({
         ? `, com prazo em ${dateLabel(firstDue)}`
         : ", com prazo no mesmo dia"}
       , e assim por diante até alguém parar a repetição. Anexos e imagens da
-      descrição não são copiados.
+      descrição não são copiados; o checklist é copiado sem as marcações.
     </small>
   );
 }

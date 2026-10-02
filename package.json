@@ -63,6 +63,7 @@
     "test:db:smart-due": "node scripts/test-smart-due.mjs",
     "test:db:due-assist": "node scripts/test-due-assist.mjs",
     "test:db:due-changes": "node scripts/test-task-due-changes.mjs",
+    "test:db:checklists": "node scripts/test-task-checklists.mjs",
     "test:db:replies": "node scripts/test-comment-replies.mjs",
     "test:db:suggestions": "node scripts/test-suggestions.mjs",
     "test:db:inbox": "node scripts/test-inbox-broadcast.mjs",

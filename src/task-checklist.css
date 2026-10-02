@@ -1,0 +1,366 @@
+/* Checklist nas tarefas (TaskChecklist.tsx, ChecklistTemplates.tsx). */
+.checklist-panel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+.checklist-rule {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfcf9;
+  color: #6e7b78;
+}
+.checklist-rule.on {
+  border-color: #d9eab9;
+  background: #f4faea;
+  color: #3d5a24;
+}
+.checklist-rule strong {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.checklist-rule small {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.checklist-overall {
+  display: grid;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.checklist-progress {
+  display: block;
+  height: 5px;
+  border-radius: 999px;
+  background: #eef1ef;
+  overflow: hidden;
+}
+.checklist-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #8fc75a;
+  transition: width 0.25s ease;
+}
+.checklist-progress.full > span {
+  background: #5fae3a;
+}
+.checklist-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+.checklist-card.finished {
+  background: #fbfdf8;
+}
+.checklist-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.checklist-head h4 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.checklist-head .icon-btn {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 7px;
+}
+.checklist-fold svg {
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+.checklist-fold svg.open {
+  transform: none;
+}
+.checklist-count {
+  flex: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.checklist-finished {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  color: #4d7a2e;
+}
+.checklist-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fdf3ef;
+  font-size: 0.78rem;
+  color: #7a3a26;
+}
+.checklist-confirm .btn {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
+.checklist-items,
+.checklist-subitems {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.checklist-subitems {
+  margin: 2px 0 2px 30px;
+  padding-left: 8px;
+  border-left: 2px solid #eef1ef;
+}
+.checklist-item.dragging {
+  opacity: 0.45;
+}
+.checklist-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 4px 4px 0;
+  border-radius: 7px;
+}
+.checklist-row:hover {
+  background: #f7f9f5;
+}
+.checklist-row .ui-checkbox {
+  flex: none;
+  margin-top: 2px;
+}
+.checklist-grip {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 22px;
+  color: #c3cbc8;
+  cursor: grab;
+  opacity: 0;
+}
+.checklist-row:hover .checklist-grip {
+  opacity: 1;
+}
+.checklist-title {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.checklist-title small {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-decoration: none;
+}
+.checklist-item.done > .checklist-row .checklist-text {
+  color: #8a9592;
+  text-decoration: line-through;
+  text-decoration-color: #c3cbc8;
+}
+.checklist-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  opacity: 0;
+}
+.checklist-row:hover .checklist-actions,
+.checklist-row:focus-within .checklist-actions {
+  opacity: 1;
+}
+.checklist-actions .icon-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: #8b9a96;
+}
+.checklist-actions .icon-btn:hover {
+  background: #eef3e7;
+  color: var(--ink);
+}
+.checklist-quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #a2aeab;
+}
+.checklist-quick .ui-input,
+.checklist-new .ui-input,
+.checklist-inline {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+}
+.checklist-quick .ui-input {
+  border-color: transparent;
+  background: transparent;
+}
+.checklist-quick .ui-input:hover,
+.checklist-quick .ui-input:focus {
+  border-color: var(--border);
+  background: #fff;
+}
+.checklist-add {
+  padding-left: 20px;
+}
+.checklist-add.sub {
+  padding-left: 0;
+}
+.checklist-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #8b9a96;
+}
+.checklist-new .btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+}
+.checklist-model-pick {
+  display: grid;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.checklist-empty {
+  margin: 4px 0;
+  font-size: 0.8rem;
+}
+.checklist-log-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font-size: 0.75rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+.checklist-log-toggle:hover,
+.checklist-log-toggle:focus-visible {
+  color: var(--ink);
+}
+.checklist-log {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid #eef1ef;
+  list-style: none;
+}
+.checklist-log li {
+  display: grid;
+  gap: 1px;
+  font-size: 0.76rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.checklist-log small {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+/* Nova tarefa › Adicionar detalhes › Checklist */
+.checklist-create-models {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.checklist-create-models .checkbox-label small {
+  margin-left: 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.checklist-create-hint {
+  display: block;
+  margin: 4px 0 8px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+/* Modelos (Templates de tarefa) */
+.checklist-model-editor .ui-textarea {
+  font-family: inherit;
+  line-height: 1.5;
+}
+.checklist-model-scope {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.checklist-model-scope legend {
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.checklist-model-preview {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfcf9;
+  font-size: 0.8rem;
+}
+.checklist-model-preview > span {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.checklist-model-preview ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.checklist-model-preview ul ul {
+  margin: 0;
+  color: #5d6a67;
+}
+
+@media (hover: none) {
+  .checklist-actions,
+  .checklist-grip {
+    opacity: 1;
+  }
+}
+#config-checklists {
+  margin-top: 18px;
+}

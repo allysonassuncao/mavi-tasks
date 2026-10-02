@@ -10,6 +10,7 @@ import {
 import {
   lazy,
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -22,6 +23,7 @@ import {
   CircleDot,
   Download,
   Flag,
+  ListChecks,
   MessageSquare,
   Paperclip,
   Play,
@@ -58,6 +60,7 @@ import {
   type Attachment,
   type TaskEvent,
   type TaskRecurrence,
+  type TaskChecklist,
   type ProjectApprover,
   type Status,
   priorities,
@@ -87,7 +90,18 @@ import {
 import { StatusMenu, StatusPill, type StatusChoice } from "./StatusMenu";
 import { useTaskSeconds } from "./useTaskTime";
 import { supabase } from "./supabase";
-import { rpc, taskExtras, invalidateTaskExtras } from "./api";
+import {
+  rpc,
+  taskExtras,
+  invalidateTaskExtras,
+  checklistHistory,
+} from "./api";
+import { TaskChecklistPanel } from "./TaskChecklist";
+import {
+  checklistGateMessage,
+  checklistLogLabel,
+  openChecklistItems,
+} from "./checklist";
 import { getGcsPublicUrl } from "./gcs";
 import type { DemoStore } from "./demo-store";
 import { RichTextContent } from "./RichTextContent";
@@ -560,6 +574,9 @@ function eventLabel(e: TaskEvent) {
   if (e.action === "due_changed")
     return `Prazo alterado · ${dateLabel(String(e.detail.old_due))} → ${dateLabel(String(e.detail.new_due))}`;
   if (e.action === "bulk_undone") return "Alteração em massa desfeita";
+  // Checklist (migração 20270220090000): o principal do registro dele.
+  if (e.action === "checklist")
+    return checklistLogLabel({ action: String(e.detail.kind), detail: e.detail });
   // Prioridades (migração 20270130090000): quem mudou vai na linha de baixo.
   if (e.action === "priority")
     return e.detail.system
@@ -805,6 +822,8 @@ export function TaskDetail({
       recurrence?: TaskRecurrence | null;
       /** Da descrição e dos comentários (migration task_audio). */
       audios?: TaskAudio[];
+      /** Os checklists da tarefa (migration task_checklists). */
+      checklists?: TaskChecklist[];
     }>({ comments: [], attachments: [], events: [] }),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false),
@@ -959,6 +978,33 @@ export function TaskDetail({
       // Blocked storage: the choice just won't persist.
     }
   }
+  const openItems = openChecklistItems(extras.checklists);
+  // Com "Só entregar com o checklist concluído", Em validação e Entregue
+  // esperam os itens (mavi_private.checklist_gate diz o mesmo).
+  const checklistGate =
+    task.checklist_required && openItems > 0
+      ? checklistGateMessage(openItems)
+      : undefined;
+  /** A checklist function: demo store or database; the panel gets the lists. */
+  async function runChecklist(name: string, args: Record<string, unknown>) {
+    const lists = (
+      demo ? demoStore.mutate(name, args) : await rpc(name, args)
+    ) as TaskChecklist[];
+    invalidateTaskExtras(task.id);
+    setExtras((x) => ({ ...x, checklists: lists }));
+    // The Histórico picks up what was recorded.
+    if (demo) setLocalRefresh((v) => v + 1);
+    return lists;
+  }
+  const loadChecklistHistory = useCallback(
+    () =>
+      demo
+        ? Promise.resolve(
+            demoStore.checklistLog.filter((e) => e.task_id === task.id),
+          )
+        : checklistHistory(task.id),
+    [demo, demoStore, task.id],
+  );
   const panels = [
     {
       id: "comments",
@@ -966,6 +1012,8 @@ export function TaskDetail({
       icon: MessageSquare,
       count: extras.comments.length,
     },
+    // Itens em aberto, como na entrega exigida.
+    { id: "checklist", label: "Checklist", icon: ListChecks, count: openItems },
     { id: "activity", label: "Histórico", icon: History, count: 0 },
     {
       id: "files",
@@ -1010,7 +1058,25 @@ export function TaskDetail({
       setExtras({
         comments: demoStore.comments.filter((c) => c.task_id === task.id),
         attachments: [],
-        events: demoStore.events.filter((e) => e.task_id === task.id),
+        // O principal do registro do checklist entra no histórico, como em
+        // public.task_extras.
+        events: [
+          ...demoStore.events.filter((e) => e.task_id === task.id),
+          ...demoStore.checklistLog
+            .filter(
+              (e) =>
+                e.task_id === task.id &&
+                !["item_added", "item_edited", "checklist_renamed"].includes(
+                  e.action,
+                ),
+            )
+            .map((e) => ({
+              ...e,
+              action: "checklist",
+              detail: { ...e.detail, kind: e.action },
+            })),
+        ].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+        checklists: demoStore.checklistsOf(task.id),
         recurrence: demoStore.recurrences.find(
           (r) => r.id === task.recurrence_id,
         ),
@@ -1083,14 +1149,18 @@ export function TaskDetail({
               ? acts.reopen.blocked
               : "Sem permissão para reabrir"
           : acts.move
-            ? undefined
+            ? status === "review" && task.status !== "review"
+              ? checklistGate
+              : undefined
             : moveHint,
     })),
     {
       status: "done" as Status,
       disabled:
-        task.status === "done" || acts.approveInternal || acts.deliver
+        task.status === "done"
           ? undefined
+          : acts.approveInternal || acts.deliver
+          ? checklistGate
           : review.required
             ? task.status === "review" && task.internal_approved_by
               ? "Aguardando a aprovação do cliente"
@@ -1111,6 +1181,12 @@ export function TaskDetail({
   }, [action, target]);
   function pickStatus(next: Status) {
     setError("");
+    if (checklistGate && next !== task.status && (next === "review" || next === "done")) {
+      setError(checklistGate);
+      setTab("checklist");
+      togglePanel(true);
+      return;
+    }
     if (next === "done") {
       if (task.status === "done") return;
       // Whoever created the task for themselves just delivers it.
@@ -2237,6 +2313,23 @@ export function TaskDetail({
                     </p>
                   )}
                 </div>
+              ) : tab === "checklist" ? (
+                <TaskChecklistPanel
+                  task={task}
+                  data={data}
+                  user={user}
+                  company={task.company_id}
+                  lists={extras.checklists ?? []}
+                  canManage={canEdit}
+                  isLeader={isLeader}
+                  run={runChecklist}
+                  mutate={mutate}
+                  notify={notify}
+                  loadHistory={loadChecklistHistory}
+                  onLists={(checklists) =>
+                    setExtras((x) => ({ ...x, checklists }))
+                  }
+                />
               ) : tab === "drive" && n.client ? (
                 <TaskDrive
                   root={{ client: n.client.id }}
@@ -2346,6 +2439,12 @@ export function TaskDetail({
                         {e.action === "priority" && !e.detail.system && (
                           <span className="event-reason">
                             {isPrioritized(String(e.detail.to)) ? "Marcada" : "Alterada"} por{" "}
+                            <span data-person={e.actor_id}>{memberName(e.actor_id)}</span>
+                          </span>
+                        )}
+                        {e.action === "checklist" && (
+                          <span className="event-reason">
+                            por{" "}
                             <span data-person={e.actor_id}>{memberName(e.actor_id)}</span>
                           </span>
                         )}

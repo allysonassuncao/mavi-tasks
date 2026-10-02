@@ -441,6 +441,38 @@ export function demoSnapshot(): Snapshot {
         ],
       },
     ],
+    // Modelos de checklist: o de Make Ads já vem marcado na Nova tarefa.
+    checklistTemplates: [
+      {
+        id: "chk-ads",
+        company_id,
+        name: "Entrega de criativos",
+        product_id: "pd-1",
+        team_id: null,
+        active: true,
+        items: [
+          {
+            title: "Conferir o briefing",
+            children: [{ title: "Público" }, { title: "Oferta e CTA" }],
+          },
+          { title: "Exportar nos formatos 1:1, 4:5 e 9:16" },
+          { title: "Subir no Drive do cliente" },
+        ],
+      },
+      {
+        id: "chk-review",
+        company_id,
+        name: "Revisão antes de enviar",
+        product_id: null,
+        team_id: null,
+        active: true,
+        items: [
+          { title: "Ortografia" },
+          { title: "Cores e fontes da marca" },
+          { title: "Links funcionando" },
+        ],
+      },
+    ],
     hours: tasks.slice(0, 6).map((t, i) => ({
       id: `time-${i}`,
       company_id,

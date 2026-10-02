@@ -139,6 +139,8 @@ export interface Task {
   participant_ids?: string[];
   /** Template fields filled in when the task was created (its own copy). */
   custom_fields?: TaskCustomField[];
+  /** Só vai para Em validação ou Entregue com o checklist concluído (migration task_checklists). */
+  checklist_required?: boolean;
   /** The repetition this task started or was opened by (see TaskRecurrence). */
   recurrence_id?: string | null;
   /** False when the due date came from a rule (TaskDueRule), so it follows it. */
@@ -300,6 +302,8 @@ export interface Snapshot {
   clientTeams: { company_id: string; client_id: string; team_id: string }[];
   /** Custom fields for new tasks, by product and/or team (see TaskTemplate). */
   taskTemplates: TaskTemplate[];
+  /** Ready-made checklists (see ChecklistTemplate). */
+  checklistTemplates?: ChecklistTemplate[];
   /** Where suggestions become tasks (one row at most; see Suggestions). */
   suggestionSettings?: SuggestionSettings[];
   /** Default due dates, by project, client, product, team and person. */
@@ -404,6 +408,61 @@ export interface TaskTemplate {
   created_by?: string;
   created_at?: string;
   updated_at?: string;
+}
+/** An item of a checklist model; subitems go one level deep. */
+export interface ChecklistTemplateItem {
+  title: string;
+  children?: { title: string }[];
+}
+/**
+ * A ready-made checklist: anyone applies it to a task; leaders build it.
+ * With a product and/or team, "Nova tarefa" comes with it already checked.
+ */
+export interface ChecklistTemplate {
+  id: string;
+  company_id: string;
+  name: string;
+  items: ChecklistTemplateItem[];
+  product_id: string | null;
+  team_id: string | null;
+  active: boolean;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+/** A line of a task's checklist; parent_id makes it a subitem. */
+export interface ChecklistItem {
+  id: string;
+  parent_id: string | null;
+  title: string;
+  position: number;
+  done: boolean;
+  done_by: string | null;
+  done_at: string | null;
+  created_by: string;
+  created_at: string;
+}
+/** One of a task's named checklists, with its items (flat, in order). */
+export interface TaskChecklist {
+  id: string;
+  task_id: string;
+  title: string;
+  position: number;
+  template_id: string | null;
+  created_by: string;
+  created_at: string;
+  completed_by: string | null;
+  completed_at: string | null;
+  items: ChecklistItem[];
+}
+/** A line of the checklist's durable record (task_checklist_log). */
+export interface ChecklistLogEntry {
+  id: string;
+  task_id: string;
+  actor_id: string;
+  action: string;
+  detail: Record<string, unknown>;
+  created_at: string;
 }
 /** A value as stored: text, number, date (YYYY-MM-DD), options or yes. */
 export type CustomValue = string | number | boolean | string[] | null;

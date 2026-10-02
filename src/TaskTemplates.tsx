@@ -11,6 +11,7 @@ import {
 import { Modal } from "./components";
 import { Button, Checkbox, Input, Select, SelectOption, Textarea } from "./ui";
 import { CustomFieldsForm } from "./CustomFieldsForm";
+import { ChecklistTemplatesSection } from "./ChecklistTemplates";
 import { fieldIdFrom, fieldTypes, hasOptions } from "./templateFields";
 import type {
   CustomFieldType,
@@ -81,91 +82,99 @@ export function TaskTemplatesPanel({
     a.name.localeCompare(b.name, "pt-BR"),
   );
   return (
-    <section className="panel task-templates" id="config-templates">
-      <div className="panel-heading">
-        <div>
-          <h2>Templates de tarefa</h2>
-          <p>
-            Campos extras pedidos na criação, conforme o produto e a equipe do
-            responsável
-          </p>
-        </div>
-        <Button className="btn secondary" onClick={() => setEditing("new")}>
-          <Plus size={17} /> Novo template
-        </Button>
-      </div>
-      {templates.length ? (
-        templates.map((t) => (
-          <div className="template-row" key={t.id}>
-            <ListChecks size={18} aria-hidden="true" />
-            <div>
-              <strong>{t.name}</strong>
-              <small>
-                {scopeOf(data, t)} · {t.fields.length}{" "}
-                {t.fields.length === 1 ? "campo" : "campos"}
-                {t.fields.some((f) => f.required) &&
-                  ` (${t.fields.filter((f) => f.required).length} obrigatório${t.fields.filter((f) => f.required).length > 1 ? "s" : ""})`}
-              </small>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={t.active}
-              aria-label={`${t.active ? "Desativar" : "Ativar"} template ${t.name}`}
-              title={
-                t.active
-                  ? "Ativo: aparece ao criar novas tarefas. Clique para desativar."
-                  : "Inativo: não aparece em novas tarefas. Clique para ativar."
-              }
-              className={`template-switch${t.active ? " on" : ""}`}
-              disabled={toggling === t.id}
-              onClick={() => void toggle(t)}
-            >
-              <span aria-hidden="true" />
-              {t.active ? "Ativo" : "Inativo"}
-            </button>
-            <Button
-              className="icon-btn"
-              aria-label={`Editar template ${t.name}`}
-              title="Editar template"
-              onClick={() => setEditing(t)}
-            >
-              <Pencil size={15} />
-            </Button>
+    <>
+      <section className="panel task-templates" id="config-templates">
+        <div className="panel-heading">
+          <div>
+            <h2>Templates de tarefa</h2>
+            <p>
+              Campos extras pedidos na criação, conforme o produto e a equipe do
+              responsável
+            </p>
           </div>
-        ))
-      ) : (
-        <p className="template-empty">
-          Nenhum template ainda. Crie um para pedir informações específicas —
-          link do briefing, formato, quantidade de peças — ao criar tarefas de
-          um produto ou de uma equipe.
-        </p>
-      )}
-      {error && (
-        <p className="form-error template-error" role="alert">
-          {error}
-        </p>
-      )}
-      {editing && (
-        <TemplateBuilder
-          data={data}
-          template={editing === "new" ? undefined : editing}
-          onClose={() => setEditing(null)}
-          onSave={async (t) => {
-            await save(t);
-            notify(t.id ? "Template atualizado." : "Template criado.");
-            setEditing(null);
-          }}
-          onDelete={async (id) => {
-            await mutate("delete_task_template", { p_template: id });
-            notify(
-              "Template excluído. As tarefas já criadas mantêm seus campos.",
-            );
-            setEditing(null);
-          }}
-        />
-      )}
-    </section>
+          <Button className="btn secondary" onClick={() => setEditing("new")}>
+            <Plus size={17} /> Novo template
+          </Button>
+        </div>
+        {templates.length ? (
+          templates.map((t) => (
+            <div className="template-row" key={t.id}>
+              <ListChecks size={18} aria-hidden="true" />
+              <div>
+                <strong>{t.name}</strong>
+                <small>
+                  {scopeOf(data, t)} · {t.fields.length}{" "}
+                  {t.fields.length === 1 ? "campo" : "campos"}
+                  {t.fields.some((f) => f.required) &&
+                    ` (${t.fields.filter((f) => f.required).length} obrigatório${t.fields.filter((f) => f.required).length > 1 ? "s" : ""})`}
+                </small>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={t.active}
+                aria-label={`${t.active ? "Desativar" : "Ativar"} template ${t.name}`}
+                title={
+                  t.active
+                    ? "Ativo: aparece ao criar novas tarefas. Clique para desativar."
+                    : "Inativo: não aparece em novas tarefas. Clique para ativar."
+                }
+                className={`template-switch${t.active ? " on" : ""}`}
+                disabled={toggling === t.id}
+                onClick={() => void toggle(t)}
+              >
+                <span aria-hidden="true" />
+                {t.active ? "Ativo" : "Inativo"}
+              </button>
+              <Button
+                className="icon-btn"
+                aria-label={`Editar template ${t.name}`}
+                title="Editar template"
+                onClick={() => setEditing(t)}
+              >
+                <Pencil size={15} />
+              </Button>
+            </div>
+          ))
+        ) : (
+          <p className="template-empty">
+            Nenhum template ainda. Crie um para pedir informações específicas —
+            link do briefing, formato, quantidade de peças — ao criar tarefas de
+            um produto ou de uma equipe.
+          </p>
+        )}
+        {error && (
+          <p className="form-error template-error" role="alert">
+            {error}
+          </p>
+        )}
+        {editing && (
+          <TemplateBuilder
+            data={data}
+            template={editing === "new" ? undefined : editing}
+            onClose={() => setEditing(null)}
+            onSave={async (t) => {
+              await save(t);
+              notify(t.id ? "Template atualizado." : "Template criado.");
+              setEditing(null);
+            }}
+            onDelete={async (id) => {
+              await mutate("delete_task_template", { p_template: id });
+              notify(
+                "Template excluído. As tarefas já criadas mantêm seus campos.",
+              );
+              setEditing(null);
+            }}
+          />
+        )}
+      </section>
+      <ChecklistTemplatesSection
+        data={data}
+        company={company}
+        mutate={mutate}
+        notify={notify}
+      />
+    </>
   );
 }
 
