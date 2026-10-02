@@ -24,3 +24,5 @@ gcs-credentials.json
 # scripts/import-maso-tasks.mjs (tarefas de clientes).
 /maso-tarefas/
 /maso-tarefas-import*/
+# SQL gerado por scripts/import-maso-media.mjs (entradas de mídia dos clientes).
+/maso-midia-import*/

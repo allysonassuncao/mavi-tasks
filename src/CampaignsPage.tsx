@@ -851,13 +851,13 @@ function CampaignList({
                           {product_name || "Produto"}
                         </small>
                       </td>
-                      <td data-label="M">
+                      <td data-label="Plataforma">
                         <PlatformLabel platform={campaign.platform} />
                       </td>
-                      <td data-label="Meta do ciclo">
+                      <td data-label="Status">
                         <StatusChip status={campaign.status} />
                       </td>
-                      <td data-label="Orçamento diário">
+                      <td data-label="Ciclo atual" className="stack-full">
                         {cycle && (
                           <span className="campaign-period">
                             {shortDate(cycle.start_date)} a{" "}
@@ -876,7 +876,7 @@ function CampaignList({
                       <td data-label="Verba do ciclo">
                         {cycle ? shown(cycle.budget, cycle.multiplier) : "—"}
                       </td>
-                      <td data-label="Ciclo atual" className="stack-full">
+                      <td data-label="Orçamento diário">
                         <DailyBudget
                           cycle={cycle}
                           spent={spent}
@@ -884,7 +884,7 @@ function CampaignList({
                           withM={withM}
                         />
                       </td>
-                      <td data-label="Status">
+                      <td data-label="Meta do ciclo">
                         {cycle ? (
                           <>
                             {cycle.goal_results}{" "}
@@ -900,7 +900,7 @@ function CampaignList({
                           "—"
                         )}
                       </td>
-                      <td data-label="Plataforma">
+                      <td data-label="M">
                         {cycle ? cycle.multiplier.toLocaleString("pt-BR") : "—"}
                       </td>
                     </tr>
