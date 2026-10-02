@@ -594,4 +594,154 @@ await check("no teto do mês, a MAVI não escreve", async () => {
   await rpc("set_personal_radar_cap", [A, member, null]);
 });
 
+// ------------------------------------------------------------ Fase 3: aprendizado, Jev e autonomia
+let detectLesson;
+let replyLesson;
+await check("aprender: os retornos da pessoa viram lições dela (só uma vez)", async () => {
+  await sql(`update personal_radar_learning set dirty_at = now() - interval '1 hour'`);
+  await as(null);
+  let claim = await rpc("ai_personal_radar_learning_claim", [SECRET]);
+  // A primeira da fila: quem tem retornos novos (o Bruno tem vários).
+  while (claim && claim.user !== member) {
+    await as(null);
+    await rpc("ai_personal_radar_learning_store", [SECRET, A, claim.user, "[]", claim.feedback.map((f) => f.id), "{}"]);
+    claim = await rpc("ai_personal_radar_learning_claim", [SECRET]);
+  }
+  assert.ok(claim, "o Bruno tem retornos para aprender");
+  assert.equal(claim.person.name, "Bruno Tráfego");
+  const actions = claim.feedback.map((f) => f.action);
+  assert.ok(actions.includes("edited") && actions.includes("rejected") && actions.includes("training"));
+  const edited = claim.feedback.find((f) => f.action === "edited");
+  assert.match(edited.final, /R\$ 12/);
+  const n = await rpc("ai_personal_radar_learning_store", [SECRET, A, member, JSON.stringify([
+    { op: "add", kind: "detection", text: "Pedidos de arte e criativo são da Duda, não seus.", feedback: [claim.feedback[0].id] },
+    { op: "add", kind: "reply", text: "Cite o CPL sempre com o valor e o período.", feedback: [edited.id] },
+    { op: "add", kind: "reply", text: "Cite o CPL sempre com o valor e o período." },
+    { op: "add", kind: "outro", text: "Tipo inválido não entra." },
+    { op: "update", id: uid(9999), text: "Não existe." },
+  ]), claim.feedback.map((f) => f.id), JSON.stringify({ model: "claude-haiku-4-5", input: 3000, cost: 0.004 })]);
+  assert.equal(n, 2);
+  assert.equal(await rpc("ai_personal_radar_learning_claim", [SECRET]), null);
+  const lessons = await sql(`select id, kind, origin, cardinality(feedback) as fb from personal_radar_lessons where user_id = $1 order by kind`, [member]);
+  assert.deepEqual(lessons.map((l) => [l.kind, l.origin, l.fb]), [["detection", "mavi", 1], ["reply", "mavi", 1]]);
+  detectLesson = lessons[0].id;
+  replyLesson = lessons[1].id;
+  const [u] = await sql(`select user_id, cost_usd::float as cost from ai_usage where kind = 'learning'`);
+  assert.deepEqual([u.user_id, u.cost], [member, 0.004]);
+  // Um retorno novo suja a fila de novo.
+  await as(member);
+  await rpc("personal_radar_reply_feedback", [A, cpl, "training", "Chame o cliente pelo primeiro nome.", null]);
+  const [q] = await sql(`select dirty_at > learned_at as dirty from personal_radar_learning where user_id = $1`, [member]);
+  assert.equal(q.dirty, true);
+});
+
+await check("as lições entram na leitura dos grupos e na resposta", async () => {
+  await as(null);
+  const byPerson = await rpc("ai_personal_radar_lessons", [SECRET, A, [member, other], client]);
+  assert.deepEqual(byPerson[member].map((l) => l.text), ["Pedidos de arte e criativo são da Duda, não seus."]);
+  assert.deepEqual(byPerson[other], []);
+  await as(member);
+  assert.deepEqual((await rpc("personal_radar_reply_lessons", [A, client])).map((l) => l.text), ["Cite o CPL sempre com o valor e o período."]);
+});
+
+await check("a pessoa edita, pausa e exclui as suas; a MAVI não mexe mais nelas", async () => {
+  await as(member);
+  const edited = await rpc("save_personal_radar_lesson", [A, replyLesson, "reply", "Cite o CPL com o valor, o período e a meta."]);
+  assert.deepEqual([edited.origin, edited.status], ["person", "active"]);
+  await rejects(() => rpc("save_personal_radar_lesson", [A, null, "reply", "oi"]), /5 a 400/);
+  const own = await rpc("save_personal_radar_lesson", [A, null, "reply", "Não use emojis com a Clínica Vida."]);
+  assert.equal(own.origin, "person");
+  await rpc("set_personal_radar_lesson_status", [A, own.id, "paused"]);
+  await as(null);
+  await rpc("ai_personal_radar_learning_store", [SECRET, A, member, JSON.stringify([
+    { op: "update", id: replyLesson, text: "A MAVI tentando mudar o que a pessoa escreveu." },
+    { op: "retire", id: own.id },
+  ]), [], "{}"]);
+  const [l] = await sql(`select text from personal_radar_lessons where id = $1`, [replyLesson]);
+  assert.equal(l.text, "Cite o CPL com o valor, o período e a meta.");
+  assert.equal((await sql(`select status from personal_radar_lessons where id = $1`, [own.id]))[0].status, "paused");
+  await as(member);
+  const list = await rpc("personal_radar_lessons", [A, null]);
+  assert.equal(list.mine.length, 3);
+  assert.equal(list.can_promote, false);
+  // A lição de outra pessoa não se edita.
+  await as(other);
+  await rejects(() => rpc("save_personal_radar_lesson", [A, replyLesson, "reply", "Mexendo no do Bruno."]), /não encontrada/);
+  await rejects(() => rpc("set_personal_radar_lesson_status", [A, replyLesson, "dismissed"]), /não encontrada/);
+});
+
+let promoted;
+await check("promover para a equipe: só líderes; o Jev confere antes de valer", async () => {
+  await as(member);
+  await rejects(() => rpc("promote_personal_radar_lesson", [A, replyLesson, "team", team]), /administradores e gestores/);
+  await as(manager);
+  const list = await rpc("personal_radar_lessons", [A, member]);
+  assert.equal(list.can_promote, true);
+  assert.deepEqual(list.teams.map((t) => t.name), ["Tráfego"]);
+  promoted = await rpc("promote_personal_radar_lesson", [A, replyLesson, "team", team]);
+  assert.deepEqual([promoted.scope, promoted.status, promoted.team.name], ["team", "checking", "Tráfego"]);
+  await rejects(() => rpc("promote_personal_radar_lesson", [A, replyLesson, "team", team]), /já foi promovida/);
+  // Esperando o Jev, não vale para ninguém.
+  await as(other);
+  assert.deepEqual(await rpc("personal_radar_reply_lessons", [A, client]), []);
+  await as(null);
+  const c = await rpc("ai_personal_radar_check_claim", [SECRET]);
+  assert.deepEqual([c.id, c.scope, c.target, c.kind], [promoted.id, "team", "Tráfego", "reply"]);
+  assert.equal(c.jev, null); // sem Jev cadastrado: o worker põe em uso sem conferir
+  assert.equal(await rpc("ai_personal_radar_check_claim", [SECRET]), null);
+  await rpc("ai_personal_radar_check_store", [SECRET, promoted.id, true, null, "{}"]);
+  await as(other);
+  assert.deepEqual((await rpc("personal_radar_reply_lessons", [A, client])).map((l) => [l.scope, l.text]),
+    [["team", "Cite o CPL com o valor, o período e a meta."]]);
+  const shared = (await rpc("personal_radar_lessons", [A, null])).shared;
+  assert.deepEqual(shared.map((l) => l.scope), ["team"]);
+});
+
+await check("recusada pelo Jev: o líder vê o motivo e decide; editar volta para a conferência", async () => {
+  await as(admin);
+  const toClient = await rpc("promote_personal_radar_lesson", [A, detectLesson, "client", client]);
+  await as(null);
+  await rpc("ai_personal_radar_check_claim", [SECRET]);
+  await rpc("ai_personal_radar_check_store", [SECRET, toClient.id, false, "Fala de uma pessoa específica, não do cliente.",
+    JSON.stringify({ model: "~typesafe/jev-latest", input: 500, cost: 0.00002 })]);
+  await as(admin);
+  let l = (await rpc("personal_radar_lessons", [A, null])).shared.find((x) => x.id === toClient.id);
+  assert.deepEqual([l.status, l.check_note], ["refused", "Fala de uma pessoa específica, não do cliente."]);
+  l = await rpc("set_personal_radar_lesson_status", [A, toClient.id, "active"]);
+  assert.deepEqual([l.status, l.check_note], ["active", "Posta em uso por um líder."]);
+  l = await rpc("save_personal_radar_lesson", [A, toClient.id, "detection", "Pedidos de arte deste cliente são da equipe de criação."]);
+  assert.deepEqual([l.status, l.origin], ["checking", "leader"]);
+  // A original mostra para onde foi promovida.
+  await as(member);
+  const mine = (await rpc("personal_radar_lessons", [A, null])).mine.find((x) => x.id === detectLesson);
+  assert.deepEqual(mine.promoted.map((p) => p.scope), ["client"]);
+});
+
+await check("autonomia: a taxa de copiadas sem edição por tipo e a regra da pessoa", async () => {
+  await as(member);
+  let a = await rpc("personal_radar_autonomy", [A, null]);
+  const complaint = a.find((k) => k.kind === "complaint");
+  assert.deepEqual([complaint.decided, complaint.edited, complaint.rejected, complaint.ready], [2, 1, 1, false]);
+  await sql(
+    `insert into personal_radar_feedback(company_id, item_id, user_id, action, snapshot)
+     select $1, $2, $3, 'approved', '{"kind":"complaint"}' from generate_series(1, 18)`,
+    [A, cpl, member],
+  );
+  a = await rpc("personal_radar_autonomy", [A, null]);
+  assert.deepEqual([a.find((k) => k.kind === "complaint").rate, a.find((k) => k.kind === "complaint").ready], [0.9, true]);
+  a = await rpc("set_personal_radar_autonomy", [A, "complaint", true, 30, 0.95, 10]);
+  assert.equal(a.find((k) => k.kind === "complaint").ready, false);
+  await rejects(() => rpc("set_personal_radar_autonomy", [A, "complaint", true, 2, 0.95, 10]), /7 a 180/);
+  // O gestor vê os números do liderado.
+  await as(manager);
+  assert.equal((await rpc("personal_radar_autonomy", [A, member])).find((k) => k.kind === "complaint").decided, 20);
+  await as(other);
+  await rejects(() => rpc("personal_radar_autonomy", [A, member]), /Sem permissão/);
+});
+
+await check("Quem usa qual modelo: a conferência do Radar pessoal só aceita o Jev", async () => {
+  await as(admin);
+  await rejects(() => rpc("ai_set_route", [A, "feature", null, uid(800), "claude-haiku-4-5", "personal_radar_check"]), /Jev/);
+});
+
 console.log(`\n${passed} verificações do Radar pessoal passaram.`);

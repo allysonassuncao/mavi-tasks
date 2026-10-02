@@ -664,6 +664,145 @@
   color: #a35b00;
 }
 
+/* Aprendizado */
+.pradar-ready {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #263334;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.pradar-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pradar-lessons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pradar-lesson {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
+.pradar-lesson p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+.pradar-lesson.status-paused p,
+.pradar-lesson.status-dismissed p {
+  color: var(--muted);
+}
+.pradar-lesson.status-dismissed p:not(.pradar-lesson-note) {
+  text-decoration: line-through;
+}
+.pradar-lesson .pradar-lesson-note {
+  font-size: 0.74rem;
+}
+.pradar-lesson-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 0.72rem;
+}
+.pradar-lesson-kind {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.pradar-lesson-kind.k-detection {
+  background: #e7f0fb;
+  color: #1f5fa8;
+}
+.pradar-lesson-kind.k-reply {
+  background: #efeafb;
+  color: #4a3aa7;
+}
+.pradar-lesson-where {
+  font-weight: 700;
+}
+.pradar-lesson-status {
+  font-weight: 600;
+}
+.pradar-lesson-status.s-active {
+  color: #2f7f52;
+}
+.pradar-lesson-status.s-checking {
+  color: #a35b00;
+}
+.pradar-lesson-status.s-refused {
+  color: #b23a2a;
+}
+.pradar-lesson-status.s-paused,
+.pradar-lesson-status.s-dismissed {
+  color: var(--muted);
+}
+.pradar-dismissed summary {
+  cursor: pointer;
+  color: #57645f;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.pradar-dismissed[open] summary {
+  margin-bottom: 8px;
+}
+.pradar-empty-note {
+  margin: 0;
+  font-size: 0.8rem;
+}
+.pradar-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.pradar-autonomy td:last-child {
+  width: auto;
+}
+.pradar-autonomy .pradar-link {
+  display: inline;
+  margin-left: 6px;
+}
+.pradar-rule {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pradar-rule label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+}
+.pradar-rule .pradar-num {
+  width: 64px;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 1px solid #dfe5e3;
+  border-radius: 6px;
+  background: #fff;
+}
+.pradar-rule input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
 @media (max-width: 720px) {
   .pradar-head {
     align-items: stretch;

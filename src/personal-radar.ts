@@ -361,6 +361,111 @@ export async function createLink(company: string, a: ReplyAction): Promise<strin
   return reportUrl(report.link.token);
 }
 
+// ------------------------------------------------------------ aprendizado
+export type LessonKind = "detection" | "reply";
+export const LESSON_KIND_LABEL: Record<LessonKind, string> = {
+  detection: "O que é comigo",
+  reply: "Como responder",
+};
+export type LessonStatus = "active" | "paused" | "dismissed" | "checking" | "refused";
+export const LESSON_STATUS_LABEL: Record<LessonStatus, string> = {
+  active: "Em uso",
+  paused: "Pausada",
+  dismissed: "Excluída",
+  checking: "O Jev está conferindo",
+  refused: "Recusada pelo Jev",
+};
+export type Lesson = {
+  id: string;
+  scope: "person" | "team" | "client";
+  kind: LessonKind;
+  text: string;
+  status: LessonStatus;
+  origin: "mavi" | "person" | "leader";
+  check_note?: string;
+  checked_at?: string;
+  updated_at: string;
+  evidence: number;
+  user?: { id: string; name: string };
+  team?: { id: string; name: string };
+  client?: { id: string; name: string };
+  promoted?: { scope: "team" | "client"; status: LessonStatus }[];
+};
+export type LessonsView = {
+  mine: Lesson[];
+  shared: Lesson[];
+  can_edit: boolean;
+  can_promote: boolean;
+  teams: { id: string; name: string }[];
+  clients: { id: string; name: string }[];
+};
+export type AutonomyRow = {
+  kind: PersonalKind;
+  enabled: boolean;
+  days: number;
+  min_rate: number;
+  min_count: number;
+  decided: number;
+  approved: number;
+  edited: number;
+  rejected: number;
+  rate: number | null;
+  ready: boolean;
+};
+
+export async function loadLessons(company: string, user: string | null) {
+  if (offline(company)) return demoLessons();
+  return rpc<LessonsView>("personal_radar_lessons", { p_company: company, p_user: user });
+}
+export async function saveLesson(company: string, id: string | null, kind: LessonKind, text: string) {
+  if (offline(company)) {
+    const l = id ? demo.lessons.find((x) => x.id === id) : undefined;
+    if (l) Object.assign(l, { text, kind, origin: l.scope === "person" ? "person" : "leader", updated_at: new Date().toISOString() });
+    else
+      demo.lessons.unshift({ id: `demo-l${Date.now()}`, scope: "person", kind, text, status: "active", origin: "person", updated_at: new Date().toISOString(), evidence: 0 });
+    return;
+  }
+  await rpc("save_personal_radar_lesson", { p_company: company, p_id: id, p_kind: kind, p_text: text });
+}
+export async function setLessonStatus(company: string, id: string, status: "active" | "paused" | "dismissed") {
+  if (offline(company)) {
+    const l = demo.lessons.find((x) => x.id === id);
+    if (l) l.status = status;
+    return;
+  }
+  await rpc("set_personal_radar_lesson_status", { p_company: company, p_id: id, p_status: status });
+}
+export async function promoteLesson(company: string, id: string, scope: "team" | "client", target: string) {
+  if (offline(company)) {
+    const l = demo.lessons.find((x) => x.id === id)!;
+    const where = (scope === "team" ? demoLessons().teams : demoLessons().clients).find((x) => x.id === target);
+    demo.lessons.push({ ...l, id: `demo-p${Date.now()}`, scope, origin: "leader", status: "active", check_note: "Conferida pelo Jev.", promoted: undefined, ...(scope === "team" ? { team: where } : { client: where }) });
+    l.promoted = [...(l.promoted ?? []), { scope, status: "active" }];
+    return;
+  }
+  await rpc("promote_personal_radar_lesson", { p_company: company, p_id: id, p_scope: scope, p_target: target });
+}
+export async function loadAutonomy(company: string, user: string | null) {
+  if (offline(company)) return demo.autonomy;
+  return rpc<AutonomyRow[]>("personal_radar_autonomy", { p_company: company, p_user: user });
+}
+export async function saveAutonomy(company: string, row: Pick<AutonomyRow, "kind" | "enabled" | "days" | "min_rate" | "min_count">) {
+  if (offline(company)) {
+    const r = demo.autonomy.find((x) => x.kind === row.kind)!;
+    Object.assign(r, row);
+    r.ready = r.enabled && r.decided >= r.min_count && (r.rate ?? 0) >= r.min_rate;
+    return demo.autonomy;
+  }
+  return rpc<AutonomyRow[]>("set_personal_radar_autonomy", {
+    p_company: company,
+    p_kind: row.kind,
+    p_enabled: row.enabled,
+    p_days: row.days,
+    p_min_rate: row.min_rate,
+    p_min_count: row.min_count,
+  });
+}
+
 /**
  * Escreve as respostas que faltam, uma por vez (a fila fica no banco): ao
  * abrir a página e quando chega uma situação nova pelo Realtime, com o app
@@ -402,6 +507,21 @@ const demo = {
       { id: "demo-u3", name: "Rafa Atendimento" },
     ],
   } as PersonalState,
+  lessons: [
+    { id: "demo-l1", scope: "person", kind: "detection", text: "Pedidos de arte e criativo são da Duda, não seus: só marque-a no item.", status: "active", origin: "mavi", updated_at: ago(60 * 20), evidence: 3 },
+    { id: "demo-l2", scope: "person", kind: "reply", text: "Ao falar de CPL, traga o valor, o período e a meta do ciclo.", status: "active", origin: "mavi", updated_at: ago(60 * 5), evidence: 2, promoted: [{ scope: "team", status: "active" }] },
+    { id: "demo-l3", scope: "person", kind: "reply", text: "Chame o cliente pelo primeiro nome e use no máximo um emoji.", status: "active", origin: "person", updated_at: ago(60 * 48), evidence: 0 },
+    { id: "demo-l4", scope: "team", kind: "reply", text: "Ao falar de CPL, traga o valor, o período e a meta do ciclo.", status: "active", origin: "leader", check_note: "Conferida pelo Jev.", updated_at: ago(60 * 4), evidence: 2, team: { id: "demo-team", name: "Tráfego" } },
+    { id: "demo-l5", scope: "client", kind: "detection", text: "Na Facilita, o Carlos manda prints de leads: confirme o recebimento, não é reclamação.", status: "refused", origin: "leader", check_note: "O Jev recusou: parece valer só para uma pessoa, ou não está clara.", updated_at: ago(90), evidence: 1, client: { id: "demo-c1", name: "4282 · Facilita" } },
+  ] as Lesson[],
+  autonomy: [
+    { kind: "question", enabled: true, days: 30, min_rate: 0.9, min_count: 10, decided: 14, approved: 13, edited: 1, rejected: 0, rate: 0.929, ready: true },
+    { kind: "request", enabled: true, days: 30, min_rate: 0.9, min_count: 10, decided: 9, approved: 6, edited: 2, rejected: 1, rate: 0.667, ready: false },
+    { kind: "complaint", enabled: true, days: 30, min_rate: 0.9, min_count: 10, decided: 5, approved: 2, edited: 3, rejected: 0, rate: 0.4, ready: false },
+    { kind: "material", enabled: true, days: 30, min_rate: 0.9, min_count: 10, decided: 11, approved: 11, edited: 0, rejected: 0, rate: 1, ready: true },
+    { kind: "approval", enabled: true, days: 30, min_rate: 0.9, min_count: 10, decided: 2, approved: 2, edited: 0, rejected: 0, rate: 1, ready: false },
+    { kind: "deadline", enabled: false, days: 30, min_rate: 0.9, min_count: 10, decided: 0, approved: 0, edited: 0, rejected: 0, rate: null, ready: false },
+  ] as AutonomyRow[],
   people: [
     { id: "demo-u1", name: "Você", role: "admin", allowed: true, active: true, started_at: ago(60 * 24 * 12), cap_usd: null, cap: 10, spent: 1.84, groups: 7, phones: 1 },
     { id: "demo-u2", name: "Duda Design", role: "member", allowed: true, active: true, started_at: ago(60 * 24 * 5), cap_usd: 5, cap: 5, spent: 0.71, groups: 4, phones: 1 },
@@ -496,6 +616,16 @@ function demoFeedback(id: string, action: string, text: string): PersonalItem {
     if (action === "rejected") Object.assign(i.reply, { status: "rejected", approved_at: undefined });
   }
   return { ...i };
+}
+function demoLessons(): LessonsView {
+  return {
+    mine: demo.lessons.filter((l) => l.scope === "person"),
+    shared: demo.lessons.filter((l) => l.scope !== "person"),
+    can_edit: true,
+    can_promote: true,
+    teams: [{ id: "demo-team", name: "Tráfego" }, { id: "demo-team2", name: "Criação" }],
+    clients: [{ id: "demo-c1", name: "4282 · Facilita" }, { id: "demo-c2", name: "3110 · Clínica Vida" }],
+  };
 }
 function demoState(): PersonalState {
   return { ...demo.state, settings: { ...demo.state.settings } };

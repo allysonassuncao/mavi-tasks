@@ -64,6 +64,8 @@ export type DraftMaterial = {
   feedback: { action: string; note?: string; reason?: string; title?: string; draft?: string; final?: string }[];
   guidance: string;
   previous?: string | null;
+  /** As lições de resposta em uso (da pessoa, do cliente e da equipe). */
+  lessons?: { scope: "person" | "team" | "client"; text: string }[];
   shareables: {
     recordings: { id: string; title?: string; at: string; token?: string }[];
     files: { id: string; name: string; type: string; folder?: string; at: string; token?: string; can_share?: boolean }[];
@@ -178,6 +180,12 @@ export function draftMessage(m: DraftMaterial, origin: string) {
             ? `- Reprovou uma resposta (${REASON[f.reason ?? ""] ?? "sem motivo"})${f.note ? `: ${f.note}` : ""}${f.title ? ` — situação "${f.title}"` : ""}`
             : `- Editou antes de mandar${f.title ? ` ("${f.title}")` : ""}: de "${f.draft ?? ""}" para "${f.final ?? ""}"`,
       ),
+    );
+  if (m.lessons?.length)
+    out.push(
+      "",
+      "O que você aprendeu (siga; a da pessoa vale mais que a do cliente, que vale mais que a da equipe):",
+      ...m.lessons.map((l) => `- ${l.scope === "person" ? "Da pessoa" : l.scope === "client" ? "Do cliente" : "Da equipe"}: ${l.text}`),
     );
   if (m.previous) out.push("", `A versão anterior desta resposta (melhore):\n"${m.previous}"`);
   if (m.guidance) out.push("", `Pedido da pessoa para esta versão: ${m.guidance}`);
@@ -353,6 +361,11 @@ export async function writeDraft(
     });
     if (limits?.blocked) throw new AssistantError(429, limits.message ?? "O limite de gasto da MAVI foi atingido.");
     const now = (deps.now ?? Date.now)();
+    // As lições de resposta (sem a migração 20270307, nenhuma).
+    m.lessons = await rpc<NonNullable<DraftMaterial["lessons"]>>(env, deps, auth, "personal_radar_reply_lessons", {
+      p_company: company,
+      p_client: client,
+    }).catch(() => []);
     const [base, provider] = await Promise.all([
       buildContext(env, deps, auth, company, { client, module: "personal_radar" }, now),
       featureProvider(env, deps.fetch, auth, company, "personal_assistant", { client }),

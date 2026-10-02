@@ -26,6 +26,18 @@ import { appPath, openInApp } from "./temperature";
 import { taskUrl, navigate } from "./router";
 import {
   CONFIDENCE_LABEL,
+  LESSON_KIND_LABEL,
+  LESSON_STATUS_LABEL,
+  loadAutonomy,
+  loadLessons,
+  promoteLesson,
+  saveAutonomy,
+  saveLesson,
+  setLessonStatus,
+  type AutonomyRow,
+  type Lesson,
+  type LessonKind,
+  type LessonsView,
   DISMISS_LABEL,
   REJECT_LABEL,
   createLink,
@@ -105,6 +117,9 @@ export function PersonalRadarPage({
   const [list, setList] = useState<PersonalList | null>(null);
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [learningOpen, setLearningOpen] = useState(false);
+  // Os tipos em que a pessoa já está pronta para a MAVI responder sozinha (só o selo).
+  const [ready, setReady] = useState<Set<string>>(new Set());
   const request = useRef(0);
 
   useEffect(() => {
@@ -156,6 +171,13 @@ export function PersonalRadarPage({
     [company, viewing, filters, show],
   );
   useEffect(() => load(0), [load]);
+  // O selo de autonomia (só da própria lista).
+  useEffect(() => {
+    if (!active || viewing) return setReady(new Set());
+    loadAutonomy(company, null)
+      .then((rows) => setReady(new Set(rows.filter((r) => r.ready).map((r) => r.kind))))
+      .catch(() => setReady(new Set()));
+  }, [active, viewing, company]);
   // As respostas que faltam: a MAVI escreve uma por vez (a fila é do banco).
   useEffect(() => {
     if (active && !viewing) void drainDrafts(company);
@@ -315,6 +337,12 @@ export function PersonalRadarPage({
               </Button>
               <Button
                 className="btn secondary"
+                onClick={() => setLearningOpen(true)}
+              >
+                <GraduationCap size={15} aria-hidden="true" /> Aprendizado
+              </Button>
+              <Button
+                className="btn secondary"
                 onClick={() => setSettingsOpen(true)}
               >
                 <Settings2 size={15} aria-hidden="true" /> Configurar
@@ -350,6 +378,7 @@ export function PersonalRadarPage({
                   company={company}
                   item={i}
                   readOnly={readOnly}
+                  ready={ready.has(i.kind)}
                   onChanged={(next, message) => {
                     changeItem(next);
                     if (message) notify(message);
@@ -372,6 +401,16 @@ export function PersonalRadarPage({
             </div>
           )}
         </>
+      )}
+      {learningOpen && (
+        <LearningModal
+          company={company}
+          viewing={viewing}
+          viewingName={viewingName}
+          onClose={() => setLearningOpen(false)}
+          onAutonomy={(rows) => setReady(new Set(rows.filter((r) => r.ready).map((r) => r.kind)))}
+          notify={notify}
+        />
       )}
       {settingsOpen && (
         <SettingsModal
@@ -509,11 +548,13 @@ function ItemCard({
   company,
   item,
   readOnly,
+  ready = false,
   onChanged,
 }: {
   company: string;
   item: PersonalItem;
   readOnly: boolean;
+  ready?: boolean;
   onChanged: (item: PersonalItem, message?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -612,6 +653,7 @@ function ItemCard({
         <ReplyPanel
           company={company}
           item={item}
+          ready={ready}
           readOnly={readOnly || closed}
           onChanged={onChanged}
         />
@@ -997,11 +1039,13 @@ function ReplyPanel({
   company,
   item,
   readOnly,
+  ready = false,
   onChanged,
 }: {
   company: string;
   item: PersonalItem;
   readOnly: boolean;
+  ready?: boolean;
   onChanged: (item: PersonalItem, message?: string) => void;
 }) {
   const reply = item.reply;
@@ -1127,6 +1171,11 @@ function ReplyPanel({
           </span>
         )}
         {rejected && <span className="pradar-rejected">Reprovada</span>}
+        {ready && !readOnly && (
+          <span className="pradar-ready" title="Pela sua regra de autonomia, a MAVI já acerta este tipo de resposta. Por enquanto ela não envia nada sozinha.">
+            Pronta para responder sozinha
+          </span>
+        )}
       </div>
       {reply.stale && !readOnly && (
         <p className="pradar-warn">
@@ -1272,6 +1321,370 @@ function ReplyPanel({
       {error && <p className="form-error">{error}</p>}
       {reply.model && <p className="pradar-model muted">Escrita por {reply.model}</p>}
     </div>
+  );
+}
+
+/**
+ * O aprendizado da MAVI: as lições da pessoa (a MAVI escreve a partir dos
+ * retornos; a pessoa edita, pausa, exclui e escreve as suas), as da equipe e
+ * do cliente (líderes promovem, o Jev confere) e a autonomia por tipo de
+ * situação (taxa de respostas copiadas sem edição × a regra da pessoa).
+ */
+function LearningModal({
+  company,
+  viewing,
+  viewingName,
+  onClose,
+  onAutonomy,
+  notify,
+}: {
+  company: string;
+  viewing: string | null;
+  viewingName?: string;
+  onClose: () => void;
+  onAutonomy: (rows: AutonomyRow[]) => void;
+  notify: (message: string) => void;
+}) {
+  const [tab, setTab] = useState<"lessons" | "autonomy">("lessons");
+  const [view, setView] = useState<LessonsView | null>(null);
+  const [rows, setRows] = useState<AutonomyRow[] | null>(null);
+  const [editing, setEditing] = useState<{ id: string | null; kind: LessonKind; text: string } | null>(null);
+  const [promoting, setPromoting] = useState<{ id: string; scope: "team" | "client"; target: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    loadLessons(company, viewing)
+      .then(setView)
+      .catch((e) => setError((e as Error).message));
+    loadAutonomy(company, viewing)
+      .then((r) => {
+        setRows(r);
+        if (!viewing) onAutonomy(r);
+      })
+      .catch((e) => setError((e as Error).message));
+  }, [company, viewing]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [load]);
+  // A MAVI aprendeu ou o Jev conferiu: a lista se atualiza.
+  useEffect(() => {
+    const on = (e: Event) => {
+      if ((e as CustomEvent<{ lessons?: boolean }>).detail?.lessons) load();
+    };
+    window.addEventListener("mavi:personal-radar", on);
+    return () => window.removeEventListener("mavi:personal-radar", on);
+  }, [load]);
+  const run = (work: () => Promise<unknown>, message: string) => {
+    setBusy(true);
+    setError("");
+    work()
+      .then(() => {
+        notify(message);
+        setEditing(null);
+        setPromoting(null);
+        load();
+      })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setBusy(false));
+  };
+  const own = !!view?.can_edit;
+  const lessonRow = (l: Lesson, mine: boolean) => {
+    const canChange = mine ? own : !!view?.can_promote;
+    return (
+      <li key={l.id} className={`pradar-lesson status-${l.status}`}>
+        <div className="pradar-lesson-top">
+          <span className={`pradar-lesson-kind k-${l.kind}`}>{LESSON_KIND_LABEL[l.kind]}</span>
+          {!mine && (
+            <span className="pradar-lesson-where">
+              {l.scope === "team" ? `Equipe ${l.team?.name ?? ""}` : `Cliente ${l.client?.name ?? ""}`}
+            </span>
+          )}
+          <span className={`pradar-lesson-status s-${l.status}`}>{LESSON_STATUS_LABEL[l.status]}</span>
+          <span className="muted">
+            {l.origin === "mavi"
+              ? `pela MAVI${l.evidence ? ` · ${l.evidence} ${l.evidence === 1 ? "retorno" : "retornos"}` : ""}`
+              : l.origin === "person"
+                ? "escrita por você"
+                : "por um líder"}
+          </span>
+        </div>
+        <p>{l.text}</p>
+        {l.check_note && <p className="pradar-lesson-note muted">{l.check_note}</p>}
+        {!!l.promoted?.length && (
+          <p className="pradar-lesson-note muted">
+            Promovida para {l.promoted.map((p) => `${p.scope === "team" ? "a equipe" : "o cliente"} (${LESSON_STATUS_LABEL[p.status].toLowerCase()})`).join(", ")}
+          </p>
+        )}
+        <div className="pradar-actions">
+          {canChange && l.status !== "dismissed" && (
+            <Button className="btn quiet compact" onClick={() => setEditing({ id: l.id, kind: l.kind, text: l.text })}>
+              Editar
+            </Button>
+          )}
+          {canChange && (l.status === "paused" || l.status === "dismissed" || (l.status === "refused" && !mine)) && (
+            <Button className="btn quiet compact" onClick={() => run(() => setLessonStatus(company, l.id, "active"), l.status === "refused" ? "Lição posta em uso." : "Lição ligada.")}>
+              {l.status === "refused" ? "Pôr em uso assim mesmo" : "Ligar"}
+            </Button>
+          )}
+          {canChange && l.status === "active" && (
+            <Button className="btn quiet compact" onClick={() => run(() => setLessonStatus(company, l.id, "paused"), "Lição pausada.")}>
+              Pausar
+            </Button>
+          )}
+          {canChange && l.status !== "dismissed" && (
+            <Button className="btn quiet compact" onClick={() => run(() => setLessonStatus(company, l.id, "dismissed"), "Lição excluída. A MAVI não volta a criá-la.")}>
+              Excluir
+            </Button>
+          )}
+          {mine && view?.can_promote && l.status === "active" && (
+            <Button className="btn quiet compact" onClick={() => setPromoting({ id: l.id, scope: "team", target: view.teams[0]?.id ?? "" })}>
+              Promover
+            </Button>
+          )}
+        </div>
+        {promoting?.id === l.id && view && (
+          <div className="pradar-dismiss">
+            <div className="pradar-grid two">
+              <Select
+                aria-label="Para onde"
+                value={promoting.scope}
+                onValueChange={(v) =>
+                  setPromoting({ ...promoting, scope: v as "team" | "client", target: (v === "team" ? view.teams : view.clients)[0]?.id ?? "" })
+                }
+              >
+                <SelectOption value="team">Para uma equipe</SelectOption>
+                <SelectOption value="client">Para um cliente</SelectOption>
+              </Select>
+              <Select aria-label={promoting.scope === "team" ? "Equipe" : "Cliente"} value={promoting.target} onValueChange={(v) => setPromoting({ ...promoting, target: v })}>
+                {(promoting.scope === "team" ? view.teams : view.clients).map((x) => (
+                  <SelectOption key={x.id} value={x.id}>
+                    {x.name}
+                  </SelectOption>
+                ))}
+              </Select>
+            </div>
+            <small className="muted">O Jev confere se a lição vale de forma geral antes de ela entrar em uso.</small>
+            <div className="pradar-actions">
+              <Button
+                className="btn primary compact"
+                loading={busy}
+                disabled={!promoting.target}
+                onClick={() => run(() => promoteLesson(company, l.id, promoting.scope, promoting.target), "Lição promovida. O Jev vai conferir.")}
+              >
+                Promover
+              </Button>
+              <Button className="btn secondary compact" onClick={() => setPromoting(null)} disabled={busy}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        )}
+      </li>
+    );
+  };
+  const mineList = view?.mine.filter((l) => l.status !== "dismissed") ?? [];
+  const dismissed = view?.mine.filter((l) => l.status === "dismissed") ?? [];
+  return (
+    <Modal title={viewingName ? `Aprendizado da MAVI com ${viewingName}` : "Aprendizado da MAVI"} onClose={onClose} busy={busy} className="pradar-modal">
+      <div className="entity-form pradar-settings">
+        <nav className="pradar-tabs" aria-label="Aprendizado">
+          <button type="button" className={tab === "lessons" ? "selected" : ""} aria-pressed={tab === "lessons"} onClick={() => setTab("lessons")}>
+            Lições
+          </button>
+          <button type="button" className={tab === "autonomy" ? "selected" : ""} aria-pressed={tab === "autonomy"} onClick={() => setTab("autonomy")}>
+            Autonomia
+          </button>
+        </nav>
+        {tab === "lessons" ? (
+          !view ? (
+            <Loading variant="list" />
+          ) : (
+            <>
+              <section>
+                <div className="pradar-section-head">
+                  <h3>{viewingName ? `De ${viewingName}` : "Suas"}</h3>
+                  {own && !editing?.id && (
+                    <Button className="btn secondary compact" onClick={() => setEditing({ id: null, kind: "reply", text: "" })}>
+                      Escrever uma lição
+                    </Button>
+                  )}
+                </div>
+                <small className="muted">
+                  A MAVI escreve estas lições a partir do que você descarta, edita, reprova e ensina, e segue todas ao ler os grupos e ao
+                  escrever as respostas.
+                </small>
+                {editing && (
+                  <div className="pradar-dismiss">
+                    <Select aria-label="Tipo da lição" value={editing.kind} onValueChange={(v) => setEditing({ ...editing, kind: v as LessonKind })}>
+                      <SelectOption value="detection">{LESSON_KIND_LABEL.detection}</SelectOption>
+                      <SelectOption value="reply">{LESSON_KIND_LABEL.reply}</SelectOption>
+                    </Select>
+                    <Textarea
+                      rows={2}
+                      maxLength={400}
+                      value={editing.text}
+                      placeholder={
+                        editing.kind === "detection"
+                          ? "Ex.: Pedidos de arte são da Duda, não meus."
+                          : "Ex.: Chame o cliente pelo primeiro nome e não use emojis."
+                      }
+                      onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                    />
+                    <div className="pradar-actions">
+                      <Button
+                        className="btn primary compact"
+                        loading={busy}
+                        disabled={editing.text.trim().length < 5}
+                        onClick={() => run(() => saveLesson(company, editing.id, editing.kind, editing.text), "Lição salva.")}
+                      >
+                        Salvar
+                      </Button>
+                      <Button className="btn secondary compact" onClick={() => setEditing(null)} disabled={busy}>
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {mineList.length ? (
+                  <ul className="pradar-lessons">{mineList.map((l) => lessonRow(l, true))}</ul>
+                ) : (
+                  <p className="muted pradar-empty-note">Ainda nenhuma. Elas aparecem conforme a MAVI aprende com os seus retornos.</p>
+                )}
+                {dismissed.length > 0 && (
+                  <details className="pradar-dismissed">
+                    <summary>Excluídas ({dismissed.length})</summary>
+                    <ul className="pradar-lessons">{dismissed.map((l) => lessonRow(l, true))}</ul>
+                  </details>
+                )}
+              </section>
+              <section>
+                <h3>Da equipe e dos clientes</h3>
+                <small className="muted">
+                  {view.can_promote
+                    ? "As que você e outros líderes promoveram. O Jev confere cada uma antes de valer; recusada, você decide."
+                    : "As que valem para você porque são da sua equipe ou dos seus clientes."}
+                </small>
+                {view.shared.length ? (
+                  <ul className="pradar-lessons">{view.shared.map((l) => lessonRow(l, false))}</ul>
+                ) : (
+                  <p className="muted pradar-empty-note">Nenhuma ainda.</p>
+                )}
+              </section>
+            </>
+          )
+        ) : !rows ? (
+          <Loading variant="list" />
+        ) : (
+          <section>
+            <small className="muted">
+              Para cada tipo de situação, quantas respostas da MAVI você copiou sem mexer no período. Quando a sua regra é atingida, o
+              tipo fica <strong>pronto para responder sozinha</strong>. Por enquanto é só o indicador: a MAVI não envia nada sem você.
+            </small>
+            <table className="pradar-people pradar-autonomy">
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th>Copiadas sem editar</th>
+                  <th>Regra</th>
+                  <th>Situação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <AutonomyLine
+                    key={r.kind}
+                    row={r}
+                    editable={own}
+                    busy={busy}
+                    onSave={(next) =>
+                      run(async () => {
+                        const out = await saveAutonomy(company, next);
+                        setRows(out);
+                        onAutonomy(out);
+                      }, "Regra de autonomia salva.")
+                    }
+                  />
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
+        {error && <p className="form-error">{error}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+function AutonomyLine({
+  row,
+  editable,
+  busy,
+  onSave,
+}: {
+  row: AutonomyRow;
+  editable: boolean;
+  busy: boolean;
+  onSave: (row: Pick<AutonomyRow, "kind" | "enabled" | "days" | "min_rate" | "min_count">) => void;
+}) {
+  const [edit, setEdit] = useState(false);
+  const [days, setDays] = useState(String(row.days));
+  const [rate, setRate] = useState(String(Math.round(row.min_rate * 100)));
+  const [count, setCount] = useState(String(row.min_count));
+  const [enabled, setEnabled] = useState(row.enabled);
+  const pct = row.rate === null ? "—" : `${Math.round(row.rate * 100)}%`;
+  return (
+    <tr>
+      <td>{KIND_LABEL[row.kind]}</td>
+      <td>
+        {pct}{" "}
+        <span className="muted">
+          ({row.approved} de {row.decided}
+          {row.edited ? `, ${row.edited} ${row.edited === 1 ? "editada" : "editadas"}` : ""}
+          {row.rejected ? `, ${row.rejected} ${row.rejected === 1 ? "reprovada" : "reprovadas"}` : ""})
+        </span>
+      </td>
+      <td>
+        {edit ? (
+          <div className="pradar-rule">
+            <label>
+              <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Acompanhar
+            </label>
+            <label>
+              ≥ <input className="pradar-num" type="number" min={50} max={100} value={rate} onChange={(e) => setRate(e.target.value)} aria-label="Taxa mínima (%)" />%
+            </label>
+            <label>
+              em <input className="pradar-num" type="number" min={3} max={500} value={count} onChange={(e) => setCount(e.target.value)} aria-label="Mínimo de respostas" /> respostas
+            </label>
+            <label>
+              nos últimos <input className="pradar-num" type="number" min={7} max={180} value={days} onChange={(e) => setDays(e.target.value)} aria-label="Dias" /> dias
+            </label>
+            <div className="pradar-actions">
+              <Button
+                className="btn primary compact"
+                loading={busy}
+                onClick={() => {
+                  onSave({ kind: row.kind, enabled, days: Number(days), min_rate: Number(rate) / 100, min_count: Number(count) });
+                  setEdit(false);
+                }}
+              >
+                Salvar
+              </Button>
+              <Button className="btn secondary compact" onClick={() => setEdit(false)}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {row.enabled ? `≥ ${Math.round(row.min_rate * 100)}% em ${row.min_count}+ respostas · ${row.days} dias` : "Sem acompanhar"}
+            {editable && (
+              <button type="button" className="pradar-link" onClick={() => setEdit(true)}>
+                Mudar
+              </button>
+            )}
+          </>
+        )}
+      </td>
+      <td>{row.ready ? <span className="pradar-ready">Pronta para responder sozinha</span> : <span className="muted">{row.enabled ? "Aprendendo" : "—"}</span>}</td>
+    </tr>
   );
 }
 

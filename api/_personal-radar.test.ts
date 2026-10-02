@@ -2,7 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import type { AiEnv } from "./_ai";
 import type { LlmAdapter } from "./_ai-llm";
 import { newMeter } from "./_social-leads";
+import crypto from "node:crypto";
+import { seal } from "./_google";
 import {
+  applyCheck,
+  checkQuestions,
+  learningMessage,
+  lessonQuestions,
+  parseLearningOps,
+  type LearningClaim,
   handlePersonalRadarWorker,
   parsePersonal,
   personalMessage,
@@ -19,6 +27,16 @@ const item = "00000000-0000-4000-8000-0000000000e1";
 const task = "00000000-0000-4000-8000-0000000000d1";
 const radar = "00000000-0000-4000-8000-0000000000b1";
 const msg = (n: number) => `00000000-0000-4000-8000-0000000001${String(n).padStart(2, "0")}`;
+const providerKey = crypto.randomBytes(32);
+const jevRoute = {
+  provider_id: "00000000-0000-4000-8000-000000000800",
+  provider: "OpenRouter",
+  kind: "openrouter",
+  base_url: "https://openrouter.ai/api/v1",
+  key_cipher: seal(providerKey, "sk-or"),
+  model: "~typesafe/jev-latest",
+  price: { id: "~typesafe/jev-latest", input: 0.042, output: 0 },
+};
 const env: AiEnv = {
   supabaseUrl: "https://db.example.com",
   supabaseKey: "publishable",
@@ -28,7 +46,7 @@ const env: AiEnv = {
   embeddingModel: "text-embedding-3-small",
   workerSecret: "s".repeat(40),
   workerBudgetMs: 60_000,
-  providerKey: null,
+  providerKey,
   imageModel: "gpt-image-1",
 };
 const embed = vi.fn();
@@ -182,7 +200,7 @@ describe("worker do Radar pessoal", () => {
       { ...env, personalRadarBudgetMs: 400_000 },
       { fetch: fetchImpl, llm, embed, now: () => (t += 60_000) },
     );
-    expect(stats).toEqual({ groups: 1, items: 1, skipped: 0, failed: 0 });
+    expect(stats).toEqual({ groups: 1, items: 1, skipped: 0, failed: 0, learned: 0, checked: 0 });
     const store = calls.find((c) => c.url.includes("rpc/ai_personal_radar_store"))!;
     expect(store.body.p_secret).toBe(env.workerSecret);
     expect(store.body.p_group).toBe(group);
@@ -204,7 +222,7 @@ describe("worker do Radar pessoal", () => {
     });
     const llm = vi.fn();
     const stats = await runPersonalRadar({ ...env, personalRadarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
-    expect(stats).toEqual({ groups: 0, items: 0, skipped: 1, failed: 0 });
+    expect(stats).toEqual({ groups: 0, items: 0, skipped: 1, failed: 0, learned: 0, checked: 0 });
     expect(llm).not.toHaveBeenCalled();
     expect(calls.some((c) => c.url.includes("rpc/ai_personal_radar_store"))).toBe(false);
   });
@@ -221,5 +239,173 @@ describe("worker do Radar pessoal", () => {
     expect(stats.failed).toBe(1);
     const fail = calls.find((c) => c.url.includes("rpc/ai_personal_radar_fail"));
     expect(fail?.body).toMatchObject({ p_group: group, p_error: "A MAVI não devolveu JSON." });
+  });
+});
+
+describe("o Jev nas situações novas", () => {
+  const people = new Map(material().people.map((p) => [p.id, p]));
+  const base = {
+    item_id: null,
+    kind: "question" as const,
+    summary: "",
+    urgency: 1,
+    mentions: [{ message_id: msg(2), quote: "" }],
+    task_id: null,
+    radar_item_id: null,
+  };
+  const list = [
+    { ...base, title: "Quando sai a arte", owners: [{ user_id: duda, reason: "mention" as const, why: "" }, { user_id: bruno, reason: "role" as const, why: "" }] },
+    { ...base, title: "Bom dia pessoal", owners: [{ user_id: bruno, reason: "general" as const, why: "" }] },
+    { ...base, title: "Relatório", owners: [{ user_id: bruno, reason: "role" as const, why: "" }, { user_id: duda, reason: "role" as const, why: "" }] },
+  ];
+  it("pergunta se é situação e, para quem foi escolhido pelo assunto, se é com a pessoa", () => {
+    const q = checkQuestions(list, people);
+    expect(Object.keys(q)).toEqual(["ok_1", "own_1_2", "ok_2", "own_2_1", "ok_3", "own_3_1", "own_3_2"]);
+    expect(q.own_1_2.instructions).toMatch(/com Bruno Tráfego pelo que essa pessoa faz \(equipes: Tráfego\) — o que é com ela: Campanhas/);
+  });
+  it("tira a que não é situação e o dono que não é dono; sempre fica um", () => {
+    const out = applyCheck(list, {
+      answers: {
+        ok_1: { noul: 0.9 },
+        own_1_2: { noul: 0.1 },
+        ok_2: { noul: 0.05 },
+        ok_3: { noul: 0.8 },
+        own_3_1: { noul: 0.2 },
+        own_3_2: { noul: 0.25 },
+      },
+    } as never);
+    expect(out.map((c) => c.title)).toEqual(["Quando sai a arte", "Relatório"]);
+    expect(out[0].owners.map((o) => o.user_id)).toEqual([duda]);
+    // Os dois recusados: fica o mais provável.
+    expect(out[1].owners.map((o) => o.user_id)).toEqual([duda]);
+  });
+});
+
+const lesson = "00000000-0000-4000-8000-0000000000aa";
+const fb = (n: number) => `00000000-0000-4000-8000-0000000002${String(n).padStart(2, "0")}`;
+function learningClaim(): LearningClaim {
+  return {
+    company,
+    user: bruno,
+    person: { name: "Bruno Tráfego", about: "Campanhas.", teams: ["Tráfego"] },
+    lessons: [{ id: lesson, kind: "reply", text: "Seja breve.", status: "active", origin: "mavi" }],
+    feedback: [
+      { id: fb(1), action: "not_mine", note: "Arte é com a Duda.", kind: "request", title: "Arte nova", why: "Pelo assunto", at: "02/10 09:00" },
+      { id: fb(2), action: "edited", kind: "complaint", title: "CPL alto", draft: "Prezado Carlos", final: "Oi Carlos", at: "02/10 09:10" },
+      { id: fb(3), action: "rejected", reason: "wrong_tone", at: "02/10 09:20" },
+    ],
+  };
+}
+
+describe("aprendizado da pessoa", () => {
+  it("mostra os retornos com o que a MAVI fez e o que a pessoa mudou", () => {
+    const text = learningMessage(learningClaim());
+    expect(text).toMatch(/- id 0+.*aa · reply · em uso: Seja breve\./);
+    expect(text).toMatch(/\[F1\] 02\/10 09:00 · não é comigo\n  situação: solicitação: Arte nova\n  a MAVI tinha escolhido por: Pelo assunto\n  nota: Arte é com a Duda\./);
+    expect(text).toMatch(/\[F2\].*editou a resposta.*\n.*\n  resposta da MAVI: Prezado Carlos\n  o que a pessoa mandou: Oi Carlos/);
+    expect(text).toMatch(/\[F3\] .*reprovou a resposta \(tom errado\)/);
+  });
+  it("troca os [F#] pelos ids e só mexe nas lições que existem", () => {
+    const ops = parseLearningOps(
+      JSON.stringify({
+        ops: [
+          { op: "add", kind: "detection", text: "Arte e criativo são da Duda.", feedback: ["F1"] },
+          { op: "add", kind: "outro", text: "Tipo inválido." },
+          { op: "update", id: lesson, text: "Seja breve e chame pelo nome.", feedback: ["F2", "F9"] },
+          { op: "retire", id: "00000000-0000-4000-8000-000000009999" },
+        ],
+      }),
+      learningClaim(),
+    );
+    expect(ops).toEqual([
+      { op: "add", kind: "detection", text: "Arte e criativo são da Duda.", feedback: [fb(1)] },
+      { op: "update", id: lesson, text: "Seja breve e chame pelo nome.", feedback: [fb(2)] },
+    ]);
+  });
+  it("o worker aprende depois de ler os grupos e confere as promoções (sem Jev, entra direto)", async () => {
+    let learn = 0;
+    let check = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_personal_radar_claim": [],
+      "rpc/ai_worker_route": null,
+      "rpc/ai_personal_radar_config": { jev: null },
+      "rpc/ai_personal_radar_learning_claim": () => (learn++ === 0 ? learningClaim() : null),
+      "rpc/ai_personal_radar_learning_store": 1,
+      "rpc/ai_personal_radar_check_claim": () =>
+        check++ === 0 ? { id: lesson, company, scope: "team", kind: "reply", text: "Seja breve.", target: "Tráfego", others: [], jev: null } : null,
+      "rpc/ai_personal_radar_check_store": null,
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      expect(req.instructions).toMatch(/aprender com os retornos desta pessoa/);
+      const meter = newMeter("claude-sonnet-5-5");
+      meter.cost = 0.003;
+      return { text: JSON.stringify({ ops: [{ op: "add", kind: "detection", text: "Arte é da Duda.", feedback: ["F1"] }] }), meter, rounds: 1 };
+    });
+    const stats = await runPersonalRadar({ ...env, personalRadarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
+    expect(stats).toMatchObject({ learned: 1, checked: 1, failed: 0 });
+    const store = calls.find((c) => c.url.includes("rpc/ai_personal_radar_learning_store"))!;
+    expect(store.body).toMatchObject({ p_company: company, p_user: bruno, p_learned: [fb(1), fb(2), fb(3)] });
+    expect(store.body.p_ops).toEqual([{ op: "add", kind: "detection", text: "Arte é da Duda.", feedback: [fb(1)] }]);
+    expect(store.body.p_usage.cost).toBe(0.003);
+    const checked = calls.find((c) => c.url.includes("rpc/ai_personal_radar_check_store"))!;
+    expect(checked.body).toMatchObject({ p_lesson: lesson, p_ok: true });
+  });
+  it("com o Jev, a promoção que não vale para todos é recusada com o motivo", async () => {
+    let check = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_personal_radar_claim": [],
+      "rpc/ai_personal_radar_learning_claim": null,
+      "rpc/ai_personal_radar_check_claim": () =>
+        check++ === 0 ? { id: lesson, company, scope: "client", kind: "detection", text: "O Bruno odeia o Carlos.", target: "4282", others: [], jev: jevRoute } : null,
+      "rpc/ai_personal_radar_check_store": null,
+      "alpha/decisions": (b: any) => {
+        expect(Object.keys(b.questions)).toEqual(["general", "safe"]);
+        expect(b.state.licao).toBe("O Bruno odeia o Carlos.");
+        return { model: "typesafe/jev-1.13", answers: { general: { noul: 0.2 }, safe: { noul: 0.1 } }, usage: { input_tokens: 300, cost: 0.00001 } };
+      },
+    });
+    await runPersonalRadar({ ...env, personalRadarBudgetMs: 400_000 }, { fetch: fetchImpl, llm: vi.fn(), embed });
+    const checked = calls.find((c) => c.url.includes("rpc/ai_personal_radar_check_store"))!;
+    expect(checked.body.p_ok).toBe(false);
+    expect(checked.body.p_note).toMatch(/parece valer só para uma pessoa.*dado sensível/);
+    expect(checked.body.p_usage).toMatchObject({ input: 300, provider: "OpenRouter" });
+    expect(lessonQuestions({ scope: "team", target: "Tráfego" } as never).general.instructions).toMatch(/equipe "Tráfego"/);
+  });
+});
+
+describe("a leitura com o Jev e as lições", () => {
+  it("as lições de cada pessoa vão no texto; o Jev tira o item novo que não é situação e soma o custo", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_personal_radar_claim": () => (claims++ === 0 ? [{ group_id: group, company_id: company }] : []),
+      "rpc/ai_personal_radar_material": material(),
+      "rpc/ai_worker_route": null,
+      "rpc/ai_personal_radar_config": { jev: jevRoute },
+      "rpc/ai_personal_radar_lessons": { [bruno]: [{ text: "Arte não é com você." }] },
+      "rpc/ai_personal_radar_store": 1,
+      "rpc/ai_personal_radar_learning_claim": null,
+      "rpc/ai_personal_radar_check_claim": null,
+      "alpha/decisions": { answers: { ok_1: { noul: 0.95 }, ok_2: { noul: 0.05 } }, usage: { input_tokens: 400, cost: 0.002 } },
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      expect(req.messages[0].content).toMatch(/P1 Bruno Tráfego .* o que você aprendeu com ela \(siga\): Arte não é com você\./);
+      const meter = newMeter("claude-sonnet-5-5");
+      meter.cost = 0.01;
+      return {
+        text: JSON.stringify({
+          items: [
+            { kind: "question", title: "Quando sai a arte nova", lines: ["L2"] },
+            { kind: "request", title: "Bom dia sem pedido", lines: ["L4"] },
+            { item: "I1", kind: "complaint", lines: ["L1"] },
+          ],
+        }),
+        meter,
+        rounds: 1,
+      };
+    });
+    await runPersonalRadar({ ...env, personalRadarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
+    const store = calls.find((c) => c.url.includes("rpc/ai_personal_radar_store"))!;
+    expect(store.body.p_result.items.map((i: any) => i.title || i.item_id)).toEqual([item, "Quando sai a arte nova"]);
+    expect(store.body.p_result.usage.cost).toBe(0.012);
   });
 });

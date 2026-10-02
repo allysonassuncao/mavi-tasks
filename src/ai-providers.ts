@@ -230,6 +230,7 @@ export type AiFeature =
   | "client_radar_report"
   | "personal_radar"
   | "personal_assistant"
+  | "personal_radar_check"
   | "mavi_learning"
   | "campaign_report"
   | "campaign_alerts"
@@ -575,6 +576,15 @@ export const FEATURES: FeatureInfo[] = [
     note: "Escreve a resposta de cada situação no tom da pessoa, buscando no Drive, nas reuniões, nas tarefas e nas campanhas: vale um modelo bom de escrita e de ferramentas. Roda com o login da pessoa e conta no teto dela.",
   },
   {
+    id: "personal_radar_check",
+    group: "Radar pessoal",
+    label: "Conferência das situações e das lições promovidas (Jev)",
+    conversation: false,
+    env: "",
+    decisions: true,
+    note: "Antes de virar item, o Jev confere se é mesmo uma situação e se o dono pelo assunto faz sentido; e confere as lições levadas para uma equipe ou um cliente. Sem regra, usa o Jev do Radar do cliente.",
+  },
+  {
     id: "campaign_report",
     group: "Campanhas",
     label: "Análise da MAVI nos relatórios de campanha",
@@ -703,6 +713,9 @@ export function serverModel(
       return env.PERSONAL_RADAR_MODEL || env.CLIENT_RADAR_MODEL || env.AI_MODEL || fallback;
     case "personal_assistant":
       return env.PERSONAL_ASSISTANT_MODEL || env.AI_MODEL || fallback;
+    case "personal_radar_check":
+      // Sem escolha: o Jev do Radar do cliente (o primeiro cadastrado no OpenRouter).
+      return "~typesafe/jev-latest";
     case "client_radar_check":
       // Sem escolha: o Jev do termômetro (o primeiro cadastrado no OpenRouter).
       return "~typesafe/jev-latest";
