@@ -691,10 +691,11 @@ async function googleAccounts(
 }
 
 /**
- * The Google Ads accounts a collaborator with Campanhas on may browse: the
- * agency's connection has no client, so only the accounts already linked to
- * campaigns of the clients they serve (ad_google_scope, migration
- * 20270107090000). Null: a leader, every account.
+ * The Google Ads accounts a collaborator with Campanhas on may browse in
+ * Plataforma and Relatórios: the agency's connection has no client, so only
+ * the accounts already linked to campaigns of the clients they serve
+ * (ad_google_scope, migration 20270107090000). Null: a leader, every account.
+ * Choosing a cycle's account ("accounts", "campaigns") lists them all.
  */
 async function googleScope(
   env: AdsEnv,
@@ -1282,23 +1283,21 @@ export async function handleAds(
     }
 
     if (req.action === "accounts") {
-      if (provider === "google") {
-        const allowed = await googleScope(env, fetchImpl, authorization, company);
-        const accounts = await googleAccounts(
-          env,
-          fetchImpl,
-          authorization,
-          company,
-        );
+      // Google: every account of the agency's connection, for everyone with
+      // Campanhas (choosing a cycle's account); Plataforma and Relatórios
+      // stay within googleScope.
+      if (provider === "google")
         return {
           status: 200,
           body: {
-            accounts: allowed
-              ? accounts.filter((a) => allowed.includes(a.id))
-              : accounts,
+            accounts: await googleAccounts(
+              env,
+              fetchImpl,
+              authorization,
+              company,
+            ),
           },
         };
-      }
       const rows = await rpc<
         {
           account_id: string;
@@ -1569,11 +1568,7 @@ export async function handleAds(
       if (!account) return fail(400, "Conta de anúncio inválida.");
       const manager = req.manager ? accountId("google", req.manager) : "";
       if (manager === null) return fail(400, "MCC inválida.");
-      if (provider === "google") {
-        const allowed = await googleScope(env, fetchImpl, authorization, company);
-        if (allowed && !allowed.includes(account))
-          return fail(403, "Esta conta do Google Ads não é de um cliente seu.");
-      }
+      // Google: any account of the connection, as in "accounts" above.
       const campaigns =
         provider === "meta"
           ? await metaCampaigns(env, fetchImpl, authorization, company, account)

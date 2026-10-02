@@ -666,9 +666,11 @@ describe("Google Ads", () => {
     expect(JSON.parse(search.body!).query).toContain("FROM campaign");
   });
 
-  it("colaborador: só as contas vinculadas às campanhas dos clientes dele", async () => {
+  it("escolher a conta do ciclo: todas as da conexão, sem ad_google_scope", async () => {
     const { fetch, calls } = network([
+      tokens("access-1", future),
       [/rpc\/ad_google_scope/, () => json(["2223334444"])],
+      [/searchStream/, () => json([{ results: [] }])],
     ]);
     const result = await handleAds(
       {
@@ -682,8 +684,8 @@ describe("Google Ads", () => {
       env,
       fetch,
     );
-    expect(result.status).toBe(403);
-    expect(calls.some((c) => c.url.includes("googleads"))).toBe(false);
+    expect(result.status).toBe(200);
+    expect(calls.some((c) => c.url.includes("ad_google_scope"))).toBe(false);
   });
 
   it("consentimento revogado desconecta e pede nova conexão", async () => {
