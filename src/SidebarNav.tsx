@@ -293,6 +293,8 @@ export function SidebarNav({
           icon: Radar,
           // Opens the first of its modules the person has.
           to: { page: allowed("radar") || !allowed("personalRadar") ? "radar" : "personalRadar" },
+          // As situações em aberto do Radar pessoal, também no item principal.
+          count: personalRadarCount,
           children: [
             { key: "radar-client", label: "Do cliente", to: { page: "radar" } },
             { key: "radar-personal", label: "Pessoal", to: { page: "personalRadar" }, count: personalRadarCount },
@@ -499,7 +501,10 @@ export function SidebarNav({
                         <item.icon size={19} />
                         <span>{item.label}</span>
                         {!!item.count && (
-                          <span className="nav-count">{item.count}</span>
+                          // O texto escuro, também no item ativo (que fica verde).
+                          <span className="nav-count" style={{ color: "#263334" }}>
+                            {item.count}
+                          </span>
                         )}
                         {/* Recolhido, o número dos filhos aparece no item (ex.: Radar › Pessoal). */}
                         {!item.count && !expanded && !!children?.some((c) => !("heading" in c) && c.count) && (
