@@ -122,6 +122,9 @@ export type PersonalFilters = {
   status?: PersonalStatus;
   kind?: PersonalKind | "";
   client?: string;
+  /** O período pela chegada (AAAA-MM-DD, em São Paulo). */
+  from?: string;
+  to?: string;
   q?: string;
   limit?: number;
   offset?: number;
@@ -656,9 +659,13 @@ function demoLessons(): LessonsView {
 function demoState(): PersonalState {
   return { ...demo.state, settings: { ...demo.state.settings } };
 }
+const dayOf = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date(iso));
 function demoList(f: PersonalFilters): PersonalList {
   const status = f.status ?? "open";
-  const mine = demo.items;
+  // O período vale também para as contagens das abas (como no banco).
+  const mine = demo.items.filter(
+    (i) => (!f.from || dayOf(i.last_at) >= f.from) && (!f.to || dayOf(i.last_at) <= f.to),
+  );
   const q = (f.q ?? "").toLowerCase();
   // Por ordem de chegada: a última fala do cliente, da mais recente para a mais antiga.
   const items = [...mine].sort((a, b) => b.last_at.localeCompare(a.last_at)).filter(

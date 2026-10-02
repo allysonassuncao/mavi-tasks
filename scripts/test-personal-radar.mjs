@@ -858,4 +858,24 @@ await check("o número do menu é o mesmo da aba Em aberto", async () => {
   assert.ok((await rpc("personal_radar_open_count", [A])) > 0);
 });
 
+await check("filtro por período: pela chegada, e as contagens seguem o período", async () => {
+  await sql(`update personal_radar_items set last_at = now() - interval '10 days' where id = $1`, [cpl]);
+  await sql(`update personal_radar_items set last_at = now() where id = $1`, [parts[2]]);
+  const day = (offset) => {
+    const d = new Date(Date.now() + offset * 86400_000);
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(d);
+  };
+  await as(member);
+  const today = await rpc("personal_radar_items", [A, null, JSON.stringify({ status: "open", from: day(0), to: day(0) })]);
+  assert.ok(today.items.some((i) => i.id === parts[2]));
+  assert.ok(!today.items.some((i) => i.id === cpl));
+  const all = await rpc("personal_radar_items", [A, null, JSON.stringify({ status: "open" })]);
+  assert.ok(today.counts.open < all.counts.open);
+  const old = await rpc("personal_radar_items", [A, null, JSON.stringify({ status: "open", from: day(-11), to: day(-9) })]);
+  assert.deepEqual(old.items.map((i) => i.id), [cpl]);
+  // Data inválida é ignorada.
+  const bad = await rpc("personal_radar_items", [A, null, JSON.stringify({ status: "open", from: "ontem" })]);
+  assert.equal(bad.counts.open, all.counts.open);
+});
+
 console.log(`\n${passed} verificações do Radar pessoal passaram.`);

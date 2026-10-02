@@ -79,7 +79,19 @@ const ALL = "__all__";
 const PAGE = 50;
 const savedKey = (company: string, user: string) =>
   `mavi:personal-radar:${company}:${user}`;
-type Saved = { status?: PersonalStatus; kind?: string; client?: string };
+type Period = "all" | "today" | "7" | "30" | "custom";
+type Saved = { status?: PersonalStatus; kind?: string; client?: string; period?: Period; from?: string; to?: string };
+/** Um dia (AAAA-MM-DD) em São Paulo, a partir de hoje. */
+const dayKey = (offset = 0) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date(Date.now() + offset * 86_400_000));
+/** De / até de cada período (pela chegada da última fala do cliente). */
+function periodRange(period: Period, from: string, to: string): { from?: string; to?: string } {
+  if (period === "today") return { from: dayKey(0), to: dayKey(0) };
+  if (period === "7") return { from: dayKey(-6), to: dayKey(0) };
+  if (period === "30") return { from: dayKey(-29), to: dayKey(0) };
+  if (period === "custom") return { ...(from ? { from } : {}), ...(to ? { to } : {}) };
+  return {};
+}
 function readSaved(key: string): Saved {
   try {
     return JSON.parse(localStorage.getItem(key) ?? "{}") as Saved;
@@ -114,6 +126,9 @@ export function PersonalRadarPage({
   );
   const [kind, setKind] = useState(initial.kind ?? ALL);
   const [client, setClient] = useState(initial.client ?? ALL);
+  const [period, setPeriod] = useState<Period>(initial.period ?? "all");
+  const [from, setFrom] = useState(initial.from ?? "");
+  const [to, setTo] = useState(initial.to ?? "");
   const [query, setQuery] = useState("");
   const [q, setQ] = useState("");
   const [list, setList] = useState<PersonalList | null>(null);
@@ -131,11 +146,11 @@ export function PersonalRadarPage({
   }, [company]);
   useEffect(() => {
     try {
-      localStorage.setItem(key, JSON.stringify({ status, kind, client }));
+      localStorage.setItem(key, JSON.stringify({ status, kind, client, period, from, to }));
     } catch {
       /* sem armazenamento: só não fica guardado */
     }
-  }, [key, status, kind, client]);
+  }, [key, status, kind, client, period, from, to]);
   useEffect(() => {
     const t = setTimeout(() => setQ(query.trim()), 300);
     return () => clearTimeout(t);
@@ -149,10 +164,11 @@ export function PersonalRadarPage({
       status,
       kind: kind === ALL ? "" : (kind as PersonalKind),
       client: client === ALL ? "" : client,
+      ...periodRange(period, from, to),
       q,
       limit: PAGE,
     }),
-    [status, kind, client, q],
+    [status, kind, client, q, period, from, to],
   );
   const load = useCallback(
     (offset = 0) => {
@@ -327,6 +343,35 @@ export function PersonalRadarPage({
                   ))}
               </Select>
             </span>
+            <span className="thermo-filter">
+              <Select aria-label="Período" value={period} onValueChange={(v) => setPeriod(v as Period)}>
+                <SelectOption value="all">Qualquer data</SelectOption>
+                <SelectOption value="today">Hoje</SelectOption>
+                <SelectOption value="7">Últimos 7 dias</SelectOption>
+                <SelectOption value="30">Últimos 30 dias</SelectOption>
+                <SelectOption value="custom">Período personalizado</SelectOption>
+              </Select>
+            </span>
+            {period === "custom" && (
+              <span className="pradar-dates">
+                <Input
+                  type="date"
+                  aria-label="De"
+                  placeholder="De"
+                  value={from}
+                  max={to || undefined}
+                  onChange={(e) => setFrom(e.target.value)}
+                />
+                <Input
+                  type="date"
+                  aria-label="Até"
+                  placeholder="Até"
+                  value={to}
+                  min={from || undefined}
+                  onChange={(e) => setTo(e.target.value)}
+                />
+              </span>
+            )}
             <div className="thermo-filters-actions">
               <Button
                 className="icon-btn"
