@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   ArrowLeft,
   History,
@@ -17,22 +24,24 @@ import { Avatar, Modal } from "./components";
 import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import { navigate } from "./router";
-import { AiChat, AnswerText, entriesFrom, type ChatEntry } from "./AiChat";
-import { CampaignAlertCard } from "./MaviCampaignAlertCard";
+import { entriesFrom, type ChatEntry } from "./AiChat";
+import type { FormPreset } from "./forms";
 import {
-  askAi,
   conversationMessages,
   conversationShares,
   currentAiPlace,
   deleteConversation,
   listConversations,
-  openAiSource,
   renameConversation,
   shareConversation,
   subscribeAiPlace,
   type AiConversation,
-  type AiSource,
 } from "./ai";
+
+// A conversa é a mesma do módulo MAVI (skills e poderes): só carrega ao abrir.
+const BubbleThread = lazy(() =>
+  import("./MaviChatPage").then((m) => ({ default: m.BubbleThread })),
+);
 
 export const SUGGESTIONS_ALL = [
   "Quais clientes tiveram reunião esta semana e o que ficou combinado?",
@@ -55,7 +64,8 @@ type Open = {
 /**
  * O assistente de IA em qualquer tela (botão flutuante ou Ctrl/⌘+J): pergunta
  * sobre qualquer cliente que a pessoa acessa — ou só sobre um —, guarda as
- * conversas e compartilha com colegas.
+ * conversas e compartilha com colegas. Com os poderes da pessoa, faz o mesmo
+ * que o módulo MAVI: skills, visualizações, imagens, canvas, anexos e ações.
  */
 export function AiAssistant({
   company,
@@ -63,6 +73,9 @@ export function AiAssistant({
   user,
   location,
   notify,
+  onNewTask,
+  onComment,
+  taskHref,
 }: {
   company: string;
   data: Snapshot;
@@ -70,9 +83,19 @@ export function AiAssistant({
   /** Endereço atual (abre uma conversa pelo link ?conversa=…). */
   location: string;
   notify: (message: string) => void;
+  /** Ações da MAVI: a tarefa proposta abre no formulário de sempre. */
+  onNewTask: (preset: FormPreset) => void;
+  onComment: (task: string, text: string) => Promise<unknown>;
+  taskHref: (task: string) => string;
 }) {
   const place = useSyncExternalStore(subscribeAiPlace, currentAiPlace);
   const [open, setOpen] = useState(false);
+  // Depois de aberta, a conversa fica montada: fechar no meio de uma resposta
+  // não a perde (ela continua chegando e aparece ao abrir de novo).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    if (open) setMounted(true);
+  }, [open]);
   const [view, setView] = useState<"chat" | "history">("chat");
   const [client, setClient] = useState<string>("");
   const [chat, setChat] = useState<Open>({
@@ -137,6 +160,21 @@ export function AiAssistant({
     }
   }, []);
 
+  /** A conversa nova nasceu no servidor: passa a ser a aberta. */
+  function adopt(id: string) {
+    setChat((p) => ({
+      ...p,
+      conversation: {
+        id,
+        owner_id: user,
+        title: "Nova conversa",
+        scope: client ? { client } : {},
+        module: "assistant",
+        updated_at: new Date().toISOString(),
+      },
+    }));
+  }
+
   // Link de uma conversa compartilhada: ?conversa=<id>.
   useEffect(() => {
     const url = new URL(location, window.location.origin);
@@ -198,21 +236,23 @@ export function AiAssistant({
       month: "short",
     });
 
-  if (!open)
-    return (
-      <button
-        type="button"
-        className="ai-fab"
-        onClick={show}
-        title="MAVI (Ctrl/⌘+J)"
-        aria-label="Abrir a MAVI"
-      >
-        <Sparkles size={20} />
-      </button>
-    );
+  const fab = !open && (
+    <button
+      type="button"
+      className="ai-fab"
+      onClick={show}
+      title="MAVI (Ctrl/⌘+J)"
+      aria-label="Abrir a MAVI"
+    >
+      <Sparkles size={20} />
+    </button>
+  );
+  if (!open && !mounted) return fab;
 
   return (
-    <aside className="ai-drawer" aria-label="MAVI">
+    <>
+    {fab}
+    <aside className={`ai-drawer${open ? "" : " closed"}`} aria-label="MAVI" hidden={!open}>
       <header className="ai-drawer-head">
         {view === "history" ? (
           <button
@@ -275,7 +315,7 @@ export function AiAssistant({
         </p>
       )}
 
-      {view === "history" ? (
+      {view === "history" && (
         <div className="ai-history">
           {list === null ? (
             <Loading compact />
@@ -338,8 +378,9 @@ export function AiAssistant({
             </>
           )}
         </div>
-      ) : (
-        <>
+      )}
+      {/* A conversa fica montada nas Conversas salvas (a resposta segue chegando). */}
+      <div className="ai-chat-pane" hidden={view === "history"}>
           <div className="ai-scope">
             <Select
               aria-label="Sobre qual cliente"
@@ -362,89 +403,44 @@ export function AiAssistant({
               </small>
             )}
           </div>
-          <AiChat
-            key={chat.key}
-            initial={chat.entries}
-            intro={
-              client
-                ? `Pergunte sobre o cliente ${clientName(client)}: a MAVI busca nas reuniões gravadas e nas tarefas e mostra de onde tirou cada informação.`
-                : "Pergunte sobre qualquer cliente que você acessa: a MAVI busca nas reuniões gravadas e nas tarefas e mostra de onde tirou cada informação."
-            }
-            placeholder={
-              client
-                ? `Pergunte sobre o cliente ${clientName(client)}`
-                : "Pergunte sobre qualquer cliente"
-            }
-            suggestions={client ? SUGGESTIONS_CLIENT : SUGGESTIONS_ALL}
-            readOnly={readOnly}
-            readOnlyNote={
-              <>
-                <Lock size={13} aria-hidden="true" /> Conversa compartilhada: só
-                quem a começou continua. Para perguntar, abra uma nova conversa.
-              </>
-            }
-            send={(q, _history, handlers, extra) =>
-              askAi(
-                company,
-                { client: client || undefined, module: "assistant" },
-                q,
-                conv?.id ?? null,
-                handlers,
-                extra?.signal,
-              )
-            }
-            onRun={(run) => {
-              // A conversa nova já existe: parar ou sair não perde o fio.
-              if (!conv)
-                setChat((p) => ({
-                  ...p,
-                  conversation: {
-                    id: run.conversation,
-                    owner_id: user,
-                    title: "Nova conversa",
-                    scope: client ? { client } : {},
-                    module: "assistant",
-                    updated_at: new Date().toISOString(),
-                  },
-                }));
-            }}
-            onAnswer={(a) => {
-              if (!conv && a.conversation)
-                setChat((p) => ({
-                  ...p,
-                  conversation: {
-                    id: a.conversation!,
-                    owner_id: user,
-                    title: "Nova conversa",
-                    scope: client ? { client } : {},
-                    module: "assistant",
-                    updated_at: new Date().toISOString(),
-                  },
-                }));
-            }}
-            renderAnswer={(text, sources, _typing, below) => (
-              <AnswerText
-                text={text}
-                sources={sources}
-                onSource={openAiSource}
-                below={below}
-              />
-            )}
-            renderAction={(artifact, busy) => (
-              <CampaignAlertCard
-                artifact={artifact}
-                host={{
-                  company,
-                  conversation: conv?.id ?? null,
-                  readOnly: !!readOnly,
-                  streaming: busy,
-                  notify,
-                }}
-              />
-            )}
-          />
-        </>
-      )}
+          <Suspense fallback={<Loading variant="chat" />}>
+            <BubbleThread
+              key={chat.key}
+              company={company}
+              conversation={conv?.id ?? null}
+              client={client}
+              initial={chat.entries}
+              readOnly={readOnly}
+              greeting={`Como posso ajudar, ${memberName(user).split(/\s+/)[0]}?`}
+              intro={
+                client
+                  ? `Pergunte sobre o cliente ${clientName(client)}: a MAVI busca nas reuniões gravadas e nas tarefas e mostra de onde tirou cada informação.`
+                  : "Pergunte sobre qualquer cliente que você acessa: a MAVI busca nas reuniões gravadas e nas tarefas e mostra de onde tirou cada informação."
+              }
+              placeholder={
+                client
+                  ? `Pergunte sobre o cliente ${clientName(client)}`
+                  : "Pergunte qualquer coisa à MAVI"
+              }
+              suggestions={client ? SUGGESTIONS_CLIENT : SUGGESTIONS_ALL}
+              onNew={() => fresh(place?.client ?? client)}
+              onRun={(run) => {
+                // A conversa nova já existe: parar ou sair não perde o fio.
+                if (!conv) adopt(run.conversation);
+              }}
+              onAnswer={(a) => {
+                if (!conv && a.conversation) adopt(a.conversation);
+              }}
+              onReload={() => {
+                if (conv) void load(conv);
+              }}
+              onNewTask={onNewTask}
+              onComment={onComment}
+              taskHref={taskHref}
+              notify={notify}
+            />
+          </Suspense>
+      </div>
       {sharing && conv && (
         <ShareDialog
           conversation={conv}
@@ -455,6 +451,7 @@ export function AiAssistant({
         />
       )}
     </aside>
+    </>
   );
 }
 

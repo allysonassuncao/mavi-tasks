@@ -49,7 +49,7 @@ import { alertCatalog, findByName, labelRule } from "./_campaign-alerts.js";
 /**
  * MAVI · poderes (migração 20261212090000_mavi_powers): as ferramentas que
  * vão além de consultar, liberadas por administradores e gestores para cada
- * pessoa (ai_my_powers) e só no módulo MAVI.
+ * pessoa (ai_my_powers), no módulo MAVI e na bolinha.
  *
  * - visualizações: a MAVI descreve (formato fechado de mavi-artifacts) e o
  *   app desenha; nada de código;

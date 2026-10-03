@@ -46,7 +46,7 @@ import type { FormPreset } from "./forms";
 import { skillCatalog } from "./mavi-skills";
 
 /** Uma skill escolhida na caixa de mensagem (com versão: em teste). */
-type Picked = { slug: string; name: string; version?: number };
+export type Picked = { slug: string; name: string; version?: number };
 import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import {
@@ -805,6 +805,158 @@ function ItemMenu({
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  );
+}
+
+/**
+ * A conversa da bolinha: a mesma do módulo (skills, visualizações, imagens,
+ * canvas, anexos, ações, custo), num painel estreito. A bolinha cuida da
+ * conversa aberta e do cliente; aqui ficam os poderes da pessoa e o resto.
+ */
+export function BubbleThread({
+  company,
+  conversation,
+  client,
+  initial,
+  readOnly,
+  greeting,
+  intro,
+  placeholder,
+  suggestions,
+  onNew,
+  onRun,
+  onAnswer,
+  onReload,
+  onNewTask,
+  onComment,
+  taskHref,
+  notify,
+}: {
+  company: string;
+  /** A conversa aberta (null: nova, até a resposta começar). */
+  conversation: string | null;
+  client: string;
+  initial: ChatEntry[];
+  readOnly: boolean;
+  greeting: string;
+  intro: string;
+  placeholder: string;
+  suggestions: string[];
+  onNew: () => void;
+  onRun: (run: { id: string; conversation: string }) => void;
+  onAnswer: (answer: AiAnswer) => void;
+  /** Uma resposta desta conversa terminou longe daqui: recarregar. */
+  onReload: () => void;
+  onNewTask: (preset: FormPreset) => void;
+  onComment: (task: string, text: string) => Promise<unknown>;
+  taskHref: (task: string) => string;
+  notify: (message: string) => void;
+}) {
+  const [catalog, setCatalog] = useState<{ slug: string; name: string; description: string }[]>([]);
+  const [picked, setPicked] = useState<Picked[]>([]);
+  const [canAttach, setCanAttach] = useState(false);
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const [costs, setCosts] = useState<ConversationCost | null>(null);
+  const [tick, setTick] = useState(0);
+  const [runs, setRuns] = useState<ActiveRun[]>([]);
+  const ownRuns = useRef(new Set<string>());
+  const reload = useRef(onReload);
+  reload.current = onReload;
+  useEffect(() => {
+    myPowers(company)
+      .then((p) => setCanAttach(Array.isArray(p) && p.includes("attachments")))
+      .catch(() => setCanAttach(false));
+    // As skills que a pessoa pode escolher (vazio sem o poder).
+    skillCatalog(company)
+      .then((c) => setCatalog(Array.isArray(c) ? c : []))
+      .catch(() => setCatalog([]));
+  }, [company]);
+  useEffect(() => {
+    if (!conversation) {
+      setFiles([]);
+      setCosts(null);
+      return;
+    }
+    let alive = true;
+    conversationAttachments(conversation)
+      .then((l) => alive && setFiles(l))
+      .catch(() => alive && setFiles([]));
+    conversationCost(conversation)
+      .then((c) => alive && setCosts(c))
+      .catch(() => alive && setCosts(null));
+    return () => {
+      alive = false;
+    };
+  }, [conversation, tick]);
+  // Voltou para uma conversa que ainda está respondendo (de quando saiu).
+  useEffect(() => {
+    if (!conversation) {
+      setRuns([]);
+      return;
+    }
+    activeRuns(company)
+      .then((l) => setRuns(l.filter((r) => !ownRuns.current.has(r.id))))
+      .catch(() => setRuns([]));
+  }, [company, conversation]);
+  // Uma resposta (ou tarefa longa) desta conversa terminou: recarrega.
+  useEffect(() => {
+    const done = (e: Event) => {
+      const row = (e as CustomEvent<{ id: string; conversation: string | null }>).detail;
+      if (!row || ownRuns.current.has(row.id) || !row.conversation || row.conversation !== conversation) return;
+      setRuns((l) => l.filter((r) => r.id !== row.id));
+      reload.current();
+    };
+    const ended = (e: Event) => {
+      const row = (e as CustomEvent<{ conversation: string; status: string }>).detail;
+      if (!row || !["done", "cancelled", "error"].includes(row.status)) return;
+      if (row.conversation === conversation) reload.current();
+    };
+    window.addEventListener("mavi:ai-run", done);
+    window.addEventListener("mavi:ai-task", ended);
+    return () => {
+      window.removeEventListener("mavi:ai-run", done);
+      window.removeEventListener("mavi:ai-task", ended);
+    };
+  }, [conversation]);
+  return (
+    <ChatThread
+      initial={initial}
+      canAttach={canAttach && !readOnly}
+      files={files}
+      readOnly={readOnly}
+      greeting={greeting}
+      intro={intro}
+      placeholder={placeholder}
+      suggestions={suggestions}
+      error=""
+      onNew={onNew}
+      scope={<SkillPicker catalog={catalog} picked={picked} onChange={setPicked} />}
+      send={(question, _history, handlers, extra) =>
+        askAi(
+          company,
+          { client: client || undefined, module: "assistant" },
+          question,
+          conversation,
+          handlers,
+          extra?.signal,
+          "bubble",
+          picked.map(({ slug, version }) => ({ slug, version })),
+          extra?.confirm,
+          extra?.attachments,
+        )
+      }
+      onAnswer={(a) => {
+        setTick((n) => n + 1);
+        onAnswer(a);
+      }}
+      onRun={(run) => {
+        ownRuns.current.add(run.id);
+        onRun(run);
+      }}
+      costs={costs}
+      background={runs.find((r) => r.conversation === conversation) ?? null}
+      host={{ company, conversation, onNewTask, onComment, taskHref, notify }}
+    />
   );
 }
 

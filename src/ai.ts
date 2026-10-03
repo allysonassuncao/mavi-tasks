@@ -262,7 +262,8 @@ export async function streamAnswer(
 
 /**
  * Pergunta à IA geral (busca na base de conhecimento), numa conversa salva.
- * No módulo MAVI (surface "page"), valem também os poderes da pessoa.
+ * No módulo MAVI (surface "page") e na bolinha ("bubble"), valem também os
+ * poderes da pessoa (skills, visualizações, imagens, canvas…).
  */
 export function askAi(
   company: string,
@@ -271,12 +272,12 @@ export function askAi(
   conversation: string | null,
   handlers: AiStreamHandlers = {},
   signal?: AbortSignal,
-  surface?: "page",
+  surface?: "page" | "bubble",
   /** Skills escolhidas na caixa de mensagem (a versão: em teste). */
   skills?: { slug: string; version?: number }[],
   /** A ação de conexão (MCP) que a pessoa confirmou no card: roda e a MAVI continua. */
   confirm?: string,
-  /** Os anexos desta pergunta (módulo MAVI). */
+  /** Os anexos desta pergunta (módulo MAVI e bolinha). */
   attachments?: string[],
 ) {
   return streamAnswer(

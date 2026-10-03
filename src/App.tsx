@@ -4808,6 +4808,11 @@ export default function App() {
             user={user}
             location={address}
             notify={notify}
+            onNewTask={(preset) => openForm("task", preset)}
+            onComment={(task, text) =>
+              mutate("add_comment", { p_task: task, p_body: text })
+            }
+            taskHref={(task) => `${pageUrl("tasks", companyPath)}/${task}`}
           />
         )}
       {toast && (

@@ -219,6 +219,17 @@ Como responder no módulo MAVI (esta conversa aparece em tela cheia, com Markdow
 - Use títulos (## e ###) para separar seções de respostas longas, tabelas Markdown para comparar itens com várias colunas, listas numeradas para passos e negrito só no essencial.
 - Esta regra vale no lugar da de "sem títulos e sem tabelas" acima; todas as outras continuam.`;
 
+/**
+ * Na bolinha (painel estreito ao lado da tela) a resposta também aparece em
+ * Markdown completo, mas o padrão é curto: títulos e tabelas só nas entregas.
+ */
+export const BUBBLE_STYLE = `
+
+Como responder na bolinha da MAVI (um painel estreito ao lado da tela, com Markdown completo):
+- Por padrão, resposta curta e direta. Relatório, análise, plano, roteiro ou o que uma skill pedir: resposta completa e organizada.
+- Títulos (## e ###) só para separar seções de respostas longas; tabelas Markdown só com poucas colunas (até 4); listas numeradas para passos e negrito só no essencial.
+- Esta regra vale no lugar da de "sem títulos e sem tabelas" acima; todas as outras continuam.`;
+
 /** Quando há skills: a skill manda no jeito de fazer o trabalho. */
 export const SKILL_RULES = `
 
@@ -678,8 +689,11 @@ async function ask(
     state: "running",
   });
   const now = (deps.now ?? Date.now)();
-  // Os poderes (visualizações, imagens, ações) só no módulo MAVI.
+  // Os poderes (visualizações, imagens, ações, skills…) valem no módulo MAVI
+  // e na bolinha; as conversas das outras telas (reuniões, Whatsapp) ficam sem.
   const onPage = body.surface === "page";
+  const withPowers =
+    (onPage || body.surface === "bubble") && (scope.module ?? "assistant") === "assistant";
   // A MAVI do módulo e a da bolinha têm regras (modelo e esforço) próprias no painel.
   const feature =
     scope.module === "meetings"
@@ -734,19 +748,19 @@ async function ask(
       : Promise.resolve(null),
     // Qual provedor e modelo respondem (biblioteca de provedores).
     resolveRoute(env, deps.fetch, auth, company, scope, feature),
-    onPage
+    withPowers
       ? callRpc<string[]>(env, deps.fetch, auth, "ai_my_powers", {
           p_company: company,
         }).then((r) => (r.ok && Array.isArray(r.data) ? r.data : []))
       : Promise.resolve([] as string[]),
     // O catálogo de skills da pessoa (vazio sem o poder 'skills').
-    onPage
+    withPowers
       ? callRpc<CatalogSkill[]>(env, deps.fetch, auth, "ai_skill_catalog", {
           p_company: company,
         }).then((r) => (r.ok && Array.isArray(r.data) ? r.data : []))
       : Promise.resolve([] as CatalogSkill[]),
     // As conexões (MCP) prontas para a pessoa (vazio sem o poder 'mcp').
-    onPage
+    withPowers
       ? callRpc<McpCatalog>(env, deps.fetch, auth, "ai_mcp_catalog", {
           p_company: company,
         })
@@ -794,8 +808,8 @@ async function ask(
       ? resolveRoute(env, deps.fetch, auth, company, scope, feature).catch(() => null)
       : Promise.resolve(null);
   const [webRoute, writerRoute, rerankRoute] = await Promise.all([
-    optional(onPage && powers.has("web"), "web_search"),
-    optional(onPage && powers.has("canvas"), "canvas_writer"),
+    optional(withPowers && powers.has("web"), "web_search"),
+    optional(withPowers && powers.has("canvas"), "canvas_writer"),
     // Reordenação da busca: só com um modelo escolhido para ela.
     optional(true, "mavi_rerank"),
   ]);
@@ -1073,7 +1087,7 @@ async function ask(
     emit({ type: "step", id: `skill-model-${s.slug}`, label, state: "done" });
     break;
   }
-  // Anexos da conversa (poder 'attachments', módulo MAVI): os desta mensagem
+  // Anexos da conversa (poder 'attachments', módulo e bolinha): os desta mensagem
   // passam a ser da conversa; os que cabem vão inteiros na pergunta, e o
   // resto a MAVI busca (search_attachments) ou lê (read_attachment).
   const attachIds = (Array.isArray(body.attachments) ? body.attachments : [])
@@ -1081,7 +1095,7 @@ async function ask(
     .slice(0, 10);
   const attachConv = live?.run?.conversation ?? conversationId;
   let attachments: ConversationAttachment[] = [];
-  if (onPage && powers.has("attachments") && attachConv) {
+  if (withPowers && powers.has("attachments") && attachConv) {
     if (attachIds.length)
       await callRpc(env, deps.fetch, auth, "ai_attachments_link", {
         p_conversation: attachConv,
@@ -1117,9 +1131,9 @@ async function ask(
       )
     : null;
   // As contas de anúncio ao vivo (Meta Ads pela conexão das Campanhas, Google
-  // Ads por GAQL na MCC), só leitura: no módulo MAVI e na conversa das Campanhas.
+  // Ads por GAQL na MCC), só leitura: no módulo MAVI, na bolinha e na conversa das Campanhas.
   const ads =
-    base.campaigns && (onPage || scope.module === "campaigns")
+    base.campaigns && (withPowers || scope.module === "campaigns")
       ? await adsTurn(
           { supabaseUrl: env.supabaseUrl, supabaseKey: env.supabaseKey },
           deps.fetch,
@@ -1141,8 +1155,8 @@ async function ask(
     // Os avisos de campanhas: para quem usa Campanhas, nas duas MAVIs.
     ...(base.campaigns ? CAMPAIGN_ALERT_TOOLS : []),
     ...(ads?.tools ?? []),
-    // Tarefas longas: só no módulo MAVI (a conversa fica salva e o card aparece).
-    ...(onPage ? [PLAN_TOOL] : []),
+    // Tarefas longas: no módulo MAVI e na bolinha (a conversa fica salva e o card aparece).
+    ...(withPowers ? [PLAN_TOOL] : []),
   ];
   const allowed = new Set(tools.map((t) => t.name));
   // Montou o plano de uma tarefa longa: nada mais roda nesta resposta.
@@ -1311,7 +1325,7 @@ async function ask(
     powers.has("web") && !webRoute && (!provider || provider.kind === "anthropic");
   if (powers.has("web") && !webOn && !webRoute) powers.delete("web");
   const webNote =
-    onPage && !webOn && !webRoute && powerList.includes("web")
+    withPowers && !webOn && !webRoute && powerList.includes("web")
       ? `\nA busca na internet está liberada para esta pessoa, mas a busca nativa só funciona com os modelos da Claude, e esta conversa usa ${provider?.name ?? "outro provedor"}. Um administrador ou gestor pode escolher um modelo para a busca em Painel da MAVI › Quem usa qual modelo. Se o pedido precisar da internet, diga isso.`
       : "";
   // Cada página citada vira uma fonte, como as do sistema.
@@ -1433,7 +1447,7 @@ async function ask(
   // a MAVI continua a partir do resultado, como o Claude Code depois de aprovar.
   const confirmed = typeof body.confirm === "string" ? body.confirm.slice(0, 64) : "";
   if (confirmed) {
-    if (!onPage || !mcp)
+    if (!withPowers || !mcp)
       throw new AiError(403, "As conexões (MCP) não estão liberadas para você nesta empresa.");
     if (!conversationId) throw new AiError(400, "A ação confirmada é de uma conversa salva.");
     const stepId = `c${++n}`;
@@ -1460,16 +1474,16 @@ async function ask(
   }
   const turnInstructions =
     INSTRUCTIONS +
-    (onPage ? PAGE_STYLE : "") +
+    (onPage ? PAGE_STYLE : withPowers ? BUBBLE_STYLE : "") +
     ASK_RULES +
-    powerInstructions(powers, onPage) +
+    powerInstructions(powers, withPowers) +
     webNote +
     (skills.catalog.size || picked.length ? SKILL_RULES : "") +
     (mcp?.tools.length ? MCP_RULES : "") +
     (attachments.length ? ATTACH_RULES : "") +
     (base.campaigns ? ALERT_CHAT_RULES : "") +
     (ads ? ADS_RULES : "") +
-    (onPage ? TASK_RULES : "");
+    (withPowers ? TASK_RULES : "");
   const turnContext =
     base.context +
     personContext(person) +
@@ -1497,7 +1511,7 @@ async function ask(
         ? 14
         : skills.catalog.size || mcp?.tools.length
           ? 12
-          : onPage
+          : withPowers
             ? 10
             : powers.size
               ? 8

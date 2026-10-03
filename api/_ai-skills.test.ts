@@ -115,6 +115,57 @@ describe("skills da MAVI", () => {
     ]);
   });
 
+  it("a bolinha usa as skills como o módulo, no modelo e no jeito de responder dela", async () => {
+    const { fetchImpl, calls } = world(base(["skills", "visuals"], catalog));
+    let request: AgentRequest | undefined;
+    const llm: LlmAdapter = async (r) => {
+      request = r;
+      return answer("Ok.");
+    };
+    await handleAi(
+      {
+        action: "ai-ask",
+        company,
+        scope: { module: "assistant" },
+        question: "Faz o relatório do mês?",
+        surface: "bubble",
+        skills: [{ slug: "relatorio-mensal" }],
+      },
+      token(me),
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+    );
+    expect(request!.context).toContain("- relatorio-mensal: Relatório mensal");
+    expect(request!.tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining(["use_skill", "read_skill_file", "show_chart"]),
+    );
+    // A escolhida na caixa da bolinha entra carregada.
+    expect(request!.messages.at(-1)!.content).toContain("1. Busque as campanhas do mês.");
+    expect(request!.instructions).toContain("Como responder na bolinha da MAVI");
+    expect(request!.instructions).not.toContain("Como responder no módulo MAVI");
+    // O modelo é o da bolinha ("Quem usa qual modelo" › assistant), não o do módulo.
+    const route = calls.find((c) => c.url.includes("ai_resolve_route"))!;
+    expect(route.body.p_feature).toBe("assistant");
+  });
+
+  it("as conversas das outras telas (sem surface) seguem sem skills nem poderes", async () => {
+    const { fetchImpl, calls } = world(base(["skills", "visuals"], catalog));
+    let request: AgentRequest | undefined;
+    const llm: LlmAdapter = async (r) => {
+      request = r;
+      return answer("Ok.");
+    };
+    await handleAi(
+      { action: "ai-ask", company, scope: { module: "meetings" }, question: "Oi?", surface: "bubble" },
+      token(me),
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+    );
+    expect(request!.tools.map((t) => t.name)).not.toContain("use_skill");
+    expect(request!.tools.map((t) => t.name)).not.toContain("show_chart");
+    expect(calls.some((c) => c.url.includes("ai_skill_catalog"))).toBe(false);
+  });
+
   it("sem catálogo e sem skill escolhida, nada de skills", async () => {
     const { fetchImpl } = world(base(["skills"], []));
     let request: AgentRequest | undefined;
