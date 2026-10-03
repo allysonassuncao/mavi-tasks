@@ -31,7 +31,7 @@ import {
   relativeDays,
   stageLabel,
   stageOf,
-  stages,
+  stagesOf,
   type NextAction,
   type Portfolio,
   type PortfolioItem,
@@ -645,12 +645,12 @@ function PortfolioView({
     (i) => scope !== "minha" || i.briefing?.responsible_id === user,
   );
   const counts = [0, 1, 2, 3].map(
-    (s) => scoped.filter((i) => stageOf(i) === s).length,
+    (s) => scoped.filter((i) => stageOf(i, mod.id) === s).length,
   );
   const fold = (t: string) =>
     t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const shown = scoped.filter((i) => {
-    if (stage !== "" && String(stageOf(i)) !== stage) return false;
+    if (stage !== "" && String(stageOf(i, mod.id)) !== stage) return false;
     if (!query.trim()) return true;
     const hay = fold(
       [
@@ -665,7 +665,7 @@ function PortfolioView({
     );
     return hay.includes(fold(query.trim()));
   });
-  const actions = nextActions(scoped);
+  const actions = nextActions(scoped, Date.now(), mod.id);
   const act = (a: NextAction) => {
     const item = items.find((i) => i.contract_id === a.contract)!;
     if (a.action === "open-briefing") onOpen(item, "briefing");
@@ -673,6 +673,7 @@ function PortfolioView({
     else if (a.action === "next-month") onOpen(item, "plano", "next-month");
     else if (a.action === "release") onOpen(item, "plano", "release");
     else if (a.action === "campaign") onOpen(item, "plano", "campaign");
+    else if (a.action === "schedule") onOpen(item, "plano", "schedule");
     else onOpen(item, "plano");
   };
 
@@ -919,7 +920,7 @@ function PortfolioView({
               </thead>
               <tbody>
                 {shown.map((i) => {
-                  const s = stageOf(i);
+                  const s = stageOf(i, mod.id);
                   const next = actions.find(
                     (a) => a.contract === i.contract_id,
                   );
@@ -956,9 +957,9 @@ function PortfolioView({
                         </div>
                       </td>
                       <td data-label="Etapa">
-                        <StageBar stage={s} />
+                        <StageBar stage={s} module={mod.id} />
                         <small className="sl-stage-label">
-                          {stageLabel(i)}
+                          {stageLabel(i, mod.id)}
                         </small>
                       </td>
                       <td data-label="Mês">{i.plan ? i.plan.label : "—"}</td>
@@ -1030,7 +1031,14 @@ function PortfolioView({
   );
 }
 
-export function StageBar({ stage }: { stage: number }) {
+export function StageBar({
+  stage,
+  module = "social_leads",
+}: {
+  stage: number;
+  module?: SlModule;
+}) {
+  const stages = stagesOf(module);
   return (
     <span className="sl-stage" aria-label={`Etapa: ${stages[stage]}`}>
       {stages.map((label, i) => (

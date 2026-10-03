@@ -5,6 +5,7 @@ import { postTextPlain, slidesRichText } from "../src/social-leads";
 import {
   SYSTEM_PROMPT,
   addUsage,
+  cleanSchedule,
   handleSocialLeads,
   newMeter,
   publicArt,
@@ -1018,5 +1019,168 @@ describe("briefing pela IA", () => {
       ),
     );
     expect(denied.status).toBe(403);
+  });
+});
+
+describe("Agendamento: sugestão de datas da MAVI", () => {
+  it("só os posts sem data, uma vez, a partir de uma hora depois de agora", () => {
+    const out = cleanSchedule(
+      [
+        {
+          numero: 3,
+          data: "2026-10-05",
+          hora: "19:00",
+          destinos: ["instagram", "story", "story"],
+          motivo: "Reels à noite",
+        },
+        {
+          numero: 1,
+          data: "2026-10-03",
+          hora: "12:00",
+          destinos: ["facebook", "tiktok"],
+          motivo: "",
+        },
+        {
+          numero: 1,
+          data: "2026-10-04",
+          hora: "12:00",
+          destinos: ["instagram"],
+          motivo: "repetido",
+        },
+        {
+          numero: 2,
+          data: "2026-10-02",
+          hora: "10:30",
+          destinos: ["instagram"],
+          motivo: "cedo demais",
+        },
+        {
+          numero: 4,
+          data: "2026-02-30",
+          hora: "10:00",
+          destinos: ["instagram"],
+          motivo: "não existe",
+        },
+        {
+          numero: 5,
+          data: "2026-10-06",
+          hora: "25:00",
+          destinos: ["instagram"],
+          motivo: "hora inválida",
+        },
+        {
+          numero: 6,
+          data: "2026-10-06",
+          hora: "10:00",
+          destinos: [],
+          motivo: "sem destino",
+        },
+        {
+          numero: 9,
+          data: "2026-10-06",
+          hora: "10:00",
+          destinos: ["instagram"],
+          motivo: "não pode",
+        },
+      ],
+      [1, 2, 3, 4, 5, 6],
+      "2026-10-02T10:00",
+    );
+    expect(out).toEqual([
+      {
+        numero: 1,
+        at: "2026-10-03T12:00",
+        destinations: ["facebook"],
+        reason: "",
+      },
+      {
+        numero: 3,
+        at: "2026-10-05T19:00",
+        destinations: ["instagram", "story"],
+        reason: "Reels à noite",
+      },
+    ]);
+  });
+
+  it("lê o contexto do plano e devolve as datas para a equipe revisar", async () => {
+    const { fetchImpl, calls } = fakeDb({
+      social_media_schedule_context: () => ({
+        body: {
+          client_name: "Forma",
+          briefing: { clientName: "Forma" },
+          label: "Mês 1",
+          timezone: "America/Sao_Paulo",
+          now: "2026-10-02T10:00",
+          weekday: "5",
+          posts: [
+            {
+              numero: 1,
+              pilar: "posicionar",
+              gancho: "G1",
+              formato: "Reels",
+              cta: "",
+              ehAnuncio: false,
+              artes: 1,
+              video: true,
+              agendado: null,
+              publicado: false,
+            },
+            {
+              numero: 2,
+              pilar: "oferta",
+              gancho: "G2",
+              formato: "Imagem",
+              cta: "",
+              ehAnuncio: true,
+              artes: 1,
+              video: false,
+              agendado: "2026-10-04T12:00",
+              publicado: false,
+            },
+          ],
+          outros: [],
+        },
+      }),
+    });
+    const seen: ModelRequest[] = [];
+    const r = await handleSocialLeads(
+      {
+        action: "schedule",
+        company,
+        contract,
+        plan: planId,
+        instruction: "só dias úteis",
+      },
+      "Bearer t",
+      env,
+      deps(
+        fetchImpl,
+        [
+          JSON.stringify({
+            posts: [
+              {
+                numero: 1,
+                data: "2026-10-06",
+                hora: "19:00",
+                destinos: ["instagram"],
+                motivo: "terça à noite",
+              },
+            ],
+            resumo: "Ritmo semanal.",
+          }),
+        ],
+        seen,
+      ),
+    );
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({
+      posts: [
+        { numero: 1, at: "2026-10-06T19:00", destinations: ["instagram"] },
+      ],
+      summary: "Ritmo semanal.",
+    });
+    expect(seen[0].user).toContain("só dias úteis");
+    expect(seen[0].user).toContain('"numero":1');
+    expect(seen[0].user).not.toContain('"numero":2,"pilar"');
   });
 });

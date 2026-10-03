@@ -204,6 +204,7 @@ export type AiFeature =
   | "social_leads_adjust"
   | "social_leads_briefing"
   | "social_leads_colors"
+  | "social_media_schedule"
   | "task_copilot"
   | "task_title"
   | "task_search"
@@ -438,6 +439,13 @@ export const FEATURES: FeatureInfo[] = [
     conversation: false,
     env: "SOCIAL_LEADS_MODEL",
     note: "O modelo escolhido precisa aceitar imagens.",
+  },
+  {
+    id: "social_media_schedule",
+    group: "Social Media",
+    label: "Sugestão de datas do Agendamento",
+    conversation: false,
+    env: "SOCIAL_LEADS_MODEL",
   },
   {
     id: "task_copilot",

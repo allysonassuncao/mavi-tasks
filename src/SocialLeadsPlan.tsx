@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { Empty, Modal } from "./components";
 import { PublicSocialLeads } from "./PublicSocialLeads";
+import { ScheduleView } from "./SocialMediaSchedule";
 import {
   Button,
   Checkbox,
@@ -76,7 +77,10 @@ import {
   pillars,
   relativeDays,
   slugify,
-  stages,
+  stagesOf,
+  scheduleStatus,
+  scheduleWhen,
+  SM_TIME_ZONE,
   type Decision,
   type Pillar,
   type PlanContent,
@@ -118,7 +122,8 @@ const appPath = (path: string) => {
 };
 
 /** Why the plan was opened from the portfolio. */
-export type PlanIntent = "share" | "next-month" | "release" | "campaign" | null;
+export type PlanIntent =
+  "share" | "next-month" | "release" | "campaign" | "schedule" | null;
 /** Who produces the arts and in how many days (the module's settings). */
 export type Production = {
   /** The creative team (or the squad): the default receiver of the arts. */
@@ -194,8 +199,12 @@ export function PlanView({
   const [bundle, setBundle] = useState<PlanBundle | null>(null);
   const [error, setError] = useState("");
   const [section, setSection] = useState<
-    "posts" | "estrategia" | "campanha" | "alertas" | "versoes"
+    "posts" | "agendamento" | "estrategia" | "campanha" | "alertas" | "versoes"
   >("posts");
+  const media = mod.id === "social_media";
+  // ?secao=agendamento (the notice "hora de publicar") opens that part once.
+  const [linkedSection, setLinkedSection] = useUrlState<string>("secao", "");
+  const [schedulePost, setSchedulePost] = useState(0);
   const [openPost, setOpenPost] = useState<number | null>(null);
   // ?post=N (the "Abrir o post no plano" of an art task) opens that post once.
   const [linkedPost, setLinkedPost] = useUrlState<number>("post", 0);
@@ -253,18 +262,28 @@ export function PlanView({
   useLiveSocialLeads(item.contract_id, load);
   useEffect(() => {
     if (!linkedPost || !bundle || bundle.plan.id !== plan?.id) return;
-    if (bundle.posts.some((p) => p.number === linkedPost)) {
+    if (linkedSection === "agendamento" && media) {
+      setSection("agendamento");
+      setSchedulePost(linkedPost);
+      setLinkedSection("");
+    } else if (bundle.posts.some((p) => p.number === linkedPost)) {
       setSection("posts");
       setOpenPost(linkedPost);
     }
     setLinkedPost(0);
-  }, [linkedPost, bundle, plan?.id, setLinkedPost]);
+  }, [linkedPost, bundle, plan?.id, setLinkedPost]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (linkedSection !== "agendamento" || linkedPost) return;
+    if (media) setSection("agendamento");
+    setLinkedSection("");
+  }, [linkedSection, linkedPost, media, setLinkedSection]);
 
   useEffect(() => {
     if (!intent) return;
     if (intent === "share" && plan) setModal("share");
     if (intent === "next-month") setModal("next-month");
     if (intent === "release" && plan) setModal("release");
+    if (intent === "schedule" && plan && media) setSection("agendamento");
     if (intent === "campaign" && plan) {
       if (item.campaign?.id)
         navigate(appPath(`/campanhas/${item.campaign.id}`));
@@ -390,13 +409,13 @@ export function PlanView({
   const cost = usageSummary(bundle.usage ?? []);
   const people = (id: string | null) =>
     data.members.find((m) => m.user_id === id)?.name;
-  const stage = allApproved
-    ? item.campaign?.active
-      ? 4
-      : 3
-    : bundle.plan.share_enabled || approved + rejected
-      ? 2
-      : 1;
+  const schedules = bundle.schedules ?? [];
+  const scheduleOf = (p: SlPost) =>
+    schedules.find((x) => x.number === p.number);
+  const published = schedules.filter((x) => x.status === "published").length;
+  const stages = stagesOf(mod.id);
+  const tz =
+    data.companies.find((c) => c.id === company)?.timezone || SM_TIME_ZONE;
   // Production: approved posts still without an art task, arts sent.
   const toRelease = posts.filter(
     (p) => p.decision === "approved" && !p.task_id,
@@ -404,6 +423,27 @@ export function PlanView({
   const withTask = posts.filter((p) => p.task_id).length;
   const withArt = posts.filter((p) => p.arts?.length).length;
   const taskOf = (p: SlPost) => bundle.tasks.find((t) => t.id === p.task_id);
+  // Social Media: Agendamento (4) once every art is in, Campanha (5) once
+  // every post has a date.
+  const stage = allApproved
+    ? media
+      ? schedules.length >= total
+        ? 5
+        : withArt >= total
+          ? 4
+          : 3
+      : item.campaign?.active
+        ? 4
+        : 3
+    : bundle.plan.share_enabled || approved + rejected
+      ? 2
+      : 1;
+  const campaignAt = media ? 5 : 4;
+  const toSchedule = media
+    ? posts.filter(
+        (p) => p.decision === "approved" && p.arts?.length && !scheduleOf(p),
+      ).length
+    : 0;
 
   const write = async (
     next: PlanContent,
@@ -428,7 +468,7 @@ export function PlanView({
   return (
     <div className="sl-plan">
       {jobBanner}
-      <div className="sl-flow">
+      <div className={`sl-flow${media ? " six" : ""}`}>
         {stages.map((label, i) => (
           <div
             key={label}
@@ -455,11 +495,19 @@ export function PlanView({
                         : allApproved
                           ? "pronta para liberar"
                           : "depois da aprovação"
-                      : item.campaign
-                        ? item.campaign.active
-                          ? "no ar no Meta"
-                          : "criada, ainda inativa"
-                        : "depois das artes"}
+                      : i < campaignAt
+                        ? schedules.length
+                          ? `${schedules.length} de ${total} agendados${published ? ` · ${published} ${published === 1 ? "publicado" : "publicados"}` : ""}`
+                          : withArt
+                            ? "pronto para agendar"
+                            : "depois das artes"
+                        : item.campaign
+                          ? item.campaign.active
+                            ? "no ar no Meta"
+                            : "criada, ainda inativa"
+                          : media
+                            ? "depois do agendamento"
+                            : "depois das artes"}
             </small>
           </div>
         ))}
@@ -490,6 +538,14 @@ export function PlanView({
         </p>
         {item.can_write && (
           <div className="sl-plan-actions">
+            {media && toSchedule > 0 && section !== "agendamento" && (
+              <Button
+                className={`btn ${toRelease > 0 ? "secondary" : "primary"}`}
+                onClick={() => setSection("agendamento")}
+              >
+                <CalendarClock size={16} /> Agendar ({toSchedule})
+              </Button>
+            )}
             {toRelease > 0 && (
               <Button
                 className="btn primary"
@@ -500,7 +556,7 @@ export function PlanView({
             )}
             {allApproved && toRelease === 0 && isLeader && (
               <Button
-                className={`btn ${withArt === total && !item.campaign?.active ? "primary" : "secondary"}`}
+                className={`btn ${withArt === total && !toSchedule && !item.campaign?.active ? "primary" : "secondary"}`}
                 onClick={() =>
                   item.campaign?.id
                     ? navigate(
@@ -600,6 +656,9 @@ export function PlanView({
         {(
           [
             ["posts", "Posts", total],
+            ...(media
+              ? ([["agendamento", "Agendamento", schedules.length]] as const)
+              : []),
             ["estrategia", "Estratégia", null],
             ["campanha", "Campanha", null],
             [
@@ -706,6 +765,16 @@ export function PlanView({
                       )}
                     </span>
                   )}
+                  {media && scheduleOf(p) && (
+                    <span
+                      className={`sm-post-when ${scheduleStatus(scheduleOf(p)!).tone}`}
+                    >
+                      <CalendarClock size={11} />
+                      {scheduleOf(p)!.status === "published"
+                        ? "Publicado"
+                        : scheduleWhen(scheduleOf(p)!.scheduled_at, tz)}
+                    </span>
+                  )}
                   <span className="sl-post-foot">
                     <span className={`sl-decision ${p.decision}`}>
                       {decisionLabel[p.decision]}
@@ -723,6 +792,27 @@ export function PlanView({
             })}
           </div>
         </>
+      )}
+      {section === "agendamento" && media && (
+        <ScheduleView
+          company={company}
+          contract={item.contract_id}
+          planId={plan.id}
+          posts={posts}
+          schedules={schedules}
+          linkCalendar={bundle.linkCalendar ?? true}
+          canWrite={item.can_write}
+          backend={backend}
+          tz={tz}
+          focus={schedulePost}
+          clearFocus={() => setSchedulePost(0)}
+          who={people}
+          notify={notify}
+          onChanged={() => {
+            load();
+            onChanged();
+          }}
+        />
       )}
       {section === "estrategia" && <Strategy content={content} />}
       {section === "campanha" && (
@@ -1519,6 +1609,10 @@ function PostHistory({
                     <Hammer size={11} />
                   ) : e.kind === "reopened" ? (
                     <RotateCcw size={11} />
+                  ) : e.kind === "scheduled" || e.kind === "unscheduled" ? (
+                    <CalendarClock size={11} />
+                  ) : e.kind === "published" ? (
+                    <Check size={11} />
                   ) : null}
                 </span>
                 <div className="sl-history-body">

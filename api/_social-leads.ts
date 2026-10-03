@@ -267,7 +267,7 @@ async function logUsage(
     plan?: string | null;
     job?: string | null;
   },
-  kind: "generate" | "adjust" | "colors" | "briefing",
+  kind: "generate" | "adjust" | "colors" | "briefing" | "schedule",
   m: Meter,
 ) {
   if (!m.input && !m.output && !m.cacheRead && !m.cacheWrite) return;
@@ -716,6 +716,15 @@ export type SocialLeadsRequest =
       /** Notes or a transcript; or the meeting to read (not both). */
       text?: string | null;
       recording?: string | null;
+    }
+  | {
+      /** Social Media › Agendamento: the MAVI suggests dates and times. */
+      action: "schedule";
+      company: string;
+      contract: string;
+      plan: string;
+      /** What the team wants (optional: "só dias úteis", "Reels à noite"). */
+      instruction?: string | null;
     };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -762,6 +771,8 @@ export async function handleSocialLeads(
       return await colors(body, authorization, env, deps);
     if (body.action === "briefing")
       return await briefing(body, authorization, env, deps);
+    if (body.action === "schedule")
+      return await schedule(body, authorization, env, deps);
     return { status: 400, body: { error: "Ação desconhecida." } };
   } catch (err) {
     return {
@@ -780,6 +791,7 @@ const FEATURE_OF: Record<string, AiFeature> = {
   adjust: "social_leads_adjust",
   colors: "social_leads_colors",
   briefing: "social_leads_briefing",
+  schedule: "social_media_schedule",
 };
 
 async function generate(
@@ -1298,6 +1310,218 @@ async function briefing(
       auth,
       { company: body.company, contract: body.contract },
       "briefing",
+      meter,
+    );
+  }
+}
+
+// ------------------------------------------------------------ schedule
+export const SCHEDULE_SCHEMA = obj({
+  posts: {
+    type: "array",
+    description: "Um item por post a agendar (os que ainda não têm data).",
+    items: obj({
+      numero: { type: "integer" },
+      data: { type: "string", description: "AAAA-MM-DD" },
+      hora: { type: "string", description: "HH:MM, 24 horas" },
+      destinos: {
+        type: "array",
+        items: { type: "string", enum: ["instagram", "story", "facebook"] },
+      },
+      motivo: { type: "string", description: "Até 120 caracteres." },
+    }),
+  },
+  resumo: str,
+});
+export type ScheduleSuggestion = {
+  numero: number;
+  at: string;
+  destinations: ("instagram" | "story" | "facebook")[];
+  reason: string;
+};
+type ScheduleContext = {
+  client_name: string;
+  briefing: BriefingFields;
+  label: string;
+  timezone: string;
+  now: string;
+  weekday: string;
+  posts: {
+    numero: number;
+    pilar: string;
+    gancho: string;
+    formato: string;
+    cta: string;
+    ehAnuncio: boolean;
+    artes: number;
+    video: boolean;
+    agendado: string | null;
+    publicado: boolean;
+  }[];
+  outros: string[];
+};
+const LOCAL = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+/**
+ * The MAVI's answer, checked: only posts it may schedule, each once, at a
+ * real time from an hour after now, with at least one destination.
+ */
+export function cleanSchedule(
+  raw: {
+    numero?: unknown;
+    data?: unknown;
+    hora?: unknown;
+    destinos?: unknown;
+    motivo?: unknown;
+  }[],
+  allowed: number[],
+  now: string,
+): ScheduleSuggestion[] {
+  const out: ScheduleSuggestion[] = [];
+  const m = LOCAL.exec(now);
+  const floor = m
+    ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) + 3_600_000
+    : 0;
+  for (const r of raw ?? []) {
+    const n = Number(r?.numero);
+    if (!allowed.includes(n) || out.some((x) => x.numero === n)) continue;
+    const at = `${String(r?.data ?? "")}T${String(r?.hora ?? "")}`;
+    const t = LOCAL.exec(at);
+    if (!t) continue;
+    const [y, mo, d, h, mi] = t.slice(1).map(Number);
+    const ms = Date.UTC(y, mo - 1, d, h, mi);
+    const back = new Date(ms);
+    if (back.getUTCDate() !== d || h > 23 || mi > 59 || ms < floor) continue;
+    const destinations = [
+      ...new Set(
+        (Array.isArray(r?.destinos) ? r.destinos : []).filter(
+          (x): x is ScheduleSuggestion["destinations"][number] =>
+            x === "instagram" || x === "story" || x === "facebook",
+        ),
+      ),
+    ];
+    if (!destinations.length) continue;
+    out.push({
+      numero: n,
+      at,
+      destinations,
+      reason: String(r?.motivo ?? "")
+        .trim()
+        .slice(0, 200),
+    });
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at) || a.numero - b.numero);
+}
+
+async function schedule(
+  body: Extract<SocialLeadsRequest, { action: "schedule" }>,
+  auth: string,
+  env: SocialLeadsEnv,
+  deps: Deps,
+) {
+  if (!UUID.test(body.plan ?? ""))
+    return { status: 400, body: { error: "Plano não informado." } };
+  const instruction = String(body.instruction ?? "").trim();
+  if (instruction.length > 1000)
+    return {
+      status: 400,
+      body: { error: "O pedido passou de 1.000 caracteres." },
+    };
+  const ctx = await rpc<ScheduleContext>(
+    env,
+    deps,
+    auth,
+    "social_media_schedule_context",
+    { p_company: body.company, p_contract: body.contract, p_plan: body.plan },
+  );
+  const open = ctx.posts.filter((p) => !p.agendado && !p.publicado);
+  if (!open.length)
+    return {
+      status: 400,
+      body: {
+        error:
+          "Todos os posts aprovados com arte já têm data. Para mudar uma, edite o post no calendário.",
+      },
+    };
+  const days = [
+    "",
+    "segunda",
+    "terça",
+    "quarta",
+    "quinta",
+    "sexta",
+    "sábado",
+    "domingo",
+  ];
+  const request: ModelRequest = {
+    system:
+      "Você é estrategista de social media da agência e monta o calendário de publicações orgânicas do mês de um cliente no Instagram e no Facebook. Distribua os posts para manter frequência regular (sem dois no mesmo dia, sem buracos longos), alternando os pilares, nos dias e horários em que o público do cliente costuma estar ativo (pense no nicho, na cidade e na rotina desse público). Reels e vídeos rendem melhor no fim da tarde e à noite; conteúdo de autoridade, em dias úteis; oferta, perto do meio e do fim da semana. Escreva em português do Brasil.",
+    user: [
+      `Cliente: ${ctx.client_name}. Plano: ${ctx.label}.`,
+      `Agora é ${ctx.now} (${days[Number(ctx.weekday)] ?? ""}), fuso ${ctx.timezone}. Agende a partir de amanhã e dentro das próximas 4 semanas.`,
+      `Briefing (JSON):\n${JSON.stringify(ctx.briefing).slice(0, 12000)}`,
+      `Posts sem data (agende todos, cada um uma vez):\n${JSON.stringify(
+        open.map((p) => ({
+          numero: p.numero,
+          pilar: p.pilar,
+          gancho: p.gancho,
+          formato: p.formato,
+          video: p.video,
+          artes: p.artes,
+          ehAnuncio: p.ehAnuncio,
+        })),
+      )}`,
+      `Já agendados (não use estes horários e evite o mesmo dia): ${JSON.stringify(
+        [
+          ...ctx.posts.filter((p) => p.agendado).map((p) => p.agendado),
+          ...ctx.outros,
+        ],
+      )}`,
+      `Destinos: "instagram" (feed, carrossel ou Reels, conforme a arte), "story" e "facebook" (a Página). Padrão: instagram e facebook; acrescente story nos posts de oferta, nos vídeos e no anúncio do mês. Em motivo, uma frase curta do porquê do dia e da hora. Em resumo, uma frase sobre o ritmo escolhido.`,
+      instruction ? `Pedido da equipe: ${instruction}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    schema: SCHEDULE_SCHEMA,
+    domains: [],
+    effort: "low",
+    maxTokens: 8000,
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  const meter = newMeter(env.model);
+  try {
+    const text = await deps.complete(env, request, controller.signal, meter);
+    const parsed = JSON.parse(text) as {
+      posts: Parameters<typeof cleanSchedule>[0];
+      resumo: string;
+    };
+    const posts = cleanSchedule(
+      parsed.posts,
+      open.map((p) => p.numero),
+      ctx.now,
+    );
+    if (!posts.length)
+      return {
+        status: 502,
+        body: { error: "A MAVI não devolveu datas válidas. Tente de novo." },
+      };
+    return {
+      status: 200,
+      body: {
+        posts,
+        summary: String(parsed.resumo ?? ""),
+        timezone: ctx.timezone,
+        cost_usd: meter.cost,
+      },
+    };
+  } finally {
+    clearTimeout(timer);
+    await logUsage(
+      env,
+      deps,
+      auth,
+      { company: body.company, contract: body.contract, plan: body.plan },
+      "schedule",
       meter,
     );
   }

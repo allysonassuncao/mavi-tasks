@@ -34,6 +34,10 @@ import {
   POSTS_DEFAULT,
   type BriefingSuggestion,
   type SlAlertRead,
+  type SmSchedule,
+  type SmScheduleDraft,
+  type SmDestination,
+  SM_TIME_ZONE,
 } from "./social-leads";
 
 /**
@@ -56,6 +60,23 @@ export interface PlanBundle {
   events: SlPostEvent[];
   /** The alerts marked as read (who and when). */
   alertReads: SlAlertRead[];
+  /** Social Media › Agendamento: each scheduled post. */
+  schedules?: SmSchedule[];
+  /** Whether the client link shows the calendar (on by default). */
+  linkCalendar?: boolean;
+}
+/** The MAVI's suggestion of dates (api/_social-leads.ts, "schedule"). */
+export interface ScheduleSuggestion {
+  posts: {
+    numero: number;
+    /** "AAAA-MM-DDTHH:MM" in the company's time zone. */
+    at: string;
+    destinations: SmDestination[];
+    reason: string;
+  }[];
+  summary: string;
+  timezone: string;
+  cost_usd: number;
 }
 /** The client's social proof folder in the Drive, with its public link. */
 export interface ProofFolder {
@@ -186,6 +207,22 @@ export interface SocialLeadsBackend {
   ): Promise<MediaFile[]>;
   /** The Meta campaign created from the plan (leaders); returns its id. */
   createCampaign(plan: string): Promise<string>;
+  /** Social Media › Agendamento. */
+  saveSchedule(plan: string, items: SmScheduleDraft[]): Promise<void>;
+  cancelSchedule(plan: string, number: number): Promise<void>;
+  setPublished(
+    plan: string,
+    number: number,
+    published: boolean,
+    url?: string | null,
+  ): Promise<void>;
+  setLinkCalendar(contract: string, enabled: boolean): Promise<void>;
+  suggestSchedule(
+    company: string,
+    contract: string,
+    plan: string,
+    instruction: string,
+  ): Promise<ScheduleSuggestion>;
   contract(company: string, contract: string): Promise<ContractBundle>;
   plan(plan: string): Promise<PlanBundle>;
   saveBriefing(
@@ -455,6 +492,38 @@ export const serverSocialLeads: SocialLeadsBackend = {
       p_plan: plan,
     })) as string;
   },
+  async saveSchedule(plan, items) {
+    await rpc("social_media_schedule_save", { p_plan: plan, p_items: items });
+  },
+  async cancelSchedule(plan, number) {
+    await rpc("social_media_schedule_cancel", {
+      p_plan: plan,
+      p_number: number,
+    });
+  },
+  async setPublished(plan, number, published, url) {
+    await rpc("social_media_schedule_published", {
+      p_plan: plan,
+      p_number: number,
+      p_published: published,
+      p_url: url ?? null,
+    });
+  },
+  async setLinkCalendar(contract, enabled) {
+    await rpc("social_media_set_link_calendar", {
+      p_contract: contract,
+      p_enabled: enabled,
+    });
+  },
+  async suggestSchedule(company, contract, plan, instruction) {
+    return server<ScheduleSuggestion>({
+      action: "schedule",
+      company,
+      contract,
+      plan,
+      instruction: instruction || null,
+    });
+  },
   async contract(company, contract) {
     const [b, p, j] = await Promise.all([
       db()
@@ -485,7 +554,7 @@ export const serverSocialLeads: SocialLeadsBackend = {
     };
   },
   async plan(plan) {
-    const [p, x, r, u, e, a] = await Promise.all([
+    const [p, x, r, u, e, a, sc] = await Promise.all([
       db()
         .from("social_leads_plans")
         .select(PLAN_COLUMNS)
@@ -524,8 +593,19 @@ export const serverSocialLeads: SocialLeadsBackend = {
         .select("alert_text,kind,read_by,read_at")
         .eq("plan_id", plan)
         .limit(200),
+      db()
+        .from("social_media_schedules")
+        .select("*")
+        .eq("plan_id", plan)
+        .order("scheduled_at"),
     ]);
     for (const q of [p, x, r]) if (q.error) throw q.error;
+    const contract = (p.data as unknown as SlPlan).contract_id;
+    const account = await db()
+      .from("social_media_accounts")
+      .select("link_calendar")
+      .eq("contract_id", contract)
+      .maybeSingle();
     const posts = (x.data ?? []) as SlPost[];
     const ids = posts.map((y) => y.task_id).filter((v): v is string => !!v);
     const t = ids.length
@@ -545,6 +625,12 @@ export const serverSocialLeads: SocialLeadsBackend = {
       events: e.error ? [] : ((e.data ?? []) as SlPostEvent[]),
       // Without the reads (migration not applied yet) every alert is unread.
       alertReads: a.error ? [] : ((a.data ?? []) as SlAlertRead[]),
+      // Without the schedule (migration not applied yet) nothing is scheduled.
+      schedules: sc.error ? [] : ((sc.data ?? []) as SmSchedule[]),
+      linkCalendar: account.error
+        ? true
+        : ((account.data as { link_calendar: boolean } | null)?.link_calendar ??
+          true),
     };
   },
   async saveBriefing(
@@ -760,6 +846,17 @@ export interface SharedPlan {
     decided_via: "link" | "team" | null;
     arts?: { id: string; name: string; type: string }[];
   }[];
+  /** Social Media: when each post goes out (null when the team turned it off). */
+  calendar?:
+    | {
+        numero: number;
+        at: string;
+        destinations: SmDestination[];
+        published: boolean;
+        url: string | null;
+      }[]
+    | null;
+  timezone?: string;
 }
 export async function sharedPlan(token: string): Promise<SharedPlan> {
   return (await rpc("social_leads_shared_plan", {
@@ -785,6 +882,17 @@ export const serverLink: LinkSource = {
   artUrl: (token, art) =>
     `/api/social-leads?arte=${encodeURIComponent(art.id)}&link=${encodeURIComponent(token)}`,
 };
+/** "AAAA-MM-DDTHH:MM" in São Paulo as an instant (the demo; the database uses the company's zone). */
+function demoInstant(local: string) {
+  const guess = new Date(`${local}:00Z`);
+  const shown = new Date(
+    guess.toLocaleString("en-US", { timeZone: SM_TIME_ZONE }),
+  );
+  const utc = new Date(guess.toLocaleString("en-US", { timeZone: "UTC" }));
+  return new Date(
+    guess.getTime() + (utc.getTime() - shown.getTime()),
+  ).toISOString();
+}
 /** The Drive folder of a month's arts and PDFs. */
 export const monthFolder = (label: string) => `Artes · ${label}`;
 export function shareUrl(token: string) {
@@ -821,6 +929,9 @@ type DemoState = {
   /** Why the plan is being written now (like the database's revision). */
   reason: string | null;
   alertReads: (SlAlertRead & { plan_id: string })[];
+  schedules: SmSchedule[];
+  /** Contracts whose client link hides the calendar. */
+  hiddenCalendars: string[];
   /** Drive folders of the demo's contracts (the social proof folder). */
   folders: {
     id: string;
@@ -1003,6 +1114,8 @@ export function demoSocialLeads(
       reason: null,
       alertReads: [],
       folders: [],
+      schedules: [],
+      hiddenCalendars: [],
     };
   const s = demoState;
   const spend = (plan: string, kind: SlUsage["kind"], cost: number) =>
@@ -1194,6 +1307,18 @@ export function demoSocialLeads(
                       .at(-1) ?? null,
                   tasks: posts.filter((x) => x.task_id).length,
                   arts: posts.filter((x) => x.arts?.length).length,
+                  scheduled: s.schedules.filter((z) => z.plan_id === last.id)
+                    .length,
+                  published: s.schedules.filter(
+                    (z) => z.plan_id === last.id && z.status === "published",
+                  ).length,
+                  due: s.schedules.filter(
+                    (z) =>
+                      z.plan_id === last.id &&
+                      (z.status === "failed" ||
+                        (z.status !== "published" &&
+                          new Date(z.scheduled_at).getTime() <= Date.now())),
+                  ).length,
                 }
               : null,
             job: s.jobs[k.id] ?? null,
@@ -1401,6 +1526,189 @@ export function demoSocialLeads(
         ),
         events: s.events.filter((e) => e.plan_id === planId),
         alertReads: s.alertReads.filter((r) => r.plan_id === planId),
+        schedules: s.schedules
+          .filter((z) => z.plan_id === planId)
+          .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at)),
+        linkCalendar: !s.hiddenCalendars.includes(plan.contract_id),
+      };
+    },
+    async saveSchedule(planId, items) {
+      const event = (
+        number: number,
+        kind: SlPostEvent["kind"],
+        detail: SlPostEvent["detail"],
+      ) =>
+        s.events.push({
+          id: id(),
+          plan_id: planId,
+          number,
+          kind,
+          via: "team",
+          actor_id: user,
+          actor_name: nameOf(user),
+          note: "",
+          detail,
+          created_at: now(),
+        });
+      for (const i of items) {
+        const x = s.posts.find(
+          (p) => p.plan_id === planId && p.number === i.number,
+        );
+        if (!x || x.decision !== "approved")
+          throw new Error(
+            `Post ${i.number}: só posts aprovados entram no agendamento.`,
+          );
+        if (!x.arts?.length)
+          throw new Error(`Post ${i.number}: envie a arte antes de agendar.`);
+        if (!i.destinations.length)
+          throw new Error(`Post ${i.number}: escolha onde publicar.`);
+        const at = demoInstant(i.at);
+        const old = s.schedules.find(
+          (z) => z.plan_id === planId && z.number === i.number,
+        );
+        if (old?.status === "published")
+          throw new Error(`Post ${i.number} já foi publicado.`);
+        const moved =
+          !old || old.scheduled_at !== at || old.status === "failed";
+        if (moved && new Date(at).getTime() < Date.now() + 60_000)
+          throw new Error(
+            `Post ${i.number}: escolha uma data e hora no futuro.`,
+          );
+        const row: SmSchedule = {
+          plan_id: planId,
+          number: i.number,
+          scheduled_at: at,
+          destinations: [...i.destinations].sort(),
+          caption: i.caption,
+          first_comment: i.first_comment.trim(),
+          cover: i.cover,
+          status: moved ? "scheduled" : old!.status,
+          reminded_at: moved ? null : (old?.reminded_at ?? null),
+          published_at: null,
+          published_url: null,
+          published_via: null,
+          published_by: null,
+          error: null,
+          scheduled_by: old?.scheduled_by ?? user,
+          updated_by: user,
+          updated_at: now(),
+        };
+        s.schedules = s.schedules.filter((z) => z !== old).concat(row);
+        if (!old || old.scheduled_at !== at)
+          event(i.number, "scheduled", {
+            at,
+            previous: old?.scheduled_at ?? null,
+            destinations: row.destinations,
+          });
+      }
+      emit();
+    },
+    async cancelSchedule(planId, number) {
+      const old = s.schedules.find(
+        (z) => z.plan_id === planId && z.number === number,
+      );
+      if (!old || old.status === "published")
+        throw new Error(
+          "Agendamento não encontrado (ou o post já foi publicado).",
+        );
+      s.schedules = s.schedules.filter((z) => z !== old);
+      s.events.push({
+        id: id(),
+        plan_id: planId,
+        number,
+        kind: "unscheduled",
+        via: "team",
+        actor_id: user,
+        actor_name: nameOf(user),
+        note: "",
+        detail: { at: old.scheduled_at },
+        created_at: now(),
+      });
+      emit();
+    },
+    async setPublished(planId, number, published, url) {
+      const z = s.schedules.find(
+        (r) => r.plan_id === planId && r.number === number,
+      );
+      if (!z) throw new Error("Agendamento não encontrado.");
+      const u = url?.trim() || null;
+      if (u && !/^https:\/\/\S+$/i.test(u))
+        throw new Error("O link do post precisa começar com https://.");
+      if (published)
+        Object.assign(z, {
+          status: "published",
+          published_at: z.published_at ?? now(),
+          published_url: u ?? z.published_url,
+          published_via: z.published_via ?? "manual",
+          published_by: z.published_by ?? user,
+          error: null,
+        });
+      else
+        Object.assign(z, {
+          status:
+            new Date(z.scheduled_at).getTime() <= Date.now()
+              ? "due"
+              : "scheduled",
+          published_at: null,
+          published_url: null,
+          published_via: null,
+          published_by: null,
+        });
+      s.events.push({
+        id: id(),
+        plan_id: planId,
+        number,
+        kind: "published",
+        via: "team",
+        actor_id: user,
+        actor_name: nameOf(user),
+        note: published ? "" : "desfeito",
+        detail: published
+          ? { url: z.published_url, via: "manual" }
+          : { undone: true },
+        created_at: now(),
+      });
+      emit();
+    },
+    async setLinkCalendar(contract, enabled) {
+      s.hiddenCalendars = s.hiddenCalendars.filter((c) => c !== contract);
+      if (!enabled) s.hiddenCalendars.push(contract);
+      emit();
+    },
+    async suggestSchedule(_c, _contract, planId) {
+      await new Promise((r) => setTimeout(r, 900));
+      const open = s.posts
+        .filter(
+          (x) =>
+            x.plan_id === planId &&
+            x.decision === "approved" &&
+            x.arts?.length &&
+            !s.schedules.some(
+              (z) => z.plan_id === planId && z.number === x.number,
+            ),
+        )
+        .sort((a, b) => a.number - b.number);
+      if (!open.length)
+        throw new Error(
+          "Todos os posts aprovados com arte já têm data. Para mudar uma, edite o post no calendário.",
+        );
+      spend(planId, "schedule", 0.01);
+      const day = (n: number) => {
+        const d = new Date(Date.now() + n * 86_400_000);
+        return d.toLocaleDateString("en-CA", { timeZone: SM_TIME_ZONE });
+      };
+      return {
+        posts: open.map((x, i) => ({
+          numero: x.number,
+          at: `${day(1 + i * 3)}T${x.arts?.some((a) => a.type.startsWith("video/")) ? "19:00" : "12:00"}`,
+          destinations: x.is_ad
+            ? ["facebook", "instagram", "story"]
+            : ["facebook", "instagram"],
+          reason: "Ritmo de dois posts por semana, alternando os pilares.",
+        })),
+        summary: "Dois posts por semana, vídeos à noite e o resto no almoço.",
+        timezone: SM_TIME_ZONE,
+        cost_usd: 0.01,
       };
     },
     async markAlert(planId, text, kind, read) {
@@ -1748,6 +2056,21 @@ export function demoSocialLeads(
                 type: a.type,
               })),
             })),
+          calendar:
+            moduleOf(plan.contract_id) === "social_media" &&
+            !s.hiddenCalendars.includes(plan.contract_id)
+              ? s.schedules
+                  .filter((z) => z.plan_id === plan.id)
+                  .sort((a, z) => a.scheduled_at.localeCompare(z.scheduled_at))
+                  .map((z) => ({
+                    numero: z.number,
+                    at: z.scheduled_at,
+                    destinations: z.destinations,
+                    published: z.status === "published",
+                    url: z.published_url,
+                  }))
+              : null,
+          timezone: SM_TIME_ZONE,
         };
       },
       artUrl: (_token, art) => s.files[art.id] ?? "",

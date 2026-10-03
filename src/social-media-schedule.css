@@ -1,0 +1,517 @@
+/* Planejamento › Social Media › Agendamento (SocialMediaSchedule.tsx) */
+
+/* Seis etapas no Social Media (Agendamento antes da Campanha). */
+.sl-flow.six {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+@media (max-width: 760px) {
+  .sl-flow.six {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* A data no cartão do post. */
+.sm-post-when {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: #eef3f6;
+  color: #46606a;
+}
+.sm-post-when.good {
+  background: #e6f5ec;
+  color: #2f6e4c;
+}
+.sm-post-when.warn {
+  background: #fdf3e1;
+  color: #8a5d12;
+}
+.sm-post-when.bad {
+  background: #fcefee;
+  color: #a6403e;
+}
+
+.sm-schedule {
+  display: grid;
+  gap: 14px;
+}
+.sm-schedule-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sm-schedule-bar p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.sm-schedule-bar p strong {
+  color: var(--ink);
+}
+.sm-schedule-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sm-check {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+/* Hora de publicar */
+.sm-due {
+  display: grid;
+  gap: 8px;
+}
+.sm-due-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #f1dfb5;
+  background: #fdf8ec;
+  color: #7d5a17;
+  cursor: pointer;
+}
+.sm-due-item.bad {
+  border-color: #f1cfd4;
+  background: #fcf1f2;
+  color: #8d3d4b;
+}
+.sm-due-item span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.sm-due-item strong {
+  font-size: 0.85rem;
+}
+.sm-due-item small {
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sm-due-go {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Calendário */
+.sm-calendar {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+.sm-calendar header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.sm-calendar header h4 {
+  margin: 0;
+  min-width: 160px;
+  text-align: center;
+  font-size: 0.92rem;
+}
+.sm-calendar header button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+.sm-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.sm-weekday {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-bottom: 2px;
+}
+.sm-day {
+  min-height: 86px;
+  border: 1px solid #eef0f1;
+  border-radius: 8px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.sm-day.empty {
+  border-color: transparent;
+}
+.sm-day.past {
+  background: #fafbfb;
+}
+.sm-day.today {
+  border-color: #9fc970;
+  box-shadow: 0 0 0 1px #9fc970 inset;
+}
+.sm-day-n {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.sm-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 0;
+  font-size: 0.7rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  background: #eaf1f6;
+  color: #34505c;
+}
+.sm-chip b {
+  font-weight: 700;
+}
+.sm-chip.good {
+  background: #e6f5ec;
+  color: #2f6e4c;
+}
+.sm-chip.warn {
+  background: #fdf0d6;
+  color: #8a5d12;
+}
+.sm-chip.bad {
+  background: #fbe3e5;
+  color: #a6403e;
+}
+
+/* Para agendar */
+.sm-pending {
+  display: grid;
+  gap: 8px;
+}
+.sm-pending h4 {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.sm-pending ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.sm-pending li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.sm-pending-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.sm-pending-text strong {
+  font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sm-pending-text small {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.sm-pending > p {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+/* Modal do post */
+/* As artes só para ver (o envio é no post, em Produção). */
+.sm-modal .sl-media-add {
+  display: none;
+}
+.sm-modal-hook {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.sm-modal-hook small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.sm-status {
+  justify-self: start;
+  align-self: flex-start;
+  width: fit-content;
+  margin: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #eaf1f6;
+  color: #34505c;
+}
+.sm-status.good {
+  background: #e6f5ec;
+  color: #2f6e4c;
+}
+.sm-status.warn {
+  background: #fdf0d6;
+  color: #8a5d12;
+}
+.sm-status.bad {
+  background: #fbe3e5;
+  color: #a6403e;
+}
+.sm-dest,
+.sm-cover {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.sm-dest legend,
+.sm-cover legend {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0 4px;
+}
+.sm-dest > small {
+  flex-basis: 100%;
+}
+.sm-cover {
+  flex-direction: column;
+}
+.sm-cover .input-control {
+  flex: none;
+  width: 110px;
+}
+.sm-label-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sm-label-row small {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.72rem;
+}
+.sm-row-actions {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: -4px;
+}
+.sm-row-actions .sl-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sm-publish {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f7faf3;
+  border: 1px solid #e1edd2;
+}
+.sm-publish h4 {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.sm-publish p {
+  margin: 0;
+}
+.sm-publish a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82rem;
+}
+.sm-spacer {
+  flex: 1;
+}
+.sm-modal .form-footer {
+  flex-wrap: wrap;
+}
+
+/* Sugestão da MAVI */
+.sm-suggest-summary {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f5fbea;
+  color: #44602a;
+  font-size: 0.82rem;
+}
+.sm-suggest-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 50vh;
+  overflow: auto;
+}
+.sm-suggest-list li {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.sm-suggest-list .sm-check {
+  align-items: flex-start;
+}
+.sm-suggest-list .sm-check > span {
+  display: grid;
+  gap: 2px;
+}
+.sm-suggest-list strong {
+  font-size: 0.84rem;
+}
+.sm-suggest-list small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.sm-suggest-list em {
+  font-size: 0.74rem;
+  color: #5e774b;
+}
+
+/* Link do cliente: calendário só para ver */
+.sm-public-calendar h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 1rem;
+}
+.sm-public-calendar ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.sm-public-calendar li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.sm-public-calendar time {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #5e774b;
+}
+.sm-public-calendar li span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.sm-public-calendar li strong {
+  font-size: 0.86rem;
+}
+.sm-public-calendar li small {
+  color: #899492;
+  font-size: 0.75rem;
+}
+.sm-public-calendar li em,
+.sm-public-calendar li a {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-style: normal;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #899492;
+}
+.sm-public-calendar li.done em,
+.sm-public-calendar li.done a {
+  color: #2f6e4c;
+}
+
+@media (max-width: 760px) {
+  .sm-day {
+    min-height: 58px;
+    padding: 3px;
+  }
+  .sm-chip {
+    padding: 2px 3px;
+    font-size: 0.62rem;
+  }
+  .sm-chip b {
+    display: none;
+  }
+  .sm-pending li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .sm-pending li .btn {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Os campos do formulário ocupam a linha toda; o rádio e o número, não. */
+.sm-cover .sm-check {
+  justify-content: flex-start;
+  width: auto;
+}
+.sm-modal .sm-cover input[type="radio"] {
+  min-height: 0;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: #56793a;
+}

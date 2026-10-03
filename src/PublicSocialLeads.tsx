@@ -1,14 +1,29 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Megaphone, MessageSquare, X } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  Megaphone,
+  MessageSquare,
+  X,
+} from "lucide-react";
 import { Button, Textarea } from "./ui";
 import {
   serverLink,
   type LinkSource,
   type SharedPlan,
 } from "./social-leads-api";
-import { pillars, postTextPlain } from "./social-leads";
+import {
+  destinationLabels,
+  pillars,
+  postTextPlain,
+  scheduleWhen,
+  SM_TIME_ZONE,
+} from "./social-leads";
 import { RichTextContent } from "./RichTextContent";
 import "./social-leads-onboarding.css";
+import "./social-media-schedule.css";
 
 type Post = SharedPlan["posts"][number];
 
@@ -206,6 +221,50 @@ export function PublicSocialLeads({
             }}
           />
         ))}
+
+        {!!plan.calendar?.length && (
+          <section className="sl-public-intro sm-public-calendar">
+            <h2>
+              <CalendarDays size={16} /> Quando cada post sai
+            </h2>
+            <ol>
+              {plan.calendar.map((c) => {
+                const p = plan.posts.find((x) => x.numero === c.numero);
+                return (
+                  <li key={c.numero} className={c.published ? "done" : ""}>
+                    <time dateTime={c.at}>
+                      {scheduleWhen(c.at, plan.timezone || SM_TIME_ZONE)}
+                    </time>
+                    <span>
+                      <strong>
+                        Post {c.numero}
+                        {p ? ` · ${p.gancho}` : ""}
+                      </strong>
+                      <small>
+                        {c.destinations
+                          .map((d) => destinationLabels[d])
+                          .join(", ")}
+                      </small>
+                    </span>
+                    {c.published ? (
+                      c.url ? (
+                        <a href={c.url} target="_blank" rel="noreferrer">
+                          <ExternalLink size={13} /> Publicado
+                        </a>
+                      ) : (
+                        <em>
+                          <Check size={13} /> Publicado
+                        </em>
+                      )
+                    ) : (
+                      <em>Agendado</em>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        )}
 
         <section className="sl-public-intro sl-public-ad">
           <h2>

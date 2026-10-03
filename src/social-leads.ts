@@ -362,7 +362,7 @@ export function mediaAllowed(key: MediaKey, type: string) {
 }
 /** One call to the AI and what it cost (social_leads_ai_usage). */
 export interface SlUsage {
-  kind: "generate" | "adjust" | "colors" | "briefing";
+  kind: "generate" | "adjust" | "colors" | "briefing" | "schedule";
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -576,6 +576,10 @@ export interface PortfolioItem {
     /** Posts with an art task / with art files. */
     tasks?: number;
     arts?: number;
+    /** Social Media: posts scheduled, published, and waiting to be published. */
+    scheduled?: number;
+    published?: number;
+    due?: number;
   } | null;
   job: SlJob | null;
   /** The client's Meta campaign (id and name only for leaders). */
@@ -906,26 +910,56 @@ export const stages = [
   "Produção",
   "Campanha",
 ] as const;
+/** Social Media publishes the posts too: Agendamento comes before Campanha. */
+export const mediaStages = [
+  "Briefing",
+  "Plano",
+  "Aprovação",
+  "Produção",
+  "Agendamento",
+  "Campanha",
+] as const;
+export const stagesOf = (module: SlModule): readonly string[] =>
+  module === "social_media" ? mediaStages : stages;
 /** How many posts the latest plan has (8 before the count could change). */
 export const postsOf = (plan: { posts?: number } | null | undefined) =>
   plan?.posts || POSTS_DEFAULT;
-/** 0 briefing · 1 plano (a revisar) · 2 aprovação · 3 aprovado/produção. */
-export function stageOf(item: PortfolioItem) {
+/**
+ * 0 briefing · 1 plano (a revisar) · 2 aprovação · 3 aprovado/produção ·
+ * Social Media: 4 agendamento (todas as artes) · 5 campanha (tudo agendado).
+ */
+export function stageOf(
+  item: PortfolioItem,
+  module: SlModule = "social_leads",
+) {
   if (!item.plan) return 0;
-  if (item.plan.approved >= postsOf(item.plan))
-    return item.campaign?.active ? 4 : 3;
+  const total = postsOf(item.plan);
+  if (item.plan.approved >= total) {
+    if (module !== "social_media") return item.campaign?.active ? 4 : 3;
+    if ((item.plan.scheduled ?? 0) >= total) return 5;
+    return (item.plan.arts ?? 0) >= total ? 4 : 3;
+  }
   if (!item.plan.share_enabled && item.plan.approved + item.plan.rejected === 0)
     return 1;
   return 2;
 }
-export function stageLabel(item: PortfolioItem) {
+export function stageLabel(
+  item: PortfolioItem,
+  module: SlModule = "social_leads",
+) {
   const p = item.plan;
   if (item.job?.status === "running") return "Gerando o plano…";
   if (!p) return item.briefing ? "Briefing em andamento" : "Sem briefing";
   const decided = p.approved + p.rejected;
   const total = postsOf(p);
   if (p.approved >= total) {
+    if (module === "social_media" && (p.due ?? 0) > 0)
+      return `Agendamento · ${p.due} para publicar`;
     if (item.campaign?.active) return "Campanha no ar";
+    if (module === "social_media" && (p.scheduled ?? 0) > 0)
+      return (p.published ?? 0) >= total
+        ? "Tudo publicado"
+        : `Agendamento · ${p.scheduled}/${total} agendados`;
     if (!p.tasks) return "Plano aprovado";
     return `Produção · ${p.arts ?? 0}/${total} artes`;
   }
@@ -948,7 +982,8 @@ export type NextAction = {
     | "share"
     | "next-month"
     | "release"
-    | "campaign";
+    | "campaign"
+    | "schedule";
   label: string;
 };
 const DAY = 86_400_000;
@@ -959,6 +994,7 @@ export function daysSince(iso: string | null | undefined, now = Date.now()) {
 export function nextActions(
   items: PortfolioItem[],
   now = Date.now(),
+  module: SlModule = "social_leads",
 ): NextAction[] {
   const order: Record<Tone, number> = { bad: 0, warn: 1, good: 2, info: 3 };
   const out: NextAction[] = [];
@@ -1027,7 +1063,17 @@ export function nextActions(
     if (p.approved >= total) {
       const age = daysSince(p.created_at, now);
       const arts = p.arts ?? 0;
-      if (age >= 25)
+      const media = module === "social_media";
+      if (media && (p.due ?? 0) > 0)
+        out.push({
+          ...base,
+          tone: "bad",
+          title: `${i.client_name}: ${plural(p.due ?? 0, "post na hora de publicar", "posts na hora de publicar")}`,
+          detail: "A hora marcada chegou: publique e marque como publicado.",
+          action: "schedule",
+          label: "Abrir agendamento",
+        });
+      else if (age >= 25)
         out.push({
           ...base,
           tone: "warn",
@@ -1044,6 +1090,15 @@ export function nextActions(
           detail: "Libere a produção: cada post vira uma tarefa de arte.",
           action: "release",
           label: "Liberar produção",
+        });
+      else if (media && arts > (p.scheduled ?? 0))
+        out.push({
+          ...base,
+          tone: arts < total ? "info" : "good",
+          title: `${i.client_name}: ${plural(arts - (p.scheduled ?? 0), "post com arte para agendar", "posts com arte para agendar")}`,
+          detail: `${p.scheduled ?? 0} de ${total} agendados · ${arts} com arte.`,
+          action: "schedule",
+          label: "Agendar",
         });
       else if (arts < total)
         out.push({
@@ -1416,7 +1471,10 @@ export type PostEventKind =
   | "edited"
   | "arts"
   | "task"
-  | "comment";
+  | "comment"
+  | "scheduled"
+  | "unscheduled"
+  | "published";
 /** The post's content fields the history compares (database names). */
 export const postFields = {
   pillar: "Pilar",
@@ -1445,6 +1503,13 @@ export interface PostEventDetail {
   assignee?: string;
   team?: string;
   due?: string;
+  /** Agendamento (Social Media): when, when before and where. */
+  at?: string;
+  previous?: string | null;
+  destinations?: SmDestination[];
+  url?: string | null;
+  via?: "manual" | "meta" | null;
+  undone?: boolean;
 }
 export interface SlPostEvent {
   id: string;
@@ -1701,6 +1766,37 @@ export function describeEvent(e: SlPostEvent): {
       };
     case "comment":
       return { title: `${who} comentou`, tone: "neutral", changes: [], lines };
+    case "scheduled":
+      if (d.destinations?.length)
+        lines.push(
+          `Onde: ${d.destinations.map((x) => destinationLabels[x]).join(", ")}`,
+        );
+      if (d.previous) lines.push(`Antes: ${scheduleWhen(d.previous)}`);
+      return {
+        title: `${d.previous ? "Reagendado" : "Agendado"} por ${who} para ${d.at ? scheduleWhen(d.at) : "—"}`,
+        tone: "info",
+        changes: [],
+        lines,
+      };
+    case "unscheduled":
+      return {
+        title: `${who} tirou do agendamento`,
+        tone: "neutral",
+        changes: [],
+        lines,
+      };
+    case "published":
+      if (d.url) lines.push(d.url);
+      return {
+        title: d.undone
+          ? `${who} desfez o “publicado”`
+          : d.via === "meta"
+            ? "Publicado pelo Meta"
+            : `Publicado · marcado por ${who}`,
+        tone: d.undone ? "neutral" : "good",
+        changes: [],
+        lines,
+      };
   }
 }
 
@@ -1938,4 +2034,109 @@ export function campaignFacts(
         : "",
     },
   ];
+}
+
+// ------------------------------------------------------------ agendamento
+/** The module of a client (social-leads-module.ts; repeated: no imports here). */
+type SlModule = "social_leads" | "social_media";
+/** Where a post goes: Instagram (feed, carousel or Reels by the art), Stories, the Facebook Page. */
+export type SmDestination = "instagram" | "story" | "facebook";
+export const destinationLabels: Record<SmDestination, string> = {
+  instagram: "Instagram",
+  story: "Stories",
+  facebook: "Facebook",
+};
+export const DESTINATIONS: SmDestination[] = ["instagram", "story", "facebook"];
+export type SmStatus = "scheduled" | "due" | "published" | "failed";
+/** A post's schedule (migration 20270315090000_social_media_schedule). */
+export interface SmSchedule {
+  plan_id: string;
+  number: number;
+  scheduled_at: string;
+  destinations: SmDestination[];
+  /** null: the plan's caption. */
+  caption: string | null;
+  first_comment: string;
+  cover: { art: string } | { seconds: number } | null;
+  status: SmStatus;
+  reminded_at: string | null;
+  published_at: string | null;
+  published_url: string | null;
+  published_via: "manual" | "meta" | null;
+  published_by: string | null;
+  error: string | null;
+  scheduled_by: string;
+  updated_by: string | null;
+  updated_at: string;
+}
+/** What a save sends: the time in the company's time zone ("AAAA-MM-DDTHH:MM"). */
+export interface SmScheduleDraft {
+  number: number;
+  at: string;
+  destinations: SmDestination[];
+  caption: string | null;
+  first_comment: string;
+  cover: SmSchedule["cover"];
+}
+export const SM_TIME_ZONE = "America/Sao_Paulo";
+/** An instant as "AAAA-MM-DDTHH:MM" in a time zone (the input's value). */
+export function localInput(iso: string, timeZone = SM_TIME_ZONE) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(iso))
+      .map((p) => [p.type, p.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+/** "seg., 12/10 às 18:30" (in the company's time zone). */
+export function scheduleWhen(iso: string, timeZone = SM_TIME_ZONE) {
+  const d = new Date(iso);
+  const day = d.toLocaleDateString("pt-BR", {
+    timeZone,
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+  });
+  const time = d.toLocaleTimeString("pt-BR", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${day} às ${time}`;
+}
+/** "AAAA-MM-DDTHH:MM" (local) shown the same way. */
+export function localWhen(local: string) {
+  const [date, time] = local.split("T");
+  const d = new Date(`${date}T12:00:00Z`);
+  const day = d.toLocaleDateString("pt-BR", {
+    timeZone: "UTC",
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+  });
+  return `${day} às ${time}`;
+}
+/** Instagram's label for a post: Reels for a video, carousel for several arts. */
+export function instagramKind(arts: { type: string }[] | undefined) {
+  const list = arts ?? [];
+  if (list.some((a) => a.type.startsWith("video/")) && list.length === 1)
+    return "Reels";
+  return list.length > 1 ? "Carrossel" : "Feed";
+}
+/** The schedule's status for the team. */
+export function scheduleStatus(s: SmSchedule, now = Date.now()) {
+  if (s.status === "published")
+    return { label: "Publicado", tone: "good" as const };
+  if (s.status === "failed") return { label: "Falhou", tone: "bad" as const };
+  if (s.status === "due" || new Date(s.scheduled_at).getTime() <= now)
+    return { label: "Hora de publicar", tone: "warn" as const };
+  return { label: "Agendado", tone: "info" as const };
 }

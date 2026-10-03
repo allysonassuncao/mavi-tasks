@@ -281,6 +281,37 @@ describe("etapas e próximas ações", () => {
     expect(stageOf(item({ plan: p({ approved: 5 }) }))).toBe(2);
     expect(stageOf(item({ plan: p({ approved: 8 }) }))).toBe(3);
   });
+  it("no Social Media, o Agendamento vem antes da Campanha", () => {
+    const m = "social_media" as const;
+    expect(stageOf(item({ plan: p({ approved: 8, arts: 5 }) }), m)).toBe(3);
+    expect(stageOf(item({ plan: p({ approved: 8, arts: 8 }) }), m)).toBe(4);
+    expect(
+      stageOf(item({ plan: p({ approved: 8, arts: 8, scheduled: 8 }) }), m),
+    ).toBe(5);
+    // O Social Leads não muda.
+    expect(
+      stageOf(item({ plan: p({ approved: 8, arts: 8, scheduled: 8 }) })),
+    ).toBe(3);
+    const due = item({
+      plan: p({ approved: 8, arts: 8, scheduled: 3, due: 1 }),
+    });
+    expect(stageLabel(due, m)).toBe("Agendamento · 1 para publicar");
+    expect(
+      nextActions([due], Date.parse("2026-09-25T12:00:00Z"), m)[0],
+    ).toMatchObject({
+      tone: "bad",
+      action: "schedule",
+    });
+    const toPlan = item({
+      plan: p({ approved: 8, arts: 8, tasks: 8, scheduled: 3 }),
+    });
+    expect(
+      nextActions([toPlan], Date.parse("2026-09-25T12:00:00Z"), m)[0],
+    ).toMatchObject({
+      action: "schedule",
+      title: "Cliente: 5 posts com arte para agendar",
+    });
+  });
   it("ordena do mais urgente e diz o que fazer", () => {
     const list = nextActions(
       [
