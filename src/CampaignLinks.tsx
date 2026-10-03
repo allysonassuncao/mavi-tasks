@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ClipboardList,
   Keyboard,
@@ -977,6 +977,7 @@ export function AdConnections({
   onPending,
   refresh = 0,
   agency = true,
+  extra,
 }: {
   company: string;
   ads: AdsBackend;
@@ -990,6 +991,8 @@ export function AdConnections({
   refresh?: number;
   /** False: a collaborator, who doesn't manage the agency's Google. */
   agency?: boolean;
+  /** Other connections, before the daily sync (the MakeCRM's). */
+  extra?: ReactNode;
 }) {
   const [status, setStatus] = useState<AdsStatus | null>(null);
   const [clients, setClients] = useState<MetaClient[] | null>(null);
@@ -1279,6 +1282,8 @@ export function AdConnections({
             </section>
           </>
         )}
+
+        {extra}
 
         <section className="campaign-connection-block">
           <header>

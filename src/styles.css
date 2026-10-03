@@ -29927,3 +29927,26 @@ a.radar-task-chip:hover {
   user-select: none;
   cursor: default;
 }
+
+/* Campanhas › Abrir no CRM (CampaignCrm.tsx). */
+.campaign-crm-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 2px;
+  font-size: 0.74rem;
+}
+.campaign-crm-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.campaign-crm-picker .campaign-pick-list {
+  max-height: 300px;
+}
+.campaign-crm-picker .campaign-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

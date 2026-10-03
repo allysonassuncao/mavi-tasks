@@ -106,6 +106,7 @@
     "test:db:social-media-schedule": "node scripts/test-social-media-schedule.mjs",
     "test:db:social-leads-stuck-jobs": "node scripts/test-social-leads-stuck-jobs.mjs",
     "test:db:task-scope-teams": "node scripts/test-task-scope-teams.mjs",
+    "test:db:makecrm": "node scripts/test-makecrm-links.mjs",
     "benchmark:rls": "node scripts/benchmark-rls.mjs",
     "benchmark:dashboards": "node scripts/benchmark-dashboards.mjs",
     "format": "prettier --write src scripts supabase/functions *.json *.ts *.html *.md",

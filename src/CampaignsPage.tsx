@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import {
   ArrowLeft,
@@ -124,6 +125,7 @@ import {
 import { GoogleConversions, MetaConversions } from "./CampaignConversions";
 import { CampaignAlerts, type AlertCampaignOption } from "./CampaignAlerts";
 import { CampaignMavi } from "./CampaignMavi";
+import { CrmConnections, demoCrm, OpenInCrm, serverCrm, type CrmBackend } from "./CampaignCrm";
 import {
   CampaignMediaBalance,
   CycleMediaFit,
@@ -262,6 +264,37 @@ export function CampaignsPage({
   const [statusForm, setStatusForm] = useState<StatusFormState>(null);
   const [connections, setConnections] = useState(false);
   const [eventsTick, setEventsTick] = useState(0);
+  // Abrir no CRM: os clientes ligados ao MakeCRM que a pessoa vê.
+  const crm: CrmBackend = useMemo(
+    () => (demo ? demoCrm(() => dataRef.current.clients) : serverCrm),
+    [demo],
+  );
+  const [crmLinks, setCrmLinks] = useState<Record<string, string>>({});
+  const [crmTick, setCrmTick] = useState(0);
+  useEffect(() => {
+    let live = true;
+    crm
+      .links(company)
+      .then((links) => live && setCrmLinks(links))
+      .catch(() => live && setCrmLinks({}));
+    return () => {
+      live = false;
+    };
+  }, [crm, company, crmTick]);
+  // The button for a campaign's client, when it is linked to the MakeCRM.
+  const crmButton = (contract: string, compact = false) => {
+    const client = contractParts(data, contract).client;
+    return client && client.id in crmLinks ? (
+      <OpenInCrm
+        backend={crm}
+        company={company}
+        client={client.id}
+        clientName={client.name}
+        notify={notify}
+        compact={compact}
+      />
+    ) : null;
+  };
   // Back from Facebook or Google (api/ads-callback): say how it went.
   const [connection, setConnection] = useUrlState<string>("conexao", "");
   // A Facebook login waiting for the client's accounts to be ticked.
@@ -336,6 +369,7 @@ export function CampaignsPage({
           maviOpen={maviOpen === "1"}
           onMavi={(open) => setMaviOpen(open ? "1" : "")}
           onAlerts={() => setAlertsView("lista")}
+          crm={crmButton(campaign.contract_id)}
           link={window.location.origin + href(campaign.id)}
           onBack={() =>
             navigate(
@@ -373,6 +407,7 @@ export function CampaignsPage({
           onNew={() => setCampaignForm({})}
           onConnections={canEdit ? () => setConnections(true) : undefined}
           onAlerts={() => setAlertsView("lista")}
+          crm={(c) => crmButton(c.contract_id, true)}
           demo={demo}
         />
       )}
@@ -481,6 +516,16 @@ export function CampaignsPage({
           onPending={setPending}
           refresh={connectionTick}
           agency={agency}
+          extra={
+            agency && (
+              <CrmConnections
+                backend={crm}
+                company={company}
+                notify={notify}
+                onChange={() => setCrmTick((t) => t + 1)}
+              />
+            )
+          }
         />
       )}
       {canEdit && pending && (
@@ -639,6 +684,7 @@ function CampaignList({
   onNew,
   onConnections,
   onAlerts,
+  crm,
   demo,
 }: {
   backend: CampaignsBackend;
@@ -656,6 +702,8 @@ function CampaignList({
   onConnections?: () => void;
   /** Meus avisos. */
   onAlerts: () => void;
+  /** Abrir no CRM, when the campaign's client is linked to the MakeCRM. */
+  crm: (campaign: AdCampaign) => ReactNode;
   demo: boolean;
 }) {
   const [query, setQuery] = useUrlState<string>("busca", "");
@@ -830,7 +878,7 @@ function CampaignList({
             <Button
               className="btn secondary"
               onClick={onConnections}
-              title="Conexões com o Facebook e o Google Ads"
+              title="Conexões com o Facebook, o Google Ads e o MakeCRM"
             >
               <Plug size={16} /> Conexões
             </Button>
@@ -919,6 +967,7 @@ function CampaignList({
                           {client_name || "Cliente"} ·{" "}
                           {product_name || "Produto"}
                         </small>
+                        {crm(campaign)}
                       </td>
                       <td data-label="Plataforma">
                         <PlatformLabel platform={campaign.platform} />
@@ -1067,6 +1116,7 @@ function CampaignDetail({
   maviOpen,
   onMavi,
   onAlerts,
+  crm,
   link,
   onBack,
   onEdit,
@@ -1096,6 +1146,8 @@ function CampaignDetail({
   onMavi: (open: boolean) => void;
   /** Meus avisos, com os desta campanha primeiro. */
   onAlerts: () => void;
+  /** Abrir no CRM (null: the client isn't linked to the MakeCRM). */
+  crm: ReactNode;
   /** The campaign's own address, to share. */
   link: string;
   onBack: () => void;
@@ -1158,6 +1210,7 @@ function CampaignDetail({
       >
         <Link2 size={15} /> Copiar link
       </Button>
+      {crm}
     </>
   );
   const actions = !canEdit ? (
