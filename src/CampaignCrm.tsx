@@ -5,6 +5,7 @@ import { fold } from "./domain";
 import { rpc } from "./api";
 import { supabase } from "./supabase";
 import type { Client } from "./types";
+import { ConnectionFilter, ConnectionHeader } from "./CampaignLinks";
 
 /**
  * Campanhas › Abrir no CRM (migração 20270320090000_makecrm_links): um
@@ -233,7 +234,7 @@ export function OpenInCrm({
     </button>
   ) : (
     <Button
-      className="btn secondary"
+      className="btn crm-open"
       onClick={() => void open()}
       loading={busy}
       title={title}
@@ -249,12 +250,15 @@ export function CrmConnections({
   company,
   notify,
   onChange,
+  onSummary,
 }: {
   backend: CrmBackend;
   company: string;
   notify: (message: string) => void;
   /** Uma ligação mudou (o botão aparece ou some). */
   onChange: () => void;
+  /** Quantos clientes e quantos sem ligação (o menu das Conexões). */
+  onSummary?: (summary: { total: number; unlinked: number }) => void;
 }) {
   const [clients, setClients] = useState<CrmClient[] | null>(null);
   const [companies, setCompanies] = useState<CrmCompany[] | null>(null);
@@ -310,19 +314,35 @@ export function CrmConnections({
     [clients, q],
   );
   const unlinked = (clients ?? []).filter((c) => !c.crm_company_id).length;
+  useEffect(() => {
+    if (clients) onSummary?.({ total: clients.length, unlinked });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, unlinked]);
+  // Sem ligação primeiro, até a pessoa escolher.
+  const [filter, setFilter] = useState<"unlinked" | "linked" | "all" | null>(
+    null,
+  );
+  const shown = filter ?? (unlinked ? "unlinked" : "all");
+  const rows = listed.filter((c) =>
+    shown === "all"
+      ? true
+      : shown === "linked"
+        ? !!c.crm_company_id
+        : !c.crm_company_id,
+  );
 
   return (
-    <section className="campaign-connection-block">
-      <header>
-        <h3>MakeCRM — por cliente</h3>
-        <p className="cell-note">
-          Ligue cada cliente à empresa dele no MakeCRM. Com a ligação, a
-          campanha ganha o botão Abrir no CRM: um clique abre o CRM do cliente
-          já logado, com um login da pessoa criado no primeiro acesso.
-          Administrador entra como Admin, gestor como Gerente e colaborador só
-          olha.
-        </p>
-      </header>
+    <>
+      <ConnectionHeader
+        title="MakeCRM"
+        lead="Ligue cada cliente à empresa dele no MakeCRM: a campanha ganha o botão Abrir no CRM."
+      >
+        Um clique em Abrir no CRM abre o CRM do cliente numa aba nova, já
+        logado, com um login da pessoa criado no primeiro acesso. Administrador
+        entra como Admin, gestor como Gerente e colaborador só olha. No MakeCRM
+        a empresa não tem nome: ela aparece pelo código da Make e pelo
+        administrador dela.
+      </ConnectionHeader>
       {error && (
         <p className="campaign-links-problem" role="alert">
           <TriangleAlert size={15} /> <span>{error}</span>
@@ -332,7 +352,7 @@ export function CrmConnections({
         !error && <Loading variant="list" />
       ) : (
         <>
-          <div className="campaign-clients-tools">
+          <div className="connections-tools">
             <span className="portfolio-search">
               <Input
                 type="search"
@@ -342,14 +362,23 @@ export function CrmConnections({
                 onChange={(e) => setQuery(e.target.value)}
               />
             </span>
-            <small className="cell-note">
-              {clients.length} {clients.length === 1 ? "cliente" : "clientes"}
-              {unlinked ? ` · ${unlinked} sem ligação` : ""}
-            </small>
+            <ConnectionFilter
+              value={shown}
+              onChange={setFilter}
+              options={[
+                { value: "unlinked", label: "Sem ligação", count: unlinked },
+                {
+                  value: "linked",
+                  label: "Ligados",
+                  count: clients.length - unlinked,
+                },
+                { value: "all", label: "Todos", count: clients.length },
+              ]}
+            />
           </div>
-          {listed.length ? (
-            <ul className="campaign-profiles">
-              {listed.map((c) => (
+          {rows.length ? (
+            <ul className="campaign-profiles connections-list">
+              {rows.map((c) => (
                 <li key={c.client_id}>
                   <div className="campaign-profile-head">
                     <div>
@@ -412,15 +441,19 @@ export function CrmConnections({
               ))}
             </ul>
           ) : (
-            <p className="muted">
+            <p className="connections-empty">
               {q
                 ? "Nenhum cliente encontrado."
-                : "Nenhum cliente com campanha ainda."}
+                : shown === "unlinked"
+                  ? "Todos os clientes já estão ligados ao MakeCRM."
+                  : shown === "linked"
+                    ? "Nenhum cliente ligado ao MakeCRM ainda."
+                    : "Nenhum cliente com campanha ainda."}
             </p>
           )}
         </>
       )}
-    </section>
+    </>
   );
 }
 

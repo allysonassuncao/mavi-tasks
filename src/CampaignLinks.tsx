@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ClipboardList,
+  Handshake,
   Keyboard,
+  Megaphone,
   Plug,
   Plus,
   RefreshCw,
@@ -964,7 +966,9 @@ export function MetaAccountChooser({
 }
 
 /**
- * Connections of the company with Facebook and Google Ads. A collaborator
+ * Connections of the company with Facebook, Google Ads and the MakeCRM, and
+ * the daily sync: a side menu with each one's state at a glance, opening on
+ * what needs attention. A collaborator
  * with Campanhas on sees only the clients of their teams and uses the
  * agency's Google connection without connecting or disconnecting it.
  */
@@ -977,7 +981,7 @@ export function AdConnections({
   onPending,
   refresh = 0,
   agency = true,
-  extra,
+  crm,
 }: {
   company: string;
   ads: AdsBackend;
@@ -991,8 +995,14 @@ export function AdConnections({
   refresh?: number;
   /** False: a collaborator, who doesn't manage the agency's Google. */
   agency?: boolean;
-  /** Other connections, before the daily sync (the MakeCRM's). */
-  extra?: ReactNode;
+  /**
+   * The MakeCRM's tab (administrators and managers): its panel, and how
+   * many clients are linked (null: still loading).
+   */
+  crm?: {
+    panel: ReactNode;
+    summary: { total: number; unlinked: number } | null;
+  };
 }) {
   const [status, setStatus] = useState<AdsStatus | null>(null);
   const [clients, setClients] = useState<MetaClient[] | null>(null);
@@ -1069,7 +1079,97 @@ export function AdConnections({
         ),
     [clients, q],
   );
+  const expiredOf = (c: MetaClient) =>
+    c.accounts.length > 0 && (daysUntil(c.expires_at) ?? 1) <= 0;
+  const expired = (clients ?? []).filter(expiredOf).length;
+  const expiring =
+    (clients ?? []).filter((c) => rank(c) === 1).length - expired;
   const unconnected = (clients ?? []).filter((c) => !c.accounts.length).length;
+  // The clients needing attention come up first, until the person chooses.
+  const [metaFilter, setMetaFilter] = useState<"attention" | "all" | null>(
+    null,
+  );
+  const metaShown =
+    metaFilter ?? (unconnected + expired + expiring ? "attention" : "all");
+  const metaRows =
+    metaShown === "attention" ? listed.filter((c) => rank(c) < 2) : listed;
+
+  // The side menu: each connection with its state at a glance.
+  const states: Record<ConnectionTab, TabState | null> = {
+    meta: !status
+      ? null
+      : !status.meta.configured
+        ? { tone: "danger", text: "Falta configurar" }
+        : clients === null
+          ? null
+          : unconnected + expired + expiring
+            ? {
+                tone: unconnected + expired ? "danger" : "warn",
+                text: [
+                  unconnected && `${unconnected} sem conexão`,
+                  expired && `${expired} ${expired === 1 ? "vencido" : "vencidos"}`,
+                  expiring && `${expiring} vencendo`,
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
+              }
+            : clients.length
+              ? { tone: "good", text: "Tudo conectado" }
+              : { tone: "muted", text: "Nenhum cliente no Meta" },
+    google: !google
+      ? null
+      : !google.configured
+        ? { tone: "danger", text: "Falta configurar" }
+        : googleConnected
+          ? { tone: "good", text: "Conectado" }
+          : { tone: "warn", text: "Não conectado" },
+    crm: !crm
+      ? null
+      : crm.summary === null
+        ? null
+        : crm.summary.unlinked
+          ? {
+              tone: "muted",
+              text: `${crm.summary.unlinked} sem ligação`,
+            }
+          : crm.summary.total
+            ? { tone: "good", text: "Todos ligados" }
+            : { tone: "muted", text: "Nenhum cliente" },
+    sync: !overview
+      ? null
+      : !overview.configured
+        ? { tone: "danger", text: "Não configurada" }
+        : overview.errors.length || overview.failed
+          ? {
+              tone: "danger",
+              text: `${overview.errors.length || overview.failed} com erro`,
+            }
+          : overview.stale.length
+            ? {
+                tone: "warn",
+                text: `${overview.stale.length} sem os números de ontem`,
+              }
+            : { tone: "good", text: "Em dia" },
+  };
+  const tabs = connectionTabs.filter((t) => t.key !== "crm" || crm);
+  // Opens on what needs attention: a problem first, then a warning.
+  const [tab, setTab] = useState<ConnectionTab | null>(null);
+  const settled = (["meta", "google", "sync"] as const).every(
+    (k) => states[k] !== null,
+  );
+  const attention =
+    tabs.find((t) => states[t.key]?.tone === "danger") ??
+    tabs.find((t) => states[t.key]?.tone === "warn");
+  useEffect(() => {
+    if (!tab && settled) setTab(attention?.key ?? "meta");
+  }, [tab, settled, attention]);
+  const shown = tab ?? "meta";
+  // On a phone the menu is a strip: bring the chosen one into view.
+  useEffect(() => {
+    document
+      .getElementById(`connections-tab-${shown}`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [shown]);
 
   return (
     <Modal
@@ -1077,179 +1177,232 @@ export function AdConnections({
       onClose={onClose}
       busy={!!busy}
       wide
+      className="connections-modal"
     >
-      <div className="campaign-connections">
-        {error && (
-          <div className="form-error" role="alert">
-            {error}
-          </div>
-        )}
-        {!status && !error && <Loading variant="form" />}
-        {status && (
-          <>
-            <section className="campaign-connection-block">
-              <header>
-                <h3>Facebook (Meta Ads) — por cliente</h3>
-                <p className="cell-note">
-                  Cada cliente tem a sua conta de anúncio, acessada pelo perfil
-                  do Facebook dele. Para conectar um cliente, entre no
-                  facebook.com com o perfil dele neste navegador e clique em
-                  Conectar: depois do login você marca as contas do cliente, e o
-                  MAVI guarda esse acesso para as buscas e a sincronização das
-                  campanhas dele. O acesso vale cerca de 60 dias; depois,
-                  renove.
-                </p>
-              </header>
-              {!status.meta.configured ? (
-                <p className="campaign-links-problem">
-                  <TriangleAlert size={15} />{" "}
-                  <span>{missing(status.meta)}</span>
-                </p>
-              ) : clients === null ? (
-                <Loading variant="list" />
-              ) : (
-                <>
-                  <div className="campaign-clients-tools">
-                    <span className="portfolio-search">
-                      <Input
-                        type="search"
-                        placeholder="Buscar cliente, conta ou perfil"
-                        aria-label="Buscar cliente, conta ou perfil"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                      />
-                    </span>
-                    <small className="cell-note">
-                      {clients.length}{" "}
-                      {clients.length === 1 ? "cliente" : "clientes"}
-                      {unconnected ? ` · ${unconnected} sem conexão` : ""}
-                    </small>
-                  </div>
-                  {listed.length ? (
-                    <ul className="campaign-profiles">
-                      {listed.map((c) => (
-                        <li key={c.client_id}>
-                          <div className="campaign-profile-head">
-                            <div>
-                              <strong>{c.client}</strong>
-                              <small className="cell-note">
-                                {c.campaigns}{" "}
-                                {c.campaigns === 1
-                                  ? "campanha ativa"
-                                  : "campanhas ativas"}{" "}
-                                no Meta
-                              </small>
-                            </div>
-                            <ExpiryChip
-                              expires={c.expires_at}
-                              none={!c.accounts.length}
-                            />
-                            <span className="campaign-row-actions">
+      <div className="campaign-connections connections-layout">
+        <nav
+          className="connections-nav"
+          role="tablist"
+          aria-label="Conexões"
+          aria-orientation="vertical"
+        >
+          {tabs.map((t) => {
+            const state = states[t.key];
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                id={`connections-tab-${t.key}`}
+                aria-selected={shown === t.key}
+                aria-controls={`connections-panel-${t.key}`}
+                className={`connections-tab${shown === t.key ? " active" : ""}`}
+                onClick={() => setTab(t.key)}
+              >
+                <span className="connections-tab-icon" aria-hidden="true">
+                  <Icon size={17} />
+                </span>
+                <span className="connections-tab-text">
+                  <strong>{t.label}</strong>
+                  <small className={`connections-state ${state?.tone ?? "muted"}`}>
+                    {state ? state.text : "Verificando…"}
+                  </small>
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="connections-panels">
+          {error && (
+            <div className="form-error" role="alert">
+              {error}
+            </div>
+          )}
+
+          <section
+            id="connections-panel-meta"
+            role="tabpanel"
+            aria-labelledby="connections-tab-meta"
+            className="connections-panel"
+            hidden={shown !== "meta"}
+          >
+            <ConnectionHeader
+              title="Facebook (Meta Ads)"
+              lead="Cada cliente conecta com o próprio perfil do Facebook. O acesso vale cerca de 60 dias."
+            >
+              Para conectar um cliente, entre no facebook.com com o perfil dele
+              neste navegador e clique em Conectar: depois do login você marca
+              as contas do cliente, e o MAVI guarda esse acesso para as buscas e
+              a sincronização das campanhas dele. Quando o acesso estiver perto
+              de vencer, clique em Renovar.
+            </ConnectionHeader>
+            {!status && !error ? (
+              <Loading variant="list" />
+            ) : status && !status.meta.configured ? (
+              <p className="campaign-links-problem">
+                <TriangleAlert size={15} /> <span>{missing(status.meta)}</span>
+              </p>
+            ) : clients === null ? (
+              <Loading variant="list" />
+            ) : (
+              <>
+                <div className="connections-tools">
+                  <span className="portfolio-search">
+                    <Input
+                      type="search"
+                      placeholder="Buscar cliente, conta ou perfil"
+                      aria-label="Buscar cliente, conta ou perfil"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                  </span>
+                  <ConnectionFilter
+                    value={metaShown}
+                    onChange={setMetaFilter}
+                    options={[
+                      {
+                        value: "attention",
+                        label: "Precisam de atenção",
+                        count: unconnected + expired + expiring,
+                      },
+                      { value: "all", label: "Todos", count: clients.length },
+                    ]}
+                  />
+                </div>
+                {metaRows.length ? (
+                  <ul className="campaign-profiles connections-list">
+                    {metaRows.map((c) => (
+                      <li key={c.client_id}>
+                        <div className="campaign-profile-head">
+                          <div>
+                            <strong>{c.client}</strong>
+                            <small className="cell-note">
+                              {c.campaigns}{" "}
+                              {c.campaigns === 1
+                                ? "campanha ativa"
+                                : "campanhas ativas"}{" "}
+                              no Meta
+                            </small>
+                          </div>
+                          <ExpiryChip
+                            expires={c.expires_at}
+                            none={!c.accounts.length}
+                          />
+                          <span className="campaign-row-actions">
+                            <Button
+                              type="button"
+                              className={
+                                c.accounts.length && rank(c) === 2
+                                  ? "btn secondary"
+                                  : "btn primary"
+                              }
+                              disabled={!!busy}
+                              title="Entre no Facebook com o perfil deste cliente antes"
+                              onClick={() => void connect("meta", c.client_id)}
+                            >
+                              {c.accounts.length ? (
+                                <RefreshCw size={14} />
+                              ) : (
+                                <Plug size={14} />
+                              )}{" "}
+                              {c.accounts.length ? "Renovar" : "Conectar"}
+                            </Button>
+                            {c.accounts.length > 0 && (
                               <Button
                                 type="button"
-                                className={
-                                  c.accounts.length
-                                    ? "btn secondary"
-                                    : "btn primary"
-                                }
+                                className="btn secondary"
                                 disabled={!!busy}
-                                title="Entre no Facebook com o perfil deste cliente antes"
                                 onClick={() =>
-                                  void connect("meta", c.client_id)
+                                  void run(`remove-${c.client_id}`, async () => {
+                                    await ads.disconnect(company, "meta", {
+                                      client: c.client_id,
+                                    });
+                                    notify(`Conexão de ${c.client} removida.`);
+                                  })
                                 }
                               >
-                                {c.accounts.length ? (
-                                  <RefreshCw size={14} />
-                                ) : (
-                                  <Plug size={14} />
-                                )}{" "}
-                                {c.accounts.length ? "Renovar" : "Conectar"}
+                                <Unplug size={14} /> Remover
                               </Button>
-                              {c.accounts.length > 0 && (
-                                <Button
-                                  type="button"
-                                  className="btn secondary"
-                                  disabled={!!busy}
-                                  onClick={() =>
-                                    void run(
-                                      `remove-${c.client_id}`,
-                                      async () => {
-                                        await ads.disconnect(company, "meta", {
-                                          client: c.client_id,
-                                        });
-                                        notify(
-                                          `Conexão de ${c.client} removida.`,
-                                        );
-                                      },
-                                    )
-                                  }
-                                >
-                                  <Unplug size={14} /> Remover
-                                </Button>
-                              )}
-                            </span>
-                          </div>
-                          {c.accounts.length > 0 && (
-                            <ul className="campaign-profile-accounts">
-                              {c.accounts.map((a) => (
-                                <li key={a.account_id}>
-                                  {a.name || a.account_id}{" "}
-                                  <small className="cell-note">
-                                    {a.account_id}
-                                    {a.profile ? ` · perfil ${a.profile}` : ""}
-                                  </small>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="muted">
-                      {q
-                        ? "Nenhum cliente encontrado."
+                            )}
+                          </span>
+                        </div>
+                        {c.accounts.length > 0 && (
+                          <ul className="campaign-profile-accounts">
+                            {c.accounts.map((a) => (
+                              <li key={a.account_id}>
+                                {a.name || a.account_id}{" "}
+                                <small className="cell-note">
+                                  {a.account_id}
+                                  {a.profile ? ` · perfil ${a.profile}` : ""}
+                                </small>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="connections-empty">
+                    {q
+                      ? "Nenhum cliente encontrado."
+                      : metaShown === "attention"
+                        ? "Nenhum cliente precisa de atenção: todos estão conectados."
                         : "Nenhum cliente com campanha ativa no Meta ainda."}
-                    </p>
-                  )}
-                </>
-              )}
-            </section>
+                  </p>
+                )}
+              </>
+            )}
+          </section>
 
-            <section className="campaign-connection-block">
-              <header>
-                <h3>Google Ads</h3>
-                <p className="cell-note">
-                  Uma conexão só, da agência: a conta Google com acesso à MCC
-                  enxerga as contas de todos os clientes. O acesso se renova
-                  sozinho.
-                </p>
-              </header>
-              {!google?.configured ? (
-                <p className="campaign-links-problem">
-                  <TriangleAlert size={15} /> <span>{missing(google!)}</span>
-                </p>
-              ) : (
-                <div className="campaign-profile-head">
-                  <div>
-                    <strong>
-                      {googleConnected
-                        ? google.email || "Conectado"
-                        : "Não conectado"}
-                    </strong>
-                    {google.connected_at && (
-                      <small className="cell-note">
-                        desde {shortDate(google.connected_at.slice(0, 10))}
-                      </small>
-                    )}
-                  </div>
-                  {agency ? (
+          <section
+            id="connections-panel-google"
+            role="tabpanel"
+            aria-labelledby="connections-tab-google"
+            className="connections-panel"
+            hidden={shown !== "google"}
+          >
+            <ConnectionHeader
+              title="Google Ads"
+              lead="Uma conexão só, da agência, para as contas de todos os clientes."
+            >
+              A conta Google com acesso à MCC enxerga as contas de todos os
+              clientes, e o acesso se renova sozinho. Só administradores e
+              gestores conectam ou desconectam.
+            </ConnectionHeader>
+            {!status && !error ? (
+              <Loading variant="form" />
+            ) : google && !google.configured ? (
+              <p className="campaign-links-problem">
+                <TriangleAlert size={15} /> <span>{missing(google)}</span>
+              </p>
+            ) : google ? (
+              <div className="connections-card">
+                <span
+                  className={`connections-card-icon ${googleConnected ? "good" : "warn"}`}
+                  aria-hidden="true"
+                >
+                  {googleConnected ? <Plug size={18} /> : <Unplug size={18} />}
+                </span>
+                <div>
+                  <strong>
+                    {googleConnected
+                      ? google.email || "Conectado"
+                      : "Não conectado"}
+                  </strong>
+                  <small className="cell-note">
+                    {google.connected_at
+                      ? `Conectado desde ${shortDate(google.connected_at.slice(0, 10))}`
+                      : "As campanhas do Google não sincronizam sem a conexão."}
+                  </small>
+                </div>
+                {agency ? (
                   <span className="campaign-row-actions">
                     <Button
                       type="button"
-                      className={
-                        googleConnected ? "btn secondary" : "btn primary"
-                      }
+                      className={googleConnected ? "btn secondary" : "btn primary"}
                       disabled={!!busy}
                       onClick={() => void connect("google")}
                     >
@@ -1272,37 +1425,116 @@ export function AdConnections({
                       </Button>
                     )}
                   </span>
-                  ) : (
-                    <small className="cell-note">
-                      Quem conecta o Google é um administrador ou gestor.
-                    </small>
-                  )}
-                </div>
-              )}
+                ) : (
+                  <small className="cell-note">
+                    Quem conecta o Google é um administrador ou gestor.
+                  </small>
+                )}
+              </div>
+            ) : null}
+          </section>
+
+          {crm && (
+            <section
+              id="connections-panel-crm"
+              role="tabpanel"
+              aria-labelledby="connections-tab-crm"
+              className="connections-panel"
+              hidden={shown !== "crm"}
+            >
+              {crm.panel}
             </section>
-          </>
-        )}
-
-        {extra}
-
-        <section className="campaign-connection-block">
-          <header>
-            <h3>Sincronização diária</h3>
-            <p className="cell-note">
-              Todos os dias, das 06:00 às 09:40, a MAVI busca no Meta e no
-              Google os números do ciclo inteiro até ontem (refazendo cada dia)
-              dos ciclos em andamento com contas vinculadas, com as regras de
-              conversão do MASO.
-            </p>
-          </header>
-          {!overview ? (
-            <Loading variant="chart" />
-          ) : (
-            <SyncSummary overview={overview} onOpenCampaign={onOpenCampaign} />
           )}
-        </section>
+
+          <section
+            id="connections-panel-sync"
+            role="tabpanel"
+            aria-labelledby="connections-tab-sync"
+            className="connections-panel"
+            hidden={shown !== "sync"}
+          >
+            <ConnectionHeader
+              title="Sincronização diária"
+              lead="Todos os dias, das 06:00 às 09:40, a MAVI traz os números do Meta e do Google."
+            >
+              A busca refaz cada dia do ciclo inteiro até ontem, nos ciclos em
+              andamento com contas vinculadas, com as regras de conversão do
+              MASO. Um erro aqui costuma ser uma conexão vencida: clique na
+              campanha para ver.
+            </ConnectionHeader>
+            {!overview ? (
+              <Loading variant="chart" />
+            ) : (
+              <SyncSummary overview={overview} onOpenCampaign={onOpenCampaign} />
+            )}
+          </section>
+        </div>
       </div>
     </Modal>
+  );
+}
+
+type ConnectionTab = "meta" | "google" | "crm" | "sync";
+type TabState = { tone: "good" | "warn" | "danger" | "muted"; text: string };
+const connectionTabs: {
+  key: ConnectionTab;
+  label: string;
+  icon: typeof Plug;
+}[] = [
+  { key: "meta", label: "Facebook", icon: Megaphone },
+  { key: "google", label: "Google Ads", icon: Search },
+  { key: "crm", label: "MakeCRM", icon: Handshake },
+  { key: "sync", label: "Sincronização", icon: RefreshCw },
+];
+
+/** A connection's title, its one-line summary and "Como funciona" folded. */
+export function ConnectionHeader({
+  title,
+  lead,
+  children,
+}: {
+  title: string;
+  lead: string;
+  children?: ReactNode;
+}) {
+  return (
+    <header className="connections-head">
+      <h3>{title}</h3>
+      <p>{lead}</p>
+      {children && (
+        <details className="connections-help">
+          <summary>Como funciona</summary>
+          <p>{children}</p>
+        </details>
+      )}
+    </header>
+  );
+}
+
+/** Two or three choices with their counts (Precisam de atenção · Todos). */
+export function ConnectionFilter<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string; count: number }[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="connections-filter" role="group" aria-label="Mostrar">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={value === o.value}
+          className={value === o.value ? "active" : ""}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label} <span>{o.count}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 

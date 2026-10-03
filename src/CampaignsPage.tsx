@@ -271,6 +271,10 @@ export function CampaignsPage({
   );
   const [crmLinks, setCrmLinks] = useState<Record<string, string>>({});
   const [crmTick, setCrmTick] = useState(0);
+  const [crmSummary, setCrmSummary] = useState<{
+    total: number;
+    unlinked: number;
+  } | null>(null);
   useEffect(() => {
     let live = true;
     crm
@@ -516,15 +520,21 @@ export function CampaignsPage({
           onPending={setPending}
           refresh={connectionTick}
           agency={agency}
-          extra={
-            agency && (
-              <CrmConnections
-                backend={crm}
-                company={company}
-                notify={notify}
-                onChange={() => setCrmTick((t) => t + 1)}
-              />
-            )
+          crm={
+            agency
+              ? {
+                  panel: (
+                    <CrmConnections
+                      backend={crm}
+                      company={company}
+                      notify={notify}
+                      onChange={() => setCrmTick((t) => t + 1)}
+                      onSummary={setCrmSummary}
+                    />
+                  ),
+                  summary: crmSummary,
+                }
+              : undefined
           }
         />
       )}
