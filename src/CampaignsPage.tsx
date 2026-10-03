@@ -2044,7 +2044,9 @@ function CycleForm({
   const mChanged =
     baseM !== null && Number.isFinite(typedM) && !sameMultiplier(typedM, baseM);
   const [mReason, setMReason] = useState("");
-  const [mApply, setMApply] = useState<MultiplierApply | null>(null);
+  const [mReasonMissing, setMReasonMissing] = useState(false);
+  // "Só daqui para frente" comes chosen: it is the recommended one.
+  const [mApply, setMApply] = useState<MultiplierApply | null>("forward");
   const [mRange, setMRange] = useState({ from: "", to: "" });
   const impact = useMultiplierImpact(
     backend.multiplier,
@@ -2071,8 +2073,11 @@ function CycleForm({
     if ("error" in result) return setError(result.error);
     const registered = impact.impact?.registered ?? 0;
     if (mChanged) {
-      if (!mReason.trim())
-        return setError("Informe o motivo da alteração do M.");
+      if (!mReason.trim()) {
+        setMReasonMissing(true);
+        document.getElementById("multiplier-reason")?.focus();
+        return setError("Informe o motivo da alteração do M (obrigatório).");
+      }
       if (cycle && impact.loading)
         return setError("Aguarde: conferindo os dias já registrados do ciclo.");
       if (cycle && registered && !mApply)
@@ -2331,6 +2336,7 @@ function CycleForm({
               cycleEnd={draft.end_date}
               reason={mReason}
               onReason={setMReason}
+              reasonMissing={mReasonMissing}
               apply={mApply}
               onApply={setMApply}
               from={mRange.from}

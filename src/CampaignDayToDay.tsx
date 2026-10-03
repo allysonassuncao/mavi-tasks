@@ -15,8 +15,9 @@ import {
   RefreshCw,
   TriangleAlert,
 } from "lucide-react";
-import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
+import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { multiplierError, sameMultiplier } from "./campaign-multiplier";
+import { MultiplierReason } from "./CampaignMultiplier";
 import { Modal } from "./components";
 import { PanelChart } from "./DashboardCharts";
 import type { Display, PanelSpec, Unit } from "./dashboards";
@@ -1678,6 +1679,7 @@ function RecordEditor({
   );
   // Changing the day's M: 1 or more and a reason (migration 20270322090000).
   const [mReason, setMReason] = useState("");
+  const [mReasonMissing, setMReasonMissing] = useState(false);
   const [end, setEnd] = useState(
     target.kind === "snapshot" ? target.row.period_end : "",
   );
@@ -1714,9 +1716,15 @@ function RecordEditor({
     try {
       if (target.kind === "daily") {
         const wrong = multiplierError(m, target.row.multiplier);
-        if (wrong || (mChanged && !mReason.trim())) {
+        if (wrong) {
           setSaving(false);
-          return setError(wrong ?? "Informe o motivo da alteração do M.");
+          return setError(wrong);
+        }
+        if (mChanged && !mReason.trim()) {
+          setSaving(false);
+          setMReasonMissing(true);
+          document.getElementById("multiplier-day-reason")?.focus();
+          return setError("Informe o motivo da alteração do M (obrigatório).");
         }
         await backend.updateDaily(target.row, {
           ...metrics,
@@ -1792,23 +1800,15 @@ function RecordEditor({
                 <small>No mínimo 1. Alterar pede o motivo.</small>
               </label>
               {mChanged && (
-                <label>
-                  Motivo da alteração do M ({decimal.format(target.row.multiplier)}{" "}
-                  → {decimal.format(m)})
-                  <Textarea
-                    value={mReason}
-                    onChange={(e) => setMReason(e.target.value)}
-                    rows={2}
-                    maxLength={1000}
-                    required
-                    placeholder="Ex.: dia com acordo diferente com o cliente"
-                  />
-                  <small>
-                    Muda só este dia (e o débito dele no Financeiro › Mídia).
-                    Fica no histórico da campanha e no registro de alterações
-                    do M.
-                  </small>
-                </label>
+                <MultiplierReason
+                  id="multiplier-day-reason"
+                  label={`Motivo da alteração do M (${decimal.format(target.row.multiplier)} → ${decimal.format(m)})`}
+                  value={mReason}
+                  onChange={setMReason}
+                  missing={mReasonMissing}
+                  placeholder="Ex.: dia com acordo diferente com o cliente"
+                  help="Muda só este dia (e o débito dele no Financeiro › Mídia). Fica no histórico da campanha e no registro de alterações do M."
+                />
               )}
             </>
           )}

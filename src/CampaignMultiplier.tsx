@@ -72,6 +72,58 @@ export function useMultiplierImpact(
 }
 
 /**
+ * The reason of a change of the M: required, marked as such, and red when
+ * someone tries to save without it.
+ */
+export function MultiplierReason({
+  id,
+  label = "Motivo da alteração",
+  value,
+  onChange,
+  missing,
+  placeholder,
+  help,
+}: {
+  id: string;
+  label?: string;
+  value: string;
+  onChange: (value: string) => void;
+  missing: boolean;
+  placeholder: string;
+  help: string;
+}) {
+  const empty = missing && !value.trim();
+  return (
+    <label className={empty ? "campaign-m-reason-field missing" : "campaign-m-reason-field"}>
+      <span>
+        {label}{" "}
+        <span className="custom-required" aria-hidden="true">
+          *
+        </span>{" "}
+        <span className="campaign-m-required">(obrigatório)</span>
+      </span>
+      <Textarea
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={2}
+        maxLength={1000}
+        aria-required="true"
+        aria-invalid={empty || undefined}
+        placeholder={placeholder}
+      />
+      {empty ? (
+        <small className="campaign-m-missing" role="alert">
+          Informe o motivo para salvar a alteração do M.
+        </small>
+      ) : (
+        <small>{help}</small>
+      )}
+    </label>
+  );
+}
+
+/**
  * Below the M field, when it differs from the cycle's (or, in a new cycle,
  * the previous one's): the reason and, editing a cycle with registered
  * days, which of them take the new M.
@@ -84,6 +136,7 @@ export function MultiplierChangeFields({
   cycleEnd,
   reason,
   onReason,
+  reasonMissing,
   apply,
   onApply,
   from,
@@ -99,6 +152,8 @@ export function MultiplierChangeFields({
   cycleEnd: string;
   reason: string;
   onReason: (value: string) => void;
+  /** Tried to save without it: shown in red. */
+  reasonMissing: boolean;
   apply: MultiplierApply | null;
   onApply: (value: MultiplierApply) => void;
   from: string;
@@ -117,20 +172,20 @@ export function MultiplierChangeFields({
       x.manual ? ` (${x.manual} editado${x.manual === 1 ? "" : "s"} à mão)` : ""
     }; débito no Financeiro › Mídia: ${signed(x.diff)}.`;
   };
+  // "Só daqui para frente" is the recommended one: it keeps what was
+  // already debited and reported as it was.
   const options: [MultiplierApply, string, string][] = [
+    [
+      "forward",
+      "Só daqui para frente (recomendado)",
+      ended
+        ? `O ciclo já terminou: nenhum dia registrado muda, continuam com o M que têm. Muda só o M do ciclo (verba sem M e meta de custo), e o ciclo passa a ter dias com um M diferente do dele.`
+        : `A partir de hoje${today ? ` (${day5(today)})` : ""}. Os dias até ontem continuam com o M que têm: o que já foi debitado no Financeiro e mostrado ao cliente não muda. Hoje e os próximos dias usam M ${m(next)}. Atenção: o ciclo passa a ter dias com M diferentes, e a verba sem M e a meta de custo usam o M novo para o ciclo todo.`,
+    ],
     [
       "all",
       "Todos os dias do ciclo",
       `Os dias já registrados passam a usar M ${m(next)}. O investimento com M desses dias e o débito no Financeiro › Mídia são refeitos. O ciclo fica com um M só e os números batem em toda a tela. Use quando o M estava errado desde o início.`,
-    ],
-    [
-      "forward",
-      ended
-        ? "Só daqui para frente (o ciclo já terminou)"
-        : `Só daqui para frente (a partir de hoje${today ? `, ${day5(today)}` : ""})`,
-      ended
-        ? `Nenhum dia registrado muda: continuam com o M que têm. Muda só o M do ciclo (verba sem M e meta de custo), e o ciclo passa a ter dias com um M diferente do dele.`
-        : `Os dias até ontem continuam com o M que têm (o Financeiro não muda para trás); hoje e os próximos dias usam M ${m(next)}. Use quando o índice da operação mudou agora. Atenção: o ciclo passa a ter dias com M diferentes, e a verba sem M e a meta de custo usam o M novo para o ciclo todo.`,
     ],
     [
       "range",
@@ -144,21 +199,14 @@ export function MultiplierChangeFields({
       <legend>
         <Scale size={15} /> Alteração do M: {m(previous)} → {m(next)}
       </legend>
-      <label>
-        Motivo da alteração
-        <Textarea
-          value={reason}
-          onChange={(e) => onReason(e.target.value)}
-          rows={2}
-          maxLength={1000}
-          required
-          placeholder="Ex.: novo índice acordado com o cliente a partir de outubro"
-        />
-        <small>
-          Obrigatório. Fica no histórico da campanha e no registro de
-          alterações do M, que ninguém edita nem apaga.
-        </small>
-      </label>
+      <MultiplierReason
+        id="multiplier-reason"
+        value={reason}
+        onChange={onReason}
+        missing={reasonMissing}
+        placeholder="Ex.: novo índice acordado com o cliente a partir de outubro"
+        help="Fica no histórico da campanha e no registro de alterações do M, que ninguém edita nem apaga."
+      />
       {!newCycle && impact.loading && !data && (
         <p className="cell-note">Conferindo os dias já registrados…</p>
       )}

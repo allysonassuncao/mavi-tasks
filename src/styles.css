@@ -13840,6 +13840,19 @@ tr:hover .campaign-edit-record,
   gap: 4px;
   min-width: 0;
 }
+.campaign-m-required {
+  color: #c0503f;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.campaign-m-reason-field.missing textarea {
+  border-color: #c0503f;
+  box-shadow: 0 0 0 3px rgb(192 80 63 / 0.15);
+}
+.campaign-m-missing {
+  color: #c0503f;
+  font-weight: 600;
+}
 .campaign-m-effect {
   color: #7a5310;
   font-weight: 600;
