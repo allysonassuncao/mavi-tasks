@@ -111,6 +111,11 @@ const cycle = (user, id, c = {}) =>
       c.niche ?? "Suplementos",
       JSON.stringify(c.links ?? [{ account_id: "act_1", campaign_id: "c1" }]),
       c.current ?? false,
+      null,
+      null,
+      null,
+      // Only asked when the M differs from the previous cycle's.
+      c.reason ?? "Teste do M",
     ]),
   );
 
@@ -374,6 +379,11 @@ await check(
       [],
       "",
       "[]",
+      null,
+      null,
+      null,
+      "Teste do M",
+      "all",
     ]);
     const [row] = await sql(
       "select multiplier::float,objective from ad_cycles where id=$1",
@@ -416,6 +426,11 @@ await check(
         [],
         "",
         "[]",
+        null,
+        null,
+        null,
+        "Teste do M",
+        "all",
       ]);
     await as(admin);
     await edit(y.version, "2024-01-21", 5.2);
@@ -1543,7 +1558,7 @@ await check(
       [{ clicks: 1.5 }, /Cliques é um número inteiro/],
       [{ spend: -1 }, /Investimento não pode ser negativo/],
       [{ conversions: "10" }, /Informe um número em Conversões/],
-      [{ multiplier: 0 }, /O M deve ser maior que 0/],
+      [{ multiplier: 0 }, /no mínimo 1 e no máximo 100/],
       [{ spend: 1e12 }, /grande demais/],
     ])
       await assert.rejects(
@@ -1559,6 +1574,7 @@ await check(
       syncCycle,
       day,
       JSON.stringify({ spend: 80.456, conversions: 4, multiplier: 3 }),
+      "Acordo do dia",
     ]);
     const [row] = await sql(
       "select spend::float, conversions::float, multiplier::float, source from ad_daily_metrics where cycle_id=$1 and day=$2",

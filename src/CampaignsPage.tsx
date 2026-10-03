@@ -103,6 +103,12 @@ import {
   accountLabel,
 } from "./CampaignLinks";
 import { CampaignDayToDay, useWithM } from "./CampaignDayToDay";
+import {
+  MultiplierChangeFields,
+  MultiplierLog,
+  useMultiplierImpact,
+} from "./CampaignMultiplier";
+import { sameMultiplier, type MultiplierApply } from "./campaign-multiplier";
 import { dailyBudget, daysRemaining } from "./campaign-metrics";
 import { CampaignPlatform } from "./CampaignPlatform";
 import { CampaignReports } from "./CampaignReports";
@@ -263,6 +269,8 @@ export function CampaignsPage({
   const [cycleForm, setCycleForm] = useState<CycleFormState>(null);
   const [statusForm, setStatusForm] = useState<StatusFormState>(null);
   const [connections, setConnections] = useState(false);
+  // Alterações do M (administrators and managers).
+  const [multiplierLog, setMultiplierLog] = useState(false);
   const [eventsTick, setEventsTick] = useState(0);
   // Abrir no CRM: os clientes ligados ao MakeCRM que a pessoa vê.
   const crm: CrmBackend = useMemo(
@@ -411,8 +419,17 @@ export function CampaignsPage({
           onNew={() => setCampaignForm({})}
           onConnections={canEdit ? () => setConnections(true) : undefined}
           onAlerts={() => setAlertsView("lista")}
+          onMultiplierLog={agency ? () => setMultiplierLog(true) : undefined}
           crm={(c) => crmButton(c.contract_id, true)}
           demo={demo}
+        />
+      )}
+      {agency && multiplierLog && (
+        <MultiplierLog
+          backend={backend.multiplier}
+          company={company}
+          href={href}
+          onClose={() => setMultiplierLog(false)}
         />
       )}
       {alertsView && (
@@ -694,6 +711,7 @@ function CampaignList({
   onNew,
   onConnections,
   onAlerts,
+  onMultiplierLog,
   crm,
   demo,
 }: {
@@ -712,6 +730,8 @@ function CampaignList({
   onConnections?: () => void;
   /** Meus avisos. */
   onAlerts: () => void;
+  /** Alterações do M (administrators and managers). */
+  onMultiplierLog?: () => void;
   /** Abrir no CRM, when the campaign's client is linked to the MakeCRM. */
   crm: (campaign: AdCampaign) => ReactNode;
   demo: boolean;
@@ -884,6 +904,15 @@ function CampaignList({
           >
             <BellRing size={16} /> Meus avisos
           </Button>
+          {onMultiplierLog && (
+            <Button
+              className="btn secondary"
+              onClick={onMultiplierLog}
+              title="Todas as alterações do índice de performance (M), com quem, quando, de/para e o motivo"
+            >
+              <History size={16} /> Alterações do M
+            </Button>
+          )}
           {onConnections && (
             <Button
               className="btn secondary"
@@ -1664,6 +1693,8 @@ function show(field: string, value: unknown): string {
   if (field === "links") return `${(value as unknown[]).length} vínculo(s)`;
   if (Array.isArray(value)) return value.join(", ") || "vazio";
   if (field === "notes") return "texto alterado";
+  if (field === "multiplier")
+    return Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 3 });
   return String(value);
 }
 function describeEvent(e: AdCampaignEvent, state: CampaignData) {
@@ -1708,6 +1739,26 @@ function describeEvent(e: AdCampaignEvent, state: CampaignData) {
         .join("; ");
       return `${e.action === "updated" ? "alterou a campanha" : `alterou o ciclo de ${period(e.cycle_id)}`}${changes ? ` — ${changes}` : ""}.`;
     }
+    case "multiplier_changed": {
+      const n = Number(d.days ?? 0);
+      const reached =
+        d.kind === "new_cycle"
+          ? ""
+          : d.apply === "forward"
+            ? `, de ${shortDate(String(d.since))} em diante`
+            : d.apply === "range"
+              ? `, nos dias de ${shortDate(String(d.apply_from))} a ${shortDate(String(d.apply_to))}`
+              : ", em todos os dias do ciclo";
+      const days =
+        d.kind === "new_cycle"
+          ? ""
+          : ` (${n ? `${n} ${n === 1 ? "dia registrado mudou" : "dias registrados mudaram"}` : "nenhum dia registrado mudou"})`;
+      const what =
+        d.kind === "new_cycle"
+          ? `cadastrou o ciclo de ${period(e.cycle_id)} com M diferente do anterior`
+          : `alterou o M do ciclo de ${period(e.cycle_id)}`;
+      return `${what}: ${show("multiplier", d.from)} → ${show("multiplier", d.to)}${reached}${days}. Motivo: ${String(d.reason ?? "")}`;
+    }
     case "conversion_actions":
       return d.to
         ? `escolheu as conversões do Google que contam no ciclo de ${period(e.cycle_id)} (${(d.to as string[]).length} ${(d.to as string[]).length === 1 ? "ação" : "ações"}).`
@@ -1731,7 +1782,7 @@ function describeEvent(e: AdCampaignEvent, state: CampaignData) {
             `${recordLabels[f] ?? f}: ${showRecord(f, c.from)} → ${showRecord(f, c.to)}`,
         )
         .join("; ");
-      return `editou o registro ${e.action === "daily_edited" ? `diário de ${shortDate(String(d.day))}` : `de ${shortDate(String(d.taken_on))}`}${changes ? ` — ${changes}` : ""}.`;
+      return `editou o registro ${e.action === "daily_edited" ? `diário de ${shortDate(String(d.day))}` : `de ${shortDate(String(d.taken_on))}`}${changes ? ` — ${changes}` : ""}.${d.reason ? ` Motivo do M: ${String(d.reason)}` : ""}`;
     }
     case "report_created":
       return `criou o relatório "${String(d.title ?? "")}" (${shortDate(String(d.start))} a ${shortDate(String(d.end))})${d.link ? ", com link público" : ""}.`;
@@ -1986,6 +2037,23 @@ function CycleForm({
   const [release, setRelease] = useState("");
   const set = <K extends keyof CycleDraft>(key: K, value: CycleDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
+  // The M changed (from the cycle's or, in a new one, the previous cycle's):
+  // a reason and, editing, which registered days take it.
+  const baseM = cycle ? cycle.multiplier : (last?.multiplier ?? null);
+  const typedM = parseAmount(draft.multiplier);
+  const mChanged =
+    baseM !== null && Number.isFinite(typedM) && !sameMultiplier(typedM, baseM);
+  const [mReason, setMReason] = useState("");
+  const [mApply, setMApply] = useState<MultiplierApply | null>(null);
+  const [mRange, setMRange] = useState({ from: "", to: "" });
+  const impact = useMultiplierImpact(
+    backend.multiplier,
+    cycle?.id ?? null,
+    typedM,
+    mApply === "range" ? mRange.from : "",
+    mApply === "range" ? mRange.to : "",
+    !!cycle && mChanged,
+  );
   const budget = parseAmount(draft.budget),
     goal = Number(draft.goal_results);
   const days =
@@ -1999,8 +2067,24 @@ function CycleForm({
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
-    const result = cycleInput(draft);
+    const result = cycleInput(draft, cycle ? cycle.multiplier : null);
     if ("error" in result) return setError(result.error);
+    const registered = impact.impact?.registered ?? 0;
+    if (mChanged) {
+      if (!mReason.trim())
+        return setError("Informe o motivo da alteração do M.");
+      if (cycle && impact.loading)
+        return setError("Aguarde: conferindo os dias já registrados do ciclo.");
+      if (cycle && registered && !mApply)
+        return setError("Escolha a quais dias já registrados o novo M se aplica.");
+      if (
+        cycle &&
+        registered &&
+        mApply === "range" &&
+        (!mRange.from || !mRange.to || mRange.from > mRange.to)
+      )
+        return setError("Informe o período em que o novo M se aplica.");
+    }
     if ((askStart && !draft.shared_start) || (askEnd && !draft.shared_end))
       return setError(
         `Escolha em qual ciclo conta o dia de virada (${shortDate(askStart && !draft.shared_start ? draft.start_date : draft.end_date)}).`,
@@ -2009,6 +2093,14 @@ function CycleForm({
       ...result.input,
       shared_start: shared.before ? result.input.shared_start : null,
       shared_end: shared.after ? result.input.shared_end : null,
+      multiplier_change: mChanged
+        ? {
+            reason: mReason.trim(),
+            apply: cycle ? (registered ? mApply : "all") : null,
+            from: mRange.from || null,
+            to: mRange.to || null,
+          }
+        : null,
     };
     const blocked = cycleMediaBlocked(
       media.room,
@@ -2226,9 +2318,27 @@ function CycleForm({
               onChange={(e) => set("multiplier", e.target.value)}
             />
             <small>
-              Vem do ciclo anterior; altere quando o índice da operação mudar.
+              No mínimo 1. Vem do ciclo anterior; altere quando o índice da
+              operação mudar (pede o motivo).
             </small>
           </label>
+          {mChanged && baseM !== null && (
+            <MultiplierChangeFields
+              previous={baseM}
+              next={typedM}
+              newCycle={!cycle}
+              cycleStart={draft.start_date}
+              cycleEnd={draft.end_date}
+              reason={mReason}
+              onReason={setMReason}
+              apply={mApply}
+              onApply={setMApply}
+              from={mRange.from}
+              to={mRange.to}
+              onRange={(from, to) => setMRange({ from, to })}
+              impact={impact}
+            />
+          )}
           <div className="form-columns">
             <label>
               Destino dos anúncios

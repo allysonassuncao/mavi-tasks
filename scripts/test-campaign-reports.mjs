@@ -65,7 +65,7 @@ const far = await rpc("create_ad_campaign", [
 const cycleOf = (id, start, end, m, links) =>
   rpc("create_ad_cycle", [
     id, start.slice(0, 8) + "01", start, end, "lead", 100, 3000, m,
-    "lead_form", [], "Saúde", JSON.stringify(links), true,
+    "lead_form", [], "Saúde", JSON.stringify(links), true, null, null, null, "Teste do M",
   ]);
 const first = await cycleOf(campaign, "2026-08-01", "2026-08-31", 1.5, [
   { account_id: "act_111", campaign_id: "c1" },

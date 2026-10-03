@@ -27,6 +27,11 @@ import {
 import { contractParts, dateKey } from "./domain";
 import { cycleFit, demoMediaRoom } from "./campaign-media";
 import {
+  multiplierError,
+  sameMultiplier,
+  type MultiplierLogItem,
+} from "./campaign-multiplier";
+import {
   dateRange,
   type CampaignMetrics,
   type CycleSnapshot,
@@ -71,6 +76,42 @@ export function demoCampaigns(
   const bump = (a: AdCampaign) => {
     a.version++;
     a.updated_at = now();
+  };
+  // The M's rules, as in the database: 1 or more and a reason, logged.
+  const multiplierReason = (reason: string | undefined) => {
+    const text = (reason ?? "").trim();
+    if (!text)
+      throw Error("Informe o motivo da alteração do índice de performance (M)");
+    return text;
+  };
+  const recordMultiplier = (
+    a: AdCampaign,
+    y: AdCycle,
+    item: Pick<
+      MultiplierLogItem,
+      "kind" | "from" | "to" | "reason" | "apply" | "apply_from" | "apply_to"
+    >,
+  ) => {
+    const parts = contractParts(data(), a.contract_id);
+    store.multiplierLog.unshift({
+      id: ++store.seq,
+      at: now(),
+      actor: user,
+      actor_name:
+        data().members.find((m) => m.user_id === user)?.name ?? "",
+      campaign_id: a.id,
+      cycle_id: y.id,
+      campaign: a.name,
+      client: parts.client?.name ?? "",
+      product: parts.product?.name ?? "",
+      platform: a.platform,
+      cycle_start: y.start_date,
+      cycle_end: y.end_date,
+      day: null,
+      days: [],
+      media_diff: 0,
+      ...item,
+    });
   };
   function checkCycle(a: AdCampaign, input: CycleInput, except?: string) {
     if (input.end_date < input.start_date)
@@ -514,6 +555,13 @@ export function demoCampaigns(
         .filter((y) => y.campaign_id === a.id)
         .sort((x, y) => y.start_date.localeCompare(x.start_date))[0];
       const inherited = previous?.multiplier ?? 1;
+      const m = input.multiplier ?? inherited;
+      const wrong = multiplierError(m, null);
+      if (wrong) throw Error(wrong);
+      const reason =
+        previous && !sameMultiplier(m, previous.multiplier)
+          ? multiplierReason(input.multiplier_change?.reason)
+          : null;
       const y: AdCycle = {
         id: crypto.randomUUID(),
         company_id: a.company_id,
@@ -524,7 +572,7 @@ export function demoCampaigns(
         objective: input.objective,
         goal_results: input.goal_results,
         budget: input.budget,
-        multiplier: input.multiplier ?? inherited,
+        multiplier: m,
         destination: input.destination,
         landing_pages: input.landing_pages,
         niche: input.niche,
@@ -556,6 +604,25 @@ export function demoCampaigns(
         multiplier: y.multiplier,
         links: y.links,
       });
+      if (previous && reason) {
+        log(a, y.id, "multiplier_changed", {
+          kind: "new_cycle",
+          from: previous.multiplier,
+          to: m,
+          reason,
+          days: 0,
+          media_diff: 0,
+        });
+        recordMultiplier(a, y, {
+          kind: "new_cycle",
+          from: previous.multiplier,
+          to: m,
+          reason,
+          apply: null,
+          apply_from: null,
+          apply_to: null,
+        });
+      }
       if (release) log(a, y.id, "media_override", release);
       if (makeCurrent) {
         const from = a.current_cycle_id;
@@ -574,6 +641,14 @@ export function demoCampaigns(
           "O ciclo foi alterado por outra pessoa. Recarregue e tente de novo.",
         );
       checkCycle(a, input, y.id);
+      const m = input.multiplier ?? y.multiplier;
+      const mChanged = !sameMultiplier(m, y.multiplier);
+      const wrong = multiplierError(m, y.multiplier);
+      if (wrong) throw Error(wrong);
+      // The demonstration's days follow the cycle's M: all of them change.
+      const reason = mChanged
+        ? multiplierReason(input.multiplier_change?.reason)
+        : null;
       const release = mediaGuard(a, y.id, input, override);
       const before = { ...y, competence_month: y.competence_month };
       Object.assign(y, {
@@ -613,17 +688,68 @@ export function demoCampaigns(
         "objective",
         "goal_results",
         "budget",
-        "multiplier",
         "destination",
         "landing_pages",
         "niche",
         "links",
       ]);
       if (Object.keys(diff).length) log(a, y.id, "cycle_updated", diff);
+      if (reason) {
+        log(a, y.id, "multiplier_changed", {
+          kind: "cycle",
+          from: before.multiplier,
+          to: y.multiplier,
+          reason,
+          apply: "all",
+          days: 0,
+          media_diff: 0,
+        });
+        recordMultiplier(a, y, {
+          kind: "cycle",
+          from: before.multiplier,
+          to: y.multiplier,
+          reason,
+          apply: "all",
+          apply_from: null,
+          apply_to: null,
+        });
+      }
       if (release) log(a, y.id, "media_override", release);
     },
     async mediaRoom(campaign) {
       return mediaRoomOf(campaignOf(campaign.id));
+    },
+    multiplier: {
+      // The demonstration's days are generated from the cycle's M.
+      async impact() {
+        return {
+          today: dateKey(),
+          registered: 0,
+          first_day: null,
+          last_day: null,
+          options: {},
+        };
+      },
+      async log(_company, q) {
+        const search = (q.search ?? "").trim().toLowerCase();
+        const rows = store.multiplierLog.filter(
+          (l) =>
+            (!q.campaign || l.campaign_id === q.campaign) &&
+            (!q.actor || l.actor === q.actor) &&
+            (!q.from || l.at.slice(0, 10) >= q.from) &&
+            (!q.to || l.at.slice(0, 10) <= q.to) &&
+            (!search ||
+              [l.campaign, l.client, l.product].some((t) =>
+                t.toLowerCase().includes(search),
+              )) &&
+            (q.before == null || l.id < q.before),
+        );
+        const limit = q.limit ?? 30;
+        return { items: rows.slice(0, limit), more: rows.length > limit };
+      },
+      async belowMin() {
+        return [];
+      },
     },
   };
 }
@@ -1425,8 +1551,11 @@ function demoMetrics(
     async updateDaily(row, values) {
       const y = cycleOf(row.cycle_id);
       const m = checkMetrics(values);
-      if (!(values.multiplier > 0 && values.multiplier <= 100))
-        throw Error("O M deve ser maior que 0 e no máximo 100");
+      const wrong = multiplierError(values.multiplier, row.multiplier);
+      if (wrong) throw Error(wrong);
+      const mChanged = !sameMultiplier(values.multiplier, row.multiplier);
+      if (mChanged && !values.reason?.trim())
+        throw Error("Informe o motivo da alteração do índice de performance (M)");
       const after = {
         multiplier: Math.round(values.multiplier * 1000) / 1000,
         ...m,
@@ -1437,7 +1566,11 @@ function demoMetrics(
         ...after,
         source: "manual",
       });
-      log(y.campaign_id, y.id, "daily_edited", { day: row.day, changes: diff });
+      log(y.campaign_id, y.id, "daily_edited", {
+        day: row.day,
+        changes: diff,
+        ...(mChanged ? { reason: values.reason?.trim() } : {}),
+      });
     },
     async updateSnapshot(snapshot, values) {
       const y = cycleOf(snapshot.cycle_id);
@@ -1498,6 +1631,8 @@ type Store = {
   events: AdCampaignEvent[];
   /** The records edited by hand, over the generated numbers. */
   edits: Map<string, Partial<DailyMetric & CycleSnapshot>>;
+  /** The M's audit log (ad_multiplier_log), newest first. */
+  multiplierLog: MultiplierLogItem[];
   seq: number;
 };
 let shared: { company: string; store: Store } | null = null;
@@ -1516,6 +1651,7 @@ function seed(data: Snapshot): Store {
     cycles: [],
     events: [],
     edits: new Map(),
+    multiplierLog: [],
     seq: 0,
   };
   const contracts = data.contracts.filter(

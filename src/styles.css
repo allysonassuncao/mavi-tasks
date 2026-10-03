@@ -13826,6 +13826,86 @@ tr:hover .campaign-edit-record,
   font-size: 0.75rem;
   line-height: 1.5;
 }
+/* Índice de performance (M): a alteração no ciclo e o registro. */
+.campaign-m-change {
+  border-color: #e7c27d;
+  background: #fdf9ef;
+}
+.campaign-m-change legend {
+  color: #7a5310;
+}
+.campaign-m-change .share-toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.campaign-m-effect {
+  color: #7a5310;
+  font-weight: 600;
+}
+.campaign-m-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.campaign-m-range input {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 130px;
+}
+.campaign-m-log {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 20px 24px 24px;
+  overflow: auto;
+}
+.campaign-m-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+.campaign-m-filters > input {
+  flex: 1 1 220px;
+}
+.campaign-m-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.75rem;
+  color: #5d6b80;
+}
+.campaign-m-below {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e7c27d;
+  border-radius: 10px;
+  background: #fdf7ea;
+}
+.campaign-m-below .text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  color: #7a5310;
+  font-weight: 600;
+}
+.campaign-m-table td[data-label="M"] {
+  white-space: nowrap;
+}
+.campaign-m-table td.campaign-m-reason {
+  min-width: 220px;
+  white-space: pre-wrap;
+}
+.campaign-m-more {
+  margin-top: 10px;
+}
 .campaign-lead-forms h4 {
   margin: 0 0 6px;
   font-size: 0.82rem;

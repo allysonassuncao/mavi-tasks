@@ -187,6 +187,15 @@ describe("formulário do ciclo", () => {
     expect("error" in cycleInput({ ...base, budget: "" })).toBe(true);
     expect("error" in cycleInput({ ...base, multiplier: "0" })).toBe(true);
     expect("error" in cycleInput({ ...base, multiplier: "101" })).toBe(true);
+    // At least 1 (migration 20270322090000); one below 1 from before the
+    // rule may stay as it is.
+    expect("error" in cycleInput({ ...base, multiplier: "0,8" })).toBe(true);
+    expect("error" in cycleInput({ ...base, multiplier: "0,8" }, 0.8)).toBe(
+      false,
+    );
+    expect("error" in cycleInput({ ...base, multiplier: "0,9" }, 0.8)).toBe(
+      true,
+    );
     expect(
       "error" in
         cycleInput({
@@ -543,9 +552,17 @@ describe("editar registros da Linha do tempo (demonstração)", () => {
       metrics.updateDaily(day, { ...day, clicks: 1.5 }),
     ).rejects.toThrow(/Cliques é um número inteiro/);
     await expect(
-      metrics.updateDaily(day, { ...day, multiplier: 0 }),
-    ).rejects.toThrow(/O M deve ser/);
-    await metrics.updateDaily(day, { ...day, spend: 123.456, multiplier: 4 });
+      metrics.updateDaily(day, { ...day, multiplier: 0.5 }),
+    ).rejects.toThrow(/no mínimo 1 e no máximo 100/);
+    await expect(
+      metrics.updateDaily(day, { ...day, multiplier: 4 }),
+    ).rejects.toThrow(/Informe o motivo/);
+    await metrics.updateDaily(day, {
+      ...day,
+      spend: 123.456,
+      multiplier: 4,
+      reason: "Acordo do dia",
+    });
     const after = await metrics.load(company, row.campaign.id);
     expect(
       after.daily.find((r) => r.cycle_id === day.cycle_id && r.day === day.day),

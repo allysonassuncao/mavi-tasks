@@ -3,6 +3,12 @@ import { fetchAllRows, rpc } from "./api";
 import type { MetricsBackend } from "./campaign-metrics";
 import { loadMediaRoom, type MediaRoom } from "./campaign-media";
 import {
+  multiplierError,
+  serverMultiplier,
+  type MultiplierBackend,
+  type MultiplierChange,
+} from "./campaign-multiplier";
+import {
   addBusinessDays,
   calendarEntry,
   isBusinessDay,
@@ -438,10 +444,21 @@ export type CycleInput = {
   /** Turnover days: where each counts (null keeps the saved choice). */
   shared_start?: SharedDayChoice | null;
   shared_end?: SharedDayChoice | null;
+  /**
+   * The M changed (from the cycle's, or the previous cycle's in a new one):
+   * the reason and, editing, which registered days take it (migration
+   * 20270322090000).
+   */
+  multiplier_change?: MultiplierChange | null;
 };
-/** Checks a draft the way the database will, with friendlier messages. */
+/**
+ * Checks a draft the way the database will, with friendlier messages.
+ * `currentMultiplier`: the M it had (one below 1 from before the rule may
+ * stay as it is).
+ */
 export function cycleInput(
   draft: CycleDraft,
+  currentMultiplier: number | null = null,
 ): { input: CycleInput } | { error: string } {
   if (!draft.start_date || !draft.end_date)
     return { error: "Informe o início e o término do ciclo." };
@@ -456,10 +473,8 @@ export function cycleInput(
   if (Number.isNaN(budget) || budget < 0)
     return { error: "Informe a verba do ciclo em reais." };
   const multiplier = parseAmount(draft.multiplier);
-  if (Number.isNaN(multiplier) || multiplier <= 0 || multiplier > 100)
-    return {
-      error: "O índice de performance (M) precisa estar entre 0 e 100.",
-    };
+  const multiplierWrong = multiplierError(multiplier, currentMultiplier);
+  if (multiplierWrong) return { error: multiplierWrong };
   const pages = splitList(draft.landing_pages);
   if (draft.destination === "make_landing_page" && !pages.length)
     return { error: "Informe ao menos uma página de captura da Make." };
@@ -620,6 +635,8 @@ export interface CampaignsBackend {
   ): Promise<void>;
   /** The client's media balance, reserved and available (Financeiro › Mídia). */
   mediaRoom(campaign: AdCampaign): Promise<MediaRoom>;
+  /** The M's rules: the days a change reaches and the audit log. */
+  multiplier: MultiplierBackend;
   /** The platforms' accounts and campaigns, read live (api/_ads.ts). */
   ads: AdsBackend;
   /** Each cycle's numbers (the daily sync, api/_ads-sync.ts). */
@@ -1234,17 +1251,31 @@ export const supabaseCampaigns: CampaignsBackend = {
       ...cycleArgs(input),
       p_make_current: makeCurrent,
       p_media_override: override || null,
+      // Only with another M (older databases don't take it).
+      ...(input.multiplier_change
+        ? { p_multiplier_reason: input.multiplier_change.reason }
+        : {}),
     })) as string;
   },
   async updateCycle(cycle, input, override) {
+    const change = input.multiplier_change;
     await rpc("update_ad_cycle", {
       p_cycle: cycle.id,
       p_version: cycle.version,
       ...cycleArgs(input),
       p_media_override: override || null,
+      ...(change
+        ? {
+            p_multiplier_reason: change.reason,
+            p_multiplier_apply: change.apply,
+            p_multiplier_from: change.apply === "range" ? change.from : null,
+            p_multiplier_to: change.apply === "range" ? change.to : null,
+          }
+        : {}),
     });
   },
   mediaRoom: (campaign) => loadMediaRoom(campaign.id),
+  multiplier: serverMultiplier,
   ads: serverAds,
   // Loaded on demand (and keeps campaign-metrics.ts out of this module).
   metrics: {
@@ -1255,10 +1286,13 @@ export const supabaseCampaigns: CampaignsBackend = {
     sync: (_company, campaign) =>
       import("./campaign-metrics").then((m) => m.syncNow(campaign)),
     async updateDaily(row, values) {
+      const { reason, ...rest } = values;
       await rpc("update_ad_daily_metric", {
         p_cycle: row.cycle_id,
         p_day: row.day,
-        p_values: values,
+        p_values: rest,
+        // Only with another M (older databases don't take it).
+        ...(reason ? { p_reason: reason } : {}),
       });
     },
     async updateSnapshot(snapshot, values) {

@@ -68,7 +68,7 @@ const edit = async (id, { start, end, multiplier, shared = null, sharedEnd = nul
   return rpc("update_ad_cycle", [
     id, y.version, y.competence_month, start ?? y.start_date, end ?? y.end_date, y.objective, y.goal_results,
     y.budget, multiplier ?? y.multiplier, y.destination, y.landing_pages, y.niche, JSON.stringify(own), null,
-    shared, sharedEnd,
+    shared, sharedEnd, "Teste do M", "all",
   ]);
 };
 const sharedDay = async (id) => (await sql("select shared_day from ad_cycles where id=$1", [id]))[0].shared_day;

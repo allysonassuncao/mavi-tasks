@@ -72,7 +72,11 @@ export type MetricValues = Pick<
   | "initiate_checkout"
 >;
 /** A day of the "Dia a dia": its metrics and the day's M. */
-export type DailyEdit = MetricValues & { multiplier: number };
+export type DailyEdit = MetricValues & {
+  multiplier: number;
+  /** Why the M changed (required then; migration 20270322090000). */
+  reason?: string;
+};
 /**
  * A snapshot of the "MASO" sub-tab: the end of its period, the metrics and
  * Bom/Ruim ("auto": by the cycle's goal, as the daily sync rates it).
