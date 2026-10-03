@@ -52,6 +52,15 @@ const publicReport = window.location.pathname.match(
 const approvalLink = window.location.pathname.match(
   /^\/aprovacao\/([0-9a-f]{64})\/?$/,
 );
+// Social Media: o cliente conecta a Página e o Instagram para publicar.
+const PublicSocialConnect = lazy(() =>
+  import("./PublicSocialConnect").then((m) => ({
+    default: m.PublicSocialConnect,
+  })),
+);
+const connectLink = window.location.pathname.match(
+  /^\/conectar\/([0-9a-f]{64})\/?$/,
+);
 // IA do MAVI: a tela de permissão do OAuth (Claude, ChatGPT e outros apps MCP).
 const OAuthConsent = lazy(() =>
   import("./OAuthConsent").then((m) => ({ default: m.OAuthConsent })),
@@ -87,6 +96,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     ) : approvalLink ? (
       <Suspense fallback={null}>
         <PublicSocialLeads token={approvalLink[1]} />
+      </Suspense>
+    ) : connectLink ? (
+      <Suspense fallback={null}>
+        <PublicSocialConnect token={connectLink[1]} />
       </Suspense>
     ) : apiDocs ? (
       <Suspense fallback={null}>

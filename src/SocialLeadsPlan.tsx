@@ -801,7 +801,9 @@ export function PlanView({
           posts={posts}
           schedules={schedules}
           linkCalendar={bundle.linkCalendar ?? true}
+          account={bundle.account ?? null}
           canWrite={item.can_write}
+          isLeader={isLeader}
           backend={backend}
           tz={tz}
           focus={schedulePost}

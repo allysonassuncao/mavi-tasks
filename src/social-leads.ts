@@ -2047,7 +2047,8 @@ export const destinationLabels: Record<SmDestination, string> = {
   facebook: "Facebook",
 };
 export const DESTINATIONS: SmDestination[] = ["instagram", "story", "facebook"];
-export type SmStatus = "scheduled" | "due" | "published" | "failed";
+export type SmStatus =
+  "scheduled" | "publishing" | "due" | "published" | "failed";
 /** A post's schedule (migration 20270315090000_social_media_schedule). */
 export interface SmSchedule {
   plan_id: string;
@@ -2136,7 +2137,34 @@ export function scheduleStatus(s: SmSchedule, now = Date.now()) {
   if (s.status === "published")
     return { label: "Publicado", tone: "good" as const };
   if (s.status === "failed") return { label: "Falhou", tone: "bad" as const };
+  if (s.status === "publishing")
+    return { label: "Publicando pelo Meta", tone: "info" as const };
   if (s.status === "due" || new Date(s.scheduled_at).getTime() <= now)
     return { label: "Hora de publicar", tone: "warn" as const };
   return { label: "Agendado", tone: "info" as const };
+}
+/**
+ * The client's Meta connection in Social Media (migration
+ * 20270316090000_social_media_meta): the Page and its Instagram. The token
+ * never leaves the database.
+ */
+export interface SmAccount {
+  link_calendar: boolean;
+  page_id: string | null;
+  page_name: string | null;
+  ig_user_id: string | null;
+  ig_username: string | null;
+  connected_via: "agency" | "client" | null;
+  connected_name: string | null;
+  connected_by: string | null;
+  connected_at: string | null;
+  connection_error: string | null;
+  connection_error_at: string | null;
+}
+/** A Page the Facebook login reaches (to pick the client's). */
+export interface SmPage {
+  id: string;
+  name: string;
+  ig_id: string | null;
+  ig_username: string | null;
 }

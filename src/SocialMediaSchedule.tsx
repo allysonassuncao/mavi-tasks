@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  CalendarClock,
   CalendarDays,
   Check,
   ChevronLeft,
@@ -9,7 +8,10 @@ import {
   Copy,
   ExternalLink,
   Link2,
+  PlugZap,
+  RefreshCw,
   RotateCcw,
+  Unplug,
   Sparkles,
   TriangleAlert,
   X,
@@ -30,14 +32,18 @@ import {
   SM_TIME_ZONE,
   type MediaFile,
   type SlPost,
+  type SmAccount,
   type SmDestination,
+  type SmPage,
   type SmSchedule,
   type SmScheduleDraft,
 } from "./social-leads";
-import type {
-  ScheduleSuggestion,
-  SocialLeadsBackend,
+import {
+  connectUrl,
+  type ScheduleSuggestion,
+  type SocialLeadsBackend,
 } from "./social-leads-api";
+import { useUrlState } from "./router";
 import "./social-media-schedule.css";
 
 /**
@@ -47,6 +53,10 @@ import "./social-media-schedule.css";
  * the team is told to publish (the arts and the caption are here, ready to
  * copy) and marks the post as published. The client link shows the calendar
  * when the team leaves it on.
+ *
+ * With the client's Page connected (migration 20270316090000_social_media_meta,
+ * the Social Media's own Meta app), the post goes out by itself at the time;
+ * what fails comes back as "hora de publicar", with the reason.
  */
 export function ScheduleView({
   company,
@@ -55,7 +65,9 @@ export function ScheduleView({
   posts,
   schedules,
   linkCalendar,
+  account,
   canWrite,
+  isLeader,
   backend,
   tz,
   focus,
@@ -70,7 +82,11 @@ export function ScheduleView({
   posts: SlPost[];
   schedules: SmSchedule[];
   linkCalendar: boolean;
+  /** The client's Meta connection (null: none yet). */
+  account: SmAccount | null;
   canWrite: boolean;
+  /** Administrators and managers connect through the agency. */
+  isLeader: boolean;
   backend: SocialLeadsBackend;
   /** The company's time zone (dates are typed and shown in it). */
   tz: string;
@@ -173,13 +189,16 @@ export function ScheduleView({
         </div>
       </div>
 
-      <p className="sl-alert info-soft">
-        <CalendarClock size={15} />
-        Na hora marcada, o MAVI avisa quem agendou, quem fez a arte e a criação
-        do cliente, com a arte e a legenda prontas para publicar. Depois de
-        publicar, marque como publicado. A publicação automática pelo Meta entra
-        numa próxima etapa.
-      </p>
+      <MetaConnection
+        contract={contract}
+        account={account}
+        canWrite={canWrite}
+        isLeader={isLeader}
+        backend={backend}
+        who={who}
+        notify={notify}
+        onChanged={onChanged}
+      />
 
       {due.length > 0 && (
         <section className="sm-due" aria-label="Hora de publicar">
@@ -207,7 +226,9 @@ export function ScheduleView({
                   <small>
                     {s.status === "failed"
                       ? s.error
-                      : `${scheduleWhen(s.scheduled_at, tz)} · ${p?.hook ?? ""}`}
+                      : s.error
+                        ? `O Meta não publicou: ${s.error}`
+                        : `${scheduleWhen(s.scheduled_at, tz)} · ${p?.hook ?? ""}`}
                   </small>
                 </span>
                 <span className="sm-due-go">
@@ -469,10 +490,14 @@ function ScheduleModal({
   const published = schedule?.status === "published";
   const st = schedule ? scheduleStatus(schedule) : null;
   // The time came (the database flips it within a minute): time to publish.
+  const publishing = schedule?.status === "publishing";
   const due =
-    !!schedule && (schedule.status !== "scheduled" || st?.tone === "warn");
+    !!schedule &&
+    (schedule.status === "due" ||
+      schedule.status === "failed" ||
+      (schedule.status === "scheduled" && st?.tone === "warn"));
   const shownCaption = caption ?? planCaption;
-  const locked = !canWrite || published;
+  const locked = !canWrite || published || publishing;
 
   const run = (key: string, work: () => Promise<void>, done: string) => {
     setBusy(key);
@@ -531,6 +556,17 @@ function ScheduleModal({
               : schedule
                 ? ` · ${scheduleWhen(schedule.scheduled_at, tz)}`
                 : ""}
+          </p>
+        )}
+        {publishing && (
+          <p className="sl-alert info-soft">
+            <PlugZap size={15} /> O Meta está publicando este post agora. Vídeos
+            podem levar alguns minutos para processar.
+          </p>
+        )}
+        {schedule?.status === "due" && schedule.error && (
+          <p className="sl-alert warn">
+            <TriangleAlert size={15} /> O Meta não publicou: {schedule.error}
           </p>
         )}
         {schedule?.status === "failed" && schedule.error && (
@@ -752,7 +788,7 @@ function ScheduleModal({
 
         {error && <p className="sl-alert bad">{error}</p>}
         <div className="form-footer">
-          {schedule && !published && canWrite && (
+          {schedule && !published && !publishing && canWrite && (
             <Button
               className="btn secondary danger-text"
               loading={busy === "cancel"}
@@ -986,5 +1022,316 @@ function SuggestModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+// ------------------------------------------------------------ Meta
+const CONNECT_RESULTS: Record<string, string> = {
+  cancelado: "A conexão com o Facebook foi cancelada.",
+  "sem-paginas":
+    "Esse Facebook não administra nenhuma Página. Entre com quem administra a Página do cliente.",
+  erro: "Não foi possível conectar com o Meta. Tente de novo.",
+};
+
+/**
+ * The client's Page and Instagram for the automatic publishing: connected
+ * by the agency (administrators and managers) or by the client through a
+ * link. Uses the Social Media's own Meta app: connecting here never touches
+ * Campanhas' connection.
+ */
+function MetaConnection({
+  contract,
+  account,
+  canWrite,
+  isLeader,
+  backend,
+  who,
+  notify,
+  onChanged,
+}: {
+  contract: string;
+  account: SmAccount | null;
+  canWrite: boolean;
+  isLeader: boolean;
+  backend: SocialLeadsBackend;
+  who: (id: string | null) => string | undefined;
+  notify: (m: string) => void;
+  onChanged: () => void;
+}) {
+  const [config, setConfig] = useState<{
+    configured: boolean;
+    missing: string[];
+  } | null>(null);
+  const [busy, setBusy] = useState("");
+  const [link, setLink] = useState("");
+  const [pending, setPending] = useUrlState<string>("sm_pendente", "");
+  const [result, setResult] = useUrlState<string>("sm_conexao", "");
+  useEffect(() => {
+    backend
+      .metaStatus()
+      .then(setConfig)
+      .catch(() => setConfig({ configured: false, missing: [] }));
+  }, [backend]);
+  useEffect(() => {
+    if (!result) return;
+    notify(CONNECT_RESULTS[result] ?? CONNECT_RESULTS.erro);
+    setResult("");
+  }, [result]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const connected = !!account?.page_id;
+  const run = (key: string, work: () => Promise<void>) => {
+    setBusy(key);
+    work()
+      .catch((e) => notify((e as Error).message))
+      .finally(() => setBusy(""));
+  };
+  const copyLink = (renew = false) =>
+    run(renew ? "renew" : "link", async () => {
+      const token = await backend.connectLink(contract, renew);
+      const url = connectUrl(token);
+      setLink(url);
+      await navigator.clipboard.writeText(url).catch(() => {});
+      notify(
+        renew
+          ? "Link novo copiado. O anterior parou de funcionar."
+          : "Link copiado. Mande para o cliente conectar a Página dele.",
+      );
+    });
+
+  return (
+    <section
+      className={`sm-meta ${connected ? (account?.connection_error ? "bad" : "on") : ""}`}
+      aria-label="Publicação automática pelo Meta"
+    >
+      <div className="sm-meta-head">
+        <PlugZap size={16} />
+        <div>
+          {connected ? (
+            <>
+              <strong>
+                Publicação automática ligada: {account!.page_name}
+                {account!.ig_username ? ` · @${account!.ig_username}` : ""}
+              </strong>
+              <small>
+                {account!.connected_via === "client"
+                  ? `Conectado pelo cliente${account!.connected_name ? ` (${account!.connected_name})` : ""}`
+                  : `Conectado pela agência${account!.connected_by ? ` · ${who(account!.connected_by) ?? account!.connected_name ?? ""}` : ""}`}
+                {account!.connected_at &&
+                  ` em ${new Date(account!.connected_at).toLocaleDateString("pt-BR")}`}
+                . Na hora marcada o post sai sozinho; se algo falhar, a equipe é
+                avisada para publicar à mão.
+                {!account!.ig_user_id &&
+                  " Esta Página não tem Instagram profissional ligado: só o Facebook sai sozinho."}
+              </small>
+            </>
+          ) : (
+            <>
+              <strong>Publicação manual (lembrete)</strong>
+              <small>
+                Na hora marcada, o MAVI avisa quem agendou, quem fez a arte e a
+                criação do cliente, com a arte e a legenda prontas para
+                publicar. Conecte a Página e o Instagram do cliente para os
+                posts saírem sozinhos.
+              </small>
+            </>
+          )}
+        </div>
+      </div>
+      {account?.connection_error && (
+        <p className="sl-alert bad">
+          <CircleAlert size={15} /> A conexão caiu: {account.connection_error}{" "}
+          Reconecte; até lá, os posts voltam para o lembrete.
+        </p>
+      )}
+      {config &&
+        !config.configured &&
+        config.missing.length > 0 &&
+        isLeader && (
+          <p className="sl-alert warn">
+            <TriangleAlert size={15} /> Falta na Vercel:{" "}
+            {config.missing.join(", ")}. Depois de salvar, faça um Redeploy.
+          </p>
+        )}
+      {canWrite && config?.configured && (
+        <div className="sm-meta-actions">
+          {isLeader && (
+            <Button
+              className={`btn ${connected && !account?.connection_error ? "secondary" : "primary"}`}
+              loading={busy === "connect"}
+              onClick={() =>
+                run("connect", async () => {
+                  window.location.assign(await backend.connectMeta(contract));
+                })
+              }
+            >
+              <PlugZap size={14} />
+              {connected ? "Reconectar pela agência" : "Conectar pela agência"}
+            </Button>
+          )}
+          <Button
+            className="btn secondary"
+            loading={busy === "link"}
+            onClick={() => copyLink()}
+          >
+            <Link2 size={14} /> Copiar link para o cliente conectar
+          </Button>
+          {link && (
+            <button
+              type="button"
+              className="sl-link"
+              disabled={busy === "renew"}
+              onClick={() => copyLink(true)}
+            >
+              <RefreshCw size={12} /> Trocar o link
+            </button>
+          )}
+          {connected && (
+            <button
+              type="button"
+              className="sl-link danger"
+              disabled={busy === "off"}
+              onClick={() =>
+                run("off", async () => {
+                  await backend.disconnectMeta(contract);
+                  notify(
+                    "Desconectado. Os próximos posts voltam para o lembrete.",
+                  );
+                  onChanged();
+                })
+              }
+            >
+              <Unplug size={12} /> Desconectar
+            </button>
+          )}
+        </div>
+      )}
+      {link && <p className="sm-meta-link">{link}</p>}
+      {pending && (
+        <PickPage
+          pending={pending}
+          backend={backend}
+          notify={notify}
+          onClose={() => setPending("")}
+          onDone={() => {
+            setPending("");
+            onChanged();
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+/** After the agency's Facebook login: which Page is this client's. */
+function PickPage({
+  pending,
+  backend,
+  notify,
+  onClose,
+  onDone,
+}: {
+  pending: string;
+  backend: SocialLeadsBackend;
+  notify: (m: string) => void;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [data, setData] = useState<{
+    fb_user_name: string;
+    client: string;
+    pages: SmPage[];
+  } | null>(null);
+  const [error, setError] = useState("");
+  const [page, setPage] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    backend
+      .pendingPages(pending)
+      .then((d) => {
+        setData(d);
+        if (d.pages.length === 1) setPage(d.pages[0].id);
+      })
+      .catch((e) => setError((e as Error).message));
+  }, [pending]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <Modal title="Qual é a Página do cliente?" onClose={onClose} busy={busy}>
+      <div className="entity-form">
+        {error ? (
+          <p className="sl-alert bad">{error}</p>
+        ) : !data ? (
+          <p className="sl-muted">Carregando as Páginas…</p>
+        ) : (
+          <>
+            <p>
+              Páginas que {data.fb_user_name || "este Facebook"} administra.
+              Escolha a de <strong>{data.client}</strong>: os posts saem nela e
+              no Instagram ligado a ela.
+            </p>
+            <PageList pages={data.pages} value={page} onChange={setPage} />
+          </>
+        )}
+        <div className="form-footer">
+          <Button className="btn secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            className="btn primary"
+            loading={busy}
+            disabled={!page}
+            onClick={() => {
+              setBusy(true);
+              backend
+                .choosePage(pending, page)
+                .then(() => {
+                  notify(
+                    "Conectado. Os posts agendados saem sozinhos na hora.",
+                  );
+                  onDone();
+                })
+                .catch((e) => setError((e as Error).message))
+                .finally(() => setBusy(false));
+            }}
+          >
+            <PlugZap size={14} /> Conectar esta Página
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** The Pages to pick from, with each one's Instagram (shared with the client link). */
+export function PageList({
+  pages,
+  value,
+  onChange,
+}: {
+  pages: SmPage[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <ul className="sm-pages">
+      {pages.map((p) => (
+        <li key={p.id}>
+          <label className={`sm-page ${value === p.id ? "on" : ""}`}>
+            <input
+              type="radio"
+              name="sm-page"
+              checked={value === p.id}
+              onChange={() => onChange(p.id)}
+            />
+            <span>
+              <strong>{p.name}</strong>
+              <small>
+                {p.ig_username
+                  ? `Instagram @${p.ig_username}`
+                  : "Sem Instagram profissional ligado (só o Facebook)"}
+              </small>
+            </span>
+          </label>
+        </li>
+      ))}
+    </ul>
   );
 }

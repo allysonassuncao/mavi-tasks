@@ -34,6 +34,8 @@ import {
   POSTS_DEFAULT,
   type BriefingSuggestion,
   type SlAlertRead,
+  type SmAccount,
+  type SmPage,
   type SmSchedule,
   type SmScheduleDraft,
   type SmDestination,
@@ -64,6 +66,8 @@ export interface PlanBundle {
   schedules?: SmSchedule[];
   /** Whether the client link shows the calendar (on by default). */
   linkCalendar?: boolean;
+  /** The client's Meta connection (Social Media), when there is one. */
+  account?: SmAccount | null;
 }
 /** The MAVI's suggestion of dates (api/_social-leads.ts, "schedule"). */
 export interface ScheduleSuggestion {
@@ -217,6 +221,22 @@ export interface SocialLeadsBackend {
     url?: string | null,
   ): Promise<void>;
   setLinkCalendar(contract: string, enabled: boolean): Promise<void>;
+  /** Social Media › the Meta connection (its own app, not Campanhas'). */
+  metaStatus(): Promise<{ configured: boolean; missing: string[] }>;
+  /** The Facebook login address (administrators and managers). */
+  connectMeta(contract: string): Promise<string>;
+  /** The client's link to connect (renew: the old one stops working). */
+  connectLink(contract: string, renew?: boolean): Promise<string>;
+  disconnectMeta(contract: string): Promise<void>;
+  pendingPages(
+    pending: string,
+  ): Promise<{
+    contract: string;
+    fb_user_name: string;
+    client: string;
+    pages: SmPage[];
+  }>;
+  choosePage(pending: string, page: string): Promise<void>;
   suggestSchedule(
     company: string,
     contract: string,
@@ -333,6 +353,29 @@ async function server<T>(body: Record<string, unknown>): Promise<T> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok)
     throw new Error(data.error ?? "Não foi possível falar com a MAVI.");
+  return data as T;
+}
+/** /api/social-media: the Meta connection of Social Media (signed in or not). */
+async function socialMediaServer<T>(
+  body: Record<string, unknown>,
+  signedIn = true,
+): Promise<T> {
+  const token =
+    signedIn && supabase
+      ? (await supabase.auth.getSession()).data.session?.access_token
+      : undefined;
+  if (signedIn && !token) throw new Error("Entre novamente.");
+  const res = await fetch("/api/social-media", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok)
+    throw new Error(data.error ?? "Não foi possível falar com o servidor.");
   return data as T;
 }
 function db() {
@@ -515,6 +558,38 @@ export const serverSocialLeads: SocialLeadsBackend = {
       p_enabled: enabled,
     });
   },
+  async metaStatus() {
+    return socialMediaServer<{ configured: boolean; missing: string[] }>({
+      action: "status",
+    });
+  },
+  async connectMeta(contract) {
+    return (
+      await socialMediaServer<{ url: string }>({ action: "connect", contract })
+    ).url;
+  },
+  async connectLink(contract, renew = false) {
+    return (await rpc("social_media_connect_link", {
+      p_contract: contract,
+      p_new: renew,
+    })) as string;
+  },
+  async disconnectMeta(contract) {
+    await rpc("social_media_disconnect", { p_contract: contract });
+  },
+  async pendingPages(pending) {
+    return (await rpc("social_media_pending_pages", {
+      p_pending: pending,
+    })) as {
+      contract: string;
+      fb_user_name: string;
+      client: string;
+      pages: SmPage[];
+    };
+  },
+  async choosePage(pending, page) {
+    await rpc("social_media_choose_page", { p_pending: pending, p_page: page });
+  },
   async suggestSchedule(company, contract, plan, instruction) {
     return server<ScheduleSuggestion>({
       action: "schedule",
@@ -601,11 +676,20 @@ export const serverSocialLeads: SocialLeadsBackend = {
     ]);
     for (const q of [p, x, r]) if (q.error) throw q.error;
     const contract = (p.data as unknown as SlPlan).contract_id;
-    const account = await db()
+    let account = await db()
       .from("social_media_accounts")
-      .select("link_calendar")
+      .select(
+        "link_calendar,page_id,page_name,ig_user_id,ig_username,connected_via,connected_name,connected_by,connected_at,connection_error,connection_error_at",
+      )
       .eq("contract_id", contract)
       .maybeSingle();
+    // Before the connection's migration: only the calendar switch.
+    if (account.error)
+      account = (await db()
+        .from("social_media_accounts")
+        .select("link_calendar")
+        .eq("contract_id", contract)
+        .maybeSingle()) as typeof account;
     const posts = (x.data ?? []) as SlPost[];
     const ids = posts.map((y) => y.task_id).filter((v): v is string => !!v);
     const t = ids.length
@@ -631,6 +715,9 @@ export const serverSocialLeads: SocialLeadsBackend = {
         ? true
         : ((account.data as { link_calendar: boolean } | null)?.link_calendar ??
           true),
+      account: account.error
+        ? null
+        : ((account.data as SmAccount | null) ?? null),
     };
   },
   async saveBriefing(
@@ -1675,6 +1762,21 @@ export function demoSocialLeads(
       if (!enabled) s.hiddenCalendars.push(contract);
       emit();
     },
+    // The buttons show; connecting says the demo has no Meta.
+    async metaStatus() {
+      return { configured: true, missing: [] };
+    },
+    async connectMeta() {
+      throw new Error("No ambiente demonstrativo não há conexão com o Meta.");
+    },
+    async connectLink() {
+      return "d".repeat(64);
+    },
+    async disconnectMeta() {},
+    async pendingPages() {
+      throw new Error("No ambiente demonstrativo não há conexão com o Meta.");
+    },
+    async choosePage() {},
     async suggestSchedule(_c, _contract, planId) {
       await new Promise((r) => setTimeout(r, 900));
       const open = s.posts
@@ -2116,3 +2218,43 @@ export function demoSocialLeads(
     },
   };
 }
+
+// ------------------------------------------------------------ client: connect Meta
+/** /conectar/<token>: the client connects their Page to Social Media. */
+export interface SmLinkInfo {
+  company: string;
+  company_logo: string | null;
+  client: string;
+  connected: boolean;
+  page_name: string | null;
+  ig_username: string | null;
+  connected_at: string | null;
+  error: string | null;
+}
+export const smLink = {
+  info: async (token: string) =>
+    (await rpc("social_media_link_info", { p_token: token })) as SmLinkInfo,
+  /** The Facebook login address for the client. */
+  connect: async (token: string) =>
+    (
+      await socialMediaServer<{ url: string }>(
+        { action: "link-connect", token },
+        false,
+      )
+    ).url,
+  pending: async (token: string, pending: string) =>
+    (await rpc("social_media_link_pending", {
+      p_token: token,
+      p_pending: pending,
+    })) as { fb_user_name: string; pages: SmPage[] },
+  choose: async (token: string, pending: string, page: string) => {
+    await rpc("social_media_link_choose", {
+      p_token: token,
+      p_pending: pending,
+      p_page: page,
+    });
+  },
+};
+/** The address the client opens to connect. */
+export const connectUrl = (token: string) =>
+  `${window.location.origin}/conectar/${token}`;
