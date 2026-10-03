@@ -16,6 +16,7 @@ import {
   type QueryFilter,
   type Source,
   type Unit,
+  type DashboardCompare,
   type DashboardRange,
   type DashboardVariables,
   type SeriesRow,
@@ -93,6 +94,54 @@ export function resolveRange(
   }
 }
 
+/** The day a month before (clamped: 31/03 → 28/02). */
+function monthBefore(key: string) {
+  const [y, m, d] = key.split("-").map(Number);
+  const first = new Date(Date.UTC(y, m - 2, 1));
+  const last = new Date(Date.UTC(y, m - 1, 0)).getUTCDate();
+  first.setUTCDate(Math.min(d, last));
+  return iso(first);
+}
+const monthEnd = (key: string) => addDays(key, 1).slice(8) === "01";
+
+/**
+ * The comparison period of a period (inclusive dates), or null without
+ * one. Previous: the same number of days right before. Last month: the
+ * same days a month before; a period ending on a month's last day ends on
+ * the last day of the month before (September → all of August).
+ */
+export function resolveCompare(
+  compare: DashboardCompare | null | undefined,
+  range: { from: string; to: string },
+): { from: string; to: string } | null {
+  if (!compare) return null;
+  if ("from" in compare) return { from: compare.from, to: compare.to };
+  if (compare.preset === "last_month")
+    return {
+      from: monthBefore(range.from),
+      to: monthEnd(range.to) ? addDays(`${range.to.slice(0, 7)}-01`, -1) : monthBefore(range.to),
+    };
+  const days = daysBetween(range.from, range.to);
+  return { from: addDays(range.from, -days), to: addDays(range.from, -1) };
+}
+
+/** "01/09/2026 – 15/09/2026" (one day: just the day). */
+export const datesLabel = (r: { from: string; to: string }) =>
+  r.from === r.to ? shortDay(r.from) : `${shortDay(r.from)} – ${shortDay(r.to)}`;
+
+/** The change from a base, in % (null without a base to compare). */
+export function change(value: number | null | undefined, base: number | null | undefined) {
+  if (value === null || value === undefined || base === null || base === undefined) return null;
+  if (base === 0) return value === 0 ? 0 : null;
+  return ((value - base) / Math.abs(base)) * 100;
+}
+/** "+12,5%", "−3%", "0%" — or "—". */
+export function changeLabel(pct: number | null) {
+  if (pct === null || !Number.isFinite(pct)) return "—";
+  const n = Math.abs(pct).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+  return pct > 0 ? `+${n}%` : pct < 0 ? `−${n}%` : "0%";
+}
+
 export function rangeLabel(range: DashboardRange | undefined) {
   if (range && "from" in range)
     return `${shortDay(range.from)} – ${shortDay(range.to)}`;
@@ -134,6 +183,8 @@ export type DisplaySeries = {
   unit: Unit;
   values: (number | null)[];
   previous?: number | null;
+  /** The comparison period's value at each key (dashboard comparison). */
+  compare?: (number | null)[];
 };
 export type Display = {
   /** Keys of the x axis / categories, in order ("__other__" = Outros). */
@@ -142,6 +193,9 @@ export type Display = {
   series: DisplaySeries[];
   unit: Unit;
   interval: PanelResult["interval"];
+  /** The dashboard's comparison: its dates and, by time, each bucket of
+   *  the comparison period lined up with the period's (1st with 1st). */
+  compare?: { from: string; to: string; label: string; labels: string[] };
 };
 
 const emptyLabel: Partial<Record<GroupBy, string>> = {
@@ -183,12 +237,13 @@ export function buildDisplay(spec: PanelSpec, result: PanelResult): Display {
   const labels = new Map<string, string>();
   const valueOf = new Map<string, Map<string, number | null>>();
   const order: string[] = [];
+  const num = (v: number | null) => (v === null ? null : Number(v));
   for (const q of spec.queries) {
     const rows = result.series[q.ref] ?? [];
     const map = new Map<string, number | null>();
     for (const row of rows) {
       const key = row.k ?? "__null__";
-      map.set(key, row.v === null ? null : Number(row.v));
+      map.set(key, num(row.v));
       if (!labels.has(key)) {
         labels.set(
           key,
@@ -203,24 +258,51 @@ export function buildDisplay(spec: PanelSpec, result: PanelResult): Display {
   }
   const prevOf = (ref: string) => {
     const row = result.previous?.[ref]?.[0];
-    return row ? (row.v === null ? null : Number(row.v)) : undefined;
+    return row ? num(row.v) : undefined;
   };
+  // The comparison: by time, its buckets in order (the 1st against the
+  // 1st); otherwise by key, "Outros" adding up what isn't shown.
+  const cmpRange = result.compare_range;
+  const cmpRows = (ref: string) =>
+    [...(result.compare?.[ref] ?? [])].sort((a, b) =>
+      String(a.k).localeCompare(String(b.k)),
+    );
+  const cmpMaps = new Map<string, Map<string, number | null>>();
+  const cmpByIndex = new Map<string, (number | null)[]>();
+  if (result.compare && cmpRange)
+    for (const q of spec.queries) {
+      const rows = cmpRows(q.ref);
+      cmpByIndex.set(q.ref, rows.map((r) => num(r.v)));
+      cmpMaps.set(
+        q.ref,
+        new Map(rows.map((r) => [r.k ?? "__null__", num(r.v)] as const)),
+      );
+    }
   const formula = spec.formula?.expr ? parseFormula(spec.formula.expr) : null;
   let keys = group === "time" ? [...order].sort() : order;
+  const cmpAt = (ref: string, key: string, i: number, shown: Set<string>) => {
+    if (group === "time") return cmpByIndex.get(ref)?.[i] ?? null;
+    const map = cmpMaps.get(ref);
+    if (!map) return null;
+    if (key !== "__other__") return map.get(key) ?? null;
+    const q = spec.queries.find((x) => x.ref === ref);
+    if (!q || !metricDef(q)?.additive) return null;
+    let sum: number | null = null;
+    for (const [k, v] of map)
+      if (!shown.has(k) && v !== null) sum = (sum ?? 0) + v;
+    return sum;
+  };
   let series: DisplaySeries[];
   if (formula?.ok) {
     const node = formula.node;
-    const at = (
-      key: string,
-      from: (ref: string) => number | null | undefined,
-    ) =>
+    const at = (from: (ref: string) => number | null | undefined) =>
       evaluate(
         node,
         Object.fromEntries(
           spec.queries.map((q) => [q.ref, from(q.ref) ?? null]),
         ),
       );
-    let values = keys.map((k) => at(k, (ref) => valueOf.get(ref)?.get(k)));
+    let values = keys.map((k) => at((ref) => valueOf.get(ref)?.get(k)));
     // A formula brings every group: rank them here and keep the top N.
     if (group !== "time" && group !== "none") {
       const ranked = keys
@@ -231,6 +313,7 @@ export function buildDisplay(spec: PanelSpec, result: PanelResult): Display {
       keys = ranked.map((r) => r.k);
       values = ranked.map((r) => r.v);
     }
+    const shown = new Set(keys);
     series = [
       {
         id: "formula",
@@ -238,10 +321,14 @@ export function buildDisplay(spec: PanelSpec, result: PanelResult): Display {
         color: seriesColors[0],
         unit,
         values,
-        previous: spec.compare ? at("total", prevOf) : undefined,
+        previous: spec.compare ? at(prevOf) : undefined,
+        compare: cmpRange
+          ? keys.map((k, i) => at((ref) => cmpAt(ref, k, i, shown)))
+          : undefined,
       },
     ];
   } else {
+    const shown = new Set(keys);
     series = spec.queries
       .filter((q) => !q.hidden)
       .map((q, i) => ({
@@ -251,14 +338,31 @@ export function buildDisplay(spec: PanelSpec, result: PanelResult): Display {
         unit: spec.unit ?? metricDef(q)?.unit ?? unit,
         values: keys.map((k) => valueOf.get(q.ref)?.get(k) ?? null),
         previous: spec.compare ? prevOf(q.ref) : undefined,
+        compare: cmpRange
+          ? keys.map((k, i) => cmpAt(q.ref, k, i, shown))
+          : undefined,
       }));
   }
+  const first = spec.queries[0];
   return {
     keys,
     labels: keys.map((k) => labels.get(k) ?? k),
     series,
     unit,
     interval,
+    compare: cmpRange
+      ? {
+          ...cmpRange,
+          label: datesLabel(cmpRange),
+          labels:
+            group === "time" && first
+              ? keys.map((_, i) => {
+                  const k = cmpRows(first.ref)[i]?.k;
+                  return k ? bucketLabel(k, interval) : "";
+                })
+              : [],
+        }
+      : undefined,
   };
 }
 
@@ -768,6 +872,7 @@ export async function panelData(
   range: { from: string; to: string },
   vars: DashboardVariables | null,
   fresh = false,
+  compare: { from: string; to: string } | null = null,
 ): Promise<PanelResult> {
   const { data, error } = await db().rpc("dashboard_panel_data", {
     p_dashboard: source.kind === "app" ? source.dashboard : null,
@@ -778,6 +883,8 @@ export async function panelData(
     p_token: source.kind === "link" ? source.token : null,
     p_password: source.kind === "link" ? (source.password ?? null) : null,
     p_fresh: fresh,
+    // Migration 20270314090000: the comparison period (absent: none).
+    ...(compare ? { p_cmp_from: compare.from, p_cmp_to: compare.to } : {}),
   });
   if (error) throw error;
   if (data?.error) throw Error(data.error);
@@ -916,6 +1023,7 @@ export async function previewPanel(
   spec: PanelSpec,
   range: { from: string; to: string },
   vars: DashboardVariables,
+  compare: { from: string; to: string } | null = null,
 ): Promise<PanelResult> {
   const { data, error } = await db().rpc("dashboard_preview", {
     p_company: company,
@@ -923,6 +1031,7 @@ export async function previewPanel(
     p_from: range.from,
     p_to: range.to,
     p_vars: vars,
+    ...(compare ? { p_cmp_from: compare.from, p_cmp_to: compare.to } : {}),
   });
   if (error) throw error;
   return data as PanelResult;

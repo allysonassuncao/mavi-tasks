@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDisplay,
+  change,
+  changeLabel,
   compact,
   evaluate,
   formatValue,
   freeSpot,
   parseFormula,
   placePanel,
+  resolveCompare,
   resolveRange,
   starterPanels,
   socialLeadsPanels,
@@ -204,6 +207,150 @@ describe("Séries dos painéis", () => {
   it("marcas do eixo redondas, com negativos", () => {
     expect(niceTicks(0, 97)).toEqual([0, 25, 50, 75, 100]);
     expect(niceTicks(-12, 30)[0]).toBeLessThanOrEqual(-12);
+  });
+});
+
+describe("Comparação entre períodos", () => {
+  const out = (
+    series: PanelResult["series"],
+    compare: PanelResult["series"],
+    extra: Partial<PanelResult> = {},
+  ): PanelResult => ({
+    series,
+    previous: {},
+    compare,
+    compare_range: { from: "2026-09-01", to: "2026-09-03" },
+    interval: "day",
+    computed_at: "",
+    ...extra,
+  });
+  it("período anterior e mesmo período do mês passado", () => {
+    const r = { from: "2026-10-01", to: "2026-10-15" };
+    expect(resolveCompare({ preset: "previous" }, r)).toEqual({
+      from: "2026-09-16",
+      to: "2026-09-30",
+    });
+    expect(resolveCompare({ preset: "last_month" }, r)).toEqual({
+      from: "2026-09-01",
+      to: "2026-09-15",
+    });
+    // Um mês inteiro compara com o mês anterior inteiro.
+    expect(
+      resolveCompare({ preset: "last_month" }, { from: "2026-09-01", to: "2026-09-30" }),
+    ).toEqual({ from: "2026-08-01", to: "2026-08-31" });
+    // 31/03 vira o último dia de fevereiro.
+    expect(
+      resolveCompare({ preset: "last_month" }, { from: "2027-03-15", to: "2027-03-30" }),
+    ).toEqual({ from: "2027-02-15", to: "2027-02-28" });
+    expect(resolveCompare({ from: "2025-01-01", to: "2025-01-31" }, r)).toEqual({
+      from: "2025-01-01",
+      to: "2025-01-31",
+    });
+    expect(resolveCompare(null, r)).toBeNull();
+  });
+  it("variação em %", () => {
+    expect(changeLabel(change(19, 12))).toBe("+58,3%");
+    expect(changeLabel(change(5, 10))).toBe("−50%");
+    expect(changeLabel(change(0, 0))).toBe("0%");
+    expect(changeLabel(change(3, 0))).toBe("—");
+    expect(changeLabel(change(3, null))).toBe("—");
+  });
+  it("por tempo, alinha o 1º dia com o 1º dia", () => {
+    const d = buildDisplay(
+      {
+        viz: "line",
+        groupBy: "time",
+        queries: [{ ref: "A", source: "tasks", metric: "count", filters: [] }],
+      },
+      out(
+        {
+          A: [
+            { k: "2026-10-02", v: 2 },
+            { k: "2026-10-01", v: 1 },
+            { k: "2026-10-03", v: 3 },
+          ],
+        },
+        {
+          A: [
+            { k: "2026-09-01", v: 10 },
+            { k: "2026-09-02", v: 20 },
+            { k: "2026-09-03", v: null },
+          ],
+        },
+      ),
+    );
+    expect(d.series[0].values).toEqual([1, 2, 3]);
+    expect(d.series[0].compare).toEqual([10, 20, null]);
+    expect(d.compare?.labels).toEqual(["01/09", "02/09", "03/09"]);
+    expect(d.compare?.label).toBe("01/09/2026 – 03/09/2026");
+  });
+  it("por categoria, acha cada uma e soma o resto em Outros", () => {
+    const d = buildDisplay(
+      {
+        viz: "table",
+        groupBy: "person",
+        limit: 2,
+        queries: [{ ref: "A", source: "tasks", metric: "count", filters: [] }],
+      },
+      out(
+        {
+          A: [
+            { k: "telma", l: "Telma", v: 19 },
+            { k: "pedro", l: "Pedro", v: 5 },
+            { k: "__other__", l: "Outros", v: 4 },
+          ],
+        },
+        {
+          // Todos os grupos, em outra ordem; Ana e Rui viram "Outros".
+          A: [
+            { k: "pedro", l: "Pedro", v: 8 },
+            { k: "ana", l: "Ana", v: 2 },
+            { k: "telma", l: "Telma", v: 12 },
+            { k: "rui", l: "Rui", v: 1 },
+          ],
+        },
+        { interval: "day" },
+      ),
+    );
+    expect(d.labels).toEqual(["Telma", "Pedro", "Outros"]);
+    expect(d.series[0].compare).toEqual([12, 8, 3]);
+  });
+  it("Número usa a comparação do dashboard, e a fórmula também", () => {
+    const d = buildDisplay(
+      {
+        viz: "stat",
+        groupBy: "none",
+        formula: { expr: "A / B * 100", label: "Atraso" },
+        queries: [
+          { ref: "A", source: "tasks", metric: "late", filters: [] },
+          { ref: "B", source: "tasks", metric: "count", filters: [] },
+        ],
+      },
+      out(
+        { A: [{ k: null, v: 2 }], B: [{ k: null, v: 10 }] },
+        { A: [{ k: null, v: 1 }], B: [{ k: null, v: 10 }] },
+      ),
+    );
+    expect(d.series[0].values).toEqual([20]);
+    expect(d.series[0].compare).toEqual([10]);
+  });
+  it("o motor da demonstração devolve a comparação com todos os grupos", () => {
+    const r = runPanel(
+      emptySnapshot,
+      {
+        viz: "bar",
+        groupBy: "client",
+        limit: 1,
+        queries: [{ ref: "A", source: "tasks", metric: "count", filters: [] }],
+      },
+      { from: "2026-10-01", to: "2026-10-15" },
+      {},
+      "America/Sao_Paulo",
+      new Date("2026-10-15T12:00:00Z"),
+      { from: "2026-09-01", to: "2026-09-15" },
+    );
+    expect(r.compare_range).toEqual({ from: "2026-09-01", to: "2026-09-15" });
+    expect(r.compare).toEqual({ A: [] });
   });
 });
 
@@ -498,6 +645,31 @@ describe("Motor da demonstração", () => {
       r.series.C[0].v,
       r.series.D[0].v,
     ]).toEqual([4, 3.5, 2, 3.5]);
+  });
+  it("comparação: todos os clientes, sem top N", () => {
+    const spec: PanelSpec = {
+      viz: "hbar",
+      groupBy: "client",
+      limit: 1,
+      queries: [q("A", "tasks", "count")],
+    };
+    const r = runPanel(
+      data,
+      spec,
+      range,
+      {},
+      "America/Sao_Paulo",
+      new Date("2026-09-24T15:00:00Z"),
+      range,
+    );
+    expect(r.series.A.map((x) => x.k)).toContain("__other__");
+    expect(r.compare?.A.map((x) => x.k)).not.toContain("__other__");
+    const sum = (rows: { v: number | null }[]) =>
+      rows.reduce((t, x) => t + (x.v ?? 0), 0);
+    expect(sum(r.compare!.A)).toBe(sum(r.series.A));
+    // O mesmo período dos dois lados: variação zero em cada barra, Outros inclusive.
+    const d = buildDisplay(spec, r);
+    expect(d.series[0].compare).toEqual(d.series[0].values);
   });
   it("por cliente, com top N e Outros", () => {
     const r = run({

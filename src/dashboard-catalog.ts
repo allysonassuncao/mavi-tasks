@@ -98,7 +98,8 @@ export type PanelSpec = {
   formula?: { expr: string; label: string } | null;
   unit?: Unit;
   decimals?: number;
-  /** Stat: compare with the previous period of the same length. */
+  /** Stat: compare with the previous period of the same length (when the
+   *  dashboard compares with nothing). */
   compare?: boolean;
 };
 export type Panel = {
@@ -122,6 +123,11 @@ export type RangePreset =
   | "12m";
 export type DashboardRange =
   { preset: RangePreset } | { from: string; to: string };
+/** What the period is compared with: the previous period of the same
+ *  length, the same days of the month before, or dates of one's own. */
+export type ComparePreset = "previous" | "last_month";
+export type DashboardCompare =
+  { preset: ComparePreset } | { from: string; to: string };
 export type DashboardFilters = {
   clients?: string[];
   products?: string[];
@@ -131,6 +137,10 @@ export type DashboardFilters = {
 export type DashboardVariables = {
   range?: DashboardRange;
   filters?: DashboardFilters;
+  /** The comparison (absent = none). */
+  compare?: DashboardCompare | null;
+  /** Who views (app and link) can change the comparison. */
+  compareOpen?: boolean;
 };
 export type LinkAccess = "none" | "password" | "public";
 export type Dashboard = {
@@ -159,6 +169,10 @@ export type SeriesRow = {
 export type PanelResult = {
   series: Record<string, SeriesRow[]>;
   previous: Record<string, SeriesRow[]>;
+  /** The same queries over the comparison period: every group (no top N)
+   *  and the period's own interval, so they line up with the series. */
+  compare?: Record<string, SeriesRow[]>;
+  compare_range?: { from: string; to: string };
   interval: Exclude<Interval, "auto">;
   computed_at: string;
 };
@@ -901,6 +915,11 @@ export const rangeOptions: { key: RangePreset; label: string }[] = [
   { key: "quarter", label: "Este trimestre" },
   { key: "year", label: "Este ano" },
   { key: "12m", label: "Últimos 12 meses" },
+];
+
+export const compareOptions: { key: ComparePreset; label: string }[] = [
+  { key: "previous", label: "Período anterior" },
+  { key: "last_month", label: "Mesmo período do mês passado" },
 ];
 
 export function queryName(q: Query) {

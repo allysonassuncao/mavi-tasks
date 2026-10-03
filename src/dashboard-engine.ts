@@ -366,13 +366,14 @@ export function runPanel(
   filters: DashboardFilters,
   tz: string,
   now = new Date(),
+  compare: { from: string; to: string } | null = null,
 ): PanelResult {
   const days = daysBetween(range.from, range.to);
   const interval = intervalOf(spec, range);
   const limit = spec.formula?.expr
     ? null
     : Math.min(Math.max(spec.limit ?? 10, 1), 50);
-  const run = (from: string, to: string) =>
+  const run = (from: string, to: string, top = limit) =>
     Object.fromEntries(
       spec.queries.map((q) => [
         q.ref,
@@ -384,7 +385,7 @@ export function runPanel(
           from,
           to,
           filters,
-          limit,
+          top,
           tz,
           now,
         ),
@@ -396,6 +397,10 @@ export function runPanel(
       spec.groupBy === "none" && spec.compare
         ? run(addDays(range.from, -days), addDays(range.from, -1))
         : {},
+    // The comparison: every group, with the period's interval.
+    ...(compare
+      ? { compare: run(compare.from, compare.to, null), compare_range: compare }
+      : {}),
     interval,
     computed_at: now.toISOString(),
   };

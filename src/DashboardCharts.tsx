@@ -10,9 +10,12 @@ import {
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import {
   OTHER_COLOR,
+  change,
+  changeLabel,
   formatTick,
   formatValue,
   type Display,
+  type DisplaySeries,
   type PanelSpec,
 } from "./dashboards";
 
@@ -24,6 +27,10 @@ import {
  * tooltips), so colour is never the only way to tell series apart.
  * With onSelect, clicking a bar, slice, point or row picks its category
  * (the records below the panel, migration 20270224090000).
+ * With the dashboard's comparison (Display.compare), each chart also shows
+ * the comparison period: a dashed line, a lighter bar beside each bar,
+ * columns in the table, the change in the legend of the donut and under
+ * the number.
  */
 
 /** Clicking a category or time bucket (its key in Display.keys). */
@@ -83,8 +90,8 @@ type Tip = {
   x: number;
   y: number;
   title: string;
-  /** [key, color, name, value] */
-  rows: [string, string, string, string][];
+  /** [key, color, name, value, comparison row] */
+  rows: [string, string, string, string, boolean?][];
 };
 function Tooltip({ tip, width }: { tip: Tip | null; width: number }) {
   if (!tip) return null;
@@ -96,8 +103,8 @@ function Tooltip({ tip, width }: { tip: Tip | null; width: number }) {
       role="tooltip"
     >
       <strong>{tip.title}</strong>
-      {tip.rows.map(([key, color, name, value]) => (
-        <span key={key}>
+      {tip.rows.map(([key, color, name, value, cmp]) => (
+        <span key={key} className={cmp ? "cmp" : undefined}>
           <i style={{ background: color }} aria-hidden="true" />
           {name}
           <b>{value}</b>
@@ -109,10 +116,13 @@ function Tooltip({ tip, width }: { tip: Tip | null; width: number }) {
 
 function Legend({
   items,
+  compare,
 }: {
   items: { id: string; name: string; color: string; value?: string }[];
+  /** The comparison period ("01/09 – 15/09"), drawn lighter or dashed. */
+  compare?: string;
 }) {
-  if (items.length < 2) return null;
+  if (items.length < 2 && !compare) return null;
   return (
     <ul className="dash-legend">
       {items.map((s) => (
@@ -122,14 +132,51 @@ function Legend({
           {s.value && <b>{s.value}</b>}
         </li>
       ))}
+      {compare && (
+        <li className="cmp">
+          <i aria-hidden="true" />
+          Comparação: {compare}
+        </li>
+      )}
     </ul>
   );
 }
 
+/** The rows of a tooltip at index i: each series, then its comparison. */
+function tipRows(
+  display: Display,
+  i: number,
+  colorOf: (s: DisplaySeries) => string = (s) => s.color,
+): Tip["rows"] {
+  return display.series.flatMap((s) => {
+    const v = s.values[i];
+    if (!s.compare)
+      return [[s.id, colorOf(s), s.name, formatValue(v, s.unit)]];
+    const c = s.compare[i];
+    const when = display.compare?.labels[i] || display.compare?.label || "";
+    return [
+      [
+        s.id,
+        colorOf(s),
+        s.name,
+        `${formatValue(v, s.unit)} (${changeLabel(change(v, c))})`,
+      ],
+      [`${s.id}-cmp`, colorOf(s), `Comparação ${when}`, formatValue(c, s.unit), true],
+    ];
+  });
+}
+/** Every value drawn (the comparison too), for the axis. */
+const drawn = (d: Display) =>
+  d.series.flatMap((s) =>
+    [...s.values, ...(s.compare ?? [])].filter((v): v is number => v !== null),
+  );
+
 const Empty = () => <p className="dash-empty">Sem dados no período.</p>;
 const hasData = (d: Display) =>
   d.keys.length > 0 &&
-  d.series.some((s) => s.values.some((v) => v !== null && v !== 0));
+  d.series.some((s) =>
+    [...s.values, ...(s.compare ?? [])].some((v) => v !== null && v !== 0),
+  );
 
 // ------------------------------------------------------------ number
 function StatView({ display, spec }: { display: Display; spec: PanelSpec }) {
@@ -137,19 +184,26 @@ function StatView({ display, spec }: { display: Display; spec: PanelSpec }) {
     <div className={`dash-stat ${display.series.length > 1 ? "multi" : ""}`}>
       {display.series.map((s) => {
         const value = s.values[0] ?? null;
-        const prev = s.previous;
+        // The dashboard's comparison, or the panel's previous period.
+        const cmp = display.compare;
+        const prev = cmp ? (s.compare?.[0] ?? null) : s.previous;
         const delta =
           prev !== undefined && prev !== null && value !== null && prev !== 0
             ? ((value - prev) / Math.abs(prev)) * 100
             : null;
+        const versus = cmp ? `vs. ${cmp.label}` : "vs. período anterior";
         return (
           <div key={s.id} className="dash-stat-item">
             {display.series.length > 1 && <small>{s.name}</small>}
             <strong>{formatValue(value, s.unit, spec.decimals)}</strong>
-            {spec.compare && (
+            {(cmp || spec.compare) && (
               <span
                 className={`dash-delta ${delta === null ? "" : delta > 0 ? "up" : delta < 0 ? "down" : ""}`}
-                title="Comparado ao período anterior de mesma duração"
+                title={
+                  cmp
+                    ? `Comparado com ${cmp.label}: ${formatValue(prev, s.unit, spec.decimals)}`
+                    : "Comparado ao período anterior de mesma duração"
+                }
               >
                 {delta === null ? (
                   <Minus size={13} aria-hidden="true" />
@@ -162,9 +216,11 @@ function StatView({ display, spec }: { display: Display; spec: PanelSpec }) {
                 )}
                 {delta === null
                   ? prev === null || prev === undefined
-                    ? "sem base anterior"
-                    : `antes: ${formatValue(prev, s.unit, spec.decimals)}`
-                  : `${delta > 0 ? "+" : ""}${delta.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% vs. período anterior`}
+                    ? cmp
+                      ? "sem dados na comparação"
+                      : "sem base anterior"
+                    : `${cmp ? "comparação" : "antes"}: ${formatValue(prev, s.unit, spec.decimals)}`
+                  : `${delta > 0 ? "+" : ""}${delta.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% ${versus}`}
               </span>
             )}
           </div>
@@ -192,12 +248,13 @@ function TimeChart({
   const chosen = selected ? display.keys.indexOf(selected) : -1;
   const lit = (i: number) =>
     hover === null ? chosen < 0 || chosen === i : hover === i;
-  const all = display.series.flatMap((s) =>
-    s.values.filter((v): v is number => v !== null),
-  );
+  const all = drawn(display);
   const ticks = niceTicks(Math.min(...all, 0), Math.max(...all, 0));
   const lo = ticks[0],
     hi = ticks[ticks.length - 1];
+  const cmp = !!display.compare;
+  // Bars: each series, then its comparison (lighter) beside it.
+  const bars = display.series.length * (cmp ? 2 : 1);
   const w = Math.max(0, width - PAD.left - PAD.right);
   const h = Math.max(0, height - PAD.top - PAD.bottom);
   const band = n ? w / n : 0;
@@ -207,7 +264,7 @@ function TimeChart({
   const y = (v: number) => PAD.top + h - ((v - lo) / (hi - lo || 1)) * h;
   const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(w / 56))));
   const groupW = Math.max(1, band - Math.max(2, band * 0.2));
-  const barW = Math.max(1, groupW / display.series.length - 2);
+  const barW = Math.max(1, groupW / bars - 2);
 
   function move(e: PointerEvent<SVGRectElement>) {
     const box = e.currentTarget.getBoundingClientRect();
@@ -225,12 +282,7 @@ function TimeChart({
           x: x(hover),
           y: PAD.top,
           title: display.labels[hover],
-          rows: display.series.map((s) => [
-            s.id,
-            s.color,
-            s.name,
-            formatValue(s.values[hover], s.unit),
-          ]),
+          rows: tipRows(display, hover),
         };
   const path = (values: (number | null)[]) => {
     let d = "";
@@ -289,27 +341,42 @@ function TimeChart({
               ) : null,
             )}
             {kind === "bar"
-              ? display.series.map((s, si) =>
-                  s.values.map((v, i) => {
-                    if (v === null || v === 0) return null;
-                    const top = y(Math.max(v, 0));
-                    const bottom = y(Math.min(v, 0));
-                    return (
-                      <rect
-                        key={`${si}-${i}`}
-                        x={x(i) - groupW / 2 + si * (barW + 2) + 1}
-                        y={top}
-                        width={barW}
-                        height={Math.max(1, bottom - top)}
-                        rx={Math.min(4, barW / 2)}
-                        fill={s.color}
-                        opacity={lit(i) ? 1 : 0.55}
-                      />
-                    );
-                  }),
+              ? display.series.flatMap((s, si) =>
+                  [s.values, ...(s.compare ? [s.compare] : [])].map(
+                    (values, ci) =>
+                      values.map((v, i) => {
+                        if (v === null || v === 0) return null;
+                        const top = y(Math.max(v, 0));
+                        const bottom = y(Math.min(v, 0));
+                        const slot = si * (cmp ? 2 : 1) + ci;
+                        return (
+                          <rect
+                            key={`${si}-${ci}-${i}`}
+                            x={x(i) - groupW / 2 + slot * (barW + 2) + 1}
+                            y={top}
+                            width={barW}
+                            height={Math.max(1, bottom - top)}
+                            rx={Math.min(4, barW / 2)}
+                            fill={s.color}
+                            opacity={(lit(i) ? 1 : 0.55) * (ci ? 0.38 : 1)}
+                          />
+                        );
+                      }),
+                  ),
                 )
               : display.series.map((s) => (
                   <g key={s.id}>
+                    {s.compare && (
+                      <path
+                        d={path(s.compare)}
+                        fill="none"
+                        stroke={s.color}
+                        strokeWidth={1.6}
+                        strokeDasharray="5 4"
+                        strokeLinejoin="round"
+                        opacity={0.6}
+                      />
+                    )}
                     {kind === "area" && (
                       <path
                         d={`${path(s.values)}L${x(n - 1)},${y(Math.max(lo, 0))}L${x(0)},${y(Math.max(lo, 0))}Z`}
@@ -370,7 +437,7 @@ function TimeChart({
         )}
         <Tooltip tip={tip} width={width} />
       </div>
-      <Legend items={display.series} />
+      <Legend items={display.series} compare={display.compare?.label} />
     </div>
   );
 }
@@ -391,10 +458,9 @@ function CategoryChart({
   const lit = (i: number) =>
     hover === null ? chosen < 0 || chosen === i : hover === i;
   const n = display.keys.length;
-  const count = display.series.length;
-  const all = display.series.flatMap((s) =>
-    s.values.filter((v): v is number => v !== null),
-  );
+  const cmp = !!display.compare;
+  const count = display.series.length * (cmp ? 2 : 1);
+  const all = drawn(display);
   const ticks = niceTicks(Math.min(...all, 0), Math.max(...all, 0));
   const lo = ticks[0],
     hi = ticks[ticks.length - 1];
@@ -404,12 +470,7 @@ function CategoryChart({
     x: px,
     y: py,
     title: display.labels[i],
-    rows: display.series.map((s) => [
-      s.id,
-      colorOf(display.keys[i], s.color),
-      s.name,
-      formatValue(s.values[i], s.unit),
-    ]),
+    rows: tipRows(display, i, (s) => colorOf(display.keys[i], s.color)),
   });
 
   if (horizontal) {
@@ -433,30 +494,44 @@ function CategoryChart({
               <span className="dash-hbar-label" title={display.labels[i]}>
                 {display.labels[i]}
               </span>
-              {display.series.map((s) => {
-                const v = s.values[s.values === undefined ? 0 : i];
-                return (
-                  <span key={s.id} className="dash-hbar-row">
-                    <span className="dash-hbar-track" style={{ width: w }}>
-                      <i
-                        style={{
-                          left: scale(Math.min(v ?? 0, 0)),
-                          width: Math.max(
-                            v ? 2 : 0,
-                            Math.abs(scale(v ?? 0) - scale(0)),
-                          ),
-                          background: colorOf(key, s.color),
-                        }}
-                      />
-                    </span>
-                    <b>{formatValue(v, s.unit)}</b>
-                  </span>
-                );
-              })}
+              {display.series.flatMap((s) =>
+                [s.values, ...(s.compare ? [s.compare] : [])].map(
+                  (values, ci) => {
+                    const v = values[i];
+                    return (
+                      <span
+                        key={`${s.id}-${ci}`}
+                        className={`dash-hbar-row ${ci ? "cmp" : ""}`}
+                      >
+                        <span className="dash-hbar-track" style={{ width: w }}>
+                          <i
+                            style={{
+                              left: scale(Math.min(v ?? 0, 0)),
+                              width: Math.max(
+                                v ? 2 : 0,
+                                Math.abs(scale(v ?? 0) - scale(0)),
+                              ),
+                              background: colorOf(key, s.color),
+                            }}
+                          />
+                        </span>
+                        <b>
+                          {formatValue(v, s.unit)}
+                          {s.compare && !ci && (
+                            <small>
+                              {changeLabel(change(v, s.compare[i]))}
+                            </small>
+                          )}
+                        </b>
+                      </span>
+                    );
+                  },
+                ),
+              )}
             </div>
           ))}
         </div>
-        <Legend items={display.series} />
+        <Legend items={display.series} compare={display.compare?.label} />
       </div>
     );
   }
@@ -503,24 +578,29 @@ function CategoryChart({
             ))}
             {display.keys.map((key, i) => (
               <g key={key}>
-                {display.series.map((s, si) => {
-                  const v = s.values[i];
-                  if (v === null || v === 0) return null;
-                  const top = y(Math.max(v, 0));
-                  const bottom = y(Math.min(v, 0));
-                  return (
-                    <rect
-                      key={s.id}
-                      x={x(i) - groupW / 2 + si * (barW + 2) + 1}
-                      y={top}
-                      width={barW}
-                      height={Math.max(1, bottom - top)}
-                      rx={Math.min(4, barW / 2)}
-                      fill={colorOf(key, s.color)}
-                      opacity={lit(i) ? 1 : 0.55}
-                    />
-                  );
-                })}
+                {display.series.flatMap((s, si) =>
+                  [s.values, ...(s.compare ? [s.compare] : [])].map(
+                    (values, ci) => {
+                      const v = values[i];
+                      if (v === null || v === 0) return null;
+                      const top = y(Math.max(v, 0));
+                      const bottom = y(Math.min(v, 0));
+                      const slot = si * (cmp ? 2 : 1) + ci;
+                      return (
+                        <rect
+                          key={`${s.id}-${ci}`}
+                          x={x(i) - groupW / 2 + slot * (barW + 2) + 1}
+                          y={top}
+                          width={barW}
+                          height={Math.max(1, bottom - top)}
+                          rx={Math.min(4, barW / 2)}
+                          fill={colorOf(key, s.color)}
+                          opacity={(lit(i) ? 1 : 0.55) * (ci ? 0.38 : 1)}
+                        />
+                      );
+                    },
+                  ),
+                )}
                 <text
                   x={x(i)}
                   y={height - 6}
@@ -549,7 +629,7 @@ function CategoryChart({
           width={width}
         />
       </div>
-      <Legend items={display.series} />
+      <Legend items={display.series} compare={display.compare?.label} />
     </div>
   );
 }
@@ -568,6 +648,7 @@ function DonutChart({
       key,
       label: display.labels[i],
       v: Math.max(0, s?.values[i] ?? 0),
+      c: s?.compare?.[i] ?? null,
     }))
     .filter((x) => x.v > 0);
   const total = slices.reduce((sum, x) => sum + x.v, 0);
@@ -650,6 +731,11 @@ function DonutChart({
         )}
       </div>
       <ul className="dash-legend vertical">
+        {display.compare && (
+          <li className="dash-legend-head">
+            Variação vs. {display.compare.label}
+          </li>
+        )}
         {arcs.map((a, i) => (
           <li
             key={a.key}
@@ -669,6 +755,14 @@ function DonutChart({
                 })}
                 %
               </small>
+              {s?.compare && (
+                <small
+                  className="dash-legend-change"
+                  title={`Comparação (${display.compare?.label}): ${formatValue(a.c, s.unit)}`}
+                >
+                  {changeLabel(change(a.v, a.c))}
+                </small>
+              )}
             </b>
           </li>
         ))}
@@ -690,11 +784,26 @@ function TableView({
         <thead>
           <tr>
             <th>{group}</th>
-            {display.series.map((s) => (
+            {display.series.map((s) => [
               <th key={s.id} className="num">
                 {s.name}
-              </th>
-            ))}
+              </th>,
+              ...(s.compare
+                ? [
+                    <th
+                      key={`${s.id}-cmp`}
+                      className="num cmp"
+                      title={display.compare?.label}
+                    >
+                      Comparação
+                      {display.series.length > 1 && ` (${s.name})`}
+                    </th>,
+                    <th key={`${s.id}-chg`} className="num">
+                      Variação
+                    </th>,
+                  ]
+                : []),
+            ])}
           </tr>
         </thead>
         <tbody>
@@ -706,11 +815,32 @@ function TableView({
               {...pick(key, onSelect)}
             >
               <td>{display.labels[i]}</td>
-              {display.series.map((s) => (
-                <td key={s.id} className="num">
-                  {formatValue(s.values[i], s.unit)}
-                </td>
-              ))}
+              {display.series.map((s) => {
+                const c = s.compare?.[i] ?? null;
+                const pct = change(s.values[i], c);
+                return [
+                  <td key={s.id} className="num">
+                    {formatValue(s.values[i], s.unit)}
+                  </td>,
+                  ...(s.compare
+                    ? [
+                        <td
+                          key={`${s.id}-cmp`}
+                          className="num cmp"
+                          title={display.compare?.labels[i] || undefined}
+                        >
+                          {formatValue(c, s.unit)}
+                        </td>,
+                        <td
+                          key={`${s.id}-chg`}
+                          className={`num dash-change ${pct === null ? "" : pct > 0 ? "up" : pct < 0 ? "down" : ""}`}
+                        >
+                          {changeLabel(pct)}
+                        </td>,
+                      ]
+                    : []),
+                ];
+              })}
             </tr>
           ))}
         </tbody>

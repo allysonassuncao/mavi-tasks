@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Lock, RefreshCw } from "lucide-react";
-import { Button, Input, Loading, Select, SelectOption } from "./ui";
+import { Button, Input, Loading } from "./ui";
 import { DashboardCanvas, type PanelLoader } from "./DashboardCanvas";
+import { ComparePicker, PeriodPicker } from "./DashboardPeriod";
 import type { RecordsLoader } from "./DashboardRecords";
 import {
+  datesLabel,
   panelData,
   panelRecords,
-  rangeOptions,
+  resolveCompare,
   resolveRange,
   sharedDashboard,
+  type DashboardCompare,
   type DashboardRange,
   type SharedDashboard,
 } from "./dashboards";
@@ -16,7 +19,9 @@ import {
 /**
  * A dashboard opened by its share link (/painel/<token>), without the app
  * and without signing in: asks the password when the link has one, then
- * shows the panels with the saved filters; only the period can change.
+ * shows the panels with the saved filters. The period can change (ready
+ * periods or dates of one's own), and the comparison when the dashboard
+ * lets viewers change it.
  */
 export function PublicDashboard({ token }: { token: string }) {
   const [state, setState] = useState<SharedDashboard | null>(null);
@@ -25,6 +30,7 @@ export function PublicDashboard({ token }: { token: string }) {
   const [accepted, setAccepted] = useState<string | undefined>();
   const [checking, setChecking] = useState(false);
   const [range, setRange] = useState<DashboardRange | undefined>();
+  const [compareSetting, setCompare] = useState<DashboardCompare | null>();
   const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
@@ -33,6 +39,7 @@ export function PublicDashboard({ token }: { token: string }) {
         setState(s);
         if (s.status === "ok") {
           setRange(s.variables.range);
+          setCompare(s.variables.compare);
           document.title = `${s.name} · Dashboards`;
         }
       })
@@ -44,6 +51,10 @@ export function PublicDashboard({ token }: { token: string }) {
     () => (state?.status === "ok" ? resolveRange(range, state.timezone) : null),
     [state, range],
   );
+  const compare = useMemo(
+    () => (dates ? resolveCompare(compareSetting, dates) : null),
+    [dates, compareSetting],
+  );
   const loader: PanelLoader = useCallback(
     (panel, fresh) =>
       panelData(
@@ -52,8 +63,9 @@ export function PublicDashboard({ token }: { token: string }) {
         dates!,
         null,
         fresh,
+        compare,
       ),
-    [token, accepted, dates],
+    [token, accepted, dates, compare],
   );
   // The records below each panel, when the dashboard shows them on the link.
   const recordsLoader: RecordsLoader = useCallback(
@@ -107,6 +119,7 @@ export function PublicDashboard({ token }: { token: string }) {
               if (s.status === "ok") {
                 setAccepted(password);
                 setRange(s.variables.range);
+                setCompare(s.variables.compare);
                 document.title = `${s.name} · Dashboards`;
               }
             } catch (err) {
@@ -142,7 +155,6 @@ export function PublicDashboard({ token }: { token: string }) {
       </main>
     );
 
-  const preset = range && "from" in range ? "custom" : (range?.preset ?? "30d");
   return (
     <main className="public-dashboard">
       <header className="public-dashboard-head">
@@ -152,22 +164,15 @@ export function PublicDashboard({ token }: { token: string }) {
           {state.description && <p>{state.description}</p>}
         </div>
         <div className="dash-vars">
-          <Select
-            aria-label="Período"
-            value={preset}
-            onValueChange={(v) =>
-              v !== "custom" && setRange({ preset: v as never })
-            }
-          >
-            {rangeOptions.map((r) => (
-              <SelectOption key={r.key} value={r.key}>
-                {r.label}
-              </SelectOption>
-            ))}
-            {preset === "custom" && (
-              <SelectOption value="custom">Período salvo</SelectOption>
-            )}
-          </Select>
+          <PeriodPicker range={range} tz={state.timezone} onChange={setRange} />
+          {dates && (
+            <ComparePicker
+              compare={compareSetting}
+              range={dates}
+              onChange={setCompare}
+              open={!!state.variables.compareOpen}
+            />
+          )}
           <Button
             className="icon-btn"
             aria-label="Atualizar"
@@ -184,13 +189,15 @@ export function PublicDashboard({ token }: { token: string }) {
           loader={loader}
           recordsLoader={state.records ? recordsLoader : undefined}
           tz={state.timezone}
-          loadKey={`${dates.from}|${dates.to}`}
+          loadKey={`${dates.from}|${dates.to}|${compare?.from}|${compare?.to}`}
           refresh={refresh}
         />
       )}
       <footer className="public-dashboard-foot">
         Dados de {dates?.from.split("-").reverse().join("/")} a{" "}
-        {dates?.to.split("-").reverse().join("/")} · atualizados a cada minuto
+        {dates?.to.split("-").reverse().join("/")}
+        {compare && ` comparados com ${datesLabel(compare)}`} · atualizados a
+        cada minuto
       </footer>
     </main>
   );

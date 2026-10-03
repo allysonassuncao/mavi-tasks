@@ -29,6 +29,7 @@ import { Empty, Modal } from "./components";
 import { MultiPick, type PickOption } from "./MultiPick";
 import { DashboardCanvas, type PanelLoader } from "./DashboardCanvas";
 import { PanelChart } from "./DashboardCharts";
+import { ComparePicker, PeriodPicker } from "./DashboardPeriod";
 import { runPanel, runRecords } from "./dashboard-engine";
 import type { RecordsLoader } from "./DashboardRecords";
 import {
@@ -49,7 +50,7 @@ import {
   panelRecords,
   parseFormula,
   previewPanel,
-  rangeOptions,
+  resolveCompare,
   resolveRange,
   saveDashboard,
   setDashboardSharing,
@@ -903,9 +904,19 @@ function DashboardView({
   // The MAVI builds and explains panels (not in the demo: no server there).
   const canMavi = editor && !demo;
   const range = useMemo(() => resolveRange(vars.range, tz), [vars.range, tz]);
+  // The comparison: whoever edits, or views when allowed, picks it; the
+  // others get the dashboard's.
+  const compareSetting =
+    editor || saved?.variables.compareOpen
+      ? vars.compare
+      : saved?.variables.compare;
+  const compare = useMemo(
+    () => resolveCompare(compareSetting, range),
+    [JSON.stringify(compareSetting), range], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const filters = vars.filters ?? {};
   const editing = !!draft;
-  const loadKey = JSON.stringify([range, editor ? filters : null, editing]);
+  const loadKey = JSON.stringify([range, compare, editor ? filters : null, editing]);
   const loader: PanelLoader = useCallback(
     (panel, fresh) => {
       if (demo)
@@ -916,17 +927,21 @@ function DashboardView({
             range,
             editor ? filters : (saved?.variables.filters ?? {}),
             tz,
+            undefined,
+            compare,
           ),
         );
       // Unsaved panels (editing) are computed from their spec; saved ones
       // through the dashboard, with the 60-second cache.
-      if (editing) return previewPanel(company, panel.spec, range, { filters });
+      if (editing)
+        return previewPanel(company, panel.spec, range, { filters }, compare);
       return panelData(
         { kind: "app", dashboard: id! },
         panel.id,
         range,
         editor ? vars : null,
         fresh,
+        compare,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1141,13 +1156,15 @@ function DashboardView({
         auto={auto}
         onAuto={setAuto}
         savedFilters={dash.variables.filters}
+        savedCompareOpen={dash.variables.compareOpen}
+        editing={editing}
       />
       {editing && (
         <div className="dash-edit-bar">
           <span>
             Arraste um painel pelo título para mover e pelo canto para
-            redimensionar. O período e os filtros atuais ficam como padrão ao
-            salvar.
+            redimensionar. O período, a comparação e os filtros atuais ficam
+            como padrão ao salvar.
           </span>
           <Button
             className="btn secondary"
@@ -1208,8 +1225,10 @@ function DashboardView({
           onClose={() => setEditingPanel(null)}
           preview={(spec) =>
             demo
-              ? Promise.resolve(runPanel(data, spec, range, filters, tz))
-              : previewPanel(company, spec, range, { filters })
+              ? Promise.resolve(
+                  runPanel(data, spec, range, filters, tz, undefined, compare),
+                )
+              : previewPanel(company, spec, range, { filters }, compare)
           }
           onSave={(panel) => {
             if (editingPanel === "new") {
@@ -1274,6 +1293,8 @@ function VariablesBar({
   auto,
   onAuto,
   savedFilters,
+  savedCompareOpen,
+  editing,
 }: {
   vars: DashboardVariables;
   tz: string;
@@ -1284,10 +1305,10 @@ function VariablesBar({
   auto: number;
   onAuto: (seconds: number) => void;
   savedFilters?: DashboardFilters;
+  /** Viewers may change the comparison (saved in the dashboard). */
+  savedCompareOpen?: boolean;
+  editing: boolean;
 }) {
-  const range = vars.range;
-  const custom = !!range && "from" in range;
-  const preset = custom ? "custom" : (range?.preset ?? "30d");
   const filters = vars.filters ?? {};
   const setFilter = (key: keyof DashboardFilters, value: string[]) =>
     onChange({ ...vars, filters: { ...filters, [key]: value } });
@@ -1299,47 +1320,17 @@ function VariablesBar({
     : [];
   return (
     <div className="dash-vars" role="group" aria-label="Filtros do dashboard">
-      <Select
-        aria-label="Período"
-        value={preset}
-        onValueChange={(v) => {
-          if (v === "custom") {
-            const r = resolveRange(range, tz);
-            setRange({ from: r.from, to: r.to });
-          } else setRange({ preset: v as never });
-        }}
-      >
-        {rangeOptions.map((r) => (
-          <SelectOption key={r.key} value={r.key}>
-            {r.label}
-          </SelectOption>
-        ))}
-        <SelectOption value="custom">Personalizado</SelectOption>
-      </Select>
-      {custom && range && "from" in range && (
-        <span className="dash-custom-range">
-          <Input
-            type="date"
-            aria-label="De"
-            value={range.from}
-            max={range.to}
-            onChange={(e) =>
-              e.target.value && setRange({ from: e.target.value, to: range.to })
-            }
-          />
-          <span aria-hidden="true">–</span>
-          <Input
-            type="date"
-            aria-label="Até"
-            value={range.to}
-            min={range.from}
-            onChange={(e) =>
-              e.target.value &&
-              setRange({ from: range.from, to: e.target.value })
-            }
-          />
-        </span>
-      )}
+      <PeriodPicker range={vars.range} tz={tz} onChange={setRange} />
+      <ComparePicker
+        compare={vars.compare}
+        range={resolveRange(vars.range, tz)}
+        onChange={(c) => onChange({ ...vars, compare: c })}
+        open={canFilter || !!savedCompareOpen}
+        allowViewers={vars.compareOpen}
+        onAllowViewers={
+          editing ? (on) => onChange({ ...vars, compareOpen: on }) : undefined
+        }
+      />
       {canFilter && (
         <>
           <MultiPick
@@ -1773,7 +1764,7 @@ function PanelEditor({
                 checked={!!spec.compare}
                 onCheckedChange={(on) => update({ compare: on === true })}
               />
-              Comparar com o período anterior
+              Sem comparação no dashboard, comparar com o período anterior
             </label>
           )}
         </div>

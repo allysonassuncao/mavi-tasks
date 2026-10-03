@@ -11183,6 +11183,76 @@ p.task-search-mavi,
   white-space: nowrap;
 }
 
+/* Migration 20270314090000: the dashboard's comparison — dashed or
+   lighter, beside the period; the change in green/red text only where it
+   is written out (table, legend), the arrows of the number as before. */
+.dash-tip span.cmp {
+  color: #8a9694;
+}
+.dash-tip span.cmp i {
+  opacity: 0.4;
+}
+.dash-legend li.cmp i {
+  border-radius: 0;
+  height: 0;
+  border-top: 2px dashed #8a9694;
+}
+.dash-legend li.dash-legend-head {
+  display: block;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.dash-legend-change {
+  margin-left: 6px;
+}
+.dash-hbar-row.cmp .dash-hbar-track i {
+  opacity: 0.38;
+}
+.dash-hbar-row.cmp b {
+  color: #8a9694;
+  font-weight: 500;
+}
+.dash-hbar-row b small {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.dash-table .cmp {
+  color: #8a9694;
+}
+.dash-change.up {
+  color: #2f7d32;
+}
+.dash-change.down {
+  color: #b3401f;
+}
+.dash-compare {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.dash-compare > .ui-select {
+  width: auto;
+  min-width: 200px;
+}
+.dash-compare-dates,
+.dash-compare-fixed small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.dash-compare-fixed {
+  color: #4f5c5c;
+  font-size: 0.76rem;
+}
+.dash-compare-open {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  font-size: 0.74rem;
+}
+
 /* Migration 20270224090000: the records behind each panel. */
 .dash-pickable {
   cursor: pointer;
@@ -11805,7 +11875,9 @@ p.task-search-mavi,
     flex: 1 1 calc(50% - 4px);
     max-width: none;
   }
-  .dash-custom-range {
+  .dash-custom-range,
+  .dash-compare,
+  .dash-compare > .ui-select {
     flex: 1 1 100%;
   }
   .dash-query-fields {
