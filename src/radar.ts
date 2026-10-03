@@ -3,7 +3,8 @@ import { canCreateTaskIn } from "./domain";
 import { serializeDescription, type RichNode } from "./rich-text";
 import { appPath } from "./temperature";
 import type { FormPreset } from "./forms";
-import type { Snapshot } from "./types";
+import type { Snapshot, Task } from "./types";
+import { fold } from "./task-search";
 
 /**
  * Radar do cliente (migration 20261229090000_client_radar): problemas,
@@ -707,6 +708,69 @@ export async function linkTask(company: string, item: string, task: string) {
     return;
   }
   await rpc("link_radar_task", { p_company: company, p_item: item, p_task: task });
+}
+export async function unlinkTask(company: string, item: string, task: string) {
+  if (offline(company)) {
+    const i = demo.items.find((x) => x.id === item);
+    if (i) i.tasks = (i.tasks ?? []).filter((t) => t.id !== task);
+    return;
+  }
+  await rpc("unlink_radar_task", { p_company: company, p_item: item, p_task: task });
+}
+/** Uma tarefa para vincular ao item; `same_client`: do cliente do item. */
+export type LinkCandidate = { task: Task; same_client: boolean };
+/**
+ * As tarefas para vincular: sem termo, as do cliente do item (as não
+ * entregues primeiro); com termo, pelo título em tudo o que a pessoa vê, as
+ * do cliente primeiro. Na demonstração, as tarefas do exemplo (`demoTasks`).
+ */
+export async function linkCandidates(
+  company: string,
+  client: string,
+  query: string,
+  exclude: string[],
+  demoTasks: Task[] = [],
+  clientOf: (t: Task) => string | undefined = () => undefined,
+): Promise<LinkCandidate[]> {
+  if (offline(company)) {
+    const q = fold(query.trim());
+    return demoTasks
+      .filter((t) => !exclude.includes(t.id) && !t.archived)
+      .filter((t) => (q.length >= 2 ? fold(t.title).includes(q) : clientOf(t) === client))
+      .map((task) => ({ task, same_client: clientOf(task) === client }))
+      .sort((a, b) => +b.same_client - +a.same_client || +(a.task.status === "done") - +(b.task.status === "done"))
+      .slice(0, 40);
+  }
+  return rpc<LinkCandidate[]>("radar_link_candidates", {
+    p_company: company,
+    p_client: client,
+    p_query: query.trim(),
+    p_exclude: exclude,
+  });
+}
+/**
+ * As tarefas parecidas com o item (a busca por significado). O vetor do item
+ * fica guardado; quando falta, a API (radar-task-suggest) o gera.
+ */
+export async function taskSuggestions(company: string, item: string): Promise<string[]> {
+  if (offline(company)) return [];
+  const first = await rpc<{ embed?: boolean; tasks?: { id: string }[] }>("radar_task_suggestions", {
+    p_company: company,
+    p_item: item,
+    p_embedding: null,
+  });
+  if (!first.embed) return (first.tasks ?? []).map((t) => t.id);
+  const token = (await supabase!.auth.getSession()).data.session?.access_token;
+  if (!token) return [];
+  const res = await fetch("/api/drive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: "radar-task-suggest", company, item }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Error(data.error ?? "A MAVI não respondeu.");
+  return Array.isArray(data.tasks) ? data.tasks.map((t: { id: string }) => t.id) : [];
 }
 export async function setItemTheme(company: string, item: string, move: ThemeMove) {
   if (offline(company)) return demoMove(item, move);

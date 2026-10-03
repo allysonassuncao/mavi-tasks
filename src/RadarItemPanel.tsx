@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { AlertTriangle, ExternalLink, Layers, MessageCircle, Plus, RotateCcw, Video } from "lucide-react";
+import { AlertTriangle, ExternalLink, Layers, Link2, MessageCircle, Plus, RotateCcw, Unlink, Video } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import { Modal } from "./components";
 import { type Member, type Snapshot, type Task } from "./types";
@@ -8,6 +8,7 @@ import { appPath, openInApp } from "./temperature";
 import { tasksByIds } from "./api";
 import { buildNameLookup, dateKey } from "./domain";
 import { TaskTable } from "./TaskTable";
+import { RadarTaskPicker } from "./RadarTaskPicker";
 import {
   SEVERITY_COLORS,
   clock,
@@ -15,6 +16,7 @@ import {
   loadItem,
   occurrencePath,
   linkTask,
+  unlinkTask,
   overdue,
   radarTaskPreset,
   setItemTheme,
@@ -54,8 +56,9 @@ function stub(t: RadarTask, item: RadarItemDetail, members: Member[], data?: Sna
  * Um item do Radar: o que a MAVI entendeu, o andamento (status,
  * responsável, gravidade, prazo, produto) e cada vez que o assunto apareceu,
  * com o trecho e o link para o momento da reunião ou a mensagem do grupo.
- * Líderes editam, mudam o tema e criam tarefas a partir do item; os demais
- * (pela aba do cliente no Drive) só leem.
+ * Quem edita o item muda o tema, cria tarefas a partir dele e vincula ou
+ * desvincula tarefas que já existem; os demais (pela aba do cliente no
+ * Drive) só leem.
  */
 export function RadarItemPanel({
   company,
@@ -78,7 +81,7 @@ export function RadarItemPanel({
   data?: Snapshot;
   user?: string;
   onNewTask?: (preset: FormPreset) => void;
-  /** A tarefa criada pelo painel ficou ligada ao item. */
+  /** Uma tarefa ficou ligada ao item (ou deixou de ficar). */
   onTaskLinked?: (item: string) => void;
   notify?: (message: string) => void;
 }) {
@@ -89,6 +92,8 @@ export function RadarItemPanel({
   const [summary, setSummary] = useState("");
   const [fields, setFields] = useState<Record<string, string>>({});
   const [newTheme, setNewTheme] = useState<string | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [unlinking, setUnlinking] = useState<string | null>(null);
   // As tarefas do item como a lista de Tarefas as mostra (as colunas da lista).
   const [rows, setRows] = useState<Task[] | null>(null);
   const taskIds = item?.tasks.map((t) => t.id).join(",") ?? "";
@@ -156,6 +161,30 @@ export function RadarItemPanel({
           })
           .catch((e) => notify?.(`A tarefa foi criada, mas não ficou ligada ao item: ${(e as Error).message}`)),
     });
+  }
+  async function linkExisting(ids: string[]) {
+    if (!item) return;
+    await Promise.all(ids.map((t) => linkTask(company, item.id, t)));
+    const next = await loadItem(company, item.id);
+    setItem(next);
+    setLinking(false);
+    onTaskLinked?.(item.id);
+    notify?.(ids.length > 1 ? `${ids.length} tarefas vinculadas ao item.` : "Tarefa vinculada ao item.");
+  }
+  async function unlink(task: string) {
+    if (!item) return;
+    setUnlinking(task);
+    setError("");
+    try {
+      await unlinkTask(company, item.id, task);
+      setItem(await loadItem(company, item.id));
+      onTaskLinked?.(item.id);
+      notify?.("Tarefa desvinculada do item. A tarefa continua como estava.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setUnlinking(null);
+    }
   }
   async function apply(fn: () => Promise<RadarItemDetail>) {
     setBusy(true);
@@ -431,16 +460,39 @@ export function RadarItemPanel({
             </p>
           )}
 
-          {(item.tasks.length > 0 || (edit && onNewTask)) && (
+          {(item.tasks.length > 0 || edit) && (
             <div className="radar-tasks">
               <div className="radar-tasks-head">
                 <h4 className="radar-occ-title">Tarefas</h4>
-                {edit && onNewTask && (
-                  <Button className="btn secondary" onClick={createTask}>
-                    <Plus size={14} aria-hidden="true" /> Criar tarefa
-                  </Button>
+                {edit && (
+                  <div className="radar-tasks-actions">
+                    {lookup && (
+                      <Button
+                        className="btn secondary"
+                        aria-expanded={linking}
+                        onClick={() => setLinking((v) => !v)}
+                      >
+                        <Link2 size={14} aria-hidden="true" /> Vincular tarefa
+                      </Button>
+                    )}
+                    {onNewTask && (
+                      <Button className="btn secondary" onClick={createTask}>
+                        <Plus size={14} aria-hidden="true" /> Criar tarefa
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
+              {linking && lookup && (
+                <RadarTaskPicker
+                  company={company}
+                  item={item}
+                  lookup={lookup}
+                  demoTasks={data?.tasks}
+                  onCancel={() => setLinking(false)}
+                  onLink={linkExisting}
+                />
+              )}
               {item.tasks.length ? (
                 !rows || !lookup ? (
                   <Loading variant="list" />
@@ -456,11 +508,32 @@ export function RadarItemPanel({
                         openInApp(`/tarefas/${id}`);
                       }}
                       parentTitle={(id) => data?.tasks.find((t) => t.id === id)?.title}
+                      rowAction={
+                        edit
+                          ? (t) => (
+                              <Button
+                                className="row-unlink"
+                                loading={unlinking === t.id}
+                                disabled={!!unlinking}
+                                title="Desvincular do item (a tarefa não muda)"
+                                aria-label={`Desvincular ${t.title} do item`}
+                                onClick={() => void unlink(t.id)}
+                              >
+                                <Unlink size={13} aria-hidden="true" />
+                              </Button>
+                            )
+                          : undefined
+                      }
                     />
                   </div>
                 )
               ) : (
-                <p className="muted">Nenhuma tarefa ainda. A tarefa criada aqui já vem com as falas e o link do item.</p>
+                !linking && (
+                  <p className="muted">
+                    Nenhuma tarefa ainda. Vincule uma que já existe ou crie uma nova (ela já vem com as falas e o
+                    link do item).
+                  </p>
+                )
               )}
             </div>
           )}

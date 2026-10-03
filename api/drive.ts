@@ -40,6 +40,7 @@ import { handlePublicApi } from "./_public-api.js";
 import { handleTaskAudio, taskAudioEnv } from "./_task-audio.js";
 import { handleTaskTitle } from "./_task-title.js";
 import { handleTaskSearch } from "./_task-search.js";
+import { handleRadarSuggest } from "./_radar-link.js";
 import {
   handleTaskAudioCleanup,
   taskAudioCleanupEnv,
@@ -490,6 +491,10 @@ export default async function handler(
         model: serverModel("task_search", process.env),
       };
       result = await handleTaskSearch(body, authorization, env, aiDeps(env));
+    } else if (action === "radar-task-suggest") {
+      // Radar › Vincular tarefa: o vetor do item para as tarefas parecidas.
+      const env = aiEnv(driveEnv());
+      result = await handleRadarSuggest(body, authorization, env, aiDeps(env));
     } else if (action === "campaign-report-mavi") {
       // A análise do relatório de campanha (funcionalidade 'campaign_report').
       const env = {

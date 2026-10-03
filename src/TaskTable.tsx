@@ -97,6 +97,7 @@ export function TaskTable({
   growKey,
   renderTitle,
   renderNote,
+  rowAction,
 }: {
   tasks: Task[];
   /** Sections (e.g. "Para você", a pack), each maybe with a second level. */
@@ -145,6 +146,8 @@ export function TaskTable({
   renderTitle?: (t: Task) => ReactNode;
   /** A line under the client, e.g. where the search found the term. */
   renderNote?: (t: Task) => ReactNode;
+  /** A small button at the end of the title cell (shown on hover). */
+  rowAction?: (t: Task) => ReactNode;
 }) {
   const memory = rememberGroups
     ? `${rememberGroups.company}|${rememberGroups.user}|${rememberGroups.split}`
@@ -321,6 +324,7 @@ export function TaskTable({
                 )}
               </Button>
             )}
+            {rowAction?.(t)}
           </div>
         </td>
         <td className="col-status">

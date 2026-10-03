@@ -682,6 +682,87 @@ await check("a tarefa criada a partir do item fica ligada; quem não acessa a ta
   await rejects(() => rpc("link_radar_task", [A, i1.id, uid(444)]), /Tarefa não encontrada/);
 });
 
+await check("vincular tarefas que já existem: busca, parecidas pela MAVI e desvincular", async () => {
+  const [k] = await sql(`select id from contracts where client_id = $1 and product_id = $2`, [client, trafego]);
+  const [k9] = await sql(`select id from contracts where client_id = $1`, [other]);
+  const add = async (contract, title, status = "progress") =>
+    (await sql(`insert into tasks(company_id, contract_id, title, creator_id, assignee_id, due_date, original_due_date,
+      status, delivered_at, internal_approved_by) values ($1,$2,$3,$4,$4,'2026-10-10','2026-10-10',$5,
+      case when $5 = 'done' then now() end, case when $5 = 'done' then $4::uuid end) returning id`, [A, contract, title, admin, status]))[0].id;
+  const done = await add(k.id, "Telefone da loja no cadastro", "done");
+  const open = await add(k.id, "Ajustar telefone da loja na MAVI");
+  const elsewhere = await add(k9.id, "Telefone no rodapé do site");
+  const linked = (await sql(`select task_id from radar_item_tasks where item_id = $1`, [i1.id])).map((r) => r.task_id);
+  const titles = (rows) => rows.map((r) => r.task.title);
+  const cands = async (q, exclude = linked) =>
+    (await db.query(`select * from public.radar_link_candidates($1,$2,$3,$4)`, [A, client, q, exclude])).rows;
+
+  // Sem termo: só as do cliente, as não entregues primeiro; as já ligadas saem.
+  await as(manager);
+  const firstOpen = await cands("");
+  assert.ok(!titles(firstOpen).includes("Resolver a aprovação"));
+  assert.ok(!titles(firstOpen).includes("Telefone no rodapé do site"));
+  assert.ok(titles(firstOpen).indexOf("Ajustar telefone da loja na MAVI") < titles(firstOpen).indexOf("Telefone da loja no cadastro"));
+  // Com termo (sem acento): todos os clientes, os do cliente primeiro.
+  await as(manager);
+  const found = await cands("telefone");
+  assert.deepEqual(titles(found), ["Ajustar telefone da loja na MAVI", "Telefone da loja no cadastro", "Telefone no rodapé do site"]);
+  assert.deepEqual(found.map((r) => r.same_client), [true, true, false]);
+  // Quem não vê as tarefas (RLS) não as encontra.
+  await as(outsider);
+  assert.deepEqual(await cands("telefone"), []);
+
+  // Parecidas: sem vetor, pede para a API gerar; com o vetor, guarda e responde.
+  const vec = (n) => `[${Array.from({ length: 1536 }, (_, i) => (i === n ? 1 : 0)).join(",")}]`;
+  for (const [task, n, contract, clientId] of [[open, 0, k.id, client], [elsewhere, 1, k9.id, other]]) {
+    const [{ id: doc }] = await sql(`insert into ai_documents(company_id, source_type, source_id, access, client_id,
+      contract_id, task_id, title, content_hash) values ($1,'task',$2,'client',$3,$4,$2,'t',md5(random()::text))
+      returning id`, [A, task, clientId, contract]);
+    await sql(`insert into ai_chunks(company_id, document_id, ord, content, source_type, access, client_id, task_id,
+      embedding) values ($1,$2,0,'texto','task','client',$3,$4,$5::extensions.halfvec(1536))`, [A, doc, clientId, task, vec(n)]);
+  }
+  await as(manager);
+  let s = await rpc("radar_task_suggestions", [A, i1.id, null]);
+  assert.equal(s.embed, true);
+  assert.ok(s.text.length > 3);
+  await as(manager);
+  s = await rpc("radar_task_suggestions", [A, i1.id, vec(0)]);
+  assert.deepEqual(s.tasks.map((t) => t.id), [open], "só a próxima, não a distante");
+  await as(manager);
+  s = await rpc("radar_task_suggestions", [A, i1.id, null]);
+  assert.deepEqual(s.tasks.map((t) => t.id), [open], "o vetor ficou guardado");
+  // Mudou o título: o vetor é refeito (e o título volta, para os próximos testes).
+  const [{ title: before, person_edited: edited }] = await sql(`select title, person_edited from radar_items where id = $1`, [i1.id]);
+  await as(manager);
+  await rpc("update_radar_item", [A, i1.id, JSON.stringify({ title: "Outro título para o item" })]);
+  await as(manager);
+  assert.equal((await rpc("radar_task_suggestions", [A, i1.id, null])).embed, true);
+  await sql(`update radar_items set title = $2, person_edited = $3 where id = $1`, [i1.id, before, edited]);
+  await as(manager);
+  await rpc("radar_task_suggestions", [A, i1.id, vec(0)]);
+
+  // Vincular várias; a ligada sai das parecidas; desvincular não mexe na tarefa.
+  await as(manager);
+  await rpc("link_radar_task", [A, i1.id, open]);
+  await as(manager);
+  await rpc("link_radar_task", [A, i1.id, done]);
+  await as(manager);
+  assert.deepEqual((await rpc("radar_task_suggestions", [A, i1.id, null])).tasks, []);
+  await as(manager);
+  assert.equal((await rpc("radar_item", [A, i1.id])).tasks.length, linked.length + 2);
+  await as(member);
+  await rejects(() => rpc("unlink_radar_task", [A, i1.id, open]), /Sem permissão/);
+  await as(manager);
+  await rpc("unlink_radar_task", [A, i1.id, open]);
+  await as(manager);
+  assert.ok(!(await rpc("radar_item", [A, i1.id])).tasks.some((t) => t.id === open));
+  assert.equal((await sql(`select archived from tasks where id = $1`, [open]))[0].archived, false);
+  await as(manager);
+  await rejects(() => rpc("unlink_radar_task", [A, uid(445), open]), /Item não encontrado/);
+  await as(manager);
+  await rpc("unlink_radar_task", [A, i1.id, done]);
+});
+
 await check("a fonte Radar nos Dashboards: métricas, agrupamentos e filtros", async () => {
   const spec = (q, groupBy = "none") => JSON.stringify({ viz: "stat", groupBy, queries: [{ ref: "A", filters: [], ...q }] });
   const today = (await sql(`select (now() at time zone 'America/Sao_Paulo')::date::text as d`))[0].d;
