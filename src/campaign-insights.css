@@ -1056,3 +1056,54 @@
   color: var(--muted);
   font-size: 0.74rem;
 }
+
+/* Negativas do Google (Fase 8). */
+.insight-copy {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.insight-section > .insight-label:has(.insight-copy) {
+  display: flex;
+}
+.insight-negatives {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.insight-negatives li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #f6f7f5;
+  font-size: 0.76rem;
+}
+.insight-negatives code {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+}
+.insight-negatives li span {
+  font-variant-numeric: tabular-nums;
+  color: #3b463e;
+}
+.insight-negatives li small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+.insight-negatives-hint {
+  color: var(--muted);
+  font-size: 0.68rem;
+}

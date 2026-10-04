@@ -28,7 +28,10 @@ import {
   newApiMeter,
   ThrottledError,
   nearMissUtms,
+  negativeCandidates,
+  negativesInsight,
   parseInsights,
+  parseNegatives,
   rankInsights,
   ruleInsights,
   sampleOk,
@@ -680,6 +683,83 @@ describe("cota das APIs e leitura à toa", () => {
     const defer = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_defer"))!.body;
     expect(defer).toMatchObject({ p_until: "2026-10-05T09:05:00Z" });
     expect(defer.p_note).toMatch(/498 de 500/);
+  });
+});
+
+describe("termos de pesquisa e negativas (Fase 8)", () => {
+  const term = (id: string, name: string, cost: number, conversions: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    name,
+    sub: "Grupo A",
+    status: { code: "NONE", label: "Nenhum", tone: "off" as const },
+    enabled: null,
+    campaign_id: "222",
+    ad_group_id: "g1",
+    info: { campaign: "Pesquisa", ad_group: "Grupo A", keyword: "[clínica]" },
+    windows: { cycle: { cost, clicks: 10, impressions: 100, conversions } },
+    ...extra,
+  });
+  const reads = [
+    {
+      view: "search_terms" as const,
+      rows: [
+        term("1", "vaga de emprego clínica", 40, 0),
+        term("2", "Vaga de emprego clínica", 15, 0),
+        term("3", "clínica perto de mim", 80, 3),
+        term("4", "clínica grátis", 30, 0),
+        term("5", "curso de clínica", 4, 0),
+        term("6", "clínica popular", 60, 0, { status: { code: "EXCLUDED", label: "Excluído", tone: "off" } }),
+      ],
+    },
+  ] as never;
+
+  it("candidatas: sem conversão, ainda não negativadas, somadas por termo e acima do piso", () => {
+    // Meta de R$ 20 por resultado → piso de R$ 6; o M (1,5) multiplica o gasto.
+    const list = negativeCandidates(reads, 1.5, 20);
+    expect(list.map((t) => [t.ref, t.term, t.spend])).toEqual([
+      ["N1", "vaga de emprego clínica", 82.5],
+      ["N2", "clínica grátis", 45],
+      // R$ 4 × 1,5 = R$ 6: alcança o piso.
+      ["N3", "curso de clínica", 6],
+    ]);
+    // Sem meta: piso de R$ 10.
+    expect(negativeCandidates(reads, 1, null).map((t) => t.term)).toEqual(["vaga de emprego clínica", "clínica grátis"]);
+  });
+
+  it("a MAVI escolhe só entre as candidatas; o servidor soma o gasto e monta a lista", () => {
+    const candidates = negativeCandidates(reads, 1, 20);
+    const picked = parseNegatives(
+      JSON.stringify({
+        insights: [],
+        negatives: [
+          { ref: "N1", match: "phrase", why: "Procura de emprego" },
+          { ref: "N1", match: "exact" },
+          { ref: "N9", match: "exact" },
+          { ref: "N2", match: "qualquer" },
+        ],
+      }),
+      candidates,
+    );
+    expect(picked).toEqual([
+      { term: "vaga de emprego clínica", match: "phrase", spend: 55, clicks: 20, campaign: "Pesquisa", why: "Procura de emprego" },
+      { term: "clínica grátis", match: "exact", spend: 30, clicks: 10, campaign: "Pesquisa", why: "" },
+    ]);
+    expect(parseNegatives("sem json", candidates)).toEqual([]);
+    const total = { key: "total", level: "total" as const, name: "Campanha (total)", n: { cycle: { spend: 500 } } };
+    const insight = negativesInsight({} as never, picked, new Map([["total", total]]))!;
+    expect(insight).toMatchObject({
+      kind: "opportunity",
+      priority: "high",
+      fingerprint: "opportunity#total#negativas-termos-de-pesquisa",
+      extra: { negatives: picked },
+    });
+    expect(insight.title).toMatch(/^Negativar 2 termos de pesquisa que gastaram R\$\s?85,00 sem converter$/);
+    expect(insight.evidence.map((e) => [e.metric, e.value])).toEqual([
+      ["negatives_spend", 85],
+      ["negatives_count", 2],
+      ["negatives_share", 17],
+    ]);
+    expect(negativesInsight({} as never, [], new Map())).toBeNull();
   });
 });
 

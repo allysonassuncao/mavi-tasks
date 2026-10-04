@@ -50,6 +50,8 @@ export type CampaignInsight = {
   target: { key: string; level: InsightLevel; name: string; parent?: string } | null;
   /** watch: a vigia diária (sem a MAVI). */
   source: "rule" | "mavi" | "watch";
+  /** Fase 8: as negativas do Google para copiar. */
+  extra?: { negatives?: InsightNegative[] } | null;
   money_basis: MoneyBasis;
   confidence: number | null;
   status: InsightStatus;
@@ -595,6 +597,19 @@ export function effectText(e: InsightEffect) {
 }
 
 /** A tarefa a partir de um insight: no produto da campanha, com o insight e o link de volta. */
+export type InsightNegative = {
+  term: string;
+  match: "exact" | "phrase";
+  spend: number;
+  clicks: number;
+  campaign: string;
+  why: string;
+};
+/** Como o Google Ads lê ao colar: [exata] ou "frase". */
+export const negativeLine = (n: Pick<InsightNegative, "term" | "match">) =>
+  n.match === "phrase" ? `"${n.term}"` : `[${n.term}]`;
+export const negativesText = (list: InsightNegative[]) => list.map(negativeLine).join("\n");
+
 export function insightTaskPreset(
   insight: CampaignInsight,
   campaign: { id: string; name: string; contract_id: string },
@@ -613,7 +628,25 @@ export function insightTaskPreset(
   const paragraph = (...content: RichNode[]): RichNode => ({ type: "paragraph", content });
   const content: RichNode[] = [];
   if (insight.body) content.push(paragraph(text(insight.body)));
-  if (insight.action) content.push(paragraph(text("O que fazer: ", bold), text(insight.action)));
+  const steps = insight.action
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (steps.length === 1) content.push(paragraph(text("O que fazer: ", bold), text(steps[0])));
+  else if (steps.length)
+    content.push(paragraph(text("O que fazer", bold)), {
+      type: "orderedList",
+      content: steps.map((x) => ({ type: "listItem", content: [paragraph(text(x))] })),
+    });
+  const negatives = insight.extra?.negatives ?? [];
+  if (negatives.length)
+    content.push(paragraph(text("Negativas para colar no Google Ads", bold)), {
+      type: "bulletList",
+      content: negatives.map((n) => ({
+        type: "listItem",
+        content: [paragraph(text(negativeLine(n)), text(` — ${brl(n.spend)} sem conversão${n.why ? ` (${n.why})` : ""}`))],
+      })),
+    });
   if (insight.evidence.length)
     content.push(paragraph(text(`Evidências (valores ${basisLabel(insight.money_basis)})`, bold)), {
       type: "bulletList",
@@ -634,6 +667,8 @@ export function insightTaskPreset(
     description: serializeDescription({ type: "doc", content }),
   };
 }
+
+const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 // Painel da MAVI › Campanhas (administradores e gestores).
 const offline = (company: string) => !supabase || !/^[0-9a-f-]{36}$/i.test(company);
@@ -822,6 +857,30 @@ export function demoInsights(): InsightsBackend {
             created_at: ago(120),
           },
           ...list,
+          {
+            ...list[0],
+            id: "dn-1",
+            kind: "opportunity",
+            priority: "medium",
+            source: "mavi",
+            confidence: null,
+            title: "Negativar 3 termos de pesquisa que gastaram R$ 214,60 sem converter",
+            body: "Estes termos acionaram os anúncios, gastaram R$ 214,60 no ciclo (8,4% do investimento) e não trouxeram nenhuma conversão — e não têm a ver com o que o cliente vende. Negativando, essa verba vai para as buscas que convertem.",
+            action:
+              'Clique em "Copiar negativas" e confira a lista\nNo Google Ads, em Palavras-chave › Palavras-chave negativas, cole no nível da campanha\nDaqui a 7 dias, veja se o custo por resultado caiu',
+            evidence: [
+              { label: "Gasto dos termos sem conversão", value: 214.6, unit: "money", window: "cycle", entity: "total", name: "Captação", metric: "negatives_spend" },
+              { label: "Termos para negativar", value: 3, unit: "count", window: "cycle", entity: "total", name: "Captação", metric: "negatives_count" },
+            ],
+            target: null,
+            extra: {
+              negatives: [
+                { term: "vaga de emprego clínica", match: "phrase", spend: 98.2, clicks: 31, campaign: "Captação", why: "Procura de emprego" },
+                { term: "clínica veterinária", match: "phrase", spend: 71.4, clicks: 22, campaign: "Captação", why: "Outro tipo de clínica" },
+                { term: "clínica odontológica grátis", match: "exact", spend: 45, clicks: 14, campaign: "Captação", why: "Busca por atendimento gratuito" },
+              ],
+            },
+          },
         ],
         applied: [
           {

@@ -377,6 +377,8 @@ export type Analysis = {
   effects?: { insight: string; effect: Effect }[];
   /** Quantos dias o lead costuma levar até a etapa que importa (mediana do CRM; nulo: sem histórico). */
   stageDays?: number | null;
+  /** Google: termos de pesquisa do ciclo que gastaram sem conversão (candidatos a negativa). */
+  negCandidates?: NegCandidate[];
 };
 
 /** O total da campanha (as campanhas vinculadas somadas) e a meta do ciclo. */
@@ -503,6 +505,8 @@ export type Insight = {
   source: "rule" | "mavi";
   fingerprint: string;
   confidence?: number;
+  /** Fase 8: a lista de negativas para copiar. */
+  extra?: { negatives: Negative[] };
 };
 
 const KINDS: InsightKind[] = ["highlight", "opportunity", "problem", "tracking"];
@@ -1118,6 +1122,113 @@ export function googleEntities(reads: GoogleRead[], crm: CrmIndex | null, k: num
   return focus(out, limits);
 }
 
+export type NegCandidate = {
+  ref: string;
+  term: string;
+  campaign: string;
+  keyword: string;
+  spend: number;
+  clicks: number;
+};
+export type Negative = {
+  term: string;
+  match: "exact" | "phrase";
+  spend: number;
+  clicks: number;
+  campaign: string;
+  why: string;
+};
+/**
+ * Os termos de pesquisa do ciclo que gastaram sem nenhuma conversão e ainda
+ * não foram negativados (somados por campanha + termo), do maior gasto para o
+ * menor: a partir de 30% do custo por resultado da meta (mín. R$ 5; sem meta,
+ * R$ 10). A MAVI só escolhe entre eles.
+ */
+export function negativeCandidates(reads: GoogleRead[], k: number, goalCpa: number | null, max = 40): NegCandidate[] {
+  const min = goalCpa ? Math.max(goalCpa * 0.3, 5) : 10;
+  const sum = new Map<string, Omit<NegCandidate, "ref"> & { conversions: number }>();
+  for (const read of reads) {
+    if (read.view !== "search_terms") continue;
+    for (const r of read.rows) {
+      if (r.status?.code === "EXCLUDED" || r.status?.code === "ADDED_EXCLUDED") continue;
+      const x = r.windows.cycle;
+      if (!x) continue;
+      const campaign = String(r.info.campaign ?? "");
+      const id = `${campaign}\u0000${r.name.trim().toLowerCase()}`;
+      const cur = sum.get(id) ?? { term: r.name.trim(), campaign, keyword: String(r.info.keyword ?? ""), spend: 0, clicks: 0, conversions: 0 };
+      cur.spend += numOr(x.cost) * k;
+      cur.clicks += numOr(x.clicks);
+      cur.conversions += numOr(x.conversions);
+      sum.set(id, cur);
+    }
+  }
+  return [...sum.values()]
+    .filter((t) => t.conversions === 0 && t.spend >= min && t.term)
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, max)
+    .map(({ conversions: _c, ...t }, i) => ({ ...t, ref: `N${i + 1}`, spend: round(t.spend) }));
+}
+
+/** As negativas que a MAVI escolheu (só entre as candidatas). */
+export function parseNegatives(text: string, candidates: NegCandidate[]): Negative[] {
+  if (!candidates.length) return [];
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return [];
+  let raw: Row;
+  try {
+    raw = JSON.parse(text.slice(start, end + 1)) as Row;
+  } catch {
+    return [];
+  }
+  const byRef = new Map(candidates.map((c) => [c.ref, c]));
+  const seen = new Set<string>();
+  const out: Negative[] = [];
+  for (const x of Array.isArray(raw.negatives) ? (raw.negatives as Row[]) : []) {
+    const c = byRef.get(String(x?.ref ?? ""));
+    if (!c || seen.has(c.ref)) continue;
+    seen.add(c.ref);
+    out.push({
+      term: c.term,
+      match: x.match === "phrase" ? "phrase" : "exact",
+      spend: c.spend,
+      clicks: c.clicks,
+      campaign: c.campaign,
+      why: typeof x.why === "string" ? x.why.trim().slice(0, 160) : "",
+    });
+  }
+  return out;
+}
+
+/** Um insight só com as negativas: o gasto somado e a lista para copiar. */
+export function negativesInsight(a: Analysis, picked: Negative[], entities: Map<string, Entity>): Insight | null {
+  if (!picked.length) return null;
+  const spend = round(picked.reduce((s, n) => s + n.spend, 0));
+  const total = numOr(entities.get("total")?.n.cycle?.spend);
+  const share = total ? (spend / total) * 100 : 0;
+  const n = picked.length;
+  const name = entities.get("total")?.name ?? "Campanha";
+  return {
+    kind: "opportunity",
+    priority: share >= 10 ? "high" : "medium",
+    title: `Negativar ${n === 1 ? "1 termo de pesquisa" : `${n} termos de pesquisa`} que gastaram ${fmtMoney(spend)} sem converter`,
+    body: `${n === 1 ? "Este termo acionou" : "Estes termos acionaram"} os anúncios, gastaram ${fmtMoney(spend)} no ciclo${share >= 1 ? ` (${fmtPct(share)} do investimento)` : ""} e não trouxeram nenhuma conversão — e não têm a ver com o que o cliente vende. Negativando, essa verba vai para as buscas que convertem.`,
+    action:
+      'Clique em "Copiar negativas" e confira a lista\nNo Google Ads, em Palavras-chave › Palavras-chave negativas, cole no nível da campanha\nDaqui a 7 dias, veja se o custo por resultado caiu',
+    evidence: [
+      { label: "Gasto dos termos sem conversão", value: spend, unit: "money", window: "cycle", entity: "total", name, metric: "negatives_spend" },
+      { label: "Termos para negativar", value: n, unit: "count", window: "cycle", entity: "total", name, metric: "negatives_count" },
+      ...(total
+        ? [{ label: "Do investimento do ciclo", value: round(share, 1), unit: "pct", window: "cycle" as WindowKey, entity: "total", name, metric: "negatives_share" }]
+        : []),
+    ],
+    target: null,
+    source: "mavi",
+    fingerprint: fingerprintOf("opportunity", null, "negativas-termos-de-pesquisa"),
+    extra: { negatives: picked },
+  };
+}
+
 /**
  * A linha do CRM de uma palavra-chave do Google: utm_content = {keyword}
  * (a palavra como está na conta, sem os sinais da correspondência), dentro
@@ -1470,6 +1581,7 @@ REGRAS DOS NÚMEROS (obrigatório):
 - O funil do CRM (quando vem) mostra a QUALIDADE do lead: abertas, ganhas, perdidas, taxa de perda, quantas chegaram a cada etapa ("stage:…", ou além), os motivos de perda ("lost:…"), a faixa da qualificação ("bucket:…") e as respostas mais escolhidas no formulário ("answer:…"); os nomes estão em "funil_crm.legenda". Use isso para separar volume de qualidade e cite essas métricas nas evidências pelo nome da chave. O CRM não tem idade nem gênero do lead: o cruzamento com o público é pelo conjunto.
 - A ETAPA QUE IMPORTA (quando vem em "etapa_que_importa"): é a régua principal desta campanha. Compare conjuntos, anúncios e palavras-chave pelo custo por lead que chega a ela (goal_stage_cost) e pela porcentagem que chega (goal_stage_rate), não só pelo custo por lead da plataforma; a meta de custo, quando existe, está em goal_stage_target (no total). Ex.: "o conjunto A tem lead mais caro, mas cada lead em Negociação custa a metade do conjunto B".
 - MATURIDADE DOS LEADS: young_leads / young_rate são os leads abertos mais novos que o tempo que um lead costuma levar até a etapa ("dias_tipicos_ate_a_etapa"). Com young_rate alto (40% ou mais), não conclua que um item vai mal na etapa: diga que ainda é cedo e quando reavaliar.
+- NEGATIVAS (Google): "termos_sem_conversao" traz os termos de pesquisa do ciclo que gastaram sem nenhuma conversão e ainda não foram negativados. Escolha só os claramente fora do que o cliente vende ou de intenção errada (procura de emprego, grátis, curso, como fazer sozinho, outra cidade ou outro produto, concorrente quando não faz sentido) e devolva em "negatives": [{"ref": "N1", "match": "exact" ou "phrase", "why": "motivo curto"}]. "phrase" quando a palavra-problema deve bloquear qualquer busca com ela (ex.: "emprego"); "exact" para o termo exato. Termo que pode trazer cliente e só não converteu ainda fica de fora. Na dúvida, deixe de fora. O sistema monta o insight das negativas com o gasto somado: não escreva outro insight sobre elas.
 - As "detecções automáticas" já viram insights: não as repita; você pode aprofundar com outra conclusão (outro topic).
 - Anúncios podem trazer "criativo" (o que a imagem ou o vídeo comunica: promessa, gancho, oferta — lido pela MAVI) e "audio" (trecho da transcrição do vídeo). Use para explicar o porquê do desempenho e sugerir variações concretas; a descrição do criativo não é número e não entra nas evidências.
 - "aprendizados_do_time" são regras que o time ensinou (para a agência, o produto ou este cliente): siga-as sempre; nunca sugira o que elas proíbem.
@@ -1477,7 +1589,8 @@ REGRAS DOS NÚMEROS (obrigatório):
 - O contexto do cliente (dossiê, Radar, termômetro, reuniões) serve para interpretar e priorizar; não copie trechos dele nem exponha conversas internas.
 
 Responda SOMENTE com um JSON, sem texto antes ou depois:
-{"summary": "uma frase simples sobre o momento da campanha", "insights": [{"kind": "...", "priority": "...", "topic": "assunto curto e estável, ex.: anuncio-x-promessa-frete", "target": "key da entidade principal ou null", "title": "...", "body": "...", "steps": ["...", "..."], "evidence": [{"entity": "key", "window": "cycle", "metric": "crm_opportunities"}]}]}
+{"summary": "uma frase simples sobre o momento da campanha", "insights": [{"kind": "...", "priority": "...", "topic": "assunto curto e estável, ex.: anuncio-x-promessa-frete", "target": "key da entidade principal ou null", "title": "...", "body": "...", "steps": ["...", "..."], "evidence": [{"entity": "key", "window": "cycle", "metric": "crm_opportunities"}]}], "negatives": [{"ref": "N1", "match": "exact", "why": "..."}]}
+("negatives" só quando houver "termos_sem_conversao"; senão, omita.)
 Português do Brasil.
 
 As métricas (nomes usados em "n" e em "evidence"): ${Object.entries(METRICS)
@@ -1524,6 +1637,16 @@ export function insightMessage(m: InsightMaterial, a: Analysis, rules: Insight[]
       a.funnel === "ok" && a.labels && Object.keys(a.labels).length
         ? { legenda: a.labels }
         : undefined,
+    termos_sem_conversao: a.negCandidates?.length
+      ? a.negCandidates.map((t) => ({
+          ref: t.ref,
+          termo: t.term,
+          ...(t.keyword ? { palavra_chave: t.keyword } : {}),
+          campanha: t.campaign,
+          gasto: t.spend,
+          cliques: t.clicks,
+        }))
+      : undefined,
     etapa_que_importa: m.crm_goal
       ? {
           etapa: m.crm_goal.stage_name,
@@ -1628,7 +1751,11 @@ export function cutAnalysis(m: InsightMaterial, a: Analysis, cut: number): { m: 
   let aa = a;
   if (cut >= 1) mm = { ...mm, context: { ...mm.context, meetings: [] } };
   if (cut >= 2)
-    aa = { ...aa, entities: focus(aa.entities, { adsets: 8, ads: 8, keywords: 8, terms: 6, segments: 6 }) };
+    aa = {
+      ...aa,
+      entities: focus(aa.entities, { adsets: 8, ads: 8, keywords: 8, terms: 6, segments: 6 }),
+      negCandidates: aa.negCandidates?.slice(0, 15),
+    };
   if (cut >= 3)
     aa = {
       ...aa,
@@ -1902,6 +2029,8 @@ export async function readAnalysis(
   const ids = [...accounts.keys()];
   let entities: Entity[] = [];
   let resultLabel = "";
+  // Google: os termos de pesquisa de todas as contas (para as negativas).
+  const termReads: GoogleRead[] = [];
   // No máximo duas leituras ao mesmo tempo (e uma conta por vez: a fila garante).
   const slot = limiter(2);
   try {
@@ -1963,6 +2092,7 @@ export async function readAnalysis(
           ),
         ]);
         entities.push(...googleEntities(reads, crm, k));
+        termReads.push(...reads);
       }
       resultLabel = "Conversões";
     }
@@ -1996,6 +2126,15 @@ export async function readAnalysis(
     contentCampaigns,
     effects,
     stageDays: funnel ? typicalDays(funnel, m.crm_goal) : null,
+    negCandidates: termReads.length
+      ? negativeCandidates(
+          termReads,
+          k,
+          m.cycle.goal_results > 0
+            ? (basis === "gross" ? m.cycle.budget : m.cycle.budget / (Number(m.cycle.multiplier) || 1)) / m.cycle.goal_results
+            : null,
+        )
+      : [],
   };
   analysis.entities = [totalEntity(m, analysis), ...analysis.entities];
   return analysis;
@@ -2147,6 +2286,7 @@ export async function analyse(
   );
   let summary = "";
   let found: Insight[] = [];
+  let negatives: Insight | null = null;
   if (!fit) {
     // Nem o mínimo cabe: ficam só as detecções automáticas (sem custo).
     notes.push(`O teto por análise (US$ ${cap.toFixed(2)}) não cobre a leitura da MAVI desta campanha: só as detecções automáticas.`);
@@ -2174,6 +2314,7 @@ export async function analyse(
     });
     const parsed = parseInsights(result.text, entities, maxInsights(m) + 2, full.labels ?? {});
     summary = parsed.summary;
+    negatives = negativesInsight(full, parseNegatives(result.text, full.negCandidates ?? []), entities);
     // Amostra mínima: sem número suficiente, a MAVI não conclui.
     const min = minResults(m);
     found = parsed.insights.filter((x) => sampleOk(x, entities, min));
@@ -2221,6 +2362,8 @@ export async function analyse(
       notes.push(`Conferência do Jev indisponível: ${(e as Error).message}`.slice(0, 200));
     }
   }
+  // As negativas: os números vêm da plataforma, a MAVI só escolheu os termos (sem o Jev).
+  if (negatives) list = [...list, negatives];
   // Menos e melhor: pela prioridade, até o limite do Painel (o primeiro é o "Comece por aqui").
   const ranked = rankInsights(list, maxInsights(m));
   if (ranked.length < list.length)

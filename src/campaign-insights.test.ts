@@ -89,3 +89,15 @@ describe("Fase 4: efeito e tarefa", () => {
     ).toBe("Piorou: resultados por dia −15%, 5 dias antes × 5 depois");
   });
 });
+
+describe("Fase 8: negativas para colar no Google Ads", () => {
+  it("[exata] ou \"frase\", uma por linha", async () => {
+    const { negativesText } = await import("./campaign-insights");
+    expect(
+      negativesText([
+        { term: "vaga de emprego", match: "phrase", spend: 55, clicks: 20, campaign: "Pesquisa", why: "" },
+        { term: "clínica grátis", match: "exact", spend: 30, clicks: 10, campaign: "Pesquisa", why: "" },
+      ]),
+    ).toBe('"vaga de emprego"\n[clínica grátis]');
+  });
+});

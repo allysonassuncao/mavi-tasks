@@ -14,6 +14,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   CircleAlert,
+  Copy,
   History,
   Lightbulb,
   Radar,
@@ -44,6 +45,8 @@ import {
   dayLabel,
   effectText,
   insightTaskPreset,
+  negativeLine,
+  negativesText,
   formatEvidence,
   localParts,
   money,
@@ -57,6 +60,7 @@ import {
   type CampaignOwner,
   type CrmGoalInput,
   type CrmPipeline,
+  type InsightNegative,
   type InsightBadge,
   type InsightKind,
   type InsightRun,
@@ -586,6 +590,7 @@ export function InsightCard({
           )}
         </div>
       )}
+      {!!insight.extra?.negatives?.length && <NegativesList list={insight.extra.negatives} compact={compact} />}
       {compact ? (
         <details className="insight-numbers">
           <summary>Ver os números ({insight.evidence.length})</summary>
@@ -639,6 +644,75 @@ export function InsightCard({
         )}
       </footer>
     </article>
+  );
+}
+
+/** As negativas do Google: a lista e o botão que copia no formato que o Google Ads entende. */
+function NegativesList({ list, compact }: { list: InsightNegative[]; compact: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    const value = negativesText(list);
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(value);
+      ok = true;
+    } catch {
+      // Sem a API (ou sem permissão): o jeito antigo, por uma caixa de texto escondida.
+      const box = document.createElement("textarea");
+      box.value = value;
+      box.setAttribute("readonly", "");
+      box.style.position = "fixed";
+      box.style.opacity = "0";
+      document.body.appendChild(box);
+      box.select();
+      try {
+        ok = document.execCommand("copy");
+      } catch {
+        ok = false;
+      }
+      box.remove();
+    }
+    if (!ok) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+  const rows = (
+    <ul className="insight-negatives">
+      {list.map((n) => (
+        <li key={`${n.campaign}|${n.term}`}>
+          <code>{negativeLine(n)}</code>
+          <span>{n.spend.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+          {n.why && <small>{n.why}</small>}
+        </li>
+      ))}
+    </ul>
+  );
+  return (
+    <div className="insight-section">
+      <span className="insight-label">
+        Negativas ({list.length})
+        <button type="button" className="text-btn insight-copy" onClick={() => void copy()}>
+          {copied ? (
+            <>
+              <Check size={12} aria-hidden="true" /> Copiado
+            </>
+          ) : (
+            <>
+              <Copy size={12} aria-hidden="true" /> Copiar negativas
+            </>
+          )}
+        </button>
+      </span>
+      {compact ? (
+        <details className="insight-numbers">
+          <summary>Ver a lista</summary>
+          {rows}
+        </details>
+      ) : (
+        rows
+      )}
+      <small className="insight-negatives-hint">[exata] bloqueia só o termo; "frase" bloqueia qualquer busca que o contenha.</small>
+    </div>
   );
 }
 

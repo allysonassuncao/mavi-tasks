@@ -848,6 +848,30 @@ await check("Fase 7: a vigia diária pelos números do dia e a leitura das plata
   await sql(`update ad_daily_metrics set conversions=2 where campaign_id=$1`, [campaign]);
 });
 
+await check("Fase 8: a lista de negativas vai com o insight (só o bem formado)", async () => {
+  const [run] = await sql(`insert into campaign_insight_runs(company_id, campaign_id, trigger, status, started_at, attempts, local_day)
+    values ($1,$2,'manual','running',now(),1,$3) returning id`, [A, campaign, today]);
+  await as(null);
+  await worker("ai_campaign_insight_store", [SECRET, run.id, JSON.stringify({
+    status: "done",
+    insights: [insight("opportunity#total#negativas-termos-de-pesquisa", {
+      kind: "opportunity", title: "Negativar 2 termos", target: null,
+      extra: { negatives: [
+        { term: " vaga de emprego ", match: "phrase", spend: 55.456, clicks: 20, campaign: "Pesquisa", why: "Emprego" },
+        { term: "clínica grátis", match: "qualquer", spend: "x", clicks: 10 },
+        { term: "", match: "exact" },
+      ], outro: 1 },
+    })],
+  })]);
+  await as(trafego);
+  const v = await rpc("campaign_insights", [A, campaign, 8]);
+  const neg = v.current.find((i) => i.title === "Negativar 2 termos");
+  assert.deepEqual(neg.extra, { negatives: [
+    { term: "vaga de emprego", match: "phrase", spend: 55.46, clicks: 20, campaign: "Pesquisa", why: "Emprego" },
+    { term: "clínica grátis", match: "exact", spend: 0, clicks: 10, campaign: "", why: "" },
+  ] });
+});
+
 await check("a campanha que não pode ser analisada diz por quê", async () => {
   await sql(`update ad_campaigns set status='inactive' where id=$1`, [campaign]);
   await as(trafego);
