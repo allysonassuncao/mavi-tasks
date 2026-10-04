@@ -545,7 +545,68 @@ export type CampaignRow = {
    * (each day × its M). Null without a current cycle.
    */
   spent: { net: number; gross: number } | null;
+  /** Resultados e gasto (sem M) de hoje, ontem e do ciclo atual. */
+  results: RowResults;
 };
+/**
+ * Os números da lista: o ciclo (o último acumulado, como o cabeçalho da
+ * campanha), ontem (o dia sincronizado) e hoje (a última leitura do leitor
+ * em 2º plano, com a hora). Gasto sempre sem M; multiplier é o M do dia.
+ */
+export type RowResults = {
+  cycle: { spend: number; conversions: number } | null;
+  yesterday: { spend: number; conversions: number; multiplier: number } | null;
+  today: {
+    spend: number;
+    conversions: number;
+    multiplier: number;
+    read_at: string;
+  } | null;
+};
+export const noResults = (): RowResults => ({
+  cycle: null,
+  yesterday: null,
+  today: null,
+});
+type Num = number | string;
+/** As linhas do banco (numeric chega como texto). */
+export function resultsFrom(
+  r:
+    | {
+        cycle?: { spend: Num; conversions: Num } | null;
+        yesterday?: { spend: Num; conversions: Num; multiplier: Num } | null;
+        today?: {
+          spend: Num;
+          conversions: Num;
+          multiplier: Num;
+          read_at: string;
+        } | null;
+      }
+    | null
+    | undefined,
+): RowResults {
+  if (!r) return noResults();
+  return {
+    cycle: r.cycle
+      ? { spend: Number(r.cycle.spend), conversions: Number(r.cycle.conversions) }
+      : null,
+    yesterday: r.yesterday
+      ? {
+          spend: Number(r.yesterday.spend),
+          conversions: Number(r.yesterday.conversions),
+          multiplier: Number(r.yesterday.multiplier) || 1,
+        }
+      : null,
+    today: r.today
+      ? {
+          spend: Number(r.today.spend),
+          conversions: Number(r.today.conversions),
+          multiplier: Number(r.today.multiplier) || 1,
+          read_at: r.today.read_at,
+        }
+      : null,
+  };
+}
 export type CampaignPage = {
   rows: CampaignRow[];
   /** Rows matching the search and filters. */
@@ -1105,6 +1166,7 @@ export const supabaseCampaigns: CampaignsBackend = {
         alert: Parameters<typeof alertFrom>[0];
         waiting?: boolean;
         spent?: { net: number | string; gross: number | string } | null;
+        results?: Parameters<typeof resultsFrom>[0];
       }[];
     };
     return {
@@ -1122,6 +1184,7 @@ export const supabaseCampaigns: CampaignsBackend = {
         spent: r.spent
           ? { net: Number(r.spent.net), gross: Number(r.spent.gross) }
           : null,
+        results: resultsFrom(r.results),
       })),
     };
   },

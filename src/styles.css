@@ -9892,6 +9892,273 @@ p.task-search-mavi,
   margin-bottom: 6px;
   white-space: nowrap;
 }
+/* A lista de campanhas: mais colunas, menos respiro dos lados. */
+.campaign-list-table th,
+.campaign-list-table td {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.campaign-list-table th.wrap {
+  white-space: normal;
+  min-width: 64px;
+  max-width: 96px;
+  line-height: 1.3;
+}
+/* Resultados e custo por resultado: hoje, ontem e o ciclo, alinhados. */
+.campaign-results {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.campaign-results > div {
+  display: grid;
+  grid-template-columns: 44px auto;
+  align-items: baseline;
+  gap: 6px;
+}
+.campaign-results dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #9da793;
+  font-size: 0.66rem;
+  cursor: default;
+}
+.campaign-results dd {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+.campaign-results dd strong {
+  font-weight: 600;
+}
+.campaign-results dd small {
+  color: #9da793;
+  font-size: 0.66rem;
+}
+/* No computador, o custo fica na mesma linha do resultado: sem repetir o dia. */
+.campaign-results.cost > div {
+  grid-template-columns: auto;
+}
+.campaign-results.cost dt {
+  display: none;
+}
+.campaign-results.cost dd.good {
+  color: #3f7a2c;
+}
+.campaign-results.cost dd.bad {
+  color: #b0433a;
+}
+.results-arrow {
+  font-size: 0.55rem;
+  margin-right: 3px;
+  vertical-align: 1px;
+}
+.results-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6fae3e;
+  animation: fade 1.2s infinite alternate;
+}
+.results-live.stale {
+  background: #c4cbc0;
+  animation: none;
+}
+/* Painel da MAVI › Campanhas: a Leitura do dia logo abaixo dos insights
+   (que reservam 80px embaixo para a barra de salvar). */
+.cins-settings.cins-daily {
+  margin-top: -66px;
+}
+/* Coluna MAVI: o ícone com a cor da Leitura do dia e os insights abertos. */
+.mavi-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #e4d7f3;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #f6f1fc;
+  color: #7a4fb3;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mavi-cell:hover,
+.mavi-cell[data-state="open"] {
+  background: #ede3f8;
+}
+.mavi-cell.good {
+  border-color: #cfe5bd;
+  background: #f1f8ea;
+  color: #3f7a2c;
+}
+.mavi-cell.good:hover,
+.mavi-cell.good[data-state="open"] {
+  background: #e5f2d8;
+}
+.mavi-cell.attention {
+  border-color: #f0dca6;
+  background: #fff7e3;
+  color: #93640f;
+}
+.mavi-cell.attention:hover,
+.mavi-cell.attention[data-state="open"] {
+  background: #fcefcc;
+}
+.mavi-cell.bad {
+  border-color: #f4cdc8;
+  background: #fdf0ee;
+  color: #b0433a;
+}
+.mavi-cell.bad:hover,
+.mavi-cell.bad[data-state="open"] {
+  background: #fbe2de;
+}
+.mavi-cell-count {
+  min-width: 16px;
+  border-radius: 999px;
+  padding: 0 5px;
+  background: #fff;
+  color: #5b3a8a;
+  font-size: 0.66rem;
+  line-height: 16px;
+  text-align: center;
+}
+.mavi-cell-count.high {
+  background: #b0433a;
+  color: #fff;
+}
+.mavi-cell-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #7a4fb3;
+  font-size: 0.72rem;
+}
+.mavi-read {
+  z-index: 60;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(460px, var(--radix-popover-content-available-height));
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(28, 39, 40, 0.16);
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+.mavi-read header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.mavi-read-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #7a4fb3;
+  font-weight: 600;
+}
+.mavi-read-tone {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.mavi-read-tone.good {
+  background: #e5f2d8;
+  color: #3f7a2c;
+}
+.mavi-read-tone.attention {
+  background: #fcefcc;
+  color: #93640f;
+}
+.mavi-read-tone.bad {
+  background: #fbe2de;
+  color: #b0433a;
+}
+.mavi-read-headline {
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.mavi-read-points {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: #4b5859;
+  line-height: 1.45;
+}
+.mavi-read-points li + li {
+  margin-top: 4px;
+}
+.mavi-read-meta {
+  margin: 0;
+  color: #9da793;
+  font-size: 0.68rem;
+}
+.mavi-read-insights {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.mavi-read-insights h4 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 6px;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+.mavi-read-insights ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  line-height: 1.4;
+}
+.mavi-read-prio {
+  display: inline-block;
+  margin-right: 6px;
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: #f1f3f1;
+  color: #7c877f;
+  font-size: 0.64rem;
+  font-weight: 600;
+}
+.mavi-read-prio.high {
+  background: #fde8e6;
+  color: #b0433a;
+}
+.mavi-read-prio.medium {
+  background: #fff4dc;
+  color: #93640f;
+}
+.mavi-read-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 12px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #5b3a8a;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mavi-read-open:hover {
+  text-decoration: underline;
+}
 .campaign-chip {
   display: inline-flex;
   align-items: center;

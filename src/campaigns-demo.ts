@@ -6,6 +6,7 @@ import {
   cycleAlert,
   money,
   monthlyEnd,
+  noResults,
   shortDate,
   type AdCampaign,
   type AdCampaignEvent,
@@ -23,6 +24,7 @@ import {
   type CycleInput,
   type SharedDayChoice,
   type MetaConversionRule,
+  type RowResults,
 } from "./campaigns";
 import { contractParts, dateKey } from "./domain";
 import { cycleFit, demoMediaRoom } from "./campaign-media";
@@ -370,6 +372,10 @@ export function demoCampaigns(
                 : cycleAlert(snapshot, c, today),
             waiting: pending(c),
             spent: current ? demoSpent(store, current, today) : null,
+            results:
+              current && c.status === "active"
+                ? demoResults(store, current, today)
+                : noResults(),
           };
         })
         .sort(
@@ -1513,6 +1519,45 @@ function demoSpent(store: Store, y: AdCycle, today: string) {
     .sort((a, b) => b.taken_on.localeCompare(a.taken_on))[0];
   const spend = last?.spend ?? 0;
   return { net: spend, gross: spend * y.multiplier };
+}
+/** Hoje: a parte do dia que já passou de um dia como ontem. */
+function demoResults(store: Store, y: AdCycle, today: string): RowResults {
+  const parts = demoCycleMetrics(y, today);
+  const days = parts.daily.map((r) => ({
+    ...r,
+    ...store.edits.get(`d:${r.cycle_id}:${r.day}`),
+  }));
+  const last = parts.snapshots
+    .map((x) => ({ ...x, ...store.edits.get(`s:${x.cycle_id}:${x.id}`) }))
+    .sort((a, b) => b.taken_on.localeCompare(a.taken_on))[0];
+  const sum = (key: "spend" | "conversions") =>
+    days.reduce((t, r) => t + r[key], 0);
+  const yesterday = days.find((r) => r.day === addDays(today, -1));
+  const now = new Date();
+  const part = Math.min(Math.max((now.getHours() - 6) / 18, 0.1), 1);
+  return {
+    cycle: last
+      ? { spend: last.spend, conversions: last.conversions }
+      : days.length
+        ? { spend: sum("spend"), conversions: sum("conversions") }
+        : null,
+    yesterday: yesterday
+      ? {
+          spend: yesterday.spend,
+          conversions: yesterday.conversions,
+          multiplier: yesterday.multiplier,
+        }
+      : null,
+    today:
+      yesterday && today <= y.end_date
+        ? {
+            spend: Math.round(yesterday.spend * part * 100) / 100,
+            conversions: Math.round(yesterday.conversions * part),
+            multiplier: y.multiplier,
+            read_at: new Date(now.getTime() - 25 * 60_000).toISOString(),
+          }
+        : null,
+  };
 }
 function demoMetrics(
   store: Store,

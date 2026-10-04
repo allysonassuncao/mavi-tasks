@@ -37,9 +37,10 @@ import type { FormPreset } from "./forms";
 import {
   CampaignInsightsAside,
   CampaignInsightsTab,
-  InsightsBadgeChip,
   useCampaignInsights,
 } from "./CampaignInsights";
+import { CampaignMaviCell } from "./CampaignMaviCell";
+import { demoDaily, serverDaily, type DailyRead } from "./campaign-daily";
 import {
   demoInsights,
   serverInsights,
@@ -100,6 +101,7 @@ import {
   type CampaignData,
   type CampaignPage,
   type CampaignRow,
+  type RowResults,
   type CampaignScope,
   type CampaignsBackend,
   type CycleAlert,
@@ -752,6 +754,181 @@ function DailyBudget({
   );
 }
 
+/** A leitura de hoje mais velha que isso aparece como desatualizada. */
+const STALE_TODAY_MS = 3 * 60 * 60_000;
+const count = (n: number) =>
+  n.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+const clock = (at: string) =>
+  new Date(at).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+type ResultLine = {
+  key: "today" | "yesterday" | "cycle";
+  label: string;
+  spend: number;
+  conversions: number;
+  multiplier: number;
+} | null;
+/** Hoje, ontem e o ciclo de uma linha da lista (gasto sem M e o M de cada um). */
+function resultLines(cycle: AdCycle | null, r: RowResults) {
+  const lines: Record<"today" | "yesterday" | "cycle", ResultLine> = {
+    today: r.today && { key: "today", label: "Hoje", ...r.today },
+    yesterday: r.yesterday && {
+      key: "yesterday",
+      label: "Ontem",
+      ...r.yesterday,
+    },
+    cycle:
+      r.cycle && cycle
+        ? {
+            key: "cycle",
+            label: "Ciclo",
+            ...r.cycle,
+            multiplier: cycle.multiplier,
+          }
+        : null,
+  };
+  return lines;
+}
+/** Por que a linha de hoje está vazia ou o que ela mostra (a dica do "Hoje"). */
+function todayHint(r: RowResults, now: number) {
+  if (!r.today)
+    return "Ainda sem a leitura de hoje: o MAVI lê o Meta a cada hora e o Google a cada duas, a partir das 7h.";
+  const stale = now - Date.parse(r.today.read_at) > STALE_TODAY_MS;
+  return `Hoje até ${clock(r.today.read_at)} (parcial${stale ? "; a leitura está atrasada" : ""}). O MAVI lê o Meta a cada hora e o Google a cada duas.`;
+}
+/** O dia da linha; o "Hoje" com leitura ganha o ponto ao vivo (cinza se atrasada). */
+function DayLabel({ line, hint, live, stale }: { line: string; hint?: string; live?: boolean; stale?: boolean }) {
+  return (
+    <dt title={hint}>
+      {live && <span className={`results-live${stale ? " stale" : ""}`} aria-hidden="true" />}
+      {line}
+    </dt>
+  );
+}
+
+/** "Resultados": hoje (ao vivo), ontem e o ciclo, um embaixo do outro. */
+function ResultsCell({
+  cycle,
+  results,
+  now,
+}: {
+  cycle: AdCycle | null;
+  results: RowResults;
+  now: number;
+}) {
+  if (!cycle) return <>—</>;
+  const lines = resultLines(cycle, results);
+  const unit = objectives[cycle.objective].result;
+  const stale =
+    !!results.today &&
+    now - Date.parse(results.today.read_at) > STALE_TODAY_MS;
+  return (
+    <dl className="campaign-results" aria-label={`Resultados (${unit})`}>
+      {(["today", "yesterday", "cycle"] as const).map((key) => {
+        const l = lines[key];
+        const label = { today: "Hoje", yesterday: "Ontem", cycle: "Ciclo" }[key];
+        return (
+          <div key={key}>
+            <DayLabel
+              line={label}
+              live={key === "today" && !!l}
+              stale={stale}
+              hint={
+                key === "today"
+                  ? todayHint(results, now)
+                  : key === "yesterday"
+                    ? l
+                      ? "O dia de ontem, como a sincronização da manhã gravou"
+                      : "Ontem ainda não foi sincronizado (a sincronização roda de manhã)"
+                    : "O ciclo até ontem (o último acumulado, como no cabeçalho da campanha)"
+              }
+            />
+            <dd>
+              {l ? (
+                <strong>{count(l.conversions)}</strong>
+              ) : (
+                "—"
+              )}
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+
+/**
+ * "Custo por resultado" de hoje, ontem e do ciclo, com a cor da meta do
+ * ciclo (verba ÷ meta de resultados): verde na meta ou abaixo, vermelho
+ * acima; gasto sem resultado também é vermelho. Com M ou sem M, como o resto.
+ */
+function CostCell({
+  cycle,
+  results,
+  withM,
+}: {
+  cycle: AdCycle | null;
+  results: RowResults;
+  withM: boolean;
+}) {
+  if (!cycle) return <>—</>;
+  const lines = resultLines(cycle, results);
+  const goal = goalCost(cycle);
+  // A meta sem M: a comparação não muda com o switch.
+  const goalNet = goal === null ? null : goal / cycle.multiplier;
+  const basis = withM ? "com M" : "sem M";
+  return (
+    <dl className="campaign-results cost">
+      {(["today", "yesterday", "cycle"] as const).map((key) => {
+        const l = lines[key];
+        const label = { today: "Hoje", yesterday: "Ontem", cycle: "Ciclo" }[key];
+        if (!l || (l.spend <= 0 && l.conversions <= 0))
+          return (
+            <div key={key}>
+              <dt>{label}</dt>
+              <dd>—</dd>
+            </div>
+          );
+        if (l.conversions <= 0)
+          return (
+            <div key={key}>
+              <dt>{label}</dt>
+              <dd
+                className="bad"
+                title={`Gastou ${money(withM ? l.spend * l.multiplier : l.spend)} (${basis}) sem nenhum resultado`}
+              >
+                Sem resultado
+              </dd>
+            </div>
+          );
+        const net = l.spend / l.conversions;
+        const shown = withM ? net * l.multiplier : net;
+        const diff = goalNet ? (net / goalNet - 1) * 100 : null;
+        const tone = diff === null ? "" : diff <= 0 ? "good" : "bad";
+        const hint =
+          diff === null || goal === null
+            ? `${money(shown)} por resultado (${basis}); o ciclo não tem meta de resultados`
+            : `${money(shown)} por resultado (${basis}) · ${Math.abs(Math.round(diff))}% ${diff <= 0 ? "abaixo" : "acima"} da meta de ${money(withM ? goal : goalNet!)}`;
+        return (
+          <div key={key}>
+            <dt>{label}</dt>
+            <dd className={tone} title={hint}>
+              {tone && (
+                <span className="results-arrow" aria-hidden="true">
+                  {tone === "good" ? "▼" : "▲"}
+                </span>
+              )}
+              {money(shown)}
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+
 /**
  * The list, a page at a time from the server (ad_campaign_page): by default
  * only active campaigns; the Status filter shows the new ones waiting for
@@ -853,6 +1030,44 @@ function CampaignList({
       live = false;
     };
   }, [backend, company, query, platform, attention, scope, page, tick]);
+  // Uma leitura nova de hoje (o leitor em 2º plano grava e avisa pelo
+  // Realtime): a página se relê sem piscar. Várias contas de uma vez viram
+  // uma releitura só.
+  const silent = useRef({ scope, query, platform, attention, page });
+  silent.current = { scope, query, platform, attention, page };
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const reload = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const q = silent.current;
+        backend
+          .page(company, {
+            scope: q.scope,
+            search: q.query,
+            platform: q.platform,
+            attention: q.attention && q.scope === "active",
+            limit: PAGE_SIZE,
+            offset: q.page * PAGE_SIZE,
+          })
+          .then((r) => {
+            // Os filtros mudaram enquanto relia: a releitura não vale mais.
+            const now = silent.current;
+            const same = (Object.keys(q) as (keyof typeof q)[]).every(
+              (k) => now[k] === q[k],
+            );
+            if (same) setResult(r);
+          })
+          .catch(() => {});
+      }, 1500);
+    };
+    window.addEventListener("mavi:campaign-today", reload);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("mavi:campaign-today", reload);
+    };
+  }, [backend, company]);
+  const now = Date.now();
 
   const rows = result?.rows ?? [];
   const total = result?.total ?? 0;
@@ -880,6 +1095,40 @@ function CampaignList({
       window.removeEventListener("mavi:campaign-insights", on);
     };
   }, [insights, company, pageIds]);
+  // A Leitura do dia da MAVI de cada campanha da página (desligada: sem nada).
+  const daily = useMemo(() => (demo ? demoDaily() : serverDaily), [demo]);
+  const [reads, setReads] = useState<{
+    today: string;
+    rows: Map<string, DailyRead>;
+  } | null>(null);
+  useEffect(() => {
+    let live = true;
+    const ids = pageIds ? pageIds.split(",") : [];
+    const load = () =>
+      daily
+        .reads(company, ids)
+        .then(
+          (r) =>
+            live &&
+            setReads(
+              r.enabled
+                ? { today: r.today, rows: new Map(r.rows.map((x) => [x.campaign, x])) }
+                : null,
+            ),
+        )
+        .catch(() => live && setReads(null));
+    void load();
+    // Uma leitura nova (a MAVI gravou) chega pelo mesmo aviso dos insights.
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ campaign?: string; status?: string }>).detail;
+      if (d?.status === "daily" && d.campaign && ids.includes(d.campaign)) void load();
+    };
+    window.addEventListener("mavi:campaign-insights", on);
+    return () => {
+      live = false;
+      window.removeEventListener("mavi:campaign-insights", on);
+    };
+  }, [daily, company, pageIds]);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const filtered = !!(query || platform || (attention && scope === "active"));
 
@@ -1029,22 +1278,37 @@ function CampaignList({
           aria-busy={loading}
         >
           <div className="table-scroll">
-            <table className="campaign-table stack-mobile">
+            <table className="campaign-table campaign-list-table stack-mobile">
               <thead>
                 <tr>
                   <th>Campanha</th>
                   <th>Plataforma</th>
                   <th>Status</th>
                   <th>Ciclo atual</th>
-                  <th>Verba do ciclo</th>
-                  <th title="Mídia restante do ciclo ÷ dias restantes (hoje incluído): quanto a campanha deve gastar por dia para fechar a verba">
+                  <th className="wrap">Verba do ciclo</th>
+                  <th
+                    className="wrap"
+                    title="Mídia restante do ciclo ÷ dias restantes (hoje incluído): quanto a campanha deve gastar por dia para fechar a verba"
+                  >
                     Orçamento diário
                   </th>
-                  <th>Meta do ciclo</th>
+                  <th
+                    className="wrap"
+                    title="Hoje (ao vivo, parcial), ontem e o ciclo até ontem, pelas Conversões que contam de cada ciclo"
+                  >
+                    Resultados
+                  </th>
+                  <th
+                    className="wrap"
+                    title="Gasto ÷ resultados de hoje, ontem e do ciclo. Verde: na meta do ciclo ou abaixo; vermelho: acima"
+                  >
+                    Custo por resultado
+                  </th>
+                  <th className="wrap">Meta do ciclo</th>
                   <th title="Índice de performance">M</th>
-                  {badges && (
-                    <th title="Os insights abertos da última análise da MAVI">
-                      Insights
+                  {(badges || reads) && (
+                    <th title="A Leitura do dia da MAVI (passe o mouse no ícone) e os insights abertos">
+                      MAVI
                     </th>
                   )}
                 </tr>
@@ -1059,6 +1323,7 @@ function CampaignList({
                     alert,
                     waiting,
                     spent,
+                    results,
                   }) => (
                     <tr
                       key={campaign.id}
@@ -1132,6 +1397,12 @@ function CampaignList({
                           withM={withM}
                         />
                       </td>
+                      <td data-label="Resultados">
+                        <ResultsCell cycle={cycle} results={results} now={now} />
+                      </td>
+                      <td data-label="Custo por resultado">
+                        <CostCell cycle={cycle} results={results} withM={withM} />
+                      </td>
                       <td data-label="Meta do ciclo">
                         {cycle ? (
                           <>
@@ -1151,12 +1422,18 @@ function CampaignList({
                       <td data-label="M">
                         {cycle ? cycle.multiplier.toLocaleString("pt-BR") : "—"}
                       </td>
-                      {badges && (
-                        <td data-label="Insights">
-                          <InsightsBadgeChip
-                            badge={badges.get(campaign.id)}
-                            onOpen={() =>
-                              navigate(`${href(campaign.id)}?aba=insights`)
+                      {(badges || reads) && (
+                        <td data-label="MAVI">
+                          <CampaignMaviCell
+                            read={reads?.rows.get(campaign.id)}
+                            badge={badges?.get(campaign.id)}
+                            today={reads?.today || today}
+                            onOpen={(insights) =>
+                              navigate(
+                                insights
+                                  ? `${href(campaign.id)}?aba=insights`
+                                  : href(campaign.id),
+                              )
                             }
                           />
                         </td>

@@ -1,10 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { adsEnv } from "./_ads.js";
 import { handleAdsSync, syncEnv } from "./_ads-sync.js";
+import { handleAdsToday } from "./_ads-today.js";
 import { handleMakeLeads } from "./_make-leads.js";
 
 /**
- * Campanhas: the daily sync of the cycles' numbers (api/_ads-sync.ts) and,
+ * Campanhas: the daily sync of the cycles' numbers (api/_ads-sync.ts), the
+ * list's "hoje" reader ({"today": true}, api/_ads-today.ts) and,
  * at /api/make-leads (vercel.json), the leads the Make server sends
  * (api/_make-leads.ts).
  */
@@ -38,7 +40,12 @@ export default async function handler(
           (req.headers["x-mavi-secret"] as string | undefined) ?? null,
           env,
         )
-      : await handleAdsSync(
+      : body?.today === true
+        ? await handleAdsToday(
+            (req.headers["authorization"] as string | undefined) ?? null,
+            env,
+          )
+        : await handleAdsSync(
           body,
           (req.headers["authorization"] as string | undefined) ?? null,
           env,

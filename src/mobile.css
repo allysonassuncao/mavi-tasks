@@ -669,6 +669,13 @@ label input.ui-search-select-native {
   .campaign-actions {
     flex-wrap: wrap;
   }
+  /* Lista: no cartão, o custo vem com o dia de cada linha (Hoje, Ontem, Ciclo). */
+  .campaign-results.cost > div {
+    grid-template-columns: 44px auto;
+  }
+  .campaign-results.cost dt {
+    display: inline-flex;
+  }
 }
 
 @media (max-width: 900px) {

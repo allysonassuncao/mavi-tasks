@@ -239,6 +239,7 @@ export type AiFeature =
   | "campaign_insights_check"
   | "campaign_creative_image"
   | "campaign_creative_transcribe"
+  | "campaign_daily"
   | "mavi_judge"
   | "mavi_judge_check";
 
@@ -646,6 +647,14 @@ export const FEATURES: FeatureInfo[] = [
     transcription: true,
     note: "O áudio dos vídeos dos anúncios (até 24 MB), uma vez por vídeo. Um modelo barato de transcrição basta (ex.: Whisper no Groq).",
   },
+  {
+    id: "campaign_daily",
+    group: "Campanhas",
+    label: "Leitura do dia: a frase da MAVI na lista de Campanhas",
+    conversation: false,
+    env: "CAMPAIGN_DAILY_MODEL",
+    note: "Toda manhã, uma frase curta por campanha ativa (ciclo × meta, ontem, hoje, públicos, conjuntos, anúncios e copys). Uma chamada por campanha por dia: um modelo rápido e barato basta. Sem regra, usa o modelo dos insights. Conta no teto por leitura e no teto do mês dos insights.",
+  },
 ];
 
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
@@ -760,6 +769,8 @@ export function serverModel(
       return "~typesafe/jev-latest";
     case "campaign_creative_image":
       return env.CAMPAIGN_CREATIVE_IMAGE_MODEL || env.AI_MODEL || fallback;
+    case "campaign_daily":
+      return env.CAMPAIGN_DAILY_MODEL || env.CAMPAIGN_INSIGHTS_MODEL || env.AI_MODEL || fallback;
     case "campaign_creative_transcribe":
       return env.WHATSAPP_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
     case "client_radar_themes":

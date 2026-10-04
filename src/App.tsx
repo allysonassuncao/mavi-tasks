@@ -1559,6 +1559,11 @@ export default function App() {
             live.current.loadInbox();
           return;
         }
+        // Campanhas › lista: uma leitura nova de hoje (resultados ao vivo).
+        if (change.kind === "campaign_today") {
+          window.dispatchEvent(new CustomEvent("mavi:campaign-today"));
+          return;
+        }
         // Campanhas › Insights da MAVI: o painel da campanha se recarrega.
         if (change.kind === "campaign_insights") {
           window.dispatchEvent(

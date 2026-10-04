@@ -214,7 +214,7 @@ export function missingSnapshots(t: SyncTarget) {
  *    splits the funnel by category.
  */
 type MetaAction = { action_type: string; value: string };
-type MetaRow = {
+export type MetaRow = {
   date_start?: string;
   spend?: string;
   impressions?: string;
@@ -291,7 +291,11 @@ export function metaResults(
 }
 
 /** A row's totals with the rule of `day` (a period: the rule in force). */
-function metaTotals(t: SyncTarget, row: MetaRow, day: string): Totals {
+export function metaTotals(
+  t: Pick<SyncTarget, "objective" | "destination" | "meta_conversions">,
+  row: MetaRow,
+  day: string,
+): Totals {
   return {
     spend: num(row.spend),
     impressions: num(row.impressions),
@@ -411,7 +415,11 @@ async function readMeta(
 }
 
 // ------------------------------------------------------------ Google Ads
-async function googleAccess(env: AdsEnv, fetchImpl: Fetch, t: SyncTarget) {
+export async function googleAccess(
+  env: AdsEnv,
+  fetchImpl: Fetch,
+  t: Pick<SyncTarget, "google_token">,
+) {
   if (!t.google_token)
     throw new AdsError(
       409,
@@ -444,7 +452,7 @@ async function googleAccess(env: AdsEnv, fetchImpl: Fetch, t: SyncTarget) {
   return body.access_token;
 }
 
-type GoogleRow = {
+export type GoogleRow = {
   segments?: {
     date?: string;
     conversionAction?: string;

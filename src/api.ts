@@ -1332,6 +1332,8 @@ export type LiveChange =
   | { kind: "radar"; report?: string; status?: string }
   /** Campanhas › Insights da MAVI: uma análise entrou na fila, ficou pronta ou falhou. */
   | { kind: "campaign_insights"; campaign: string; run: string; status: string }
+  /** Campanhas › lista: o leitor em 2º plano gravou uma leitura nova de hoje. */
+  | { kind: "campaign_today" }
   /** Financeiro › Mídia: lançamentos ou comprovantes dessas contas (null: de muitas). */
   | { kind: "media"; contracts: string[] | null }
   /** Anotações do cliente: uma anotação criada, salva, excluída ou restaurada. */

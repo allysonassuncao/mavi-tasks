@@ -19,6 +19,7 @@ import { MaviLearning } from "./MaviLearning";
 import { TemperatureSettings } from "./TemperatureSettings";
 import { RadarSettings } from "./RadarSettings";
 import { CampaignInsightSettings } from "./CampaignInsightSettings";
+import { CampaignDailySettings } from "./CampaignDailySettings";
 import { AiPowersPanel } from "./AiPowersPanel";
 import { NoticeAnimationAdmin } from "./NoticeAnimationAdmin";
 import { noticesApi } from "./notices";
@@ -104,7 +105,10 @@ export function AiPage({
       ) : tab === "radar" ? (
         <RadarSettings company={company} data={data} notify={notify} />
       ) : tab === "campanhas" ? (
-        <CampaignInsightSettings company={company} data={data} notify={notify} />
+        <>
+          <CampaignInsightSettings company={company} data={data} notify={notify} />
+          <CampaignDailySettings company={company} demo={demo} notify={notify} />
+        </>
       ) : tab === "termometro" ? (
         <TemperatureSettings company={company} data={data} notify={notify} />
       ) : tab === "aprendizado" ? (

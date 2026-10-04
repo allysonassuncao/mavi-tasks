@@ -19,6 +19,7 @@ import { handleTemperatureWorker } from "./_temperature.js";
 import { handleRadarWorker } from "./_radar.js";
 import { handlePersonalRadarWorker } from "./_personal-radar.js";
 import { handleCampaignInsightsWorker } from "./_campaign-insights.js";
+import { handleCampaignDailyWorker } from "./_campaign-daily.js";
 import { adsEnv } from "./_ads.js";
 import { crmEnv } from "./_crm.js";
 import { handlePersonalDraft } from "./_personal-assistant.js";
@@ -446,6 +447,22 @@ export default async function handler(
         insightsBudgetMs: Number(process.env.CAMPAIGN_INSIGHTS_BUDGET_MS) || 240_000,
       };
       const result = await handleCampaignInsightsWorker(authorization, env, aiDeps(env));
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+    // Campanhas › lista: a Leitura do dia da MAVI (funcionalidade
+    // 'campaign_daily'; sem regra, o modelo dos insights). Uma por campanha
+    // ativa por dia, depois da sincronização da manhã.
+    if (action === "ai-campaign-daily") {
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("campaign_daily", process.env),
+        ads: adsEnv(),
+        crm: crmEnv(),
+        dailyBudgetMs: Number(process.env.CAMPAIGN_DAILY_BUDGET_MS) || 240_000,
+      };
+      const result = await handleCampaignDailyWorker(authorization, env, aiDeps(env));
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;
