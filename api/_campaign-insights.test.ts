@@ -512,7 +512,7 @@ describe("worker dos insights", () => {
     const read = vi.fn(async (_env: unknown, _fetch: unknown, m: InsightMaterial) => analysisOf([campaign(30, 0)], m));
     let t = 0;
     const stats = await runCampaignInsights(env, { fetch: fetchImpl, llm, embed: vi.fn(), now: () => (t += 60_000) }, read);
-    expect(stats).toEqual({ done: 1, skipped: 0, deferred: 0, failed: 0, insights: 3, learned: 0 });
+    expect(stats).toEqual({ done: 1, skipped: 0, deferred: 0, failed: 0, insights: 3, learned: 0, watched: 0 });
     const store = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_store"))!.body;
     expect(store.p_secret).toBe(env.workerSecret);
     const result = store.p_result;

@@ -513,6 +513,40 @@ export function CampaignInsightSettings({
       </section>
 
       <section className="panel cins-block">
+        <h3>Vigia diária</h3>
+        <p className="cins-help">
+          Todo dia, logo depois da sincronização da manhã, a vigia confere os números de cada campanha ativa sem usar a
+          MAVI (custo zero) e avisa os responsáveis só quando aparece algo novo. O aviso fica no topo dos insights da
+          campanha e sai sozinho quando a situação passa.
+        </p>
+        <label className="cins-check">
+          <Checkbox checked={draft.watch_enabled} onCheckedChange={(v) => set({ watch_enabled: v === true })} />
+          <span>
+            <strong>Conferir os números do dia</strong>
+            <small>
+              Gasto de ontem no dobro do normal, conversões que pararam de chegar há 2 dias, custo por resultado quase
+              dobrado e campanha que parou de gastar.
+            </small>
+          </span>
+        </label>
+        <label className="cins-check">
+          <Checkbox
+            checked={draft.watch_api}
+            disabled={!draft.watch_enabled}
+            onCheckedChange={(v) => set({ watch_api: v === true })}
+          />
+          <span>
+            <strong>Ler as plataformas e o CRM uma vez por dia</strong>
+            <small>
+              Anúncios reprovados (Meta e Google), campanha do Google limitada pela verba com o custo na meta, e
+              conversões na plataforma sem nenhum lead no MakeCRM nos últimos 2 dias. Poucas chamadas por campanha,
+              dentro dos mesmos limites das análises.
+            </small>
+          </span>
+        </label>
+      </section>
+
+      <section className="panel cins-block">
         <h3>Sem leitura à toa e limites das plataformas</h3>
         <p className="cins-help">
           A leitura é enxuta (uma chamada por nível no Meta e uma consulta por visão no Google, com todas as

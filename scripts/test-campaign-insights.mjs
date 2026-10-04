@@ -768,6 +768,86 @@ await check("Fase 6: a etapa do CRM que importa e a meta de custo por campanha",
   assert.equal((await rpc("campaign_insights", [A, campaign, 8])).crm_goal, null);
 });
 
+await check("Fase 7: a vigia diária pelos números do dia e a leitura das plataformas", async () => {
+  await sql(`delete from notifications where kind='campaign_insight'`);
+  await sql(`delete from campaign_insight_runs`);
+  const day = (n) => shift(-n);
+  const sync = () => sql(`insert into ad_sync_runs(company_id, campaign_id, cycle_id, trigger, status) values ($1,$2,$3,'schedule','ok')`, [A, campaign, cycle]);
+  const watch = () => sql(`select fingerprint, status, seen_count, source, title from campaign_insights where source='watch' order by created_at`);
+  // Ontem: R$ 300 com os mesmos 2 resultados (a média era R$ 100).
+  await sql(`update ad_daily_metrics set spend=300 where campaign_id=$1 and day=$2`, [campaign, day(1)]);
+  await sync();
+  let rows = await watch();
+  assert.deepEqual(rows.map((r) => [r.fingerprint, r.status]), [["problem#total#vigia-dia-gasto-disparou", "new"]]);
+  const notes = await sql(`select user_id, title, body from notifications where kind='campaign_insight'`);
+  assert.deepEqual(notes.map((n) => [n.user_id, n.title, n.body]), [[trafego, "Vigia da MAVI: Motion - Meta", "O gasto de ontem foi o dobro do normal"]]);
+  // A fila da leitura das plataformas: uma por campanha por dia.
+  await sync();
+  assert.equal((await sql(`select count(*)::int as n from mavi_private.campaign_watch_queue`))[0].n, 1);
+  rows = await watch();
+  assert.equal(rows[0].seen_count, 2);
+  assert.equal((await sql(`select count(*)::int as n from notifications where kind='campaign_insight'`))[0].n, 1);
+  await as(trafego);
+  let v = await rpc("campaign_insights", [A, campaign, 8]);
+  assert.equal(v.current[0].source, "watch");
+  assert.equal(v.current[0].evidence[0].window, "yesterday");
+  assert.equal(v.watch, true);
+  // Voltou ao normal: resolvido sozinho, com o registro.
+  await sql(`update ad_daily_metrics set spend=100 where campaign_id=$1 and day=$2`, [campaign, day(1)]);
+  await sync();
+  rows = await watch();
+  assert.deepEqual(rows.map((r) => r.status), ["resolved"]);
+  const [{ id: spikeId }] = await sql(`select id from campaign_insights where source='watch'`);
+  await as(trafego);
+  assert.deepEqual((await rpc("campaign_insight_events", [A, spikeId])).map((e) => e.action), ["resolved"]);
+  // Conversões pararam: 2 dias gastando sem nenhuma.
+  await sql(`update ad_daily_metrics set conversions=0 where campaign_id=$1 and day in ($2,$3)`, [campaign, day(1), day(2)]);
+  await sync();
+  rows = await watch();
+  assert.ok(rows.some((r) => r.fingerprint === "tracking#total#vigia-dia-conversoes-pararam" && r.status === "new"));
+  // A leitura das plataformas: o worker pega, grava o que achou; vazio resolve; nulo não muda nada.
+  await as(null);
+  const [item] = await worker("ai_campaign_watch_claim", [SECRET, 5]);
+  assert.equal(item.campaign.name, "Motion - Meta");
+  assert.deepEqual([Number(item.d2.conversions), Number(item.d2.spend), item.yesterday], [0, 200, day(1)]);
+  assert.equal(Number(item.cycle.goal_cpa), 20);
+  assert.equal((await worker("ai_campaign_watch_claim", [SECRET, 5])).length, 0);
+  const reproved = {
+    kind: "problem", priority: "high", title: "2 anúncios reprovados", body: "…", action: "Corrija",
+    evidence: [{ label: "Anúncios reprovados", value: 2, unit: "count", window: "now", entity: "total", name: "Motion - Meta", metric: "disapproved_ads" }],
+    fingerprint: "problem#total#vigia-api-reprovados",
+  };
+  assert.equal(await worker("ai_campaign_watch_store", [SECRET, A, campaign, item.day, JSON.stringify([reproved, { ...reproved, fingerprint: "problem#total#vigia-dia-intruso" }]), ""]), 1);
+  assert.deepEqual((await sql(`select status from mavi_private.campaign_watch_queue`)).map((r) => r.status), ["done"]);
+  await sql(`update mavi_private.campaign_watch_queue set status='queued', attempts=0`);
+  await worker("ai_campaign_watch_claim", [SECRET, 5]);
+  await worker("ai_campaign_watch_store", [SECRET, A, campaign, item.day, null, "não leu"]);
+  rows = await watch();
+  assert.equal(rows.find((r) => r.fingerprint === "problem#total#vigia-api-reprovados").status, "new");
+  await sql(`update mavi_private.campaign_watch_queue set status='queued', attempts=0`);
+  await worker("ai_campaign_watch_claim", [SECRET, 5]);
+  await worker("ai_campaign_watch_store", [SECRET, A, campaign, item.day, "[]", ""]);
+  rows = await watch();
+  assert.equal(rows.find((r) => r.fingerprint === "problem#total#vigia-api-reprovados").status, "resolved");
+  // Os números do dia continuam abertos (outro grupo).
+  assert.equal(rows.find((r) => r.fingerprint === "tracking#total#vigia-dia-conversoes-pararam").status, "new");
+  // Falha: volta para a fila; limite da plataforma espera sem gastar tentativa.
+  await sql(`update mavi_private.campaign_watch_queue set status='queued', attempts=0, claimed_until=null`);
+  await worker("ai_campaign_watch_claim", [SECRET, 5]);
+  await worker("ai_campaign_watch_fail", [SECRET, A, campaign, item.day, "cota", new Date(Date.now() + 3600e3).toISOString()]);
+  assert.deepEqual((await sql(`select status, attempts from mavi_private.campaign_watch_queue`))[0], { status: "queued", attempts: 0 });
+  // Vigia desligada: a sincronização não checa nada.
+  await as(admin);
+  const st = await rpc("save_campaign_insight_settings", [A, JSON.stringify({ watch_enabled: false })]);
+  assert.equal(st.settings.watch_enabled, false);
+  await sql(`delete from campaign_insights where source='watch'`);
+  await sync();
+  assert.equal((await watch()).length, 0);
+  await as(admin);
+  await rpc("save_campaign_insight_settings", [A, JSON.stringify({ watch_enabled: true })]);
+  await sql(`update ad_daily_metrics set conversions=2 where campaign_id=$1`, [campaign]);
+});
+
 await check("a campanha que não pode ser analisada diz por quê", async () => {
   await sql(`update ad_campaigns set status='inactive' where id=$1`, [campaign]);
   await as(trafego);

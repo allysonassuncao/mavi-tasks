@@ -34,6 +34,7 @@ import {
 import { modelPrice } from "./_social-leads.js";
 import { readCreatives, type CreativeAd } from "./_campaign-creatives.js";
 import { learnFromFeedback } from "./_campaign-insight-learning.js";
+import { watchPlatforms } from "./_campaign-watch.js";
 import { meteredFetch, newApiMeter, type ApiMeter, type Throttle } from "./_ads-meter.js";
 
 /**
@@ -1743,7 +1744,7 @@ async function companyOf(env: AiEnv, deps: AiDeps, id: string): Promise<Company>
 }
 
 /** O Google Ads da agência com o refresh token selado (sem pessoa logada). */
-async function googleSearchFor(env: AdsEnv, fetchImpl: Fetch, refreshCipher: string) {
+export async function googleSearchFor(env: AdsEnv, fetchImpl: Fetch, refreshCipher: string) {
   if (!env.tokenKey) throw new InsightsError(503, "Falta GOOGLE_TOKEN_KEY_ADS no servidor.", true);
   const res = await fetchImpl("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -2261,10 +2262,18 @@ export async function runCampaignInsights(
   creatives: typeof readCreatives = readCreatives,
   /** O aprendizado com as avaliações (trocado nos testes). */
   learn: typeof learnFromFeedback = learnFromFeedback,
+  /** A leitura leve da vigia diária (trocada nos testes). */
+  watch: typeof watchPlatforms = watchPlatforms,
 ) {
   const now = deps.now ?? Date.now;
   const deadline = now() + (env.insightsBudgetMs ?? 240_000);
-  const stats = { done: 0, skipped: 0, deferred: 0, failed: 0, insights: 0, learned: 0 };
+  const stats = { done: 0, skipped: 0, deferred: 0, failed: 0, insights: 0, learned: 0, watched: 0 };
+  // A vigia diária (sem a MAVI; poucas chamadas por campanha): até 1 minuto.
+  try {
+    stats.watched = (await watch(env, deps, Math.min(deadline - 120_000, now() + 60_000))).done;
+  } catch (e) {
+    console.error("campaign insights · vigia", (e as Error).message);
+  }
   // Primeiro, o aprendizado de uma empresa com avaliações paradas (rápido; nunca trava as análises).
   try {
     const r = await learn(env, deps);

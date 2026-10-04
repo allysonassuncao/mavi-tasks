@@ -622,7 +622,11 @@ export function InsightCard({
         <span className="insight-basis" title={basisHint(insight.money_basis)}>
           Valores {basisLabel(insight.money_basis)}
         </span>
-        {insight.source === "rule" ? (
+        {insight.source === "watch" ? (
+          <span title="A vigia diária confere os números todo dia, sem a MAVI; o aviso sai sozinho quando a situação passa">
+            <Radar size={12} aria-hidden="true" /> Vigia diária
+          </span>
+        ) : insight.source === "rule" ? (
           <span title="Encontrado pelas regras do sistema, sem modelo">Detecção automática</span>
         ) : insight.confidence !== null ? (
           <span title="O Jev conferiu que as evidências sustentam o insight">

@@ -15,7 +15,8 @@ import type { Snapshot } from "./types";
 export type InsightKind = "highlight" | "opportunity" | "problem" | "tracking";
 export type InsightPriority = "high" | "medium" | "low";
 export type MoneyBasis = "net" | "gross";
-export type InsightWindow = "cycle" | "d7" | "d15" | "d30" | "since_last";
+/** yesterday, d2, prev7 e now: os avisos da vigia diária. */
+export type InsightWindow = "cycle" | "d7" | "d15" | "d30" | "since_last" | "yesterday" | "d2" | "prev7" | "now";
 export type InsightUnit = "money" | "count" | "pct" | "ratio" | "days";
 export type InsightLevel =
   | "total"
@@ -47,7 +48,8 @@ export type CampaignInsight = {
   action: string;
   evidence: InsightEvidence[];
   target: { key: string; level: InsightLevel; name: string; parent?: string } | null;
-  source: "rule" | "mavi";
+  /** watch: a vigia diária (sem a MAVI). */
+  source: "rule" | "mavi" | "watch";
   money_basis: MoneyBasis;
   confidence: number | null;
   status: InsightStatus;
@@ -67,7 +69,8 @@ export type CampaignInsight = {
   tasks?: { id: string; title: string; status: string; due_date: string | null; assignee_name: string | null }[];
 };
 /** expired: aberto sem uso pelo prazo do Painel da MAVI (padrão 15 dias) (sai da tela; no histórico, só a contagem). */
-export type InsightStatus = "new" | "applied" | "dismissed" | "snoozed" | "expired";
+/** resolved: aviso da vigia que passou sozinho. */
+export type InsightStatus = "new" | "applied" | "dismissed" | "snoozed" | "expired" | "resolved";
 export type InsightEffect = {
   days: number;
   before: Record<string, number | null>;
@@ -138,6 +141,8 @@ export type CampaignInsightsView = {
   can_set_owners?: boolean;
   /** A etapa do CRM que importa nesta campanha e a meta de custo por lead nela. */
   crm_goal?: CrmGoal | null;
+  /** A vigia diária está ligada. */
+  watch?: boolean;
   /** Por que a campanha não pode ser analisada agora (nulo: pode). */
   blocker: string | null;
   capped: boolean;
@@ -205,6 +210,9 @@ export type InsightSettings = {
   min_results: number;
   /** Insights por análise (os mais importantes). */
   max_insights: number;
+  /** A vigia diária pelos números do dia e a leitura leve das plataformas e do CRM. */
+  watch_enabled: boolean;
+  watch_api: boolean;
   updated_by?: string | null;
   updated_at?: string;
 };
@@ -254,6 +262,10 @@ export const WINDOW_LABELS: Record<InsightWindow, string> = {
   d15: "15 dias",
   d30: "30 dias",
   since_last: "desde a última análise",
+  yesterday: "ontem",
+  d2: "últimos 2 dias",
+  prev7: "7 dias antes",
+  now: "agora",
 };
 export const LEVEL_LABELS: Record<InsightLevel, string> = {
   total: "Campanha",
@@ -456,7 +468,7 @@ export type CrmGoalInput = {
 };
 export type CrmGoal = CrmGoalInput & { updated_at?: string; updated_by_name?: string | null };
 export type InsightEvent = {
-  action: "applied" | "dismissed" | "snoozed" | "reopened" | "returned" | "task" | "expired";
+  action: "applied" | "dismissed" | "snoozed" | "reopened" | "returned" | "task" | "expired" | "resolved";
   reason: string;
   detail: Record<string, unknown>;
   created_at: string;
@@ -668,6 +680,8 @@ export const DEFAULT_SETTINGS: InsightSettings = {
   expire_days: 15,
   min_results: 10,
   max_insights: 4,
+  watch_enabled: true,
+  watch_api: true,
 };
 function demoSettings(): InsightSettingsView {
   return {
@@ -784,7 +798,31 @@ export function demoInsights(): InsightsBackend {
         wait_until: null,
         pending: null,
         latest_run: "dr-1",
-        current: list,
+        current: [
+          {
+            ...list[0],
+            id: "dw-1",
+            run_id: null as unknown as string,
+            last_seen_run: null as unknown as string,
+            kind: "problem",
+            priority: "high",
+            source: "watch",
+            confidence: null,
+            title: "O gasto de ontem foi o dobro do normal",
+            body: "Ontem a campanha investiu R$ 412,30, contra a média de R$ 186,00 por dia na semana anterior, e os resultados não acompanharam. Pode ser uma verba alterada, uma regra automática ou o leilão mais caro.",
+            action:
+              "Confira no Gerenciador se alguém mudou a verba ou criou uma regra automática\nSe não foi de propósito, volte a verba ao valor normal\nAcompanhe o dia de hoje antes de mexer em mais nada",
+            evidence: [
+              { label: "Investimento", value: 412.3, unit: "money", window: "yesterday", entity: "total", name: "Motion", metric: "spend" },
+              { label: "Investimento médio por dia", value: 186, unit: "money", window: "prev7", entity: "total", name: "Motion", metric: "spend_avg" },
+              { label: "Resultados", value: 3, unit: "count", window: "yesterday", entity: "total", name: "Motion", metric: "results" },
+            ],
+            target: null,
+            seen_count: 1,
+            created_at: ago(120),
+          },
+          ...list,
+        ],
         applied: [
           {
             ...list[2],
