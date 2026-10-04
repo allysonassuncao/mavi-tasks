@@ -1,0 +1,73 @@
+/* Campanhas › Plataforma × MakeCRM (PlatformCrm.tsx). */
+.pcrm-notice {
+  margin: 10px 14px 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #eef4fe;
+  color: #1c3d6e;
+  font-size: 0.8rem;
+}
+.pcrm-notice.bad {
+  background: #fdecea;
+  color: #8a1c14;
+}
+.pcrm-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: #3b82f6;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.pcrm-link:hover {
+  color: #1d4ed8;
+}
+.pcrm-link:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.pcrm-unmatched {
+  margin: 10px 14px 14px;
+  font-size: 0.8rem;
+}
+.pcrm-unmatched-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: #fff7e0;
+  color: #6b4e00;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.pcrm-hint {
+  margin: 8px 0;
+  color: #65676b;
+}
+.pcrm-unmatched-table {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 900px;
+}
+.pcrm-unmatched-table th,
+.pcrm-unmatched-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #eceef0;
+  text-align: left;
+}
+.pcrm-unmatched-table td:first-child {
+  max-width: 560px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #fffbeb;
+}
+.pcrm-unmatched-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

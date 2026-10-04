@@ -119,10 +119,12 @@ import {
   type GooglePlatformBackend,
 } from "./google-platform";
 import {
+  cached,
   demoPlatform,
   serverPlatform,
   type PlatformBackend,
 } from "./campaign-platform";
+import type { PlatformCrm } from "./platform-crm";
 import {
   demoReports,
   supabaseReports,
@@ -131,7 +133,14 @@ import {
 import { GoogleConversions, MetaConversions } from "./CampaignConversions";
 import { CampaignAlerts, type AlertCampaignOption } from "./CampaignAlerts";
 import { CampaignMavi } from "./CampaignMavi";
-import { CrmConnections, demoCrm, OpenInCrm, serverCrm, type CrmBackend } from "./CampaignCrm";
+import {
+  CrmConnections,
+  demoCrm,
+  OpenInCrm,
+  openCrmTab,
+  serverCrm,
+  type CrmBackend,
+} from "./CampaignCrm";
 import {
   CampaignMediaBalance,
   CycleMediaFit,
@@ -307,6 +316,30 @@ export function CampaignsPage({
       />
     ) : null;
   };
+  // Plataforma: the CRM's deals per UTM of the campaign's client.
+  const platformCrm = (contract: string): PlatformCrm | null => {
+    const client = contractParts(data, contract).client;
+    if (!client) return null;
+    return {
+      linked: client.id in crmLinks,
+      clientName: client.name,
+      load: (since, until, fresh) =>
+        cached(
+          JSON.stringify(["crm-utm", company, client.id, since, until]),
+          () => crm.utm(company, client.id, since, until),
+          fresh,
+        ),
+      open: (next) =>
+        void openCrmTab({
+          backend: crm,
+          company,
+          client: client.id,
+          clientName: client.name,
+          notify,
+          next,
+        }),
+    };
+  };
   // Back from Facebook or Google (api/ads-callback): say how it went.
   const [connection, setConnection] = useUrlState<string>("conexao", "");
   // A Facebook login waiting for the client's accounts to be ticked.
@@ -382,6 +415,7 @@ export function CampaignsPage({
           onMavi={(open) => setMaviOpen(open ? "1" : "")}
           onAlerts={() => setAlertsView("lista")}
           crm={crmButton(campaign.contract_id)}
+          platformCrm={platformCrm(campaign.contract_id)}
           link={window.location.origin + href(campaign.id)}
           onBack={() =>
             navigate(
@@ -1156,6 +1190,7 @@ function CampaignDetail({
   onMavi,
   onAlerts,
   crm,
+  platformCrm,
   link,
   onBack,
   onEdit,
@@ -1187,6 +1222,8 @@ function CampaignDetail({
   onAlerts: () => void;
   /** Abrir no CRM (null: the client isn't linked to the MakeCRM). */
   crm: ReactNode;
+  /** Plataforma: the client's MakeCRM numbers (null: no client). */
+  platformCrm: PlatformCrm | null;
   /** The campaign's own address, to share. */
   link: string;
   onBack: () => void;
@@ -1408,6 +1445,7 @@ function CampaignDetail({
               current={current}
               backend={platform}
               today={today}
+              crm={platformCrm}
             />
           ) : campaign.platform === "google" ? (
             <GooglePlatform
@@ -1416,6 +1454,7 @@ function CampaignDetail({
               current={current}
               backend={googlePlatform}
               today={today}
+              crm={platformCrm}
             />
           ) : null
         }

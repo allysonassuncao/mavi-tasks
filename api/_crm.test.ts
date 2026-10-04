@@ -18,7 +18,7 @@ type Call = { url: string; body: any; headers: Record<string, string> };
 function fake(answer: (url: string, body: any) => [number, unknown]) {
   const calls: Call[] = [];
   const impl = (async (url: string, init: RequestInit) => {
-    const body = JSON.parse(String(init.body));
+    const body = init.body ? JSON.parse(String(init.body)) : null;
     calls.push({ url, body, headers: init.headers as Record<string, string> });
     const [status, out] = answer(url, body);
     return new Response(JSON.stringify(out), { status });
@@ -200,5 +200,109 @@ describe("Abrir no CRM", () => {
       crmUrl: "https://x.test",
     });
     expect(crmEnv({}).crmUrl).toBe("https://app.usemakecrm.com.br");
+  });
+});
+
+describe("Oportunidades por UTM (Plataforma)", () => {
+  const deals = {
+    campaigns: [["[774] Leads", 5, 2, 1, 3000]],
+    adsets: [["[774] Leads", "[001] Aberto", 4, 2, 1, 3000], ["ruim", 1]],
+    ads: [["[774] Leads", "[001] Aberto", "AD002", 6, 2, 1, 3000]],
+  };
+
+  it("lê a ligação com o login da pessoa e pede ao MakeCRM o período no dia de Brasília", async () => {
+    const f = fake((url) =>
+      url.includes("/rest/v1/client_crm_links")
+        ? [200, [{ crm_company_id: crmCompany }]]
+        : [200, deals],
+    );
+    const r = await handleCrm(
+      { action: "utm", company, client, since: "2026-09-27", until: "2026-10-03" },
+      auth,
+      env,
+      f.impl,
+    );
+    expect(r).toEqual({
+      status: 200,
+      body: {
+        linked: true,
+        campaigns: deals.campaigns,
+        // Linhas fora do formato ficam de fora.
+        adsets: [deals.adsets[0]],
+        ads: deals.ads,
+      },
+    });
+    const [db, crm] = f.calls;
+    expect(db.url).toBe(
+      `https://db.test/rest/v1/client_crm_links?select=crm_company_id&company_id=eq.${company}&client_id=eq.${client}`,
+    );
+    expect(db.headers.Authorization).toBe(auth);
+    expect(crm.headers["X-Mavi-Secret"]).toBe(SECRET);
+    expect(JSON.stringify(crm)).not.toContain("user-jwt");
+    expect(crm.body).toEqual({
+      action: "utm-deals",
+      company_id: crmCompany,
+      date_start: "2026-09-27T00:00:00.000-03:00",
+      date_end: "2026-10-03T23:59:59.999-03:00",
+    });
+  });
+
+  it("cliente sem ligação (ou que a pessoa não vê): nada vai ao MakeCRM", async () => {
+    const f = fake(() => [200, []]);
+    const r = await handleCrm(
+      { action: "utm", company, client, since: "2026-09-27", until: "2026-10-03" },
+      auth,
+      env,
+      f.impl,
+    );
+    expect(r).toEqual({ status: 200, body: { linked: false } });
+    expect(f.calls).toHaveLength(1);
+  });
+
+  it("\"Máximo\" pede desde o começo; período inválido nem consulta", async () => {
+    const f = fake((url) =>
+      url.includes("/rest/v1/") ? [200, [{ crm_company_id: crmCompany }]] : [200, deals],
+    );
+    await handleCrm({ action: "utm", company, client, since: "", until: "2026-10-03" }, auth, env, f.impl);
+    expect(f.calls[1].body.date_start).toBe("2000-01-01T00:00:00.000-03:00");
+    const g = fake(() => [200, []]);
+    for (const p of [
+      { since: "2026-10-05", until: "2026-10-03" },
+      { since: "ontem", until: "2026-10-03" },
+      { since: "2026-10-01", until: "" },
+    ])
+      expect((await handleCrm({ action: "utm", company, client, ...p }, auth, env, g.impl)).status).toBe(400);
+    expect(g.calls).toHaveLength(0);
+  });
+
+  it("o erro do MakeCRM chega à pessoa", async () => {
+    const f = fake((url) =>
+      url.includes("/rest/v1/")
+        ? [200, [{ crm_company_id: crmCompany }]]
+        : [503, { error: "Falta criar a consulta mavi_utm_deals no banco do MakeCRM." }],
+    );
+    const r = await handleCrm(
+      { action: "utm", company, client, since: "2026-09-27", until: "2026-10-03" },
+      auth,
+      env,
+      f.impl,
+    );
+    expect(r.status).toBe(502);
+    expect(r.body.error).toMatch(/mavi_utm_deals/);
+  });
+
+  it("abre o funil filtrado; outro destino é recusado", async () => {
+    const f = fake((url) =>
+      url.includes("/rpc/") ? [200, opened] : [200, { url: "https://crm.test/entrar-mavi#token_hash=abc&next=x" }],
+    );
+    const next = "/pipeline-v2?utmCampaign=%5B774%5D+Leads&createdFrom=2026-09-27T03%3A00%3A00.000Z";
+    const r = await handleCrm({ action: "open", company, client, next }, auth, env, f.impl);
+    expect(r.status).toBe(200);
+    expect(f.calls[1].body.next).toBe(next);
+    for (const bad of ["https://evil.test/", "//evil.test", "/settings", "/pipeline-v2?a=1#x"])
+      expect(
+        (await handleCrm({ action: "open", company, client, next: bad }, auth, env, f.impl)).status,
+      ).toBe(400);
+    expect(f.calls).toHaveLength(2);
   });
 });

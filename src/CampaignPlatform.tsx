@@ -51,6 +51,15 @@ import {
   type PlatformList,
   type PlatformRow,
 } from "./campaign-platform";
+import {
+  crmPipelinePath,
+  crmUnmatched,
+  isCrmColumn,
+  withCrm,
+  type CrmKey,
+  type PlatformCrm,
+} from "./platform-crm";
+import { CrmLeadsLink, CrmNotice, CrmUnmatched, useCrmUtm } from "./PlatformCrm";
 import "./campaign-platform.css";
 
 /**
@@ -58,7 +67,8 @@ import "./campaign-platform.css";
  * shows it (read only): campaigns, ad sets and ads, the column presets, the
  * breakdowns, the period, the selection that filters the next level, the
  * charts of a row and the ad's preview. The campaigns linked to this MAVI
- * campaign are marked.
+ * campaign are marked. With the client linked to the MakeCRM, the CRM's
+ * opportunities and wins per UTM come as columns (src/platform-crm.ts).
  */
 
 type Prefs = {
@@ -94,6 +104,7 @@ export function CampaignPlatform({
   current,
   backend,
   today,
+  crm = null,
 }: {
   company: string;
   /** Oldest first: their links give the accounts and the linked campaigns. */
@@ -101,6 +112,8 @@ export function CampaignPlatform({
   current: AdCycle | null;
   backend: PlatformBackend;
   today: string;
+  /** The client's MakeCRM (null: the campaign has no client). */
+  crm?: PlatformCrm | null;
 }) {
   // The accounts of the campaign's links (the current cycle's first).
   const accounts = useMemo(() => {
@@ -139,7 +152,7 @@ export function CampaignPlatform({
     adset: new Set(),
     ad: new Set(),
   });
-  const [list, setList] = useState<PlatformList | null>(null);
+  const [rawList, setList] = useState<PlatformList | null>(null);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -218,6 +231,47 @@ export function CampaignPlatform({
   const columns = columnIds
     .map((id) => columnById.get(id))
     .filter((c): c is Column => !!c && (!c.levels || c.levels.includes(level)));
+
+  // MakeCRM: its deals per UTM, read only while a CRM column is on screen.
+  const crmWanted = columns.some((c) => isCrmColumn(c.id));
+  const crmSince = range.since;
+  const crmUntil = range.until || today;
+  const crmState = useCrmUtm(crm, crmWanted, crmSince, crmUntil, refresh);
+  const list = useMemo(() => {
+    if (!rawList || !crmState.index) return rawList;
+    const merged = withCrm(
+      rawList.rows,
+      crmState.index,
+      rawList.rows[0]?.level ?? level,
+      crmKey,
+    );
+    return {
+      ...rawList,
+      rows: merged.rows,
+      totals: { ...rawList.totals, ...merged.totals },
+    };
+  }, [rawList, crmState.index, level]);
+  const filteredByAdset = level === "ad" && parents.adsets.length > 0;
+  const unmatched = useMemo(() => {
+    if (!rawList || !crmState.index || !rawList.rows.length) return [];
+    const at = rawList.rows[0].level;
+    return crmUnmatched(
+      crmState.index,
+      at,
+      rawList.rows.map(crmKey),
+      at === "campaign"
+        ? {}
+        : {
+            campaigns: new Set(rawList.rows.map((r) => r.campaign_name)),
+            ...(filteredByAdset
+              ? { terms: new Set(rawList.rows.map((r) => r.adset_name ?? "")) }
+              : {}),
+          },
+    );
+  }, [rawList, crmState.index, filteredByAdset]);
+  const crmOpen = crm?.linked
+    ? (r: PlatformRow) => crm.open(crmPipelinePath(crmKey(r), crmSince, crmUntil))
+    : undefined;
   const currency = list?.account.currency ?? "BRL";
 
   const rows = useMemo(() => {
@@ -524,6 +578,7 @@ export function CampaignPlatform({
         </span>
       </div>
 
+      {crmWanted && <CrmNotice crm={crm} state={crmState} />}
       {error ? (
         <div className="mplat-error" role="alert">
           <strong>Não foi possível ler o Meta.</strong> {error.message}
@@ -667,7 +722,13 @@ export function CampaignPlatform({
                       </div>
                     </td>
                     {columns.map((c) => (
-                      <Cell key={c.id} column={c} row={r} currency={currency} />
+                      <Cell
+                        key={c.id}
+                        column={c}
+                        row={r}
+                        currency={currency}
+                        crmOpen={crmOpen}
+                      />
                     ))}
                   </tr>
                   {r.breakdown?.map((b) => (
@@ -718,7 +779,9 @@ export function CampaignPlatform({
                       <>
                         {formatValue(c.kind, totalValue(c, list), currency)}
                         <small className="mplat-cell-sub">
-                          {c.id === "results" || c.id === "cost_per_result"
+                          {isCrmColumn(c.id)
+                            ? "No CRM"
+                            : c.id === "results" || c.id === "cost_per_result"
                             ? list.result_label
                             : c.id === "reach"
                               ? "Pessoas"
@@ -736,6 +799,20 @@ export function CampaignPlatform({
             </tfoot>
           </table>
         </div>
+      )}
+      {crmWanted && list && !error && (
+        <CrmUnmatched
+          level={list.rows[0]?.level ?? level}
+          items={unmatched}
+          money={(v) => formatValue("money", v, currency)}
+          noun={
+            (list.rows[0]?.level ?? level) === "campaign"
+              ? "campanha nesta conta"
+              : (list.rows[0]?.level ?? level) === "adset"
+                ? "conjunto nestas campanhas"
+                : "anúncio nestas campanhas"
+          }
+        />
       )}
       {detail && list && (
         <DetailPanel
@@ -823,16 +900,28 @@ function SortHeader({
   );
 }
 
+/** What a Meta row is in UTMs, as the MakeCRM's Anúncios page reads it. */
+function crmKey(r: PlatformRow): CrmKey {
+  return r.level === "campaign"
+    ? { campaign: r.name }
+    : r.level === "adset"
+      ? { campaign: r.campaign_name, term: r.name }
+      : { campaign: r.campaign_name, term: r.adset_name ?? "", content: r.name };
+}
+
 function Cell({
   column: c,
   row,
   currency,
   sub = false,
+  crmOpen,
 }: {
   column: Column;
   row: PlatformRow;
   currency: string;
   sub?: boolean;
+  /** The opportunities' number opens them in the MakeCRM. */
+  crmOpen?: (r: PlatformRow) => void;
 }) {
   if (c.kind === "text") {
     if (c.id === "delivery" && !sub)
@@ -847,8 +936,26 @@ function Cell({
     return <td className="mplat-text">{sub ? "" : textValue(c.id, row, currency)}</td>;
   }
   const value = c.value?.(row.metrics);
+  if (!sub && c.id === "crm_leads" && crmOpen && value)
+    return (
+      <td className="num">
+        <CrmLeadsLink
+          value={value}
+          label={formatValue(c.kind, value, currency)}
+          onOpen={() => crmOpen(row)}
+        />
+      </td>
+    );
+  const wonDeals = row.metrics.crm_won_deals;
   return (
-    <td className="num">
+    <td
+      className="num"
+      title={
+        !sub && c.id === "crm_wons" && typeof wonDeals === "number"
+          ? `${wonDeals.toLocaleString("pt-BR")} ${wonDeals === 1 ? "oportunidade ganha" : "oportunidades ganhas"} (o CRM conta um ganho por orçamento fechado)`
+          : undefined
+      }
+    >
       {formatValue(c.kind, value, currency)}
       {!sub && (c.id === "results" || c.id === "cost_per_result") && row.result_label !== "—" && (
         <small className="mplat-cell-sub">

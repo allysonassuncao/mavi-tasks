@@ -6,6 +6,7 @@ import { rpc } from "./api";
 import { supabase } from "./supabase";
 import type { Client } from "./types";
 import { ConnectionFilter, ConnectionHeader } from "./CampaignLinks";
+import { demoCrmUtm, type CrmUtm } from "./platform-crm";
 
 /**
  * Campanhas › Abrir no CRM (migração 20270320090000_makecrm_links): um
@@ -41,8 +42,15 @@ export type CrmBackend = {
     label: string,
   ) => Promise<void>;
   unlink: (company: string, client: string) => Promise<void>;
-  /** O link de entrada, de uso único. */
-  open: (company: string, client: string) => Promise<string>;
+  /** O link de entrada, de uso único (next: o funil já filtrado). */
+  open: (company: string, client: string, next?: string) => Promise<string>;
+  /** Oportunidades e ganhos por UTM no período (Campanhas › Plataforma). */
+  utm: (
+    company: string,
+    client: string,
+    since: string,
+    until: string,
+  ) => Promise<CrmUtm>;
 };
 
 /** Como a empresa aparece: no MakeCRM ela não tem nome, só o código da Make. */
@@ -119,8 +127,17 @@ export const serverCrm: CrmBackend = {
   unlink: async (company, client) => {
     await rpc("crm_link_remove", { p_company: company, p_client: client });
   },
-  open: async (company, client) =>
-    (await crmServer<{ url: string }>({ action: "open", company, client })).url,
+  open: async (company, client, next) =>
+    (
+      await crmServer<{ url: string }>({
+        action: "open",
+        company,
+        client,
+        ...(next ? { next } : {}),
+      })
+    ).url,
+  utm: (company, client, since, until) =>
+    crmServer<CrmUtm>({ action: "utm", company, client, since, until }),
 };
 
 /** Demonstração: empresas inventadas, ligações em memória, nada abre. */
@@ -163,7 +180,53 @@ export function demoCrm(clients: () => Client[]): CrmBackend {
     open: async () => {
       throw Error("Na demonstração o MakeCRM não abre.");
     },
+    utm: async () => demoCrmUtm(),
   };
+}
+
+/**
+ * Abre o MakeCRM do cliente numa aba nova, já logado (next: uma tela dele,
+ * como o funil filtrado). A aba abre já no clique (senão o navegador a
+ * bloqueia) e vai para o MakeCRM quando o link de entrada chega.
+ */
+export async function openCrmTab({
+  backend,
+  company,
+  client,
+  clientName,
+  notify,
+  next,
+}: {
+  backend: CrmBackend;
+  company: string;
+  client: string;
+  clientName: string;
+  notify: (message: string) => void;
+  next?: string;
+}) {
+  const tab = window.open("", "_blank");
+  if (tab) {
+    tab.document.title = "Abrindo o MakeCRM…";
+    const p = tab.document.createElement("p");
+    p.textContent = `Abrindo o MakeCRM de ${clientName}…`;
+    p.style.cssText =
+      "font: 15px system-ui, sans-serif; color: #44504a; margin: 40px; text-align: center";
+    tab.document.body.appendChild(p);
+  }
+  try {
+    const url = await backend.open(company, client, next);
+    if (tab && !tab.closed) {
+      tab.opener = null;
+      tab.location.replace(url);
+    } else if (!window.open(url, "_blank", "noopener")) {
+      notify(
+        "O navegador bloqueou a aba nova: permita pop-ups do MAVI e clique de novo.",
+      );
+    }
+  } catch (e) {
+    tab?.close();
+    notify((e as Error).message);
+  }
 }
 
 /**
@@ -190,31 +253,8 @@ export function OpenInCrm({
   const open = async () => {
     if (busy) return;
     setBusy(true);
-    const tab = window.open("", "_blank");
-    if (tab) {
-      tab.document.title = "Abrindo o MakeCRM…";
-      const p = tab.document.createElement("p");
-      p.textContent = `Abrindo o MakeCRM de ${clientName}…`;
-      p.style.cssText =
-        "font: 15px system-ui, sans-serif; color: #44504a; margin: 40px; text-align: center";
-      tab.document.body.appendChild(p);
-    }
-    try {
-      const url = await backend.open(company, client);
-      if (tab && !tab.closed) {
-        tab.opener = null;
-        tab.location.replace(url);
-      } else if (!window.open(url, "_blank", "noopener")) {
-        notify(
-          "O navegador bloqueou a aba nova: permita pop-ups do MAVI e clique de novo.",
-        );
-      }
-    } catch (e) {
-      tab?.close();
-      notify((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    await openCrmTab({ backend, company, client, clientName, notify });
+    setBusy(false);
   };
   const title = `Abrir o MakeCRM de ${clientName} numa aba nova, já logado`;
   return compact ? (

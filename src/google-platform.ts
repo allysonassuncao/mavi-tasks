@@ -186,6 +186,8 @@ export type GColumn = {
   text?: (r: GoogleRow) => string | number | null;
   /** Numbers kept as they are in the row (quality score, bids). */
   info?: string;
+  /** Only in these views (default: every view with numbers). */
+  views?: GoogleView[];
 };
 const ratio = (a: number | null | undefined, b: number | null | undefined) =>
   a === null || a === undefined || !b ? null : a / b;
@@ -194,6 +196,8 @@ const pct = (a: number | null | undefined, b: number | null | undefined) => {
   return r === null ? null : r * 100;
 };
 const pick = (k: string) => (m: Metrics) => m[k] ?? null;
+/** The views whose rows are campaigns or ad (asset) groups: the CRM's UTMs. */
+export const CRM_VIEWS: GoogleView[] = ["campaigns", "ad_groups", "asset_groups"];
 export const METRIC_COLUMNS: GColumn[] = [
   { id: "clicks", label: "Cliques", kind: "count", value: pick("clicks") },
   { id: "impressions", label: "Impr.", kind: "count", value: pick("impressions") },
@@ -219,6 +223,18 @@ export const METRIC_COLUMNS: GColumn[] = [
   { id: "search_lost_budget", label: "Parc. impr. perdida pesq. (orçam.)", kind: "percent", value: pick("search_lost_budget") },
   { id: "top_pct", label: "Taxa de impr. parte sup.", kind: "percent", value: pick("top_pct") },
   { id: "abs_top_pct", label: "Taxa de impr. topo abs.", kind: "percent", value: pick("abs_top_pct") },
+  // MakeCRM: the deals its UTMs give each campaign and ad group
+  // (src/platform-crm.ts; utm_campaign = campanha, utm_term = grupo).
+  ...(
+    [
+      { id: "crm_leads", label: "Oportunidades (CRM)", kind: "count", value: pick("crm_leads") },
+      { id: "crm_cost_per_lead", label: "Custo/oportunidade (CRM)", kind: "money", value: (m) => ratio(m.cost, m.crm_leads) },
+      { id: "crm_wons", label: "Ganhos (CRM)", kind: "count", value: pick("crm_wons") },
+      { id: "crm_cost_per_won", label: "Custo/ganho (CRM)", kind: "money", value: (m) => ratio(m.cost, m.crm_wons) },
+      { id: "crm_revenue", label: "Receita (CRM)", kind: "money", value: pick("crm_revenue") },
+      { id: "crm_roas", label: "ROAS (CRM)", kind: "decimal", value: (m) => ratio(m.crm_revenue, m.cost) },
+    ] as GColumn[]
+  ).map((c) => ({ ...c, views: CRM_VIEWS })),
 ];
 export const metricColumn = new Map(METRIC_COLUMNS.map((c) => [c.id, c]));
 const t = (id: string, label: string, kind: ColumnKind = "text"): GColumn => ({
@@ -245,12 +261,13 @@ export const TEXT_COLUMNS: Record<GoogleView, GColumn[]> = {
   hour: [],
   auction: [t("overlap", "Taxa de sobreposição", "percent"), t("position_above", "Taxa de posição acima", "percent"), t("outranking", "Parcela de superação", "percent")],
 };
-export type GPreset = "desempenho" | "conversoes" | "concorrencia" | "video" | "personalizado";
+export type GPreset = "desempenho" | "conversoes" | "concorrencia" | "video" | "crm" | "personalizado";
 export const G_PRESETS: { id: GPreset; label: string; columns: string[] }[] = [
   { id: "desempenho", label: "Desempenho", columns: ["clicks", "impressions", "ctr", "cpc", "cost", "conversions", "cost_per_conv", "conv_rate"] },
   { id: "conversoes", label: "Conversões", columns: ["conversions", "cost_per_conv", "conv_rate", "conversions_value", "value_per_cost", "all_conversions", "view_through", "cost"] },
   { id: "concorrencia", label: "Concorrência", columns: ["impressions", "search_is", "search_top_is", "search_abs_top_is", "search_lost_rank", "search_lost_budget", "top_pct", "abs_top_pct"] },
   { id: "video", label: "Vídeo", columns: ["impressions", "video_views", "cpv", "interactions", "interaction_rate", "clicks", "cost", "conversions"] },
+  { id: "crm", label: "Resultado no CRM", columns: ["clicks", "cost", "conversions", "cost_per_conv", "crm_leads", "crm_cost_per_lead", "crm_wons", "crm_cost_per_won", "crm_revenue", "crm_roas"] },
 ];
 /** Auction always reads the share columns. */
 export const AUCTION_COLUMNS = ["impressions", "search_is", "top_pct", "abs_top_pct", "search_lost_rank", "search_lost_budget"];

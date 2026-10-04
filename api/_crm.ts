@@ -15,7 +15,13 @@ import { callRpc } from "./_drive.js";
  * POST /api/crm com o login do MAVI:
  *  - {action: "companies", company}: as empresas do MakeCRM para ligar a um
  *    cliente (só administradores e gestores);
- *  - {action: "open", company, client}: {url} para abrir numa aba nova.
+ *  - {action: "open", company, client, next?}: {url} para abrir numa aba
+ *    nova; next leva ao funil já filtrado (/pipeline-v2?…).
+ *  - {action: "utm", company, client, since, until}: as oportunidades e os
+ *    ganhos do MakeCRM por UTM no período (data de criação da oportunidade),
+ *    os números da página Anúncios do CRM, para Campanhas › Plataforma. Quem
+ *    vê o cliente em Campanhas lê a ligação dele (regra da tabela
+ *    client_crm_links); sem ligação, {linked: false}.
  */
 export type CrmEnv = {
   supabaseUrl: string;
@@ -49,6 +55,33 @@ export function crmEnv(
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ROLES = new Set(["admin", "manager", "member"]);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** Where "open" may land: the MakeCRM's pipeline, filters in the URL. */
+export const isCrmNext = (next: unknown): next is string =>
+  typeof next === "string" &&
+  next.length <= 2000 &&
+  /^\/pipeline-v2\?[^#\s]*$/.test(next);
+
+/** The MakeCRM's numbers per UTM (sql/mavi_utm_deals.sql in the CRM). */
+export type CrmUtmDeals = {
+  /** [utm_campaign, oportunidades, ganhos, oportunidades ganhas, receita] */
+  campaigns: [string, number, number, number, number][];
+  /** [utm_campaign, utm_term, oportunidades, ganhos, ganhas, receita] */
+  adsets: [string, string, number, number, number, number][];
+  /** [utm_campaign, utm_term, utm_content, linhas, ganhos, ganhas, receita] */
+  ads: [string, string, string, number, number, number, number][];
+};
+/** Only well-formed rows: [texts…, numbers…]. */
+function utmRows<T>(rows: unknown, texts: number, numbers: number): T[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(
+    (r) =>
+      Array.isArray(r) &&
+      r.length === texts + numbers &&
+      r.slice(0, texts).every((v) => typeof v === "string") &&
+      r.slice(texts).every((v) => typeof v === "number" && Number.isFinite(v)),
+  ) as T[];
+}
 
 export type CrmCompany = {
   id: string;
@@ -148,9 +181,49 @@ export async function handleCrm(
     };
   }
 
-  if (action === "open") {
-    const { client } = body;
+  if (action === "utm") {
+    const { client, until } = body;
+    // "Máximo": no start, everything the CRM has.
+    const since = body.since || "2000-01-01";
     if (!UUID.test(client ?? "")) return fail(400, "Cliente inválido.");
+    if (!DAY.test(since) || !DAY.test(until ?? "") || since > until)
+      return fail(400, "Período inválido.");
+    const res = await fetchImpl(
+      `${env.supabaseUrl}/rest/v1/client_crm_links?select=crm_company_id&company_id=eq.${company}&client_id=eq.${client}`,
+      { headers: { apikey: env.supabaseKey, Authorization: authorization } },
+    );
+    if (!res.ok)
+      return fail(
+        res.status === 401 || res.status === 403 ? 403 : 502,
+        "Não foi possível conferir a ligação do cliente com o MakeCRM.",
+      );
+    const rows = (await res.json().catch(() => [])) as {
+      crm_company_id?: string;
+    }[];
+    const crmCompany = Array.isArray(rows) ? rows[0]?.crm_company_id : null;
+    if (!crmCompany || !UUID.test(crmCompany))
+      return { status: 200, body: { linked: false } };
+    // The CRM's own day: Brasília, as its Anúncios page asks.
+    const r = await askCrm<Record<string, unknown>>(env, fetchImpl, {
+      action: "utm-deals",
+      company_id: crmCompany,
+      date_start: `${since}T00:00:00.000-03:00`,
+      date_end: `${until}T23:59:59.999-03:00`,
+    });
+    if (!r.ok) return fail(r.status, r.error);
+    const deals: CrmUtmDeals = {
+      campaigns: utmRows(r.data?.campaigns, 1, 4),
+      adsets: utmRows(r.data?.adsets, 2, 4),
+      ads: utmRows(r.data?.ads, 3, 4),
+    };
+    return { status: 200, body: { linked: true, ...deals } };
+  }
+
+  if (action === "open") {
+    const { client, next } = body;
+    if (!UUID.test(client ?? "")) return fail(400, "Cliente inválido.");
+    if (next !== undefined && !isCrmNext(next))
+      return fail(400, "Destino inválido no MakeCRM.");
     const who = await callRpc<{
       crm_company_id: string;
       user_id: string;
@@ -170,6 +243,7 @@ export async function handleCrm(
       company_id: crm_company_id,
       person: { id: user_id, email, name },
       role,
+      ...(next ? { next } : {}),
     });
     if (!r.ok) return fail(r.status, r.error);
     const url = r.data?.url;

@@ -21,6 +21,7 @@ import type { AdCycle } from "./campaigns";
 import { DATE_PRESETS, cached, formatValue, presetRange, type DatePreset } from "./campaign-platform";
 import {
   AUCTION_COLUMNS,
+  CRM_VIEWS,
   DETAILABLE,
   G_PRESETS,
   MENU,
@@ -43,6 +44,16 @@ import {
   type GoogleSegment,
   type GoogleView,
 } from "./google-platform";
+import {
+  crmPipelinePath,
+  crmUnmatched,
+  isCrmColumn,
+  withCrm,
+  type CrmKey,
+  type CrmLevel,
+  type PlatformCrm,
+} from "./platform-crm";
+import { CrmLeadsLink, CrmNotice, CrmUnmatched, useCrmUtm } from "./PlatformCrm";
 import "./campaign-platform.css";
 import "./google-platform.css";
 
@@ -79,12 +90,15 @@ export function GooglePlatform({
   current,
   backend,
   today,
+  crm = null,
 }: {
   company: string;
   cycles: AdCycle[];
   current: AdCycle | null;
   backend: GooglePlatformBackend;
   today: string;
+  /** The client's MakeCRM (null: the campaign has no client). */
+  crm?: PlatformCrm | null;
 }) {
   // The accounts of the campaign's links (the current cycle's first), with
   // the MCC they're reached through.
@@ -124,7 +138,7 @@ export function GooglePlatform({
   const [onlyEnabled, setOnlyEnabled] = useState(false);
   const [removed, setRemoved] = useState(false);
   const [sort, setSort] = useState<Sort>({ column: "cost", desc: true });
-  const [list, setList] = useState<GoogleList | null>(null);
+  const [rawList, setList] = useState<GoogleList | null>(null);
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -180,8 +194,43 @@ export function GooglePlatform({
   const metricIds = view === "auction" ? AUCTION_COLUMNS : preset === "personalizado" ? custom : (G_PRESETS.find((p) => p.id === preset)?.columns ?? G_PRESETS[0].columns);
   const columns: GColumn[] = [
     ...TEXT_COLUMNS[view],
-    ...(withMetrics(view) ? metricIds.map((id) => metricColumn.get(id)).filter((c): c is GColumn => !!c) : []),
+    ...(withMetrics(view)
+      ? metricIds
+          .map((id) => metricColumn.get(id))
+          .filter((c): c is GColumn => !!c && (!c.views || c.views.includes(view)))
+      : []),
   ];
+
+  // MakeCRM: its deals per UTM, read only while a CRM column is on screen.
+  const crmWanted = columns.some((c) => isCrmColumn(c.id));
+  const crmState = useCrmUtm(crm, crmWanted, range.since, range.until, refresh);
+  const list = useMemo(() => {
+    const at = rawList ? crmLevel(rawList.view) : null;
+    if (!rawList || !at || !crmState.index) return rawList;
+    const merged = withCrm(rawList.rows, crmState.index, at, (r) => crmKey(rawList.view, r));
+    return {
+      ...rawList,
+      rows: merged.rows,
+      totals: rawList.totals ? { ...rawList.totals, ...merged.totals } : null,
+    };
+  }, [rawList, crmState.index]);
+  const unmatched = useMemo(() => {
+    const at = rawList ? crmLevel(rawList.view) : null;
+    if (!rawList || !at || !crmState.index || !rawList.rows.length) return [];
+    const keys = rawList.rows.map((r) => crmKey(rawList.view, r)!);
+    return crmUnmatched(
+      crmState.index,
+      at,
+      keys,
+      at === "campaign" ? {} : { campaigns: new Set(keys.map((k) => k.campaign)) },
+    );
+  }, [rawList, crmState.index]);
+  const crmOpen = crm?.linked
+    ? (r: GoogleRow) => {
+        const k = crmKey(view, r);
+        if (k) crm.open(crmPipelinePath(k, range.since, range.until));
+      }
+    : undefined;
   const currency = list?.account.currency ?? "BRL";
   const valueOf = useCallback(
     (c: GColumn, r: GoogleRow) => (c.text ? c.text(r) : r.metrics ? (c.value?.(r.metrics) ?? null) : null),
@@ -416,6 +465,7 @@ export function GooglePlatform({
           </div>
           {list?.notice && list.view === view && <p className="gplat-notice">{list.notice}</p>}
 
+          {crmWanted && <CrmNotice crm={crm} state={crmState} />}
           {error ? (
             <div className="mplat-error" role="alert">
               <strong>Não foi possível ler o Google Ads.</strong> {error.message}
@@ -466,7 +516,7 @@ export function GooglePlatform({
                           </span>
                         </td>
                         {columns.map((c) => (
-                          <GCell key={c.id} column={c} row={r} currency={currency} value={valueOf(c, r)} />
+                          <GCell key={c.id} column={c} row={r} currency={currency} value={valueOf(c, r)} crmOpen={crmOpen} />
                         ))}
                       </tr>
                       {r.segments?.map((s) => (
@@ -505,6 +555,14 @@ export function GooglePlatform({
                 )}
               </table>
             </div>
+          )}
+          {crmWanted && list && list.view === view && !error && (
+            <CrmUnmatched
+              level={crmLevel(view) ?? "campaign"}
+              items={unmatched}
+              money={(v) => formatValue("money", v, currency)}
+              noun={view === "campaigns" ? "campanha nesta conta" : "grupo nestas campanhas"}
+            />
           )}
         </section>
       </div>
@@ -606,10 +664,54 @@ function NameCell({
   );
 }
 
-function GCell({ column: c, row, currency, value, sub = false }: { column: GColumn; row: GoogleRow; currency: string; value: string | number | null; sub?: boolean }) {
-  void row;
+/** Which UTM level a view's rows are (null: none, the CRM has no column). */
+function crmLevel(view: GoogleView): CrmLevel | null {
+  return view === "campaigns" ? "campaign" : CRM_VIEWS.includes(view) ? "adset" : null;
+}
+/** A Google row in UTMs: utm_campaign = campanha, utm_term = grupo. */
+function crmKey(view: GoogleView, r: GoogleRow): CrmKey | null {
+  const at = crmLevel(view);
+  if (at === "campaign") return { campaign: r.name };
+  if (at === "adset") return { campaign: String(r.info.campaign ?? ""), term: r.name };
+  return null;
+}
+
+function GCell({
+  column: c,
+  row,
+  currency,
+  value,
+  sub = false,
+  crmOpen,
+}: {
+  column: GColumn;
+  row: GoogleRow;
+  currency: string;
+  value: string | number | null;
+  sub?: boolean;
+  /** The opportunities' number opens them in the MakeCRM. */
+  crmOpen?: (r: GoogleRow) => void;
+}) {
   if (c.kind === "text") return <td className="mplat-text">{sub ? "" : value || "—"}</td>;
-  return <td className="num">{formatValue(c.kind, value as number | null, currency)}</td>;
+  if (!sub && c.id === "crm_leads" && crmOpen && typeof value === "number" && value > 0)
+    return (
+      <td className="num">
+        <CrmLeadsLink value={value} label={formatValue(c.kind, value, currency)} onOpen={() => crmOpen(row)} />
+      </td>
+    );
+  const wonDeals = row.metrics?.crm_won_deals;
+  return (
+    <td
+      className="num"
+      title={
+        !sub && c.id === "crm_wons" && typeof wonDeals === "number"
+          ? `${wonDeals.toLocaleString("pt-BR")} ${wonDeals === 1 ? "oportunidade ganha" : "oportunidades ganhas"} (o CRM conta um ganho por orçamento fechado)`
+          : undefined
+      }
+    >
+      {formatValue(c.kind, value as number | null, currency)}
+    </td>
+  );
 }
 
 /** A Google ad as it shows on the results page ("Patrocinado"). */

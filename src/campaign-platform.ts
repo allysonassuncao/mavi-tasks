@@ -527,6 +527,23 @@ export const COLUMNS: Column[] = [
     kind: "text",
     levels: ["ad"],
   },
+  // MakeCRM: the deals its UTMs give each row (src/platform-crm.ts).
+  { id: "crm_leads", label: "Oportunidades (CRM)", kind: "count", value: pick("crm_leads") },
+  {
+    id: "crm_cost_per_lead",
+    label: "Custo por oportunidade (CRM)",
+    kind: "money",
+    value: per("crm_leads"),
+  },
+  { id: "crm_wons", label: "Ganhos (CRM)", kind: "count", value: pick("crm_wons") },
+  { id: "crm_cost_per_won", label: "Custo por ganho (CRM)", kind: "money", value: per("crm_wons") },
+  { id: "crm_revenue", label: "Receita (CRM)", kind: "money", value: pick("crm_revenue") },
+  {
+    id: "crm_roas",
+    label: "ROAS (CRM)",
+    kind: "decimal",
+    value: (m) => ratio(m.crm_revenue, m.spend),
+  },
 ];
 export const columnById = new Map(COLUMNS.map((c) => [c.id, c]));
 
@@ -539,6 +556,7 @@ export type ColumnPreset =
   | "mensagens"
   | "leads"
   | "vendas"
+  | "crm"
   | "personalizado";
 export const PRESETS: { id: ColumnPreset; label: string; columns: string[] }[] = [
   {
@@ -685,6 +703,22 @@ export const PRESETS: { id: ColumnPreset; label: string; columns: string[] }[] =
       "spend",
     ],
   },
+  {
+    id: "crm",
+    label: "Resultado no CRM",
+    columns: [
+      "delivery",
+      "results",
+      "cost_per_result",
+      "spend",
+      "crm_leads",
+      "crm_cost_per_lead",
+      "crm_wons",
+      "crm_cost_per_won",
+      "crm_revenue",
+      "crm_roas",
+    ],
+  },
 ];
 export const BREAKDOWN_GROUPS: { label: string; items: [Breakdown, string][] }[] = [
   {
@@ -824,14 +858,14 @@ function seeded(text: string) {
     return ((h ^= h >>> 16) >>> 0) / 4294967296;
   };
 }
-const DEMO_CAMPAIGNS = [
+export const DEMO_CAMPAIGNS = [
   { id: "120210000000000001", name: "[Leads] Formulário · Público aberto", goal: "Leads no formulário", objective: "Cadastros", status: "ACTIVE" },
   { id: "120210000000000002", name: "[Mensagens] WhatsApp · Remarketing", goal: "Conversas por mensagem iniciadas", objective: "Engajamento", status: "ACTIVE" },
   { id: "120210000000000003", name: "[Tráfego] Blog · Interesses", goal: "Cliques no link", objective: "Tráfego", status: "PAUSED" },
   { id: "120210000000000004", name: "[Reconhecimento] Vídeo institucional", goal: "ThruPlays", objective: "Reconhecimento", status: "ACTIVE" },
 ];
-const DEMO_ADSETS = ["Aberto 25-54", "Semelhante 1% clientes", "Remarketing 30 dias"];
-const DEMO_ADS = ["Vídeo depoimento", "Carrossel benefícios", "Imagem oferta", "Reels bastidores"];
+export const DEMO_ADSETS = ["Aberto 25-54", "Semelhante 1% clientes", "Remarketing 30 dias"];
+export const DEMO_ADS = ["Vídeo depoimento", "Carrossel benefícios", "Imagem oferta", "Reels bastidores"];
 function demoMetrics(rand: () => number, days: number, goal: string, scale: number): Metrics {
   const spend = Math.round((40 + rand() * 90) * days * scale * 100) / 100;
   const impressions = Math.round(spend * (55 + rand() * 40));
