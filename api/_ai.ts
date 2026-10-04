@@ -1,3 +1,4 @@
+import { insightsContextLine, type InsightsContext } from "./_campaign-insights.js";
 import crypto from "node:crypto";
 import { callRpc, signGcsUrl, type GcsCredentials } from "./_drive.js";
 import { extractFileText } from "./_ai-extract.js";
@@ -443,7 +444,7 @@ export async function buildContext(
   now: number,
 ) {
   const userId = userIdFrom(auth);
-  const [members, clients, contracts, temperature, radar, media, notes, agents] = await Promise.all([
+  const [members, clients, contracts, temperature, radar, media, notes, agents, insights] = await Promise.all([
     rest<{
       user_id: string;
       name: string;
@@ -532,6 +533,16 @@ export async function buildContext(
           .then((r) => (r.ok ? r.data : null))
           .catch(() => null)
       : Promise.resolve(null),
+    // E, na conversa sobre uma campanha, os Insights da MAVI dela (quando o
+    // Painel da MAVI deixa: campaign_insight_settings.mavi_context).
+    scope.campaign
+      ? callRpc<InsightsContext>(env, deps.fetch, auth, "campaign_insights_ai", {
+          p_company: company,
+          p_campaign: scope.campaign,
+        })
+          .then((r) => (r.ok ? r.data : null))
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
   const open = contracts.filter((k) => !k.archived).map((k) => k.id);
   const projects = open.length
@@ -588,6 +599,7 @@ export async function buildContext(
       "A pergunta pode envolver qualquer cliente que a pessoa acessa. Quando ela citar um cliente, use find_clients para achar o id e depois filtre as buscas por ele.",
     );
   }
+  lines.push(insightsContextLine(insights));
   if (scope.module === "meetings")
     lines.push(
       "A pessoa está na pasta Gravações da MAVI: reuniões costumam ser o foco, mas use também as tarefas quando ajudar.",

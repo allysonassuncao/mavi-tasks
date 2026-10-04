@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   BadgeCheck,
+  Check,
+  Clock,
+  ListPlus,
+  RotateCcw,
+  ThumbsDown,
+  ThumbsUp,
+  X,
   ChevronDown,
   ChevronRight,
   ChevronsLeft,
@@ -16,10 +23,14 @@ import {
   TrendingUp,
   TriangleAlert,
 } from "lucide-react";
-import { Button, Loading } from "./ui";
-import { Empty } from "./components";
-import { useUrlState } from "./router";
+import { Button, Input, Loading, Textarea } from "./ui";
+import { Empty, Modal } from "./components";
+import { navigate, taskUrl, useUrlState } from "./router";
+import { appPath } from "./temperature";
+import type { FormPreset } from "./forms";
+import type { Snapshot } from "./types";
 import {
+  DISMISS_REASONS,
   KIND_LABELS,
   LEVEL_LABELS,
   PRIORITY_LABELS,
@@ -29,6 +40,8 @@ import {
   basisHint,
   basisLabel,
   dayLabel,
+  effectText,
+  insightTaskPreset,
   formatEvidence,
   localParts,
   money,
@@ -43,6 +56,7 @@ import {
   type InsightKind,
   type InsightRun,
   type InsightsBackend,
+  type InsightStatus,
 } from "./campaign-insights";
 import "./campaign-insights.css";
 
@@ -92,6 +106,266 @@ export function useCampaignInsights(backend: InsightsBackend, company: string, c
   return { view, error, reload };
 }
 export type InsightsState = ReturnType<typeof useCampaignInsights>;
+
+/** O que as ações precisam: a campanha, os dados (para a tarefa) e o formulário de tarefa. */
+export type InsightContext = {
+  campaign: { id: string; name: string; contract_id: string };
+  data: Snapshot;
+  user: string;
+  /** Abre o formulário de tarefa (sem ele, não há "Criar tarefa"). */
+  onNewTask?: (preset: FormPreset) => void;
+};
+type Handlers = {
+  status: (i: CampaignInsight, status: InsightStatus) => void;
+  dismiss: (i: CampaignInsight) => void;
+  snooze: (i: CampaignInsight) => void;
+  vote: (i: CampaignInsight, vote: "up" | "down") => void;
+  task?: (i: CampaignInsight) => void;
+  busy: string | null;
+};
+
+const at = (days: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  d.setHours(9, 0, 0, 0);
+  return d;
+};
+const SNOOZE: [string, () => Date][] = [
+  ["Amanhã às 9h", () => at(1)],
+  ["Em 3 dias", () => at(3)],
+  ["Em 1 semana", () => at(7)],
+  ["Em 2 semanas", () => at(14)],
+];
+
+/** As ações dos insights (com as janelas de motivo e de data) para uma lista. */
+function useInsightActions(
+  state: InsightsState,
+  backend: InsightsBackend,
+  company: string,
+  ctx: InsightContext,
+  notify: (message: string) => void,
+): { handlers: Handlers; dialogs: ReactNode } {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [reasonFor, setReasonFor] = useState<{ insight: CampaignInsight; mode: "dismiss" | "down" } | null>(null);
+  const [snoozeFor, setSnoozeFor] = useState<CampaignInsight | null>(null);
+  const run = async (id: string, job: () => Promise<unknown>, done: string) => {
+    setBusy(id);
+    try {
+      await job();
+      notify(done);
+      state.reload();
+      return true;
+    } catch (e) {
+      notify((e as Error).message);
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  };
+  const handlers: Handlers = {
+    busy,
+    status: (i, status) =>
+      void run(
+        i.id,
+        () => backend.setStatus(company, i.id, status),
+        status === "applied"
+          ? "Marcado como aplicado: a MAVI mede o efeito nas próximas análises."
+          : "Insight reaberto.",
+      ),
+    dismiss: (i) => setReasonFor({ insight: i, mode: "dismiss" }),
+    snooze: (i) => setSnoozeFor(i),
+    vote: (i, v) => {
+      if (i.my_vote === v) void run(i.id, () => backend.vote(company, i.id, null), "Avaliação retirada.");
+      else if (v === "down") setReasonFor({ insight: i, mode: "down" });
+      else void run(i.id, () => backend.vote(company, i.id, "up"), "Obrigado! A MAVI aprende com a avaliação.");
+    },
+    ...(ctx.onNewTask
+      ? {
+          task: (i: CampaignInsight) => {
+            const preset = insightTaskPreset(i, ctx.campaign, ctx.data, ctx.user);
+            if (!preset) {
+              notify("Você não pode criar tarefas neste cliente.");
+              return;
+            }
+            ctx.onNewTask!({
+              ...preset,
+              onCreated: (task) =>
+                void backend
+                  .linkTask(company, i.id, task)
+                  .then(() => state.reload())
+                  .catch((e) => notify((e as Error).message)),
+            });
+          },
+        }
+      : {}),
+  };
+  const dialogs = (
+    <>
+      {reasonFor && (
+        <ReasonDialog
+          insight={reasonFor.insight}
+          mode={reasonFor.mode}
+          onClose={() => setReasonFor(null)}
+          onSave={async (reason, comment) => {
+            const i = reasonFor.insight;
+            const ok = await run(
+              i.id,
+              () =>
+                reasonFor.mode === "dismiss"
+                  ? backend.setStatus(company, i.id, "dismissed", { reason, comment })
+                  : backend.vote(company, i.id, "down", reason || undefined, comment),
+              reasonFor.mode === "dismiss"
+                ? "Insight descartado. A MAVI aprende com o motivo."
+                : "Obrigado! A MAVI aprende com a avaliação.",
+            );
+            if (ok) setReasonFor(null);
+          }}
+        />
+      )}
+      {snoozeFor && (
+        <SnoozeDialog
+          insight={snoozeFor}
+          onClose={() => setSnoozeFor(null)}
+          onSave={async (until) => {
+            const ok = await run(
+              snoozeFor.id,
+              () => backend.setStatus(company, snoozeFor.id, "snoozed", { until: until.toISOString() }),
+              `Combinado: o insight volta ${until.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}, com aviso na sua caixa de entrada.`,
+            );
+            if (ok) setSnoozeFor(null);
+          }}
+        />
+      )}
+    </>
+  );
+  return { handlers, dialogs };
+}
+
+/** Descartar (motivo obrigatório) ou 👎 (motivo opcional). */
+function ReasonDialog({
+  insight,
+  mode,
+  onClose,
+  onSave,
+}: {
+  insight: CampaignInsight;
+  mode: "dismiss" | "down";
+  onClose: () => void;
+  onSave: (reason: string, comment: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [comment, setComment] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mode === "dismiss" && !reason) return setError("Escolha o motivo do descarte.");
+    if (reason === "other" && !comment.trim()) return setError("Conte o motivo em poucas palavras.");
+    setSaving(true);
+    await onSave(reason, comment.trim());
+    setSaving(false);
+  };
+  return (
+    <Modal title={mode === "dismiss" ? "Descartar o insight" : "O que não ajudou?"} onClose={onClose} busy={saving}>
+      <form className="entity-form insights-reason" onSubmit={(e) => void submit(e)}>
+        <p className="campaign-form-context">{insight.title}</p>
+        <fieldset className="insights-reasons">
+          <legend>{mode === "dismiss" ? "Motivo (obrigatório)" : "Motivo (opcional)"}</legend>
+          {DISMISS_REASONS.map((r) => (
+            <label key={r.id} className={reason === r.id ? "on" : ""}>
+              <input type="radio" name="reason" checked={reason === r.id} onChange={() => setReason(r.id)} />
+              {r.label}
+            </label>
+          ))}
+        </fieldset>
+        <label>
+          Comentário {reason === "other" ? "(obrigatório)" : "(opcional)"}
+          <Textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value.slice(0, 500))}
+            rows={3}
+            placeholder="Ex.: o cliente não tem margem para frete grátis"
+          />
+          <small>
+            A MAVI aprende com o motivo: aprendizados confirmados por 2 pessoas (ou por um líder) valem nas próximas
+            análises.
+          </small>
+        </label>
+        {error && <p className="form-error">{error}</p>}
+        <div className="form-footer">
+          <Button type="button" className="btn secondary" onClick={onClose} disabled={saving}>
+            Cancelar
+          </Button>
+          <Button type="submit" className="btn primary" loading={saving}>
+            {mode === "dismiss" ? "Descartar" : "Enviar"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Lembrar depois: quando o insight volta. */
+function SnoozeDialog({
+  insight,
+  onClose,
+  onSave,
+}: {
+  insight: CampaignInsight;
+  onClose: () => void;
+  onSave: (until: Date) => Promise<void>;
+}) {
+  const [choice, setChoice] = useState(0);
+  const [date, setDate] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    let until: Date;
+    if (choice < SNOOZE.length) until = SNOOZE[choice][1]();
+    else {
+      if (!date) return setError("Escolha a data.");
+      until = new Date(`${date}T09:00:00`);
+      if (until.getTime() <= Date.now()) return setError("Escolha uma data a partir de amanhã.");
+    }
+    setSaving(true);
+    await onSave(until);
+    setSaving(false);
+  };
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  return (
+    <Modal title="Lembrar depois" onClose={onClose} busy={saving}>
+      <form className="entity-form insights-reason" onSubmit={(e) => void submit(e)}>
+        <p className="campaign-form-context">{insight.title}</p>
+        <fieldset className="insights-reasons">
+          <legend>O insight sai dos abertos e volta</legend>
+          {[...SNOOZE.map(([label]) => label), "Escolher a data"].map((label, i) => (
+            <label key={label} className={choice === i ? "on" : ""}>
+              <input type="radio" name="snooze" checked={choice === i} onChange={() => setChoice(i)} />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+        {choice === SNOOZE.length && (
+          <label>
+            Data
+            <Input type="date" min={tomorrow} value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+        )}
+        <small className="insights-why">Quando voltar, você recebe um lembrete na caixa de entrada.</small>
+        {error && <p className="form-error">{error}</p>}
+        <div className="form-footer">
+          <Button type="button" className="btn secondary" onClick={onClose} disabled={saving}>
+            Cancelar
+          </Button>
+          <Button type="submit" className="btn primary" loading={saving}>
+            Combinar
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 /** "Analisar agora", com o porquê quando não dá (e quando libera). */
 function AnalyzeNow({
@@ -215,7 +489,16 @@ function PendingLine({
 }
 
 /** Um insight: o que os números mostram, a ação e as evidências. */
-export function InsightCard({ insight, compact = false }: { insight: CampaignInsight; compact?: boolean }) {
+export function InsightCard({
+  insight,
+  compact = false,
+  handlers,
+}: {
+  insight: CampaignInsight;
+  compact?: boolean;
+  /** As ações (sem elas, só leitura — ex.: o histórico das análises). */
+  handlers?: Handlers;
+}) {
   const Icon = KIND_ICONS[insight.kind];
   const evidence = compact ? insight.evidence.slice(0, 2) : insight.evidence;
   return (
@@ -258,6 +541,27 @@ export function InsightCard({ insight, compact = false }: { insight: CampaignIns
           </li>
         ))}
       </ul>
+      {insight.status !== "new" && <StatusLine insight={insight} />}
+      {!!insight.tasks?.length && (
+        <ul className="insight-tasks" aria-label="Tarefas">
+          {insight.tasks.map((t) => (
+            <li key={t.id}>
+              <ListPlus size={12} aria-hidden="true" />
+              <a
+                href={appPath(taskUrl(t, ""))}
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate(appPath(taskUrl(t, "")));
+                }}
+              >
+                {t.title}
+              </a>
+              {t.assignee_name && <small>{t.assignee_name}</small>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {handlers && <Actions insight={insight} handlers={handlers} compact={compact} />}
       <footer>
         <span className="insight-basis" title={basisHint(insight.money_basis)}>
           Valores {basisLabel(insight.money_basis)}
@@ -278,6 +582,105 @@ export function InsightCard({ insight, compact = false }: { insight: CampaignIns
   );
 }
 
+const shortDay = (v: string | null | undefined) =>
+  v ? new Date(v).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
+/** Aplicado (com o efeito), adiado ou descartado — e por quem. */
+function StatusLine({ insight: i }: { insight: CampaignInsight }) {
+  const who = i.status_by_name ? ` por ${i.status_by_name}` : "";
+  if (i.status === "applied")
+    return (
+      <div className={`insight-status applied${i.effect ? ` ${i.effect.verdict}` : ""}`}>
+        <strong>
+          <Check size={13} aria-hidden="true" /> Aplicado{who} em {shortDay(i.applied_at)}
+        </strong>
+        <span>
+          {i.effect
+            ? effectText(i.effect)
+            : "A MAVI mede o efeito nas próximas análises (a partir de 3 dias depois)."}
+        </span>
+      </div>
+    );
+  if (i.status === "snoozed")
+    return (
+      <div className="insight-status snoozed">
+        <strong>
+          <Clock size={13} aria-hidden="true" /> Volta em {shortDay(i.snooze_until)}
+        </strong>
+        <span>Adiado{who}.</span>
+      </div>
+    );
+  return (
+    <div className="insight-status dismissed">
+      <strong>
+        <X size={13} aria-hidden="true" /> Descartado{who}
+      </strong>
+      {i.status_reason && <span>{i.status_reason}</span>}
+    </div>
+  );
+}
+
+/** Os botões do insight: aplicar, lembrar depois, descartar, tarefa, 👍/👎 (ou reabrir). */
+function Actions({ insight: i, handlers: h, compact }: { insight: CampaignInsight; handlers: Handlers; compact: boolean }) {
+  const busy = h.busy === i.id;
+  if (i.status !== "new")
+    return (
+      <div className="insight-actions">
+        <button type="button" className="text-btn" disabled={busy} onClick={() => h.status(i, "new")}>
+          <RotateCcw size={13} aria-hidden="true" /> Reabrir
+        </button>
+        {h.task && !compact && (
+          <button type="button" className="text-btn" disabled={busy} onClick={() => h.task!(i)}>
+            <ListPlus size={13} aria-hidden="true" /> Criar tarefa
+          </button>
+        )}
+      </div>
+    );
+  return (
+    <div className={`insight-actions${compact ? " compact" : ""}`}>
+      <button type="button" className="insight-act apply" disabled={busy} onClick={() => h.status(i, "applied")} title="Marcar como aplicado (a MAVI mede o efeito depois)">
+        <Check size={14} aria-hidden="true" />
+        {!compact && "Aplicado"}
+      </button>
+      <button type="button" className="insight-act" disabled={busy} onClick={() => h.snooze(i)} title="Lembrar depois">
+        <Clock size={14} aria-hidden="true" />
+        {!compact && "Lembrar depois"}
+      </button>
+      <button type="button" className="insight-act" disabled={busy} onClick={() => h.dismiss(i)} title="Descartar (com motivo)">
+        <X size={14} aria-hidden="true" />
+        {!compact && "Descartar"}
+      </button>
+      {h.task && (
+        <button type="button" className="insight-act" disabled={busy} onClick={() => h.task!(i)} title="Criar tarefa a partir do insight">
+          <ListPlus size={14} aria-hidden="true" />
+          {!compact && "Criar tarefa"}
+        </button>
+      )}
+      <span className="insight-votes">
+        <button
+          type="button"
+          className={`insight-vote${i.my_vote === "up" ? " on" : ""}`}
+          disabled={busy}
+          aria-pressed={i.my_vote === "up"}
+          onClick={() => h.vote(i, "up")}
+          title="Ajudou"
+        >
+          <ThumbsUp size={13} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className={`insight-vote${i.my_vote === "down" ? " on" : ""}`}
+          disabled={busy}
+          aria-pressed={i.my_vote === "down"}
+          onClick={() => h.vote(i, "down")}
+          title="Não ajudou"
+        >
+          <ThumbsDown size={13} aria-hidden="true" />
+        </button>
+      </span>
+    </div>
+  );
+}
+
 const COLLAPSED_KEY = "mavi:campanhas:insights-recolhido";
 const readCollapsed = () => {
   try {
@@ -295,6 +698,7 @@ export function CampaignInsightsAside({
   campaign,
   notify,
   showTab,
+  ctx,
 }: {
   state: InsightsState;
   backend: InsightsBackend;
@@ -303,7 +707,9 @@ export function CampaignInsightsAside({
   notify: (message: string) => void;
   /** A aba Insights está ligada (o link "Ver tudo"). */
   showTab: boolean;
+  ctx: InsightContext;
 }) {
+  const { handlers, dialogs } = useInsightActions(state, backend, company, ctx, notify);
   const [collapsed, setCollapsedState] = useState(readCollapsed);
   const [tab, setTab] = useUrlState<string>("aba", "dia");
   const setCollapsed = (v: boolean) => {
@@ -356,7 +762,7 @@ export function CampaignInsightsAside({
       {v.pending && <PendingLine pending={v.pending} timezone={v.timezone} />}
       <div className="insights-aside-list">
         {list.slice(0, 4).map((i) => (
-          <InsightCard key={i.id} insight={i} compact />
+          <InsightCard key={i.id} insight={i} compact handlers={handlers} />
         ))}
         {!list.length && !v.pending && (
           <p className="insights-empty">
@@ -376,6 +782,7 @@ export function CampaignInsightsAside({
           </button>
         )}
       </footer>
+      {dialogs}
     </aside>
   );
 }
@@ -467,13 +874,17 @@ export function CampaignInsightsTab({
   company,
   campaign,
   notify,
+  ctx,
 }: {
   state: InsightsState;
   backend: InsightsBackend;
   company: string;
   campaign: string;
   notify: (message: string) => void;
+  ctx: InsightContext;
 }) {
+  const { handlers, dialogs } = useInsightActions(state, backend, company, ctx, notify);
+  const [filter, setFilter] = useState<"open" | "applied" | "snoozed" | "dismissed">("open");
   const v = state.view;
   if (state.error && !v)
     return (
@@ -506,22 +917,61 @@ export function CampaignInsightsTab({
         <AnalyzeNow state={state} backend={backend} company={company} campaign={campaign} notify={notify} />
       </div>
       {v.pending && <PendingLine pending={v.pending} timezone={v.timezone} />}
-      <section aria-label="Insights abertos">
-        <h4 className="insights-section-title">Da última análise</h4>
-        {v.current.length ? (
-          <div className="insights-grid">
-            {v.current.map((i) => (
-              <InsightCard key={i.id} insight={i} />
-            ))}
-          </div>
-        ) : (
-          <p className="insights-empty">
-            {v.blocker ??
-              (v.runs.some((r) => r.status === "done")
-                ? "Nada que mereça ação na última análise."
-                : "A MAVI ainda não analisou esta campanha.")}
-          </p>
-        )}
+      <section aria-label="Insights">
+        <div className="scope-tabs insights-filter" role="tablist" aria-label="Insights por situação">
+          {(
+            [
+              ["open", "Abertos", v.current.length],
+              ["applied", "Aplicados", v.applied?.length ?? 0],
+              ["snoozed", "Para depois", v.snoozed?.length ?? 0],
+              ["dismissed", "Descartados", v.dismissed?.length ?? 0],
+            ] as const
+          ).map(([id, label, n]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={filter === id}
+              className={filter === id ? "selected" : ""}
+              onClick={() => setFilter(id)}
+            >
+              {label}
+              {n > 0 && <span>{n}</span>}
+            </button>
+          ))}
+        </div>
+        {(() => {
+          const list =
+            filter === "open"
+              ? v.current
+              : filter === "applied"
+                ? (v.applied ?? [])
+                : filter === "snoozed"
+                  ? (v.snoozed ?? [])
+                  : (v.dismissed ?? []);
+          if (list.length)
+            return (
+              <div className="insights-grid">
+                {list.map((i) => (
+                  <InsightCard key={i.id} insight={i} handlers={handlers} />
+                ))}
+              </div>
+            );
+          return (
+            <p className="insights-empty">
+              {filter === "open"
+                ? (v.blocker ??
+                  (v.runs.some((r) => r.status === "done")
+                    ? "Nada aberto: a última análise não trouxe o que mereça ação."
+                    : "A MAVI ainda não analisou esta campanha."))
+                : filter === "applied"
+                  ? "Nenhum insight aplicado ainda. Ao marcar como aplicado, a MAVI mede o antes × depois."
+                  : filter === "snoozed"
+                    ? "Nada combinado para depois."
+                    : "Nenhum descartado nos últimos 90 dias."}
+            </p>
+          );
+        })()}
       </section>
       <section aria-label="Histórico das análises">
         <h4 className="insights-section-title">
@@ -537,6 +987,7 @@ export function CampaignInsightsTab({
           <p className="insights-empty">Nenhuma análise ainda.</p>
         )}
       </section>
+      {dialogs}
     </div>
   );
 }

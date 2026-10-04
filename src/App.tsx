@@ -4146,6 +4146,7 @@ export default function App() {
                   user={user}
                   notify={notify}
                   agency={isLeader}
+                  onNewTask={(preset) => openForm("task", preset)}
                 />
               )}
               {(page === "onboarding" || page === "socialMedia") && (

@@ -33,6 +33,7 @@ import {
   Loading,
 } from "./ui";
 import { Empty, Modal } from "./components";
+import type { FormPreset } from "./forms";
 import {
   CampaignInsightsAside,
   CampaignInsightsTab,
@@ -174,6 +175,8 @@ type Props = {
    * the module on works on the clients of their teams (the database checks).
    */
   agency?: boolean;
+  /** Insights da MAVI › Criar tarefa: o formulário de tarefa do App. */
+  onNewTask?: (preset: FormPreset) => void;
 };
 type CampaignFormState = { campaign?: AdCampaign } | null;
 type CycleFormState = {
@@ -207,6 +210,7 @@ export function CampaignsPage({
   notify,
   canEdit = true,
   agency = true,
+  onNewTask,
 }: Props) {
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -422,6 +426,8 @@ export function CampaignsPage({
           googlePlatform={googlePlatform}
           reports={reports}
           insights={insights}
+          user={user}
+          onNewTask={onNewTask}
           today={today}
           eventsTick={eventsTick}
           notify={notify}
@@ -1241,6 +1247,8 @@ function CampaignDetail({
   googlePlatform,
   reports,
   insights,
+  user,
+  onNewTask,
   today,
   eventsTick,
   notify,
@@ -1270,6 +1278,8 @@ function CampaignDetail({
   googlePlatform: GooglePlatformBackend;
   reports: ReportsBackend;
   insights: InsightsBackend;
+  user: string;
+  onNewTask?: (preset: FormPreset) => void;
   today: string;
   eventsTick: number;
   notify: (message: string) => void;
@@ -1304,6 +1314,12 @@ function CampaignDetail({
   const withInsights =
     (campaign.platform === "meta" || campaign.platform === "google") &&
     !!insightsView?.enabled;
+  const insightsCtx = {
+    campaign: { id: campaign.id, name: campaign.name, contract_id: campaign.contract_id },
+    data,
+    user,
+    onNewTask,
+  };
   const current = currentCycle(state, campaign);
   const alert = cycleAlert(state, campaign, today);
   const [events, setEvents] = useState<AdCampaignEvent[] | null>(null);
@@ -1535,6 +1551,7 @@ function CampaignDetail({
               company={company}
               campaign={campaign.id}
               notify={notify}
+              ctx={insightsCtx}
             />
           ) : undefined
         }
@@ -1548,6 +1565,7 @@ function CampaignDetail({
               campaign={campaign.id}
               notify={notify}
               showTab={!!insightsView?.places.tab}
+              ctx={insightsCtx}
             />
           ) : undefined
         }

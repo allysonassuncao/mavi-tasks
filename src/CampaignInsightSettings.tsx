@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Lightbulb, Pencil, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
-import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
+import { AlertTriangle, Check, GraduationCap, Lightbulb, Pause, Pencil, Play, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
+import { Button, Checkbox, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import type { Snapshot } from "./types";
 import { supabaseCampaigns } from "./campaigns";
 import {
   DEFAULT_SETTINGS,
+  KIND_LABELS,
   WEEKDAYS,
   deleteInsightRule,
+  loadInsightLessons,
   loadInsightSettings,
+  saveInsightLesson,
+  setInsightLesson,
   money,
   saveInsightRule,
   saveInsightSettings,
   scheduleText,
   type InsightFrequency,
+  type InsightKind,
+  type InsightLesson,
   type InsightRule,
   type InsightSettings,
   type InsightSettingsView,
@@ -258,6 +264,16 @@ export function CampaignInsightSettings({
           <span>
             <strong>Selo na lista de Campanhas</strong>
             <small>Uma coluna com quantos insights cada campanha tem abertos (e quantos de prioridade alta).</small>
+          </span>
+        </label>
+        <label className="cins-check">
+          <Checkbox checked={draft.mavi_context} onCheckedChange={(v) => set({ mavi_context: v === true })} />
+          <span>
+            <strong>Na conversa com a MAVI sobre a campanha</strong>
+            <small>
+              A MAVI conhece os insights abertos, os aplicados (com o efeito) e os descartados quando alguém pergunta
+              sobre a campanha.
+            </small>
           </span>
         </label>
       </section>
@@ -513,7 +529,211 @@ export function CampaignInsightSettings({
       </div>
 
       <RulesBlock company={company} data={data} config={config} onChange={setConfig} notify={notify} />
+      <LessonsBlock company={company} data={data} notify={notify} />
     </div>
+  );
+}
+
+const LESSON_STATUS: Record<InsightLesson["status"], string> = {
+  active: "Em uso",
+  candidate: "Aguardando confirmação",
+  paused: "Pausado",
+  dismissed: "Excluído",
+};
+type LessonDraft = {
+  id?: string;
+  scope: InsightLesson["scope"];
+  client_id: string;
+  product_id: string;
+  kind: "" | InsightKind;
+  text: string;
+};
+
+/**
+ * Os aprendizados do time: a MAVI tira dos 👍/👎 e dos descartes; valem com
+ * 2 pessoas ou 1 líder. Os líderes conferem, pausam, editam, excluem ou
+ * escrevem os seus (que valem na hora).
+ */
+function LessonsBlock({ company, data, notify }: { company: string; data: Snapshot; notify: (m: string) => void }) {
+  const [view, setView] = useState<Awaited<ReturnType<typeof loadInsightLessons>> | null>(null);
+  const [error, setError] = useState("");
+  const [draft, setDraft] = useState<LessonDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    loadInsightLessons(company)
+      .then(setView)
+      .catch((e) => setError((e as Error).message));
+  }, [company]);
+  const act = async (job: () => Promise<Awaited<ReturnType<typeof loadInsightLessons>>>, done: string) => {
+    setBusy(true);
+    try {
+      setView(await job());
+      notify(done);
+      return true;
+    } catch (e) {
+      notify((e as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const clients = [...data.clients].filter((c) => !c.archived).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const products = [...data.products].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  const where = (l: InsightLesson) =>
+    l.scope === "company" ? "Toda a agência" : l.scope === "client" ? `Cliente ${l.client_name ?? ""}` : `Produto ${l.product_name ?? ""}`;
+  return (
+    <section className="panel cins-block">
+      <h3>
+        <GraduationCap size={16} aria-hidden="true" /> Aprendizados do time
+      </h3>
+      <p className="cins-help">
+        Os 👍/👎 e os descartes (com motivo) dos insights viram regras que as próximas análises seguem. A MAVI propõe;
+        o aprendizado vale com 2 pessoas avaliando no mesmo sentido ou com 1 administrador ou gestor. Os escritos aqui
+        valem na hora.
+        {view ? ` Avaliações nos últimos 30 dias: ${view.feedback_30d}${view.pending ? ` (${view.pending} esperando a MAVI ler)` : ""}.` : ""}
+      </p>
+      {error && <p className="form-error">{error}</p>}
+      {!view && !error && <Loading variant="list" />}
+      {view && view.lessons.length > 0 && (
+        <ul className="cins-rules cins-lessons">
+          {view.lessons.map((l) => (
+            <li key={l.id} className={`status-${l.status}`}>
+              <div>
+                <strong>{l.text}</strong>
+                <small>
+                  {where(l)}
+                  {l.kind ? ` · ${KIND_LABELS[l.kind]}` : ""} · {LESSON_STATUS[l.status]}
+                  {l.origin === "person" ? " · escrito por líder" : ` · ${l.people} ${l.people === 1 ? "pessoa" : "pessoas"}${l.has_leader ? " (com líder)" : ""}`}
+                  {!l.reviewed_at && l.origin === "mavi" ? " · novo" : ""}
+                </small>
+              </div>
+              {!l.reviewed_at && (
+                <button type="button" className="icon-btn" title="Conferido" aria-label="Marcar como conferido" disabled={busy}
+                  onClick={() => void act(() => setInsightLesson(company, l.id, "review"), "Aprendizado conferido.")}>
+                  <Check size={15} />
+                </button>
+              )}
+              {l.status === "paused" ? (
+                <button type="button" className="icon-btn" title="Voltar a usar" aria-label="Voltar a usar" disabled={busy}
+                  onClick={() => void act(() => setInsightLesson(company, l.id, "activate"), "Aprendizado em uso.")}>
+                  <Play size={15} />
+                </button>
+              ) : (
+                <button type="button" className="icon-btn" title="Pausar" aria-label="Pausar" disabled={busy}
+                  onClick={() => void act(() => setInsightLesson(company, l.id, "pause"), "Aprendizado pausado.")}>
+                  <Pause size={15} />
+                </button>
+              )}
+              <button type="button" className="icon-btn" title="Editar" aria-label="Editar" disabled={busy}
+                onClick={() =>
+                  setDraft({ id: l.id, scope: l.scope, client_id: l.client_id ?? "", product_id: l.product_id ?? "", kind: l.kind ?? "", text: l.text })
+                }>
+                <Pencil size={15} />
+              </button>
+              <button type="button" className="icon-btn" title="Excluir" aria-label="Excluir" disabled={busy}
+                onClick={() => void act(() => setInsightLesson(company, l.id, "dismiss"), "Aprendizado excluído: a MAVI não volta a ele.")}>
+                <Trash2 size={15} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {view && !view.lessons.length && !draft && (
+        <p className="cins-help">Nenhum aprendizado ainda. Eles aparecem conforme o time avalia e descarta insights.</p>
+      )}
+      {draft ? (
+        <div className="cins-rule-editor">
+          <div className="cins-row">
+            <label>
+              <span>Vale para</span>
+              <Select value={draft.scope} onValueChange={(v) => setDraft({ ...draft, scope: v as LessonDraft["scope"] })} aria-label="Vale para">
+                <SelectOption value="company">Toda a agência</SelectOption>
+                <SelectOption value="client">Um cliente</SelectOption>
+                <SelectOption value="product">Um produto</SelectOption>
+              </Select>
+            </label>
+            {draft.scope === "client" && (
+              <label>
+                <span>Cliente</span>
+                <Select value={draft.client_id} onValueChange={(v) => setDraft({ ...draft, client_id: v })} aria-label="Cliente">
+                  <SelectOption value="">Escolha o cliente</SelectOption>
+                  {clients.map((c) => (
+                    <SelectOption key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectOption>
+                  ))}
+                </Select>
+              </label>
+            )}
+            {draft.scope === "product" && (
+              <label>
+                <span>Produto</span>
+                <Select value={draft.product_id} onValueChange={(v) => setDraft({ ...draft, product_id: v })} aria-label="Produto">
+                  <SelectOption value="">Escolha o produto</SelectOption>
+                  {products.map((p) => (
+                    <SelectOption key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectOption>
+                  ))}
+                </Select>
+              </label>
+            )}
+            <label>
+              <span>Tipo de insight</span>
+              <Select value={draft.kind} onValueChange={(v) => setDraft({ ...draft, kind: v as LessonDraft["kind"] })} aria-label="Tipo de insight">
+                <SelectOption value="">Todos</SelectOption>
+                {(Object.keys(KIND_LABELS) as InsightKind[]).map((k) => (
+                  <SelectOption key={k} value={k}>
+                    {KIND_LABELS[k]}
+                  </SelectOption>
+                ))}
+              </Select>
+            </label>
+          </div>
+          <label>
+            <span>Aprendizado</span>
+            <Textarea
+              rows={2}
+              value={draft.text}
+              onChange={(e) => setDraft({ ...draft, text: e.target.value.slice(0, 400) })}
+              placeholder="Ex.: Para este cliente, não sugerir frete grátis: não há margem."
+            />
+          </label>
+          <div className="cins-rule-actions">
+            <Button className="btn secondary" onClick={() => setDraft(null)} disabled={busy}>
+              Cancelar
+            </Button>
+            <Button
+              className="btn primary"
+              loading={busy}
+              onClick={async () => {
+                const ok = await act(
+                  () =>
+                    saveInsightLesson(company, {
+                      ...(draft.id ? { id: draft.id } : {}),
+                      scope: draft.scope,
+                      client_id: draft.scope === "client" ? draft.client_id || null : null,
+                      product_id: draft.scope === "product" ? draft.product_id || null : null,
+                      kind: draft.kind || null,
+                      text: draft.text,
+                    }),
+                  "Aprendizado salvo: vale nas próximas análises.",
+                );
+                if (ok) setDraft(null);
+              }}
+            >
+              <Save size={15} aria-hidden="true" /> Salvar aprendizado
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="cins-rule-actions start">
+          <Button className="btn secondary" onClick={() => setDraft({ scope: "company", client_id: "", product_id: "", kind: "", text: "" })}>
+            <Plus size={15} aria-hidden="true" /> Escrever um aprendizado
+          </Button>
+        </div>
+      )}
+    </section>
   );
 }
 

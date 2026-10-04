@@ -33,6 +33,7 @@ import {
 } from "./_crm.js";
 import { modelPrice } from "./_social-leads.js";
 import { readCreatives, type CreativeAd } from "./_campaign-creatives.js";
+import { learnFromFeedback } from "./_campaign-insight-learning.js";
 
 /**
  * Campanhas › Insights da MAVI (migração 20270327090000_campaign_insights).
@@ -108,7 +109,19 @@ export type InsightMaterial = {
     status: string;
     seen_count: number;
     last_seen_at: string;
+    status_reason?: string | null;
   }[];
+  /** Os aplicados nos últimos 30 dias (para medir antes × depois). */
+  applied?: {
+    id: string;
+    title: string;
+    kind: string;
+    target: { key: string; level: string; name: string } | null;
+    applied_at: string;
+    effect: Effect | null;
+  }[];
+  /** Os aprendizados do time que valem para este cliente. */
+  lessons?: { scope: string; kind: string | null; text: string }[];
   context: {
     dossier: { kind: string; text: string }[];
     radar: { topic: string; title: string; summary: string; severity: number | null; last_seen: string }[];
@@ -348,6 +361,8 @@ export type Analysis = {
   labels?: Record<string, string>;
   /** Campanhas cujas UTMs chegam ao CRM com utm_content preenchido. */
   contentCampaigns?: string[];
+  /** O efeito medido dos insights aplicados. */
+  effects?: { insight: string; effect: Effect }[];
 };
 
 /** O total da campanha (as campanhas vinculadas somadas) e a meta do ciclo. */
@@ -1052,6 +1067,147 @@ export function nearMissUtms(entities: Entity[], crm: CrmIndex | null): Entity[]
   return out.slice(0, 10);
 }
 
+// ------------------------------------------------------------ antes × depois
+export type Effect = {
+  /** Dias de cada lado (os mesmos antes e depois de aplicar). */
+  days: number;
+  before: Numbers;
+  after: Numbers;
+  /** Variação (%) do custo por resultado, dos resultados por dia e do CTR. */
+  change: { cpa: number | null; results_per_day: number | null; ctr: number | null };
+  verdict: "better" | "worse" | "neutral";
+  money_basis?: Basis;
+};
+export type EffectPlan = {
+  id: string;
+  level: "campaign" | "adset" | "ad" | "keyword" | "total";
+  target: string | null;
+  days: number;
+  before: WindowRange;
+  after: WindowRange;
+};
+/**
+ * Os períodos de cada insight aplicado: os N dias antes de aplicar e os N
+ * depois (N = os dias desde então, até 14; mínimo de 3). Entram na mesma
+ * leitura da plataforma (mais períodos na mesma chamada, sem chamada a mais).
+ */
+export function effectPlans(m: InsightMaterial): EffectPlan[] {
+  const yesterday = addDays(m.today, -1);
+  return (m.applied ?? []).flatMap((a): EffectPlan[] => {
+    const day = localDay(a.applied_at, m.timezone);
+    const after = daysBetween(day, yesterday) + 1;
+    if (after < 3) return [];
+    const days = Math.min(after, 14);
+    const level = (["campaign", "adset", "ad", "keyword"] as const).find((l) => l === a.target?.level) ?? "total";
+    const short = a.id.replace(/-/g, "").slice(0, 8);
+    return [
+      {
+        id: a.id,
+        level,
+        target: level === "total" ? null : a.target!.key,
+        days,
+        before: { key: `b:${short}`, since: addDays(day, -days), until: addDays(day, -1) },
+        after: { key: `x:${short}`, since: day, until: addDays(day, days - 1) },
+      },
+    ];
+  });
+}
+export const plannedRanges = (plans: EffectPlan[], level: "campaign" | "adset" | "ad" | "keyword") =>
+  plans.filter((p) => (p.level === "total" ? "campaign" : p.level) === level).flatMap((p) => [p.before, p.after]);
+
+/** O efeito: a variação do custo por resultado (ou, sem resultados, dos resultados por dia). */
+export function effectOf(before: Numbers, after: Numbers, days: number, basis?: Basis): Effect {
+  const pct = (a: number | null | undefined, b: number | null | undefined) =>
+    a === null || a === undefined || b === null || b === undefined || !a ? null : round(((b - a) / a) * 100, 1);
+  const perDay = (n: Numbers) => (n.results === null || n.results === undefined ? null : n.results / days);
+  const keep = (n: Numbers) =>
+    Object.fromEntries(["spend", "results", "cpa", "ctr", "cpc"].map((k) => [k, n[k] ?? null])) as Numbers;
+  const change = {
+    cpa: before.results && after.results ? pct(before.cpa, after.cpa) : null,
+    results_per_day: pct(perDay(before), perDay(after)),
+    ctr: pct(before.ctr, after.ctr),
+  };
+  const verdict: Effect["verdict"] =
+    change.cpa !== null
+      ? change.cpa <= -10
+        ? "better"
+        : change.cpa >= 10
+          ? "worse"
+          : "neutral"
+      : change.results_per_day !== null
+        ? change.results_per_day >= 10
+          ? "better"
+          : change.results_per_day <= -10
+            ? "worse"
+            : "neutral"
+        : "neutral";
+  return { days, before: keep(before), after: keep(after), change, verdict, ...(basis ? { money_basis: basis } : {}) };
+}
+
+/** Mede os aplicados e tira os períodos de medida das entidades (não vão para a MAVI). */
+export function measureEffects(plans: EffectPlan[], entities: Entity[], basis?: Basis) {
+  const out: { insight: string; effect: Effect }[] = [];
+  const at = (e: Entity, key: string) => (e.n as Record<string, Numbers | undefined>)[key];
+  const sum = (key: string) => {
+    const list = entities.filter((e) => e.level === "campaign").map((e) => at(e, key)).filter(Boolean) as Numbers[];
+    if (!list.length) return undefined;
+    return derive({
+      spend: list.reduce((s, x) => s + numOr(x.spend), 0),
+      impressions: list.reduce((s, x) => s + numOr(x.impressions), 0),
+      clicks: list.reduce((s, x) => s + numOr(x.clicks), 0),
+      results: list.reduce((s, x) => s + numOr(x.results), 0),
+    });
+  };
+  for (const p of plans) {
+    const e = p.target ? entities.find((x) => x.key === p.target) : null;
+    const before = p.target ? (e ? at(e, p.before.key) : undefined) : sum(p.before.key);
+    const after = p.target ? (e ? at(e, p.after.key) : undefined) : sum(p.after.key);
+    if (before && after) out.push({ insight: p.id, effect: effectOf(before, after, p.days, basis) });
+  }
+  for (const e of entities)
+    for (const k of Object.keys(e.n)) if (/^[bx]:/.test(k)) delete (e.n as Record<string, unknown>)[k];
+  return out;
+}
+
+// ------------------------------------------------------------ contexto da conversa
+/** O que campaign_insights_ai devolve (nulo: desligado ou sem acesso). */
+export type InsightsContext = {
+  money_basis: Basis;
+  open: { priority: string; kind: string; title: string; action: string; evidence: Evidence[] }[];
+  applied: { title: string; applied_at: string; effect: Effect | null }[];
+  dismissed: { title: string; reason: string }[];
+} | null;
+const PRIORITY_PT: Record<string, string> = { high: "alta", medium: "média", low: "baixa" };
+/** A linha do contexto da MAVI na conversa sobre a campanha. */
+export function insightsContextLine(x: InsightsContext) {
+  if (!x || (!x.open?.length && !x.applied?.length && !x.dismissed?.length)) return "";
+  const money = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const value = (e: Evidence) =>
+    e.unit === "money" ? money(e.value) : e.unit === "pct" ? `${e.value.toLocaleString("pt-BR")}%` : e.value.toLocaleString("pt-BR");
+  const parts = [
+    `Insights da MAVI desta campanha (valores ${x.money_basis === "gross" ? "com M" : "sem M"}; o time vê os mesmos no painel ao lado):`,
+    ...(x.open ?? []).map(
+      (i) =>
+        `- [aberto, prioridade ${PRIORITY_PT[i.priority] ?? i.priority}] ${i.title}${i.action ? ` → ${i.action}` : ""}${
+          i.evidence?.length ? ` (${i.evidence.slice(0, 3).map((e) => `${e.label}: ${value(e)}`).join("; ")})` : ""
+        }`,
+    ),
+    ...(x.applied ?? []).map(
+      (i) =>
+        `- [aplicado em ${String(i.applied_at).slice(0, 10)}] ${i.title}${
+          i.effect
+            ? ` — efeito em ${i.effect.days} dias: ${i.effect.verdict === "better" ? "melhorou" : i.effect.verdict === "worse" ? "piorou" : "estável"}${
+                i.effect.change.cpa !== null ? ` (custo por resultado ${i.effect.change.cpa > 0 ? "+" : ""}${i.effect.change.cpa.toLocaleString("pt-BR")}%)` : ""
+              }`
+            : " — efeito ainda em medição"
+        }`,
+    ),
+    ...(x.dismissed ?? []).map((i) => `- [descartado pelo time${i.reason ? `: ${i.reason}` : ""}] ${i.title}`),
+    "Use esses insights quando ajudarem a responder; não repita os descartados como sugestão.",
+  ];
+  return parts.join("\n");
+}
+
 // ------------------------------------------------------------ o pedido à MAVI
 export const INSIGHTS_INSTRUCTIONS = `Você é a MAVI, a inteligência de uma agência de marketing (seu nome é MAVI, no feminino). Aqui você é a analista sênior de tráfego pago da agência: lê os números de UMA campanha na plataforma (Meta Ads ou Google Ads), o resultado comercial no CRM (MakeCRM, ligado por UTM) e o contexto do cliente, e entrega insights técnicos, reais e aplicáveis para a equipe que opera a campanha.
 
@@ -1074,6 +1230,8 @@ Regras dos números (obrigatório):
 - O funil do CRM (quando vem) mostra a QUALIDADE do lead de cada campanha, conjunto, anúncio ou palavra-chave: abertas, ganhas, perdidas, taxa de perda, quantas chegaram a cada etapa ("stage:…", ou além), os motivos de perda ("lost:…"), a faixa da qualificação ("bucket:…") e as respostas mais escolhidas no formulário ("answer:…"); os nomes estão em "funil_crm.legenda". Use isso para separar volume de qualidade (ex.: o conjunto mais barato que só gera leads perdidos por "sem orçamento"; a palavra-chave cara que leva à Negociação) e cite essas métricas nas evidências pelo nome da chave. O CRM não tem idade nem gênero do lead: o cruzamento com o público é pelo conjunto (o público dele na plataforma × a qualidade dos leads dele no CRM).
 - As "detecções automáticas" já viram insights: não as repita; você pode aprofundar com outra conclusão (outro topic).
 - Anúncios podem trazer "criativo" (o que a imagem ou o vídeo comunica: promessa, gancho, oferta, prova, formato — lido pela MAVI a partir da imagem e do texto) e "audio" (trecho da transcrição do vídeo). Use para explicar o porquê do desempenho (ex.: a promessa de frete grátis do anúncio que mais gera oportunidades no CRM) e para sugerir variações concretas; a descrição do criativo não é número e não entra nas evidências.
+- "aprendizados_do_time" são regras que o time ensinou (para a agência, o produto ou este cliente): siga-as sempre; nunca sugira o que elas proíbem.
+- Insights anteriores "dismissed" foram descartados pelo time (veja o "motivo"): não os traga de volta com outras palavras. "applied" já foram aplicados: veja "insights_aplicados" — se o efeito piorou, diga e sugira o ajuste; se melhorou, você pode sugerir levar a mesma ideia a outro conjunto ou anúncio.
 - O contexto do cliente (dossiê, Radar, termômetro, reuniões) serve para interpretar e priorizar; não copie trechos dele nem exponha conversas internas.
 
 Responda SOMENTE com um JSON, sem texto antes ou depois:
@@ -1134,8 +1292,35 @@ export function insightMessage(m: InsightMaterial, a: Analysis, rules: Insight[]
     deteccoes_automaticas: rules.map((r) => ({ kind: r.kind, title: r.title, target: r.target?.key ?? null })),
     insights_anteriores: m.previous.slice(0, 15).map((p) => {
       const f = fingerprintParts(p.fingerprint);
-      return { kind: p.kind, title: p.title, topic: f.topic, target: f.target, status: p.status, visto: p.seen_count };
+      return {
+        kind: p.kind,
+        title: p.title,
+        topic: f.topic,
+        target: f.target,
+        status: p.status,
+        visto: p.seen_count,
+        ...(p.status_reason ? { motivo: p.status_reason } : {}),
+      };
     }),
+    aprendizados_do_time: m.lessons?.length
+      ? m.lessons.map((l) => ({ alcance: l.scope, ...(l.kind ? { tipo: l.kind } : {}), regra: l.text }))
+      : undefined,
+    insights_aplicados: m.applied?.length
+      ? m.applied.map((x) => ({
+          title: x.title,
+          aplicado_em: x.applied_at.slice(0, 10),
+          ...(x.effect
+            ? {
+                efeito: {
+                  dias: x.effect.days,
+                  resultado: x.effect.verdict === "better" ? "melhorou" : x.effect.verdict === "worse" ? "piorou" : "estável",
+                  custo_por_resultado: x.effect.change.cpa,
+                  resultados_por_dia: x.effect.change.results_per_day,
+                },
+              }
+            : { efeito: "ainda medindo" }),
+        }))
+      : undefined,
     contexto_do_cliente: {
       dossie: m.context.dossier.length ? m.context.dossier : undefined,
       radar: m.context.radar.length ? m.context.radar : undefined,
@@ -1508,6 +1693,8 @@ export async function readAnalysis(
   const ranges: WindowRange[] = (Object.keys(windows) as WindowKey[]).map((key) => ({ key, ...windows[key]! }));
   const short = ranges.filter((r) => r.key === "cycle" || r.key === "d7");
   const cycle = ranges.filter((r) => r.key === "cycle");
+  // Os aplicados: os períodos de antes × depois entram nas mesmas leituras.
+  const plans = effectPlans(m);
   const notes: string[] = [];
   const f = meteredFetch(fetchImpl, meter);
   // O CRM primeiro (as linhas da plataforma já saem com ele).
@@ -1574,11 +1761,14 @@ export async function readAnalysis(
             }),
           );
         // Campanhas (todas as janelas) primeiro; o público só com folga na cota.
-        const top = await read("campaign", ranges);
+        const top = await read("campaign", [...ranges, ...plannedRanges(plans, "campaign")]);
         resultLabel ||= top.result_label;
         const roomy = meter.pct < 60;
         if (!roomy) notes.push(`Cota do Meta em ${Math.round(meter.pct)}%: sem o público por idade e gênero.`);
-        const [adsets, ads] = await Promise.all([read("adset", short, roomy), read("ad", short)]);
+        const [adsets, ads] = await Promise.all([
+          read("adset", [...short, ...plannedRanges(plans, "adset")], roomy),
+          read("ad", [...short, ...plannedRanges(plans, "ad")]),
+        ]);
         entities.push(...metaEntities({ campaigns: top.rows, adsets: adsets.rows, ads: ads.rows }, crm, k, LIMITS, account));
       }
     } else {
@@ -1591,10 +1781,17 @@ export async function readAnalysis(
             (rows): GoogleRead => ({ view, rows }),
           );
         const reads = await Promise.all([
-          read("campaigns", ranges),
-          read("ad_groups", short),
+          read("campaigns", [...ranges, ...plannedRanges(plans, "campaign")]),
+          read("ad_groups", [...short, ...plannedRanges(plans, "adset")]),
           ...(["ads", "keywords", "search_terms", "age", "gender"] as const).map((view) =>
-            read(view, cycle).catch((e) => {
+            read(
+              view,
+              view === "ads"
+                ? [...cycle, ...plannedRanges(plans, "ad")]
+                : view === "keywords"
+                  ? [...cycle, ...plannedRanges(plans, "keyword")]
+                  : cycle,
+            ).catch((e) => {
               if (meter.throttle) throw e;
               notes.push(`Google: a visão ${view} não pôde ser lida.`);
               return { view, rows: [] } as GoogleRead;
@@ -1614,6 +1811,7 @@ export async function readAnalysis(
   }
   if (!entities.some((e) => e.level === "campaign"))
     throw new InsightsError(409, notes[0] ?? "Nenhuma campanha vinculada foi encontrada na plataforma.", true);
+  const effects = measureEffects(plans, entities, basis);
   entities = [...entities, ...nearMissUtms(entities, crm)];
   const labels = funnel ? applyFunnel(entities, funnel) : {};
   const contentCampaigns = crm
@@ -1632,6 +1830,7 @@ export async function readAnalysis(
     funnel: funnelState,
     labels,
     contentCampaigns,
+    effects,
   };
   analysis.entities = [totalEntity(m, analysis), ...analysis.entities];
   return analysis;
@@ -1723,6 +1922,9 @@ export async function analyse(
       }).catch(() => {});
   const entities = new Map(full.entities.map((e) => [e.key, e]));
   const rules = ruleInsights(m, full, entities);
+  // O efeito medido agora vai para a MAVI (e é gravado com a análise).
+  const measured = new Map((full.effects ?? []).map((x) => [x.insight, x.effect]));
+  if (m.applied?.length) m.applied = m.applied.map((a) => ({ ...a, effect: measured.get(a.id) ?? a.effect }));
   const cap = Number(m.settings.run_cap_usd) || 0.5;
   const usage: Usage[] = [];
   const notes = [...full.notes];
@@ -1861,6 +2063,7 @@ export async function analyse(
       insights: list,
       usage,
       api_calls: { meta: meter.meta, google: meter.google },
+      effects: full.effects ?? [],
       tokens: {
         input: usage.reduce((sum, u) => sum + u.input + u.cache_read + u.cache_write, 0),
         output: usage.reduce((sum, u) => sum + u.output, 0),
@@ -1878,10 +2081,19 @@ export async function runCampaignInsights(
   read: typeof readAnalysis = readAnalysis,
   /** A leitura dos criativos (trocada nos testes). */
   creatives: typeof readCreatives = readCreatives,
+  /** O aprendizado com as avaliações (trocado nos testes). */
+  learn: typeof learnFromFeedback = learnFromFeedback,
 ) {
   const now = deps.now ?? Date.now;
   const deadline = now() + (env.insightsBudgetMs ?? 240_000);
-  const stats = { done: 0, skipped: 0, deferred: 0, failed: 0, insights: 0 };
+  const stats = { done: 0, skipped: 0, deferred: 0, failed: 0, insights: 0, learned: 0 };
+  // Primeiro, o aprendizado de uma empresa com avaliações paradas (rápido; nunca trava as análises).
+  try {
+    const r = await learn(env, deps);
+    if (r) stats.learned = r.changed;
+  } catch (e) {
+    console.error("campaign insights · aprendizado", (e as Error).message);
+  }
   const companies = new Map<string, Promise<Company>>();
   // Uma análise leva até ~2 min (leitura da plataforma + a MAVI).
   while (now() < deadline - 120_000) {

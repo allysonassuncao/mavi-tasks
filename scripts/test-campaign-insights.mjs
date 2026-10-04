@@ -449,6 +449,159 @@ await check("criativos: escolhas da empresa, leitura guardada uma vez e reaprove
   assert.deepEqual(r, { t: true, i: false });
 });
 
+await check("ciclo de vida: aplicar, descartar com motivo, lembrar depois, reabrir; tudo no histórico", async () => {
+  // Uma análise nova com três insights.
+  await sql(`delete from campaign_insight_runs`);
+  await as(admin);
+  await rpc("save_campaign_insight_settings", [A, JSON.stringify({ min_interval_minutes: 0, monthly_cap_usd: null, notify_inbox: false })]);
+  await as(trafego);
+  const run = (await rpc("request_campaign_insight", [A, campaign])).run;
+  await as(null);
+  await worker("ai_campaign_insight_claim", [SECRET, 3]);
+  await worker("ai_campaign_insight_store", [SECRET, run, JSON.stringify({
+    status: "done",
+    insights: [insight("problem#s:1#caro"), insight("opportunity#a:2#frete", { kind: "opportunity", priority: "medium", title: "Frete" }),
+      insight("tracking#c:1#utm", { kind: "tracking", title: "UTM" })],
+  })]);
+  const ids = Object.fromEntries((await sql(`select fingerprint, id from campaign_insights where run_id=$1`, [run])).map((r) => [r.fingerprint, r.id]));
+  await as(other);
+  await assert.rejects(rpc("set_campaign_insight_status", [A, ids["problem#s:1#caro"], "applied", null, "", null]), /Sem permissão/);
+  await as(trafego);
+  const applied = await rpc("set_campaign_insight_status", [A, ids["problem#s:1#caro"], "applied", null, "", null]);
+  assert.equal(applied.status, "applied");
+  assert.equal(applied.status_by_name, "Tiago Tráfego");
+  assert.ok(applied.applied_at);
+  await assert.rejects(rpc("set_campaign_insight_status", [A, ids["opportunity#a:2#frete"], "dismissed", null, "", null]), /motivo do descarte/);
+  await assert.rejects(rpc("set_campaign_insight_status", [A, ids["opportunity#a:2#frete"], "dismissed", "other", "", null]), /Conte o motivo/);
+  const dismissed = await rpc("set_campaign_insight_status", [A, ids["opportunity#a:2#frete"], "dismissed", "client", "sem verba para frete", null]);
+  assert.equal(dismissed.status_reason, "Restrição do cliente: sem verba para frete");
+  await assert.rejects(rpc("set_campaign_insight_status", [A, ids["tracking#c:1#utm"], "snoozed", null, "", new Date(Date.now() - 60_000).toISOString()]), /quando o insight volta/);
+  const until = new Date(Date.now() + 3 * 86_400_000).toISOString();
+  const snoozed = await rpc("set_campaign_insight_status", [A, ids["tracking#c:1#utm"], "snoozed", null, "", until]);
+  assert.equal(snoozed.status, "snoozed");
+  let v = await rpc("campaign_insights", [A, campaign, 8]);
+  assert.deepEqual([v.current.length, v.applied.length, v.dismissed.length, v.snoozed.length], [0, 1, 1, 1]);
+  // O descarte virou avaliação para o aprendizado.
+  const fb = await sql(`select vote, reason, comment, leader from campaign_insight_feedback where insight_id=$1`, [ids["opportunity#a:2#frete"]]);
+  assert.deepEqual(fb, [{ vote: "dismiss", reason: "client", comment: "sem verba para frete", leader: false }]);
+  // A próxima análise não traz de volta o descartado, o aplicado nem o adiado.
+  await as(trafego);
+  const run2 = (await rpc("request_campaign_insight", [A, campaign])).run;
+  await as(null);
+  await worker("ai_campaign_insight_claim", [SECRET, 3]);
+  const stored = await worker("ai_campaign_insight_store", [SECRET, run2, JSON.stringify({
+    status: "done",
+    insights: [insight("problem#s:1#caro"), insight("opportunity#a:2#frete"), insight("tracking#c:1#utm"), insight("highlight#a:9#novo", { kind: "highlight", title: "Novo" })],
+    effects: [{ insight: ids["problem#s:1#caro"], effect: { verdict: "better", change: { cpa: -18 } } }],
+  })]);
+  assert.deepEqual(stored, { ok: true, new: 1, repeated: 0 });
+  const [eff] = await sql(`select effect from campaign_insights where id=$1`, [ids["problem#s:1#caro"]]);
+  assert.deepEqual(eff.effect, { verdict: "better", change: { cpa: -18 } });
+  // "Lembrar depois" vence: volta para os abertos e quem adiou recebe o lembrete.
+  await sql(`update campaign_insights set snooze_until = now() - interval '1 minute' where id=$1`, [ids["tracking#c:1#utm"]]);
+  await sql(`select mavi_private.campaign_insight_tick()`);
+  const notes = await sql(`select user_id, title from notifications where kind='campaign_insight' and title like 'Lembrete%'`);
+  assert.deepEqual(notes, [{ user_id: trafego, title: "Lembrete: UTM" }]);
+  await as(trafego);
+  v = await rpc("campaign_insights", [A, campaign, 8]);
+  assert.deepEqual(v.current.map((i) => i.title).sort(), ["Novo", "UTM"]);
+  const b = await rpc("campaign_insight_badges", [A, [campaign]]);
+  assert.equal(b.rows[0].open, 2);
+  // Reabrir o descartado; o histórico guarda tudo.
+  await rpc("set_campaign_insight_status", [A, ids["opportunity#a:2#frete"], "new", null, "", null]);
+  const events = await rpc("campaign_insight_events", [A, ids["opportunity#a:2#frete"]]);
+  assert.deepEqual(events.map((e) => [e.action, e.user_name]), [["reopened", "Tiago Tráfego"], ["dismissed", "Tiago Tráfego"]]);
+});
+
+await check("👍/👎, tarefa ligada ao insight e o contexto da MAVI", async () => {
+  const [i] = await sql(`select id from campaign_insights where title='Novo'`);
+  await as(trafego);
+  let x = await rpc("vote_campaign_insight", [A, i.id, "down", "known", "já testamos"]);
+  assert.equal(x.my_vote, "down");
+  assert.deepEqual(x.votes, { up: 0, down: 1 });
+  await assert.rejects(rpc("vote_campaign_insight", [A, i.id, "talvez", null, ""]), /Voto inválido/);
+  x = await rpc("vote_campaign_insight", [A, i.id, null, null, ""]);
+  assert.equal(x.my_vote, null);
+  x = await rpc("vote_campaign_insight", [A, i.id, "up", null, ""]);
+  assert.equal(x.my_vote, "up");
+  const [task] = await sql(`insert into tasks(company_id, contract_id, title, creator_id, assignee_id, due_date,
+    original_due_date) values ($1,$2,'Testar frete',$3,$3,'2026-12-10','2026-12-10') returning id`, [A, contract, trafego]);
+  await as(trafego);
+  await rpc("link_campaign_insight_task", [A, i.id, task.id]);
+  await rpc("link_campaign_insight_task", [A, i.id, task.id]);
+  await assert.rejects(rpc("link_campaign_insight_task", [A, i.id, uid(4444)]), /Tarefa não encontrada/);
+  const v = await rpc("campaign_insights", [A, campaign, 8]);
+  const card = v.current.find((c) => c.id === i.id);
+  assert.deepEqual(card.tasks.map((t) => t.title), ["Testar frete"]);
+  // Contexto da MAVI: ligado por padrão; desligado no Painel, nada.
+  const ai = await rpc("campaign_insights_ai", [A, campaign]);
+  assert.ok(ai.open.some((o) => o.title === "Novo"));
+  assert.equal(ai.applied[0].effect.verdict, "better");
+  await as(admin);
+  await rpc("save_campaign_insight_settings", [A, JSON.stringify({ mavi_context: false })]);
+  await as(trafego);
+  assert.equal(await rpc("campaign_insights_ai", [A, campaign]), null);
+  await as(admin);
+  await rpc("save_campaign_insight_settings", [A, JSON.stringify({ mavi_context: true })]);
+});
+
+await check("aprendizados: a MAVI propõe, vale com 2 pessoas ou 1 líder; os líderes revisam", async () => {
+  // Avaliações paradas há mais de 10 minutos acordam o aprendizado.
+  await sql(`update campaign_insight_feedback set updated_at = now() - interval '11 minutes'`);
+  const before = (await sql(`select count(*)::int as n from net.requests where body->>'action'='ai-campaign-insights'`))[0].n;
+  await sql(`select mavi_private.campaign_insight_kick()`);
+  assert.equal((await sql(`select count(*)::int as n from net.requests where body->>'action'='ai-campaign-insights'`))[0].n, before + 1);
+  await as(null);
+  const claim = await worker("ai_campaign_insight_learning_claim", [SECRET]);
+  assert.equal(claim.company, A);
+  assert.equal(claim.feedback.length, 2);
+  assert.equal(await worker("ai_campaign_insight_learning_claim", [SECRET]), null, "reservado");
+  const fids = claim.feedback.map((f) => f.id);
+  const dismissFb = claim.feedback.find((f) => f.vote === "dismiss");
+  assert.equal(dismissFb.client_name, "Vittalium");
+  assert.equal(dismissFb.reason, "client");
+  const n = await worker("ai_campaign_insight_learning_store", [SECRET, A, JSON.stringify([
+    { op: "add", scope: "client", client_id: client, kind: "opportunity", text: "A Vittalium não tem verba para frete grátis: não sugerir frete.", feedback: [String(dismissFb.id)] },
+    { op: "add", scope: "company", text: "x", feedback: [String(fids[0])] },
+  ]), fids, JSON.stringify({ model: "claude-opus-5-5", cost: 0.01 })]);
+  assert.equal(n, 1);
+  let [l] = await sql(`select status, people, has_leader, downs from campaign_insight_lessons`);
+  assert.deepEqual(l, { status: "candidate", people: 1, has_leader: false, downs: 1 });
+  // Um líder avaliando o mesmo assunto confirma.
+  await as(manager);
+  const [ins] = await sql(`select id from campaign_insights where title='Frete'`);
+  await as(manager);
+  await rpc("vote_campaign_insight", [A, ins.id, "down", "client", ""]);
+  const [mf] = await sql(`select id from campaign_insight_feedback where user_id=$1`, [manager]);
+  const [lesson] = await sql(`select id from campaign_insight_lessons`);
+  await as(null);
+  await worker("ai_campaign_insight_learning_store", [SECRET, A, JSON.stringify([
+    { op: "update", id: lesson.id, text: "A Vittalium não tem verba para frete grátis: não sugerir frete.", feedback: [String(mf.id)] },
+  ]), [mf.id], null]);
+  [l] = await sql(`select status, people, has_leader from campaign_insight_lessons`);
+  assert.deepEqual(l, { status: "active", people: 2, has_leader: true });
+  // O material das próximas análises leva o aprendizado do cliente (e o motivo dos descartes).
+  await as(trafego);
+  const [utm] = await sql(`select id from campaign_insights where title='UTM'`);
+  await as(trafego);
+  await rpc("set_campaign_insight_status", [A, utm.id, "dismissed", "wrong", "", null]);
+  const r3 = (await rpc("request_campaign_insight", [A, campaign])).run;
+  await as(null);
+  const m = await worker("ai_campaign_insight_material", [SECRET, r3]);
+  assert.deepEqual(m.lessons.map((x) => x.text), ["A Vittalium não tem verba para frete grátis: não sugerir frete."]);
+  assert.ok(m.applied.some((a) => a.effect?.verdict === "better"));
+  assert.ok(m.previous.some((p) => p.status === "dismissed" && p.status_reason === "Os números não mostram isso"));
+  // Líderes: lista, criar à mão (vale na hora), pausar; colaborador não.
+  await as(trafego);
+  await assert.rejects(rpc("campaign_insight_lessons", [A]), /Sem permissão/);
+  await as(admin);
+  let list = await rpc("save_campaign_insight_lesson", [A, JSON.stringify({ scope: "company", text: "Nunca sugerir pausar campanhas de marca." })]);
+  assert.deepEqual(list.lessons.map((x) => [x.status, x.origin]).sort(), [["active", "mavi"], ["active", "person"]]);
+  list = await rpc("set_campaign_insight_lesson", [A, lesson.id, "pause"]);
+  assert.equal(list.lessons.find((x) => x.id === lesson.id).status, "paused");
+  await sql(`update campaign_insight_runs set status='done', claimed_until=null where status in ('queued','running')`);
+});
+
 await check("a campanha que não pode ser analisada diz por quê", async () => {
   await sql(`update ad_campaigns set status='inactive' where id=$1`, [campaign]);
   await as(trafego);

@@ -71,3 +71,21 @@ describe("textos dos insights", () => {
     expect(waitText("2026-10-05T15:04:10Z", now)).toBe("em 5 min");
   });
 });
+
+describe("Fase 4: efeito e tarefa", () => {
+  it("o efeito em uma linha", async () => {
+    const { effectText } = await import("./campaign-insights");
+    expect(
+      effectText({
+        days: 7,
+        before: { cpa: 40 },
+        after: { cpa: 30.24 },
+        change: { cpa: -24.4, results_per_day: 26.7, ctr: null },
+        verdict: "better",
+      }),
+    ).toBe("Melhorou: custo por resultado −24,4% (R$ 40,00 → R$ 30,24), 7 dias antes × 7 depois");
+    expect(
+      effectText({ days: 5, before: {}, after: {}, change: { cpa: null, results_per_day: -15, ctr: null }, verdict: "worse" }),
+    ).toBe("Piorou: resultados por dia −15%, 5 dias antes × 5 depois");
+  });
+});

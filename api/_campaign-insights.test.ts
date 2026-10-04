@@ -9,6 +9,11 @@ import { newMeter } from "./_social-leads";
 import {
   applyCheck,
   applyFunnel,
+  effectOf,
+  effectPlans,
+  insightsContextLine,
+  measureEffects,
+  plannedRanges,
   keywordCrm,
   buildEvidence,
   crmIndex,
@@ -436,7 +441,7 @@ describe("worker dos insights", () => {
     const read = vi.fn(async (_env: unknown, _fetch: unknown, m: InsightMaterial) => analysisOf([campaign(30, 0)], m));
     let t = 0;
     const stats = await runCampaignInsights(env, { fetch: fetchImpl, llm, embed: vi.fn(), now: () => (t += 60_000) }, read);
-    expect(stats).toEqual({ done: 1, skipped: 0, deferred: 0, failed: 0, insights: 3 });
+    expect(stats).toEqual({ done: 1, skipped: 0, deferred: 0, failed: 0, insights: 3, learned: 0 });
     const store = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_store"))!.body;
     expect(store.p_secret).toBe(env.workerSecret);
     const result = store.p_result;
@@ -771,5 +776,67 @@ describe("criativos na análise (Fase 3)", () => {
       ["campaign_insights", 0.05],
     ]);
     expect(result.note).toMatch(/Criativos: 1 lido agora, 0 reaproveitados/);
+  });
+});
+
+describe("antes × depois dos aplicados (Fase 4)", () => {
+  it("os períodos: N dias antes e N depois (até 14; mínimo de 3 dias depois), no nível do alvo", () => {
+    const m = material({
+      applied: [
+        { id: "11111111-aaaa-4000-8000-000000000001", title: "Pausar", kind: "problem", target: { key: "s:9", level: "adset", name: "X" }, applied_at: "2026-09-27T12:00:00Z", effect: null },
+        { id: "22222222-aaaa-4000-8000-000000000002", title: "Geral", kind: "problem", target: null, applied_at: "2026-09-10T12:00:00Z", effect: null },
+        { id: "33333333-aaaa-4000-8000-000000000003", title: "Recente", kind: "problem", target: null, applied_at: "2026-10-02T12:00:00Z", effect: null },
+      ],
+    });
+    const plans = effectPlans(m);
+    expect(plans.map((p) => [p.level, p.days, p.before.since, p.before.until, p.after.since, p.after.until])).toEqual([
+      // Aplicado em 27/09; até ontem (03/10) são 7 dias.
+      ["adset", 7, "2026-09-20", "2026-09-26", "2026-09-27", "2026-10-03"],
+      // Há mais de 14 dias: 14 de cada lado.
+      ["total", 14, "2026-08-27", "2026-09-09", "2026-09-10", "2026-09-23"],
+    ]);
+    expect(plannedRanges(plans, "adset").map((r) => r.key)).toEqual(["b:11111111", "x:11111111"]);
+    expect(plannedRanges(plans, "campaign").map((r) => r.key)).toEqual(["b:22222222", "x:22222222"]);
+  });
+
+  it("o efeito pelo custo por resultado (ou resultados por dia) e os períodos saem das entidades", () => {
+    expect(effectOf(derive({ spend: 400, results: 10 }), derive({ spend: 400, results: 13 }), 7, "net")).toMatchObject({
+      verdict: "better",
+      change: { cpa: -23.1, results_per_day: 30 },
+      before: { cpa: 40 },
+      money_basis: "net",
+    });
+    expect(effectOf(derive({ spend: 400, results: 10 }), derive({ spend: 440, results: 10 }), 7).verdict).toBe("worse");
+    expect(effectOf(derive({ spend: 100, results: 0 }), derive({ spend: 100, results: 0 }), 5).verdict).toBe("neutral");
+    const plans = effectPlans(
+      material({
+        applied: [{ id: "11111111-aaaa-4000-8000-000000000001", title: "P", kind: "problem", target: { key: "s:9", level: "adset", name: "X" }, applied_at: "2026-09-27T12:00:00Z", effect: null }],
+      }),
+    );
+    const entities: Entity[] = [
+      {
+        key: "s:9",
+        level: "adset",
+        name: "X",
+        n: { cycle: derive({ spend: 900, results: 20 }), ["b:11111111" as never]: derive({ spend: 350, results: 7 }), ["x:11111111" as never]: derive({ spend: 350, results: 10 }) },
+      },
+    ];
+    const out = measureEffects(plans, entities);
+    expect(out[0]).toMatchObject({ insight: "11111111-aaaa-4000-8000-000000000001", effect: { verdict: "better", days: 7 } });
+    expect(Object.keys(entities[0].n)).toEqual(["cycle"]);
+  });
+
+  it("o contexto da conversa: abertos com evidências, aplicados com efeito, descartados; nada quando desligado", () => {
+    expect(insightsContextLine(null)).toBe("");
+    const line = insightsContextLine({
+      money_basis: "net",
+      open: [{ priority: "high", kind: "problem", title: "Conjunto caro", action: "Pausar", evidence: [{ label: "CPA", value: 42.5, unit: "money", window: "cycle", entity: "s:1", name: "X", metric: "cpa" }] }],
+      applied: [{ title: "Pausar o amplo", applied_at: "2026-09-27T12:00:00Z", effect: effectOf(derive({ spend: 400, results: 10 }), derive({ spend: 400, results: 13 }), 7) }],
+      dismissed: [{ title: "Frete grátis", reason: "Restrição do cliente" }],
+    });
+    expect(line).toContain("valores sem M");
+    expect(line).toContain("[aberto, prioridade alta] Conjunto caro → Pausar (CPA: R$ 42,50)");
+    expect(line).toContain("[aplicado em 2026-09-27] Pausar o amplo — efeito em 7 dias: melhorou (custo por resultado -23,1%)");
+    expect(line).toContain("[descartado pelo time: Restrição do cliente] Frete grátis");
   });
 });
