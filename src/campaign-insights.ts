@@ -134,8 +134,10 @@ export type CampaignInsightsView = {
   expire_days?: number;
   /** Os responsáveis pela campanha (recebem os avisos dos insights). */
   owners?: CampaignOwner[];
-  /** Quem vê pode escolher os responsáveis (quem edita campanhas). */
+  /** Quem vê pode escolher os responsáveis e a etapa que importa (quem edita campanhas). */
   can_set_owners?: boolean;
+  /** A etapa do CRM que importa nesta campanha e a meta de custo por lead nela. */
+  crm_goal?: CrmGoal | null;
   /** Por que a campanha não pode ser analisada agora (nulo: pode). */
   blocker: string | null;
   capped: boolean;
@@ -438,8 +440,21 @@ export interface InsightsBackend {
   ownerCandidates(company: string, campaign: string): Promise<CampaignOwner[]>;
   /** Os responsáveis (até 5): recebem os avisos dos insights. */
   setOwners(company: string, campaign: string, users: string[]): Promise<CampaignOwner[]>;
+  /** Os funis do MakeCRM do cliente (para escolher a etapa que importa). */
+  crmPipelines(company: string, client: string): Promise<{ linked: boolean; pipelines: CrmPipeline[] }>;
+  /** A etapa que importa e a meta de custo por lead nela (nulo tira). */
+  setCrmGoal(company: string, campaign: string, goal: CrmGoalInput | null): Promise<CrmGoal | null>;
 }
 export type CampaignOwner = { id: string; name: string };
+export type CrmPipeline = { id: string; name: string; stages: { id: string; name: string; order: number | null }[] };
+export type CrmGoalInput = {
+  pipeline_id: string;
+  pipeline_name: string;
+  stage_id: string;
+  stage_name: string;
+  cost_goal: number | null;
+};
+export type CrmGoal = CrmGoalInput & { updated_at?: string; updated_by_name?: string | null };
 export type InsightEvent = {
   action: "applied" | "dismissed" | "snoozed" | "reopened" | "returned" | "task" | "expired";
   reason: string;
@@ -501,6 +516,18 @@ export const serverInsights: InsightsBackend = {
     rpc<CampaignOwner[]>("campaign_owner_candidates", { p_company: company, p_campaign: campaign }),
   setOwners: (company, campaign, users) =>
     rpc<CampaignOwner[]>("set_campaign_owners", { p_company: company, p_campaign: campaign, p_users: users }),
+  async crmPipelines(company, client) {
+    const { crmServer } = await import("./CampaignCrm");
+    return crmServer<{ linked: boolean; pipelines: CrmPipeline[] }>({ action: "pipelines", company, client });
+  },
+  async setCrmGoal(company, campaign, goal) {
+    const g = await rpc<CrmGoal | null>("set_campaign_crm_goal", {
+      p_company: company,
+      p_campaign: campaign,
+      p_goal: goal,
+    });
+    return g ? { ...g, cost_goal: g.cost_goal === null ? null : Number(g.cost_goal) } : null;
+  },
 };
 
 // ------------------------------------------------------------ aprendizados do time (líderes)
@@ -745,6 +772,13 @@ export function demoInsights(): InsightsBackend {
         expire_days: 15,
         owners: [DEMO_PEOPLE[0]],
         can_set_owners: true,
+        crm_goal: {
+          pipeline_id: "demo-funil",
+          pipeline_name: "Vendas",
+          stage_id: "demo-etapa-3",
+          stage_name: "Negociação",
+          cost_goal: 45,
+        },
         blocker: null,
         capped: false,
         wait_until: null,
@@ -839,6 +873,25 @@ export function demoInsights(): InsightsBackend {
     },
     async setOwners(_c, _campaign, users) {
       return DEMO_PEOPLE.filter((p) => users.includes(p.id));
+    },
+    async crmPipelines() {
+      return {
+        linked: true,
+        pipelines: [
+          {
+            id: "demo-funil",
+            name: "Vendas",
+            stages: ["Novo lead", "Qualificado", "Negociação", "Contrato"].map((name, i) => ({
+              id: `demo-etapa-${i + 1}`,
+              name,
+              order: i + 1,
+            })),
+          },
+        ],
+      };
+    },
+    async setCrmGoal(_c, _campaign, goal) {
+      return goal ? { ...goal, updated_by_name: "Você", updated_at: new Date().toISOString() } : null;
     },
     async badges(_company, campaigns) {
       return {

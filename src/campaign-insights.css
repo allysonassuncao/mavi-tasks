@@ -1052,3 +1052,7 @@
   align-items: center;
   gap: 8px;
 }
+.insights-goal-basis {
+  color: var(--muted);
+  font-size: 0.74rem;
+}

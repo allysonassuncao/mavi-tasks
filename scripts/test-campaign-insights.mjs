@@ -739,6 +739,35 @@ await check("Fase 5: responsáveis recebem os avisos; a ordem da análise; amost
   await rpc("save_campaign_insight_settings", [A, JSON.stringify({ min_results: 10, max_insights: 4 })]);
 });
 
+await check("Fase 6: a etapa do CRM que importa e a meta de custo por campanha", async () => {
+  const stage = "00000000-0000-4000-8000-0000000000a2";
+  const pipeline = "00000000-0000-4000-8000-0000000000b1";
+  await as(trafego);
+  const goal = await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({
+    pipeline_id: pipeline, pipeline_name: "Vendas", stage_id: stage, stage_name: "Negociação", cost_goal: "45.5",
+  })]);
+  assert.deepEqual([goal.stage_name, goal.pipeline_name, Number(goal.cost_goal), goal.updated_by_name], ["Negociação", "Vendas", 45.5, "Tiago Tráfego"]);
+  await assert.rejects(rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ pipeline_id: pipeline, stage_id: "x", stage_name: "N" })]), /Escolha a etapa/);
+  await assert.rejects(rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ pipeline_id: pipeline, stage_id: stage, stage_name: "N", cost_goal: -1 })]), /maior que zero/);
+  const v = await rpc("campaign_insights", [A, campaign, 8]);
+  assert.equal(v.crm_goal.stage_id, stage);
+  await as(other);
+  await assert.rejects(rpc("set_campaign_crm_goal", [A, campaign, null]), /Sem permissão/);
+  // O worker recebe a etapa no material.
+  const [run] = await sql(`insert into campaign_insight_runs(company_id, campaign_id, trigger, status, started_at, attempts, local_day)
+    values ($1,$2,'schedule','running',now(),1,$3) returning id`, [A, campaign, today]);
+  await as(null);
+  const material = await worker("ai_campaign_insight_material", [SECRET, run.id]);
+  assert.deepEqual([material.crm_goal.stage_name, Number(material.crm_goal.cost_goal)], ["Negociação", 45.5]);
+  await sql(`update campaign_insight_runs set status='done', claimed_until=null where id=$1`, [run.id]);
+  // Sem meta de custo vale; nulo tira.
+  await as(trafego);
+  const noCost = await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ pipeline_id: pipeline, stage_id: stage, stage_name: "Negociação" })]);
+  assert.equal(noCost.cost_goal, null);
+  assert.equal(await rpc("set_campaign_crm_goal", [A, campaign, null]), null);
+  assert.equal((await rpc("campaign_insights", [A, campaign, 8])).crm_goal, null);
+});
+
 await check("a campanha que não pode ser analisada diz por quê", async () => {
   await sql(`update ad_campaigns set status='inactive' where id=$1`, [campaign]);
   await as(trafego);

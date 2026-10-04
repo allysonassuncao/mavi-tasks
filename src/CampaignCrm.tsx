@@ -66,7 +66,7 @@ export function crmLabel(c: CrmCompany) {
     .join(" · ");
 }
 
-async function crmServer<T>(body: Record<string, unknown>): Promise<T> {
+export async function crmServer<T>(body: Record<string, unknown>): Promise<T> {
   if (!supabase) throw Error("Supabase não configurado");
   const call = async () => {
     const token = (await supabase!.auth.getSession()).data.session

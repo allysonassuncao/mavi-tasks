@@ -192,6 +192,8 @@ export type CrmFunnelRow = {
   lost_by: Record<string, number> | null;
   buckets: Record<string, number> | null;
   answers: Record<string, number> | null;
+  /** As abertas por idade (dias desde a criação): chave = começo da faixa (0, 4, 8, 15, 31). */
+  ages: Record<string, number> | null;
 };
 export type CrmFunnel = {
   rows: CrmFunnelRow[];
@@ -200,6 +202,8 @@ export type CrmFunnel = {
   reasons: { id: string; name: string }[];
   buckets: { id: string; name: string; form: string; min: number | null; max: number | null }[];
   options: { id: string; label: string; question: string; form: string }[];
+  /** Mediana de dias da criação até a primeira entrada em cada etapa (5+ oportunidades). */
+  stage_days: Record<string, { median: number; n: number }>;
 };
 const counts = (v: unknown): Record<string, number> | null => {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
@@ -229,6 +233,7 @@ export function funnelFrom(raw: any): CrmFunnel {
       lost_by: counts(r.lost_by),
       buckets: counts(r.buckets),
       answers: counts(r.answers),
+      ages: counts(r.ages),
     })),
     pipelines: list(raw?.pipelines, (x) => typeof x?.id === "string"),
     stages: list<any>(raw?.stages, (x) => typeof x?.id === "string").map((x) => ({
@@ -243,7 +248,26 @@ export function funnelFrom(raw: any): CrmFunnel {
     })),
     buckets: list(raw?.buckets, (x) => typeof x?.id === "string"),
     options: list(raw?.options, (x) => typeof x?.id === "string"),
+    stage_days: Object.fromEntries(
+      Object.entries(raw?.stage_days && typeof raw.stage_days === "object" ? raw.stage_days : {})
+        .map(([id, v]: [string, any]) => [id, { median: n(v?.median), n: n(v?.n) }])
+        .filter(([, v]) => (v as { n: number }).n > 0),
+    ),
   };
+}
+
+export type CrmPipeline = { id: string; name: string; stages: { id: string; name: string; order: number | null }[] };
+/** Os funis ativos de uma empresa do CRM, com as etapas (para escolher a etapa que importa). */
+export function pipelinesFrom(raw: any): CrmPipeline[] {
+  return list<any>(raw?.pipelines, (p) => typeof p?.id === "string").map((p) => ({
+    id: p.id,
+    name: String(p.name ?? ""),
+    stages: list<any>(p.stages, (x) => typeof x?.id === "string").map((x) => ({
+      id: x.id,
+      name: String(x.name ?? ""),
+      order: typeof x.order === "number" ? x.order : null,
+    })),
+  }));
 }
 /**
  * O funil por UTM de uma empresa do CRM no período (dias de Brasília):
@@ -264,6 +288,30 @@ export async function crmUtmFunnel(
   });
   if (!r.ok) return r;
   return { ok: true, data: funnelFrom(r.data) };
+}
+
+/** A empresa do CRM ligada ao cliente, lida com o login de quem pede (a RLS confere o acesso). */
+async function linkedCrmCompany(
+  env: CrmEnv,
+  fetchImpl: Fetch,
+  authorization: string,
+  company: string,
+  client: string,
+): Promise<string | Result> {
+  const res = await fetchImpl(
+    `${env.supabaseUrl}/rest/v1/client_crm_links?select=crm_company_id&company_id=eq.${company}&client_id=eq.${client}`,
+    { headers: { apikey: env.supabaseKey, Authorization: authorization } },
+  );
+  if (!res.ok)
+    return fail(
+      res.status === 401 || res.status === 403 ? 403 : 502,
+      "Não foi possível conferir a ligação do cliente com o MakeCRM.",
+    );
+  const rows = (await res.json().catch(() => [])) as {
+    crm_company_id?: string;
+  }[];
+  const crmCompany = Array.isArray(rows) ? rows[0]?.crm_company_id : null;
+  return crmCompany && UUID.test(crmCompany) ? crmCompany : "";
 }
 
 export async function handleCrm(
@@ -312,24 +360,23 @@ export async function handleCrm(
     if (!UUID.test(client ?? "")) return fail(400, "Cliente inválido.");
     if (!DAY.test(since) || !DAY.test(until ?? "") || since > until)
       return fail(400, "Período inválido.");
-    const res = await fetchImpl(
-      `${env.supabaseUrl}/rest/v1/client_crm_links?select=crm_company_id&company_id=eq.${company}&client_id=eq.${client}`,
-      { headers: { apikey: env.supabaseKey, Authorization: authorization } },
-    );
-    if (!res.ok)
-      return fail(
-        res.status === 401 || res.status === 403 ? 403 : 502,
-        "Não foi possível conferir a ligação do cliente com o MakeCRM.",
-      );
-    const rows = (await res.json().catch(() => [])) as {
-      crm_company_id?: string;
-    }[];
-    const crmCompany = Array.isArray(rows) ? rows[0]?.crm_company_id : null;
-    if (!crmCompany || !UUID.test(crmCompany))
-      return { status: 200, body: { linked: false } };
+    const crmCompany = await linkedCrmCompany(env, fetchImpl, authorization, company, client);
+    if (typeof crmCompany !== "string") return crmCompany;
+    if (!crmCompany) return { status: 200, body: { linked: false } };
     const r = await crmUtmDeals(env, fetchImpl, crmCompany, since, until);
     if (!r.ok) return fail(r.status, r.error);
     return { status: 200, body: { linked: true, ...r.data } };
+  }
+
+  if (action === "pipelines") {
+    const { client } = body;
+    if (!UUID.test(client ?? "")) return fail(400, "Cliente inválido.");
+    const crmCompany = await linkedCrmCompany(env, fetchImpl, authorization, company, client);
+    if (typeof crmCompany !== "string") return crmCompany;
+    if (!crmCompany) return { status: 200, body: { linked: false, pipelines: [] } };
+    const r = await askCrm<Record<string, unknown>>(env, fetchImpl, { action: "pipelines", company_id: crmCompany });
+    if (!r.ok) return fail(r.status, r.error);
+    return { status: 200, body: { linked: true, pipelines: pipelinesFrom(r.data) } };
   }
 
   if (action === "open") {

@@ -21,10 +21,11 @@ import {
   Sparkles,
   Star,
   TrendingUp,
+  Target,
   TriangleAlert,
   UserRound,
 } from "lucide-react";
-import { Button, Checkbox, Input, Loading, Textarea } from "./ui";
+import { Button, Checkbox, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import { Empty, Modal } from "./components";
 import { navigate, taskUrl, useUrlState } from "./router";
 import { appPath } from "./temperature";
@@ -54,6 +55,8 @@ import {
   type CampaignInsight,
   type CampaignInsightsView,
   type CampaignOwner,
+  type CrmGoalInput,
+  type CrmPipeline,
   type InsightBadge,
   type InsightKind,
   type InsightRun,
@@ -1066,6 +1069,178 @@ function Owners({
   );
 }
 
+const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+/**
+ * A etapa do CRM que importa nesta campanha (ex.: Negociação) e a meta de
+ * custo por lead que chega a ela: a régua principal da MAVI. As etapas vêm do
+ * MakeCRM do cliente na hora.
+ */
+function CrmGoalLine({
+  state,
+  backend,
+  company,
+  campaign,
+  notify,
+  ctx,
+}: {
+  state: InsightsState;
+  backend: InsightsBackend;
+  company: string;
+  campaign: string;
+  notify: (message: string) => void;
+  ctx: InsightContext;
+}) {
+  const v = state.view;
+  const goal = v?.crm_goal ?? null;
+  const client = ctx.data.contracts.find((c) => c.id === ctx.campaign.contract_id)?.client_id ?? "";
+  const [open, setOpen] = useState(false);
+  const [pipelines, setPipelines] = useState<CrmPipeline[] | null>(null);
+  const [linked, setLinked] = useState(true);
+  const [stage, setStage] = useState("");
+  const [cost, setCost] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const start = () => {
+    setOpen(true);
+    setError("");
+    setPipelines(null);
+    setStage(goal?.stage_id ?? "");
+    setCost(goal?.cost_goal ? String(goal.cost_goal) : "");
+    backend.crmPipelines(company, client).then(
+      (r) => {
+        setLinked(r.linked);
+        setPipelines(r.pipelines);
+      },
+      (e: Error) => setError(e.message),
+    );
+  };
+  const save = async (clear = false) => {
+    setBusy(true);
+    setError("");
+    try {
+      let input: CrmGoalInput | null = null;
+      if (!clear) {
+        const p = pipelines?.find((x) => x.stages.some((st) => st.id === stage));
+        const st = p?.stages.find((x) => x.id === stage);
+        if (!p || !st) throw Error("Escolha a etapa do funil.");
+        const value = cost.trim() ? Number(cost.replace(",", ".")) : null;
+        if (value !== null && !(value > 0)) throw Error("A meta de custo precisa ser maior que zero.");
+        input = { pipeline_id: p.id, pipeline_name: p.name, stage_id: st.id, stage_name: st.name, cost_goal: value };
+      }
+      await backend.setCrmGoal(company, campaign, input);
+      setOpen(false);
+      notify(clear ? "Etapa que importa removida." : "Etapa que importa salva.");
+      state.reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!v) return null;
+  const many = (pipelines?.length ?? 0) > 1;
+  return (
+    <div className="insights-owners insights-goal">
+      <Target size={14} aria-hidden="true" />
+      <span>
+        <strong>Etapa que importa no CRM:</strong>{" "}
+        {goal ? (
+          <>
+            {goal.stage_name}
+            {goal.pipeline_name ? ` (${goal.pipeline_name})` : ""}
+            {goal.cost_goal ? (
+              <>
+                {" "}
+                · meta de {brl(goal.cost_goal)} por lead{" "}
+                <span className="insights-goal-basis" title={basisHint(v.money_basis)}>
+                  ({basisLabel(v.money_basis)})
+                </span>
+              </>
+            ) : (
+              " · sem meta de custo"
+            )}
+          </>
+        ) : (
+          "não definida — com ela, a MAVI compara anúncios e conjuntos pelo custo do lead que avança no funil"
+        )}
+      </span>
+      {v.can_set_owners && client && (
+        <button type="button" className="text-btn" onClick={start}>
+          {goal ? "Alterar" : "Definir"}
+        </button>
+      )}
+      {open && (
+        <Modal title="Etapa que importa no CRM" onClose={() => setOpen(false)} busy={busy}>
+          <form
+            className="entity-form insights-reason"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <p className="insights-owners-help">
+              Escolha a etapa do funil do MakeCRM que mostra que o lead é bom (ex.: Negociação). A MAVI passa a medir
+              quanto custa cada lead que chega a ela (ou além) e compara anúncios, conjuntos e palavras-chave por isso.
+            </p>
+            {!pipelines && !error && <Loading variant="list" />}
+            {pipelines && !linked && (
+              <p className="insights-empty">O cliente desta campanha não está ligado ao MakeCRM.</p>
+            )}
+            {pipelines && linked && (
+              <>
+                <label>
+                  <span>Etapa</span>
+                  <Select value={stage} onValueChange={setStage} aria-label="Etapa que importa">
+                    {pipelines.flatMap((p) =>
+                      p.stages.map((st) => (
+                        <SelectOption key={st.id} value={st.id}>
+                          {many ? `${p.name} › ${st.name}` : st.name}
+                        </SelectOption>
+                      )),
+                    )}
+                  </Select>
+                </label>
+                <label>
+                  <span>Meta de custo por lead nessa etapa (R$, {basisLabel(v.money_basis)})</span>
+                  <Input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={cost}
+                    placeholder="Opcional"
+                    onChange={(e) => setCost(e.target.value)}
+                  />
+                  <small>Acima dela, a MAVI avisa — com calma quando muitos leads ainda são recentes demais.</small>
+                </label>
+              </>
+            )}
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="form-footer">
+              {goal && (
+                <Button type="button" className="btn secondary" onClick={() => void save(true)} disabled={busy}>
+                  Remover
+                </Button>
+              )}
+              <Button type="button" className="btn secondary" onClick={() => setOpen(false)} disabled={busy}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="btn primary" loading={busy} disabled={!pipelines || !linked}>
+                Salvar
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 /** A aba "Insights": os abertos e o histórico das análises (auditoria e custo). */
 export function CampaignInsightsTab({
   state,
@@ -1116,6 +1291,7 @@ export function CampaignInsightsTab({
         <AnalyzeNow state={state} backend={backend} company={company} campaign={campaign} notify={notify} />
       </div>
       <Owners state={state} backend={backend} company={company} campaign={campaign} notify={notify} />
+      <CrmGoalLine state={state} backend={backend} company={company} campaign={campaign} notify={notify} ctx={ctx} />
       {v.pending && <PendingLine pending={v.pending} timezone={v.timezone} />}
       <section aria-label="Insights">
         <div className="scope-tabs insights-filter" role="tablist" aria-label="Insights por situação">

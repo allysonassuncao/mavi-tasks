@@ -98,6 +98,8 @@ export type InsightMaterial = {
   meta_tokens: Record<string, { token_cipher: string; expires_at: string | null }> | null;
   google_token: { refresh_token_cipher: string } | null;
   crm_company_id: string | null;
+  /** A etapa do CRM que importa nesta campanha e a meta de custo por lead nela (R$, na base dos insights). */
+  crm_goal?: CrmGoal | null;
   daily: { day: string; spend: number; conversions: number; multiplier: number }[];
   settings: { money_basis: Basis; run_cap_usd: number; min_new_days?: number; min_results?: number; max_insights?: number };
   last_done_at: string | null;
@@ -239,6 +241,14 @@ export const METRICS: Record<string, { label: string; unit: "money" | "count" | 
   crm_lost_rate: { label: "Oportunidades perdidas no CRM (%)", unit: "pct" },
   crm_qualified: { label: "Oportunidades qualificadas", unit: "count" },
   crm_score: { label: "Pontuação média da qualificação", unit: "ratio" },
+  // A etapa que importa (o nome dela vai nos rótulos) e a maturidade dos leads.
+  goal_stage_leads: { label: "Leads que chegaram à etapa que importa", unit: "count" },
+  goal_stage_rate: { label: "Leads que chegam à etapa que importa (%)", unit: "pct" },
+  goal_stage_cost: { label: "Custo por lead na etapa que importa", unit: "money" },
+  goal_stage_target: { label: "Meta de custo por lead na etapa que importa", unit: "money" },
+  goal_stage_vs_target: { label: "Custo na etapa que importa em relação à meta", unit: "pct" },
+  young_leads: { label: "Leads abertos ainda recentes", unit: "count" },
+  young_rate: { label: "Leads abertos ainda recentes (%)", unit: "pct" },
   // Só no total: a meta do ciclo e o que o MAVI conta.
   goal_results: { label: "Meta de resultados do ciclo", unit: "count" },
   goal_cpa: { label: "Custo por resultado da meta", unit: "money" },
@@ -363,6 +373,8 @@ export type Analysis = {
   contentCampaigns?: string[];
   /** O efeito medido dos insights aplicados. */
   effects?: { insight: string; effect: Effect }[];
+  /** Quantos dias o lead costuma levar até a etapa que importa (mediana do CRM; nulo: sem histórico). */
+  stageDays?: number | null;
 };
 
 /** O total da campanha (as campanhas vinculadas somadas) e a meta do ciclo. */
@@ -420,8 +432,39 @@ export function totalEntity(
     days_elapsed: elapsed,
     days_total: total,
   };
+  // A etapa que importa: a soma das campanhas e a meta de custo.
+  const goal = m.crm_goal;
+  const withGoal = campaigns.map((c) => c.n.cycle).filter((x) => x && x.goal_stage_leads !== undefined);
+  if (goal && withGoal.length) {
+    const leads = withGoal.reduce((sum, x) => sum + numOr(x!.goal_stage_leads), 0);
+    const opp = numOr(n.cycle.crm_opportunities);
+    const cost = leads ? round(numOr(n.cycle.spend) / leads) : null;
+    const target = goal.cost_goal ? Number(goal.cost_goal) : null;
+    n.cycle.goal_stage_leads = leads;
+    n.cycle.goal_stage_rate = opp ? round((leads / opp) * 100, 1) : null;
+    n.cycle.goal_stage_cost = cost;
+    if (target) {
+      n.cycle.goal_stage_target = target;
+      n.cycle.goal_stage_vs_target = cost ? round((cost / target) * 100, 1) : null;
+    }
+  }
+  const withAge = campaigns.map((c) => c.n.cycle).filter((x) => x && x.young_leads !== undefined);
+  if (withAge.length) {
+    const young = withAge.reduce((sum, x) => sum + numOr(x!.young_leads), 0);
+    const opp = numOr(n.cycle.crm_opportunities);
+    n.cycle.young_leads = young;
+    n.cycle.young_rate = opp ? round((young / opp) * 100, 1) : null;
+  }
   return { key: "total", level: "total", name: "Campanha (total)", n };
 }
+
+export type CrmGoal = {
+  pipeline_id: string;
+  pipeline_name: string;
+  stage_id: string;
+  stage_name: string;
+  cost_goal: number | null;
+};
 
 /** O valor de uma evidência no material (nulo: não existe). */
 export function evidenceValue(
@@ -502,7 +545,7 @@ export function buildEvidence(
     seen.add(id);
     const e = entities.get(entity)!;
     out.push({
-      label: METRICS[metric]?.label ?? labels[metric],
+      label: labels[metric] ?? METRICS[metric]?.label,
       value,
       unit: METRICS[metric]?.unit ?? "count",
       window: window as WindowKey,
@@ -616,7 +659,7 @@ const LEVEL_NAME: Partial<Record<Level, string>> = { campaign: "a campanha", ads
 export function ruleInsights(m: InsightMaterial, a: Analysis, entities: Map<string, Entity>): Insight[] {
   const out: Insight[] = [];
   const ev = (entity: string, window: WindowKey, metric: string) =>
-    buildEvidence(entities, [{ entity, window, metric }]);
+    buildEvidence(entities, [{ entity, window, metric }], a.labels ?? {});
   if (a.crm === "ok") {
     for (const c of a.entities.filter((e) => e.level === "campaign")) {
       const x = c.n.cycle;
@@ -706,6 +749,46 @@ export function ruleInsights(m: InsightMaterial, a: Analysis, entities: Map<stri
         source: "rule",
         fingerprint: fingerprintOf("problem", null, zero ? "sem-resultados" : "custo-acima-da-meta"),
       });
+  }
+  // A etapa que importa: o custo por lead que chega a ela acima da meta.
+  const goal = m.crm_goal;
+  if (goal?.cost_goal && t && a.funnel === "ok" && numOr(t.days_elapsed) >= 3 && t.goal_stage_leads !== undefined) {
+    const target = Number(goal.cost_goal);
+    const leads = numOr(t.goal_stage_leads);
+    const spend = numOr(t.spend);
+    const cost = numOr(t.goal_stage_cost);
+    const none = !leads && spend >= 2 * target;
+    const young = numOr(t.young_rate);
+    const days = a.stageDays ?? 7;
+    if (none || (leads && cost >= target * 1.3)) {
+      const early =
+        young >= 40
+          ? ` Mas ${fmtPct(young)} dos leads ainda são recentes (entraram há menos de ${days} dias, o tempo que um lead costuma levar até lá): o número tende a melhorar nos próximos dias.`
+          : "";
+      out.push({
+        kind: "problem",
+        priority: young >= 40 ? "medium" : "high",
+        title: none
+          ? `O ciclo já gastou e nenhum lead chegou a "${goal.stage_name}"`
+          : `Cada lead que chega a "${goal.stage_name}" está custando mais que a meta`,
+        body:
+          (none
+            ? `O ciclo investiu ${fmtMoney(spend)}, o suficiente para 2 leads em "${goal.stage_name}" pela meta (${fmtMoney(target)} cada), e nenhum chegou lá ainda.`
+            : `Cada lead que chega a "${goal.stage_name}" está custando ${fmtMoney(cost)}, ${fmtPct((cost / target - 1) * 100)} acima da meta de ${fmtMoney(target)}. É essa etapa que mostra se o tráfego traz clientes de verdade.`) +
+          early,
+        action:
+          "Veja nos outros insights quais conjuntos e anúncios trazem leads que avançam até a etapa\nTire verba dos que trazem leads que param no começo do funil",
+        evidence: [
+          ...ev("total", "cycle", none ? "spend" : "goal_stage_cost"),
+          ...ev("total", "cycle", "goal_stage_target"),
+          ...ev("total", "cycle", "goal_stage_leads"),
+          ...(young >= 40 ? ev("total", "cycle", "young_rate") : []),
+        ],
+        target: null,
+        source: "rule",
+        fingerprint: fingerprintOf("problem", null, none ? "etapa-sem-leads" : "etapa-acima-da-meta"),
+      });
+    }
   }
   if (a.platform === "meta") {
     const spendOf = (e: Entity, w: WindowKey) => numOr(e.n[w]?.spend);
@@ -1055,7 +1138,18 @@ export function keywordCrm(crm: CrmIndex, campaign: string, adGroup: string, key
  * em campanhas e conjuntos, answer:<id> (as respostas mais escolhidas).
  * Devolve os rótulos usados.
  */
-export function applyFunnel(entities: Entity[], funnel: CrmFunnel): Record<string, string> {
+/** Abertas mais novas que T dias (pelas faixas de idade do CRM: 0-3, 4-7, 8-14, 15-30, 31+). */
+const AGE_END: Record<string, number> = { "0": 3, "4": 7, "8": 14, "15": 30 };
+export function youngOf(ages: Record<string, number> | null, days: number) {
+  return Object.entries(ages ?? {}).reduce((sum, [k, v]) => sum + (AGE_END[k] !== undefined && AGE_END[k] < days ? v : 0), 0);
+}
+/** Os dias típicos até a etapa que importa (sem histórico: 7). */
+export const typicalDays = (funnel: CrmFunnel, goal: CrmGoal | null | undefined) => {
+  const d = goal ? funnel.stage_days?.[goal.stage_id]?.median : undefined;
+  return typeof d === "number" && d > 0 ? Math.max(Math.round(d), 1) : null;
+};
+
+export function applyFunnel(entities: Entity[], funnel: CrmFunnel, goal?: CrmGoal | null): Record<string, string> {
   const labels: Record<string, string> = {};
   const rows = new Map<string, CrmFunnelRow>();
   for (const r of funnel.rows)
@@ -1071,6 +1165,22 @@ export function applyFunnel(entities: Entity[], funnel: CrmFunnel): Record<strin
   const manyForms = new Set(funnel.buckets.map((b) => b.form)).size > 1;
   const buckets = new Map(funnel.buckets.map((b) => [b.id, manyForms ? `${b.name} (${b.form})` : b.name]));
   const options = new Map(funnel.options.map((o) => [o.id, o]));
+  // A etapa que importa: ela e as de ordem maior no mesmo funil ("chegou lá ou além").
+  const goalStage = goal ? funnel.stages.find((x) => x.id === goal.stage_id) : undefined;
+  const goalIds = goalStage
+    ? (byPipeline.get(goalStage.pipeline_id) ?? []).filter((x) => (x.order ?? 0) >= (goalStage.order ?? 0)).map((x) => x.id)
+    : goal
+      ? [goal.stage_id]
+      : [];
+  const days = typicalDays(funnel, goal) ?? 7;
+  if (goal) {
+    const name = goal.stage_name;
+    labels.goal_stage_leads = `Leads que chegaram a "${name}" (a etapa que importa)`;
+    labels.goal_stage_rate = `Leads que chegam a "${name}" (%)`;
+    labels.goal_stage_cost = `Custo por lead que chega a "${name}"`;
+    labels.goal_stage_target = `Meta de custo por lead em "${name}"`;
+    labels.goal_stage_vs_target = `Custo por lead em "${name}" em relação à meta`;
+  }
   const level = (e: Entity) =>
     e.level === "campaign" ? "c" : e.level === "adset" ? "s" : e.level === "ad" || e.level === "keyword" ? "a" : null;
   for (const e of entities) {
@@ -1085,6 +1195,21 @@ export function applyFunnel(entities: Entity[], funnel: CrmFunnel): Record<strin
       crm_lost_rate: r.deals ? round((r.lost / r.deals) * 100, 1) : null,
       ...(r.qualified ? { crm_qualified: r.qualified, crm_score: r.score } : {}),
     };
+    if (goal) {
+      const reached = goalIds.reduce((sum, id) => sum + (r.reach?.[id] ?? 0), 0);
+      const spend = numOr(e.n.cycle?.spend);
+      n.goal_stage_leads = reached;
+      n.goal_stage_rate = r.deals ? round((reached / r.deals) * 100, 1) : null;
+      n.goal_stage_cost = reached ? round(spend / reached) : null;
+      if (goal.cost_goal && reached) n.goal_stage_vs_target = round((spend / reached / Number(goal.cost_goal)) * 100, 1);
+    }
+    if (r.ages) {
+      labels.young_leads = `Leads abertos há menos de ${days} dias${goal ? ` (cedo para chegar a "${goal.stage_name}")` : ""}`;
+      labels.young_rate = `Leads abertos há menos de ${days} dias (%)`;
+      const young = youngOf(r.ages, days);
+      n.young_leads = young;
+      n.young_rate = r.deals ? round((young / r.deals) * 100, 1) : null;
+    }
     // Chegaram à etapa ou além: a soma das etapas de ordem igual ou maior, no mesmo funil.
     if (r.reach)
       for (const [pipeline, list] of byPipeline) {
@@ -1341,6 +1466,8 @@ REGRAS DOS NÚMEROS (obrigatório):
 - Resultados na plataforma (results) seguem o que a plataforma otimiza; "Resultados que contam (MAVI)" é o que a agência conta para a meta do ciclo.
 - O CRM liga pelo nome exato: utm_campaign = nome da campanha, utm_term = nome do conjunto (no Google, do grupo), utm_content = nome do anúncio (no Google, a palavra-chave, quando a agência usa {keyword}). Oportunidade zerada pode ser falta de UTM, não falta de lead.
 - O funil do CRM (quando vem) mostra a QUALIDADE do lead: abertas, ganhas, perdidas, taxa de perda, quantas chegaram a cada etapa ("stage:…", ou além), os motivos de perda ("lost:…"), a faixa da qualificação ("bucket:…") e as respostas mais escolhidas no formulário ("answer:…"); os nomes estão em "funil_crm.legenda". Use isso para separar volume de qualidade e cite essas métricas nas evidências pelo nome da chave. O CRM não tem idade nem gênero do lead: o cruzamento com o público é pelo conjunto.
+- A ETAPA QUE IMPORTA (quando vem em "etapa_que_importa"): é a régua principal desta campanha. Compare conjuntos, anúncios e palavras-chave pelo custo por lead que chega a ela (goal_stage_cost) e pela porcentagem que chega (goal_stage_rate), não só pelo custo por lead da plataforma; a meta de custo, quando existe, está em goal_stage_target (no total). Ex.: "o conjunto A tem lead mais caro, mas cada lead em Negociação custa a metade do conjunto B".
+- MATURIDADE DOS LEADS: young_leads / young_rate são os leads abertos mais novos que o tempo que um lead costuma levar até a etapa ("dias_tipicos_ate_a_etapa"). Com young_rate alto (40% ou mais), não conclua que um item vai mal na etapa: diga que ainda é cedo e quando reavaliar.
 - As "detecções automáticas" já viram insights: não as repita; você pode aprofundar com outra conclusão (outro topic).
 - Anúncios podem trazer "criativo" (o que a imagem ou o vídeo comunica: promessa, gancho, oferta — lido pela MAVI) e "audio" (trecho da transcrição do vídeo). Use para explicar o porquê do desempenho e sugerir variações concretas; a descrição do criativo não é número e não entra nas evidências.
 - "aprendizados_do_time" são regras que o time ensinou (para a agência, o produto ou este cliente): siga-as sempre; nunca sugira o que elas proíbem.
@@ -1395,6 +1522,14 @@ export function insightMessage(m: InsightMaterial, a: Analysis, rules: Insight[]
       a.funnel === "ok" && a.labels && Object.keys(a.labels).length
         ? { legenda: a.labels }
         : undefined,
+    etapa_que_importa: m.crm_goal
+      ? {
+          etapa: m.crm_goal.stage_name,
+          funil: m.crm_goal.pipeline_name || undefined,
+          meta_de_custo_por_lead: m.crm_goal.cost_goal ? Number(m.crm_goal.cost_goal) : "sem meta definida",
+          dias_tipicos_ate_a_etapa: a.stageDays ?? "sem histórico (considere 7 dias)",
+        }
+      : undefined,
     crm:
       a.crm === "ok"
         ? a.funnel === "ok"
@@ -1936,7 +2071,7 @@ export async function readAnalysis(
     throw new InsightsError(409, notes[0] ?? "Nenhuma campanha vinculada foi encontrada na plataforma.", true);
   const effects = measureEffects(plans, entities, basis);
   entities = [...entities, ...nearMissUtms(entities, crm)];
-  const labels = funnel ? applyFunnel(entities, funnel) : {};
+  const labels = funnel ? applyFunnel(entities, funnel, m.crm_goal) : {};
   const contentCampaigns = crm
     ? [...new Set([...crm.ad.keys()].filter((k) => (k.split(SEP)[2] ?? "") !== "").map((k) => k.split(SEP)[0]))]
     : [];
@@ -1954,6 +2089,7 @@ export async function readAnalysis(
     labels,
     contentCampaigns,
     effects,
+    stageDays: funnel ? typicalDays(funnel, m.crm_goal) : null,
   };
   analysis.entities = [totalEntity(m, analysis), ...analysis.entities];
   return analysis;

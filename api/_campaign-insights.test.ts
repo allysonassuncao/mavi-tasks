@@ -36,7 +36,9 @@ import {
   runCampaignInsights,
   skipReason,
   totalEntity,
+  typicalDays,
   windowsFor,
+  youngOf,
   withCrm,
   type Analysis,
   type CampaignInsightsEnv,
@@ -678,6 +680,91 @@ describe("cota das APIs e leitura à toa", () => {
     const defer = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_defer"))!.body;
     expect(defer).toMatchObject({ p_until: "2026-10-05T09:05:00Z" });
     expect(defer.p_note).toMatch(/498 de 500/);
+  });
+});
+
+describe("a etapa que importa e a maturidade (Fase 6)", () => {
+  const goal = { pipeline_id: "p1", pipeline_name: "Vendas", stage_id: "st2", stage_name: "Negociação", cost_goal: 40 };
+  const funnel = {
+    rows: [
+      {
+        l: "c" as const, c: "Motion", t: "", n: "", deals: 20, open: 12, won: 2, lost: 6, qualified: 0, score: null,
+        at: null, reach: { st1: 12, st2: 5, st3: 3 }, lost_by: null, buckets: null, answers: null,
+        ages: { "0": 6, "4": 3, "8": 2, "15": 1 },
+      },
+      {
+        l: "s" as const, c: "Motion", t: "Público A", n: "", deals: 8, open: 2, won: 1, lost: 5, qualified: 0, score: null,
+        at: null, reach: { st1: 2, st2: 4, st3: 2 }, lost_by: null, buckets: null, answers: null, ages: { "15": 2 },
+      },
+    ],
+    pipelines: [{ id: "p1", name: "Vendas" }],
+    stages: [
+      { id: "st1", pipeline_id: "p1", name: "Novo", order: 1 },
+      { id: "st2", pipeline_id: "p1", name: "Negociação", order: 2 },
+      { id: "st3", pipeline_id: "p1", name: "Contrato", order: 3 },
+    ],
+    reasons: [],
+    buckets: [],
+    options: [],
+    stage_days: { st2: { median: 6.4, n: 30 } },
+  };
+  const entities = () => [
+    { key: "c:222", level: "campaign" as const, name: "Motion", utm: "Motion", n: { cycle: withCrm(derive({ spend: 640, results: 40 }), { opportunities: 20, wins: 2, revenue: 0 }) } },
+    { key: "s:1", level: "adset" as const, name: "Público A", parent: "c:222", utm: ["Motion", "Público A"].join("\u0000"), n: { cycle: { spend: 120 } } },
+  ];
+
+  it("custo por lead que chega à etapa (ela ou além), a porcentagem e os leads ainda recentes pelo tempo típico", () => {
+    const list = entities();
+    const labels = applyFunnel(list, funnel, goal);
+    // Negociação ou além: 5 + 3 = 8 de 20; R$ 640 / 8 = R$ 80 (200% da meta de R$ 40).
+    expect(list[0].n.cycle).toMatchObject({
+      goal_stage_leads: 8,
+      goal_stage_rate: 40,
+      goal_stage_cost: 80,
+      goal_stage_vs_target: 200,
+      // Tempo típico: 6 dias → só a faixa 0-3 é "cedo" (6 de 20).
+      young_leads: 6,
+      young_rate: 30,
+    });
+    expect(list[1].n.cycle).toMatchObject({ goal_stage_leads: 6, goal_stage_cost: 20, young_leads: 0 });
+    expect(labels.goal_stage_cost).toBe('Custo por lead que chega a "Negociação"');
+    expect(labels.young_leads).toBe('Leads abertos há menos de 6 dias (cedo para chegar a "Negociação")');
+    expect(youngOf({ "0": 2, "4": 3, "8": 4, "31": 9 }, 10)).toBe(5);
+    expect(typicalDays(funnel, goal)).toBe(6);
+    expect(typicalDays({ ...funnel, stage_days: {} }, goal)).toBeNull();
+  });
+
+  it("no total, a meta; acima dela, a detecção — mais branda quando muitos leads ainda são recentes", () => {
+    const m = { ...material(), crm_goal: goal };
+    const build = (ages: Record<string, number>) => {
+      const list = entities();
+      const f = { ...funnel, rows: [{ ...funnel.rows[0], ages }, funnel.rows[1]] };
+      const a = analysisOf([], m);
+      a.entities = list;
+      a.funnel = "ok";
+      a.labels = applyFunnel(list, f, goal);
+      a.stageDays = typicalDays(f, goal);
+      a.entities = [totalEntity(m, a), ...list];
+      return a;
+    };
+    const a = build({ "15": 3 });
+    const total = a.entities[0].n.cycle!;
+    expect(total).toMatchObject({ goal_stage_leads: 8, goal_stage_cost: 80, goal_stage_target: 40, goal_stage_vs_target: 200 });
+    const r = ruleInsights(m, a, new Map(a.entities.map((e) => [e.key, e]))).find((x) => x.fingerprint === "problem#total#etapa-acima-da-meta")!;
+    expect(r.priority).toBe("high");
+    expect(r.title).toBe('Cada lead que chega a "Negociação" está custando mais que a meta');
+    expect(r.body).toMatch(/R\$\s?80,00, 100% acima da meta de R\$\s?40,00/);
+    expect(r.evidence.map((e) => e.label)).toEqual([
+      'Custo por lead que chega a "Negociação"',
+      'Meta de custo por lead em "Negociação"',
+      'Leads que chegaram a "Negociação" (a etapa que importa)',
+    ]);
+    const early = build({ "0": 9 });
+    const r2 = ruleInsights(m, early, new Map(early.entities.map((e) => [e.key, e]))).find((x) => x.fingerprint === "problem#total#etapa-acima-da-meta")!;
+    expect(r2.priority).toBe("medium");
+    expect(r2.body).toMatch(/45% dos leads ainda são recentes \(entraram há menos de 6 dias/);
+    // O material diz qual é a etapa, a meta e o tempo típico.
+    expect(insightMessage(m, a, [])).toContain('"etapa_que_importa":{"etapa":"Negociação","funil":"Vendas","meta_de_custo_por_lead":40,"dias_tipicos_ate_a_etapa":6}');
   });
 });
 

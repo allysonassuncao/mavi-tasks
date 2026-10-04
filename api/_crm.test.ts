@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { crmEnv, crmUtmFunnel, handleCrm } from "./_crm";
+import { crmEnv, crmUtmFunnel, funnelFrom, handleCrm } from "./_crm";
 
 const SECRET = "s".repeat(48);
 const env = {
@@ -344,5 +344,40 @@ describe("Funil por UTM (Insights da MAVI)", () => {
     const r = await crmUtmFunnel(env, impl, crmCompany, "2026-09-01", "2026-09-30");
     // O worker reconhece pela mensagem (o 503 do CRM chega como 502).
     expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/mavi_utm_funnel/) });
+  });
+});
+
+describe("A etapa que importa (Fase 6 dos Insights)", () => {
+  it("as idades das abertas e os dias típicos até cada etapa (só o bem formado)", () => {
+    const f = funnelFrom({
+      rows: [{ l: "c", c: "Motion", deals: 3, ages: { "0": 2, "8": "x", "15": 1 } }],
+      stage_days: { s2: { median: "6.5", n: 12 }, s3: { median: 4, n: 0 }, s4: null },
+    });
+    expect(f.rows[0].ages).toEqual({ "0": 2, "15": 1 });
+    expect(f.stage_days).toEqual({ s2: { median: 6.5, n: 12 } });
+    // A consulta antiga (sem idades): nada quebra.
+    expect(funnelFrom({ rows: [{ l: "c", c: "Motion" }] })).toMatchObject({ rows: [{ ages: null }], stage_days: {} });
+  });
+
+  it("os funis do cliente: confere a ligação com o login da pessoa e pede ao MakeCRM", async () => {
+    const f = fake((url) =>
+      url.includes("/rest/v1/client_crm_links")
+        ? [200, [{ crm_company_id: crmCompany }]]
+        : [200, { pipelines: [{ id: "p1", name: "Vendas", stages: [{ id: "s1", name: "Novo", order: 1 }, { nome: "lixo" }] }, { name: "sem id" }] }],
+    );
+    const r = await handleCrm({ action: "pipelines", company, client }, auth, env, f.impl);
+    expect(r).toEqual({
+      status: 200,
+      body: { linked: true, pipelines: [{ id: "p1", name: "Vendas", stages: [{ id: "s1", name: "Novo", order: 1 }] }] },
+    });
+    expect(f.calls[0].headers.Authorization).toBe(auth);
+    expect(f.calls[1].body).toEqual({ action: "pipelines", company_id: crmCompany });
+    const none = fake(() => [200, []]);
+    expect(await handleCrm({ action: "pipelines", company, client }, auth, env, none.impl)).toEqual({
+      status: 200,
+      body: { linked: false, pipelines: [] },
+    });
+    expect(none.calls).toHaveLength(1);
+    expect((await handleCrm({ action: "pipelines", company, client: "x" }, auth, env, none.impl)).status).toBe(400);
   });
 });
