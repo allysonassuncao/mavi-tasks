@@ -208,7 +208,9 @@ export interface AppNotification {
     /** Aprendizado da MAVI: aprendizados novos das respostas para conferir (link /mavi#aprendizado). */
     | "mavi_lessons"
     /** Campanhas › Meus avisos: uma regra da pessoa disparou (link /campanhas?campanha=<id>, que abre /campanhas/<id>) ou o resumo do dia (link /campanhas?avisos=historico). */
-    | "campaign_alert";
+    | "campaign_alert"
+    /** Campanhas › Insights da MAVI: análise pronta com insights novos (link /campanhas/<id>?aba=insights) ou o teto do mês atingido (link /mavi#campanhas). */
+    | "campaign_insight";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

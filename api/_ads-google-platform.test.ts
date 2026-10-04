@@ -6,6 +6,7 @@ import {
   googleList,
   googleQuery,
   googleReportMeta,
+  googleWindows,
   keywordText,
   metricsOf,
   statusOf,
@@ -274,5 +275,35 @@ describe("/api/ads: google-platform", () => {
       fetchMock,
     );
     expect(res.status).toBe(403);
+  });
+});
+
+describe("leitura enxuta dos insights do Google", () => {
+  it("uma consulta por visão, por dia, somada em cada janela; sem a consulta do cliente", async () => {
+    const day = (date: string, cost: number, conversions: number) => ({
+      segments: { date },
+      campaign: { id: "11", name: "Pesquisa", status: "ENABLED", advertisingChannelType: "SEARCH" },
+      metrics: { costMicros: String(cost * 1e6), conversions: String(conversions), impressions: "100", clicks: "10" },
+    });
+    const { search, queries } = gaql([
+      [/FROM campaign /, () => [day("2026-09-01", 10, 1), day("2026-09-28", 20, 2), day("2026-09-30", 30, 0)]],
+    ]);
+    const rows = await googleWindows(search, {
+      account: "1234567890",
+      manager: "",
+      view: "campaigns",
+      campaigns: ["11"],
+      ranges: [
+        { key: "cycle", since: "2026-09-01", until: "2026-09-30" },
+        { key: "d7", since: "2026-09-24", until: "2026-09-30" },
+      ],
+    });
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toMatch(/segments\.date, campaign\.id/);
+    expect(queries[0]).toMatch(/BETWEEN '2026-09-01' AND '2026-09-30'/);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe("Pesquisa");
+    expect(rows[0].windows.cycle).toMatchObject({ cost: 60, conversions: 3 });
+    expect(rows[0].windows.d7).toMatchObject({ cost: 50, conversions: 2 });
   });
 });

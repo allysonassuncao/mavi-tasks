@@ -19,6 +19,7 @@ import {
   Radar,
   Wallet,
   Megaphone,
+  Lightbulb,
 } from "lucide-react";
 import "./due-rules.css";
 import { useState } from "react";
@@ -103,6 +104,10 @@ export function InboxList({
                 <span className="inbox-system due-risk" aria-hidden="true">
                   <Megaphone size={15} />
                 </span>
+              ) : n.kind === "campaign_insight" ? (
+                <span className="inbox-system" aria-hidden="true">
+                  <Lightbulb size={15} />
+                </span>
               ) : n.kind === "media_balance" ? (
                 <span className="inbox-system due-risk" aria-hidden="true">
                   <Wallet size={15} />
@@ -142,6 +147,7 @@ export function InboxList({
                 n.kind === "radar_alert" ||
                 n.kind === "media_balance" ||
                 n.kind === "campaign_alert" ||
+                n.kind === "campaign_insight" ||
                 n.kind === "tasks_assigned" ||
                 n.kind === "tasks_priority" ||
                 n.kind === "copilot_lessons" ||

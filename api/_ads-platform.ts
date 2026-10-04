@@ -842,6 +842,155 @@ export async function platformList(
   };
 }
 
+// ------------------------------------------------------------ several periods at once
+/** A period of the insights worker (ciclo, 7 dias…). */
+export type WindowRange = { key: string; since: string; until: string };
+export type WindowRow = Omit<PlatformRow, "metrics" | "breakdown" | "rankings" | "budget" | "bid_strategy"> & {
+  /** The numbers of each period, by its key. */
+  windows: Record<string, Metrics>;
+  breakdown?: { key: string; label: string; metrics: Metrics }[];
+};
+/**
+ * The lean read of Campanhas › Insights da MAVI: the level's structure once
+ * and ONE insights call with every period (time_ranges), instead of one
+ * platformList per period (each with the account, the totals and the
+ * structure again). Results count as in Ads Manager (the ad sets' goals).
+ * The breakdown (age × gender…) comes for one period only.
+ */
+export async function platformWindows(
+  env: AdsEnv,
+  fetchImpl: Fetch,
+  token: string,
+  q: {
+    account: string;
+    level: PlatformLevel;
+    campaigns: string[];
+    ranges: WindowRange[];
+    breakdown?: { kind: Breakdown; range: WindowRange };
+  },
+  now = new Date(),
+): Promise<{ rows: WindowRow[]; result_label: string }> {
+  if (!q.ranges.length) return { rows: [], result_label: "—" };
+  for (const r of q.ranges) checkRange(r.since, r.until);
+  const act = `/act_${q.account}`;
+  const pq: PlatformQuery = {
+    account: q.account,
+    level: q.level,
+    since: q.ranges[0].since,
+    until: q.ranges[0].until,
+    campaigns: q.campaigns,
+    adsets: [],
+  };
+  const [structure, adsets, insights, split] = await Promise.all([
+    graphAll<StructureRow>(env, fetchImpl, token, `${act}/${EDGE[q.level]}`, {
+      fields: STRUCTURE[q.level],
+      limit: q.level === "ad" ? "200" : "500",
+      ...filtering(pq, true, q.level),
+    }),
+    q.level !== "adset"
+      ? graphAll<AdsetInfo>(env, fetchImpl, token, `${act}/adsets`, {
+          fields: "id,campaign_id,optimization_goal,promoted_object,destination_type",
+          limit: "500",
+          ...filtering({ ...pq, adsets: [] }, true, "adset"),
+        })
+      : Promise.resolve(null),
+    graphAll<InsightRow>(env, fetchImpl, token, `${act}/insights`, {
+      level: q.level,
+      limit: "500",
+      time_ranges: JSON.stringify(q.ranges.map((r) => ({ since: r.since, until: r.until }))),
+      fields: `campaign_id,adset_id,ad_id,${INSIGHT_FIELDS}`,
+      ...filtering(pq, false, q.level),
+    }),
+    q.breakdown
+      ? graphAll<InsightRow>(env, fetchImpl, token, `${act}/insights`, {
+          level: q.level,
+          limit: "500",
+          time_range: JSON.stringify({ since: q.breakdown.range.since, until: q.breakdown.range.until }),
+          fields: `campaign_id,adset_id,ad_id,${INSIGHT_FIELDS}`,
+          ...BREAKDOWNS[q.breakdown.kind],
+          ...filtering(pq, false, q.level),
+        })
+      : Promise.resolve(null),
+  ]);
+  const adsetInfo = new Map<string, AdsetInfo>((adsets ?? (structure as AdsetInfo[])).map((a) => [a.id, a]));
+  const campaignSpec = new Map<string, ResultSpec | null>();
+  const campaignMixed = new Set<string>();
+  for (const a of adsetInfo.values()) {
+    if (!a.campaign_id) continue;
+    const spec = resultSpec(a);
+    if (!campaignSpec.has(a.campaign_id)) campaignSpec.set(a.campaign_id, spec);
+    else if (specKey(campaignSpec.get(a.campaign_id)!) !== specKey(spec)) campaignMixed.add(a.campaign_id);
+  }
+  const idOf = (r: InsightRow | StructureRow) =>
+    String(q.level === "campaign" ? (r.campaign_id ?? r.id) : q.level === "adset" ? (r.adset_id ?? r.id) : (r.ad_id ?? r.id));
+  const keyOf = new Map(q.ranges.map((r) => [`${r.since}|${r.until}`, r.key]));
+  const byId = new Map<string, Map<string, InsightRow>>();
+  for (const r of insights) {
+    const key = keyOf.get(`${r.date_start}|${r.date_stop}`);
+    if (!key) continue;
+    const id = String(q.level === "campaign" ? r.campaign_id : q.level === "adset" ? r.adset_id : r.ad_id);
+    const m = byId.get(id) ?? new Map<string, InsightRow>();
+    m.set(key, r);
+    byId.set(id, m);
+  }
+  const splitById = new Map<string, InsightRow[]>();
+  for (const r of split ?? []) {
+    const id = String(q.level === "campaign" ? r.campaign_id : q.level === "adset" ? r.adset_id : r.ad_id);
+    const list = splitById.get(id) ?? [];
+    list.push(r);
+    splitById.set(id, list);
+  }
+  const labels = new Set<string>();
+  const rows: WindowRow[] = structure.map((s) => {
+    const mixed = q.level === "campaign" && campaignMixed.has(s.id);
+    const spec = mixed
+      ? null
+      : q.level === "campaign"
+        ? (campaignSpec.get(s.id) ?? null)
+        : resultSpec(adsetInfo.get(q.level === "adset" ? s.id : String(s.adset_id ?? "")));
+    const result_label = mixed ? "Vários" : (spec?.label ?? "—");
+    labels.add(result_label);
+    const end = s.stop_time ?? s.end_time;
+    const found = byId.get(idOf(s));
+    const row: WindowRow = {
+      id: s.id,
+      name: s.name ?? s.id,
+      level: q.level,
+      delivery: deliveryOf(s.effective_status, s.configured_status, end, now, s.learning_stage_info?.status),
+      campaign_id: q.level === "campaign" ? s.id : String(s.campaign_id ?? ""),
+      campaign_name: q.level === "campaign" ? (s.name ?? "") : (s.campaign?.name ?? ""),
+      ...(q.level === "ad" ? { adset_id: String(s.adset_id ?? ""), adset_name: s.adset?.name ?? "" } : {}),
+      ...(q.level === "campaign"
+        ? { objective: OBJECTIVE[s.objective] ?? pretty(String(s.objective ?? "").toLowerCase()) }
+        : {}),
+      ...(q.level === "adset"
+        ? { optimization: OPTIMIZATION[s.optimization_goal] ?? pretty(String(s.optimization_goal ?? "").toLowerCase()) }
+        : {}),
+      ...(q.level === "ad"
+        ? {
+            creative: {
+              title: s.creative?.title,
+              body: s.creative?.body,
+              cta: s.creative?.call_to_action_type,
+              type: s.creative?.object_type,
+            },
+          }
+        : {}),
+      result_label,
+      windows: Object.fromEntries(
+        q.ranges.map((r) => [r.key, metricsOf(found?.get(r.key) ?? {}, mixed ? null : spec)]),
+      ),
+    };
+    if (q.breakdown)
+      row.breakdown = (splitById.get(idOf(s)) ?? [])
+        .map((r) => ({ ...breakdownKey(q.breakdown!.kind, r), metrics: metricsOf(r, mixed ? null : spec) }))
+        .sort((a, b) => (b.metrics.spend ?? 0) - (a.metrics.spend ?? 0));
+    return row;
+  });
+  const one = labels.size === 1 ? [...labels][0] : "";
+  return { rows, result_label: one && one !== "—" ? one : labels.size > 1 ? "Vários" : "—" };
+}
+
 // ------------------------------------------------------------ one object
 export async function platformDetail(
   env: AdsEnv,

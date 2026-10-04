@@ -99,7 +99,7 @@ export function useWithM(): [boolean, (v: boolean) => void] {
   return [value, set];
 }
 
-type Tab = "dia" | "linha" | "ciclos" | "relatorios" | "plataforma";
+type Tab = "dia" | "linha" | "ciclos" | "relatorios" | "plataforma" | "insights";
 
 export function CampaignDayToDay({
   campaign,
@@ -119,6 +119,9 @@ export function CampaignDayToDay({
   cyclesTab,
   reportsTab,
   platformTab,
+  insightsTab,
+  insightsCount = 0,
+  aside,
   onRecordEdited,
   onConversions,
   metricsTick = 0,
@@ -146,6 +149,11 @@ export function CampaignDayToDay({
   /** Meta: the reports with public links, and the ad account's view. */
   reportsTab?: ReactNode;
   platformTab?: ReactNode;
+  /** Insights da MAVI: a aba (todos + histórico) e quantos estão abertos. */
+  insightsTab?: ReactNode;
+  insightsCount?: number;
+  /** Ao lado das abas, em qualquer uma: o painel dos insights da MAVI. */
+  aside?: ReactNode;
   /** A record was edited: the history (events) changed too. */
   onRecordEdited: () => void;
   /** Google: opens "Conversões do Google que contam" for the cycle. */
@@ -185,7 +193,8 @@ export function CampaignDayToDay({
     null;
   const extra =
     (tab === "relatorios" && !!reportsTab) ||
-    (tab === "plataforma" && !!platformTab);
+    (tab === "plataforma" && !!platformTab) ||
+    (tab === "insights" && !!insightsTab);
   const active: Tab =
     !cycle || (tab !== "linha" && tab !== "ciclos" && !extra)
       ? cycle
@@ -260,6 +269,7 @@ export function CampaignDayToDay({
                 ["ciclos", "Ciclos e histórico"],
                 ...(reportsTab ? [["relatorios", "Relatórios"]] : []),
                 ...(platformTab ? [["plataforma", "Plataforma"]] : []),
+                ...(insightsTab ? [["insights", "Insights"]] : []),
               ] as [Tab, string][]
             )
               .filter(([id]) => cycle || id === "ciclos")
@@ -273,6 +283,7 @@ export function CampaignDayToDay({
                   onClick={() => setTab(id)}
                 >
                   {label}
+                  {id === "insights" && insightsCount > 0 && <span>{insightsCount}</span>}
                 </button>
               ))}
           </div>
@@ -282,6 +293,8 @@ export function CampaignDayToDay({
             <div className="campaign-tab-body flush">{reportsTab}</div>
           ) : active === "plataforma" ? (
             <div className="campaign-tab-body flush">{platformTab}</div>
+          ) : active === "insights" ? (
+            insightsTab
           ) : !metrics ? (
             error ? (
               <p className="form-error campaign-tab-body" role="alert">
@@ -313,6 +326,7 @@ export function CampaignDayToDay({
             />
           ) : null}
         </section>
+        {aside}
       </div>
       {editing && cycle && (
         <RecordEditor

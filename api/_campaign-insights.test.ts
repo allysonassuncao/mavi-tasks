@@ -1,0 +1,606 @@
+import crypto from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
+import type { AiEnv } from "./_ai";
+import type { LlmAdapter } from "./_ai-llm";
+import type { WindowRow } from "./_ads-platform";
+import type { AdsEnv } from "./_ads";
+import { seal } from "./_google";
+import { newMeter } from "./_social-leads";
+import {
+  applyCheck,
+  buildEvidence,
+  crmIndex,
+  derive,
+  fitToCap,
+  focus,
+  handleCampaignInsightsWorker,
+  insightMessage,
+  metaEntities,
+  metaUsage,
+  meteredFetch,
+  newApiMeter,
+  ThrottledError,
+  nearMissUtms,
+  parseInsights,
+  ruleInsights,
+  runCampaignInsights,
+  skipReason,
+  totalEntity,
+  windowsFor,
+  withCrm,
+  type Analysis,
+  type CampaignInsightsEnv,
+  type Entity,
+  type InsightMaterial,
+} from "./_campaign-insights";
+
+const company = "00000000-0000-4000-8000-000000000001";
+const run = "00000000-0000-4000-8000-0000000000a1";
+const provider = "00000000-0000-4000-8000-000000000800";
+const providerKey = crypto.randomBytes(32);
+const env: CampaignInsightsEnv = {
+  supabaseUrl: "https://db.example.com",
+  supabaseKey: "publishable",
+  anthropicKey: "sk-ant",
+  model: "claude-opus-5-5",
+  openaiKey: "",
+  embeddingModel: "text-embedding-3-small",
+  workerSecret: "s".repeat(40),
+  workerBudgetMs: 60_000,
+  providerKey,
+  imageModel: "gpt-image-1",
+  ads: {} as AdsEnv,
+  crm: { supabaseUrl: "", supabaseKey: "", crmUrl: "https://crm.example.com", secret: "c".repeat(40) },
+  insightsBudgetMs: 400_000,
+};
+
+function material(over: Partial<InsightMaterial> = {}): InsightMaterial {
+  return {
+    run: { id: run, trigger: "manual" },
+    company_id: company,
+    today: "2026-10-04",
+    timezone: "America/Sao_Paulo",
+    campaign: { id: "camp", name: "Motion - Meta", platform: "meta", notes: "" },
+    client: { id: "cl", name: "Vittalium" },
+    product: { id: "pd", name: "Make Ads" },
+    contract_id: "k",
+    cycle: {
+      id: "cy",
+      start_date: "2026-09-24",
+      end_date: "2026-10-23",
+      objective: "lead",
+      destination: "external_page",
+      goal_results: 100,
+      budget: 3000,
+      multiplier: 1.5,
+      niche: "",
+    },
+    links: [{ account_id: "111", campaign_id: "222" }],
+    meta_tokens: { "111": { token_cipher: "v1:x", expires_at: null } },
+    google_token: null,
+    crm_company_id: "crm",
+    // 10 dias: R$ 100 por dia (sem M) e 2 resultados que contam por dia.
+    daily: Array.from({ length: 10 }, (_, i) => ({
+      day: i < 7 ? `2026-09-${24 + i}` : `2026-10-0${i - 6}`,
+      spend: 100,
+      conversions: 2,
+      multiplier: 1.5,
+    })),
+    settings: { money_basis: "net", run_cap_usd: 0.5 },
+    last_done_at: null,
+    previous: [],
+    context: { dossier: [{ kind: "context", text: "Vende suplementos" }], radar: [], temperature: null, meetings: [] },
+    jev: null,
+    ...over,
+  };
+}
+
+const row = (
+  p: Partial<WindowRow> & { id: string; name: string; level: WindowRow["level"] },
+  windows: Record<string, Record<string, number>> = {
+    cycle: { spend: 100, impressions: 1000, reach: 800, link_clicks: 20, results: 4 },
+  },
+): WindowRow => ({
+  delivery: { code: "ACTIVE", label: "Ativo", tone: "on" },
+  campaign_id: "222",
+  campaign_name: "Motion",
+  attribution: "",
+  result_label: "Cadastros",
+  windows,
+  ...p,
+});
+
+describe("janelas e números", () => {
+  it("todas até ontem; o ciclo para no fim dele; desde a última análise quando houve", () => {
+    const w = windowsFor("2026-10-04", { start_date: "2026-09-24", end_date: "2026-10-23" }, null, "America/Sao_Paulo");
+    expect(w).toEqual({
+      cycle: { since: "2026-09-24", until: "2026-10-03" },
+      d7: { since: "2026-09-27", until: "2026-10-03" },
+      d15: { since: "2026-09-19", until: "2026-10-03" },
+      d30: { since: "2026-09-04", until: "2026-10-03" },
+    });
+    const after = windowsFor(
+      "2026-10-04",
+      { start_date: "2026-09-01", end_date: "2026-10-02" },
+      "2026-10-01T02:00:00Z",
+      "America/Sao_Paulo",
+    );
+    expect(after.cycle).toEqual({ since: "2026-09-01", until: "2026-10-02" });
+    // 01/10 às 02h UTC ainda é 30/09 em São Paulo.
+    expect(after.since_last).toEqual({ since: "2026-09-30", until: "2026-10-03" });
+  });
+
+  it("derivadas: CPA, CTR, CPC, CPM, frequência, ROAS; e o CRM ao lado", () => {
+    const n = derive({ spend: 100, impressions: 1000, reach: 500, clicks: 20, results: 4, value: 300 });
+    expect(n).toMatchObject({ cpa: 25, ctr: 2, cpc: 5, cpm: 100, frequency: 2, roas: 3 });
+    expect(derive({ spend: 50, results: 0 }).cpa).toBeNull();
+    const c = withCrm(n, { opportunities: 2, wins: 1, revenue: 900 });
+    expect(c).toMatchObject({ crm_opportunities: 2, crm_cpl: 50, crm_cost_win: 100, crm_roas: 9, crm_rate: 50 });
+  });
+});
+
+describe("entidades do Meta com o CRM", () => {
+  const crm = crmIndex({
+    campaigns: [
+      ["Motion", 3, 1, 1, 500],
+      ["motion ", 2, 0, 0, 0],
+    ],
+    adsets: [
+      ["Motion", "Público A", 2, 1, 1, 500],
+      ["Motion", "público a", 1, 0, 0, 0],
+    ],
+    ads: [["Motion", "Público A", "Anúncio frete", 2, 1, 1, 500]],
+  });
+  const entities = metaEntities(
+    {
+      campaigns: [
+        row({ id: "222", name: "Motion", level: "campaign" }, {
+          cycle: { spend: 100, impressions: 1000, results: 4 },
+          d7: { spend: 40, impressions: 400, results: 1 },
+        }),
+      ],
+      adsets: [
+        row({
+          id: "s1",
+          name: "Público A",
+          level: "adset",
+          optimization: "Cadastros",
+          breakdown: [{ key: "25-34|female", label: "25-34 · Mulheres", metrics: { spend: 60, results: 3, impressions: 500 } }],
+        }),
+        // Sem veiculação: não vai para a MAVI.
+        row({ id: "s9", name: "Parado", level: "adset" }, { cycle: { spend: 0, impressions: 0, results: 0 } }),
+      ],
+      ads: [
+        row({
+          id: "a1",
+          name: "Anúncio frete",
+          level: "ad",
+          adset_id: "s1",
+          adset_name: "Público A",
+          creative: { title: "Frete grátis em 24h", body: "Compre hoje" },
+        }),
+      ],
+    },
+    crm,
+    1.5,
+  );
+  const byKey = new Map(entities.map((e) => [e.key, e]));
+
+  it("liga pelo nome exato, multiplica o dinheiro pelo M quando pedido e guarda o criativo", () => {
+    expect(byKey.get("c:222")!.n.cycle).toMatchObject({ spend: 150, crm_opportunities: 3, crm_wins: 1 });
+    // O CRM só vem na janela do ciclo.
+    expect(byKey.get("c:222")!.n.d7!.crm_opportunities).toBeUndefined();
+    expect(byKey.get("s:s1")).toMatchObject({ parent: "c:222", info: { otimizacao: "Cadastros" } });
+    expect(byKey.get("s:s1")!.n.cycle!.crm_opportunities).toBe(2);
+    expect(byKey.get("a:a1")).toMatchObject({ parent: "s:s1", info: { titulo: "Frete grátis em 24h" } });
+    expect(byKey.get("a:a1")!.n.cycle!.crm_opportunities).toBe(2);
+    expect(byKey.get("g:s1:25-34|female")).toMatchObject({ level: "segment", parent: "s:s1" });
+    expect(byKey.get("g:s1:25-34|female")!.n.cycle!.spend).toBe(90);
+    expect(byKey.has("s:s9")).toBe(false);
+  });
+
+  it("UTMs quase iguais ao nome viram entidades para a correção", () => {
+    const near = nearMissUtms(entities, crm);
+    expect(near.map((u) => [u.name, u.parent, u.info?.kind])).toEqual([
+      ["motion ", "c:222", "campaign"],
+      ["público a", "s:s1", "adset"],
+    ]);
+    expect(near[0].n.cycle!.crm_opportunities).toBe(2);
+  });
+});
+
+function analysisOf(entities: Entity[], m = material(), crm: Analysis["crm"] = "ok"): Analysis {
+  const a: Analysis = {
+    platform: "meta",
+    basis: "net",
+    multiplier: 1.5,
+    windows: windowsFor(m.today, m.cycle, m.last_done_at, m.timezone),
+    result_label: "Cadastros",
+    entities,
+    crm,
+    notes: [],
+  };
+  a.entities = [totalEntity(m, a), ...a.entities];
+  return a;
+}
+const campaign = (results: number, opportunities: number): Entity => ({
+  key: "c:222",
+  level: "campaign",
+  name: "Motion",
+  n: { cycle: withCrm(derive({ spend: 900, results }), { opportunities, wins: 0, revenue: 0 }) },
+});
+
+describe("detecções automáticas", () => {
+  it("conversões na plataforma e nenhum lead no CRM: rastreamento, prioridade alta", () => {
+    const a = analysisOf([campaign(30, 0)]);
+    const map = new Map(a.entities.map((e) => [e.key, e]));
+    const rules = ruleInsights(material(), a, map);
+    const t = rules.find((r) => r.kind === "tracking")!;
+    expect(t).toMatchObject({ priority: "high", source: "rule", fingerprint: "tracking#c:222#sem-lead-no-crm" });
+    expect(t.evidence.map((e) => [e.metric, e.value])).toEqual([
+      ["results", 30],
+      ["crm_opportunities", 0],
+    ]);
+    // Com leads no CRM, ou sem CRM ligado, não há o que apontar.
+    expect(ruleInsights(material(), analysisOf([campaign(30, 4)]), new Map()).some((r) => r.kind === "tracking")).toBe(false);
+    const off = analysisOf([campaign(30, 0)], material(), "unlinked");
+    expect(ruleInsights(material(), off, new Map(off.entities.map((e) => [e.key, e]))).some((r) => r.kind === "tracking")).toBe(false);
+  });
+
+  it("custo por resultado do ciclo acima da meta (com a meta sem M)", () => {
+    // Meta: R$ 3.000 com M = R$ 2.000 sem M para 100 resultados = R$ 20; o ciclo: R$ 1.000 / 20 = R$ 50.
+    const a = analysisOf([campaign(30, 4)]);
+    const total = a.entities[0].n.cycle!;
+    expect(total).toMatchObject({ goal_cpa: 20, mavi_results: 20, mavi_cpa: 50, cost_vs_goal: 250, days_elapsed: 10 });
+    const r = ruleInsights(material(), a, new Map(a.entities.map((e) => [e.key, e])));
+    expect(r.find((x) => x.kind === "problem")).toMatchObject({
+      priority: "high",
+      fingerprint: "problem#total#custo-acima-da-meta",
+    });
+  });
+});
+
+describe("a resposta da MAVI", () => {
+  const a = analysisOf([campaign(30, 4)]);
+  const map = new Map(a.entities.map((e) => [e.key, e]));
+
+  it("os valores das evidências vêm do material; evidência inventada cai, e o insight sem nenhuma também", () => {
+    const text = `Segue:\n${JSON.stringify({
+      summary: "Campanha cara.",
+      insights: [
+        {
+          kind: "opportunity",
+          priority: "medium",
+          topic: "Mover verba",
+          target: "c:222",
+          title: "Mover verba",
+          body: "…",
+          action: "…",
+          evidence: [
+            { entity: "c:222", window: "cycle", metric: "crm_opportunities" },
+            { entity: "c:999", window: "cycle", metric: "spend" },
+            { entity: "c:222", window: "cycle", metric: "inventada" },
+          ],
+        },
+        { kind: "problem", priority: "high", title: "Sem prova", evidence: [{ entity: "x", window: "cycle", metric: "spend" }] },
+        { kind: "talvez", priority: "high", title: "Tipo errado", evidence: [{ entity: "c:222", window: "cycle", metric: "spend" }] },
+      ],
+    })}`;
+    const r = parseInsights(text, map);
+    expect(r.summary).toBe("Campanha cara.");
+    expect(r.dropped).toBe(2);
+    expect(r.insights).toHaveLength(1);
+    expect(r.insights[0]).toMatchObject({
+      target: { key: "c:222", level: "campaign", name: "Motion" },
+      fingerprint: "opportunity#c:222#mover-verba",
+      evidence: [{ metric: "crm_opportunities", value: 4, unit: "count", name: "Motion", window: "cycle" }],
+    });
+    expect(() => parseInsights("não deu", map)).toThrow(/formato esperado/);
+  });
+
+  it("o material vai com as chaves, as janelas, os insights anteriores e sem tokens", () => {
+    const text = insightMessage(
+      material({
+        previous: [
+          {
+            kind: "problem",
+            priority: "high",
+            title: "Público caro",
+            fingerprint: "problem#g:s1:25-34|female#publico-caro",
+            status: "new",
+            seen_count: 2,
+            last_seen_at: "2026-10-01",
+          },
+        ],
+      }),
+      a,
+      [],
+    );
+    expect(text).toMatch(/"topic":"publico-caro","target":"g:s1:25-34\|female"/);
+    expect(text).toMatch(/"key":"c:222"/);
+    expect(text).toMatch(/R\$ sem M/);
+    expect(text).not.toMatch(/token/);
+  });
+
+  it("buildEvidence não repete a mesma evidência", () => {
+    const e = buildEvidence(map, [
+      { entity: "total", window: "cycle", metric: "goal_cpa" },
+      { entity: "total", window: "cycle", metric: "goal_cpa" },
+    ]);
+    expect(e).toHaveLength(1);
+    expect(e[0]).toMatchObject({ value: 20, unit: "money", label: "Custo por resultado da meta" });
+  });
+});
+
+describe("teto por análise e o Jev", () => {
+  it("enxuga até caber; sem caber nem cortado, nulo", () => {
+    const price = { input: 4, output: 20 };
+    const build = (cut: number) => ({ text: "x".repeat(cut >= 2 ? 1000 : 400_000), maxTokens: cut >= 4 ? 3000 : 6000 });
+    expect(fitToCap(build, 0.5, price)).toMatchObject({ cut: 2 });
+    expect(fitToCap(build, 0.01, price)).toBeNull();
+  });
+
+  it("o Jev tira o que os números não sustentam e guarda a confiança", () => {
+    const list = [{ title: "a" }, { title: "b" }, { title: "c" }] as any[];
+    const kept = applyCheck(list, { answers: { ok_1: { noul: 0.9 }, ok_2: { noul: 0.1 } } });
+    expect(kept.map((x) => x.title)).toEqual(["a", "c"]);
+    expect(kept[0].confidence).toBe(0.9);
+  });
+});
+
+function database(routes: Record<string, unknown | ((body: any) => unknown)>) {
+  const calls: { url: string; body: any }[] = [];
+  const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    calls.push({ url, body });
+    const key = Object.keys(routes)
+      .sort((x, y) => y.length - x.length)
+      .find((k) => url.includes(k));
+    if (!key) return new Response("null", { status: 200 });
+    const value = routes[key];
+    const data = typeof value === "function" ? (value as (b: any) => unknown)(body) : value;
+    if (data instanceof Response) return data;
+    return new Response(JSON.stringify(data), { status: 200 });
+  }) as unknown as typeof fetch;
+  return { fetchImpl, calls };
+}
+
+describe("worker dos insights", () => {
+  it("recusa sem o segredo", async () => {
+    const res = await handleCampaignInsightsWorker("Bearer errado", env, {
+      fetch: vi.fn() as any,
+      llm: vi.fn(),
+      embed: vi.fn(),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("lê, detecta, pergunta à MAVI, confere com o Jev e grava com o custo", async () => {
+    let claims = 0;
+    const jev = {
+      scope: "feature",
+      provider_id: provider,
+      provider: "OpenRouter",
+      kind: "openrouter",
+      base_url: "https://openrouter.ai/api/v1",
+      key_cipher: seal(providerKey, "sk-or"),
+      model: "~typesafe/jev-latest",
+      price: { id: "~typesafe/jev-latest", input: 0.042, output: 0 },
+    };
+    const { fetchImpl, calls } = database({
+      "rpc/ai_campaign_insight_claim": () => (claims++ < 1 ? [{ id: run, company_id: company }] : []),
+      "rpc/ai_campaign_insight_material": material({ jev }),
+      "rpc/ai_worker_route": null,
+      "rpc/ai_campaign_insight_store": { ok: true },
+      "alpha/decisions": { model: "typesafe/jev-1", answers: { ok_1: { noul: 0.92 }, ok_2: { noul: 0.05 } }, usage: { input_tokens: 900, cost: 0.00004 } },
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      expect(req.instructions).toMatch(/analista sênior de tráfego/);
+      expect(req.messages[0].content).toMatch(/deteccoes_automaticas/);
+      const meter = newMeter("claude-opus-5-5");
+      meter.input = 9000;
+      meter.output = 700;
+      meter.cost = 0.05;
+      return {
+        text: JSON.stringify({
+          summary: "Leads sem CRM e custo alto.",
+          insights: [
+            {
+              kind: "highlight",
+              priority: "medium",
+              topic: "anuncio-frete",
+              target: "c:222",
+              title: "Bom volume",
+              body: "…",
+              action: "Escalar",
+              evidence: [{ entity: "c:222", window: "cycle", metric: "results" }],
+            },
+            {
+              kind: "opportunity",
+              priority: "low",
+              topic: "sem-base",
+              target: null,
+              title: "Chute",
+              body: "…",
+              action: "…",
+              evidence: [{ entity: "total", window: "cycle", metric: "spend" }],
+            },
+          ],
+        }),
+        meter,
+        rounds: 1,
+      };
+    });
+    const read = vi.fn(async (_env: unknown, _fetch: unknown, m: InsightMaterial) => analysisOf([campaign(30, 0)], m));
+    let t = 0;
+    const stats = await runCampaignInsights(env, { fetch: fetchImpl, llm, embed: vi.fn(), now: () => (t += 60_000) }, read);
+    expect(stats).toEqual({ done: 1, skipped: 0, deferred: 0, failed: 0, insights: 3 });
+    const store = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_store"))!.body;
+    expect(store.p_secret).toBe(env.workerSecret);
+    const result = store.p_result;
+    expect(result.status).toBe("done");
+    expect(result.summary).toBe("Leads sem CRM e custo alto.");
+    // As detecções primeiro; o "Chute" o Jev recusou.
+    expect(result.insights.map((i: any) => [i.source, i.kind, i.title])).toEqual([
+      ["rule", "tracking", "Motion: conversões na plataforma e nenhum lead no CRM"],
+      ["rule", "problem", "Custo por resultado acima da meta do ciclo"],
+      ["mavi", "highlight", "Bom volume"],
+    ]);
+    expect(result.insights[2].confidence).toBe(0.92);
+    expect(result.note).toMatch(/O Jev recusou 1 insight/);
+    expect(result.api_calls).toEqual({ meta: 0, google: 0 });
+    expect(result.tokens).toEqual({ input: 9900, output: 700 });
+    expect(result.usage.map((u: any) => [u.kind, u.cost])).toEqual([
+      ["campaign_insights", 0.05],
+      ["campaign_insights_check", 0.00004],
+    ]);
+  });
+
+  it("campanha que deixou de poder ser analisada: pula com o motivo", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_campaign_insight_claim": () => (claims++ < 1 ? [{ id: run, company_id: company }] : []),
+      "rpc/ai_campaign_insight_material": { blocked: "A campanha não está ativa." },
+      "rpc/ai_campaign_insight_store": { ok: true },
+    });
+    let t = 0;
+    const stats = await runCampaignInsights(env, { fetch: fetchImpl, llm: vi.fn(), embed: vi.fn(), now: () => (t += 60_000) });
+    expect(stats.skipped).toBe(1);
+    const store = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_store"))!.body;
+    expect(store.p_result).toEqual({ status: "skipped", note: "A campanha não está ativa." });
+  });
+
+  it("falha de leitura volta para a fila; falta de conexão não adianta repetir", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_campaign_insight_claim": () => (claims++ < 1 ? [{ id: run, company_id: company }] : []),
+      "rpc/ai_campaign_insight_material": material({ meta_tokens: null }),
+      "rpc/ai_worker_route": null,
+      "rpc/ai_campaign_insight_fail": null,
+    });
+    const read = vi.fn(async () => {
+      const { InsightsError } = await import("./_campaign-insights");
+      throw new InsightsError(409, "A conexão do Facebook desta conta expirou.", true);
+    });
+    let t = 0;
+    const stats = await runCampaignInsights(env, { fetch: fetchImpl, llm: vi.fn(), embed: vi.fn(), now: () => (t += 60_000) }, read as any);
+    expect(stats.failed).toBe(1);
+    const fail = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_fail"))!.body;
+    expect(fail).toMatchObject({ p_run: run, p_final: true });
+    expect(fail.p_error).toMatch(/expirou/);
+  });
+});
+
+describe("cota das APIs e leitura à toa", () => {
+  it("lê o consumo que o Meta informa (o maior vale) e o tempo para liberar", () => {
+    const h = new Headers({
+      "x-business-use-case-usage": JSON.stringify({
+        "999": [{ type: "ads_insights", call_count: 12, total_cputime: 81, total_time: 40, estimated_time_to_regain_access: 7 }],
+      }),
+      "x-ad-account-usage": JSON.stringify({ acc_id_util_pct: 33, reset_time_duration: 120 }),
+    });
+    expect(metaUsage(h)).toEqual({ pct: 81, regain: 7 });
+    expect(metaUsage(new Headers())).toEqual({ pct: 0, regain: 0 });
+  });
+
+  it("conta as chamadas e percebe o limite do Meta e o RESOURCE_EXHAUSTED do Google", async () => {
+    const meter = newApiMeter();
+    const base = vi.fn(async (url: string) =>
+      url.includes("graph.facebook.com/v23.0/act_1/ads")
+        ? new Response(JSON.stringify({ error: { code: 80000, message: "too many" } }), {
+            status: 400,
+            headers: { "x-business-use-case-usage": JSON.stringify({ "1": [{ call_count: 100, estimated_time_to_regain_access: 30 }] }) },
+          })
+        : url.includes("googleads")
+          ? new Response(JSON.stringify([{ error: { status: "RESOURCE_EXHAUSTED", details: [{ retryDelay: "120s" }] } }]), { status: 429 })
+          : new Response("{}", { status: 200 }),
+    ) as unknown as typeof fetch;
+    const f = meteredFetch(base, meter);
+    await f("https://graph.facebook.com/v23.0/act_1/campaigns");
+    expect(meter).toMatchObject({ meta: 1, throttle: null });
+    await f("https://graph.facebook.com/v23.0/act_1/ads");
+    expect(meter.throttle).toMatchObject({ platform: "meta", scope: "account", minutes: 30 });
+    expect(meter.pct).toBe(100);
+    const g = newApiMeter();
+    await meteredFetch(base, g)("https://googleads.googleapis.com/v25/customers/1/googleAds:searchStream");
+    expect(g).toMatchObject({ google: 1, throttle: { platform: "google", scope: "platform", minutes: 60 } });
+  });
+
+  it("pula sem chamar nada: sem investimento desde a última análise, ou poucos dias novos no agendamento", () => {
+    // A última análise (02/10, 9h em SP) leu até 01/10.
+    const base = material({ last_done_at: "2026-10-02T12:00:00Z" });
+    const days = (spends: number[]) =>
+      spends.map((spend, i) => ({ day: `2026-10-0${i + 2}`, spend, conversions: 0, multiplier: 1.5 }));
+    expect(skipReason({ ...base, daily: days([0, 0]) })).toMatch(/Sem investimento desde a última análise \(que leu até 01\/10\)/);
+    const sched = { ...base, run: { id: run, trigger: "schedule" as const }, settings: { ...base.settings, min_new_days: 2 } };
+    expect(skipReason({ ...sched, daily: days([50, 0]) })).toMatch(/Só 1 dia novo com investimento/);
+    expect(skipReason({ ...sched, daily: days([50, 20]) })).toBeNull();
+    // Pedida por alguém: analisa mesmo com pouco dado novo.
+    expect(skipReason({ ...base, settings: { ...base.settings, min_new_days: 2 }, daily: days([50, 0]) })).toBeNull();
+    // Sem os dias sincronizados não dá para saber: analisa. Nunca analisada: analisa.
+    expect(skipReason({ ...sched, daily: [] })).toBeNull();
+    expect(skipReason(material())).toBeNull();
+  });
+
+  it("só o que pesa vai para a MAVI: 2% do investimento ou CRM; e o limite por nível", () => {
+    const e = (key: string, level: any, spend: number, crm = 0) => ({
+      key,
+      level,
+      name: key,
+      n: { cycle: { spend, impressions: spend ? 100 : 0, results: 0, crm_opportunities: crm } },
+    });
+    const list = focus(
+      [e("c:1", "campaign", 1000), e("a:1", "ad", 500), e("a:2", "ad", 10), e("a:3", "ad", 5, 2), e("a:4", "ad", 300), e("a:5", "ad", 0)],
+      { adsets: 5, ads: 2, keywords: 5, terms: 5, segments: 5 },
+    );
+    // a:2 pesa 1% e não tem CRM; a:5 não veiculou; dos que sobram, o do CRM primeiro.
+    expect(list.map((x) => x.key)).toEqual(["c:1", "a:1", "a:3"]);
+  });
+
+  it("limite da plataforma: pausa a conta, a análise volta para a fila sem contar tentativa", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_campaign_insight_claim": () => (claims++ < 1 ? [{ id: run, company_id: company }] : []),
+      "rpc/ai_campaign_insight_material": material(),
+      "rpc/ai_worker_route": null,
+      "rpc/ai_campaign_insight_cooldown": null,
+      "rpc/ai_campaign_insight_defer": null,
+    });
+    const read = vi.fn(async () => {
+      throw new ThrottledError({ platform: "meta", scope: "account", minutes: 30, reason: "Meta: limite de requisições (código 80000)" }, ["111"]);
+    });
+    let t = 0;
+    const llm = vi.fn();
+    const stats = await runCampaignInsights(env, { fetch: fetchImpl, llm, embed: vi.fn(), now: () => (t += 60_000) }, read as any);
+    expect(stats).toMatchObject({ deferred: 1, failed: 0 });
+    expect(llm).not.toHaveBeenCalled();
+    const cool = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_cooldown"))!.body;
+    expect(cool).toMatchObject({ p_platform: "meta", p_account: "111" });
+    const defer = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_defer"))!.body;
+    expect(defer.p_note).toMatch(/espera a cota liberar/);
+    expect(new Date(defer.p_until).getTime() - new Date(cool.p_until).getTime()).toBe(0);
+  });
+
+  it("Google: sem orçamento de operações da MAVI, nem lê a plataforma", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_campaign_insight_claim": () => (claims++ < 1 ? [{ id: run, company_id: company }] : []),
+      "rpc/ai_campaign_insight_material": material({
+        campaign: { id: "camp", name: "Pesquisa", platform: "google", notes: "" },
+        links: [{ account_id: "123", campaign_id: "9" }],
+        google_token: { refresh_token_cipher: "v1:x" },
+      }),
+      "rpc/ai_campaign_insight_google_ops": { ok: false, used: 498, budget: 500, retry_at: "2026-10-05T09:05:00Z" },
+      "rpc/ai_campaign_insight_defer": null,
+    });
+    const read = vi.fn();
+    let t = 0;
+    const stats = await runCampaignInsights(env, { fetch: fetchImpl, llm: vi.fn(), embed: vi.fn(), now: () => (t += 60_000) }, read as any);
+    expect(stats.deferred).toBe(1);
+    expect(read).not.toHaveBeenCalled();
+    expect(calls.find((c) => c.url.includes("rpc/ai_campaign_insight_google_ops"))!.body).toMatchObject({ p_ops: 7, p_check: true });
+    const defer = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_defer"))!.body;
+    expect(defer).toMatchObject({ p_until: "2026-10-05T09:05:00Z" });
+    expect(defer.p_note).toMatch(/498 de 500/);
+  });
+});

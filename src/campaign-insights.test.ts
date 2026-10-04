@@ -1,0 +1,73 @@
+import { describe, expect, it } from "vitest";
+import {
+  basisLabel,
+  dayLabel,
+  formatEvidence,
+  nextScheduled,
+  scheduleText,
+  waitText,
+  whenText,
+  type InsightSchedule,
+} from "./campaign-insights";
+
+const schedule = (s: Partial<InsightSchedule>): InsightSchedule => ({
+  source: "company",
+  rule: null,
+  enabled: true,
+  frequency: "weekdays",
+  weekdays: [1, 4],
+  every_days: 3,
+  hour: 8,
+  ...s,
+});
+const tz = "America/Sao_Paulo";
+// 2026-10-05 é segunda-feira; 10h UTC = 7h em São Paulo.
+const mondayAt7 = new Date("2026-10-05T10:00:00Z");
+const mondayAt9 = new Date("2026-10-05T12:00:00Z");
+
+describe("textos dos insights", () => {
+  it("evidências no formato brasileiro, pela unidade", () => {
+    expect(formatEvidence({ value: 1234.5, unit: "money", metric: "spend" })).toBe("R$ 1.234,50");
+    expect(formatEvidence({ value: 12.34, unit: "pct", metric: "ctr" })).toBe("12,3%");
+    expect(formatEvidence({ value: 3.456, unit: "ratio", metric: "crm_roas" })).toBe("3,46x");
+    expect(formatEvidence({ value: 1.8, unit: "ratio", metric: "frequency" })).toBe("1,80");
+    expect(formatEvidence({ value: 41, unit: "count", metric: "results" })).toBe("41");
+    expect(formatEvidence({ value: 1, unit: "days", metric: "days_elapsed" })).toBe("1 dia");
+  });
+
+  it("frequência em português", () => {
+    expect(scheduleText(schedule({}))).toBe("Toda segunda e quinta, a partir das 8h");
+    expect(scheduleText(schedule({ weekdays: [1, 2, 3, 4, 5] }))).toBe("De segunda a sexta, a partir das 8h");
+    expect(scheduleText(schedule({ frequency: "daily", hour: 7 }))).toBe("Todo dia, a partir das 7h");
+    expect(scheduleText(schedule({ frequency: "every", every_days: 2 }))).toBe("A cada 2 dias, a partir das 8h");
+    expect(scheduleText(schedule({ enabled: false }))).toBe("Desligado");
+    expect(basisLabel("gross")).toBe("com M");
+    expect(basisLabel("net")).toBe("sem M");
+  });
+
+  it("a próxima análise segue a regra do banco", () => {
+    // Segunda antes das 8h: hoje às 8h.
+    expect(nextScheduled(schedule({}), null, mondayAt7, tz)).toEqual({ day: "2026-10-05", hour: 8 });
+    // Segunda às 9h, sem análise hoje: já (vai rodar na próxima volta).
+    expect(nextScheduled(schedule({}), "2026-10-01", mondayAt9, tz)).toEqual({ day: "2026-10-05", hour: 9 });
+    // Já rodou hoje: quinta.
+    expect(nextScheduled(schedule({}), "2026-10-05", mondayAt9, tz)).toEqual({ day: "2026-10-08", hour: 8 });
+    // A cada 3 dias, a última no sábado (03/10): terça (06/10).
+    expect(nextScheduled(schedule({ frequency: "every" }), "2026-10-03", mondayAt9, tz)).toEqual({
+      day: "2026-10-06",
+      hour: 8,
+    });
+    expect(nextScheduled(schedule({ enabled: false }), null, mondayAt9, tz)).toBeNull();
+    expect(dayLabel("2026-10-08", "2026-10-05")).toBe("quinta, 08/10");
+    expect(dayLabel("2026-10-06", "2026-10-05")).toBe("amanhã");
+  });
+
+  it("quanto tempo passou e quanto falta", () => {
+    const now = new Date("2026-10-05T15:00:00Z");
+    expect(whenText("2026-10-05T14:48:00Z", now, tz)).toBe("há 12 min");
+    expect(whenText("2026-10-05T12:00:00Z", now, tz)).toBe("há 3 h");
+    expect(whenText("2026-10-04T12:05:00Z", now, tz)).toBe("ontem às 09:05");
+    expect(waitText("2026-10-05T16:20:00Z", now)).toBe("em 1 h 20 min");
+    expect(waitText("2026-10-05T15:04:10Z", now)).toBe("em 5 min");
+  });
+});

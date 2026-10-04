@@ -9,6 +9,7 @@ import {
   metricsOf,
   platformList,
   platformQuery,
+  platformWindows,
   previewSrc,
   reportMeta,
   resultSpec,
@@ -502,5 +503,59 @@ describe("/api/ads: report-create", () => {
       fetch,
     );
     expect(bad.status).toBe(400);
+  });
+});
+
+describe("leitura enxuta dos insights (várias janelas numa chamada)", () => {
+  it("uma chamada de insights com time_ranges; cada linha na sua janela; sem conta nem totais", async () => {
+    const { fetch, calls } = network([
+      [
+        /\/act_7\/adsets/,
+        () =>
+          json({
+            data: [
+              { id: "s1", name: "Público A", campaign_id: "c1", campaign: { name: "Leads" }, effective_status: "ACTIVE", optimization_goal: "LEAD_GENERATION" },
+            ],
+          }),
+      ],
+      [
+        /\/act_7\/insights/,
+        (c) =>
+          param(c, "breakdowns")
+            ? json({
+                data: [
+                  { adset_id: "s1", age: "25-34", gender: "female", spend: "6", actions: [{ action_type: "onsite_conversion.lead_grouped", value: "3" }] },
+                  { adset_id: "s1", age: "35-44", gender: "male", spend: "4", actions: [] },
+                ],
+              })
+            : json({
+                data: [
+                  { adset_id: "s1", date_start: "2026-09-01", date_stop: "2026-09-30", spend: "100", impressions: "1000", actions: [{ action_type: "onsite_conversion.lead_grouped", value: "8" }] },
+                  { adset_id: "s1", date_start: "2026-09-24", date_stop: "2026-09-30", spend: "30", impressions: "300", actions: [{ action_type: "onsite_conversion.lead_grouped", value: "2" }] },
+                ],
+              }),
+      ],
+    ]);
+    const cycle = { key: "cycle", since: "2026-09-01", until: "2026-09-30" };
+    const r = await platformWindows(env, fetch, "t", {
+      account: "7",
+      level: "adset",
+      campaigns: ["c1"],
+      ranges: [cycle, { key: "d7", since: "2026-09-24", until: "2026-09-30" }],
+      breakdown: { kind: "age_gender", range: cycle },
+    });
+    expect(r.result_label).toBe("Leads no formulário");
+    expect(r.rows[0]).toMatchObject({ id: "s1", name: "Público A", campaign_name: "Leads", optimization: "Cadastros" });
+    expect(r.rows[0].windows.cycle).toMatchObject({ spend: 100, results: 8 });
+    expect(r.rows[0].windows.d7).toMatchObject({ spend: 30, results: 2 });
+    expect(r.rows[0].breakdown?.[0]).toMatchObject({ key: "25-34|female" });
+    // Estrutura (com as metas) + insights das janelas + o público: 3 chamadas.
+    expect(calls).toHaveLength(3);
+    const insights = calls.find((c) => c.url.pathname.endsWith("/insights") && !param(c, "breakdowns"))!;
+    expect(JSON.parse(param(insights, "time_ranges"))).toEqual([
+      { since: "2026-09-01", until: "2026-09-30" },
+      { since: "2026-09-24", until: "2026-09-30" },
+    ]);
+    expect(calls.some((c) => c.url.pathname === "/v23.0/act_7")).toBe(false);
   });
 });

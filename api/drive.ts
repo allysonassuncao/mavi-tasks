@@ -18,6 +18,9 @@ import { handleLearningWorker } from "./_copilot-learning.js";
 import { handleTemperatureWorker } from "./_temperature.js";
 import { handleRadarWorker } from "./_radar.js";
 import { handlePersonalRadarWorker } from "./_personal-radar.js";
+import { handleCampaignInsightsWorker } from "./_campaign-insights.js";
+import { adsEnv } from "./_ads.js";
+import { crmEnv } from "./_crm.js";
 import { handlePersonalDraft } from "./_personal-assistant.js";
 import { serverModel } from "../src/ai-providers.js";
 import { handleMcp, protectedResource } from "./_mcp.js";
@@ -427,6 +430,22 @@ export default async function handler(
         personalRadarBudgetMs: Number(process.env.PERSONAL_RADAR_WORKER_BUDGET_MS) || 240_000,
       };
       const result = await handlePersonalRadarWorker(authorization, env, aiDeps(env));
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+    // Campanhas › Insights da MAVI: o worker do pg_cron (a MAVI analisa a
+    // campanha com o modelo da funcionalidade 'campaign_insights'; o Jev
+    // confere). Uma análise leva até ~2 min: o worker trabalha até 4 min.
+    if (action === "ai-campaign-insights") {
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("campaign_insights", process.env),
+        ads: adsEnv(),
+        crm: crmEnv(),
+        insightsBudgetMs: Number(process.env.CAMPAIGN_INSIGHTS_BUDGET_MS) || 240_000,
+      };
+      const result = await handleCampaignInsightsWorker(authorization, env, aiDeps(env));
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

@@ -1559,6 +1559,13 @@ export default function App() {
             live.current.loadInbox();
           return;
         }
+        // Campanhas › Insights da MAVI: o painel da campanha se recarrega.
+        if (change.kind === "campaign_insights") {
+          window.dispatchEvent(
+            new CustomEvent("mavi:campaign-insights", { detail: change }),
+          );
+          return;
+        }
         // Radar do cliente › Relatórios listens for its own notices.
         if (change.kind === "radar") {
           window.dispatchEvent(new CustomEvent("mavi:radar", { detail: change }));

@@ -178,6 +178,9 @@ const PRICES: Record<string, [number, number]> = {
   "claude-opus-4-8": [5, 25],
   "claude-haiku-4-5": [1, 5],
 };
+/** US$ por milhão (entrada, saída) de um modelo da Claude (sem tabela: o do Opus 5.5). */
+export const modelPrice = (model: string): [number, number] =>
+  PRICES[model] ?? PRICES["claude-opus-5-5"];
 /**
  * Leitura do cache, US$ por milhão, quando não é 0,1x a entrada (o Opus 5.5
  * cobra 0,05x).

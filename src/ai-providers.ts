@@ -235,6 +235,8 @@ export type AiFeature =
   | "mavi_learning"
   | "campaign_report"
   | "campaign_alerts"
+  | "campaign_insights"
+  | "campaign_insights_check"
   | "mavi_judge"
   | "mavi_judge_check";
 
@@ -608,6 +610,23 @@ export const FEATURES: FeatureInfo[] = [
     env: "CAMPAIGN_ALERTS_MODEL",
     note: "O campo \"Descreva o aviso\" de Campanhas › Meus avisos: transforma o pedido numa regra para a pessoa revisar. Uma chamada curta: um modelo rápido basta. Na conversa com a MAVI, vale o modelo da conversa.",
   },
+  {
+    id: "campaign_insights",
+    group: "Campanhas",
+    label: "Insights da MAVI: análise técnica das campanhas",
+    conversation: false,
+    env: "CAMPAIGN_INSIGHTS_MODEL",
+    note: "Lê a plataforma, o MakeCRM por UTM e o contexto do cliente de cada campanha, na frequência do Painel da MAVI › Campanhas, e aponta destaques, oportunidades, problemas e correções. Precisa raciocinar sobre números: vale um modelo forte. Conta no teto por análise e no teto do mês.",
+  },
+  {
+    id: "campaign_insights_check",
+    group: "Campanhas",
+    label: "Insights da MAVI: conferência das evidências (Jev)",
+    conversation: false,
+    env: "",
+    decisions: true,
+    note: "Antes de publicar, o Jev confere se os números de cada insight sustentam o que a MAVI escreveu. Sem regra, usa o Jev do Termômetro; sem Jev cadastrado, os insights entram sem a conferência (as evidências continuam conferidas pelo sistema).",
+  },
 ];
 
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
@@ -715,6 +734,11 @@ export function serverModel(
       return env.CAMPAIGN_REPORT_MODEL || env.AI_MODEL || fallback;
     case "campaign_alerts":
       return env.CAMPAIGN_ALERTS_MODEL || env.AI_MODEL || fallback;
+    case "campaign_insights":
+      return env.CAMPAIGN_INSIGHTS_MODEL || env.AI_MODEL || fallback;
+    case "campaign_insights_check":
+      // Sem escolha: o Jev do termômetro (o primeiro cadastrado no OpenRouter).
+      return "~typesafe/jev-latest";
     case "client_radar_themes":
       return env.CLIENT_RADAR_THEMES_MODEL || env.AI_MODEL || fallback;
     case "personal_radar":

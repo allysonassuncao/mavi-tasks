@@ -956,6 +956,48 @@ async function auctionRows(search: Search, q: GoogleQuery) {
   return { rows, notice };
 }
 
+/** A period of the insights worker (ciclo, 7 dias…). */
+export type GoogleRange = { key: string; since: string; until: string };
+export type GoogleWindowRow = Omit<GoogleListRow, "metrics" | "segments"> & { windows: Record<string, Metrics> };
+/**
+ * The lean read of Campanhas › Insights da MAVI: ONE query per view over
+ * the widest period, split by day and added up per period here (one
+ * operation of the developer token instead of one per period, and without
+ * the customer's name every time). Age and gender come for one period.
+ * Impression share (a ratio) is not added up: it comes empty.
+ */
+export async function googleWindows(
+  search: Search,
+  q: { account: string; manager: string; view: GoogleView; campaigns: string[]; ranges: GoogleRange[] },
+): Promise<GoogleWindowRow[]> {
+  if (!q.ranges.length) return [];
+  const since = q.ranges.reduce((m, r) => (r.since < m ? r.since : m), q.ranges[0].since);
+  const until = q.ranges.reduce((m, r) => (r.until > m ? r.until : m), q.ranges[0].until);
+  checkRange(since, until);
+  const base: GoogleQuery = { account: q.account, manager: q.manager, view: q.view, since, until, campaigns: q.campaigns, ad_groups: [] };
+  if (!SEGMENTABLE.includes(q.view)) {
+    const r = q.ranges[0];
+    const rows = await audienceRows(search, { ...base, since: r.since, until: r.until });
+    return rows.map(({ metrics, segments: _s, ...row }) => ({ ...row, windows: { [r.key]: metrics ?? {} } }));
+  }
+  const found = await search(viewQuery(base, "segments.date"));
+  const byRow = groupBy(found, (r) => rowKey(q.view, r));
+  const out: GoogleWindowRow[] = [];
+  for (const list of byRow.values()) {
+    const { metrics: _m, segments: _s, ...row } = toRow(q.view, list[0], "");
+    const windows: Record<string, Metrics> = {};
+    for (const r of q.ranges) {
+      const days = list.filter((x) => {
+        const d = str(x.segments?.date);
+        return d >= r.since && d <= r.until;
+      });
+      if (days.length) windows[r.key] = days.reduce<Metrics>((acc, x) => addMetrics(acc, metricsOf(x.metrics)), {});
+    }
+    out.push({ ...row, windows });
+  }
+  return out;
+}
+
 /** Audiences and segments: age, gender, devices, locations, day and hour. */
 async function audienceRows(search: Search, q: GoogleQuery): Promise<GoogleListRow[]> {
   const aggregate = (list: GoogleRow[], key: (r: GoogleRow) => string, label: (k: string) => string, order?: (k: string) => number) =>

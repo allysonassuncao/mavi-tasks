@@ -66,6 +66,11 @@ export const NOTICE_TYPES: {
     hint: "Os avisos que você criou em Campanhas › Meus avisos, na hora ou no resumo das 11h.",
   },
   {
+    key: "campaign_insight",
+    label: "Insights da MAVI nas campanhas",
+    hint: "Quando a MAVI analisa uma campanha de um cliente seu e encontra insights novos (pela prioridade escolhida no Painel da MAVI), ou quando a análise que você pediu fica pronta.",
+  },
+  {
     key: "media_balance",
     label: "Saldo de mídia",
     hint: "Quando a conta de mídia de um cliente seu (Financeiro › Mídia) fica abaixo do saldo mínimo ou negativa.",

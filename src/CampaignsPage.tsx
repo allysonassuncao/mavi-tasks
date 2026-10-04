@@ -33,6 +33,18 @@ import {
   Loading,
 } from "./ui";
 import { Empty, Modal } from "./components";
+import {
+  CampaignInsightsAside,
+  CampaignInsightsTab,
+  InsightsBadgeChip,
+  useCampaignInsights,
+} from "./CampaignInsights";
+import {
+  demoInsights,
+  serverInsights,
+  type InsightBadge,
+  type InsightsBackend,
+} from "./campaign-insights";
 import { Pagination } from "./Pagination";
 import { ContractPicker } from "./ContractPicker";
 import { contractParts, dateKey } from "./domain";
@@ -221,6 +233,11 @@ export function CampaignsPage({
     () => (demo ? demoGooglePlatform(["21000001"]) : serverGooglePlatform),
     [demo],
   );
+  // Insights da MAVI: o painel, a aba e o selo da lista.
+  const insights: InsightsBackend = useMemo(
+    () => (demo ? demoInsights() : serverInsights),
+    [demo],
+  );
   const reports: ReportsBackend = useMemo(
     () =>
       demo
@@ -404,6 +421,7 @@ export function CampaignsPage({
           platform={platform}
           googlePlatform={googlePlatform}
           reports={reports}
+          insights={insights}
           today={today}
           eventsTick={eventsTick}
           notify={notify}
@@ -455,6 +473,7 @@ export function CampaignsPage({
           onAlerts={() => setAlertsView("lista")}
           onMultiplierLog={agency ? () => setMultiplierLog(true) : undefined}
           crm={(c) => crmButton(c.contract_id, true)}
+          insights={insights}
           demo={demo}
         />
       )}
@@ -747,6 +766,7 @@ function CampaignList({
   onAlerts,
   onMultiplierLog,
   crm,
+  insights,
   demo,
 }: {
   backend: CampaignsBackend;
@@ -768,6 +788,8 @@ function CampaignList({
   onMultiplierLog?: () => void;
   /** Abrir no CRM, when the campaign's client is linked to the MakeCRM. */
   crm: (campaign: AdCampaign) => ReactNode;
+  /** Insights da MAVI: o selo de cada campanha da página. */
+  insights: InsightsBackend;
   demo: boolean;
 }) {
   const [query, setQuery] = useUrlState<string>("busca", "");
@@ -828,6 +850,30 @@ function CampaignList({
 
   const rows = result?.rows ?? [];
   const total = result?.total ?? 0;
+  // Os selos dos insights da página (desligados no Painel da MAVI: sem coluna).
+  const [badges, setBadges] = useState<Map<string, InsightBadge> | null>(null);
+  const pageIds = rows.map((r) => r.campaign.id).join(",");
+  useEffect(() => {
+    let live = true;
+    const ids = pageIds ? pageIds.split(",") : [];
+    insights
+      .badges(company, ids)
+      .then((b) => live && setBadges(b.badge ? new Map(b.rows.map((r) => [r.campaign, r])) : null))
+      .catch(() => live && setBadges(null));
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ campaign?: string; status?: string }>).detail;
+      if (d?.campaign && ids.includes(d.campaign) && d.status !== "queued")
+        insights
+          .badges(company, ids)
+          .then((b) => live && setBadges(b.badge ? new Map(b.rows.map((r) => [r.campaign, r])) : null))
+          .catch(() => {});
+    };
+    window.addEventListener("mavi:campaign-insights", on);
+    return () => {
+      live = false;
+      window.removeEventListener("mavi:campaign-insights", on);
+    };
+  }, [insights, company, pageIds]);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const filtered = !!(query || platform || (attention && scope === "active"));
 
@@ -990,6 +1036,11 @@ function CampaignList({
                   </th>
                   <th>Meta do ciclo</th>
                   <th title="Índice de performance">M</th>
+                  {badges && (
+                    <th title="Os insights abertos da última análise da MAVI">
+                      Insights
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -1094,6 +1145,16 @@ function CampaignList({
                       <td data-label="M">
                         {cycle ? cycle.multiplier.toLocaleString("pt-BR") : "—"}
                       </td>
+                      {badges && (
+                        <td data-label="Insights">
+                          <InsightsBadgeChip
+                            badge={badges.get(campaign.id)}
+                            onOpen={() =>
+                              navigate(`${href(campaign.id)}?aba=insights`)
+                            }
+                          />
+                        </td>
+                      )}
                     </tr>
                   ),
                 )}
@@ -1179,6 +1240,7 @@ function CampaignDetail({
   platform,
   googlePlatform,
   reports,
+  insights,
   today,
   eventsTick,
   notify,
@@ -1207,6 +1269,7 @@ function CampaignDetail({
   platform: PlatformBackend;
   googlePlatform: GooglePlatformBackend;
   reports: ReportsBackend;
+  insights: InsightsBackend;
   today: string;
   eventsTick: number;
   notify: (message: string) => void;
@@ -1235,6 +1298,12 @@ function CampaignDetail({
 }) {
   const parts = contractParts(data, campaign.contract_id);
   const cycles = cyclesOf(state, campaign.id);
+  // Insights da MAVI (Meta e Google): um carregamento para o painel e a aba.
+  const insightsState = useCampaignInsights(insights, company, campaign.id);
+  const insightsView = insightsState.view;
+  const withInsights =
+    (campaign.platform === "meta" || campaign.platform === "google") &&
+    !!insightsView?.enabled;
   const current = currentCycle(state, campaign);
   const alert = cycleAlert(state, campaign, today);
   const [events, setEvents] = useState<AdCampaignEvent[] | null>(null);
@@ -1457,6 +1526,30 @@ function CampaignDetail({
               crm={platformCrm}
             />
           ) : null
+        }
+        insightsTab={
+          withInsights && insightsView?.places.tab ? (
+            <CampaignInsightsTab
+              state={insightsState}
+              backend={insights}
+              company={company}
+              campaign={campaign.id}
+              notify={notify}
+            />
+          ) : undefined
+        }
+        insightsCount={insightsView?.current.length ?? 0}
+        aside={
+          withInsights ? (
+            <CampaignInsightsAside
+              state={insightsState}
+              backend={insights}
+              company={company}
+              campaign={campaign.id}
+              notify={notify}
+              showTab={!!insightsView?.places.tab}
+            />
+          ) : undefined
         }
         today={today}
         events={events}

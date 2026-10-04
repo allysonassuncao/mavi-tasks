@@ -20,6 +20,7 @@ export const INBOX_KINDS: { id: string; label: string; kinds: AppNotification["k
   { id: "temperature", label: "Termômetro", kinds: ["temperature"] },
   { id: "radar", label: "Radar do cliente", kinds: ["radar_report", "radar_alert"] },
   { id: "campaign_alert", label: "Avisos de campanhas", kinds: ["campaign_alert"] },
+  { id: "campaign_insight", label: "Insights das campanhas", kinds: ["campaign_insight"] },
   { id: "media_balance", label: "Financeiro › Mídia", kinds: ["media_balance"] },
   { id: "success_case", label: "Cases de Sucesso", kinds: ["success_case"] },
   { id: "social_leads", label: "Social Leads", kinds: ["social_leads"] },

@@ -142,6 +142,37 @@ async function askCrm<T>(
   return { ok: true, data: data as T };
 }
 
+/**
+ * The MakeCRM's deals per UTM of a CRM company in a period (days of
+ * Brasília, as its Anúncios page asks). Also used by the insights worker,
+ * which reads the link with the worker's secret.
+ */
+export async function crmUtmDeals(
+  env: CrmEnv,
+  fetchImpl: Fetch,
+  crmCompany: string,
+  since: string,
+  until: string,
+): Promise<
+  { ok: true; data: CrmUtmDeals } | { ok: false; status: number; error: string }
+> {
+  const r = await askCrm<Record<string, unknown>>(env, fetchImpl, {
+    action: "utm-deals",
+    company_id: crmCompany,
+    date_start: `${since}T00:00:00.000-03:00`,
+    date_end: `${until}T23:59:59.999-03:00`,
+  });
+  if (!r.ok) return r;
+  return {
+    ok: true,
+    data: {
+      campaigns: utmRows(r.data?.campaigns, 1, 4),
+      adsets: utmRows(r.data?.adsets, 2, 4),
+      ads: utmRows(r.data?.ads, 3, 4),
+    },
+  };
+}
+
 export async function handleCrm(
   body: any,
   authorization: string | null,
@@ -203,20 +234,9 @@ export async function handleCrm(
     const crmCompany = Array.isArray(rows) ? rows[0]?.crm_company_id : null;
     if (!crmCompany || !UUID.test(crmCompany))
       return { status: 200, body: { linked: false } };
-    // The CRM's own day: Brasília, as its Anúncios page asks.
-    const r = await askCrm<Record<string, unknown>>(env, fetchImpl, {
-      action: "utm-deals",
-      company_id: crmCompany,
-      date_start: `${since}T00:00:00.000-03:00`,
-      date_end: `${until}T23:59:59.999-03:00`,
-    });
+    const r = await crmUtmDeals(env, fetchImpl, crmCompany, since, until);
     if (!r.ok) return fail(r.status, r.error);
-    const deals: CrmUtmDeals = {
-      campaigns: utmRows(r.data?.campaigns, 1, 4),
-      adsets: utmRows(r.data?.adsets, 2, 4),
-      ads: utmRows(r.data?.ads, 3, 4),
-    };
-    return { status: 200, body: { linked: true, ...deals } };
+    return { status: 200, body: { linked: true, ...r.data } };
   }
 
   if (action === "open") {
