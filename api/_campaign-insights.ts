@@ -23,7 +23,14 @@ import {
   type Search,
 } from "./_ads-google-platform.js";
 import { unseal } from "./_google.js";
-import { crmUtmDeals, type CrmEnv, type CrmUtmDeals } from "./_crm.js";
+import {
+  crmUtmDeals,
+  crmUtmFunnel,
+  type CrmEnv,
+  type CrmFunnel,
+  type CrmFunnelRow,
+  type CrmUtmDeals,
+} from "./_crm.js";
 import { modelPrice } from "./_social-leads.js";
 
 /**
@@ -184,6 +191,8 @@ export type Entity = {
   info?: Record<string, string>;
   /** Os números por janela (já na base de dinheiro escolhida). */
   n: Partial<Record<WindowKey, Numbers>>;
+  /** A chave da UTM no CRM (nome exato: campanha; + termo; + conteúdo). */
+  utm?: string;
 };
 
 /** As métricas, com a unidade de cada uma (para mostrar e para conferir). */
@@ -207,6 +216,13 @@ export const METRICS: Record<string, { label: string; unit: "money" | "count" | 
   crm_cost_win: { label: "Custo por ganho (CRM)", unit: "money" },
   crm_roas: { label: "ROAS do CRM", unit: "ratio" },
   crm_rate: { label: "Resultados que viraram oportunidade", unit: "pct" },
+  // O funil do CRM (oportunidades criadas no ciclo).
+  crm_open: { label: "Oportunidades abertas", unit: "count" },
+  crm_won_deals: { label: "Oportunidades ganhas", unit: "count" },
+  crm_lost: { label: "Oportunidades perdidas", unit: "count" },
+  crm_lost_rate: { label: "Taxa de perda (CRM)", unit: "pct" },
+  crm_qualified: { label: "Oportunidades qualificadas", unit: "count" },
+  crm_score: { label: "Pontuação média da qualificação", unit: "ratio" },
   // Só no total: a meta do ciclo e o que o MAVI conta.
   goal_results: { label: "Meta de resultados do ciclo", unit: "count" },
   goal_cpa: { label: "Custo por resultado da meta", unit: "money" },
@@ -323,6 +339,12 @@ export type Analysis = {
   notes: string[];
   /** As contas de anúncios lidas (para pausar pela cota). */
   accounts?: string[];
+  /** O funil do CRM: lido, sem a consulta no CRM, com erro, ou sem CRM. */
+  funnel?: "ok" | "missing" | "error" | "off";
+  /** Os rótulos das métricas do funil (stage:…, lost:…, bucket:…, answer:…). */
+  labels?: Record<string, string>;
+  /** Campanhas cujas UTMs chegam ao CRM com utm_content preenchido. */
+  contentCampaigns?: string[];
 };
 
 /** O total da campanha (as campanhas vinculadas somadas) e a meta do ciclo. */
@@ -384,9 +406,13 @@ export function totalEntity(
 }
 
 /** O valor de uma evidência no material (nulo: não existe). */
-export function evidenceValue(entities: Map<string, Entity>, ref: { entity: string; window: string; metric: string }) {
+export function evidenceValue(
+  entities: Map<string, Entity>,
+  ref: { entity: string; window: string; metric: string },
+  labels: Record<string, string> = {},
+) {
   const e = entities.get(ref.entity);
-  if (!e || !(ref.metric in METRICS)) return null;
+  if (!e || !(ref.metric in METRICS || ref.metric in labels)) return null;
   const v = e.n[ref.window as WindowKey]?.[ref.metric];
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
@@ -440,6 +466,8 @@ export function fingerprintParts(f: string) {
 export function buildEvidence(
   entities: Map<string, Entity>,
   refs: unknown,
+  /** Os rótulos do funil do CRM (stage:…, lost:…, bucket:…, answer:…). */
+  labels: Record<string, string> = {},
 ): Evidence[] {
   if (!Array.isArray(refs)) return [];
   const out: Evidence[] = [];
@@ -450,15 +478,15 @@ export function buildEvidence(
     const entity = String(ref.entity ?? "");
     const window = String(ref.window ?? "cycle");
     const metric = String(ref.metric ?? "");
-    const value = evidenceValue(entities, { entity, window, metric });
+    const value = evidenceValue(entities, { entity, window, metric }, labels);
     const id = `${entity}|${window}|${metric}`;
     if (value === null || seen.has(id)) continue;
     seen.add(id);
     const e = entities.get(entity)!;
     out.push({
-      label: METRICS[metric].label,
+      label: METRICS[metric]?.label ?? labels[metric],
       value,
-      unit: METRICS[metric].unit,
+      unit: METRICS[metric]?.unit ?? "count",
       window: window as WindowKey,
       entity,
       name: e.name,
@@ -480,6 +508,7 @@ export function parseInsights(
   text: string,
   entities: Map<string, Entity>,
   max = 6,
+  labels: Record<string, string> = {},
 ): { summary: string; insights: Insight[]; dropped: number } {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -502,7 +531,7 @@ export function parseInsights(
       dropped++;
       continue;
     }
-    const evidence = buildEvidence(entities, x.evidence);
+    const evidence = buildEvidence(entities, x.evidence, labels);
     if (!evidence.length) {
       dropped++;
       continue;
@@ -531,7 +560,10 @@ export function parseInsights(
 /** UTM para o nome do que a plataforma mostra (o padrão da aba Plataforma). */
 export const UTM_HINT = {
   meta: "utm_campaign={{campaign.name}}&utm_term={{adset.name}}&utm_content={{ad.name}}",
-  google: "utm_campaign={campaignname}&utm_term={nome do grupo de anúncios}",
+  // O Google não tem parâmetro com o nome da campanha ou do grupo (só ids):
+  // os nomes vão escritos no sufixo de cada grupo; {keyword} vai no conteúdo.
+  google:
+    "no sufixo do URL final de cada grupo de anúncios: utm_campaign=<nome exato da campanha>&utm_term=<nome exato do grupo>&utm_content={keyword}",
 } as const;
 
 const fmtCount = (v: number) => new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(v);
@@ -590,6 +622,27 @@ export function ruleInsights(m: InsightMaterial, a: Analysis, entities: Map<stri
         target: targetOf(entities, owner.key),
         source: "rule",
         fingerprint: fingerprintOf("tracking", owner.key, `utm-grafia-${slug(u.name)}`),
+      });
+    }
+  }
+  // Google: os leads chegam ao CRM sem a palavra-chave (utm_content vazio).
+  if (a.crm === "ok" && a.platform === "google") {
+    const content = new Set(a.contentCampaigns ?? []);
+    for (const c of a.entities.filter((e) => e.level === "campaign")) {
+      const opp = numOr(c.n.cycle?.crm_opportunities);
+      if (opp <= 0 || content.has(c.name)) continue;
+      const groups = new Set(a.entities.filter((e) => e.level === "adset" && e.parent === c.key).map((e) => e.key));
+      if (!a.entities.some((e) => e.level === "keyword" && e.parent && groups.has(e.parent))) continue;
+      out.push({
+        kind: "tracking",
+        priority: "low",
+        title: `${c.name}: os leads chegam ao CRM sem a palavra-chave`,
+        body: `${fmtCount(opp)} ${opp === 1 ? "oportunidade chegou" : "oportunidades chegaram"} ao MakeCRM pela campanha, mas nenhuma com utm_content: não dá para saber qual palavra-chave trouxe cada lead, nem qual chega à negociação. O Google não tem parâmetro com o nome da campanha ou do grupo (só ids), então os nomes vão escritos e a palavra vai pelo {keyword}.`,
+        action: `Use ${UTM_HINT.google}.`,
+        evidence: ev(c.key, "cycle", "crm_opportunities"),
+        target: targetOf(entities, c.key),
+        source: "rule",
+        fingerprint: fingerprintOf("tracking", c.key, "google-sem-palavra-chave"),
       });
     }
   }
@@ -659,6 +712,7 @@ export function metaEntities(read: MetaRead, crm: CrmIndex | null, k: number, li
       key: `c:${r.id}`,
       level: "campaign",
       name: r.name,
+      utm: utmKey(r.name),
       status: r.delivery?.label,
       info: {
         ...(r.objective ? { objetivo: r.objective } : {}),
@@ -672,6 +726,7 @@ export function metaEntities(read: MetaRead, crm: CrmIndex | null, k: number, li
       level: "adset",
       name: r.name,
       parent: `c:${r.campaign_id}`,
+      utm: utmKey(r.campaign_name, r.name),
       status: r.delivery?.label,
       info: {
         ...(r.optimization ? { otimizacao: r.optimization } : {}),
@@ -689,6 +744,7 @@ export function metaEntities(read: MetaRead, crm: CrmIndex | null, k: number, li
       level: "ad",
       name: r.name,
       parent: `s:${r.adset_id}`,
+      utm: utmKey(r.campaign_name, r.adset_name ?? "", r.name),
       status: r.delivery?.label,
       info: {
         ...(r.creative?.title ? { titulo: r.creative.title.slice(0, 160) } : {}),
@@ -777,11 +833,13 @@ export function googleEntities(reads: GoogleRead[], crm: CrmIndex | null, k: num
       let level: Level;
       let parent: string | undefined;
       let counts: CrmCounts | undefined;
+      let utm: string | undefined;
       const info: Record<string, string> = {};
       switch (read.view) {
         case "campaigns":
           key = `c:${r.id}`;
           level = "campaign";
+          utm = utmKey(r.name);
           if (r.info.type) info.tipo = String(r.info.type);
           if (r.info.bidding) info.lance = String(r.info.bidding);
           if (crm) counts = crm.campaign.get(utmKey(r.name)) ?? ZERO;
@@ -790,7 +848,8 @@ export function googleEntities(reads: GoogleRead[], crm: CrmIndex | null, k: num
           key = `s:${r.id}`;
           level = "adset";
           parent = `c:${r.campaign_id}`;
-          if (crm) counts = crm.adset.get(utmKey(String(r.info.campaign ?? ""), r.name)) ?? ZERO;
+          utm = utmKey(String(r.info.campaign ?? ""), r.name);
+          if (crm) counts = crm.adset.get(utm) ?? ZERO;
           break;
         case "ads":
           key = `a:${r.id}`;
@@ -807,6 +866,14 @@ export function googleEntities(reads: GoogleRead[], crm: CrmIndex | null, k: num
           parent = `s:${r.ad_group_id}`;
           if (r.info.match) info.correspondencia = String(r.info.match);
           if (r.info.quality !== null && r.info.quality !== undefined) info.qualidade = String(r.info.quality);
+          // A palavra no utm_content ({keyword}): grupo + campanha pelo nome, a palavra sem [ ] nem aspas.
+          if (crm) {
+            const found = keywordCrm(crm, String(r.info.campaign ?? ""), String(r.info.ad_group ?? ""), r.name);
+            if (found) {
+              utm = found.key;
+              counts = found.counts;
+            }
+          }
           break;
         case "search_terms":
           key = `t:${r.id}`;
@@ -827,6 +894,7 @@ export function googleEntities(reads: GoogleRead[], crm: CrmIndex | null, k: num
         level,
         name: level === "segment" ? `${read.view === "age" ? "Idade" : "Gênero"} · ${r.name}` : r.name,
         ...(parent ? { parent } : {}),
+        ...(utm ? { utm } : {}),
         status: r.status?.label || undefined,
         info,
         n: windowNumbers(r.windows, nums, counts),
@@ -834,6 +902,95 @@ export function googleEntities(reads: GoogleRead[], crm: CrmIndex | null, k: num
     }
   }
   return focus(out, limits);
+}
+
+/**
+ * A linha do CRM de uma palavra-chave do Google: utm_content = {keyword}
+ * (a palavra como está na conta, sem os sinais da correspondência), dentro
+ * da campanha e do grupo pelo nome exato.
+ */
+export function keywordCrm(crm: CrmIndex, campaign: string, adGroup: string, keyword: string) {
+  const prefix = utmKey(campaign, adGroup, "");
+  const want = looseName(keyword);
+  if (!want) return null;
+  for (const [key, counts] of crm.ad)
+    if (key.startsWith(prefix) && looseName(key.slice(prefix.length)) === want) return { key, counts };
+  return null;
+}
+
+/**
+ * O funil do CRM em cada entidade com UTM (só no ciclo, a janela que o CRM
+ * lê): abertas, ganhas, perdidas, taxa de perda, qualificadas e pontuação;
+ * e as métricas com rótulo — stage:<id> (chegaram àquela etapa ou além, no
+ * funil dela), lost:<id> (motivo), bucket:<id> (faixa da qualificação) e,
+ * em campanhas e conjuntos, answer:<id> (as respostas mais escolhidas).
+ * Devolve os rótulos usados.
+ */
+export function applyFunnel(entities: Entity[], funnel: CrmFunnel): Record<string, string> {
+  const labels: Record<string, string> = {};
+  const rows = new Map<string, CrmFunnelRow>();
+  for (const r of funnel.rows)
+    rows.set(`${r.l}|${r.l === "c" ? utmKey(r.c) : r.l === "s" ? utmKey(r.c, r.t) : utmKey(r.c, r.t, r.n)}`, r);
+  const pipelines = new Map(funnel.pipelines.map((p) => [p.id, p.name]));
+  const manyPipelines = new Set(funnel.stages.map((x) => x.pipeline_id)).size > 1;
+  const stages = funnel.stages
+    .slice()
+    .sort((a, b) => a.pipeline_id.localeCompare(b.pipeline_id) || (a.order ?? 0) - (b.order ?? 0));
+  const byPipeline = new Map<string, typeof stages>();
+  for (const st of stages) byPipeline.set(st.pipeline_id, [...(byPipeline.get(st.pipeline_id) ?? []), st]);
+  const reasons = new Map(funnel.reasons.map((r) => [r.id, r.name]));
+  const manyForms = new Set(funnel.buckets.map((b) => b.form)).size > 1;
+  const buckets = new Map(funnel.buckets.map((b) => [b.id, manyForms ? `${b.name} (${b.form})` : b.name]));
+  const options = new Map(funnel.options.map((o) => [o.id, o]));
+  const level = (e: Entity) =>
+    e.level === "campaign" ? "c" : e.level === "adset" ? "s" : e.level === "ad" || e.level === "keyword" ? "a" : null;
+  for (const e of entities) {
+    const l = level(e);
+    if (!l || !e.utm) continue;
+    const r = rows.get(`${l}|${e.utm}`);
+    if (!r) continue;
+    const n: Numbers = {
+      crm_open: r.open,
+      crm_won_deals: r.won,
+      crm_lost: r.lost,
+      crm_lost_rate: r.deals ? round((r.lost / r.deals) * 100, 1) : null,
+      ...(r.qualified ? { crm_qualified: r.qualified, crm_score: r.score } : {}),
+    };
+    // Chegaram à etapa ou além: a soma das etapas de ordem igual ou maior, no mesmo funil.
+    if (r.reach)
+      for (const [pipeline, list] of byPipeline) {
+        list.forEach((st, i) => {
+          if (i === 0) return; // a primeira: todas
+          const total = list.slice(i).reduce((sum, x) => sum + (r.reach?.[x.id] ?? 0), 0);
+          if (!total) return;
+          const key = `stage:${st.id}`;
+          n[key] = total;
+          labels[key] = `Chegaram a "${st.name}" ou além${manyPipelines ? ` (${pipelines.get(pipeline) ?? "funil"})` : ""}`;
+        });
+      }
+    for (const [id, k] of Object.entries(r.lost_by ?? {})) {
+      const key = `lost:${id}`;
+      n[key] = k;
+      labels[key] = `Perdidas por "${reasons.get(id) ?? "motivo removido"}"`;
+    }
+    for (const [id, k] of Object.entries(r.buckets ?? {})) {
+      const key = `bucket:${id}`;
+      n[key] = k;
+      labels[key] = `Qualificação "${buckets.get(id) ?? "faixa removida"}"`;
+    }
+    if (l !== "a")
+      for (const [id, k] of Object.entries(r.answers ?? {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)) {
+        const o = options.get(id);
+        if (!o) continue;
+        const key = `answer:${id}`;
+        n[key] = k;
+        labels[key] = `Responderam "${o.label}" em "${o.question}"`;
+      }
+    e.n.cycle = { ...(e.n.cycle ?? {}), ...n };
+  }
+  return labels;
 }
 
 /**
@@ -899,7 +1056,8 @@ Regras dos números (obrigatório):
 - Nunca invente números, nomes, metas, datas ou comparações que não estejam no material. Amostra pequena (poucos resultados ou poucos dias) pede cautela: diga isso ou não conclua.
 - O dinheiro já vem na base indicada em "valores" (com ou sem M). Não fale de M, multiplicador ou índice de performance.
 - Resultados na plataforma (results) seguem o que a plataforma otimiza; "Resultados que contam (MAVI)" é o que a agência conta para a meta do ciclo.
-- O CRM liga pelo nome exato: utm_campaign = nome da campanha, utm_term = nome do conjunto (no Google, do grupo), utm_content = nome do anúncio. Oportunidade zerada pode ser falta de UTM, não falta de lead.
+- O CRM liga pelo nome exato: utm_campaign = nome da campanha, utm_term = nome do conjunto (no Google, do grupo), utm_content = nome do anúncio (no Google, a palavra-chave, quando a agência usa {keyword}). Oportunidade zerada pode ser falta de UTM, não falta de lead.
+- O funil do CRM (quando vem) mostra a QUALIDADE do lead de cada campanha, conjunto, anúncio ou palavra-chave: abertas, ganhas, perdidas, taxa de perda, quantas chegaram a cada etapa ("stage:…", ou além), os motivos de perda ("lost:…"), a faixa da qualificação ("bucket:…") e as respostas mais escolhidas no formulário ("answer:…"); os nomes estão em "funil_crm.legenda". Use isso para separar volume de qualidade (ex.: o conjunto mais barato que só gera leads perdidos por "sem orçamento"; a palavra-chave cara que leva à Negociação) e cite essas métricas nas evidências pelo nome da chave. O CRM não tem idade nem gênero do lead: o cruzamento com o público é pelo conjunto (o público dele na plataforma × a qualidade dos leads dele no CRM).
 - As "detecções automáticas" já viram insights: não as repita; você pode aprofundar com outra conclusão (outro topic).
 - O contexto do cliente (dossiê, Radar, termômetro, reuniões) serve para interpretar e priorizar; não copie trechos dele nem exponha conversas internas.
 
@@ -937,9 +1095,15 @@ export function insightMessage(m: InsightMaterial, a: Analysis, rules: Insight[]
     valores: a.basis === "gross" ? "R$ com M (o que o cliente vê)" : "R$ sem M (o investimento real na plataforma)",
     resultado_da_plataforma: a.result_label || undefined,
     janelas: windows,
+    funil_crm:
+      a.funnel === "ok" && a.labels && Object.keys(a.labels).length
+        ? { legenda: a.labels }
+        : undefined,
     crm:
       a.crm === "ok"
-        ? "ligado: oportunidades, ganhos e receita do ciclo por UTM"
+        ? a.funnel === "ok"
+          ? "ligado: oportunidades, ganhos, receita e o funil do ciclo por UTM (etapa alcançada, perdas, qualificação)"
+          : "ligado: oportunidades, ganhos e receita do ciclo por UTM"
         : a.crm === "error"
           ? "ligado, mas não respondeu agora (sem números do CRM nesta análise)"
           : "o cliente não está ligado ao MakeCRM (sem números do CRM)",
@@ -1334,16 +1498,36 @@ export async function readAnalysis(
   // O CRM primeiro (as linhas da plataforma já saem com ele).
   let crm: CrmIndex | null = null;
   let crmState: Analysis["crm"] = "unlinked";
+  let funnel: CrmFunnel | null = null;
+  let funnelState: Analysis["funnel"] = "off";
   if (m.crm_company_id) {
     if (!env.crm.secret) crmState = "off";
     else {
-      const r = await crmUtmDeals(env.crm, fetchImpl, m.crm_company_id, windows.cycle!.since, windows.cycle!.until);
+      const since = windows.cycle!.since;
+      const until = windows.cycle!.until;
+      const [r, f] = await Promise.all([
+        crmUtmDeals(env.crm, fetchImpl, m.crm_company_id, since, until),
+        crmUtmFunnel(env.crm, fetchImpl, m.crm_company_id, since, until),
+      ]);
       if (r.ok) {
         crm = crmIndex(r.data);
         crmState = "ok";
       } else {
         crmState = "error";
         notes.push(`MakeCRM: ${r.error}`);
+      }
+      // O funil é um extra: sem ele, a análise segue com oportunidades e ganhos.
+      if (f.ok) {
+        funnel = f.data;
+        funnelState = "ok";
+      } else if (r.ok) {
+        const missing = /mavi_utm_funnel/.test(f.error);
+        funnelState = missing ? "missing" : "error";
+        notes.push(
+          missing
+            ? "Funil do CRM indisponível: falta criar a consulta mavi_utm_funnel no MakeCRM."
+            : `Funil do CRM: ${f.error}`,
+        );
       }
     }
   }
@@ -1416,6 +1600,10 @@ export async function readAnalysis(
   if (!entities.some((e) => e.level === "campaign"))
     throw new InsightsError(409, notes[0] ?? "Nenhuma campanha vinculada foi encontrada na plataforma.", true);
   entities = [...entities, ...nearMissUtms(entities, crm)];
+  const labels = funnel ? applyFunnel(entities, funnel) : {};
+  const contentCampaigns = crm
+    ? [...new Set([...crm.ad.keys()].filter((k) => (k.split(SEP)[2] ?? "") !== "").map((k) => k.split(SEP)[0]))]
+    : [];
   const analysis: Analysis = {
     platform: m.campaign.platform,
     basis,
@@ -1426,6 +1614,9 @@ export async function readAnalysis(
     crm: crmState,
     notes,
     accounts: ids,
+    funnel: funnelState,
+    labels,
+    contentCampaigns,
   };
   analysis.entities = [totalEntity(m, analysis), ...analysis.entities];
   return analysis;
@@ -1554,7 +1745,7 @@ export async function analyse(
       cost: Math.round(result.meter.cost * 1e6) / 1e6,
       ...(company.route ? { provider_id: company.route.provider_id, provider: company.route.provider } : {}),
     });
-    const parsed = parseInsights(result.text, entities);
+    const parsed = parseInsights(result.text, entities, 6, full.labels ?? {});
     summary = parsed.summary;
     found = parsed.insights;
     if (parsed.dropped)

@@ -173,6 +173,99 @@ export async function crmUtmDeals(
   };
 }
 
+/** O funil do CRM por UTM (sql/mavi_utm_funnel.sql no CRM). */
+export type CrmFunnelRow = {
+  /** c: campanha; s: campanha + termo; a: campanha + termo + conteúdo. */
+  l: "c" | "s" | "a";
+  c: string;
+  t: string;
+  n: string;
+  deals: number;
+  open: number;
+  won: number;
+  lost: number;
+  qualified: number;
+  score: number | null;
+  /** Abertas por etapa atual; até onde cada uma chegou; perdas por motivo; faixas; opções. */
+  at: Record<string, number> | null;
+  reach: Record<string, number> | null;
+  lost_by: Record<string, number> | null;
+  buckets: Record<string, number> | null;
+  answers: Record<string, number> | null;
+};
+export type CrmFunnel = {
+  rows: CrmFunnelRow[];
+  pipelines: { id: string; name: string }[];
+  stages: { id: string; pipeline_id: string; name: string; order: number | null }[];
+  reasons: { id: string; name: string }[];
+  buckets: { id: string; name: string; form: string; min: number | null; max: number | null }[];
+  options: { id: string; label: string; question: string; form: string }[];
+};
+const counts = (v: unknown): Record<string, number> | null => {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const out: Record<string, number> = {};
+  for (const [k, n] of Object.entries(v as Record<string, unknown>))
+    if (typeof n === "number" && Number.isFinite(n) && n > 0) out[k] = n;
+  return Object.keys(out).length ? out : null;
+};
+const list = <T>(v: unknown, ok: (x: any) => boolean): T[] => (Array.isArray(v) ? v.filter(ok) : []);
+/** Só o que é bem formado (o CRM é outro sistema). */
+export function funnelFrom(raw: any): CrmFunnel {
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number(v) || 0);
+  return {
+    rows: list<any>(raw?.rows, (r) => r && ["c", "s", "a"].includes(r.l) && typeof r.c === "string").map((r) => ({
+      l: r.l,
+      c: r.c,
+      t: typeof r.t === "string" ? r.t : "",
+      n: typeof r.n === "string" ? r.n : "",
+      deals: n(r.deals),
+      open: n(r.open),
+      won: n(r.won),
+      lost: n(r.lost),
+      qualified: n(r.qualified),
+      score: r.score === null || r.score === undefined ? null : n(r.score),
+      at: counts(r.at),
+      reach: counts(r.reach),
+      lost_by: counts(r.lost_by),
+      buckets: counts(r.buckets),
+      answers: counts(r.answers),
+    })),
+    pipelines: list(raw?.pipelines, (x) => typeof x?.id === "string"),
+    stages: list<any>(raw?.stages, (x) => typeof x?.id === "string").map((x) => ({
+      id: x.id,
+      pipeline_id: String(x.pipeline_id ?? ""),
+      name: String(x.name ?? ""),
+      order: x.order === null || x.order === undefined ? null : n(x.order),
+    })),
+    reasons: list(raw?.reasons, (x) => typeof x?.id === "string" || typeof x?.id === "number").map((x: any) => ({
+      id: String(x.id),
+      name: String(x.name ?? ""),
+    })),
+    buckets: list(raw?.buckets, (x) => typeof x?.id === "string"),
+    options: list(raw?.options, (x) => typeof x?.id === "string"),
+  };
+}
+/**
+ * O funil por UTM de uma empresa do CRM no período (dias de Brasília):
+ * etapa alcançada, perdas com motivo e qualificação. Usado pelos Insights.
+ */
+export async function crmUtmFunnel(
+  env: CrmEnv,
+  fetchImpl: Fetch,
+  crmCompany: string,
+  since: string,
+  until: string,
+): Promise<{ ok: true; data: CrmFunnel } | { ok: false; status: number; error: string }> {
+  const r = await askCrm<Record<string, unknown>>(env, fetchImpl, {
+    action: "utm-funnel",
+    company_id: crmCompany,
+    date_start: `${since}T00:00:00.000-03:00`,
+    date_end: `${until}T23:59:59.999-03:00`,
+  });
+  if (!r.ok) return r;
+  return { ok: true, data: funnelFrom(r.data) };
+}
+
 export async function handleCrm(
   body: any,
   authorization: string | null,

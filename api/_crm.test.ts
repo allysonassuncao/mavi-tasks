@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { crmEnv, handleCrm } from "./_crm";
+import { crmEnv, crmUtmFunnel, handleCrm } from "./_crm";
 
 const SECRET = "s".repeat(48);
 const env = {
@@ -304,5 +304,45 @@ describe("Oportunidades por UTM (Plataforma)", () => {
         (await handleCrm({ action: "open", company, client, next: bad }, auth, env, f.impl)).status,
       ).toBe(400);
     expect(f.calls).toHaveLength(2);
+  });
+});
+
+describe("Funil por UTM (Insights da MAVI)", () => {
+  it("pede ao MakeCRM com o segredo, no dia de Brasília, e só aceita o que é bem formado", async () => {
+    const { impl, calls } = fake(() => [
+      200,
+      {
+        rows: [
+          { l: "c", c: "Motion", t: "", n: "", deals: 3, open: 1, won: 1, lost: 1, qualified: 2, score: "6.5", at: { s2: 1 }, reach: { s2: 1, s3: 2, x: "1" }, lost_by: null, buckets: { b1: 2 }, answers: {} },
+          { l: "z", c: "Inválida" },
+          "lixo",
+        ],
+        pipelines: [{ id: "p1", name: "Vendas" }],
+        stages: [{ id: "s2", pipeline_id: "p1", name: "Negociação", order: 2 }],
+        reasons: [{ id: 7, name: "Preço" }],
+        buckets: [{ id: "b1", name: "Quente", form: "SDR", min: 7, max: 10 }],
+        options: [],
+      },
+    ]);
+    const r = await crmUtmFunnel(env, impl, crmCompany, "2026-09-01", "2026-09-30");
+    expect(calls[0].url).toBe("https://crm.test/api/mavi-sso");
+    expect(calls[0].headers["X-Mavi-Secret"]).toBe(SECRET);
+    expect(calls[0].body).toEqual({
+      action: "utm-funnel",
+      company_id: crmCompany,
+      date_start: "2026-09-01T00:00:00.000-03:00",
+      date_end: "2026-09-30T23:59:59.999-03:00",
+    });
+    if (!r.ok) throw Error(r.error);
+    expect(r.data.rows).toHaveLength(1);
+    expect(r.data.rows[0]).toMatchObject({ deals: 3, score: 6.5, reach: { s2: 1, s3: 2 }, lost_by: null, answers: null });
+    expect(r.data.reasons).toEqual([{ id: "7", name: "Preço" }]);
+  });
+
+  it("sem a consulta no CRM, o erro chega com o status", async () => {
+    const { impl } = fake(() => [503, { error: "Falta criar a consulta mavi_utm_funnel no banco do MakeCRM." }]);
+    const r = await crmUtmFunnel(env, impl, crmCompany, "2026-09-01", "2026-09-30");
+    // O worker reconhece pela mensagem (o 503 do CRM chega como 502).
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/mavi_utm_funnel/) });
   });
 });

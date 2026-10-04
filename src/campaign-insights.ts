@@ -482,11 +482,12 @@ export function demoInsights(): InsightsBackend {
       kind: "highlight",
       priority: "medium",
       title: "Anúncio \"Frete grátis em 24h\" puxa as oportunidades do CRM",
-      body: "Com 22% do investimento do ciclo, o anúncio gerou 41% das oportunidades no CRM, com custo por oportunidade 38% menor que a média. O título promete entrega rápida e sem frete, a dor mais citada nas reuniões.",
+      body: "Com 22% do investimento do ciclo, o anúncio gerou 41% das oportunidades no CRM, com custo por oportunidade 38% menor que a média, e 9 delas já chegaram à Negociação. O título promete entrega rápida e sem frete, a dor mais citada nas reuniões.",
       action: "Duplique o conjunto com este anúncio e teste uma variação com a mesma promessa em vídeo curto.",
       evidence: [
         { label: "Oportunidades no CRM", value: 19, unit: "count", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "crm_opportunities" },
         { label: "Custo por oportunidade (CRM)", value: 23.4, unit: "money", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "crm_cpl" },
+        { label: 'Chegaram a "Negociação" ou além', value: 9, unit: "count", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "stage:demo" },
       ],
       target: { key: "a:2", level: "ad", name: "Frete grátis em 24h", parent: "Público frio – 25-44" },
       source: "mavi",

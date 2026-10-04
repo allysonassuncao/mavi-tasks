@@ -8,6 +8,8 @@ import { seal } from "./_google";
 import { newMeter } from "./_social-leads";
 import {
   applyCheck,
+  applyFunnel,
+  keywordCrm,
   buildEvidence,
   crmIndex,
   derive,
@@ -602,5 +604,121 @@ describe("cota das APIs e leitura à toa", () => {
     const defer = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_defer"))!.body;
     expect(defer).toMatchObject({ p_until: "2026-10-05T09:05:00Z" });
     expect(defer.p_note).toMatch(/498 de 500/);
+  });
+});
+
+describe("o funil do CRM (Fase 2)", () => {
+  const funnel = {
+    rows: [
+      {
+        l: "c" as const, c: "Motion", t: "", n: "", deals: 10, open: 4, won: 2, lost: 4, qualified: 6, score: 7.5,
+        at: { st2: 3, st1: 1 }, reach: { st1: 3, st2: 4, st3: 3 }, lost_by: { r1: 3, r2: 1 }, buckets: { b1: 4, b2: 2 },
+        answers: { o1: 5, o2: 1 },
+      },
+      {
+        l: "s" as const, c: "Motion", t: "Público A", n: "", deals: 6, open: 2, won: 0, lost: 4, qualified: 0, score: null,
+        at: null, reach: { st1: 6 }, lost_by: { r1: 4 }, buckets: null, answers: null,
+      },
+    ],
+    pipelines: [{ id: "p1", name: "Vendas" }],
+    stages: [
+      { id: "st1", pipeline_id: "p1", name: "Novo", order: 1 },
+      { id: "st2", pipeline_id: "p1", name: "Negociação", order: 2 },
+      { id: "st3", pipeline_id: "p1", name: "Contrato", order: 3 },
+    ],
+    reasons: [{ id: "r1", name: "Sem orçamento" }, { id: "r2", name: "Preço" }],
+    buckets: [{ id: "b1", name: "Quente", form: "SDR", min: 7, max: 10 }, { id: "b2", name: "Frio", form: "SDR", min: 0, max: 6 }],
+    options: [{ id: "o1", label: "Sim", question: "Tem orçamento?", form: "SDR" }],
+  };
+
+  it("cada entidade com UTM ganha o funil do ciclo; etapas somam 'ou além'; rótulos legíveis", () => {
+    const entities = [
+      { key: "c:1", level: "campaign" as const, name: "Motion", utm: "Motion", n: { cycle: { spend: 100 }, d7: { spend: 30 } } },
+      { key: "s:1", level: "adset" as const, name: "Público A", utm: ["Motion", "Público A"].join("\u0000"), n: { cycle: { spend: 50 } } },
+      { key: "s:2", level: "adset" as const, name: "Sem lead", utm: ["Motion", "Sem lead"].join("\u0000"), n: { cycle: { spend: 10 } } },
+    ];
+    const labels = applyFunnel(entities, funnel);
+    expect(entities[0].n.cycle).toMatchObject({
+      spend: 100,
+      crm_open: 4,
+      crm_won_deals: 2,
+      crm_lost: 4,
+      crm_lost_rate: 40,
+      crm_qualified: 6,
+      crm_score: 7.5,
+      // Negociação ou além: 4 + 3; Contrato: 3. "Novo" (a primeira) não entra.
+      "stage:st2": 7,
+      "stage:st3": 3,
+      "lost:r1": 3,
+      "bucket:b1": 4,
+      "answer:o1": 5,
+    });
+    expect(entities[0].n.cycle).not.toHaveProperty("stage:st1");
+    // Opção sem nome (removida) não vira métrica; o CRM só na janela do ciclo.
+    expect(entities[0].n.cycle).not.toHaveProperty("answer:o2");
+    expect(entities[0].n.d7).toEqual({ spend: 30 });
+    expect(entities[1].n.cycle).toMatchObject({ crm_lost_rate: 66.7, "lost:r1": 4 });
+    expect(entities[1].n.cycle).not.toHaveProperty("crm_score");
+    expect(entities[2].n.cycle).toEqual({ spend: 10 });
+    expect(labels).toMatchObject({
+      "stage:st2": 'Chegaram a "Negociação" ou além',
+      "lost:r1": 'Perdidas por "Sem orçamento"',
+      "bucket:b1": 'Qualificação "Quente"',
+      "answer:o1": 'Responderam "Sim" em "Tem orçamento?"',
+    });
+    // A MAVI cita a métrica do funil e o valor vem do material, com o rótulo.
+    const map = new Map(entities.map((e) => [e.key, e]));
+    const r = parseInsights(
+      JSON.stringify({
+        insights: [
+          {
+            kind: "problem",
+            priority: "high",
+            title: "Leads sem orçamento",
+            target: "s:1",
+            evidence: [{ entity: "s:1", window: "cycle", metric: "lost:r1" }, { entity: "s:1", window: "cycle", metric: "stage:inventada" }],
+          },
+        ],
+      }),
+      map,
+      6,
+      labels,
+    );
+    expect(r.insights[0].evidence).toEqual([
+      { label: 'Perdidas por "Sem orçamento"', value: 4, unit: "count", window: "cycle", entity: "s:1", name: "Público A", metric: "lost:r1" },
+    ]);
+  });
+
+  it("Google: a palavra-chave pelo utm_content ({keyword}), sem os sinais da correspondência", () => {
+    const crm = crmIndex({
+      campaigns: [["Pesquisa", 5, 1, 1, 900]],
+      adsets: [["Pesquisa", "Grupo A", 5, 1, 1, 900]],
+      ads: [
+        ["Pesquisa", "Grupo A", "consultoria tributaria", 3, 1, 1, 900],
+        ["Pesquisa", "Grupo A", "contador online", 2, 0, 0, 0],
+      ],
+    })!;
+    expect(keywordCrm(crm, "Pesquisa", "Grupo A", "[consultoria tributária]")).toMatchObject({
+      counts: { opportunities: 3, wins: 1, revenue: 900 },
+    });
+    expect(keywordCrm(crm, "Pesquisa", "Grupo B", "contador online")).toBeNull();
+  });
+
+  it("Google sem utm_content no CRM: aviso de rastreamento com o modelo de URL", () => {
+    const m = material({ campaign: { id: "camp", name: "Pesquisa", platform: "google", notes: "" } });
+    const a = analysisOf([
+      { key: "c:9", level: "campaign", name: "Pesquisa", n: { cycle: withCrm(derive({ spend: 500, results: 10 }), { opportunities: 6, wins: 0, revenue: 0 }) } },
+      { key: "s:9", level: "adset", name: "Grupo A", parent: "c:9", n: { cycle: { spend: 500 } } },
+      { key: "k:1", level: "keyword", name: "[contador]", parent: "s:9", n: { cycle: { spend: 200 } } },
+    ], m);
+    a.platform = "google";
+    a.contentCampaigns = [];
+    const map = new Map(a.entities.map((e) => [e.key, e]));
+    const rule = ruleInsights(m, a, map).find((r) => r.fingerprint === "tracking#c:9#google-sem-palavra-chave");
+    expect(rule).toMatchObject({ priority: "low" });
+    expect(rule!.action).toMatch(/utm_content=\{keyword\}/);
+    // Com utm_content chegando ao CRM, nada a dizer.
+    a.contentCampaigns = ["Pesquisa"];
+    expect(ruleInsights(m, a, map).some((r) => r.fingerprint.includes("google-sem-palavra-chave"))).toBe(false);
   });
 });
