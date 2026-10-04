@@ -78,8 +78,11 @@ type Prefs = {
   period: DatePreset;
   since: string;
   until: string;
+  /** 2: chosen since "Resultado no CRM" became the default (04/10/2026). */
+  columnsV?: number;
 };
 const PREFS_KEY = "mavi:campanhas:plataforma";
+const COLUMNS_V = 2;
 function loadPrefs(): Partial<Prefs> {
   try {
     return JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}");
@@ -133,7 +136,11 @@ export function CampaignPlatform({
   const saved = useMemo(loadPrefs, []);
   const [account, setAccount] = useState(accounts[0]?.id ?? "");
   const [level, setLevel] = useState<PlatformLevel>(saved.level ?? "campaign");
-  const [preset, setPreset] = useState<ColumnPreset>(saved.preset ?? "desempenho");
+  // "Resultado no CRM" by default; a choice saved before it was the default
+  // ("Desempenho", saved on every visit) doesn't count.
+  const [preset, setPreset] = useState<ColumnPreset>(
+    (saved.columnsV === COLUMNS_V && saved.preset) || "crm",
+  );
   const [custom, setCustom] = useState<string[]>(
     saved.custom?.length ? saved.custom : PRESETS[0].columns,
   );
@@ -166,6 +173,7 @@ export function CampaignPlatform({
     savePrefs({
       level,
       preset,
+      columnsV: COLUMNS_V,
       custom,
       period,
       since: customRange.since,

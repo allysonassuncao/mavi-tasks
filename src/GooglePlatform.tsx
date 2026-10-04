@@ -65,8 +65,18 @@ import "./google-platform.css";
  * charts. The campaigns linked to this MAVI campaign are marked.
  */
 
-type Prefs = { view: GoogleView; preset: GPreset; custom: string[]; period: DatePreset; since: string; until: string };
+type Prefs = {
+  view: GoogleView;
+  preset: GPreset;
+  custom: string[];
+  period: DatePreset;
+  since: string;
+  until: string;
+  /** 2: chosen since "Resultado no CRM" became the default (04/10/2026). */
+  columnsV?: number;
+};
 const PREFS_KEY = "mavi:campanhas:plataforma-google";
+const COLUMNS_V = 2;
 function loadPrefs(): Partial<Prefs> {
   try {
     return JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}");
@@ -121,7 +131,9 @@ export function GooglePlatform({
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const account = accounts.find((a) => a.id === accountId) ?? accounts[0];
   const [view, setView] = useState<GoogleView>(saved.view ?? "campaigns");
-  const [preset, setPreset] = useState<GPreset>(saved.preset ?? "desempenho");
+  // "Resultado no CRM" by default; a choice saved before it was the default
+  // ("Desempenho", saved on every visit) doesn't count.
+  const [preset, setPreset] = useState<GPreset>((saved.columnsV === COLUMNS_V && saved.preset) || "crm");
   const [custom, setCustom] = useState<string[]>(saved.custom?.length ? saved.custom : G_PRESETS[0].columns);
   const [period, setPeriod] = useState<DatePreset>(
     saved.period && saved.period !== "maximum" ? saved.period : "last_30d",
@@ -147,7 +159,7 @@ export function GooglePlatform({
   const [choosing, setChoosing] = useState(false);
 
   useEffect(() => {
-    savePrefs({ view, preset, custom, period, since: customRange.since, until: customRange.until });
+    savePrefs({ view, preset, custom, period, since: customRange.since, until: customRange.until, columnsV: COLUMNS_V });
   }, [view, preset, custom, period, customRange]);
   const range =
     period === "custom"
