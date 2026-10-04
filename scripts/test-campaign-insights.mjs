@@ -418,6 +418,37 @@ await check("Google: o orçamento de operações da MAVI nas últimas 24 h", asy
   await assert.rejects(worker("ai_campaign_insight_google_ops", ["errado", A, 1, true]), /Sem permissão/);
 });
 
+await check("criativos: escolhas da empresa, leitura guardada uma vez e reaproveitada", async () => {
+  await as(admin);
+  const s = await rpc("campaign_insight_settings", [A]);
+  assert.deepEqual([s.settings.creative_images, s.settings.creative_videos, s.settings.creative_new_max], [true, true, 6]);
+  const saved = await rpc("save_campaign_insight_settings", [A, JSON.stringify({ creative_videos: false, creative_new_max: 2 })]);
+  assert.deepEqual([saved.settings.creative_videos, saved.settings.creative_new_max], [false, 2]);
+  await as(null);
+  await assert.rejects(worker("ai_campaign_creatives_get", ["errado", A, "meta", ["i:h1"]]), /Sem permissão/);
+  const empty = await worker("ai_campaign_creatives_get", [SECRET, A, "meta", ["i:h1"]]);
+  assert.deepEqual(empty, { settings: { images: true, videos: false, new_max: 2 }, items: [] });
+  const n = await worker("ai_campaign_creatives_put", [SECRET, A, "meta", JSON.stringify([
+    { key: "i:h1", kind: "image", summary: { promessa: "Frete grátis" }, model: "claude-opus-5-5", cost: 0.01 },
+    { key: "v:v9", kind: "video", summary: { resumo: "Vídeo" }, transcript: "fala", note: "" },
+    { key: "x", kind: "image", summary: {} },
+    { key: "i:h2", kind: "gif", summary: {} },
+  ])]);
+  assert.equal(n, 2);
+  // Relida: substitui (não duplica).
+  await worker("ai_campaign_creatives_put", [SECRET, A, "meta", JSON.stringify([{ key: "i:h1", kind: "image", summary: { promessa: "Entrega em 24h" } }])]);
+  const got = await worker("ai_campaign_creatives_get", [SECRET, A, "meta", ["i:h1", "v:v9", "i:nao"]]);
+  assert.deepEqual(got.items.map((i) => [i.key, i.summary.promessa ?? i.summary.resumo, i.transcript]).sort(), [
+    ["i:h1", "Entrega em 24h", ""],
+    ["v:v9", "Vídeo", "fala"],
+  ]);
+  // Outra plataforma não enxerga.
+  assert.deepEqual((await worker("ai_campaign_creatives_get", [SECRET, A, "google", ["i:h1"]])).items, []);
+  const [r] = await sql(`select mavi_private.ai_transcribe_feature('campaign_creative_transcribe') as t,
+    mavi_private.ai_transcribe_feature('campaign_creative_image') as i`);
+  assert.deepEqual(r, { t: true, i: false });
+});
+
 await check("a campanha que não pode ser analisada diz por quê", async () => {
   await sql(`update ad_campaigns set status='inactive' where id=$1`, [campaign]);
   await as(trafego);

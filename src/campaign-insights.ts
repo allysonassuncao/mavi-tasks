@@ -146,6 +146,10 @@ export type InsightSettings = {
   min_new_days: number;
   /** Google: operações do developer token por 24 h para a MAVI. */
   google_daily_ops: number;
+  /** Criativos: ler as imagens, ler os vídeos (capa + áudio) e quantos novos por análise. */
+  creative_images: boolean;
+  creative_videos: boolean;
+  creative_new_max: number;
   updated_by?: string | null;
   updated_at?: string;
 };
@@ -435,6 +439,9 @@ export const DEFAULT_SETTINGS: InsightSettings = {
   min_interval_minutes: 240,
   min_new_days: 2,
   google_daily_ops: 500,
+  creative_images: true,
+  creative_videos: true,
+  creative_new_max: 6,
 };
 function demoSettings(): InsightSettingsView {
   return {

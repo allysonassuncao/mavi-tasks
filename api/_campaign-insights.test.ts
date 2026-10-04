@@ -722,3 +722,54 @@ describe("o funil do CRM (Fase 2)", () => {
     expect(ruleInsights(m, a, map).some((r) => r.fingerprint.includes("google-sem-palavra-chave"))).toBe(false);
   });
 });
+
+describe("criativos na análise (Fase 3)", () => {
+  it("o resumo do criativo entra no material do anúncio e o custo da leitura conta na análise", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_campaign_insight_claim": () => (claims++ < 1 ? [{ id: run, company_id: company }] : []),
+      "rpc/ai_campaign_insight_material": material(),
+      "rpc/ai_worker_route": null,
+      "rpc/ai_campaign_insight_store": { ok: true },
+    });
+    const ad: Entity = {
+      key: "a:7",
+      level: "ad",
+      name: "Frete grátis",
+      parent: "c:222",
+      source: { creative: "c7", account: "111" },
+      info: { titulo: "Frete grátis em 24h" },
+      n: { cycle: withCrm(derive({ spend: 300, results: 9 }), { opportunities: 5, wins: 1, revenue: 800 }) },
+    };
+    const read = vi.fn(async (_e: unknown, _f: unknown, m: InsightMaterial) => analysisOf([campaign(30, 4), ad], m));
+    const creatives = vi.fn(async (_env: unknown, _deps: unknown, input: any) => {
+      expect(input.ads).toEqual([
+        expect.objectContaining({ entity: "a:7", spend: 300, title: "Frete grátis em 24h", meta: { creative: "c7", account: "111" } }),
+      ]);
+      expect(input.budget).toBeCloseTo(0.2);
+      return {
+        byEntity: new Map([["a:7", { line: "Caixa chegando | promessa: frete grátis em 24h", transcript: "chega amanhã" }]]),
+        usage: [{ kind: "campaign_creative_image", model: "claude-opus-5-5", input: 2400, output: 300, cache_read: 0, cache_write: 0, cost: 0.02 }],
+        notes: [],
+        read: 1,
+        reused: 0,
+      };
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      expect(req.messages[0].content).toMatch(/"criativo":"Caixa chegando \| promessa: frete grátis em 24h"/);
+      expect(req.messages[0].content).toMatch(/"audio":"chega amanhã"/);
+      const meter = newMeter("claude-opus-5-5");
+      meter.cost = 0.05;
+      return { text: JSON.stringify({ summary: "ok", insights: [] }), meter, rounds: 1 };
+    });
+    let t = 0;
+    await runCampaignInsights(env, { fetch: fetchImpl, llm, embed: vi.fn(), now: () => (t += 60_000) }, read, creatives as any);
+    expect(creatives).toHaveBeenCalledTimes(1);
+    const result = calls.find((c) => c.url.includes("rpc/ai_campaign_insight_store"))!.body.p_result;
+    expect(result.usage.map((u: any) => [u.kind, u.cost])).toEqual([
+      ["campaign_creative_image", 0.02],
+      ["campaign_insights", 0.05],
+    ]);
+    expect(result.note).toMatch(/Criativos: 1 lido agora, 0 reaproveitados/);
+  });
+});

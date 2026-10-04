@@ -237,6 +237,8 @@ export type AiFeature =
   | "campaign_alerts"
   | "campaign_insights"
   | "campaign_insights_check"
+  | "campaign_creative_image"
+  | "campaign_creative_transcribe"
   | "mavi_judge"
   | "mavi_judge_check";
 
@@ -627,6 +629,23 @@ export const FEATURES: FeatureInfo[] = [
     decisions: true,
     note: "Antes de publicar, o Jev confere se os números de cada insight sustentam o que a MAVI escreveu. Sem regra, usa o Jev do Termômetro; sem Jev cadastrado, os insights entram sem a conferência (as evidências continuam conferidas pelo sistema).",
   },
+  {
+    id: "campaign_creative_image",
+    group: "Campanhas",
+    label: "Insights da MAVI: leitura das imagens dos criativos",
+    conversation: false,
+    env: "CAMPAIGN_CREATIVE_IMAGE_MODEL",
+    note: "Lê a imagem (ou a capa do vídeo) e o texto de cada anúncio que pesa na campanha: promessa, gancho, oferta, prova. Precisa de um modelo com visão. Cada criativo é lido uma vez e reaproveitado; conta no teto por análise.",
+  },
+  {
+    id: "campaign_creative_transcribe",
+    group: "Campanhas",
+    label: "Insights da MAVI: transcrição dos vídeos dos criativos",
+    conversation: false,
+    env: "WHATSAPP_TRANSCRIBE_MODEL",
+    transcription: true,
+    note: "O áudio dos vídeos dos anúncios (até 24 MB), uma vez por vídeo. Um modelo barato de transcrição basta (ex.: Whisper no Groq).",
+  },
 ];
 
 export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
@@ -739,6 +758,10 @@ export function serverModel(
     case "campaign_insights_check":
       // Sem escolha: o Jev do termômetro (o primeiro cadastrado no OpenRouter).
       return "~typesafe/jev-latest";
+    case "campaign_creative_image":
+      return env.CAMPAIGN_CREATIVE_IMAGE_MODEL || env.AI_MODEL || fallback;
+    case "campaign_creative_transcribe":
+      return env.WHATSAPP_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
     case "client_radar_themes":
       return env.CLIENT_RADAR_THEMES_MODEL || env.AI_MODEL || fallback;
     case "personal_radar":

@@ -378,6 +378,50 @@ export function CampaignInsightSettings({
       </section>
 
       <section className="panel cins-block">
+        <h3>Criativos</h3>
+        <p className="cins-help">
+          A MAVI enxerga os anúncios que pesam na campanha para explicar o porquê do desempenho (a promessa, o
+          gancho, a oferta). Cada criativo é lido uma vez — pela imagem ou pelo vídeo — e reaproveitado nas
+          próximas análises e nas outras campanhas que usam o mesmo criativo. Os modelos ficam em{" "}
+          <a href="#regras">Quem usa qual modelo</a> (leitura das imagens e transcrição dos vídeos).
+        </p>
+        <label className="cins-check">
+          <Checkbox checked={draft.creative_images} onCheckedChange={(v) => set({ creative_images: v === true })} />
+          <span>
+            <strong>Ler as imagens dos anúncios</strong>
+            <small>A imagem com o texto do anúncio, pelo modelo de visão.</small>
+          </span>
+        </label>
+        <label className="cins-check">
+          <Checkbox checked={draft.creative_videos} onCheckedChange={(v) => set({ creative_videos: v === true })} />
+          <span>
+            <strong>Ler os vídeos</strong>
+            <small>
+              A capa e a transcrição do áudio (vídeos de até 24 MB; sem acesso ao arquivo, só a capa). No Google,
+              por enquanto, só os anúncios com imagem.
+            </small>
+          </span>
+        </label>
+        <div className="cins-row">
+          <label>
+            <span>Criativos novos por análise</span>
+            <Select
+              value={String(draft.creative_new_max)}
+              onValueChange={(v) => set({ creative_new_max: Number(v) })}
+              aria-label="Criativos novos por análise"
+            >
+              {[0, 2, 4, 6, 8, 12].map((n) => (
+                <SelectOption key={n} value={String(n)}>
+                  {n === 0 ? "Nenhum (só os já lidos)" : `Até ${n}`}
+                </SelectOption>
+              ))}
+            </Select>
+            <small>Os de maior investimento primeiro; o resto fica para a próxima análise. Até 40% do teto por análise.</small>
+          </label>
+        </div>
+      </section>
+
+      <section className="panel cins-block">
         <h3>Sem leitura à toa e limites das plataformas</h3>
         <p className="cins-help">
           A leitura é enxuta (uma chamada por nível no Meta e uma consulta por visão no Google, com todas as

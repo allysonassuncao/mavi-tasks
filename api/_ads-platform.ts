@@ -595,6 +595,7 @@ export type PlatformRow = {
   end?: string | null;
   attribution?: string;
   creative?: {
+    id?: string;
     thumbnail?: string;
     title?: string;
     body?: string;
@@ -969,6 +970,7 @@ export async function platformWindows(
       ...(q.level === "ad"
         ? {
             creative: {
+              id: s.creative?.id,
               title: s.creative?.title,
               body: s.creative?.body,
               cta: s.creative?.call_to_action_type,

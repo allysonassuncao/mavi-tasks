@@ -32,6 +32,7 @@ import {
   type CrmUtmDeals,
 } from "./_crm.js";
 import { modelPrice } from "./_social-leads.js";
+import { readCreatives, type CreativeAd } from "./_campaign-creatives.js";
 
 /**
  * Campanhas › Insights da MAVI (migração 20270327090000_campaign_insights).
@@ -193,6 +194,8 @@ export type Entity = {
   n: Partial<Record<WindowKey, Numbers>>;
   /** A chave da UTM no CRM (nome exato: campanha; + termo; + conteúdo). */
   utm?: string;
+  /** Anúncios: de onde vem o criativo (Meta: o criativo e a conta; Google: a imagem). */
+  source?: { creative?: string; account?: string; image?: string };
 };
 
 /** As métricas, com a unidade de cada uma (para mostrar e para conferir). */
@@ -704,7 +707,14 @@ const delivered = (e: Entity) =>
 
 export type MetaRead = { campaigns: WindowRow[]; adsets: WindowRow[]; ads: WindowRow[] };
 /** As linhas do Meta (uma leitura por nível, todas as janelas) viram entidades com o CRM ao lado. */
-export function metaEntities(read: MetaRead, crm: CrmIndex | null, k: number, limits: Limits = LIMITS): Entity[] {
+export function metaEntities(
+  read: MetaRead,
+  crm: CrmIndex | null,
+  k: number,
+  limits: Limits = LIMITS,
+  /** A conta lida (para buscar os criativos com o token dela). */
+  account?: string,
+): Entity[] {
   const out: Entity[] = [];
   const nums = (x: PlatformMetrics) => metaNumbers(x, k);
   for (const r of read.campaigns)
@@ -745,6 +755,7 @@ export function metaEntities(read: MetaRead, crm: CrmIndex | null, k: number, li
       name: r.name,
       parent: `s:${r.adset_id}`,
       utm: utmKey(r.campaign_name, r.adset_name ?? "", r.name),
+      ...(r.creative?.id && account ? { source: { creative: r.creative.id, account } } : {}),
       status: r.delivery?.label,
       info: {
         ...(r.creative?.title ? { titulo: r.creative.title.slice(0, 160) } : {}),
@@ -834,6 +845,7 @@ export function googleEntities(reads: GoogleRead[], crm: CrmIndex | null, k: num
       let parent: string | undefined;
       let counts: CrmCounts | undefined;
       let utm: string | undefined;
+      let source: Entity["source"];
       const info: Record<string, string> = {};
       switch (read.view) {
         case "campaigns":
@@ -859,6 +871,7 @@ export function googleEntities(reads: GoogleRead[], crm: CrmIndex | null, k: num
           if (r.preview?.descriptions?.length)
             info.descricoes = r.preview.descriptions.slice(0, 3).join(" | ").slice(0, 300);
           if (r.info.strength) info.forca = String(r.info.strength);
+          if (r.preview?.images?.[0]) source = { image: r.preview.images[0] };
           break;
         case "keywords":
           key = `k:${r.id}`;
@@ -895,6 +908,7 @@ export function googleEntities(reads: GoogleRead[], crm: CrmIndex | null, k: num
         name: level === "segment" ? `${read.view === "age" ? "Idade" : "Gênero"} · ${r.name}` : r.name,
         ...(parent ? { parent } : {}),
         ...(utm ? { utm } : {}),
+        ...(source ? { source } : {}),
         status: r.status?.label || undefined,
         info,
         n: windowNumbers(r.windows, nums, counts),
@@ -1059,6 +1073,7 @@ Regras dos números (obrigatório):
 - O CRM liga pelo nome exato: utm_campaign = nome da campanha, utm_term = nome do conjunto (no Google, do grupo), utm_content = nome do anúncio (no Google, a palavra-chave, quando a agência usa {keyword}). Oportunidade zerada pode ser falta de UTM, não falta de lead.
 - O funil do CRM (quando vem) mostra a QUALIDADE do lead de cada campanha, conjunto, anúncio ou palavra-chave: abertas, ganhas, perdidas, taxa de perda, quantas chegaram a cada etapa ("stage:…", ou além), os motivos de perda ("lost:…"), a faixa da qualificação ("bucket:…") e as respostas mais escolhidas no formulário ("answer:…"); os nomes estão em "funil_crm.legenda". Use isso para separar volume de qualidade (ex.: o conjunto mais barato que só gera leads perdidos por "sem orçamento"; a palavra-chave cara que leva à Negociação) e cite essas métricas nas evidências pelo nome da chave. O CRM não tem idade nem gênero do lead: o cruzamento com o público é pelo conjunto (o público dele na plataforma × a qualidade dos leads dele no CRM).
 - As "detecções automáticas" já viram insights: não as repita; você pode aprofundar com outra conclusão (outro topic).
+- Anúncios podem trazer "criativo" (o que a imagem ou o vídeo comunica: promessa, gancho, oferta, prova, formato — lido pela MAVI a partir da imagem e do texto) e "audio" (trecho da transcrição do vídeo). Use para explicar o porquê do desempenho (ex.: a promessa de frete grátis do anúncio que mais gera oportunidades no CRM) e para sugerir variações concretas; a descrição do criativo não é número e não entra nas evidências.
 - O contexto do cliente (dossiê, Radar, termômetro, reuniões) serve para interpretar e priorizar; não copie trechos dele nem exponha conversas internas.
 
 Responda SOMENTE com um JSON, sem texto antes ou depois:
@@ -1564,7 +1579,7 @@ export async function readAnalysis(
         const roomy = meter.pct < 60;
         if (!roomy) notes.push(`Cota do Meta em ${Math.round(meter.pct)}%: sem o público por idade e gênero.`);
         const [adsets, ads] = await Promise.all([read("adset", short, roomy), read("ad", short)]);
-        entities.push(...metaEntities({ campaigns: top.rows, adsets: adsets.rows, ads: ads.rows }, crm, k));
+        entities.push(...metaEntities({ campaigns: top.rows, adsets: adsets.rows, ads: ads.rows }, crm, k, LIMITS, account));
       }
     } else {
       if (!m.google_token) throw new InsightsError(409, "Conecte o Google Ads da agência em Campanhas.", true);
@@ -1631,6 +1646,7 @@ export async function analyse(
   runId: string,
   companies: Map<string, Promise<Company>>,
   read: typeof readAnalysis = readAnalysis,
+  creatives: typeof readCreatives = readCreatives,
 ): Promise<{ skipped?: boolean; deferred?: boolean; insights?: number }> {
   const now = deps.now ?? Date.now;
   const m = await workerRpc<InsightMaterial | null>(env, deps, "ai_campaign_insight_material", { p_run: runId });
@@ -1708,16 +1724,60 @@ export async function analyse(
   const entities = new Map(full.entities.map((e) => [e.key, e]));
   const rules = ruleInsights(m, full, entities);
   const cap = Number(m.settings.run_cap_usd) || 0.5;
+  const usage: Usage[] = [];
+  const notes = [...full.notes];
+  // Os criativos dos anúncios que pesam (cada um lido uma vez; até 40% do teto).
+  const withCreative = full.entities
+    .filter((e) => e.level === "ad" && e.source)
+    .sort((a, b) => numOr(b.n.cycle?.spend ?? b.n.d7?.spend) - numOr(a.n.cycle?.spend ?? a.n.d7?.spend));
+  if (withCreative.length) {
+    try {
+      const tokens = new Map<string, string>();
+      if (m.campaign.platform === "meta" && env.ads.tokenKey)
+        for (const [account, t] of Object.entries(m.meta_tokens ?? {})) tokens.set(account, unseal(env.ads.tokenKey, t.token_cipher));
+      const ads: CreativeAd[] = withCreative.map((e) => ({
+        entity: e.key,
+        spend: numOr(e.n.cycle?.spend ?? e.n.d7?.spend),
+        title: e.info?.titulo ?? e.info?.titulos,
+        body: e.info?.texto ?? e.info?.descricoes,
+        cta: e.info?.cta,
+        ...(e.source?.creative && e.source.account
+          ? { meta: { creative: e.source.creative, account: e.source.account } }
+          : {}),
+        ...(e.source?.image ? { google: { image: e.source.image } } : {}),
+      }));
+      const cr = await creatives(env, deps, {
+        company: m.company_id,
+        platform: m.campaign.platform,
+        ads,
+        tokens,
+        platformFetch: meteredFetch(deps.fetch, meter),
+        budget: cap * 0.4,
+      });
+      for (const [key, c] of cr.byEntity) {
+        const e = entities.get(key);
+        if (!e) continue;
+        e.info = { ...(e.info ?? {}), criativo: c.line, ...(c.transcript ? { audio: c.transcript } : {}) };
+      }
+      usage.push(...cr.usage);
+      notes.push(...cr.notes);
+      if (cr.read || cr.reused)
+        notes.push(
+          `Criativos: ${cr.read} ${cr.read === 1 ? "lido agora" : "lidos agora"}, ${cr.reused} ${cr.reused === 1 ? "reaproveitado" : "reaproveitados"}.`,
+        );
+    } catch (e) {
+      notes.push(`Os criativos não puderam ser lidos agora: ${(e as Error).message}`.slice(0, 200));
+    }
+  }
+  const creativeCost = usage.reduce((sum, u) => sum + u.cost, 0);
   const fit = fitToCap(
     (cut) => {
       const c = cutAnalysis(m, full, cut);
       return { text: insightMessage(c.m, c.a, rules), maxTokens: cut >= 4 ? 2500 : 5000 };
     },
-    cap,
+    Math.max(cap - creativeCost, 0),
     company.price,
   );
-  const usage: Usage[] = [];
-  const notes = [...full.notes];
   let summary = "";
   let found: Insight[] = [];
   if (!fit) {
@@ -1816,6 +1876,8 @@ export async function runCampaignInsights(
   deps: AiDeps,
   /** A leitura da plataforma e do CRM (trocada nos testes). */
   read: typeof readAnalysis = readAnalysis,
+  /** A leitura dos criativos (trocada nos testes). */
+  creatives: typeof readCreatives = readCreatives,
 ) {
   const now = deps.now ?? Date.now;
   const deadline = now() + (env.insightsBudgetMs ?? 240_000);
@@ -1830,7 +1892,7 @@ export async function runCampaignInsights(
     await Promise.all(
       claimed.map(async (c) => {
         try {
-          const r = await analyse(env, deps, c.id, companies, read);
+          const r = await analyse(env, deps, c.id, companies, read, creatives);
           if (r.skipped) stats.skipped++;
           else if (r.deferred) stats.deferred++;
           else {
