@@ -970,3 +970,8 @@
   font-size: 0.82rem;
   line-height: 1.4;
 }
+.insights-run-expired {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+}

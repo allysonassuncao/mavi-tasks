@@ -787,7 +787,7 @@ export function CampaignInsightsAside({
   );
 }
 
-function RunRow({ run, timezone }: { run: InsightRun; timezone: string }) {
+function RunRow({ run, timezone, expireDays }: { run: InsightRun; timezone: string; expireDays?: number }) {
   const [open, setOpen] = useState(false);
   const now = new Date();
   const who = run.trigger === "manual" ? `Pedida por ${run.requested_by_name ?? "alguém"}` : "Agendada";
@@ -815,6 +815,12 @@ function RunRow({ run, timezone }: { run: InsightRun; timezone: string }) {
       {open && (
         <div className="insights-run-body">
           {run.summary && <p className="insights-run-summary">{run.summary}</p>}
+          {!!run.expired_count && (
+            <p className="insights-run-expired">
+              {run.expired_count} {run.expired_count === 1 ? "insight expirou" : "insights expiraram"} sem uso ({expireDays ? `${expireDays} dias` : "o prazo do Painel da MAVI"}
+              abertos sem ser aplicado, adiado, descartado, avaliado ou virar tarefa) e saiu da tela.
+            </p>
+          )}
           {run.note && (
             <p className="insights-run-note">
               <CircleAlert size={13} aria-hidden="true" /> {run.note}
@@ -980,7 +986,7 @@ export function CampaignInsightsTab({
         {v.runs.length ? (
           <ul className="insights-runs">
             {v.runs.map((r) => (
-              <RunRow key={r.id} run={r} timezone={v.timezone} />
+              <RunRow key={r.id} run={r} timezone={v.timezone} expireDays={v.expire_days} />
             ))}
           </ul>
         ) : (

@@ -66,7 +66,8 @@ export type CampaignInsight = {
   votes?: { up: number; down: number };
   tasks?: { id: string; title: string; status: string; due_date: string | null; assignee_name: string | null }[];
 };
-export type InsightStatus = "new" | "applied" | "dismissed" | "snoozed";
+/** expired: aberto sem uso pelo prazo do Painel da MAVI (padrão 15 dias) (sai da tela; no histórico, só a contagem). */
+export type InsightStatus = "new" | "applied" | "dismissed" | "snoozed" | "expired";
 export type InsightEffect = {
   days: number;
   before: Record<string, number | null>;
@@ -103,6 +104,8 @@ export type InsightRun = {
   windows: Partial<Record<InsightWindow, { since: string; until: string }>>;
   insights_count: number;
   repeated_count: number;
+  /** Quantos desta análise expiraram sem uso (não aparecem mais). */
+  expired_count?: number;
   /** Chamadas às APIs ({meta, google}) e tokens ({input, output}) da análise. */
   api_calls: { meta?: number; google?: number };
   tokens: { input?: number; output?: number };
@@ -127,6 +130,8 @@ export type CampaignInsightsView = {
   places: { panel: boolean; badge: boolean; tab: boolean };
   money_basis: MoneyBasis;
   min_interval_minutes: number;
+  /** Dias abertos sem uso até o insight expirar (0: nunca). */
+  expire_days?: number;
   /** Por que a campanha não pode ser analisada agora (nulo: pode). */
   blocker: string | null;
   capped: boolean;
@@ -187,6 +192,8 @@ export type InsightSettings = {
   creative_images: boolean;
   creative_videos: boolean;
   creative_new_max: number;
+  /** Dias abertos sem uso até o insight expirar e sair da tela (0: nunca). */
+  expire_days: number;
   updated_by?: string | null;
   updated_at?: string;
 };
@@ -420,7 +427,7 @@ export interface InsightsBackend {
   events(company: string, insight: string): Promise<InsightEvent[]>;
 }
 export type InsightEvent = {
-  action: "applied" | "dismissed" | "snoozed" | "reopened" | "returned" | "task";
+  action: "applied" | "dismissed" | "snoozed" | "reopened" | "returned" | "task" | "expired";
   reason: string;
   detail: Record<string, unknown>;
   created_at: string;
@@ -613,6 +620,7 @@ export const DEFAULT_SETTINGS: InsightSettings = {
   creative_images: true,
   creative_videos: true,
   creative_new_max: 6,
+  expire_days: 15,
 };
 function demoSettings(): InsightSettingsView {
   return {
@@ -709,6 +717,7 @@ export function demoInsights(): InsightsBackend {
         places: { panel: true, badge: true, tab: true },
         money_basis: "net",
         min_interval_minutes: 240,
+        expire_days: 15,
         blocker: null,
         capped: false,
         wait_until: null,

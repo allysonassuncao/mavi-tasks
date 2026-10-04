@@ -1231,7 +1231,7 @@ Regras dos números (obrigatório):
 - As "detecções automáticas" já viram insights: não as repita; você pode aprofundar com outra conclusão (outro topic).
 - Anúncios podem trazer "criativo" (o que a imagem ou o vídeo comunica: promessa, gancho, oferta, prova, formato — lido pela MAVI a partir da imagem e do texto) e "audio" (trecho da transcrição do vídeo). Use para explicar o porquê do desempenho (ex.: a promessa de frete grátis do anúncio que mais gera oportunidades no CRM) e para sugerir variações concretas; a descrição do criativo não é número e não entra nas evidências.
 - "aprendizados_do_time" são regras que o time ensinou (para a agência, o produto ou este cliente): siga-as sempre; nunca sugira o que elas proíbem.
-- Insights anteriores "dismissed" foram descartados pelo time (veja o "motivo"): não os traga de volta com outras palavras. "applied" já foram aplicados: veja "insights_aplicados" — se o efeito piorou, diga e sugira o ajuste; se melhorou, você pode sugerir levar a mesma ideia a outro conjunto ou anúncio.
+- Insights anteriores "dismissed" foram descartados pelo time (veja o "motivo"): não os traga de volta com outras palavras. "expired" ficaram dias abertos sem que ninguém agisse: o time não viu valor neles; só volte ao assunto se os números pioraram bem desde então, com um ângulo novo. "applied" já foram aplicados: veja "insights_aplicados" — se o efeito piorou, diga e sugira o ajuste; se melhorou, você pode sugerir levar a mesma ideia a outro conjunto ou anúncio.
 - O contexto do cliente (dossiê, Radar, termômetro, reuniões) serve para interpretar e priorizar; não copie trechos dele nem exponha conversas internas.
 
 Responda SOMENTE com um JSON, sem texto antes ou depois:

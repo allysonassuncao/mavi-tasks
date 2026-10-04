@@ -602,6 +602,92 @@ await check("aprendizados: a MAVI propõe, vale com 2 pessoas ou 1 líder; os l�
   await sql(`update campaign_insight_runs set status='done', claimed_until=null where status in ('queued','running')`);
 });
 
+await check("15 dias abertos sem uso: o insight expira, sai da tela e não volta como novo por 30 dias", async () => {
+  await sql(`delete from campaign_insight_runs`);
+  await as(trafego);
+  const run = (await rpc("request_campaign_insight", [A, campaign])).run;
+  await as(null);
+  await worker("ai_campaign_insight_claim", [SECRET, 3]);
+  await worker("ai_campaign_insight_store", [SECRET, run, JSON.stringify({
+    status: "done",
+    insights: ["esquecido", "votado", "com-tarefa", "reaberto", "recente"].map((t) => insight(`problem#c:1#${t}`, { title: t })),
+  })]);
+  const id = Object.fromEntries((await sql(`select title, id from campaign_insights where run_id=$1`, [run])).map((r) => [r.title, r.id]));
+  // Todos apareceram há 16 dias; o "recente", há 10.
+  await sql(`update campaign_insights set created_at = now() - interval '16 days' where run_id=$1 and title <> 'recente'`, [run]);
+  await sql(`update campaign_insights set created_at = now() - interval '10 days' where id=$1`, [id.recente]);
+  await as(trafego);
+  await rpc("vote_campaign_insight", [A, id.votado, "up", null, ""]);
+  const [task] = await sql(`insert into tasks(company_id, contract_id, title, creator_id, assignee_id, due_date,
+    original_due_date) values ($1,$2,'Ver',$3,$3,'2026-12-10','2026-12-10') returning id`, [A, contract, trafego]);
+  await as(trafego);
+  await rpc("link_campaign_insight_task", [A, id["com-tarefa"], task.id]);
+  // Reaberto há 2 dias: a conta recomeça.
+  await sql(`update campaign_insights set status_at = now() - interval '2 days' where id=$1`, [id.reaberto]);
+  await sql(`select mavi_private.campaign_insight_tick()`);
+  const rows = Object.fromEntries((await sql(`select title, status from campaign_insights where run_id=$1`, [run])).map((r) => [r.title, r.status]));
+  assert.deepEqual(rows, { esquecido: "expired", votado: "new", "com-tarefa": "new", reaberto: "new", recente: "new" });
+  await as(trafego);
+  const v = await rpc("campaign_insights", [A, campaign, 8]);
+  assert.deepEqual(v.current.map((i) => i.title).sort(), ["com-tarefa", "reaberto", "recente", "votado"]);
+  const theRun = v.runs.find((x) => x.id === run);
+  assert.equal(theRun.expired_count, 1);
+  assert.ok(!theRun.insights.some((i) => i.title === "esquecido"));
+  // (o tick pode ter posto uma análise agendada na fila: tira para pedir outra)
+  await sql(`delete from campaign_insight_runs where status = 'queued'`);
+  await as(trafego);
+  const events = await rpc("campaign_insight_events", [A, id.esquecido]);
+  assert.deepEqual(events.map((e) => [e.action, e.user_name]), [["expired", null]]);
+  // A próxima análise não traz o expirado de volta.
+  const run2 = (await rpc("request_campaign_insight", [A, campaign])).run;
+  await as(null);
+  await worker("ai_campaign_insight_claim", [SECRET, 3]);
+  const r = await worker("ai_campaign_insight_store", [SECRET, run2, JSON.stringify({ status: "done", insights: [insight("problem#c:1#esquecido")] })]);
+  assert.deepEqual(r, { ok: true, new: 0, repeated: 0 });
+  // Depois de 30 dias, pode voltar.
+  await sql(`update campaign_insights set status_at = now() - interval '31 days' where id=$1`, [id.esquecido]);
+  await as(trafego);
+  const run3 = (await rpc("request_campaign_insight", [A, campaign])).run;
+  await as(null);
+  await worker("ai_campaign_insight_claim", [SECRET, 3]);
+  const r3 = await worker("ai_campaign_insight_store", [SECRET, run3, JSON.stringify({ status: "done", insights: [insight("problem#c:1#esquecido")] })]);
+  assert.equal(r3.new, 1);
+});
+
+await check("o prazo vem do Painel da MAVI: 7 dias expira antes; Nunca não expira", async () => {
+  await sql(`delete from campaign_insight_runs`);
+  await as(admin);
+  let s = await rpc("save_campaign_insight_settings", [A, JSON.stringify({ expire_days: 7 })]);
+  assert.equal(s.settings.expire_days, 7);
+  await assert.rejects(rpc("save_campaign_insight_settings", [A, JSON.stringify({ expire_days: 120 })]));
+  await as(trafego);
+  const run = (await rpc("request_campaign_insight", [A, campaign])).run;
+  await as(null);
+  await worker("ai_campaign_insight_claim", [SECRET, 3]);
+  await worker("ai_campaign_insight_store", [SECRET, run, JSON.stringify({
+    status: "done",
+    insights: ["oito-dias", "seis-dias"].map((t) => insight(`problem#c:1#${t}`, { title: t })),
+  })]);
+  await sql(`update campaign_insights set created_at = now() - interval '8 days' where run_id=$1 and title='oito-dias'`, [run]);
+  await sql(`update campaign_insights set created_at = now() - interval '6 days' where run_id=$1 and title='seis-dias'`, [run]);
+  await as(admin);
+  await rpc("save_campaign_insight_settings", [A, JSON.stringify({ expire_days: 0 })]);
+  await sql(`select mavi_private.campaign_insight_tick()`);
+  let rows = Object.fromEntries((await sql(`select title, status from campaign_insights where run_id=$1`, [run])).map((r) => [r.title, r.status]));
+  assert.deepEqual(rows, { "oito-dias": "new", "seis-dias": "new" });
+  await as(admin);
+  await rpc("save_campaign_insight_settings", [A, JSON.stringify({ expire_days: 7 })]);
+  await sql(`select mavi_private.campaign_insight_tick()`);
+  rows = Object.fromEntries((await sql(`select title, status from campaign_insights where run_id=$1`, [run])).map((r) => [r.title, r.status]));
+  assert.deepEqual(rows, { "oito-dias": "expired", "seis-dias": "new" });
+  await as(trafego);
+  const v = await rpc("campaign_insights", [A, campaign, 8]);
+  assert.equal(v.expire_days, 7);
+  await as(admin);
+  await rpc("save_campaign_insight_settings", [A, JSON.stringify({ expire_days: 15 })]);
+  await sql(`update campaign_insight_runs set status='done', claimed_until=null where status in ('queued','running')`);
+});
+
 await check("a campanha que não pode ser analisada diz por quê", async () => {
   await sql(`update ad_campaigns set status='inactive' where id=$1`, [campaign]);
   await as(trafego);

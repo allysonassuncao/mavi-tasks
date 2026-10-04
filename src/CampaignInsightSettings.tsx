@@ -320,6 +320,32 @@ export function CampaignInsightSettings({
       </section>
 
       <section className="panel cins-block">
+        <h3>Insights sem uso</h3>
+        <p className="cins-help">
+          Um insight que fica aberto sem que ninguém o aplique, adie, descarte, avalie (👍/👎) ou transforme em tarefa
+          expira e sai da campanha. No histórico das análises fica só a contagem, e a MAVI não traz o mesmo assunto de
+          volta por 30 dias, a não ser que os números piorem bem.
+        </p>
+        <div className="cins-row">
+          <label>
+            <span>Expira depois de</span>
+            <Select
+              value={String(draft.expire_days)}
+              onValueChange={(v) => set({ expire_days: Number(v) })}
+              aria-label="Prazo para o insight sem uso expirar"
+            >
+              {[7, 10, 15, 21, 30, 45, 60, 0].map((n) => (
+                <SelectOption key={n} value={String(n)}>
+                  {n === 0 ? "Nunca expira" : `${n} dias abertos`}
+                </SelectOption>
+              ))}
+            </Select>
+            <small>Contados da análise que o trouxe (ou de quando voltou a ficar aberto).</small>
+          </label>
+        </div>
+      </section>
+
+      <section className="panel cins-block">
         <h3>Valores em R$</h3>
         <div className="cins-radio" role="radiogroup" aria-label="Valores em R$">
           {(
