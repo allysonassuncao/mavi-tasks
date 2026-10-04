@@ -22,6 +22,13 @@
   padding: 14px;
   border-color: #e3d8f0;
 }
+/* .panel (styles.css, carregado depois) esconde o que passa: a coluna rola
+   sozinha, sem levar a página junto quando chega ao fim. */
+.panel.campaign-insights-aside {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .campaign-insights-aside > header {
   display: flex;
   align-items: flex-start;
