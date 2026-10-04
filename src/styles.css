@@ -10246,8 +10246,18 @@ p.task-search-mavi,
 }
 .storage-person-detail {
   display: grid;
+  /* Rows keep their content's height (the table's .table-scroll would
+     otherwise shrink into a scroll of its own). */
+  grid-auto-rows: max-content;
   gap: 16px;
   padding: 22px 24px;
+}
+/* The wide sheet (.modal.sheet[open]) doesn't scroll itself: the detail does. */
+.modal.sheet > .storage-person-detail {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .storage-files-head .ui-select {
   width: auto;
