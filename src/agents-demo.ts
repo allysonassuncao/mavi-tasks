@@ -1,6 +1,5 @@
 import type {
   AgentInstance,
-  AgentLinker,
   AgentPrompt,
   AgentPromptVersion,
   AgentStatus,
@@ -280,24 +279,6 @@ export function demoLink(workflow: string, client: string | null, clientName: st
   w.link_source = "manual";
   window.dispatchEvent(new CustomEvent("mavi:agents", { detail: {} }));
   return w;
-}
-const linkers: AgentLinker[] = [
-  { user_id: "demo-admin", name: "Allyson Assunção", role: "admin", leader: true, allowed: true,
-    granted_at: null, granted_by_name: null },
-  { user_id: "demo-julia", name: "Júlia Martins", role: "member", leader: false, allowed: true,
-    granted_at: ago(48), granted_by_name: "Allyson Assunção" },
-  { user_id: "demo-lucas", name: "Lucas Oliveira", role: "member", leader: false, allowed: false,
-    granted_at: null, granted_by_name: null },
-];
-export const demoLinkers = () => linkers.map((l) => ({ ...l }));
-export function demoSetLinker(user: string, allowed: boolean) {
-  const l = linkers.find((x) => x.user_id === user);
-  if (l) {
-    l.allowed = allowed;
-    l.granted_at = allowed ? new Date().toISOString() : null;
-    l.granted_by_name = allowed ? "Você (demonstração)" : null;
-  }
-  return { user_id: user, allowed };
 }
 export const demoInstances = (): AgentInstance[] => [
   {

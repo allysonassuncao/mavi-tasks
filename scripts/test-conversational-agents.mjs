@@ -412,7 +412,7 @@ await check("o módulo entra entre os que o administrador pode ocultar", async (
   assert.ok(m.hidden_pages.includes("agents"));
 });
 
-await check("líderes liberam quem liga fluxos: Sem cliente e Trocar cliente nos clientes que atende", async () => {
+await check("recurso da pessoa: quem liga fluxos usa Sem cliente e Trocar cliente nos clientes que atende", async () => {
   await as(null);
   await rpc("agent_sync_targets", [SECRET, null, null]);
   await rpc("agent_sync_store", [SECRET, vps.id, JSON.stringify([
@@ -424,16 +424,15 @@ await check("líderes liberam quem liga fluxos: Sem cliente e Trocar cliente nos
   assert.deepEqual(await rpc("agent_status", [A]), { leader: false, linker: false });
   await fails(() => rpc("agent_list", [A, null, null, null, true]), /42501/);
   await fails(() => rpc("agent_workflow_link", [wf7, client, contract]), /P0002/);
-  await fails(() => rpc("agent_linker_set", [A, member, true]), /42501/);
-  await fails(() => rpc("agent_linkers_list", [A]), /42501/);
-  // O gestor libera (o administrador e o gestor já podem).
+  await fails(() => rpc("set_member_agent_linker", [A, member, true]), /42501/);
+  // Gestor libera só as pessoas das equipes dele (o Gil não está na Equipe A).
   await as(manager);
-  await fails(() => rpc("agent_linker_set", [A, admin, true]), /já ligam/);
-  await rpc("agent_linker_set", [A, member, true]);
-  const people = await rpc("agent_linkers_list", [A]);
-  const bruno = people.find((x) => x.user_id === member);
-  assert.deepEqual([bruno.allowed, bruno.leader, bruno.granted_by_name], [true, false, "Gil Gestor"]);
-  assert.equal(people.find((x) => x.user_id === admin).allowed, true);
+  await fails(() => rpc("set_member_agent_linker", [A, member, true]), /42501/);
+  await as(admin);
+  await rpc("set_member_agent_linker", [A, member, true]);
+  assert.equal((await sql(`select agent_linker from memberships where user_id=$1`, [member]))[0].agent_linker, true);
+  const [msg] = await sql(`select payload from realtime.messages order by id desc limit 1`);
+  assert.equal(msg.payload.kind, "agents");
   await as(member);
   const status = await rpc("agent_status", [A]);
   assert.deepEqual([status.leader, status.linker, status.unlinked, status.instances], [false, true, 1, undefined]);
@@ -445,27 +444,42 @@ await check("líderes liberam quem liga fluxos: Sem cliente e Trocar cliente nos
   const linked = await rpc("agent_workflow_link", [wf7, client, contract]);
   assert.equal(linked.client_name, "Clínica Sorriso");
   await rpc("agent_workflow_ignore", [(await sql(`select id from agent_workflows where n8n_id='wf4'`))[0].id, false]);
-  // Trocar cliente de um fluxo que vê: desligar volta para Sem cliente.
+  // Trocar cliente de um fluxo que vê.
   await rpc("agent_workflow_link", [wf1, null, null]);
   await rpc("agent_workflow_link", [wf1, client, contract]);
   // Quem não atende o cliente, mesmo liberado, não mexe nos fluxos dele.
-  await as(manager);
-  await rpc("agent_linker_set", [A, outsider, true]);
+  await as(admin);
+  await rpc("set_member_agent_linker", [A, outsider, true]);
   await as(outsider);
   await fails(() => rpc("agent_workflow_link", [wf1, null, null]), /P0002/);
-  // Tirar a permissão: volta ao normal.
+  // Desligar o recurso: volta ao normal.
   await as(admin);
-  await rpc("agent_linker_set", [A, member, false]);
+  await rpc("set_member_agent_linker", [A, member, false]);
   await as(member);
   await fails(() => rpc("agent_list", [A, null, null, null, true]), /42501/);
   await fails(() => rpc("agent_workflow_link", [wf1, null, null]), /42501/);
-  // Liberada de novo e desativada: sem acesso enquanto estiver fora.
+  // Desativada, a pessoa não usa (mesmo liberada).
   await as(admin);
-  await rpc("agent_linker_set", [A, member, true]);
+  await rpc("set_member_agent_linker", [A, member, true]);
   await sql(`update memberships set active=false where user_id=$1`, [member]);
   await as(member);
   await fails(() => rpc("agent_list", [A, null, null, null, true]), /42501/);
   await sql(`update memberships set active=true where user_id=$1`, [member]);
+});
+
+await check("quem foi liberado na aba Permissões (20270324) continua liberado", async () => {
+  const { createTestDatabase, applyMigration } = await import("./database-fixture.mjs");
+  const old = await createTestDatabase({ until: "20270325090000" });
+  await old.query(`insert into auth.users(id) values ($1), ($2)`, [admin, member]);
+  await old.query(`insert into companies(id,name) values($1,'Make')`, [A]);
+  await old.query(`insert into memberships(company_id,user_id,name,role,active) values ($1,$2,'Ana','admin',true),($1,$3,'Bruno','member',true)`, [A, admin, member]);
+  await old.query(`insert into agent_linkers(company_id,user_id,granted_by) values ($1,$2,$3)`, [A, member, admin]);
+  await applyMigration(old, "20270325090000");
+  const r = await old.query(`select user_id, agent_linker from memberships order by name`);
+  // A administradora não precisa (sempre pode); o Bruno vem da aba antiga.
+  assert.deepEqual(r.rows.map((x) => x.agent_linker), [false, true]);
+  const t = await old.query(`select to_regclass('public.agent_linkers') as t`);
+  assert.equal(t.rows[0].t, null);
 });
 
 await check("apagar a VPS leva os fluxos e tira da MAVI", async () => {

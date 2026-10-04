@@ -25,7 +25,6 @@ import {
   ROLE_LABEL,
   SOURCE_LABEL,
   agentInstances,
-  agentLinkers,
   agentPrompt,
   agentPromptVersion,
   agentPromptVersions,
@@ -37,12 +36,10 @@ import {
   publishAgentPrompt,
   refreshAgentWorkflow,
   saveAgentInstance,
-  setAgentLinker,
   syncAgents,
   testAgentInstance,
   useLiveAgents,
   type AgentInstance,
-  type AgentLinker,
   type AgentPrompt,
   type AgentPromptSummary,
   type AgentPromptVersion,
@@ -862,6 +859,9 @@ function Unlinked({
       <p className="muted agent-intro">
         Fluxos com AI Agent que não foram ligados sozinhos (o nome do fluxo não tem o nome de um cliente). Ligue
         ao cliente e ao produto, ou ignore os que são internos. Subfluxos herdam o cliente do fluxo principal.
+        {leader
+          ? " Outras pessoas usam esta aba quando liberadas em Módulos visíveis (ou Editar usuário › Recursos extras)."
+          : ""}
       </p>
       <label className="agent-check">
         <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
@@ -1152,7 +1152,7 @@ function InstanceForm({
 }
 
 // ------------------------------------------------------------ módulo
-type Tab = "agents" | "unlinked" | "instances" | "people";
+type Tab = "agents" | "unlinked" | "instances";
 
 /** O prompt aberto pelo link (?prompt=<id>), e o fechar limpa o link. */
 function usePromptParam() {
@@ -1167,87 +1167,6 @@ function usePromptParam() {
     setOpen(id);
   };
   return [open, set] as const;
-}
-
-/** Quem liga os fluxos aos clientes (aba Permissões, líderes). */
-function Permissions({
-  company,
-  notify,
-}: {
-  company: string;
-  notify: (message: string) => void;
-}) {
-  const [people, setPeople] = useState<AgentLinker[] | null>(null);
-  const [search, setSearch] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const load = useCallback(() => {
-    agentLinkers(company)
-      .then(setPeople)
-      .catch((e) => setError(errorOf(e)));
-  }, [company]);
-  useEffect(load, [load]);
-  useLiveAgents({}, load);
-  const toggle = (p: AgentLinker) => {
-    setBusy(p.user_id);
-    setError("");
-    setAgentLinker(company, p.user_id, !p.allowed)
-      .then((r) => {
-        notify(
-          r.allowed
-            ? `${p.name} agora liga fluxos aos clientes (aba Sem cliente e Trocar cliente).`
-            : `${p.name} não liga mais fluxos aos clientes.`,
-        );
-        load();
-      })
-      .catch((e) => setError(errorOf(e)))
-      .finally(() => setBusy(null));
-  };
-  if (!people) return error ? <p className="form-error">{error}</p> : <Loading variant="table" />;
-  const q = search.trim().toLowerCase();
-  const shown = people.filter((p) => !q || p.name.toLowerCase().includes(q));
-  return (
-    <div className="agent-permissions">
-      <p className="muted agent-intro">
-        Quem pode usar <strong>Trocar cliente</strong> na aba Agentes e ver a aba <strong>Sem cliente</strong> (ligar
-        fluxos ao cliente e ao produto, desligar e ignorar). Administradores e gestores sempre podem; os demais
-        ligam fluxos só aos clientes que atendem.
-      </p>
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="agent-search">
-        <Input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar pessoa"
-          aria-label="Buscar pessoa"
-        />
-      </div>
-      <ul className="agent-people">
-        {shown.map((p) => (
-          <li key={p.user_id}>
-            <label className="agent-check">
-              <input
-                type="checkbox"
-                checked={p.allowed}
-                disabled={p.leader || busy === p.user_id}
-                onChange={() => toggle(p)}
-              />
-              <strong>{p.name}</strong>
-            </label>
-            <span className="muted">
-              {p.leader
-                ? `${p.role === "admin" ? "Administrador" : "Gestor"} · sempre pode`
-                : p.allowed
-                  ? `Liberado${p.granted_by_name ? ` por ${p.granted_by_name}` : ""}${p.granted_at ? ` em ${when(p.granted_at)}` : ""}`
-                  : "Sem permissão"}
-            </span>
-          </li>
-        ))}
-        {!shown.length && <li className="muted">Ninguém com esse nome.</li>}
-      </ul>
-    </div>
-  );
 }
 
 export function AgentsPage({
@@ -1283,7 +1202,7 @@ export function AgentsPage({
   // Perdeu a permissão com a aba aberta: volta para Agentes.
   useEffect(() => {
     if (!status) return;
-    if ((tab === "unlinked" && !linker) || ((tab === "instances" || tab === "people") && !leader))
+    if ((tab === "unlinked" && !linker) || (tab === "instances" && !leader))
       setTab("agents");
   }, [status, tab, linker, leader]);
   const tabs: { id: Tab; label: string; show: boolean }[] = status?.linker
@@ -1295,7 +1214,6 @@ export function AgentsPage({
           show: true,
         },
         { id: "instances", label: `VPS do n8n${status.errors ? " ⚠" : ""}`, show: leader },
-        { id: "people", label: "Permissões", show: leader },
       ]
     : [];
 
@@ -1361,7 +1279,6 @@ export function AgentsPage({
         <Unlinked company={company} data={data} leader={leader} user={user} />
       )}
       {tab === "instances" && leader && <Instances company={company} admin={admin} notify={notify} />}
-      {tab === "people" && leader && <Permissions company={company} notify={notify} />}
       {open && <AgentPromptSheet promptId={open} onClose={() => setOpen(null)} notify={notify} />}
     </div>
   );

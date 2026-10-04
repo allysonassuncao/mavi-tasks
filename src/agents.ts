@@ -103,7 +103,8 @@ export type AgentInstance = {
 /**
  * O que a pessoa pode no módulo. `linker`: liga fluxos aos clientes (aba Sem
  * cliente e Trocar cliente) — líderes sempre, os outros quando liberados
- * (migração 20270324090000_agent_linkers). As VPS só para líderes.
+ * em Módulos visíveis ou Editar usuário › Recursos extras; migração
+ * 20270325090000_agent_linker_member). As VPS só para líderes.
  */
 export type AgentStatus =
   | { leader: false; linker: false }
@@ -119,18 +120,6 @@ export type AgentStatus =
       errors?: number;
       last_sync_at?: string | null;
     };
-/** Uma pessoa e se ela liga fluxos aos clientes. */
-export type AgentLinker = {
-  user_id: string;
-  name: string;
-  role: string;
-  /** Administrador ou gestor: sempre pode. */
-  leader: boolean;
-  allowed: boolean;
-  granted_at: string | null;
-  granted_by_name: string | null;
-};
-
 export const ROLE_LABEL: Record<AgentRole, string> = {
   main: "Principal",
   subflow: "Subfluxo",
@@ -207,16 +196,6 @@ export const ignoreAgentWorkflow = (workflow: string, ignored: boolean) =>
     p_workflow: workflow,
     p_ignored: ignored,
   }) as Promise<AgentWorkflow>;
-export const agentLinkers = (company: string) =>
-  demo()?.then((m) => m.demoLinkers()) ??
-  (rpc("agent_linkers_list", { p_company: company }) as Promise<AgentLinker[]>);
-export const setAgentLinker = (company: string, user: string, allowed: boolean) =>
-  demo()?.then((m) => m.demoSetLinker(user, allowed)) ??
-  (rpc("agent_linker_set", {
-    p_company: company,
-    p_user: user,
-    p_allowed: allowed,
-  }) as Promise<{ user_id: string; allowed: boolean }>);
 export const agentInstances = (company: string) =>
   demo()?.then((m) => m.demoInstances()) ??
   (rpc("agent_instances_list", { p_company: company }) as Promise<

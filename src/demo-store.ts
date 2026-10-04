@@ -1353,6 +1353,21 @@ export class DemoStore {
         );
         break;
       }
+      case "set_member_agent_linker": {
+        // Mirrors public.set_member_agent_linker (migration 20270325090000).
+        const target = this.data.members.find((m) => m.user_id === a.p_user);
+        const me = this.data.members.find((m) => m.user_id === demoUser);
+        if (
+          !target ||
+          !canManageDueScope(this.data, demoUser, { project_id: null, client_id: null, team_id: null, user_id: a.p_user }) ||
+          (target.role === "admin" && me?.role !== "admin")
+        )
+          throw Error("Administradores liberam para todos; gestores, para as pessoas das suas equipes");
+        this.data.members = this.data.members.map((m) =>
+          m.user_id === a.p_user ? { ...m, agent_linker: !!a.p_on } : m,
+        );
+        break;
+      }
       case "set_member_multi_timer": {
         // Mirrors public.set_member_multi_timer (migration 20270202090000).
         const target = this.data.members.find((m) => m.user_id === a.p_user);

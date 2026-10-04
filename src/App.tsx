@@ -4586,6 +4586,16 @@ export default function App() {
                                         Marca prioridade
                                       </span>
                                     )}
+                                  {isLeader &&
+                                    m.agent_linker &&
+                                    m.role === "member" && (
+                                      <span
+                                        className="member-email"
+                                        title="Usa Trocar cliente e vê a aba Sem cliente do Agente Conversacional (Módulos visíveis e Recursos extras, em Editar usuário)"
+                                      >
+                                        Liga fluxos do Agente
+                                      </span>
+                                    )}
                                   {isLeader && m.multi_timer && (
                                     <span
                                       className="member-email"
@@ -4633,6 +4643,13 @@ export default function App() {
                                             p_company: company,
                                             p_user: m.user_id,
                                             p_access: access,
+                                          })
+                                        }
+                                        saveAgentLinker={(on) =>
+                                          mutate("set_member_agent_linker", {
+                                            p_company: company,
+                                            p_user: m.user_id,
+                                            p_on: on,
                                           })
                                         }
                                       />

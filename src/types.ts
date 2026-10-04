@@ -51,6 +51,12 @@ export interface Member {
    */
   task_priority?: boolean;
   /**
+   * Agente Conversacional: liga os fluxos do n8n aos clientes ("Trocar
+   * cliente" e a aba "Sem cliente"; set_member_agent_linker, por
+   * administradores e gestores; eles sempre podem).
+   */
+  agent_linker?: boolean;
+  /**
    * Avisos na caixa de entrada dos aprendizados novos do Copiloto e da MAVI
    * (Painel da MAVI; set_member_lesson_alerts, só administradores e gestores).
    */

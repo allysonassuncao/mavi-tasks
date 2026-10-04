@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { LayoutGrid, PlugZap } from "lucide-react";
+import { BotMessageSquare, LayoutGrid, PlugZap } from "lucide-react";
 import { Checkbox } from "./ui";
 import type { Member } from "./types";
 import {
@@ -28,12 +28,18 @@ export function MemberModulesMenu({
   member,
   save,
   saveMcp,
+  saveAgentLinker,
 }: {
   member: Member;
   /** Saves the person's hidden modules. */
   save: (hidden: string[]) => Promise<unknown>;
   /** Liga ou desliga a IA externa (MCP) da pessoa (set_member_mcp). */
   saveMcp?: (access: "default" | "on" | "off") => Promise<unknown>;
+  /**
+   * Agente Conversacional: Trocar cliente e a aba Sem cliente
+   * (set_member_agent_linker; líderes sempre podem).
+   */
+  saveAgentLinker?: (on: boolean) => Promise<unknown>;
 }) {
   const saved = hiddenModules(member);
   const [hidden, setHidden] = useState<string[]>(saved);
@@ -117,6 +123,30 @@ export function MemberModulesMenu({
       setStatus("error");
     } finally {
       setMcpBusy(false);
+    }
+  }
+
+  const linkerSaved = !!member.agent_linker;
+  const [linker, setLinker] = useState(linkerSaved);
+  const [linkerBusy, setLinkerBusy] = useState(false);
+  useEffect(() => {
+    if (!linkerBusy) setLinker(linkerSaved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkerSaved]);
+  async function toggleLinker(on: boolean) {
+    if (!saveAgentLinker) return;
+    setLinker(on);
+    setLinkerBusy(true);
+    setError("");
+    try {
+      await saveAgentLinker(on);
+      setStatus("saved");
+    } catch (err) {
+      setLinker(!on);
+      setError((err as Error).message);
+      setStatus("error");
+    } finally {
+      setLinkerBusy(false);
     }
   }
 
@@ -224,6 +254,26 @@ export function MemberModulesMenu({
                 <PlugZap size={13} aria-hidden="true" /> MAVI em apps externos (MCP)
               </span>
               {mcp === "default" && <small>padrão</small>}
+            </label>
+          )}
+          {saveAgentLinker && (
+            <label
+              className="checkbox-label member-modules-option member-modules-mcp"
+              title={
+                leader
+                  ? "Administradores e gestores sempre usam Trocar cliente e a aba Sem cliente"
+                  : "Usar Trocar cliente e ver a aba Sem cliente do Agente Conversacional (só nos clientes das equipes da pessoa)"
+              }
+            >
+              <Checkbox
+                checked={leader || linker}
+                disabled={leader || linkerBusy || hidden.includes("agents")}
+                onCheckedChange={(on) => void toggleLinker(on === true)}
+              />
+              <span>
+                <BotMessageSquare size={13} aria-hidden="true" /> Agente Conversacional: ligar fluxos aos clientes
+              </span>
+              {leader && <small>sempre</small>}
             </label>
           )}
           <div className="member-modules-foot">

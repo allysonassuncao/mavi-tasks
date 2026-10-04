@@ -27,7 +27,9 @@ const roles: { id: Role; label: string }[] = [
  * pick the modules the person sees (set_member_pages); admins and managers
  * turn on the extras, such as timing several tasks at once
  * (set_member_multi_timer), marking tasks Alta/Urgente
- * (set_member_task_priority; admins and managers always can) and, for admins
+ * (set_member_task_priority; admins and managers always can), linking the
+ * Agente Conversacional's n8n flows to clients (set_member_agent_linker;
+ * admins and managers always can) and, for admins
  * and managers (who open the Painel
  * da MAVI), the inbox notices of the Copiloto's and the MAVI's new learnings
  * (set_member_lesson_alerts).
@@ -60,6 +62,7 @@ export function MemberForm({
   const [active, setActive] = useState(member.active);
   const [multiTimer, setMultiTimer] = useState(!!member.multi_timer);
   const [taskPriority, setTaskPriority] = useState(!!member.task_priority);
+  const [agentLinker, setAgentLinker] = useState(!!member.agent_linker);
   const [copilotAlerts, setCopilotAlerts] = useState(
     !!member.lesson_alerts_copilot,
   );
@@ -132,6 +135,13 @@ export function MemberForm({
           p_company: company,
           p_user: member.user_id,
           p_on: taskPriority,
+        });
+      // The same for linking the Agente Conversacional's flows to clients.
+      if (!leader && agentLinker !== !!member.agent_linker)
+        await mutate("set_member_agent_linker", {
+          p_company: company,
+          p_user: member.user_id,
+          p_on: agentLinker,
         });
       // Only leaders open the Painel da MAVI: a collaborator can't keep them.
       const copilotOn = leader && copilotAlerts;
@@ -340,6 +350,23 @@ export function MemberForm({
                     : taskPriority
                       ? "dá e tira a prioridade Alta ou Urgente nas tarefas que vê; elas ficam em destaque e no topo da lista"
                       : "desligado: marca só Baixa ou Normal (nas tarefas que edita)"}
+                </small>
+              </span>
+            </label>
+            <label className="checkbox-label">
+              <Checkbox
+                checked={role === "admin" || role === "manager" || agentLinker}
+                disabled={role === "admin" || role === "manager"}
+                onCheckedChange={(on) => setAgentLinker(on === true)}
+              />
+              <span>
+                Agente Conversacional: ligar fluxos aos clientes
+                <small className="member-module-note">
+                  {role === "admin" || role === "manager"
+                    ? "administradores e gestores sempre usam Trocar cliente e a aba Sem cliente"
+                    : agentLinker
+                      ? "usa Trocar cliente e vê a aba Sem cliente (liga, desliga e ignora fluxos do n8n), só nos clientes das equipes da pessoa"
+                      : "desligado: só lê e edita os prompts dos clientes que atende"}
                 </small>
               </span>
             </label>
