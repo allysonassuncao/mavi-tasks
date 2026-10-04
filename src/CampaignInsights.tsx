@@ -22,8 +22,9 @@ import {
   Star,
   TrendingUp,
   TriangleAlert,
+  UserRound,
 } from "lucide-react";
-import { Button, Input, Loading, Textarea } from "./ui";
+import { Button, Checkbox, Input, Loading, Textarea } from "./ui";
 import { Empty, Modal } from "./components";
 import { navigate, taskUrl, useUrlState } from "./router";
 import { appPath } from "./temperature";
@@ -52,6 +53,7 @@ import {
   whenText,
   type CampaignInsight,
   type CampaignInsightsView,
+  type CampaignOwner,
   type InsightBadge,
   type InsightKind,
   type InsightRun,
@@ -146,7 +148,10 @@ function useInsightActions(
   notify: (message: string) => void,
 ): { handlers: Handlers; dialogs: ReactNode } {
   const [busy, setBusy] = useState<string | null>(null);
-  const [reasonFor, setReasonFor] = useState<{ insight: CampaignInsight; mode: "dismiss" | "down" } | null>(null);
+  const [reasonFor, setReasonFor] = useState<{
+    insight: CampaignInsight;
+    mode: "dismiss" | "down";
+  } | null>(null);
   const [snoozeFor, setSnoozeFor] = useState<CampaignInsight | null>(null);
   const run = async (id: string, job: () => Promise<unknown>, done: string) => {
     setBusy(id);
@@ -212,7 +217,10 @@ function useInsightActions(
               i.id,
               () =>
                 reasonFor.mode === "dismiss"
-                  ? backend.setStatus(company, i.id, "dismissed", { reason, comment })
+                  ? backend.setStatus(company, i.id, "dismissed", {
+                      reason,
+                      comment,
+                    })
                   : backend.vote(company, i.id, "down", reason || undefined, comment),
               reasonFor.mode === "dismiss"
                 ? "Insight descartado. A MAVI aprende com o motivo."
@@ -229,7 +237,10 @@ function useInsightActions(
           onSave={async (until) => {
             const ok = await run(
               snoozeFor.id,
-              () => backend.setStatus(company, snoozeFor.id, "snoozed", { until: until.toISOString() }),
+              () =>
+                backend.setStatus(company, snoozeFor.id, "snoozed", {
+                  until: until.toISOString(),
+                }),
               `Combinado: o insight volta ${until.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}, com aviso na sua caixa de entrada.`,
             );
             if (ok) setSnoozeFor(null);
@@ -464,7 +475,8 @@ function PendingLine({
   pending: NonNullable<CampaignInsightsView["pending"]>;
   timezone: string;
 }) {
-  const who = pending.trigger === "manual" && pending.requested_by_name ? ` Pedida por ${pending.requested_by_name}.` : "";
+  const who =
+    pending.trigger === "manual" && pending.requested_by_name ? ` Pedida por ${pending.requested_by_name}.` : "";
   if (pending.waiting_until) {
     const at = new Date(pending.waiting_until).toLocaleTimeString("pt-BR", {
       hour: "2-digit",
@@ -493,16 +505,42 @@ export function InsightCard({
   insight,
   compact = false,
   handlers,
+  first = false,
 }: {
   insight: CampaignInsight;
   compact?: boolean;
   /** As ações (sem elas, só leitura — ex.: o histórico das análises). */
   handlers?: Handlers;
+  /** O primeiro aberto da análise: "Comece por aqui". */
+  first?: boolean;
 }) {
   const Icon = KIND_ICONS[insight.kind];
-  const evidence = compact ? insight.evidence.slice(0, 2) : insight.evidence;
+  const steps = insight.action
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const numbers = (
+    <ul className="insight-evidence" aria-label="Os números">
+      {insight.evidence.map((e) => (
+        <li key={`${e.entity}|${e.window}|${e.metric}`}>
+          <span>{e.label}</span>
+          <strong>{formatEvidence(e)}</strong>
+          <small>
+            {e.name} · {WINDOW_LABELS[e.window]}
+          </small>
+        </li>
+      ))}
+    </ul>
+  );
   return (
-    <article className={`insight-card kind-${insight.kind} prio-${insight.priority}${compact ? " compact" : ""}`}>
+    <article
+      className={`insight-card kind-${insight.kind} prio-${insight.priority}${compact ? " compact" : ""}${first ? " first" : ""}`}
+    >
+      {first && (
+        <p className="insight-first">
+          <Star size={12} aria-hidden="true" /> Comece por aqui
+        </p>
+      )}
       <header>
         <span className="insight-kind">
           <Icon size={13} aria-hidden="true" /> {KIND_LABELS[insight.kind]}
@@ -523,24 +561,39 @@ export function InsightCard({
           {insight.target.parent ? <> · em {insight.target.parent}</> : null}
         </p>
       )}
-      {insight.body && <p className="insight-body">{insight.body}</p>}
-      {insight.action && (
-        <p className="insight-action">
-          <ArrowRight size={14} aria-hidden="true" />
-          <span>{insight.action}</span>
-        </p>
+      {insight.body && (
+        <div className="insight-section">
+          <span className="insight-label">O que está acontecendo</span>
+          <p className="insight-body">{insight.body}</p>
+        </div>
       )}
-      <ul className="insight-evidence" aria-label="Evidências">
-        {evidence.map((e) => (
-          <li key={`${e.entity}|${e.window}|${e.metric}`}>
-            <span>{e.label}</span>
-            <strong>{formatEvidence(e)}</strong>
-            <small>
-              {e.name} · {WINDOW_LABELS[e.window]}
-            </small>
-          </li>
-        ))}
-      </ul>
+      {!!steps.length && (
+        <div className="insight-section insight-action">
+          <span className="insight-label">
+            <ArrowRight size={13} aria-hidden="true" /> O que fazer
+          </span>
+          {steps.length === 1 ? (
+            <p>{steps[0]}</p>
+          ) : (
+            <ol>
+              {steps.map((x, k) => (
+                <li key={k}>{x}</li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+      {compact ? (
+        <details className="insight-numbers">
+          <summary>Ver os números ({insight.evidence.length})</summary>
+          {numbers}
+        </details>
+      ) : (
+        <div className="insight-section">
+          <span className="insight-label">Os números</span>
+          {numbers}
+        </div>
+      )}
       {insight.status !== "new" && <StatusLine insight={insight} />}
       {!!insight.tasks?.length && (
         <ul className="insight-tasks" aria-label="Tarefas">
@@ -583,7 +636,12 @@ export function InsightCard({
 }
 
 const shortDay = (v: string | null | undefined) =>
-  v ? new Date(v).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : "";
+  v
+    ? new Date(v).toLocaleDateString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+      })
+    : "";
 /** Aplicado (com o efeito), adiado ou descartado — e por quem. */
 function StatusLine({ insight: i }: { insight: CampaignInsight }) {
   const who = i.status_by_name ? ` por ${i.status_by_name}` : "";
@@ -594,9 +652,7 @@ function StatusLine({ insight: i }: { insight: CampaignInsight }) {
           <Check size={13} aria-hidden="true" /> Aplicado{who} em {shortDay(i.applied_at)}
         </strong>
         <span>
-          {i.effect
-            ? effectText(i.effect)
-            : "A MAVI mede o efeito nas próximas análises (a partir de 3 dias depois)."}
+          {i.effect ? effectText(i.effect) : "A MAVI mede o efeito nas próximas análises (a partir de 3 dias depois)."}
         </span>
       </div>
     );
@@ -620,7 +676,15 @@ function StatusLine({ insight: i }: { insight: CampaignInsight }) {
 }
 
 /** Os botões do insight: aplicar, lembrar depois, descartar, tarefa, 👍/👎 (ou reabrir). */
-function Actions({ insight: i, handlers: h, compact }: { insight: CampaignInsight; handlers: Handlers; compact: boolean }) {
+function Actions({
+  insight: i,
+  handlers: h,
+  compact,
+}: {
+  insight: CampaignInsight;
+  handlers: Handlers;
+  compact: boolean;
+}) {
   const busy = h.busy === i.id;
   if (i.status !== "new")
     return (
@@ -637,7 +701,13 @@ function Actions({ insight: i, handlers: h, compact }: { insight: CampaignInsigh
     );
   return (
     <div className={`insight-actions${compact ? " compact" : ""}`}>
-      <button type="button" className="insight-act apply" disabled={busy} onClick={() => h.status(i, "applied")} title="Marcar como aplicado (a MAVI mede o efeito depois)">
+      <button
+        type="button"
+        className="insight-act apply"
+        disabled={busy}
+        onClick={() => h.status(i, "applied")}
+        title="Marcar como aplicado (a MAVI mede o efeito depois)"
+      >
         <Check size={14} aria-hidden="true" />
         {!compact && "Aplicado"}
       </button>
@@ -645,12 +715,24 @@ function Actions({ insight: i, handlers: h, compact }: { insight: CampaignInsigh
         <Clock size={14} aria-hidden="true" />
         {!compact && "Lembrar depois"}
       </button>
-      <button type="button" className="insight-act" disabled={busy} onClick={() => h.dismiss(i)} title="Descartar (com motivo)">
+      <button
+        type="button"
+        className="insight-act"
+        disabled={busy}
+        onClick={() => h.dismiss(i)}
+        title="Descartar (com motivo)"
+      >
         <X size={14} aria-hidden="true" />
         {!compact && "Descartar"}
       </button>
       {h.task && (
-        <button type="button" className="insight-act" disabled={busy} onClick={() => h.task!(i)} title="Criar tarefa a partir do insight">
+        <button
+          type="button"
+          className="insight-act"
+          disabled={busy}
+          onClick={() => h.task!(i)}
+          title="Criar tarefa a partir do insight"
+        >
           <ListPlus size={14} aria-hidden="true" />
           {!compact && "Criar tarefa"}
         </button>
@@ -761,8 +843,8 @@ export function CampaignInsightsAside({
       </header>
       {v.pending && <PendingLine pending={v.pending} timezone={v.timezone} />}
       <div className="insights-aside-list">
-        {list.slice(0, 4).map((i) => (
-          <InsightCard key={i.id} insight={i} compact handlers={handlers} />
+        {list.slice(0, 4).map((i, k) => (
+          <InsightCard key={i.id} insight={i} compact handlers={handlers} first={k === 0 && list.length > 1} />
         ))}
         {!list.length && !v.pending && (
           <p className="insights-empty">
@@ -808,7 +890,10 @@ function RunRow({ run, timezone, expireDays }: { run: InsightRun; timezone: stri
         <span className="insights-run-who">{who}</span>
         <span className={`insights-run-status status-${run.status}`}>{RUN_STATUS[run.status]}</span>
         <span className="insights-run-count">{count}</span>
-        <span className="insights-run-cost" title={run.model ? `Modelo: ${run.model}${run.provider_name ? ` (${run.provider_name})` : ""}` : undefined}>
+        <span
+          className="insights-run-cost"
+          title={run.model ? `Modelo: ${run.model}${run.provider_name ? ` (${run.provider_name})` : ""}` : undefined}
+        >
           {run.status === "done" || run.cost_usd ? money(run.cost_usd) : ""}
         </span>
       </button>
@@ -817,7 +902,8 @@ function RunRow({ run, timezone, expireDays }: { run: InsightRun; timezone: stri
           {run.summary && <p className="insights-run-summary">{run.summary}</p>}
           {!!run.expired_count && (
             <p className="insights-run-expired">
-              {run.expired_count} {run.expired_count === 1 ? "insight expirou" : "insights expiraram"} sem uso ({expireDays ? `${expireDays} dias` : "o prazo do Painel da MAVI"}
+              {run.expired_count} {run.expired_count === 1 ? "insight expirou" : "insights expiraram"} sem uso (
+              {expireDays ? `${expireDays} dias` : "o prazo do Painel da MAVI"}
               abertos sem ser aplicado, adiado, descartado, avaliado ou virar tarefa) e saiu da tela.
             </p>
           )}
@@ -873,6 +959,113 @@ function RunRow({ run, timezone, expireDays }: { run: InsightRun; timezone: stri
   );
 }
 
+/** Os responsáveis pela campanha: recebem os avisos dos insights (quem edita campanhas escolhe). */
+function Owners({
+  state,
+  backend,
+  company,
+  campaign,
+  notify,
+}: {
+  state: InsightsState;
+  backend: InsightsBackend;
+  company: string;
+  campaign: string;
+  notify: (message: string) => void;
+}) {
+  const owners = state.view?.owners ?? [];
+  const [open, setOpen] = useState(false);
+  const [people, setPeople] = useState<CampaignOwner[] | null>(null);
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const start = () => {
+    setOpen(true);
+    setError("");
+    setChosen(owners.map((o) => o.id));
+    backend.ownerCandidates(company, campaign).then(setPeople, (e: Error) => setError(e.message));
+  };
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await backend.setOwners(company, campaign, chosen);
+      setOpen(false);
+      notify("Responsáveis salvos.");
+      state.reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="insights-owners">
+      <UserRound size={14} aria-hidden="true" />
+      <span>
+        <strong>Responsáveis:</strong>{" "}
+        {owners.length ? owners.map((o) => o.name).join(", ") : "nenhum (os avisos vão para as equipes do cliente)"}
+      </span>
+      {state.view?.can_set_owners && (
+        <button type="button" className="text-btn" onClick={start}>
+          {owners.length ? "Alterar" : "Escolher"}
+        </button>
+      )}
+      {open && (
+        <Modal title="Responsáveis pela campanha" onClose={() => setOpen(false)} busy={busy}>
+          <form
+            className="entity-form insights-reason"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <p className="insights-owners-help">
+              Quem responde pela campanha recebe os avisos dos insights da MAVI (caixa de entrada e push). Até 5
+              pessoas.
+            </p>
+            {!people && !error && <Loading variant="list" />}
+            {people && (
+              <ul className="insights-owners-list">
+                {people.map((p) => {
+                  const on = chosen.includes(p.id);
+                  return (
+                    <li key={p.id}>
+                      <label className="cins-check">
+                        <Checkbox
+                          checked={on}
+                          disabled={!on && chosen.length >= 5}
+                          onCheckedChange={(v) =>
+                            setChosen((c) => (v === true ? [...c, p.id] : c.filter((x) => x !== p.id)))
+                          }
+                        />
+                        <span>{p.name}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="form-footer">
+              <Button type="button" className="btn secondary" onClick={() => setOpen(false)} disabled={busy}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="btn primary" loading={busy} disabled={!people}>
+                Salvar
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 /** A aba "Insights": os abertos e o histórico das análises (auditoria e custo). */
 export function CampaignInsightsTab({
   state,
@@ -922,6 +1115,7 @@ export function CampaignInsightsTab({
         </div>
         <AnalyzeNow state={state} backend={backend} company={company} campaign={campaign} notify={notify} />
       </div>
+      <Owners state={state} backend={backend} company={company} campaign={campaign} notify={notify} />
       {v.pending && <PendingLine pending={v.pending} timezone={v.timezone} />}
       <section aria-label="Insights">
         <div className="scope-tabs insights-filter" role="tablist" aria-label="Insights por situação">
@@ -958,8 +1152,13 @@ export function CampaignInsightsTab({
           if (list.length)
             return (
               <div className="insights-grid">
-                {list.map((i) => (
-                  <InsightCard key={i.id} insight={i} handlers={handlers} />
+                {list.map((i, k) => (
+                  <InsightCard
+                    key={i.id}
+                    insight={i}
+                    handlers={handlers}
+                    first={filter === "open" && k === 0 && list.length > 1}
+                  />
                 ))}
               </div>
             );
@@ -1007,7 +1206,7 @@ export function InsightsBadgeChip({ badge, onOpen }: { badge: InsightBadge | und
         <span className="insights-pulse" aria-hidden="true" /> Analisando
       </span>
     );
-  const label = `${badge.open} ${badge.open === 1 ? "insight" : "insights"}${badge.high ? ` (${badge.high} de prioridade alta)` : ""}`;
+  const label = `${badge.open} ${badge.open === 1 ? "insight" : "insights"}${badge.high ? ` (${badge.high} para fazer hoje)` : ""}`;
   return (
     <button
       type="button"

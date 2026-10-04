@@ -99,7 +99,7 @@ export type InsightMaterial = {
   google_token: { refresh_token_cipher: string } | null;
   crm_company_id: string | null;
   daily: { day: string; spend: number; conversions: number; multiplier: number }[];
-  settings: { money_basis: Basis; run_cap_usd: number; min_new_days?: number };
+  settings: { money_basis: Basis; run_cap_usd: number; min_new_days?: number; min_results?: number; max_insights?: number };
   last_done_at: string | null;
   previous: {
     kind: string;
@@ -219,24 +219,24 @@ export const METRICS: Record<string, { label: string; unit: "money" | "count" | 
   clicks: { label: "Cliques", unit: "count" },
   results: { label: "Resultados na plataforma", unit: "count" },
   cpa: { label: "Custo por resultado", unit: "money" },
-  ctr: { label: "CTR", unit: "pct" },
-  cpc: { label: "CPC", unit: "money" },
-  cpm: { label: "CPM", unit: "money" },
-  frequency: { label: "Frequência", unit: "ratio" },
+  ctr: { label: "Taxa de cliques (CTR)", unit: "pct" },
+  cpc: { label: "Custo por clique (CPC)", unit: "money" },
+  cpm: { label: "Custo por mil impressões (CPM)", unit: "money" },
+  frequency: { label: "Vezes que cada pessoa viu (frequência)", unit: "ratio" },
   value: { label: "Valor de conversão", unit: "money" },
-  roas: { label: "ROAS da plataforma", unit: "ratio" },
+  roas: { label: "Retorno na plataforma (ROAS)", unit: "ratio" },
   crm_opportunities: { label: "Oportunidades no CRM", unit: "count" },
   crm_wins: { label: "Ganhos no CRM", unit: "count" },
   crm_revenue: { label: "Receita no CRM", unit: "money" },
   crm_cpl: { label: "Custo por oportunidade (CRM)", unit: "money" },
   crm_cost_win: { label: "Custo por ganho (CRM)", unit: "money" },
-  crm_roas: { label: "ROAS do CRM", unit: "ratio" },
-  crm_rate: { label: "Resultados que viraram oportunidade", unit: "pct" },
+  crm_roas: { label: "Retorno em vendas no CRM (ROAS)", unit: "ratio" },
+  crm_rate: { label: "Resultados que viraram oportunidade no CRM", unit: "pct" },
   // O funil do CRM (oportunidades criadas no ciclo).
   crm_open: { label: "Oportunidades abertas", unit: "count" },
   crm_won_deals: { label: "Oportunidades ganhas", unit: "count" },
   crm_lost: { label: "Oportunidades perdidas", unit: "count" },
-  crm_lost_rate: { label: "Taxa de perda (CRM)", unit: "pct" },
+  crm_lost_rate: { label: "Oportunidades perdidas no CRM (%)", unit: "pct" },
   crm_qualified: { label: "Oportunidades qualificadas", unit: "count" },
   crm_score: { label: "Pontuação média da qualificação", unit: "ratio" },
   // Só no total: a meta do ciclo e o que o MAVI conta.
@@ -245,7 +245,7 @@ export const METRICS: Record<string, { label: string; unit: "money" | "count" | 
   budget: { label: "Verba do ciclo", unit: "money" },
   mavi_results: { label: "Resultados que contam (MAVI)", unit: "count" },
   mavi_cpa: { label: "Custo por resultado (MAVI)", unit: "money" },
-  cost_vs_goal: { label: "Custo × meta", unit: "pct" },
+  cost_vs_goal: { label: "Custo por resultado em relação à meta", unit: "pct" },
   spend_pace: { label: "Ritmo de gasto", unit: "pct" },
   results_pace: { label: "Ritmo de resultados", unit: "pct" },
   days_elapsed: { label: "Dias do ciclo passados", unit: "days" },
@@ -521,6 +521,17 @@ const targetOf = (entities: Map<string, Entity>, key: unknown): Insight["target"
   return { key: e.key, level: e.level, name: e.name, ...(parent ? { parent } : {}) };
 };
 
+/** "O que fazer": até 3 passos, um por linha. */
+export function stepsOf(v: unknown): string {
+  const list = Array.isArray(v) ? v : typeof v === "string" ? v.split(/\n+/) : [];
+  return list
+    .map((x) => (typeof x === "string" ? x.replace(/^\s*(\d+[.)]|[-•*])\s*/, "").trim() : ""))
+    .filter(Boolean)
+    .slice(0, 3)
+    .join("\n")
+    .slice(0, 800);
+}
+
 /** Lê a resposta da MAVI: só o que é bem formado e tem evidência que confere. */
 export function parseInsights(
   text: string,
@@ -560,7 +571,7 @@ export function parseInsights(
       priority,
       title,
       body: typeof x.body === "string" ? x.body.trim().slice(0, 2000) : "",
-      action: typeof x.action === "string" ? x.action.trim().slice(0, 800) : "",
+      action: stepsOf(x.steps ?? x.action),
       evidence,
       target,
       source: "mavi",
@@ -586,13 +597,21 @@ export const UTM_HINT = {
 
 const fmtCount = (v: number) => new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(v);
 
+const fmtMoney = (v: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
+const fmtPct = (v: number) => `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(v)}%`;
+const LEVEL_NAME: Partial<Record<Level, string>> = { campaign: "a campanha", adset: "o conjunto", ad: "o anúncio" };
+
 /**
  * As detecções automáticas (sem modelo, sempre conferidas):
  *  - conversões na plataforma e nenhuma oportunidade no CRM com o nome da
  *    campanha (UTM ausente ou errada);
  *  - UTMs do CRM quase iguais ao nome de uma campanha ou conjunto (só a
  *    grafia difere: maiúsculas, acentos, espaços);
- *  - custo por resultado do ciclo bem acima da meta.
+ *  - Google: leads no CRM sem a palavra-chave;
+ *  - custo por resultado do ciclo bem acima da meta;
+ *  - Meta: conjunto em "Aprendizado limitado" que pesa na campanha;
+ *  - Meta: anúncio cansado (frequência alta nos últimos 7 dias e taxa de
+ *    cliques bem abaixo da dos últimos 30).
  */
 export function ruleInsights(m: InsightMaterial, a: Analysis, entities: Map<string, Entity>): Insight[] {
   const out: Insight[] = [];
@@ -608,15 +627,15 @@ export function ruleInsights(m: InsightMaterial, a: Analysis, entities: Map<stri
       out.push({
         kind: "tracking",
         priority: "high",
-        title: `${c.name}: conversões na plataforma e nenhum lead no CRM`,
-        body: `No ciclo, a campanha registrou ${fmtCount(numOr(x.results))} ${a.result_label.toLowerCase() || "resultados"} na plataforma, mas nenhuma oportunidade com utm_campaign igual ao nome dela chegou ao MakeCRM.${
+        title: `${c.name}: a plataforma registra leads, mas nenhum chega ao CRM`,
+        body: `No ciclo, a plataforma contou ${fmtCount(numOr(x.results))} ${a.result_label.toLowerCase() || "resultados"}, mas nenhum lead com o nome desta campanha entrou no MakeCRM. ${
           near
-            ? ` O CRM recebeu oportunidades com a UTM "${near.name}", quase igual ao nome da campanha: só a grafia difere.`
-            : " É provável que as UTMs dos anúncios estejam ausentes ou com outro nome, ou que os leads não estejam chegando ao CRM."
-        }`,
+            ? `Os leads estão chegando com o nome "${near.name}", escrito um pouco diferente, e por isso não contam para a campanha.`
+            : "Provavelmente os links dos anúncios estão sem as UTMs (ou com outro nome), ou o formulário não está mandando os leads para o CRM."
+        } Sem isso, não dá para saber quais anúncios trazem clientes de verdade.`,
         action: near
-          ? `Troque a UTM "${near.name}" pelo nome exato da campanha ("${c.name}") nos parâmetros de URL dos anúncios.`
-          : `Confira os parâmetros de URL dos anúncios (${UTM_HINT[a.platform]}) e se o formulário ou a página leva as UTMs até o CRM.`,
+          ? `Nos anúncios, troque a UTM "${near.name}" por "${c.name}" (exatamente igual)\nDepois de 1 ou 2 dias, confira se os novos leads aparecem no CRM com o nome certo`
+          : `Abra os anúncios e confira os parâmetros de URL: ${UTM_HINT[a.platform]}\nFaça um cadastro de teste e veja se ele chega ao CRM com as UTMs`,
         evidence: [...ev(c.key, "cycle", "results"), ...ev(c.key, "cycle", "crm_opportunities"), ...(near ? ev(near.key, "cycle", "crm_opportunities") : [])],
         target: targetOf(entities, c.key),
         source: "rule",
@@ -633,9 +652,9 @@ export function ruleInsights(m: InsightMaterial, a: Analysis, entities: Map<stri
       out.push({
         kind: "tracking",
         priority: "medium",
-        title: `UTM com grafia diferente de "${owner.name}"`,
-        body: `${fmtCount(opp)} ${opp === 1 ? "oportunidade chegou" : "oportunidades chegaram"} ao MakeCRM com a UTM "${u.name}", quase igual ao nome ${owner.level === "campaign" ? "da campanha" : owner.level === "ad" ? "do anúncio" : "do conjunto"} "${owner.name}" — só a grafia difere. O CRM e a aba Plataforma ligam pelo nome exato, então esses leads não contam para ${owner.level === "campaign" ? "a campanha" : "ele"}.`,
-        action: `Ajuste a UTM para "${owner.name}" (exatamente igual, com maiúsculas, acentos e espaços).`,
+        title: `Leads de "${owner.name}" chegam ao CRM com o nome escrito diferente`,
+        body: `${fmtCount(opp)} ${opp === 1 ? "lead chegou" : "leads chegaram"} ao MakeCRM com a UTM "${u.name}", quase igual ao nome d${owner.level === "campaign" ? "a campanha" : owner.level === "ad" ? "o anúncio" : "o conjunto"} "${owner.name}". O CRM liga pelo nome exato, então esses leads não contam para ${LEVEL_NAME[owner.level] ?? "ele"} nos relatórios.`,
+        action: `Nos parâmetros de URL, troque "${u.name}" por "${owner.name}" (com as mesmas maiúsculas, acentos e espaços)`,
         evidence: [...ev(u.key, "cycle", "crm_opportunities"), ...ev(owner.key, "cycle", "results")],
         target: targetOf(entities, owner.key),
         source: "rule",
@@ -654,9 +673,9 @@ export function ruleInsights(m: InsightMaterial, a: Analysis, entities: Map<stri
       out.push({
         kind: "tracking",
         priority: "low",
-        title: `${c.name}: os leads chegam ao CRM sem a palavra-chave`,
-        body: `${fmtCount(opp)} ${opp === 1 ? "oportunidade chegou" : "oportunidades chegaram"} ao MakeCRM pela campanha, mas nenhuma com utm_content: não dá para saber qual palavra-chave trouxe cada lead, nem qual chega à negociação. O Google não tem parâmetro com o nome da campanha ou do grupo (só ids), então os nomes vão escritos e a palavra vai pelo {keyword}.`,
-        action: `Use ${UTM_HINT.google}.`,
+        title: `${c.name}: não dá para saber qual palavra-chave trouxe cada lead`,
+        body: `${fmtCount(opp)} ${opp === 1 ? "lead chegou" : "leads chegaram"} ao MakeCRM por esta campanha, mas sem a palavra-chave. Com ela, dá para ver quais palavras trazem leads que viram venda e cortar as que só gastam.`,
+        action: `No Google Ads, no sufixo do URL final de cada grupo, use: ${UTM_HINT.google.replace(/^no sufixo do URL final de cada grupo de anúncios: /, "")}`,
         evidence: ev(c.key, "cycle", "crm_opportunities"),
         target: targetOf(entities, c.key),
         source: "rule",
@@ -672,11 +691,12 @@ export function ruleInsights(m: InsightMaterial, a: Analysis, entities: Map<stri
       out.push({
         kind: "problem",
         priority: zero || (ratio ?? 0) >= 160 ? "high" : "medium",
-        title: zero ? "Investimento sem resultados no ciclo" : "Custo por resultado acima da meta do ciclo",
+        title: zero ? "O ciclo já gastou e ainda não trouxe resultados" : "Cada resultado está custando mais que a meta",
         body: zero
-          ? "O ciclo já investiu mais que o custo de dois resultados da meta e ainda não registrou resultados que contam."
-          : `O custo por resultado do ciclo está em ${fmtCount(ratio!)}% da meta.`,
-        action: "Veja abaixo onde o custo sobe (conjuntos, anúncios ou termos) antes de mexer no orçamento.",
+          ? `O ciclo já investiu ${fmtMoney(numOr(t.spend))}, o suficiente para dois resultados pela meta (${fmtMoney(t.goal_cpa)} cada), e ainda não registrou nenhum resultado que conta.`
+          : `Cada resultado do ciclo está custando ${fmtMoney(numOr(t.mavi_cpa))}, ${fmtPct(ratio! - 100)} acima da meta de ${fmtMoney(t.goal_cpa)}. Se continuar assim, o ciclo entrega menos resultados do que o combinado.`,
+        action:
+          "Veja nos outros insights onde o custo sobe (conjunto, anúncio ou palavra-chave)\nCorte ou ajuste esses itens antes de mexer na verba da campanha",
         evidence: [
           ...ev("total", "cycle", zero ? "spend" : "mavi_cpa"),
           ...ev("total", "cycle", "goal_cpa"),
@@ -687,7 +707,87 @@ export function ruleInsights(m: InsightMaterial, a: Analysis, entities: Map<stri
         fingerprint: fingerprintOf("problem", null, zero ? "sem-resultados" : "custo-acima-da-meta"),
       });
   }
+  if (a.platform === "meta") {
+    const spendOf = (e: Entity, w: WindowKey) => numOr(e.n[w]?.spend);
+    const campaignSpend = (w: WindowKey) =>
+      a.entities.filter((e) => e.level === "campaign").reduce((sum, e) => sum + spendOf(e, w), 0);
+    // Aprendizado limitado: o conjunto não junta resultados para a entrega se estabilizar.
+    const total7 = campaignSpend("d7");
+    for (const e of a.entities.filter((x) => x.level === "adset" && x.status === "Aprendizado limitado")) {
+      if (!total7 || spendOf(e, "d7") < total7 * 0.1) continue;
+      out.push({
+        kind: "problem",
+        priority: "medium",
+        title: `O conjunto "${e.name}" está travado em "Aprendizado limitado"`,
+        body: `O Meta avisa que este conjunto não consegue juntar resultados suficientes (cerca de 50 por semana) para a entrega se estabilizar. Enquanto isso, o custo tende a oscilar e ficar mais alto. Ele recebeu ${fmtPct((spendOf(e, "d7") / total7) * 100)} do investimento da campanha nos últimos 7 dias.`,
+        action:
+          "Junte este conjunto com outro parecido, para somar os resultados\nOu amplie o público (menos filtros de interesse e idade)\nOu otimize para um evento que acontece mais vezes (ex.: lead em vez de compra)",
+        evidence: [...ev(e.key, "d7", "results"), ...ev(e.key, "d7", "spend"), ...ev(e.key, "d7", "cpa")],
+        target: targetOf(entities, e.key),
+        source: "rule",
+        fingerprint: fingerprintOf("problem", e.key, "aprendizado-limitado"),
+      });
+    }
+    // Anúncio cansado: o público já viu demais e clica menos.
+    for (const e of a.entities.filter((x) => x.level === "ad")) {
+      const w7 = e.n.d7;
+      const w30 = e.n.d30;
+      if (!w7 || !w30 || !total7) continue;
+      if (spendOf(e, "d7") < total7 * 0.05 || numOr(w7.impressions) < 2000 || numOr(w30.clicks) < 30) continue;
+      const freq = numOr(w7.frequency);
+      const ctr7 = numOr(w7.ctr);
+      const ctr30 = numOr(w30.ctr);
+      if (freq < 3 || !ctr30 || ctr7 > ctr30 * 0.75) continue;
+      out.push({
+        kind: "problem",
+        priority: "medium",
+        title: `O anúncio "${e.name}" está cansando o público`,
+        body: `Nos últimos 7 dias, cada pessoa viu este anúncio ${fmtCount(freq)} vezes, em média, e a taxa de cliques caiu para ${fmtPct(ctr7)}, contra ${fmtPct(ctr30)} nos últimos 30 dias. Quando o público já viu demais, clica menos e o custo por lead sobe.`,
+        action:
+          "Crie uma variação do anúncio com outra imagem ou outro começo de vídeo, mantendo a mesma oferta\nSe a campanha tiver outros anúncios bons, deixe este com menos peso ou pause",
+        evidence: [...ev(e.key, "d7", "frequency"), ...ev(e.key, "d7", "ctr"), ...ev(e.key, "d30", "ctr")],
+        target: targetOf(entities, e.key),
+        source: "rule",
+        fingerprint: fingerprintOf("problem", e.key, "anuncio-cansado"),
+      });
+    }
+  }
   return out.filter((i) => i.evidence.length > 0);
+}
+
+/**
+ * Amostra mínima: um insight da MAVI (fora rastreamento) só fica se o item de
+ * que fala tem número suficiente numa das janelas citadas — resultados, ou
+ * metade disso em oportunidades no CRM, ou o investimento de 2 resultados da
+ * meta (para os que gastam sem trazer nada).
+ */
+export function sampleOk(i: Insight, entities: Map<string, Entity>, min: number) {
+  if (min <= 0 || i.kind === "tracking") return true;
+  const key = i.target?.key ?? "total";
+  const e = entities.get(key);
+  if (!e) return true;
+  const goal = numOr(entities.get("total")?.n.cycle?.goal_cpa);
+  const windows = new Set<WindowKey>(i.evidence.filter((x) => x.entity === key).map((x) => x.window));
+  if (!windows.size) windows.add("cycle");
+  return [...windows].some((w) => {
+    const n = e.n[w];
+    if (!n) return false;
+    return (
+      numOr(n.results) >= min ||
+      numOr(n.crm_opportunities) >= Math.ceil(min / 2) ||
+      (goal > 0 && numOr(n.spend) >= 2 * goal)
+    );
+  });
+}
+
+/** A ordem final: pela prioridade, mantendo a ordem de cada um (detecções e depois a MAVI), até o limite. */
+export function rankInsights(list: Insight[], max: number) {
+  const order: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
+  return list
+    .map((x, i) => ({ x, i }))
+    .sort((a, b) => order[a.x.priority] - order[b.x.priority] || a.i - b.i)
+    .slice(0, max)
+    .map(({ x }) => x);
 }
 
 // ------------------------------------------------------------ leitura do Meta
@@ -1209,38 +1309,57 @@ export function insightsContextLine(x: InsightsContext) {
 }
 
 // ------------------------------------------------------------ o pedido à MAVI
-export const INSIGHTS_INSTRUCTIONS = `Você é a MAVI, a inteligência de uma agência de marketing (seu nome é MAVI, no feminino). Aqui você é a analista sênior de tráfego pago da agência: lê os números de UMA campanha na plataforma (Meta Ads ou Google Ads), o resultado comercial no CRM (MakeCRM, ligado por UTM) e o contexto do cliente, e entrega insights técnicos, reais e aplicáveis para a equipe que opera a campanha.
+export const INSIGHTS_INSTRUCTIONS = `Você é a MAVI, a inteligência de uma agência de marketing (seu nome é MAVI, no feminino). Aqui você é a analista sênior de tráfego pago da agência: lê os números de UMA campanha na plataforma (Meta Ads ou Google Ads), o resultado comercial no CRM (MakeCRM, ligado por UTM) e o contexto do cliente, e entrega poucos insights, claros e aplicáveis, para quem opera a campanha — de quem começou ontem na agência ao gestor mais experiente.
 
-O que é um bom insight:
+COMO ESCREVER (o mais importante):
+- Linguagem simples, de conversa. Frases curtas (até ~20 palavras). Sem jargão: diga "custo por lead", "taxa de cliques", "vezes que cada pessoa viu o anúncio". Se precisar de uma sigla, explique na primeira vez: "retorno sobre o investimento (ROAS)".
+- Número sempre com comparação que dá sentido: "R$ 48 por lead, quase o dobro da meta de R$ 25"; "3 de cada 10 leads chegam à Negociação, contra 1 de cada 10 nos outros conjuntos". Poucos números no texto: os que provam a ideia.
+- "title": a conclusão em uma frase, até 90 caracteres, com o nome do item. Ex.: "O anúncio 'Frete grátis' traz os leads que mais viram venda". Nada de títulos vagos ("Oportunidade de otimização").
+- "body" (O que está acontecendo): 2 a 3 frases. O que os números mostram, por que isso importa (dinheiro perdido ou ganho, leads bons ou ruins) e o porquê provável. Fato é fato; hipótese vem com "provavelmente" ou "vale testar".
+- "steps" (O que fazer): de 1 a 3 passos curtos, no imperativo, que alguém sem experiência consegue seguir, dizendo onde e o quê. Ex.: ["No Gerenciador, duplique o conjunto 'Mulheres 25-34'", "No novo conjunto, suba a verba em 20%", "Daqui a 3 dias, compare o custo por lead com o original"]. Nada genérico como "teste novos criativos" ou "acompanhe os resultados".
+
+O QUE É UM BOM INSIGHT:
 - Específico: fala de um anúncio, conjunto/grupo, palavra-chave, termo de pesquisa, público ou da campanha, pelo nome.
-- Cruzado: o melhor insight junta a plataforma com o CRM (ex.: "o anúncio X tem o CPL mais alto, mas é o que mais gera oportunidades no CRM"; "o conjunto Y converte barato na plataforma e quase nada vira oportunidade").
-- Explicado: diga o porquê provável quando os dados permitirem (o texto/título do criativo, a promessa, o público, a correspondência da palavra-chave, a frequência alta, o horário…). Separe o que é fato (números) do que é hipótese ("provavelmente", "vale testar").
-- Acionável: a ação é concreta (pausar, escalar duplicando o conjunto, mover verba de A para B, testar uma variação do criativo X com a promessa Y, negativar o termo Z, revisar a UTM…). Nada genérico como "teste novos criativos" ou "acompanhe os resultados".
-- Novo: não repita insights anteriores ainda abertos com outras palavras. Se um anterior continua valendo, repita-o com o MESMO "topic" e o MESMO "target" (ele é confirmado, não duplicado). Se nada mudou, devolva menos insights.
+- Cruzado: o melhor insight junta a plataforma com o CRM (ex.: "o anúncio X tem o lead mais caro, mas é o que mais gera oportunidades"; "o conjunto Y gera leads baratos que quase nunca viram oportunidade").
+- Prioritário: traga poucos — no máximo o "limite" do material; 3 bons valem mais que 5 médios. Ordene do mais importante para o menos: o primeiro é o que a pessoa deve fazer hoje.
+- Novo: não repita insights anteriores ainda abertos com outras palavras. Se um anterior continua valendo, repita-o com o MESMO "topic" e o MESMO "target" (ele é confirmado, não duplicado). Se nada mudou, devolva menos insights (ou nenhum).
 
-Tipos ("kind"): "highlight" (destaque positivo), "opportunity" (oportunidade de ganho), "problem" (problema que custa dinheiro ou resultado), "tracking" (rastreamento/UTM/integração). Prioridade ("priority"): "high" (age hoje: dinheiro sendo perdido ou ganho relevante), "medium", "low".
+Tipos ("kind"): "highlight" (algo dando certo), "opportunity" (chance de ganhar mais), "problem" (algo custando dinheiro ou resultado), "tracking" (rastreamento/UTM/integração). Prioridade ("priority"): "high" (agir hoje: dinheiro sendo perdido ou ganho relevante), "medium" (nesta semana), "low" (quando der).
 
-Regras dos números (obrigatório):
+BOAS PRÁTICAS DE TRÁFEGO (obrigatório):
+- Amostra: só afirme que algo "vai bem" ou "vai mal" com número suficiente (o mínimo vem em "amostra_minima"). Abaixo disso, não conclua; no máximo, diga para esperar.
+- Fase de aprendizado (Meta): conjunto com status "Aprendizado" ainda está calibrando — não sugira pausar, mudar público, criativo ou verba nele; espere sair (cerca de 50 resultados em 7 dias). "Aprendizado limitado" pede o contrário: juntar conjuntos parecidos, ampliar o público ou otimizar para um evento mais frequente.
+- Verba: nunca sugira subir ou baixar mais de 20% a 30% de uma vez em um conjunto que vai bem (reinicia o aprendizado); para crescer mais, duplique o conjunto.
+- Cansaço do criativo: frequência subindo junto com a taxa de cliques caindo indica que o público já viu demais o anúncio: sugira trocar ou variar o criativo.
+- Mudanças recentes: depois de aplicar algo, espere ao menos 3 dias de dados antes de julgar.
+
+REGRAS DOS NÚMEROS (obrigatório):
 - Toda afirmação numérica vem de "evidence": cada evidência aponta a entidade ("entity", a "key" do material), a janela ("window": cycle, d7, d15, d30 ou since_last) e a métrica ("metric", um nome da lista de métricas). O sistema preenche o valor a partir do material; evidência que não existe é descartada, e insight sem evidência é descartado.
-- Use de 1 a 5 evidências por insight, as que provam o que você diz. No texto, cite números com moderação e sempre iguais aos do material, no formato brasileiro (R$ 1.234,56; 12,3%).
-- Nunca invente números, nomes, metas, datas ou comparações que não estejam no material. Amostra pequena (poucos resultados ou poucos dias) pede cautela: diga isso ou não conclua.
+- Use de 1 a 4 evidências por insight, as que provam o que você diz. No texto, os números iguais aos do material, no formato brasileiro (R$ 1.234,56; 12,3%).
+- Nunca invente números, nomes, metas, datas ou comparações que não estejam no material.
 - O dinheiro já vem na base indicada em "valores" (com ou sem M). Não fale de M, multiplicador ou índice de performance.
 - Resultados na plataforma (results) seguem o que a plataforma otimiza; "Resultados que contam (MAVI)" é o que a agência conta para a meta do ciclo.
 - O CRM liga pelo nome exato: utm_campaign = nome da campanha, utm_term = nome do conjunto (no Google, do grupo), utm_content = nome do anúncio (no Google, a palavra-chave, quando a agência usa {keyword}). Oportunidade zerada pode ser falta de UTM, não falta de lead.
-- O funil do CRM (quando vem) mostra a QUALIDADE do lead de cada campanha, conjunto, anúncio ou palavra-chave: abertas, ganhas, perdidas, taxa de perda, quantas chegaram a cada etapa ("stage:…", ou além), os motivos de perda ("lost:…"), a faixa da qualificação ("bucket:…") e as respostas mais escolhidas no formulário ("answer:…"); os nomes estão em "funil_crm.legenda". Use isso para separar volume de qualidade (ex.: o conjunto mais barato que só gera leads perdidos por "sem orçamento"; a palavra-chave cara que leva à Negociação) e cite essas métricas nas evidências pelo nome da chave. O CRM não tem idade nem gênero do lead: o cruzamento com o público é pelo conjunto (o público dele na plataforma × a qualidade dos leads dele no CRM).
+- O funil do CRM (quando vem) mostra a QUALIDADE do lead: abertas, ganhas, perdidas, taxa de perda, quantas chegaram a cada etapa ("stage:…", ou além), os motivos de perda ("lost:…"), a faixa da qualificação ("bucket:…") e as respostas mais escolhidas no formulário ("answer:…"); os nomes estão em "funil_crm.legenda". Use isso para separar volume de qualidade e cite essas métricas nas evidências pelo nome da chave. O CRM não tem idade nem gênero do lead: o cruzamento com o público é pelo conjunto.
 - As "detecções automáticas" já viram insights: não as repita; você pode aprofundar com outra conclusão (outro topic).
-- Anúncios podem trazer "criativo" (o que a imagem ou o vídeo comunica: promessa, gancho, oferta, prova, formato — lido pela MAVI a partir da imagem e do texto) e "audio" (trecho da transcrição do vídeo). Use para explicar o porquê do desempenho (ex.: a promessa de frete grátis do anúncio que mais gera oportunidades no CRM) e para sugerir variações concretas; a descrição do criativo não é número e não entra nas evidências.
+- Anúncios podem trazer "criativo" (o que a imagem ou o vídeo comunica: promessa, gancho, oferta — lido pela MAVI) e "audio" (trecho da transcrição do vídeo). Use para explicar o porquê do desempenho e sugerir variações concretas; a descrição do criativo não é número e não entra nas evidências.
 - "aprendizados_do_time" são regras que o time ensinou (para a agência, o produto ou este cliente): siga-as sempre; nunca sugira o que elas proíbem.
 - Insights anteriores "dismissed" foram descartados pelo time (veja o "motivo"): não os traga de volta com outras palavras. "expired" ficaram dias abertos sem que ninguém agisse: o time não viu valor neles; só volte ao assunto se os números pioraram bem desde então, com um ângulo novo. "applied" já foram aplicados: veja "insights_aplicados" — se o efeito piorou, diga e sugira o ajuste; se melhorou, você pode sugerir levar a mesma ideia a outro conjunto ou anúncio.
 - O contexto do cliente (dossiê, Radar, termômetro, reuniões) serve para interpretar e priorizar; não copie trechos dele nem exponha conversas internas.
 
 Responda SOMENTE com um JSON, sem texto antes ou depois:
-{"summary": "uma frase sobre o momento da campanha", "insights": [{"kind": "...", "priority": "...", "topic": "assunto curto e estável, ex.: anuncio-x-promessa-frete", "target": "key da entidade principal ou null", "title": "até 120 caracteres, direto", "body": "o que os dados mostram e o porquê provável, até 600 caracteres", "action": "o que fazer, até 300 caracteres", "evidence": [{"entity": "key", "window": "cycle", "metric": "crm_opportunities"}]}]}
-No máximo 6 insights, do mais importante para o menos. Português do Brasil.
+{"summary": "uma frase simples sobre o momento da campanha", "insights": [{"kind": "...", "priority": "...", "topic": "assunto curto e estável, ex.: anuncio-x-promessa-frete", "target": "key da entidade principal ou null", "title": "...", "body": "...", "steps": ["...", "..."], "evidence": [{"entity": "key", "window": "cycle", "metric": "crm_opportunities"}]}]}
+Português do Brasil.
 
 As métricas (nomes usados em "n" e em "evidence"): ${Object.entries(METRICS)
   .map(([k, v]) => `${k} = ${v.label}`)
   .join("; ")}. Cada entidade traz "n" por janela; "dentro_de" é a key da entidade de cima. A entidade "total" é a campanha toda, com a meta do ciclo.`;
+
+/** Insights por análise e amostra mínima (Painel da MAVI). */
+export const maxInsights = (m: Pick<InsightMaterial, "settings">) =>
+  Math.min(Math.max(Number(m.settings.max_insights ?? 4) || 4, 2), 8);
+export const minResults = (m: Pick<InsightMaterial, "settings">) =>
+  Math.min(Math.max(Number(m.settings.min_results ?? 10), 0), 100);
 
 /** O material da conversa (compacto: só o que ajuda a decidir). */
 export function insightMessage(m: InsightMaterial, a: Analysis, rules: Insight[]): string {
@@ -1266,6 +1385,10 @@ export function insightMessage(m: InsightMaterial, a: Analysis, rules: Insight[]
       nicho: y.niche || undefined,
     },
     valores: a.basis === "gross" ? "R$ com M (o que o cliente vê)" : "R$ sem M (o investimento real na plataforma)",
+    limite: `no máximo ${maxInsights(m)} insights`,
+    amostra_minima: minResults(m)
+      ? `${minResults(m)} resultados (ou ${Math.ceil(minResults(m) / 2)} oportunidades no CRM, ou o investimento de 2 resultados da meta) no item e na janela citados`
+      : "sem mínimo",
     resultado_da_plataforma: a.result_label || undefined,
     janelas: windows,
     funil_crm:
@@ -2007,9 +2130,16 @@ export async function analyse(
       cost: Math.round(result.meter.cost * 1e6) / 1e6,
       ...(company.route ? { provider_id: company.route.provider_id, provider: company.route.provider } : {}),
     });
-    const parsed = parseInsights(result.text, entities, 6, full.labels ?? {});
+    const parsed = parseInsights(result.text, entities, maxInsights(m) + 2, full.labels ?? {});
     summary = parsed.summary;
-    found = parsed.insights;
+    // Amostra mínima: sem número suficiente, a MAVI não conclui.
+    const min = minResults(m);
+    found = parsed.insights.filter((x) => sampleOk(x, entities, min));
+    const small = parsed.insights.length - found.length;
+    if (small)
+      notes.push(
+        `${small} ${small === 1 ? "ideia ficou" : "ideias ficaram"} de fora por amostra pequena (menos de ${min} resultados).`,
+      );
     if (parsed.dropped)
       notes.push(
         `${parsed.dropped} ${parsed.dropped === 1 ? "insight foi descartado" : "insights foram descartados"} por falta de evidência que conferisse.`,
@@ -2049,6 +2179,13 @@ export async function analyse(
       notes.push(`Conferência do Jev indisponível: ${(e as Error).message}`.slice(0, 200));
     }
   }
+  // Menos e melhor: pela prioridade, até o limite do Painel (o primeiro é o "Comece por aqui").
+  const ranked = rankInsights(list, maxInsights(m));
+  if (ranked.length < list.length)
+    notes.push(
+      `${list.length - ranked.length} ${list.length - ranked.length === 1 ? "insight de menor prioridade ficou" : "insights de menor prioridade ficaram"} de fora pelo limite de ${maxInsights(m)} por análise.`,
+    );
+  list = ranked;
   await workerRpc(env, deps, "ai_campaign_insight_store", {
     p_run: runId,
     p_result: {

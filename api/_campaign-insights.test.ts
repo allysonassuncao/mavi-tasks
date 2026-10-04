@@ -29,7 +29,10 @@ import {
   ThrottledError,
   nearMissUtms,
   parseInsights,
+  rankInsights,
   ruleInsights,
+  sampleOk,
+  stepsOf,
   runCampaignInsights,
   skipReason,
   totalEntity,
@@ -267,6 +270,72 @@ describe("detecções automáticas", () => {
   });
 });
 
+describe("Fase 5: boas práticas, amostra, ordem e passos", () => {
+  const n = (w: Parameters<typeof derive>[0]) => derive(w);
+  const metaAnalysis = (extra: Entity[]) => analysisOf([campaign(30, 4), ...extra]);
+
+  it("aprendizado limitado que pesa e anúncio cansado viram detecções; o pequeno não", () => {
+    const camp = campaign(30, 4);
+    camp.n.d7 = n({ spend: 1000, results: 20, impressions: 50000, clicks: 600 });
+    const limited: Entity = {
+      key: "s:1",
+      level: "adset",
+      name: "Público A",
+      parent: "c:222",
+      status: "Aprendizado limitado",
+      n: { d7: n({ spend: 300, results: 4 }) },
+    };
+    const small: Entity = { ...limited, key: "s:2", name: "Público B", n: { d7: n({ spend: 50, results: 1 }) } };
+    const tired: Entity = {
+      key: "a:1",
+      level: "ad",
+      name: "Vídeo depoimento",
+      parent: "s:1",
+      n: {
+        d7: n({ spend: 200, impressions: 9000, reach: 2500, clicks: 45, results: 5 }),
+        d30: n({ spend: 800, impressions: 30000, reach: 12000, clicks: 300, results: 25 }),
+      },
+    };
+    const a = analysisOf([camp, limited, small, tired]);
+    const r = ruleInsights(material(), a, new Map(a.entities.map((e) => [e.key, e])));
+    const prints = r.map((x) => x.fingerprint);
+    expect(prints).toContain("problem#s:1#aprendizado-limitado");
+    expect(prints).not.toContain("problem#s:2#aprendizado-limitado");
+    const t = r.find((x) => x.fingerprint === "problem#a:1#anuncio-cansado")!;
+    expect(t.title).toBe('O anúncio "Vídeo depoimento" está cansando o público');
+    expect(t.body).toMatch(/viu este anúncio 3,6 vezes.*caiu para 0,5%, contra 1%/);
+    expect(t.action.split("\n")).toHaveLength(2);
+  });
+
+  it("amostra mínima: sem resultados, oportunidades ou gasto suficiente, a MAVI não conclui", () => {
+    const tiny: Entity = { key: "s:9", level: "adset", name: "Teste", parent: "c:222", n: { cycle: n({ spend: 15, results: 2 }) } };
+    const a = metaAnalysis([tiny]);
+    const map = new Map(a.entities.map((e) => [e.key, e]));
+    const about = (key: string | null, kind: "highlight" | "tracking" = "highlight") =>
+      ({ kind, target: key ? { key } : null, evidence: [] }) as never;
+    expect(sampleOk(about("s:9"), map, 10)).toBe(false);
+    expect(sampleOk(about("s:9", "tracking"), map, 10)).toBe(true);
+    expect(sampleOk(about("c:222"), map, 10)).toBe(true);
+    expect(sampleOk(about("s:9"), map, 0)).toBe(true);
+    // Gastou 2 resultados da meta (R$ 20 cada) sem trazer nada: pode apontar o problema.
+    map.set("s:9", { ...tiny, n: { cycle: n({ spend: 45, results: 0 }) } });
+    expect(sampleOk(about("s:9"), map, 10)).toBe(true);
+  });
+
+  it("a ordem pela prioridade (mantendo a da análise) e o limite; os passos em linhas", () => {
+    const x = (title: string, priority: "high" | "medium" | "low") => ({ title, priority }) as never;
+    expect(rankInsights([x("a", "low"), x("b", "high"), x("c", "medium"), x("d", "high")], 3).map((i: { title: string }) => i.title)).toEqual([
+      "b",
+      "d",
+      "c",
+    ]);
+    expect(stepsOf(["1. Duplique o conjunto", " - Suba 20%", "", "Compare em 3 dias", "Quarto"])).toBe(
+      "Duplique o conjunto\nSuba 20%\nCompare em 3 dias",
+    );
+    expect(stepsOf("Pausar o anúncio")).toBe("Pausar o anúncio");
+  });
+});
+
 describe("a resposta da MAVI", () => {
   const a = analysisOf([campaign(30, 4)]);
   const map = new Map(a.entities.map((e) => [e.key, e]));
@@ -449,8 +518,8 @@ describe("worker dos insights", () => {
     expect(result.summary).toBe("Leads sem CRM e custo alto.");
     // As detecções primeiro; o "Chute" o Jev recusou.
     expect(result.insights.map((i: any) => [i.source, i.kind, i.title])).toEqual([
-      ["rule", "tracking", "Motion: conversões na plataforma e nenhum lead no CRM"],
-      ["rule", "problem", "Custo por resultado acima da meta do ciclo"],
+      ["rule", "tracking", "Motion: a plataforma registra leads, mas nenhum chega ao CRM"],
+      ["rule", "problem", "Cada resultado está custando mais que a meta"],
       ["mavi", "highlight", "Bom volume"],
     ]);
     expect(result.insights[2].confidence).toBe(0.92);

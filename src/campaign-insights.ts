@@ -132,6 +132,10 @@ export type CampaignInsightsView = {
   min_interval_minutes: number;
   /** Dias abertos sem uso até o insight expirar (0: nunca). */
   expire_days?: number;
+  /** Os responsáveis pela campanha (recebem os avisos dos insights). */
+  owners?: CampaignOwner[];
+  /** Quem vê pode escolher os responsáveis (quem edita campanhas). */
+  can_set_owners?: boolean;
   /** Por que a campanha não pode ser analisada agora (nulo: pode). */
   blocker: string | null;
   capped: boolean;
@@ -179,7 +183,8 @@ export type InsightSettings = {
   mavi_context: boolean;
   notify_inbox: boolean;
   notify_min_priority: InsightPriority;
-  notify_who: "team" | "team_leaders";
+  /** owners: os responsáveis pela campanha (sem responsável, as equipes do cliente). */
+  notify_who: "owners" | "team" | "team_leaders";
   money_basis: MoneyBasis;
   monthly_cap_usd: number | null;
   run_cap_usd: number;
@@ -194,6 +199,10 @@ export type InsightSettings = {
   creative_new_max: number;
   /** Dias abertos sem uso até o insight expirar e sair da tela (0: nunca). */
   expire_days: number;
+  /** Amostra mínima: resultados no item para a MAVI concluir (0: sem mínimo). */
+  min_results: number;
+  /** Insights por análise (os mais importantes). */
+  max_insights: number;
   updated_by?: string | null;
   updated_at?: string;
 };
@@ -227,15 +236,15 @@ export type InsightSettingsView = {
 
 // ------------------------------------------------------------ textos
 export const KIND_LABELS: Record<InsightKind, string> = {
-  highlight: "Destaque",
+  highlight: "Dando certo",
   opportunity: "Oportunidade",
-  problem: "Atenção",
+  problem: "Problema",
   tracking: "Rastreamento",
 };
 export const PRIORITY_LABELS: Record<InsightPriority, string> = {
-  high: "Alta",
-  medium: "Média",
-  low: "Baixa",
+  high: "Fazer hoje",
+  medium: "Nesta semana",
+  low: "Quando der",
 };
 export const WINDOW_LABELS: Record<InsightWindow, string> = {
   cycle: "ciclo",
@@ -425,7 +434,12 @@ export interface InsightsBackend {
   linkTask(company: string, insight: string, task: string): Promise<void>;
   unlinkTask(company: string, insight: string, task: string): Promise<void>;
   events(company: string, insight: string): Promise<InsightEvent[]>;
+  /** Quem pode ser responsável pela campanha (quem a vê). */
+  ownerCandidates(company: string, campaign: string): Promise<CampaignOwner[]>;
+  /** Os responsáveis (até 5): recebem os avisos dos insights. */
+  setOwners(company: string, campaign: string, users: string[]): Promise<CampaignOwner[]>;
 }
+export type CampaignOwner = { id: string; name: string };
 export type InsightEvent = {
   action: "applied" | "dismissed" | "snoozed" | "reopened" | "returned" | "task" | "expired";
   reason: string;
@@ -483,6 +497,10 @@ export const serverInsights: InsightsBackend = {
   unlinkTask: (company, insight, task) =>
     rpc<void>("unlink_campaign_insight_task", { p_company: company, p_insight: insight, p_task: task }),
   events: (company, insight) => rpc<InsightEvent[]>("campaign_insight_events", { p_company: company, p_insight: insight }),
+  ownerCandidates: (company, campaign) =>
+    rpc<CampaignOwner[]>("campaign_owner_candidates", { p_company: company, p_campaign: campaign }),
+  setOwners: (company, campaign, users) =>
+    rpc<CampaignOwner[]>("set_campaign_owners", { p_company: company, p_campaign: campaign, p_users: users }),
 };
 
 // ------------------------------------------------------------ aprendizados do time (líderes)
@@ -610,7 +628,7 @@ export const DEFAULT_SETTINGS: InsightSettings = {
   mavi_context: true,
   notify_inbox: true,
   notify_min_priority: "high",
-  notify_who: "team",
+  notify_who: "owners",
   money_basis: "net",
   monthly_cap_usd: 30,
   run_cap_usd: 0.5,
@@ -621,6 +639,8 @@ export const DEFAULT_SETTINGS: InsightSettings = {
   creative_videos: true,
   creative_new_max: 6,
   expire_days: 15,
+  min_results: 10,
+  max_insights: 4,
 };
 function demoSettings(): InsightSettingsView {
   return {
@@ -637,6 +657,11 @@ function demoSettings(): InsightSettingsView {
 }
 const ago = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString();
 /** Exemplos para o ambiente demonstrativo (nada vai ao banco). */
+const DEMO_PEOPLE: CampaignOwner[] = [
+  { id: "demo-ana", name: "Ana Tráfego" },
+  { id: "demo-bruno", name: "Bruno Gestor" },
+  { id: "demo-carla", name: "Carla Atendimento" },
+];
 export function demoInsights(): InsightsBackend {
   const insights = (run: string): CampaignInsight[] => [
     {
@@ -645,9 +670,9 @@ export function demoInsights(): InsightsBackend {
       last_seen_run: run,
       kind: "tracking",
       priority: "high",
-      title: "Leads – Formulário: conversões na plataforma e nenhum lead no CRM",
-      body: "No ciclo, a campanha registrou 48 cadastros na plataforma, mas nenhuma oportunidade com utm_campaign igual ao nome dela chegou ao MakeCRM. O CRM recebeu oportunidades com a UTM \"leads-formulario\", quase igual ao nome da campanha.",
-      action: "Troque a UTM \"leads-formulario\" pelo nome exato da campanha (\"Leads – Formulário\") nos parâmetros de URL dos anúncios.",
+      title: "Leads – Formulário: a plataforma registra leads, mas nenhum chega ao CRM",
+      body: "No ciclo, a plataforma contou 48 cadastros, mas nenhum lead com o nome desta campanha entrou no MakeCRM. Os leads estão chegando com o nome \"leads-formulario\", escrito um pouco diferente, e por isso não contam para a campanha.",
+      action: "Nos anúncios, troque a UTM \"leads-formulario\" por \"Leads – Formulário\" (exatamente igual)\nDepois de 1 ou 2 dias, confira se os novos leads aparecem no CRM com o nome certo",
       evidence: [
         { label: "Resultados na plataforma", value: 48, unit: "count", window: "cycle", entity: "c:1", name: "Leads – Formulário", metric: "results" },
         { label: "Oportunidades no CRM", value: 0, unit: "count", window: "cycle", entity: "c:1", name: "Leads – Formulário", metric: "crm_opportunities" },
@@ -667,9 +692,9 @@ export function demoInsights(): InsightsBackend {
       last_seen_run: run,
       kind: "highlight",
       priority: "medium",
-      title: "Anúncio \"Frete grátis em 24h\" puxa as oportunidades do CRM",
-      body: "Com 22% do investimento do ciclo, o anúncio gerou 41% das oportunidades no CRM, com custo por oportunidade 38% menor que a média, e 9 delas já chegaram à Negociação. O título promete entrega rápida e sem frete, a dor mais citada nas reuniões.",
-      action: "Duplique o conjunto com este anúncio e teste uma variação com a mesma promessa em vídeo curto.",
+      title: "O anúncio \"Frete grátis em 24h\" traz os leads que mais viram venda",
+      body: "Ele recebeu 22% da verba, mas trouxe 41% das oportunidades do CRM, e 9 já chegaram à Negociação. Provavelmente a promessa de entrega rápida e sem frete, a dor mais citada nas reuniões, atrai quem está pronto para comprar.",
+      action: "No Gerenciador, duplique o conjunto deste anúncio\nNo novo conjunto, crie um vídeo curto com a mesma promessa\nDaqui a 5 dias, compare o custo por oportunidade dos dois",
       evidence: [
         { label: "Oportunidades no CRM", value: 19, unit: "count", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "crm_opportunities" },
         { label: "Custo por oportunidade (CRM)", value: 23.4, unit: "money", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "crm_cpl" },
@@ -690,9 +715,9 @@ export function demoInsights(): InsightsBackend {
       last_seen_run: run,
       kind: "opportunity",
       priority: "low",
-      title: "Mulheres de 35 a 44 anos convertem mais barato no conjunto Remarketing",
-      body: "O público feminino de 35 a 44 anos teve o menor custo por resultado do conjunto nos últimos 7 dias.",
-      action: "Crie um conjunto só com esse público e verba moderada para validar.",
+      title: "Mulheres de 35 a 44 anos trazem os leads mais baratos do Remarketing",
+      body: "Nos últimos 7 dias, cada lead desse público custou bem menos que a média do conjunto. Ainda é cedo para mudar tudo, mas vale testar separado.",
+      action: "Crie um conjunto só com mulheres de 35 a 44 anos, com 20% da verba do Remarketing",
       evidence: [
         { label: "Custo por resultado", value: 18.9, unit: "money", window: "cycle", entity: "g:3:35-44|female", name: "Remarketing · 35-44 · Mulheres", metric: "cpa" },
       ],
@@ -718,6 +743,8 @@ export function demoInsights(): InsightsBackend {
         money_basis: "net",
         min_interval_minutes: 240,
         expire_days: 15,
+        owners: [DEMO_PEOPLE[0]],
+        can_set_owners: true,
         blocker: null,
         capped: false,
         wait_until: null,
@@ -806,6 +833,12 @@ export function demoInsights(): InsightsBackend {
     async unlinkTask() {},
     async events() {
       return [];
+    },
+    async ownerCandidates() {
+      return DEMO_PEOPLE;
+    },
+    async setOwners(_c, _campaign, users) {
+      return DEMO_PEOPLE.filter((p) => users.includes(p.id));
     },
     async badges(_company, campaigns) {
       return {

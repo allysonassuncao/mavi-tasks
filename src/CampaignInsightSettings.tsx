@@ -299,9 +299,9 @@ export function CampaignInsightSettings({
               disabled={!draft.notify_inbox}
               aria-label="Prioridade mínima"
             >
-              <SelectOption value="high">Só prioridade alta</SelectOption>
-              <SelectOption value="medium">Média e alta</SelectOption>
-              <SelectOption value="low">Todas</SelectOption>
+              <SelectOption value="high">Só os de "Fazer hoje"</SelectOption>
+              <SelectOption value="medium">"Fazer hoje" e "Nesta semana"</SelectOption>
+              <SelectOption value="low">Todos</SelectOption>
             </Select>
           </label>
           <label>
@@ -312,9 +312,58 @@ export function CampaignInsightSettings({
               disabled={!draft.notify_inbox}
               aria-label="Quem recebe"
             >
+              <SelectOption value="owners">Os responsáveis pela campanha</SelectOption>
               <SelectOption value="team">As pessoas das equipes do cliente</SelectOption>
               <SelectOption value="team_leaders">As equipes do cliente e os administradores e gestores</SelectOption>
             </Select>
+            <small>
+              Os responsáveis são escolhidos na aba Insights de cada campanha e sempre recebem. Campanha sem responsável:
+              avisa as equipes do cliente.
+            </small>
+          </label>
+        </div>
+      </section>
+
+      <section className="panel cins-block">
+        <h3>Menos e melhor</h3>
+        <p className="cins-help">
+          A MAVI traz só os insights mais importantes de cada análise, em linguagem simples, com o primeiro marcado como
+          "Comece por aqui". E só conclui que algo vai bem ou mal com número suficiente: abaixo da amostra mínima, a ideia
+          fica de fora (o rastreamento e as detecções automáticas não dependem dela).
+        </p>
+        <div className="cins-row">
+          <label>
+            <span>Insights por análise</span>
+            <Select
+              value={String(draft.max_insights)}
+              onValueChange={(v) => set({ max_insights: Number(v) })}
+              aria-label="Insights por análise"
+            >
+              {[3, 4, 5, 6].map((n) => (
+                <SelectOption key={n} value={String(n)}>
+                  {`Até ${n}`}
+                </SelectOption>
+              ))}
+            </Select>
+            <small>Os de prioridade maior primeiro; os demais ficam de fora (a nota da análise diz quantos).</small>
+          </label>
+          <label>
+            <span>Amostra mínima</span>
+            <Select
+              value={String(draft.min_results)}
+              onValueChange={(v) => set({ min_results: Number(v) })}
+              aria-label="Amostra mínima"
+            >
+              {[0, 5, 10, 20, 30, 50].map((n) => (
+                <SelectOption key={n} value={String(n)}>
+                  {n === 0 ? "Sem mínimo" : `${n} resultados`}
+                </SelectOption>
+              ))}
+            </Select>
+            <small>
+              No item e no período citados. Também vale metade disso em oportunidades no CRM, ou o investimento de 2
+              resultados da meta (para apontar o que gasta sem trazer nada).
+            </small>
           </label>
         </div>
       </section>

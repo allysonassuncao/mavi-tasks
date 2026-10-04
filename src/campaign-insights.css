@@ -271,26 +271,70 @@
   line-height: 1.5;
   color: #3b463e;
 }
-.insight-card.compact .insight-body {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+/* Linguagem simples: o que está acontecendo, o que fazer e os números. */
+.insight-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.insight-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #7c877f;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 .insight-action {
-  display: flex;
-  gap: 6px;
-  margin: 0;
   padding: 7px 9px;
   border-radius: 8px;
   background: #f4f8ee;
   color: #2f4a1a;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   line-height: 1.45;
 }
-.insight-action > svg {
-  flex-shrink: 0;
-  margin-top: 2px;
+.insight-action .insight-label {
+  color: #4d6b2c;
+}
+.insight-action p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.insight-action ol {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.insight-numbers > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  color: var(--muted);
+  list-style-position: inside;
+}
+.insight-numbers[open] > summary {
+  margin-bottom: 6px;
+}
+.insight-first {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #4c2a85;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.insight-card.first {
+  box-shadow: 0 0 0 1px #b9a3d6, 0 2px 8px rgba(76, 42, 133, 0.08);
 }
 .insight-evidence {
   list-style: none;
@@ -974,4 +1018,37 @@
   margin: 0;
   font-size: 0.76rem;
   color: var(--muted);
+}
+
+/* Responsáveis pela campanha (aba Insights). */
+.insights-owners {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: #3b463e;
+}
+.insights-owners > svg {
+  color: var(--muted);
+}
+.insights-owners-help {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.insights-owners-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.insights-owners-list label.cins-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
 }

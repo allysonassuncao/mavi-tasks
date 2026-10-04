@@ -210,7 +210,7 @@ await check("grava os insights, o custo e avisa quem atende o cliente (e quem pe
   assert.equal(notes.length, 1);
   assert.equal(notes[0].user_id, trafego);
   assert.equal(notes[0].title, "Insights da MAVI: Motion - Meta");
-  assert.match(notes[0].body, /^1 insight novo \(1 de prioridade alta\) · Conjunto X caro/);
+  assert.match(notes[0].body, /^1 insight novo \(1 para fazer hoje\) · Conjunto X caro/);
   assert.equal(notes[0].link, `/campanhas/${campaign}?aba=insights`);
   const live = await sql(`select payload from realtime.messages where payload->>'kind'='campaign_insights' order by id desc limit 1`);
   assert.equal(live[0].payload.status, "done");
@@ -686,6 +686,57 @@ await check("o prazo vem do Painel da MAVI: 7 dias expira antes; Nunca não expi
   await as(admin);
   await rpc("save_campaign_insight_settings", [A, JSON.stringify({ expire_days: 15 })]);
   await sql(`update campaign_insight_runs set status='done', claimed_until=null where status in ('queued','running')`);
+});
+
+await check("Fase 5: responsáveis recebem os avisos; a ordem da análise; amostra e limite no Painel", async () => {
+  await sql(`delete from campaign_insight_runs`);
+  await sql(`delete from notifications where kind='campaign_insight'`);
+  await as(admin);
+  let s = await rpc("save_campaign_insight_settings", [A, JSON.stringify({ min_results: 20, max_insights: 3, notify_who: "owners", notify_inbox: true })]);
+  assert.deepEqual([s.settings.min_results, s.settings.max_insights, s.settings.notify_who], [20, 3, "owners"]);
+  await assert.rejects(rpc("save_campaign_insight_settings", [A, JSON.stringify({ max_insights: 1 })]));
+  // Quem pode ser responsável: quem vê a campanha (Olga não atende o cliente).
+  await as(trafego);
+  const people = await rpc("campaign_owner_candidates", [A, campaign]);
+  assert.ok(people.some((p) => p.id === manager) && !people.some((p) => p.id === other));
+  await assert.rejects(rpc("set_campaign_owners", [A, campaign, [other]]), /Só pessoas que veem a campanha/);
+  const owners = await rpc("set_campaign_owners", [A, campaign, [manager]]);
+  assert.deepEqual(owners, [{ id: manager, name: "Gil Gestor" }]);
+  await as(other);
+  await assert.rejects(rpc("set_campaign_owners", [A, campaign, [other]]), /Sem permissão/);
+  // Agendada (sem quem pediu): só o responsável é avisado, não a equipe.
+  const [run] = await sql(`insert into campaign_insight_runs(company_id, campaign_id, trigger, status, started_at, attempts, local_day)
+    values ($1,$2,'schedule','running',now(),1,$3) returning id`, [A, campaign, today]);
+  await as(null);
+  const material = await worker("ai_campaign_insight_material", [SECRET, run.id]);
+  assert.deepEqual([material.settings.min_results, material.settings.max_insights], [20, 3]);
+  await worker("ai_campaign_insight_store", [SECRET, run.id, JSON.stringify({
+    status: "done",
+    insights: [
+      insight("problem#s:1#primeiro", { title: "Primeiro", priority: "medium" }),
+      insight("problem#s:1#segundo", { title: "Segundo", priority: "high" }),
+      insight("problem#s:1#terceiro", { title: "Terceiro", priority: "low" }),
+    ],
+  })]);
+  const notes = await sql(`select user_id from notifications where kind='campaign_insight'`);
+  assert.deepEqual(notes.map((n) => n.user_id), [manager]);
+  await as(trafego);
+  const v = await rpc("campaign_insights", [A, campaign, 8]);
+  assert.deepEqual(v.current.map((i) => i.title), ["Primeiro", "Segundo", "Terceiro"]);
+  assert.deepEqual(v.owners, [{ id: manager, name: "Gil Gestor" }]);
+  assert.equal(v.can_set_owners, true);
+  // Sem responsável: volta para a equipe do cliente.
+  await rpc("set_campaign_owners", [A, campaign, []]);
+  await sql(`delete from notifications where kind='campaign_insight'`);
+  const [run2] = await sql(`insert into campaign_insight_runs(company_id, campaign_id, trigger, status, started_at, attempts, local_day)
+    values ($1,$2,'schedule','running',now(),1,$3) returning id`, [A, campaign, today]);
+  await as(null);
+  await worker("ai_campaign_insight_store", [SECRET, run2.id, JSON.stringify({
+    status: "done", insights: [insight("problem#s:1#quarto", { title: "Quarto" })],
+  })]);
+  assert.deepEqual((await sql(`select user_id from notifications where kind='campaign_insight'`)).map((n) => n.user_id), [trafego]);
+  await as(admin);
+  await rpc("save_campaign_insight_settings", [A, JSON.stringify({ min_results: 10, max_insights: 4 })]);
 });
 
 await check("a campanha que não pode ser analisada diz por quê", async () => {
