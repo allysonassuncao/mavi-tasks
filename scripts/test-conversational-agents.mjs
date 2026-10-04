@@ -412,6 +412,62 @@ await check("o módulo entra entre os que o administrador pode ocultar", async (
   assert.ok(m.hidden_pages.includes("agents"));
 });
 
+await check("líderes liberam quem liga fluxos: Sem cliente e Trocar cliente nos clientes que atende", async () => {
+  await as(null);
+  await rpc("agent_sync_targets", [SECRET, null, null]);
+  await rpc("agent_sync_store", [SECRET, vps.id, JSON.stringify([
+    flow("wf7", "Bot sem nome de cliente", { active: true, role: "main", nodes: [node("n7", "Olá.")] }),
+  ]), false, null, null]);
+  const wf7 = (await sql(`select id from agent_workflows where n8n_id='wf7'`))[0].id;
+  const wf1 = (await sql(`select id from agent_workflows where n8n_id='wf1'`))[0].id;
+  await as(member);
+  assert.deepEqual(await rpc("agent_status", [A]), { leader: false, linker: false });
+  await fails(() => rpc("agent_list", [A, null, null, null, true]), /42501/);
+  await fails(() => rpc("agent_workflow_link", [wf7, client, contract]), /P0002/);
+  await fails(() => rpc("agent_linker_set", [A, member, true]), /42501/);
+  await fails(() => rpc("agent_linkers_list", [A]), /42501/);
+  // O gestor libera (o administrador e o gestor já podem).
+  await as(manager);
+  await fails(() => rpc("agent_linker_set", [A, admin, true]), /já ligam/);
+  await rpc("agent_linker_set", [A, member, true]);
+  const people = await rpc("agent_linkers_list", [A]);
+  const bruno = people.find((x) => x.user_id === member);
+  assert.deepEqual([bruno.allowed, bruno.leader, bruno.granted_by_name], [true, false, "Gil Gestor"]);
+  assert.equal(people.find((x) => x.user_id === admin).allowed, true);
+  await as(member);
+  const status = await rpc("agent_status", [A]);
+  assert.deepEqual([status.leader, status.linker, status.unlinked, status.instances], [false, true, 1, undefined]);
+  assert.deepEqual((await rpc("agent_list", [A, null, null, null, true])).map((w) => w.n8n_id).sort(), ["wf4", "wf7"]);
+  // Lê o prompt do fluxo sem cliente para decidir, mas não publica.
+  assert.equal((await rpc("agent_prompt_get", [P.n4])).node_name, "AI Agent n4");
+  // Só liga a clientes que atende.
+  await fails(() => rpc("agent_workflow_link", [wf7, other, null]), /clientes que atende/);
+  const linked = await rpc("agent_workflow_link", [wf7, client, contract]);
+  assert.equal(linked.client_name, "Clínica Sorriso");
+  await rpc("agent_workflow_ignore", [(await sql(`select id from agent_workflows where n8n_id='wf4'`))[0].id, false]);
+  // Trocar cliente de um fluxo que vê: desligar volta para Sem cliente.
+  await rpc("agent_workflow_link", [wf1, null, null]);
+  await rpc("agent_workflow_link", [wf1, client, contract]);
+  // Quem não atende o cliente, mesmo liberado, não mexe nos fluxos dele.
+  await as(manager);
+  await rpc("agent_linker_set", [A, outsider, true]);
+  await as(outsider);
+  await fails(() => rpc("agent_workflow_link", [wf1, null, null]), /P0002/);
+  // Tirar a permissão: volta ao normal.
+  await as(admin);
+  await rpc("agent_linker_set", [A, member, false]);
+  await as(member);
+  await fails(() => rpc("agent_list", [A, null, null, null, true]), /42501/);
+  await fails(() => rpc("agent_workflow_link", [wf1, null, null]), /42501/);
+  // Liberada de novo e desativada: sem acesso enquanto estiver fora.
+  await as(admin);
+  await rpc("agent_linker_set", [A, member, true]);
+  await sql(`update memberships set active=false where user_id=$1`, [member]);
+  await as(member);
+  await fails(() => rpc("agent_list", [A, null, null, null, true]), /42501/);
+  await sql(`update memberships set active=true where user_id=$1`, [member]);
+});
+
 await check("apagar a VPS leva os fluxos e tira da MAVI", async () => {
   await as(admin);
   await rpc("agent_instance_delete", [A, vps.id]);

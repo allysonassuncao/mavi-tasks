@@ -4205,6 +4205,7 @@ export default function App() {
                   <AgentsPage
                     key={company}
                     company={company}
+                    user={user}
                     data={catalogData}
                     notify={notify}
                   />

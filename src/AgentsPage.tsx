@@ -25,6 +25,7 @@ import {
   ROLE_LABEL,
   SOURCE_LABEL,
   agentInstances,
+  agentLinkers,
   agentPrompt,
   agentPromptVersion,
   agentPromptVersions,
@@ -36,10 +37,12 @@ import {
   publishAgentPrompt,
   refreshAgentWorkflow,
   saveAgentInstance,
+  setAgentLinker,
   syncAgents,
   testAgentInstance,
   useLiveAgents,
   type AgentInstance,
+  type AgentLinker,
   type AgentPrompt,
   type AgentPromptSummary,
   type AgentPromptVersion,
@@ -101,7 +104,9 @@ export function AgentList({
   contract,
   query = "",
   data,
+  canLink = false,
   leader = false,
+  user = "",
   onOpen,
   emptyHint,
 }: {
@@ -110,7 +115,10 @@ export function AgentList({
   contract?: string | null;
   query?: string;
   data?: Snapshot;
+  /** Trocar cliente (líderes e quem eles liberaram). */
+  canLink?: boolean;
   leader?: boolean;
+  user?: string;
   onOpen: (prompt: string) => void;
   emptyHint?: string;
 }) {
@@ -164,7 +172,7 @@ export function AgentList({
           <WorkflowBadges w={w} />
         </div>
         <div className="agent-flow-actions">
-          {leader && data && (
+          {canLink && data && (
             <button
               type="button"
               className="agent-link-btn"
@@ -190,6 +198,8 @@ export function AgentList({
       {linking === w.id && data && (
         <LinkEditor
           data={data}
+          leader={leader}
+          user={user}
           workflow={w}
           onDone={() => {
             setLinking(null);
@@ -277,10 +287,15 @@ export function AgentList({
 /** Escolhe o cliente e o produto do fluxo (líderes). */
 function LinkEditor({
   data,
+  leader,
+  user,
   workflow,
   onDone,
 }: {
   data: Snapshot;
+  /** Fora os líderes, só os clientes que a pessoa atende (a regra do Drive). */
+  leader: boolean;
+  user: string;
   workflow: AgentWorkflow;
   onDone: () => void;
 }) {
@@ -295,10 +310,13 @@ function LinkEditor({
   const [contract, setContract] = useState(workflow.contract_id ?? suggested(contracts));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const clients = useMemo(
-    () => data.clients.filter((c) => !c.archived).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
-    [data],
-  );
+  const clients = useMemo(() => {
+    const teams = new Set(data.teamMembers.filter((t) => t.user_id === user).map((t) => t.team_id));
+    const mine = new Set(data.clientTeams.filter((ct) => teams.has(ct.team_id)).map((ct) => ct.client_id));
+    return data.clients
+      .filter((c) => !c.archived && (leader || mine.has(c.id)))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [data, leader, user]);
   const save = (c: string | null, k: string | null) => {
     setBusy(true);
     setError("");
@@ -813,7 +831,17 @@ function VersionList({
 }
 
 // ------------------------------------------------------------ sem cliente
-function Unlinked({ company, data }: { company: string; data: Snapshot }) {
+function Unlinked({
+  company,
+  data,
+  leader,
+  user,
+}: {
+  company: string;
+  data: Snapshot;
+  leader: boolean;
+  user: string;
+}) {
   const [list, setList] = useState<AgentWorkflow[] | null>(null);
   const [all, setAll] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
@@ -876,6 +904,8 @@ function Unlinked({ company, data }: { company: string; data: Snapshot }) {
           {linking === w.id && (
             <LinkEditor
               data={data}
+              leader={leader}
+              user={user}
               workflow={w}
               onDone={() => {
                 setLinking(null);
@@ -1122,7 +1152,7 @@ function InstanceForm({
 }
 
 // ------------------------------------------------------------ módulo
-type Tab = "agents" | "unlinked" | "instances";
+type Tab = "agents" | "unlinked" | "instances" | "people";
 
 /** O prompt aberto pelo link (?prompt=<id>), e o fechar limpa o link. */
 function usePromptParam() {
@@ -1139,12 +1169,95 @@ function usePromptParam() {
   return [open, set] as const;
 }
 
+/** Quem liga os fluxos aos clientes (aba Permissões, líderes). */
+function Permissions({
+  company,
+  notify,
+}: {
+  company: string;
+  notify: (message: string) => void;
+}) {
+  const [people, setPeople] = useState<AgentLinker[] | null>(null);
+  const [search, setSearch] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    agentLinkers(company)
+      .then(setPeople)
+      .catch((e) => setError(errorOf(e)));
+  }, [company]);
+  useEffect(load, [load]);
+  useLiveAgents({}, load);
+  const toggle = (p: AgentLinker) => {
+    setBusy(p.user_id);
+    setError("");
+    setAgentLinker(company, p.user_id, !p.allowed)
+      .then((r) => {
+        notify(
+          r.allowed
+            ? `${p.name} agora liga fluxos aos clientes (aba Sem cliente e Trocar cliente).`
+            : `${p.name} não liga mais fluxos aos clientes.`,
+        );
+        load();
+      })
+      .catch((e) => setError(errorOf(e)))
+      .finally(() => setBusy(null));
+  };
+  if (!people) return error ? <p className="form-error">{error}</p> : <Loading variant="table" />;
+  const q = search.trim().toLowerCase();
+  const shown = people.filter((p) => !q || p.name.toLowerCase().includes(q));
+  return (
+    <div className="agent-permissions">
+      <p className="muted agent-intro">
+        Quem pode usar <strong>Trocar cliente</strong> na aba Agentes e ver a aba <strong>Sem cliente</strong> (ligar
+        fluxos ao cliente e ao produto, desligar e ignorar). Administradores e gestores sempre podem; os demais
+        ligam fluxos só aos clientes que atendem.
+      </p>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <div className="agent-search">
+        <Input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar pessoa"
+          aria-label="Buscar pessoa"
+        />
+      </div>
+      <ul className="agent-people">
+        {shown.map((p) => (
+          <li key={p.user_id}>
+            <label className="agent-check">
+              <input
+                type="checkbox"
+                checked={p.allowed}
+                disabled={p.leader || busy === p.user_id}
+                onChange={() => toggle(p)}
+              />
+              <strong>{p.name}</strong>
+            </label>
+            <span className="muted">
+              {p.leader
+                ? `${p.role === "admin" ? "Administrador" : "Gestor"} · sempre pode`
+                : p.allowed
+                  ? `Liberado${p.granted_by_name ? ` por ${p.granted_by_name}` : ""}${p.granted_at ? ` em ${when(p.granted_at)}` : ""}`
+                  : "Sem permissão"}
+            </span>
+          </li>
+        ))}
+        {!shown.length && <li className="muted">Ninguém com esse nome.</li>}
+      </ul>
+    </div>
+  );
+}
+
 export function AgentsPage({
   company,
+  user,
   data,
   notify,
 }: {
   company: string;
+  user: string;
   data: Snapshot;
   notify: (message: string) => void;
 }) {
@@ -1156,7 +1269,7 @@ export function AgentsPage({
   const loadStatus = useCallback(() => {
     agentStatus(company)
       .then(setStatus)
-      .catch(() => setStatus({ leader: false }));
+      .catch(() => setStatus({ leader: false, linker: false }));
   }, [company]);
   useEffect(loadStatus, [loadStatus]);
   useLiveAgents({}, loadStatus);
@@ -1165,46 +1278,54 @@ export function AgentsPage({
     return () => window.clearTimeout(t);
   }, [search]);
   const leader = !!status?.leader;
-  const admin = status?.leader ? status.admin : false;
+  const linker = !!status?.linker;
+  const admin = status?.linker ? status.admin : false;
+  // Perdeu a permissão com a aba aberta: volta para Agentes.
+  useEffect(() => {
+    if (!status) return;
+    if ((tab === "unlinked" && !linker) || ((tab === "instances" || tab === "people") && !leader))
+      setTab("agents");
+  }, [status, tab, linker, leader]);
+  const tabs: { id: Tab; label: string; show: boolean }[] = status?.linker
+    ? [
+        { id: "agents", label: "Agentes", show: true },
+        {
+          id: "unlinked",
+          label: `Sem cliente${status.unlinked ? ` (${status.unlinked})` : ""}`,
+          show: true,
+        },
+        { id: "instances", label: `VPS do n8n${status.errors ? " ⚠" : ""}`, show: leader },
+        { id: "people", label: "Permissões", show: leader },
+      ]
+    : [];
 
   return (
     <div className="agents-page">
-      {leader && status?.leader && (
+      {status?.linker && (
         <div className="agent-top">
           <div className="drive-view agent-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "agents"}
-              className={tab === "agents" ? "selected" : ""}
-              onClick={() => setTab("agents")}
-            >
-              Agentes
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "unlinked"}
-              className={tab === "unlinked" ? "selected" : ""}
-              onClick={() => setTab("unlinked")}
-            >
-              Sem cliente{status.unlinked ? ` (${status.unlinked})` : ""}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "instances"}
-              className={tab === "instances" ? "selected" : ""}
-              onClick={() => setTab("instances")}
-            >
-              VPS do n8n{status.errors ? " ⚠" : ""}
-            </button>
+            {tabs
+              .filter((t) => t.show)
+              .map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t.id}
+                  className={tab === t.id ? "selected" : ""}
+                  onClick={() => setTab(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
           </div>
-          <span className="muted agent-last-sync">
-            {status.instances
-              ? `Última leitura do n8n: ${when(status.last_sync_at)}`
-              : "Nenhuma VPS cadastrada ainda"}
-          </span>
+          {leader && (
+            <span className="muted agent-last-sync">
+              {status.instances
+                ? `Última leitura do n8n: ${when(status.last_sync_at)}`
+                : "Nenhuma VPS cadastrada ainda"}
+            </span>
+          )}
         </div>
       )}
       {tab === "agents" && (
@@ -1222,10 +1343,12 @@ export function AgentsPage({
             company={company}
             query={query}
             data={data}
+            canLink={linker}
             leader={leader}
+            user={user}
             onOpen={setOpen}
             emptyHint={
-              leader && status?.leader && !status.instances
+              leader && status?.linker && !status.instances
                 ? admin
                   ? "Cadastre as VPS do n8n na aba VPS do n8n para trazer os agentes."
                   : "Um administrador precisa cadastrar as VPS do n8n."
@@ -1234,8 +1357,11 @@ export function AgentsPage({
           />
         </>
       )}
-      {tab === "unlinked" && leader && <Unlinked company={company} data={data} />}
+      {tab === "unlinked" && linker && (
+        <Unlinked company={company} data={data} leader={leader} user={user} />
+      )}
       {tab === "instances" && leader && <Instances company={company} admin={admin} notify={notify} />}
+      {tab === "people" && leader && <Permissions company={company} notify={notify} />}
       {open && <AgentPromptSheet promptId={open} onClose={() => setOpen(null)} notify={notify} />}
     </div>
   );
