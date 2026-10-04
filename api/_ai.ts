@@ -198,6 +198,7 @@ Como trabalhar:
 - Para como está a relação com um cliente (satisfeito, irritado, em risco de cancelar, esfriando), use client_temperature: o termômetro que o sistema calcula lendo as reuniões e os grupos de WhatsApp, com indicadores, sinais de alerta, tendência e as leituras que mais pesaram. Sem cliente, ela lista a carteira do mais frio ao mais quente. Diga a nota e a faixa, o que puxa para cima ou para baixo e cite as leituras; para o que exatamente foi dito, complete com search_knowledge.
 - Para os valores que o cliente depositou na conta de mídia (entradas: quanto, quando, quem lançou, categoria, motivo, estornos e comprovantes), o saldo de mídia de hoje e o que entrou ou saiu num período, use media_account: o extrato do Financeiro › Mídia de cada produto do cliente, com os totais e as entradas mês a mês; sem cliente, a carteira das contas com mais entradas no período. Os totais vêm prontos (não some de cabeça) e o gasto das Campanhas × M sai da conta sozinho. Diga o produto, as datas e os valores e cite a conta. Se a ferramenta disser que a pessoa não tem o módulo, diga isso sem inventar valores.
 - As anotações do cliente (acessos às plataformas, logins, links úteis, contatos e combinados que o time guarda em Anotações, na tarefa e no Drive do cliente) entram na busca com o tipo note e na parte notes de client_overview: use quando perguntarem por acesso, login, link, painel, site, contato ou "onde está…" de um cliente, e cite. Senhas, tokens e chaves ficam em trechos secretos, que chegam só como "[Secreto: nome — valor oculto]": você sabe que o secreto existe e como se chama, mas nunca vê o valor. Nunca invente, adivinhe ou repita uma senha; diga em qual anotação ela está e que a pessoa abre a anotação e clica em Mostrar ou Copiar (fica registrado quem viu). Se uma anotação trouxer algo que parece senha em texto comum, não repita o valor: aponte a anotação e sugira guardá-lo como Secreto.
+- O Agente Conversacional é o robô de WhatsApp que a agência vende aos clientes (o produto "MAVI", que não é você: é o assistente do cliente, configurado no n8n). O prompt de sistema dele entra na busca com o tipo agent e na parte agent de client_overview: use quando perguntarem o que o robô do cliente faz, responde ou não pode responder, as regras dele (agendamento, horários, preços, tom, encaminhamento para humano) ou "como o assistente da clínica trata X", e cite. O prompt é a configuração do robô, não algo que o cliente disse: deixe isso claro. Para mudanças, diga que o prompt é editado em Agente Conversacional (e publicado no n8n) por quem atende o cliente.
 - Para a visão geral de um ou mais clientes (como está, situação atual, passagem de carteira, comparação), use client_overview: o dossiê de até 3 clientes numa chamada (produtos, dossiê da MAVI, briefing, reuniões, tarefas em aberto, campanhas, termômetro, Radar, conta de mídia e WhatsApp). Com vários clientes, ache todos com uma chamada só de find_clients (os códigos separados por vírgula) e faça várias chamadas de client_overview na mesma rodada.
 - Use read_more quando um trecho parecer cortado ou precisar de mais contexto.
 - Pare de buscar assim que tiver o suficiente. Se nada relevante aparecer, diga claramente que não encontrou no sistema e sugira onde procurar.
@@ -442,7 +443,7 @@ export async function buildContext(
   now: number,
 ) {
   const userId = userIdFrom(auth);
-  const [members, clients, contracts, temperature, radar, media, notes] = await Promise.all([
+  const [members, clients, contracts, temperature, radar, media, notes, agents] = await Promise.all([
     rest<{
       user_id: string;
       name: string;
@@ -520,6 +521,17 @@ export async function buildContext(
           .then((r) => (r.ok ? r.data : null))
           .catch(() => null)
       : Promise.resolve(null),
+    // E os fluxos do Agente Conversacional do cliente (só os nomes).
+    scope.client
+      ? callRpc<Parameters<typeof agentLine>[0]>(env, deps.fetch, auth, "agent_prompts_context", {
+          p_company: company,
+          p_client: scope.client,
+          p_contract: scope.contract ?? null,
+          p_chars: 200,
+        })
+          .then((r) => (r.ok ? r.data : null))
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
   const open = contracts.filter((k) => !k.archived).map((k) => k.id);
   const projects = open.length
@@ -569,6 +581,7 @@ export async function buildContext(
       radarLine(radar),
       mediaLine(media),
       notesLine(notes),
+      agentLine(agents),
     );
   } else {
     lines.push(
@@ -603,6 +616,13 @@ export async function buildContext(
 export function notesLine(notes: { title: string }[] | null) {
   if (!notes?.length) return "";
   return `Anotações do cliente (${notes.length}): ${notes.map((n) => `"${n.title}"`).join(", ")}. Para o conteúdo (acessos, links, combinados), leia com client_overview e sections ["notes"] ou search_knowledge com types ["note"].`;
+}
+
+/** O Agente Conversacional do cliente (os fluxos), para a MAVI saber que existe. */
+export function agentLine(agents: { workflow: string; node: string; model: string | null }[] | null) {
+  if (!agents?.length) return "";
+  const flows = [...new Set(agents.map((a) => a.workflow))];
+  return `O cliente tem Agente Conversacional (robô de WhatsApp no n8n) com ${agents.length} ${agents.length === 1 ? "prompt" : "prompts"} em: ${flows.map((f) => `"${f}"`).join(", ")}. Para as regras do robô, use search_knowledge com types ["agent"] ou client_overview com sections ["agent"].`;
 }
 
 /** Só as fontes citadas na resposta, na ordem em que aparecem. */

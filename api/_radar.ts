@@ -103,6 +103,11 @@ export type RadarMaterial = {
   lines: RadarLine[];
   context?: RadarLine[];
   seen?: string[];
+  /**
+   * O prompt do Agente Conversacional do cliente (o robô de WhatsApp, no
+   * n8n): referência das regras do robô, nunca item.
+   */
+  agent_rules?: { workflow: string; node: string; text: string }[];
 };
 
 const ROLE_TAG: Record<RadarRole, string> = {
@@ -156,6 +161,7 @@ Você recebe:
 - Os tópicos (T#), cada um com o que conta, o que não conta e quem precisa ter falado.
 - Os produtos que o cliente contrata (P#).
 - Os itens que o cliente já tem (I#), abertos ou fechados há pouco.
+- Às vezes, as regras do Agente Conversacional do cliente (o robô de WhatsApp que a agência configurou para ele): só referência para entender reclamações sobre o robô (ex.: se ele agiu como foi configurado ou fora disso). Nunca anote as regras como item.
 - As falas numeradas (L#), marcadas [cliente], [time] (a agência) ou [não identificado].
 
 Regras:
@@ -241,6 +247,21 @@ export function extractionMessage(m: RadarMaterial, maxChars = 110_000) {
     "Itens que o cliente já tem:",
     ...(items.length ? items : ["(nenhum)"]),
   ];
+  if (m.agent_rules?.length) {
+    let room = 8000;
+    const rules: string[] = [];
+    for (const a of m.agent_rules) {
+      if (room <= 200) break;
+      const text = a.text.length > room ? `${a.text.slice(0, room)} (…)` : a.text;
+      room -= text.length;
+      rules.push(`[${a.workflow} › ${a.node}]`, text);
+    }
+    header.push(
+      "",
+      "Regras do Agente Conversacional do cliente (o robô de WhatsApp; só referência, não anote):",
+      ...rules,
+    );
+  }
   if (m.summary) header.push("", "Resumo da reunião (feito pela MAVI):", m.summary.slice(0, 4000));
   if (m.context?.length)
     header.push(
@@ -942,6 +963,11 @@ async function readSignal(env: AiEnv, deps: AiDeps, company: Company, c: Claimed
     p_id: c.id,
   });
   if (!m) return { items: 0, skipped: true };
+  // As regras do robô do cliente, quando há (uma falha não atrapalha).
+  m.agent_rules = await workerRpc<RadarMaterial["agent_rules"]>(env, deps, "agent_prompts_for_worker", {
+    p_client: m.client_id,
+    p_chars: 4000,
+  }).catch(() => []);
   const usage: Usage[] = [];
   const { text, refs } = extractionMessage(m);
   const result = await company.llm({

@@ -24,6 +24,7 @@ import {
   X,
   Trophy,
   NotebookPen,
+  BotMessageSquare,
   Wallet,
 } from "lucide-react";
 import { answerPieces, type ChatTurn } from "./meetings";
@@ -248,6 +249,7 @@ const SOURCE_ICONS = {
   attachment: Paperclip,
   media: Wallet,
   note: NotebookPen,
+  agent: BotMessageSquare,
 };
 function SourceIcon({ type }: { type: AiSource["type"] }) {
   const Icon = SOURCE_ICONS[type] ?? FileText;

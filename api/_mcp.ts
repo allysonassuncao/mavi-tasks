@@ -120,7 +120,10 @@ export function sourceLink(origin: string, s: AiSource) {
     path = "/financeiro/midia";
     q.set("contrato", s.id);
   } else if (s.type === "note") q.set("nota", s.id);
-  else {
+  else if (s.type === "agent") {
+    path = "/agente-conversacional";
+    q.set("prompt", s.id);
+  } else {
     path = "/campanhas";
     q.set("campanha", s.id);
   }

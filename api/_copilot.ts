@@ -171,6 +171,11 @@ type ContextRow = {
   cases?: RelatedCase[];
   evidence?: Evidence[];
   dossier?: { version: number; built_at: string | null; items: DossierItem[] };
+  /**
+   * O Agente Conversacional do produto da tarefa (o robô de WhatsApp do
+   * cliente, no n8n): o prompt de cada nó, só na análise.
+   */
+  agent?: AgentPrompt[];
   lessons?: { id: string; scope: string; kind: string | null; text: string }[];
 };
 
@@ -200,6 +205,17 @@ export function related(ctx: ContextRow, confirmed?: Set<string>) {
   };
 }
 
+type AgentPrompt = {
+  id: string;
+  workflow: string;
+  node: string;
+  role: string;
+  active: boolean;
+  changed_at: string;
+  chars: number;
+  text: string;
+};
+
 async function loadContext(
   env: AiEnv,
   deps: AiDeps,
@@ -209,6 +225,19 @@ async function loadContext(
 ) {
   const text = draftText(draft);
   const { vectors, tokens, model } = await deps.embed([text.slice(0, 4000)]);
+  // Na análise, o prompt do Agente Conversacional do produto (quando há):
+  // ao mesmo tempo, e uma falha não atrapalha o resto.
+  const agent =
+    review && draft.contract
+      ? callRpc<AgentPrompt[]>(env, deps.fetch, auth, "agent_prompts_context", {
+          p_company: draft.company,
+          p_client: null,
+          p_contract: draft.contract,
+          p_chars: 6000,
+        })
+          .then((x) => (x.ok ? x.data : []))
+          .catch(() => [] as AgentPrompt[])
+      : Promise.resolve([] as AgentPrompt[]);
   const r = await callRpc<ContextRow>(
     env,
     deps.fetch,
@@ -231,7 +260,11 @@ async function loadContext(
         ? "A busca no histórico do cliente demorou demais. Tente de novo."
         : r.error,
     );
-  return { ctx: r.data, embedding: { tokens, model } };
+  const prompts = await agent;
+  return {
+    ctx: prompts.length ? { ...r.data, agent: prompts } : r.data,
+    embedding: { tokens, model },
+  };
 }
 
 // ------------------------------------------------------------ Relacionados
@@ -307,6 +340,7 @@ O que você recebe:
 - Tarefas parecidas do mesmo cliente [S#], com status, responsável e semelhança (0 a 1).
 - Cases de sucesso de outros clientes [S#].
 - Trechos do histórico do cliente [S#]: reuniões, WhatsApp, arquivos, Social Leads, campanhas — cada um com a data.
+- Quando a tarefa é do produto que tem o Agente Conversacional (o robô de WhatsApp que a agência configurou para o cliente no n8n), o prompt de sistema dele [S#]: as regras atuais do robô. Use para apontar quando o pedido contradiz ou repete o que o robô já faz, ou esquece uma regra dele que a mudança afeta. É a configuração do robô, não algo que o cliente disse.
 - Alertas que o time recusou [R#] (com o motivo) e alertas que ajudaram. Nunca repita um recusado nem diga o mesmo com outras palavras: o motivo e o comentário mostram o que o time espera.
 - Aprendizados [L#]: o que o time ensinou com o feedback anterior. Siga-os: valem mais que o seu jeito geral de apontar. Os de cliente valem mais que os de produto, que valem mais que os da empresa.
 
@@ -578,6 +612,35 @@ export function draftMessage(
           e.title,
           e.date,
           e.similarity ?? null,
+        ),
+      ),
+    );
+  const agent = ctx.agent ?? [];
+  if (agent.length)
+    blocks.push(
+      "",
+      "Agente Conversacional deste produto (o prompt de sistema atual do robô de WhatsApp do cliente, no n8n):",
+      ...agent.map((a) =>
+        cited(
+          citeRow(tool, {
+            chunk_id: 0,
+            source_type: "agent_prompt",
+            source_id: a.id,
+            title: `${a.workflow} › ${a.node}`,
+            // A primeira linha é o cabeçalho (citeRow troca pela referência).
+            content: `\n${a.text}${a.chars > a.text.length ? "\n(… o prompt continua)" : ""}`,
+            meta: {},
+            client_id: ctx.client?.id ?? null,
+            contract_id: ctx.contract ?? null,
+            occurred_at: a.changed_at,
+            task_status: null,
+            task_assignee: null,
+            task_due: null,
+          }),
+          "agent",
+          `${a.workflow} › ${a.node}`,
+          a.changed_at,
+          null,
         ),
       ),
     );

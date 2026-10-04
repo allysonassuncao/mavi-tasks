@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -10,6 +12,7 @@ import {
 } from "react";
 import {
   BookMarked,
+  BotMessageSquare,
   NotebookPen,
   Building2,
   ChevronRight,
@@ -68,6 +71,11 @@ import { ClientRadar } from "./ClientRadar";
 import { BrandKit } from "./BrandKit";
 import { ClientNotes } from "./ClientNotes";
 import { countClientNotes, getClientNote } from "./client-notes";
+import { countAgents } from "./agents";
+// Agente Conversacional (dentro do produto): carrega só quando abre.
+const AgentFolder = lazy(() =>
+  import("./AgentsPage").then((m) => ({ default: m.AgentFolder })),
+);
 import {
   countClientGroups,
   whatsappGroupById,
@@ -313,7 +321,7 @@ function DriveTree({
       }
     : at;
   // Pastas virtuais (Gravações da MAVI, Whatsapp, Dossiê da MAVI,
-  // Termômetro, Radar): sem arquivos próprios.
+  // Termômetro, Radar, Agente Conversacional): sem arquivos próprios.
   const virtual =
     !!at.recordings ||
     !!at.whatsapp ||
@@ -321,7 +329,8 @@ function DriveTree({
     !!at.temperature ||
     !!at.radar ||
     !!at.brand ||
-    !!at.notes;
+    !!at.notes ||
+    !!at.agent;
   const canWrite =
     !virtual &&
     (isLeader ||
@@ -346,7 +355,8 @@ function DriveTree({
       at.temperature ||
       at.radar ||
       at.brand ||
-      at.notes
+      at.notes ||
+      at.agent
     )
       return setFiles([]);
     setFiles(null);
@@ -391,6 +401,24 @@ function DriveTree({
   const showsRadar = !data.members
     .find((m) => m.user_id === user)
     ?.hidden_pages?.includes("radar");
+  // Agente Conversacional: dentro do produto, quando ele tem fluxos do n8n
+  // ligados ou é o produto MAVI (e o módulo não está escondido da pessoa).
+  const [agentCount, setAgentCount] = useState(0);
+  const atContract = !!at.contract && !at.folder && !virtual;
+  const maviProduct =
+    atContract &&
+    /^\s*mavi\s*$/i.test(
+      data.products.find(
+        (p) =>
+          p.id === data.contracts.find((k) => k.id === at.contract)?.product_id,
+      )?.name ?? "",
+    );
+  const showsAgent =
+    atContract &&
+    (agentCount > 0 || maviProduct) &&
+    !data.members
+      .find((m) => m.user_id === user)
+      ?.hidden_pages?.includes("agents");
   // Whatsapp: quantos grupos o cliente tem (o cartão) e o link de uma
   // mensagem (?whatsapp=<grupo>&msg=<mensagem>).
   const [groupCount, setGroupCount] = useState(0);
@@ -444,6 +472,17 @@ function DriveTree({
       window.removeEventListener("mavi:client-notes", onNotice);
     };
   }, [company, at.client, showsProducts]);
+  useEffect(() => {
+    setAgentCount(0);
+    if (!atContract || !at.contract) return;
+    let alive = true;
+    countAgents(company, at.contract)
+      .then((n) => alive && setAgentCount(n))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [company, at.contract, atContract]);
   useEffect(() => {
     setGroupCount(0);
     if (!showsProducts || !at.client) return;
@@ -613,6 +652,7 @@ function DriveTree({
     at.radar,
     at.brand,
     at.notes,
+    at.agent,
   ].join("|");
   const clients =
     !at.client && !at.folder
@@ -1326,7 +1366,8 @@ function DriveTree({
       | "temperature"
       | "radar"
       | "brand"
-      | "notes",
+      | "notes"
+      | "agent",
     open: () => void,
     color?: string,
     actions?: {
@@ -1360,7 +1401,9 @@ function DriveTree({
                     ? Palette
                     : icon === "notes"
                       ? NotebookPen
-                      : Folder;
+                      : icon === "agent"
+                        ? BotMessageSquare
+                        : Folder;
     const detail =
       icon === "client"
         ? "Cliente"
@@ -1382,7 +1425,11 @@ function DriveTree({
                         ? noteCount
                           ? `${noteCount} ${noteCount === 1 ? "anotação" : "anotações"}`
                           : "Acessos, links e combinados"
-                        : "Pasta";
+                        : icon === "agent"
+                          ? agentCount
+                            ? `${agentCount} ${agentCount === 1 ? "fluxo do n8n" : "fluxos do n8n"}`
+                            : "Prompt do assistente de WhatsApp"
+                          : "Pasta";
     const hasMenu = !!(
       actions?.rename ||
       actions?.remove ||
@@ -1486,6 +1533,7 @@ function DriveTree({
     !clients.length &&
     !products.length &&
     !recordingCount &&
+    !showsAgent &&
     !subfolders.length &&
     files !== null &&
     !files.length &&
@@ -1714,6 +1762,12 @@ function DriveTree({
             <span>Radar</span>
           </>
         )}
+        {!searching && at.agent && (
+          <>
+            <ChevronRight size={15} aria-hidden="true" />
+            <span>Agente Conversacional</span>
+          </>
+        )}
         {searching && (
           <>
             <ChevronRight size={15} aria-hidden="true" />
@@ -1801,7 +1855,17 @@ function DriveTree({
         </div>
       )}
 
-      {at.brand && at.client ? (
+      {at.agent && at.client && at.contract ? (
+        <Suspense fallback={<Loading variant="table" />}>
+          <AgentFolder
+            key={at.contract}
+            company={company}
+            client={at.client}
+            contract={at.contract}
+            notify={notify}
+          />
+        </Suspense>
+      ) : at.brand && at.client ? (
         <BrandKit
           key={at.client}
           company={company}
@@ -1933,6 +1997,7 @@ function DriveTree({
             products.length > 0 ||
             recordingCount > 0 ||
             groupCount > 0 ||
+            showsAgent ||
             subfolders.length > 0 ||
             editing?.kind === "new-folder") && (
             <Paged
@@ -2062,6 +2127,23 @@ function DriveTree({
                         },
                       ),
                   ),
+                  ...(showsAgent
+                    ? [
+                        () =>
+                          folderCard(
+                            "agent",
+                            "Agente Conversacional",
+                            "agent",
+                            () =>
+                              go({
+                                client: at.client,
+                                contract: at.contract,
+                                agent: true,
+                              }),
+                            "#3b7d6e",
+                          ),
+                      ]
+                    : []),
                   ...subfolders.map(
                     (f) => () =>
                       editing?.kind === "folder" && editing.id === f.id ? (

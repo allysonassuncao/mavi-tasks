@@ -44,7 +44,9 @@ export type AiSource = {
     /** Financeiro › Mídia: o id é a conta (produto contratado). */
     | "media"
     /** Anotações do cliente: o id é a anotação. */
-    | "note";
+    | "note"
+    /** Agente Conversacional (robô de WhatsApp do cliente): o id é o prompt. */
+    | "agent";
   /** Página da internet (busca da Claude). */
   url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
@@ -74,6 +76,7 @@ const SEARCH_TYPES: Record<string, string[]> = {
   case: ["success_case"],
   whatsapp: ["whatsapp"],
   note: ["client_note"],
+  agent: ["agent_prompt"],
 };
 const SOURCE_KIND: Record<string, AiSource["type"]> = {
   meeting: "meeting",
@@ -85,6 +88,7 @@ const SOURCE_KIND: Record<string, AiSource["type"]> = {
   success_case: "case",
   whatsapp: "whatsapp",
   client_note: "note",
+  agent_prompt: "agent",
 };
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -121,6 +125,7 @@ export const OVERVIEW_SECTIONS = [
   "media",
   "whatsapp",
   "notes",
+  "agent",
 ] as const;
 type OverviewSection = (typeof OVERVIEW_SECTIONS)[number];
 
@@ -142,7 +147,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "client_overview",
     description:
-      "Dossiê de até 3 clientes numa chamada só: produtos contratados, o dossiê da MAVI (gostos, regras, tom, contexto, histórico), briefing (arquivos do Drive e Social Leads), as últimas reuniões com o resumo, tarefas em aberto e atrasadas, resultados das campanhas dos últimos 30 dias (só líderes), termômetro, Radar em aberto, a conta de mídia (saldo e entradas/depósitos, para quem tem o Financeiro › Mídia) o que o cliente pediu ou reclamou no WhatsApp e as anotações do cliente (acessos, links úteis, combinados). Use para visão geral, situação atual, passagem de carteira ou comparação de clientes, em vez de chamar cada ferramenta cliente por cliente; para mais clientes, faça várias chamadas na mesma rodada. Devolve trechos [S#] para citar; complete com search_knowledge ou read_more quando precisar de mais detalhe.",
+      "Dossiê de até 3 clientes numa chamada só: produtos contratados, o dossiê da MAVI (gostos, regras, tom, contexto, histórico), briefing (arquivos do Drive e Social Leads), as últimas reuniões com o resumo, tarefas em aberto e atrasadas, resultados das campanhas dos últimos 30 dias (só líderes), termômetro, Radar em aberto, a conta de mídia (saldo e entradas/depósitos, para quem tem o Financeiro › Mídia) o que o cliente pediu ou reclamou no WhatsApp, as anotações do cliente (acessos, links úteis, combinados) e o prompt do Agente Conversacional (o robô de WhatsApp que a agência configurou para o cliente, no n8n). Use para visão geral, situação atual, passagem de carteira ou comparação de clientes, em vez de chamar cada ferramenta cliente por cliente; para mais clientes, faça várias chamadas na mesma rodada. Devolve trechos [S#] para citar; complete com search_knowledge ou read_more quando precisar de mais detalhe.",
     parameters: obj(
       {
         client_ids: {
@@ -154,7 +159,7 @@ export const TOOLS: ToolSpec[] = [
           type: "array",
           items: { type: "string", enum: [...OVERVIEW_SECTIONS] },
           description:
-            "Opcional: só estas partes (padrão: todas). products, dossier, briefing, meetings, tasks, campaigns, temperature, radar, whatsapp, notes (anotações do cliente: acessos, links úteis e combinados).",
+            "Opcional: só estas partes (padrão: todas). products, dossier, briefing, meetings, tasks, campaigns, temperature, radar, whatsapp, notes (anotações do cliente: acessos, links úteis e combinados), agent (o prompt de sistema do Agente Conversacional do cliente: as regras do robô de WhatsApp).",
         },
         days: {
           type: "integer",
@@ -194,10 +199,11 @@ export const TOOLS: ToolSpec[] = [
               "case",
               "whatsapp",
               "note",
+              "agent",
             ],
           },
           description:
-            "Limitar a tipos: note (anotações do cliente: acessos, logins, links úteis e combinados; os secretos aparecem só pelo nome, sem o valor), meeting (reuniões gravadas), task (tarefas), file (arquivos do Drive), social (briefing e planos do Social Leads), campaign (anotações e ciclos das campanhas; só líderes), case (cases de sucesso aprovados: resultados, nichos, links e contatos; todos veem), whatsapp (conversas dos grupos de WhatsApp com o cliente, com áudios transcritos e o texto dos documentos enviados).",
+            "Limitar a tipos: note (anotações do cliente: acessos, logins, links úteis e combinados; os secretos aparecem só pelo nome, sem o valor), meeting (reuniões gravadas), task (tarefas), file (arquivos do Drive), social (briefing e planos do Social Leads), campaign (anotações e ciclos das campanhas; só líderes), case (cases de sucesso aprovados: resultados, nichos, links e contatos; todos veem), whatsapp (conversas dos grupos de WhatsApp com o cliente, com áudios transcritos e o texto dos documentos enviados), agent (o prompt de sistema do Agente Conversacional do cliente — o robô de WhatsApp que a agência vende como produto MAVI e configura no n8n: regras de agendamento, preços, tom, o que o robô pode ou não responder).",
         },
         from: dateField("Só a partir desta data"),
         to: dateField("Só até esta data"),
@@ -558,6 +564,8 @@ export function citeRow(ctx: ToolContext, row: SearchRow) {
               ? `Case de sucesso "${row.title}"`
               : kind === "note"
                 ? `Anotação do cliente "${row.title}" · atualizada em ${brDate(row.occurred_at)}`
+              : kind === "agent"
+                ? `Prompt do Agente Conversacional "${row.title}" · atualizado em ${brDate(row.occurred_at)}`
               : wa
                 ? `${row.title.replace(/ · \d{2}\/\d{2}\/\d{4}$/, "")} · ${brDate(at ?? row.occurred_at)}${at ? ` ${waTime(at)}` : ""}${row.meta?.kind === "whatsapp_document" && row.meta?.label ? ` · documento "${row.meta.label}"` : ""}`
                 : `Tarefa "${row.title}" · ${STATUS_LABELS[row.task_status ?? ""] ?? row.task_status ?? ""}${row.task_assignee ? ` · responsável ${ctx.members.get(row.task_assignee)?.name ?? "?"}` : ""}${row.task_due ? ` · prazo ${brDate(row.task_due)}` : ""}`;
@@ -992,6 +1000,7 @@ const SECTION_TITLES: Record<OverviewSection, string> = {
   media: "Conta de mídia (saldo e entradas)",
   whatsapp: "WhatsApp: pedidos, reclamações e combinados recentes",
   notes: "Anotações do cliente (acessos, links úteis e combinados; secretos só pelo nome)",
+  agent: "Agente Conversacional (prompt do robô de WhatsApp do cliente, no n8n)",
 };
 /** Quanto cada parte ocupa (caracteres), para o dossiê caber na conversa. */
 const SECTION_CHARS: Record<OverviewSection, number> = {
@@ -1006,6 +1015,7 @@ const SECTION_CHARS: Record<OverviewSection, number> = {
   media: 2000,
   whatsapp: 2500,
   notes: 4000,
+  agent: 5000,
 };
 const DOSSIER_KINDS: Record<string, string> = {
   prefers: "Gosta / prefere",
@@ -1070,6 +1080,7 @@ async function overviewSection(
   if (section === "radar") return clientRadar(ctx, { ...input, status: "open", limit: 10 });
   if (section === "media") return mediaAccount(ctx, { ...input, limit: 8 });
   if (section === "notes") return clientNotes(ctx, client);
+  if (section === "agent") return clientAgentPrompts(ctx, client);
   return searchKnowledge(ctx, {
     ...input,
     query: "pedido, reclamação, pendência, combinado, prazo, aprovação ou insatisfação do cliente",
@@ -1103,6 +1114,42 @@ async function clientNotes(ctx: ToolContext, client: string) {
         client_id: client,
       });
       return `[${ref}] Anotação "${n.title}" · atualizada em ${brDate(n.updated_at)}${n.updated_by_name ? ` por ${n.updated_by_name}` : ""}\n${n.text || "(sem texto)"}`;
+    })
+    .join("\n\n");
+}
+
+/**
+ * O Agente Conversacional do cliente: o prompt de sistema de cada nó AI
+ * Agent dos fluxos principais e subfluxos (sem as cópias), com o modelo.
+ * O prompt é a configuração do robô, não o que o cliente disse.
+ */
+async function clientAgentPrompts(ctx: ToolContext, client: string) {
+  const r = await callRpc<
+    {
+      id: string;
+      workflow: string;
+      node: string;
+      role: string;
+      active: boolean;
+      product: string | null;
+      model: string | null;
+      changed_at: string;
+      chars: number;
+      text: string;
+    }[]
+  >(ctx, ctx.fetch, ctx.auth, "agent_prompts_context", {
+    p_company: ctx.company,
+    p_client: client,
+    p_contract: ctx.scope.contract ?? null,
+    p_chars: 2500,
+  });
+  if (!r.ok) throw new Error(r.error);
+  if (!r.data?.length) return "O cliente não tem Agente Conversacional (robô de WhatsApp) cadastrado.";
+  return r.data
+    .map((a) => {
+      const title = `${a.workflow} › ${a.node}`;
+      const ref = cite(ctx, { type: "agent", id: a.id, title, date: a.changed_at, client_id: client });
+      return `[${ref}] Prompt do Agente Conversacional "${title}" · ${a.role === "main" ? "fluxo principal" : "subfluxo"}${a.active ? " ativo" : ""}${a.product ? ` · produto ${a.product}` : ""}${a.model ? ` · modelo ${a.model}` : ""} · atualizado em ${brDate(a.changed_at)}\n${a.text}${a.chars > a.text.length ? "\n(… o prompt continua: use search_knowledge com types [\"agent\"] para achar a regra específica)" : ""}`;
     })
     .join("\n\n");
 }
@@ -1162,6 +1209,7 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
       campaign: "nas campanhas",
       case: "nos cases de sucesso",
       note: "nas anotações do cliente",
+      agent: "no prompt do Agente Conversacional",
     };
     const where =
       types.length === 1 && names[String(types[0])]

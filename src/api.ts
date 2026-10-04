@@ -1334,6 +1334,15 @@ export type LiveChange =
   | { kind: "media"; contracts: string[] | null }
   /** Anotações do cliente: uma anotação criada, salva, excluída ou restaurada. */
   | { kind: "client_notes"; client: string; note: string; version: number }
+  /** Agente Conversacional: fluxos e prompts do n8n (sem nada: tudo mudou). */
+  | {
+      kind: "agents";
+      client?: string | null;
+      contract?: string | null;
+      workflow?: string;
+      prompt?: string;
+      version?: number;
+    }
   /** Radar pessoal: as situações destas pessoas mudaram (a MAVI leu ou alguém agiu). */
   | { kind: "personal_radar"; people: string[] };
 

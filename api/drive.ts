@@ -41,6 +41,7 @@ import { handleTaskAudio, taskAudioEnv } from "./_task-audio.js";
 import { handleTaskTitle } from "./_task-title.js";
 import { handleTaskSearch } from "./_task-search.js";
 import { handleRadarSuggest } from "./_radar-link.js";
+import { agentEnv, handleAgents } from "./_agents.js";
 import {
   handleTaskAudioCleanup,
   taskAudioCleanupEnv,
@@ -450,6 +451,15 @@ export default async function handler(
       result = await handleTaskAudioCleanup(
         authorization,
         taskAudioCleanupEnv(driveEnv()),
+        { fetch },
+      );
+    // Agente Conversacional: a leitura das VPS do n8n (o agendamento ou um
+    // administrador), reler um fluxo e publicar um prompt.
+    else if (action.startsWith("agent-"))
+      result = await handleAgents(
+        body,
+        authorization,
+        agentEnv(driveEnv()),
         { fetch },
       );
     else if (action.startsWith("whatsapp-"))

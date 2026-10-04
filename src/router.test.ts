@@ -157,6 +157,7 @@ describe("Drive: cada pasta tem o seu endereço", () => {
       { client, brand: true },
       { client, temperature: true },
       { client, radar: true },
+      { client, contract, agent: true },
     ];
     for (const at of places) {
       const url = driveUrl(at, "make");
@@ -177,6 +178,11 @@ describe("Drive: cada pasta tem o seu endereço", () => {
     expect(driveLocationFromPath(`/drive/cliente/${client}/anotacoes`)).toEqual(
       { client, notes: true },
     );
+    // O Agente Conversacional mora dentro do produto contratado.
+    expect(driveUrl({ client, contract, agent: true })).toBe(
+      `/drive/cliente/${client}/produto/${contract}/agente`,
+    );
+    expect(driveLocationFromPath(`/drive/cliente/${client}/agente`)).toBeNull();
     // O link de uma anotação sobrevive ao login.
     expect(safeReturnPath(`/drive?nota=${folder}`)).toBe(`/drive?nota=${folder}`);
     // A pasta leva o seu cliente e produto: a URL só precisa dela.

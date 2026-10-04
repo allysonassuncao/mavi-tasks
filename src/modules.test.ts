@@ -53,6 +53,7 @@ describe("módulos visíveis por pessoa", () => {
       "temperature",
       "radar",
       "personalRadar",
+      "agents",
       "hours",
       "reports",
       "drive",
@@ -88,6 +89,12 @@ describe("módulos visíveis por pessoa", () => {
         "member",
         off(["tasks", "agenda", "onboarding", "socialMedia", "cases", "temperature"]),
       ),
+    ).toBe("agents");
+    expect(
+      firstPage(
+        "member",
+        off(["tasks", "agenda", "onboarding", "socialMedia", "cases", "temperature", "agents"]),
+      ),
     ).toBe("drive");
   });
   it("Radar do cliente: administradores e gestores, e o administrador pode esconder", () => {
@@ -96,6 +103,12 @@ describe("módulos visíveis por pessoa", () => {
     expect(canOpenPage("radar", "member", off())).toBe(false);
     expect(canOpenPage("radar", "manager", ["radar"])).toBe(false);
     expect(moduleOf("radar")).toBe("radar");
+  });
+  it("Agente Conversacional: de todos os perfis (cada um vê os seus clientes), e o administrador pode esconder", () => {
+    expect(roleAllows("agents", "member")).toBe(true);
+    expect(canOpenPage("agents", "member", off())).toBe(true);
+    expect(canOpenPage("agents", "manager", ["agents"])).toBe(false);
+    expect(moduleOf("agents")).toBe("agents");
   });
   it("Termômetro dos clientes: de todos os perfis, e o administrador pode esconder", () => {
     expect(roleAllows("temperature", "member")).toBe(true);
@@ -124,6 +137,7 @@ describe("módulos visíveis por pessoa", () => {
       "temperature",
       "radar",
       "personalRadar",
+      "agents",
       "hours",
       "reports",
       "drive",

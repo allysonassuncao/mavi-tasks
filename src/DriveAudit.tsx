@@ -47,6 +47,8 @@ export const auditActions: Record<string, string> = {
   note_undeleted: "Anotação restaurada da lixeira",
   note_secret_viewed: "Secreto da anotação mostrado",
   note_secret_copied: "Secreto da anotação copiado",
+  agent_prompt_published: "Prompt do Agente Conversacional publicado no n8n",
+  agent_prompt_restored: "Versão antiga do prompt publicada no n8n",
 };
 const visibilityLabel = (v: unknown) =>
   v === "public" ? "Público" : v === "private" ? "Privado" : String(v ?? "");

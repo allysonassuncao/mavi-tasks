@@ -17,6 +17,7 @@ export const pagePaths = {
   temperature: "/termometro",
   radar: "/radar",
   personalRadar: "/radar/pessoal",
+  agents: "/agente-conversacional",
   notices: "/mural",
   inbox: "/caixa-de-entrada",
   hours: "/horas",
@@ -424,12 +425,15 @@ export type DriveRoute = {
   client?: string;
   contract?: string;
   folder?: string;
+  /** O Agente Conversacional do produto (dentro do produto contratado). */
+  agent?: boolean;
 } & { [K in DriveVirtual]?: boolean };
 
 /**
  * A pasta aberta no Drive, pela URL (cada pasta tem o seu endereço):
  * /drive/cliente/<id>, /drive/cliente/<id>/produto/<id>,
- * /drive/cliente/<id>/gravacoes (e as outras pastas virtuais) e
+ * /drive/cliente/<id>/gravacoes (e as outras pastas virtuais),
+ * /drive/cliente/<id>/produto/<id>/agente (o Agente Conversacional) e
  * /drive/pasta/<id> (a pasta leva o seu cliente e produto).
  * A raiz (/drive) é {}; fora do Drive, null.
  */
@@ -442,15 +446,16 @@ export function driveLocationFromPath(path: string): DriveRoute | null {
   if (folder) return { folder: folder[1].toLowerCase() };
   const client = normalized.match(
     new RegExp(
-      `^/drive/cliente/(${UUID})(?:/produto/(${UUID})|/(${Object.keys(DRIVE_VIRTUAL).join("|")}))?$`,
+      `^/drive/cliente/(${UUID})(?:/produto/(${UUID})(/agente)?|/(${Object.keys(DRIVE_VIRTUAL).join("|")}))?$`,
       "i",
     ),
   );
   if (!client) return null;
   const at: DriveRoute = { client: client[1].toLowerCase() };
   if (client[2]) at.contract = client[2].toLowerCase();
-  if (client[3])
-    at[DRIVE_VIRTUAL[client[3].toLowerCase() as keyof typeof DRIVE_VIRTUAL]] =
+  if (client[3]) at.agent = true;
+  if (client[4])
+    at[DRIVE_VIRTUAL[client[4].toLowerCase() as keyof typeof DRIVE_VIRTUAL]] =
       true;
   return at;
 }
@@ -460,7 +465,8 @@ export function driveUrl(at: DriveRoute, company = "") {
   if (at.folder) return `${base}/pasta/${at.folder}`;
   if (!at.client) return base;
   const client = `${base}/cliente/${at.client}`;
-  if (at.contract) return `${client}/produto/${at.contract}`;
+  if (at.contract)
+    return `${client}/produto/${at.contract}${at.agent ? "/agente" : ""}`;
   const virtual = (
     Object.entries(DRIVE_VIRTUAL) as [string, DriveVirtual][]
   ).find(([, key]) => at[key]);

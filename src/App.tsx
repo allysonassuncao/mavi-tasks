@@ -57,6 +57,7 @@ import {
   Trophy,
   Thermometer,
   Radar,
+  BotMessageSquare,
   BellRing,
   Wallet,
   Lightbulb,
@@ -297,6 +298,9 @@ const FinanceMediaPage = lazy(() =>
   import("./FinanceMediaPage").then((m) => ({ default: m.FinanceMediaPage })),
 );
 // Leaders only, and heavy (editor, charts): loaded when first opened.
+const AgentsPage = lazy(() =>
+  import("./AgentsPage").then((m) => ({ default: m.AgentsPage })),
+);
 const DashboardsPage = lazy(() =>
   import("./DashboardsPage").then((m) => ({ default: m.DashboardsPage })),
 );
@@ -320,6 +324,7 @@ const navigation = [
   { id: "temperature", label: "Termômetro dos clientes", icon: Thermometer },
   { id: "radar", label: "Radar do cliente", icon: Radar },
   { id: "personalRadar", label: "Radar pessoal", icon: Radar },
+  { id: "agents", label: "Agente Conversacional", icon: BotMessageSquare },
   { id: "hours", label: "Controle de horas", icon: Clock3 },
   { id: "reports", label: "Relatórios", icon: ChartNoAxesCombined },
   { id: "drive", label: "Drive", icon: HardDrive },
@@ -1458,6 +1463,7 @@ export default function App() {
       window.dispatchEvent(
         new CustomEvent("mavi:client-notes", { detail: {} }),
       );
+      window.dispatchEvent(new CustomEvent("mavi:agents", { detail: {} }));
       setCasesTick((n) => n + 1);
       schedule();
     };
@@ -1575,6 +1581,13 @@ export default function App() {
         if (change.kind === "client_notes") {
           window.dispatchEvent(
             new CustomEvent("mavi:client-notes", { detail: change }),
+          );
+          return;
+        }
+        // Agente Conversacional (módulo e Drive) listens for its own notices.
+        if (change.kind === "agents") {
+          window.dispatchEvent(
+            new CustomEvent("mavi:agents", { detail: change }),
           );
           return;
         }
@@ -2948,6 +2961,8 @@ export default function App() {
                         "A temperatura da relação com cada cliente, lida pela MAVI nas reuniões gravadas e nos grupos de WhatsApp.",
                       radar:
                         "O que os clientes reclamam e o que o time promete, anotado pela MAVI nas reuniões e nos grupos de WhatsApp, por produto.",
+                      agents:
+                        "O prompt do assistente de WhatsApp de cada cliente (os fluxos do n8n): leia, compare as versões e publique as mudanças.",
                       personalRadar:
                         "A MAVI como sua assistente: o que os clientes pedem, perguntam e reclamam com você nos grupos de WhatsApp. Só leitura.",
                       notices: isLeader
@@ -4181,6 +4196,16 @@ export default function App() {
                     user={user}
                     data={catalogData}
                     demo={demo}
+                    notify={notify}
+                  />
+                </Suspense>
+              )}
+              {page === "agents" && (
+                <Suspense fallback={<Loading variant="table" />}>
+                  <AgentsPage
+                    key={company}
+                    company={company}
+                    data={catalogData}
                     notify={notify}
                   />
                 </Suspense>

@@ -45,7 +45,9 @@ export type AiSource = {
     /** Financeiro › Mídia: a conta (id: o produto contratado). */
     | "media"
     /** Anotações do cliente (id: a anotação). */
-    | "note";
+    | "note"
+    /** Agente Conversacional (id: o prompt). */
+    | "agent";
   /** Página da internet (busca na internet do módulo MAVI). */
   url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
@@ -751,6 +753,7 @@ export function sourceLabel(s: AiSource) {
   if (s.type === "case") return "Case de sucesso";
   if (s.type === "media") return "Conta de mídia";
   if (s.type === "note") return "Anotação do cliente";
+  if (s.type === "agent") return "Agente Conversacional";
   if (s.type === "whatsapp")
     return [
       `Whatsapp ${shortDate(s.date)}`,
@@ -774,7 +777,7 @@ export function sourceUrl(s: AiSource) {
   if (s.type === "attachment") return "#";
   if (s.type === "task") return taskUrl({ id: s.id, title: s.title }, company);
   const q = new URLSearchParams();
-  let page: "drive" | "onboarding" | "campaigns" | "cases" | "financeMedia" = "drive";
+  let page: "drive" | "onboarding" | "campaigns" | "cases" | "financeMedia" | "agents" = "drive";
   if (s.type === "meeting") {
     q.set("gravacao", s.id);
     if (s.start && s.start > 0) q.set("t", String(Math.floor(s.start)));
@@ -792,7 +795,10 @@ export function sourceUrl(s: AiSource) {
     page = "financeMedia";
     q.set("contrato", s.id);
   } else if (s.type === "note") q.set("nota", s.id);
-  else {
+  else if (s.type === "agent") {
+    page = "agents";
+    q.set("prompt", s.id);
+  } else {
     page = "campaigns";
     q.set("campanha", s.id);
   }

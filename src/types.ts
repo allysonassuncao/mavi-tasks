@@ -613,6 +613,8 @@ export interface DriveLocation {
   brand?: boolean;
   /** The client's "Anotações" (acessos, links úteis), next to the products. */
   notes?: boolean;
+  /** The product's "Agente Conversacional" (the n8n prompts), inside it. */
+  agent?: boolean;
 }
 /** Um lugar do Drive, como o histórico guarda (ids e o caminho da época). */
 export interface DrivePlace {
