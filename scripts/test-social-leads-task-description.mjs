@@ -1,7 +1,7 @@
 // Social Leads (migration 20261018120000_social_leads_task_description): a
 // descrição das tarefas de arte em texto formatado, que o editor do app aceita
 // sem perder nada, e as tarefas já criadas convertidas se ninguém as editou.
-// Rode com --experimental-strip-types (lê src/rich-text.ts).
+// Rode com --experimental-strip-types (lê src/rich-text.ts): npm run test:db:social-leads-task-description.
 import assert from "node:assert/strict";
 import { applyMigration, createTestDatabase } from "./database-fixture.mjs";
 import { parseDescription, richTextPlain } from "../src/rich-text.ts";

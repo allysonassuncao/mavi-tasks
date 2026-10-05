@@ -217,8 +217,9 @@ await check("Dashboards: mudanças por pessoa, adiadas × antecipadas e dias mov
   await change(gil, one, "2026-10-21"); // -2
   const two = await task();
   await change(eva, two, "2026-10-21"); // +1
+  // The dashboards read the period in the company's time zone.
+  const today = (await sql("select mavi_private.company_today($1)::text as d", [A]))[0].d;
   await as(admin);
-  const today = new Date().toISOString().slice(0, 10);
   const byPerson = await rpc("dashboard_preview", [A, {
     viz: "table",
     groupBy: "person",

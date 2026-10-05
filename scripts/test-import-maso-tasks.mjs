@@ -4,6 +4,7 @@
 // pelo e-mail e quem fica no lugar, menções sem aviso, imagens coladas,
 // subtarefas, ex-clientes, o que fica de fora, e que rodar de novo não muda
 // nada. O texto rico passa pelo mesmo saneamento da interface.
+// Rode com --experimental-strip-types (lê src/rich-text.ts): npm run test:db:import-maso-tasks.
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";

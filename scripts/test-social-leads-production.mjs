@@ -148,7 +148,7 @@ await check(
     assert.deepEqual(r, { created: 3, cycle: true });
     await db.exec("reset role");
     const tasks = await all(
-      `select x.number, t.title, t.team_id, t.assignee_id, t.priority, t.due_date - current_date as days, t.description
+      `select x.number, t.title, t.team_id, t.assignee_id, t.priority, t.due_date - mavi_private.company_today(t.company_id) as days, t.description
      from social_leads_posts x join tasks t on t.id = x.task_id where x.plan_id = $1 order by x.number`,
       [planId],
     );

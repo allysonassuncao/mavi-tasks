@@ -220,18 +220,26 @@ await check(
     assert.equal(f.sent_30d, 2);
     assert.ok(f.last_lead_at);
     assert.equal(f.last_error.message, "Campos obrigatórios faltando");
+    // Without Campanhas in Módulos visíveis (migration 20270105090000).
     await as(member);
-    await assert.rejects(rpc("ad_lead_forms_overview", [A, null]), /exclusivo/);
+    await assert.rejects(
+      rpc("ad_lead_forms_overview", [A, null]),
+      /Campanhas não está disponível/,
+    );
   },
 );
 
-await check("remover o vínculo: só líderes; o histórico fica", async () => {
+await check("remover o vínculo: só quem tem o cliente; o histórico fica", async () => {
   const [{ id }] = await sql(
     "select id from ad_lead_forms where company_id=$1 and form_id='5002'",
     [A],
   );
+  // The client must be on one of the person's teams (migration 20270107090000).
   await as(member);
-  await assert.rejects(rpc("ad_delete_lead_form", [id]), /exclusivo/);
+  await assert.rejects(
+    rpc("ad_delete_lead_form", [id]),
+    /não é de uma equipe sua/,
+  );
   await as(admin);
   await rpc("ad_delete_lead_form", [id]);
   assert.equal(

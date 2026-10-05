@@ -74,7 +74,8 @@ const plan = () => ({
     ehAnuncio: i === 3,
   })),
 });
-const today = (await one("select current_date::text as d")).d;
+// The dashboards read the period in the company's time zone.
+const today = (await one("select mavi_private.company_today($1)::text as d", [A])).d;
 const preview = async (spec, vars = {}) => {
   await as(admin);
   return (
