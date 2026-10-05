@@ -9,6 +9,7 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  BarChart3,
   BookOpen,
   CircleCheck,
   CircleHelp,
@@ -23,6 +24,8 @@ import {
   Route,
   Search,
   Settings2,
+  ThumbsDown,
+  ThumbsUp,
   Users,
   X,
 } from "lucide-react";
@@ -34,6 +37,8 @@ import { TutorialMediaContext, TutorialVideoInfo } from "./TutorialVideo";
 import { TutorialEditor } from "./TutorialEditor";
 import { TutorialSearchResults } from "./TutorialSearch";
 import { TutorialGaps } from "./TutorialGaps";
+import { FeedbackDialog, TutorialFeedback } from "./TutorialFeedback";
+import { TutorialMetrics } from "./TutorialMetrics";
 import { RequiredTrails, TrailBar, TrailView, TrailsTab } from "./TutorialTrails";
 import { TutorialTrailEditor } from "./TutorialTrailEditor";
 import {
@@ -50,6 +55,7 @@ import { headingAnchors } from "./rich-text";
 import {
   TUTORIAL_MODULES,
   TUTORIAL_PARAM,
+  VIEW_FROM,
   audienceSummary,
   demoTutorials,
   moduleLabel,
@@ -64,6 +70,7 @@ import {
   type TutorialRow,
   type TutorialScope,
   type TutorialsApi,
+  type ViewSource,
 } from "./tutorials";
 import { fold } from "./domain";
 import { pageUrl, routeParts, useUrlState } from "./router";
@@ -116,6 +123,13 @@ export function TutorialsPage({
   const [tab, setTab] = useUrlState<string>("aba", "");
   const [openId, setOpenId] = useUrlState<string>(TUTORIAL_PARAM, "");
   const [trailId, setTrailId] = useUrlState<string>(TRAIL_PARAM, "");
+  // De onde veio quem abriu por um link (?de=ajuda|mavi|aviso), para as métricas.
+  const [from] = useUrlState<string>("de", "");
+  const openFrom = useRef<{ source: ViewSource; search: number | null } | null>(null);
+  const open = (id: string, source: ViewSource, search: number | null = null) => {
+    openFrom.current = { source, search };
+    setOpenId(id);
+  };
   const [editingTrail, setEditingTrail] = useState<{ detail: TrailDetail | null } | null>(null);
   const [trailRows, setTrailRows] = useState<TrailRow[]>([]);
   const [term, setTerm] = useUrlState<string>("termo", "");
@@ -136,17 +150,18 @@ export function TutorialsPage({
   const [gapCount, setGapCount] = useState(0);
   const gapsTab = tab === "duvidas" && isLeader;
   const trailsTab = tab === "trilhas";
+  const metricsTab = tab === "metricas" && isLeader;
   const scope: TutorialScope = tab === "admin" && isLeader ? "admin" : "library";
   const tags = useMemo(() => tagParam.split("|").filter(Boolean), [tagParam]);
   // Na biblioteca, buscar é com a MAVI (Enter); a lista mostra os resultados dela.
-  const searching = !gapsTab && !trailsTab && scope === "library" && !!term;
+  const searching = !gapsTab && !trailsTab && !metricsTab && scope === "library" && !!term;
   const request = useRef(0);
 
   useEffect(() => setTyped(term), [term]);
 
   const load = useCallback(
     (offset = 0) => {
-      if (searching || gapsTab || trailsTab) return;
+      if (searching || gapsTab || trailsTab || metricsTab) return;
       const n = ++request.current;
       if (!offset) setError("");
       api
@@ -173,7 +188,7 @@ export function TutorialsPage({
         });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api, company, scope, term, module, category, tagParam, searching, gapsTab, trailsTab],
+    [api, company, scope, term, module, category, tagParam, searching, gapsTab, trailsTab, metricsTab],
   );
   const loadFacets = useCallback(() => {
     api
@@ -303,6 +318,8 @@ export function TutorialsPage({
         <TutorialReader
           key={`${openId}-${tick}`}
           api={api}
+          source={openFrom.current?.source ?? VIEW_FROM[from] ?? (trailId ? "trail" : "link")}
+          searchId={openFrom.current?.search ?? null}
           trailsApi={trailsApi}
           trailId={trailId}
           trailTick={trailTick}
@@ -318,7 +335,7 @@ export function TutorialsPage({
             setTrailId(id);
           }}
           onOpenTutorial={(id) => {
-            setOpenId(id);
+            open(id, "trail");
             window.scrollTo({ top: 0 });
           }}
           onPick={(kind, value) => {
@@ -346,7 +363,7 @@ export function TutorialsPage({
           setTab("trilhas");
         }}
         onOpenTutorial={(id) => {
-          setOpenId(id);
+          open(id, "trail");
           window.scrollTo({ top: 0 });
         }}
         onEdit={(detail) => setEditingTrail({ detail })}
@@ -360,7 +377,7 @@ export function TutorialsPage({
         role="search"
         onSubmit={(e) => {
           e.preventDefault();
-          if (gapsTab || trailsTab) setTab("");
+          if (gapsTab || trailsTab || metricsTab) setTab("");
           setTerm(typed.trim());
         }}
       >
@@ -409,6 +426,7 @@ export function TutorialsPage({
           ...(isLeader
             ? [
                 { param: "admin", label: "Administração", icon: Settings2, count: 0 },
+                { param: "metricas", label: "Métricas", icon: BarChart3, count: 0 },
                 { param: "duvidas", label: "Dúvidas sem tutorial", icon: CircleHelp, count: gapCount },
               ]
             : []),
@@ -417,7 +435,8 @@ export function TutorialsPage({
             (t.param === "trilhas" && trailsTab) ||
             (t.param === "admin" && scope === "admin") ||
             (t.param === "duvidas" && gapsTab) ||
-            (!t.param && !trailsTab && scope !== "admin" && !gapsTab);
+            (t.param === "metricas" && metricsTab) ||
+            (!t.param && !trailsTab && scope !== "admin" && !gapsTab && !metricsTab);
           return (
             <button
               type="button"
@@ -434,7 +453,15 @@ export function TutorialsPage({
         })}
       </nav>
 
-      {trailsTab ? (
+      {metricsTab ? (
+        <TutorialMetrics
+          api={api}
+          company={company}
+          tick={tick}
+          onOpen={(id) => open(id, "library")}
+          onCreate={(question) => setEditing({ detail: null, gap: { question } as TutorialGap })}
+        />
+      ) : trailsTab ? (
         <TrailsTab
           api={trailsApi}
           company={company}
@@ -450,7 +477,7 @@ export function TutorialsPage({
           tick={tick}
           notify={notify}
           onCreate={(gap) => setEditing({ detail: null, gap })}
-          onOpenTutorial={(id) => setOpenId(id)}
+          onOpenTutorial={(id) => open(id, "library")}
           onChanged={refresh}
         />
       ) : (
@@ -541,8 +568,8 @@ export function TutorialsPage({
           company={company}
           query={{ query: term, module, category, tags }}
           isLeader={isLeader}
-          onOpen={(id, anchor) => {
-            setOpenId(id);
+          onOpen={(id, anchor, searchId) => {
+            open(id, "search", searchId);
             if (anchor)
               window.history.replaceState(
                 window.history.state,
@@ -570,14 +597,14 @@ export function TutorialsPage({
             {term ? ` para “${term}”` : ""}
           </p>
           {scope === "admin" ? (
-            <AdminTable rows={rows} onOpen={(id) => setOpenId(id)} />
+            <AdminTable rows={rows} onOpen={(id) => open(id, "library")} />
           ) : (
             <div className="tutorials-grid">
               {rows.map((r) => (
                 <TutorialCard
                   key={r.id}
                   row={r}
-                  onOpen={() => setOpenId(r.id)}
+                  onOpen={() => open(r.id, "library")}
                 />
               ))}
             </div>
@@ -776,6 +803,8 @@ function AdminTable({
 /** A tutorial for reading: index on the side, sections with anchors. */
 function TutorialReader({
   api,
+  source,
+  searchId,
   trailsApi,
   trailId,
   trailTick,
@@ -791,6 +820,9 @@ function TutorialReader({
   onPick,
 }: {
   api: TutorialsApi;
+  /** De onde a pessoa abriu (as métricas) e a busca, se veio de uma. */
+  source: ViewSource;
+  searchId: number | null;
   trailsApi: TrailsApi;
   /** Aberto por uma trilha: a faixa no topo e o próximo no fim. */
   trailId: string;
@@ -812,6 +844,7 @@ function TutorialReader({
   const [progress, setProgress] = useState<TutorialProgress | null>(null);
   const [trail, setTrail] = useState<TrailDetail | null>(null);
   const [marking, setMarking] = useState(false);
+  const [votes, setVotes] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const progressRef = useRef(progress);
@@ -854,6 +887,7 @@ function TutorialReader({
   useEffect(() => {
     if (!detail || !trackable) return;
     void api.progress(detail.id, "open").catch(() => {});
+    void api.logView(detail.id, source, searchId).catch(() => {});
     const el = end.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
     const started = Date.now();
@@ -1046,6 +1080,16 @@ function TutorialReader({
                   <Users size={14} /> {audienceSummary(detail.audience, data)}
                 </span>
               )}
+              {detail.votes && (detail.votes.up > 0 || detail.votes.down > 0) && (
+                <button
+                  type="button"
+                  className="link-btn tutorial-votes-chip"
+                  onClick={() => setVotes(true)}
+                  title="Ver os votos de “Isso ajudou?”"
+                >
+                  <ThumbsUp size={13} /> {detail.votes.up} <ThumbsDown size={13} /> {detail.votes.down}
+                </button>
+              )}
               {completed && (
                 <span className={`tutorial-done-chip ${updated ? "updated" : ""}`}>
                   {updated ? <RefreshCw size={13} /> : <CircleCheck size={13} />}
@@ -1156,6 +1200,15 @@ function TutorialReader({
               )}
             </section>
           )}
+          {trackable && (
+            <TutorialFeedback
+              api={api}
+              tutorial={detail.id}
+              version={detail.version}
+              initial={detail.my_vote ?? null}
+              notify={notify}
+            />
+          )}
           {inTrail && (
             <section className="tutorial-trail-next" aria-label="Na trilha">
               {next ? (
@@ -1192,6 +1245,9 @@ function TutorialReader({
           )}
           <div ref={end} className="tutorial-end" aria-hidden="true" />
         </article>
+        {votes && (
+          <FeedbackDialog api={api} tutorial={detail.id} version={detail.version} onClose={() => setVotes(false)} />
+        )}
         {!!sections.length && (
           <aside className="tutorial-toc" aria-label="Índice do tutorial">
             <span className="tutorial-toc-title">

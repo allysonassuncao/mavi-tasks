@@ -118,6 +118,10 @@ export function InboxList({
                 <span className="inbox-system" aria-hidden="true">
                   <Route size={15} />
                 </span>
+              ) : n.kind === "tutorial" ? (
+                <span className="inbox-system" aria-hidden="true">
+                  <GraduationCap size={15} />
+                </span>
               ) : n.kind === "media_balance" || n.kind === "rq_closing" ? (
                 <span className="inbox-system due-risk" aria-hidden="true">
                   <Wallet size={15} />
@@ -161,6 +165,7 @@ export function InboxList({
                 n.kind === "campaign_insight" ||
                 n.kind === "job_alert" ||
                 n.kind === "tutorial_trail" ||
+                n.kind === "tutorial" ||
                 n.kind === "tasks_assigned" ||
                 n.kind === "tasks_priority" ||
                 n.kind === "copilot_lessons" ||

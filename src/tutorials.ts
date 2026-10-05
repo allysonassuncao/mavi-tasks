@@ -12,6 +12,7 @@ import {
   type RichNode,
 } from "./rich-text";
 import type { VideoInfo } from "./TutorialVideo";
+import type { WriterDraft, WriterMode } from "./tutorial-writer";
 import type { Role, Snapshot } from "./types";
 
 /**
@@ -154,7 +155,93 @@ export interface TutorialDetail {
   progress?: TutorialProgress | null;
   /** As trilhas que têm este tutorial (as que a pessoa vê). */
   trails?: { id: string; title: string }[];
+  /** O voto da pessoa em "Isso ajudou?". */
+  my_vote?: TutorialVote | null;
+  /** Quem edita: a contagem dos votos (down_current: 👎 na versão no ar). */
+  votes?: { up: number; down: number; down_current: number } | null;
 }
+export type VoteReason = "outdated" | "confusing" | "missing_step" | "not_what_i_wanted" | "other";
+export interface TutorialVote {
+  vote: "up" | "down";
+  reason: VoteReason | null;
+  comment: string;
+  version: number;
+  updated_at: string;
+}
+export const VOTE_REASONS: { id: VoteReason; label: string }[] = [
+  { id: "outdated", label: "Está desatualizado" },
+  { id: "confusing", label: "Ficou confuso" },
+  { id: "missing_step", label: "Faltou um passo" },
+  { id: "not_what_i_wanted", label: "Não era o que eu procurava" },
+  { id: "other", label: "Outro motivo" },
+];
+export interface TutorialFeedbackRow {
+  user_id: string;
+  name: string;
+  vote: "up" | "down";
+  reason: VoteReason | null;
+  comment: string;
+  version: number;
+  updated_at: string;
+}
+/** De onde a pessoa abriu o tutorial (as métricas). */
+export type ViewSource = "library" | "search" | "trail" | "help" | "mavi" | "notice" | "link";
+/** ?de= nos links de fora da página: o "?" do topo, os cartões da MAVI e os avisos. */
+export const VIEW_FROM: Record<string, ViewSource> = { ajuda: "help", mavi: "mavi", aviso: "notice" };
+export interface TutorialMetricRow {
+  id: string;
+  title: string;
+  status: TutorialStatus;
+  version: number;
+  views: number;
+  viewers: number;
+  from_search: number;
+  completions: number;
+  up: number;
+  down: number;
+  down_current: number;
+  last_view: string | null;
+}
+export interface SearchMetricRow {
+  query_key: string;
+  query: string;
+  searches: number;
+  people: number;
+  avg_results: number;
+  empty: number;
+  opened: number;
+  last_at: string;
+}
+export interface TutorialMetrics {
+  from: string;
+  to: string;
+  totals: {
+    views: number;
+    viewers: number;
+    searches: number;
+    empty_searches: number;
+    opened_searches: number;
+    completions: number;
+    up: number;
+    down: number;
+  };
+  sources: Partial<Record<ViewSource, number>>;
+  tutorials: TutorialMetricRow[];
+  queries: SearchMetricRow[];
+  empty: SearchMetricRow[];
+}
+export type AnnounceChannel = "none" | "inbox" | "notice";
+export type WriterRequest = {
+  mode: WriterMode;
+  idea: string;
+  title: string;
+  summary: string;
+  /** A transcrição (vídeo) ou o texto aberto em linhas, com [[MIDIA n]]. */
+  source: string;
+  media: number;
+  modules: string[];
+  module_ids: string[];
+};
 export interface TutorialProgress {
   completed_at: string | null;
   completed_version: number | null;
@@ -357,7 +444,7 @@ export interface TutorialsApi {
   search(
     company: string,
     q: TutorialSearchQuery,
-  ): Promise<{ hits: TutorialHit[]; embedding: string | null }>;
+  ): Promise<{ hits: TutorialHit[]; embedding: string | null; search_id?: number | null }>;
   /** A resposta curta da MAVI, citando as seções. */
   answer(
     company: string,
@@ -372,6 +459,14 @@ export interface TutorialsApi {
   progress(id: string, action: ProgressAction): Promise<TutorialProgress | null>;
   /** Quem concluiu volta a pendente; devolve quantas pessoas. */
   askReread(id: string): Promise<number>;
+  /** "Isso ajudou?" (vote nulo tira o voto). */
+  vote(id: string, vote: "up" | "down" | null, reason?: VoteReason | null, comment?: string): Promise<TutorialVote | null>;
+  feedback(id: string): Promise<TutorialFeedbackRow[]>;
+  logView(id: string, source: ViewSource, search?: number | null): Promise<void>;
+  metrics(company: string, from: string, to: string): Promise<TutorialMetrics>;
+  /** Avisa o público do tutorial publicado; devolve quantas pessoas (caixa de entrada). */
+  announce(id: string, channel: "inbox" | "notice", updated: boolean): Promise<{ people: number | null }>;
+  write(company: string, request: WriterRequest): Promise<WriterDraft>;
 }
 
 export const serverTutorials: TutorialsApi = {
@@ -526,6 +621,33 @@ export const serverTutorials: TutorialsApi = {
   async askReread(id) {
     return ((await rpc("ask_tutorial_reread", { p_tutorial: id })) ?? 0) as number;
   },
+  async vote(id, vote, reason, comment) {
+    return (await rpc("vote_tutorial", {
+      p_tutorial: id,
+      p_vote: vote,
+      p_reason: reason ?? null,
+      p_comment: comment ?? null,
+    })) as TutorialVote | null;
+  },
+  async feedback(id) {
+    return ((await rpc("tutorial_feedback_list", { p_tutorial: id })) ?? []) as TutorialFeedbackRow[];
+  },
+  async logView(id, source, search) {
+    await rpc("log_tutorial_view", { p_tutorial: id, p_source: source, p_search: search ?? null });
+  },
+  async metrics(company, from, to) {
+    return (await rpc("tutorial_metrics", { p_company: company, p_from: from, p_to: to })) as TutorialMetrics;
+  },
+  async announce(id, channel, updated) {
+    return (await rpc("announce_tutorial", {
+      p_tutorial: id,
+      p_channel: channel,
+      p_updated: updated,
+    })) as { people: number | null };
+  },
+  async write(company, request) {
+    return server<WriterDraft>({ action: "tutorial-write", company, ...request });
+  },
 };
 
 /** As palavras que a busca ignora (as mesmas de public.search_tutorials). */
@@ -656,6 +778,8 @@ const demoVideos = new Map<string, string>();
 let demoGaps: TutorialGap[] = [];
 /** O progresso de quem está na demonstração, por tutorial. */
 const demoProgress = new Map<string, TutorialProgress>();
+const demoVotes = new Map<string, TutorialVote>();
+const demoViews: { tutorial: string; source: ViewSource; at: string }[] = [];
 
 const paragraph = (text: string): RichNode => ({
   type: "paragraph",
@@ -821,6 +945,15 @@ export function demoTutorials(data: Snapshot, user: string): TutorialsApi {
       trackable: forMe(t),
       progress: demoProgress.get(t.id) ?? null,
       trails: [],
+      my_vote: demoVotes.get(t.id) ?? null,
+      votes: edit
+        ? {
+            up: demoVotes.get(t.id)?.vote === "up" ? 1 : 0,
+            down: demoVotes.get(t.id)?.vote === "down" ? 1 : 0,
+            down_current:
+              demoVotes.get(t.id)?.vote === "down" && demoVotes.get(t.id)?.version === t.version ? 1 : 0,
+          }
+        : null,
     };
   };
   const find = (id: string) => {
@@ -1156,6 +1289,115 @@ export function demoTutorials(data: Snapshot, user: string): TutorialsApi {
           new CustomEvent("mavi:tutorials", { detail: { kind: "tutorials", progress: true, user, tutorial: id } }),
         );
       return { ...p };
+    },
+    async vote(id, vote, reason, comment) {
+      const t = store.find((x) => x.id === id);
+      if (!t || !forMe(t)) throw Error("Este tutorial não está disponível para você.");
+      if (!vote) {
+        demoVotes.delete(id);
+        return null;
+      }
+      const v: TutorialVote = {
+        vote,
+        reason: vote === "down" ? (reason ?? null) : null,
+        comment: (comment ?? "").trim().slice(0, 500),
+        version: t.version,
+        updated_at: now(),
+      };
+      demoVotes.set(id, v);
+      return v;
+    },
+    async feedback(id) {
+      find(id);
+      const v = demoVotes.get(id);
+      return v ? [{ ...v, user_id: user, name: name(user) }] : [];
+    },
+    async logView(id, source) {
+      const t = store.find((x) => x.id === id);
+      if (t && forMe(t)) demoViews.push({ tutorial: id, source, at: now() });
+    },
+    async metrics(_company, from, to) {
+      if (!leader) throw Error("Só administradores e gestores veem as métricas dos tutoriais.");
+      const inside = (iso: string) => {
+        const d = new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+        return d >= from && d <= to;
+      };
+      const views = demoViews.filter((v) => inside(v.at));
+      const sources: TutorialMetrics["sources"] = {};
+      views.forEach((v) => (sources[v.source] = (sources[v.source] ?? 0) + 1));
+      const votes = [...demoVotes.entries()];
+      return {
+        from,
+        to,
+        totals: {
+          views: views.length,
+          viewers: views.length ? 1 : 0,
+          searches: 0,
+          empty_searches: 0,
+          opened_searches: 0,
+          completions: [...demoProgress.values()].filter((p) => p.completed_at && inside(p.completed_at)).length,
+          up: votes.filter(([, v]) => v.vote === "up").length,
+          down: votes.filter(([, v]) => v.vote === "down").length,
+        },
+        sources,
+        tutorials: store
+          .filter((t) => t.status === "published")
+          .map((t) => {
+            const mine = views.filter((v) => v.tutorial === t.id);
+            const v = demoVotes.get(t.id);
+            return {
+              id: t.id,
+              title: t.title,
+              status: t.status,
+              version: t.version,
+              views: mine.length,
+              viewers: mine.length ? 1 : 0,
+              from_search: mine.filter((x) => x.source === "search").length,
+              completions: demoProgress.get(t.id)?.completed_at ? 1 : 0,
+              up: v?.vote === "up" ? 1 : 0,
+              down: v?.vote === "down" ? 1 : 0,
+              down_current: v?.vote === "down" && v.version === t.version ? 1 : 0,
+              last_view: mine.at(-1)?.at ?? null,
+            };
+          })
+          .sort((a, b) => b.views - a.views || a.title.localeCompare(b.title, "pt-BR")),
+        queries: [],
+        empty: demoGaps.map((g) => ({
+          query_key: g.question,
+          query: g.question,
+          searches: g.asks,
+          people: g.people,
+          avg_results: 0,
+          empty: g.asks,
+          opened: 0,
+          last_at: g.last_asked_at,
+        })),
+      };
+    },
+    async announce(id) {
+      const t = find(id);
+      if (t.status !== "published") throw Error("Publique o tutorial antes de avisar.");
+      return { people: Math.max(0, data.members.filter((m) => m.active).length - 1) };
+    },
+    async write(_company, request) {
+      if (!leader) throw Error("Só administradores e gestores pedem à MAVI para escrever tutoriais.");
+      const subject = (request.idea || request.title || "o assunto").replace(/\s+/g, " ").trim().slice(0, 80);
+      return {
+        title: (request.title || (/^como\b/i.test(subject) ? subject.charAt(0).toUpperCase() + subject.slice(1) : `Como ${subject.charAt(0).toLowerCase()}${subject.slice(1)}`)).slice(0, 80),
+        summary: "Na demonstração, a MAVI não escreve de verdade: este é um exemplo do formato.",
+        blocks: [
+          { type: "paragraph", text: `Este guia mostra ${subject}.` },
+          { type: "heading", level: 2, text: "Passo a passo" },
+          {
+            type: "steps",
+            items: ["Abra a tela pelo menu lateral.", "Clique em **[confirmar: nome do botão]**.", "Confira e salve."],
+          },
+          ...Array.from({ length: request.media }, (_, i) => ({ type: "media" as const, n: i + 1 })),
+        ],
+        notes: "Confira os nomes entre [confirmar].",
+        references: 0,
+        model: "demonstração",
+      };
     },
     async askReread(id) {
       find(id);

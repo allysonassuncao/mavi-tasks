@@ -86,12 +86,14 @@ export function TutorialSearchResults({
   company: string;
   query: TutorialSearchQuery;
   isLeader: boolean;
-  onOpen: (tutorial: string, anchor: string) => void;
+  /** searchId: a busca registrada (as métricas contam o que abriu dela). */
+  onOpen: (tutorial: string, anchor: string, searchId: number | null) => void;
   onCreate: (question: string) => void;
 }) {
   const [hits, setHits] = useState<TutorialHit[] | null>(null);
   const [error, setError] = useState("");
   const [embedding, setEmbedding] = useState<string | null>(null);
+  const [searchId, setSearchId] = useState<number | null>(null);
   const [answer, setAnswer] = useState<TutorialAnswer | null>(null);
   const [answerError, setAnswerError] = useState("");
   const [answering, setAnswering] = useState(false);
@@ -114,6 +116,7 @@ export function TutorialSearchResults({
         if (!alive) return;
         setHits(r.hits);
         setEmbedding(r.embedding);
+        setSearchId(r.search_id ?? null);
         if (r.hits.length) ask(r.embedding);
       })
       .catch((e) => alive && setError((e as Error).message || "Não foi possível buscar nos tutoriais."));
@@ -168,7 +171,7 @@ export function TutorialSearchResults({
           key={i}
           className="tutorial-cite"
           title={`${c.title}${c.section ? ` › ${c.section}` : ""}`}
-          onClick={() => onOpen(c.tutorial_id, c.anchor)}
+          onClick={() => onOpen(c.tutorial_id, c.anchor, searchId)}
         >
           {n}
         </button>
@@ -205,7 +208,7 @@ export function TutorialSearchResults({
                     type="button"
                     key={c.n}
                     className="chip"
-                    onClick={() => onOpen(c.tutorial_id, c.anchor)}
+                    onClick={() => onOpen(c.tutorial_id, c.anchor, searchId)}
                   >
                     <b>{c.n}</b> {c.title}
                     {c.section ? ` › ${c.section}` : ""}
@@ -233,7 +236,7 @@ export function TutorialSearchResults({
             <button
               type="button"
               className="tutorial-hit-title"
-              onClick={() => onOpen(tutorial.tutorial_id, "")}
+              onClick={() => onOpen(tutorial.tutorial_id, "", searchId)}
             >
               <GraduationCap size={17} aria-hidden="true" />
               <span>
@@ -255,7 +258,7 @@ export function TutorialSearchResults({
                 const piece = snippet(sec.content, words);
                 return (
                   <li key={sec.chunk_id}>
-                    <button type="button" onClick={() => onOpen(sec.tutorial_id, sec.anchor)}>
+                    <button type="button" onClick={() => onOpen(sec.tutorial_id, sec.anchor, searchId)}>
                       <span className="tutorial-hit-section">
                         {sec.section || "Introdução"}
                         <ArrowRight size={13} aria-hidden="true" />

@@ -1579,6 +1579,307 @@ button.tutorial-module:hover {
   color: var(--muted);
 }
 
+/* Isso ajudou? */
+.tutorial-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.tutorial-feedback-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.tutorial-feedback-buttons {
+  display: flex;
+  gap: 8px;
+}
+.tutorial-vote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+.tutorial-vote:hover:not(:disabled) {
+  border-color: #c9df9f;
+}
+.tutorial-vote.on {
+  border-color: #8db35a;
+  background: #eef5e6;
+  color: #46682a;
+}
+.tutorial-vote.down.on {
+  border-color: #e3a79f;
+  background: #fbe9e6;
+  color: #a1352a;
+}
+.tutorial-feedback-note {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.tutorial-feedback-why {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+.tutorial-feedback-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tutorial-feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+.tutorial-votes-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: inherit;
+}
+.tutorial-feedback-sum {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+.tutorial-feedback-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tutorial-feedback-list li {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.84rem;
+}
+.tutorial-feedback-list li.down {
+  border-color: #f0d2cd;
+  background: #fffaf9;
+}
+.tutorial-feedback-list p {
+  margin: 6px 0 0;
+}
+.tutorial-feedback-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.tutorial-feedback-who small {
+  color: var(--muted);
+}
+.tutorial-feedback-reason {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fbe9e6;
+  color: #a1352a;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+/* Métricas */
+.tutorial-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.tutorial-metrics-head {
+  display: flex;
+  justify-content: flex-end;
+}
+.tutorial-metrics-head > * {
+  width: 220px;
+  max-width: 100%;
+}
+.tutorial-metric-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.tutorial-metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.tutorial-metric-card span {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.tutorial-metric-card strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1.4rem;
+}
+.tutorial-metric-card small {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.tutorial-metric-card.warn strong {
+  color: #a1352a;
+}
+.tutorial-metric-sources {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #5f6d6b;
+}
+.tutorial-metric-votes {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.tutorial-metric-votes small {
+  color: #a1352a;
+}
+.tutorial-metric-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+.tutorial-metric-queries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tutorial-metric-queries li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.84rem;
+}
+.tutorial-metric-queries li > span {
+  flex: 1;
+  min-width: 140px;
+  font-weight: 600;
+}
+.tutorial-metric-queries small {
+  color: var(--muted);
+}
+
+/* A MAVI escreve */
+.modal.tutorial-writer-modal {
+  width: 760px;
+}
+.tutorial-writer,
+.tutorial-writer-result,
+.tutorial-feedback-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 22px 22px;
+}
+.tutorial-writer-videos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tutorial-writer-video {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.tutorial-writer-video.on {
+  border-color: #8db35a;
+  background: #f7fbf1;
+}
+.tutorial-writer-video input[type="radio"],
+.tutorial-announce input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 3px 0 0;
+  padding: 0;
+  accent-color: #6e8a4c;
+}
+.tutorial-writer-video > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.tutorial-writer-video small {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.tutorial-writer-empty {
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f6f8f7;
+  font-size: 0.84rem;
+  color: #5f6d6b;
+}
+.tutorial-writer-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+.tutorial-writer-result h3 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+.tutorial-writer-preview {
+  max-height: 50vh;
+  overflow: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+.tutorial-writer-result > small {
+  color: var(--muted);
+}
+.tutorial-announce .checkbox-label {
+  align-items: flex-start;
+  gap: 8px;
+}
+.tutorial-announce-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 @media (max-width: 720px) {
   .tutorial-article {
     padding: 20px 16px 24px;

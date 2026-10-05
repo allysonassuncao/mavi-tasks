@@ -216,7 +216,9 @@ export interface AppNotification {
     /** Painel da MAVI › Avisos de falhas: uma rotina falhou, parou ou voltou (link para onde a rotina aparece). */
     | "job_alert"
     /** Tutoriais › Trilhas: uma trilha obrigatória chegou à pessoa, ou o prazo dela venceu (link /tutoriais?trilha=<id>). */
-    | "tutorial_trail";
+    | "tutorial_trail"
+    /** Tutoriais: quem publicou avisou o público de um tutorial novo ou atualizado (link /tutoriais?tutorial=<id>&de=aviso). */
+    | "tutorial";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

@@ -30,6 +30,7 @@ import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
 import { handleTutorials } from "./_tutorials.js";
 import { handleTutorialSearch } from "./_tutorial-search.js";
+import { handleTutorialWriter } from "./_tutorial-writer.js";
 import {
   handleTutorialTranscribe,
   tutorialTranscribeAllowed,
@@ -542,6 +543,13 @@ export default async function handler(
         model: serverModel("tutorial_search", process.env),
       };
       result = await handleTutorialSearch(body, authorization, env, aiDeps(env));
+    } else if (action === "tutorial-write") {
+      // A MAVI escreve um tutorial (funcionalidade 'tutorial_writer').
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("tutorial_writer", process.env),
+      };
+      result = await handleTutorialWriter(body, authorization, env, aiDeps(env));
     } else if (action.startsWith("tutorial-"))
       result = await handleTutorials(body, authorization, driveEnv(), fetch);
     else if (action === "notice-mavi") {

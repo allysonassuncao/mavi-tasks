@@ -5,6 +5,7 @@ import {
   History,
   RotateCcw,
   Send,
+  Sparkles,
   Trash2,
   Undo2,
   Users,
@@ -16,6 +17,7 @@ import { MultiPick } from "./MultiPick";
 import RichTextEditor from "./RichTextEditor";
 import { RichTextContent } from "./RichTextContent";
 import { TutorialVideoInfo, type VideoInfoContext } from "./TutorialVideo";
+import { TutorialWriter } from "./TutorialWriter";
 import { parseDescription, serializeDescription } from "./rich-text";
 import {
   MAX_MODULES,
@@ -26,6 +28,7 @@ import {
   cleanLabel,
   contentOf,
   emptyTutorial,
+  type AnnounceChannel,
   type TutorialAudience,
   type TutorialContent,
   type TutorialDetail,
@@ -107,6 +110,14 @@ export function TutorialEditor({
   const [versions, setVersions] = useState(false);
   // Ao publicar uma alteração: quem já concluiu volta a pendente.
   const [reread, setReread] = useState(false);
+  // Ao publicar: avisar o público (novo: caixa de entrada; alteração: não avisar).
+  const [announce, setAnnounce] = useState<AnnounceChannel>(
+    detail?.status === "published" || (detail?.version ?? 0) > 0 ? "none" : "inbox",
+  );
+  const [writer, setWriter] = useState(false);
+  // O texto que o editor abre (troca quando a MAVI escreve e quem escreve aplica).
+  const [bodyStart, setBodyStart] = useState(initial.body);
+  const [editorKey, setEditorKey] = useState(0);
   // A transcrição de cada vídeo enviado, atualizada pelos avisos ao vivo.
   const [media, setMedia] = useState<TutorialMedia[]>(detail?.media ?? []);
   const reloadMedia = useMemo(() => {
@@ -202,10 +213,22 @@ export function TutorialEditor({
       setTagText("");
       if (publish) {
         const again = reread && r.version > 1 ? await api.askReread(r.id).catch(() => 0) : 0;
+        let told = "";
+        if (announce !== "none")
+          told = await api
+            .announce(r.id, announce, r.version > 1)
+            .then((a) =>
+              announce === "notice"
+                ? " O aviso foi para o Mural."
+                : a.people
+                  ? ` ${a.people === 1 ? "1 pessoa avisada" : `${a.people} pessoas avisadas`} na caixa de entrada.`
+                  : " Ninguém mais no público para avisar.",
+            )
+            .catch((e) => ` O aviso não saiu: ${(e as Error).message}`);
         notify(
-          r.version > 1
+          (r.version > 1
             ? `Alterações publicadas (versão ${r.version}).${again ? ` ${again === 1 ? "1 pessoa volta" : `${again} pessoas voltam`} a ter o tutorial pendente.` : ""}`
-            : "Tutorial publicado. O público escolhido já pode ler.",
+            : "Tutorial publicado. O público escolhido já pode ler.") + told,
         );
         // A dúvida que deu origem ao tutorial fica resolvida por ele.
         if (gap?.id) await api.setGap(gap.id, "resolved", r.id).catch(() => {});
@@ -288,6 +311,9 @@ export function TutorialEditor({
           {dirty ? " · não salvo" : ""}
         </span>
         <span className="tutorial-editor-actions">
+          <Button className="btn secondary" onClick={() => setWriter(true)} disabled={locked}>
+            <Sparkles size={15} /> Escrever com a MAVI
+          </Button>
           {id && (
             <Button
               className="btn secondary"
@@ -352,7 +378,8 @@ export function TutorialEditor({
             label="Conteúdo"
             company={company}
             demo={demo}
-            defaultValue={initial.body}
+            key={editorKey}
+            defaultValue={bodyStart}
             disabled={!!busy}
             headings
             videos={uploadVideo}
@@ -466,23 +493,51 @@ export function TutorialEditor({
             }}
           />
 
-          {published && (
-            <fieldset className="notice-block">
-              <legend>Ao publicar</legend>
-              <label className="checkbox-label">
-                <Checkbox
-                  checked={reread}
-                  onCheckedChange={(v) => setReread(v === true)}
+          <fieldset className="notice-block tutorial-announce">
+            <legend>Ao publicar</legend>
+            <span className="tutorial-announce-title">Avisar o público do tutorial</span>
+            {(
+              [
+                ["none", "Não avisar"],
+                ["inbox", "Na caixa de entrada"],
+                ["notice", "Com um aviso no Mural"],
+              ] as [AnnounceChannel, string][]
+            ).map(([value, label]) => (
+              <label key={value} className="checkbox-label">
+                <input
+                  type="radio"
+                  name="tutorial-announce"
+                  checked={announce === value}
+                  onChange={() => setAnnounce(value)}
                   disabled={locked}
                 />
-                Pedir que releiam
+                {label}
               </label>
-              <small>
-                Quem já concluiu volta a ter o tutorial pendente (também nas trilhas). Sem marcar, continua
-                concluído e vê o aviso de que ele foi atualizado.
-              </small>
-            </fieldset>
-          )}
+            ))}
+            <small>
+              {announce === "notice"
+                ? "Cria um aviso no Mural com o link do tutorial (pelas regras do Mural: o gestor avisa só o próprio escopo)."
+                : announce === "inbox"
+                  ? `Cada pessoa do público recebe “Tutorial ${published ? "atualizado" : "novo"}” na caixa de entrada.`
+                  : "Ninguém é avisado; o tutorial aparece na biblioteca."}
+            </small>
+            {published && (
+              <>
+                <label className="checkbox-label">
+                  <Checkbox
+                    checked={reread}
+                    onCheckedChange={(v) => setReread(v === true)}
+                    disabled={locked}
+                  />
+                  Pedir que releiam
+                </label>
+                <small>
+                  Quem já concluiu volta a ter o tutorial pendente (também nas trilhas). Sem marcar, continua
+                  concluído e vê o aviso de que ele foi atualizado.
+                </small>
+              </>
+            )}
+          </fieldset>
 
           {id && detail && (
             <fieldset className="notice-block tutorial-danger">
@@ -537,6 +592,28 @@ export function TutorialEditor({
           )}
         </aside>
       </div>
+
+      {writer && (
+        <TutorialWriter
+          api={api}
+          company={company}
+          title={form.title}
+          summary={form.summary}
+          body={body.current}
+          modules={form.modules}
+          media={media}
+          onClose={() => setWriter(false)}
+          onApply={(d) => {
+            setForm((f) => ({ ...f, title: d.title, summary: d.summary }));
+            body.current = d.body;
+            setBodyStart(d.body);
+            setEditorKey((k) => k + 1);
+            setDirty(true);
+            setWriter(false);
+            notify("Texto da MAVI aplicado. Confira e salve ou publique.");
+          }}
+        />
+      )}
 
       {versions && id && (
         <VersionsDialog

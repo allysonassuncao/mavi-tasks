@@ -270,6 +270,7 @@ export type AiFeature =
   | "campaign_daily"
   | "tutorial_search"
   | "tutorial_transcribe"
+  | "tutorial_writer"
   | "mavi_judge"
   | "mavi_judge_check";
 
@@ -528,6 +529,14 @@ export const FEATURES: FeatureInfo[] = [
     transcription: true,
     largeFiles: true,
     note: "Os vídeos têm até 500 MB. Deepgram e AssemblyAI transcrevem pelo link, de qualquer tamanho; os provedores com o endpoint da OpenAI (Whisper, gpt-4o-transcribe) só até 25 MB. Sem regra, a OpenAI do servidor (até 25 MB). Nos maiores, quem edita escreve a transcrição.",
+  },
+  {
+    id: "tutorial_writer",
+    group: "Tutoriais",
+    label: "A MAVI escreve o tutorial (de uma ideia, de um vídeo ou melhorando o texto)",
+    conversation: false,
+    env: "TUTORIAL_WRITER_MODEL",
+    note: "Uma chamada quando quem escreve pede, no editor do tutorial. A MAVI usa os tutoriais já publicados como referência e marca com [confirmar] o que não sabe. Um modelo bom de escrita ajuda (ex.: Claude Sonnet).",
   },
   {
     id: "client_dossier",
@@ -800,6 +809,8 @@ export function serverModel(
       return env.TUTORIAL_SEARCH_MODEL || "claude-haiku-4-5";
     case "tutorial_transcribe":
       return env.WHATSAPP_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
+    case "tutorial_writer":
+      return env.TUTORIAL_WRITER_MODEL || env.AI_MODEL || fallback;
     case "client_dossier":
       return env.CLIENT_DOSSIER_MODEL || env.AI_MODEL || fallback;
     case "copilot_learning":

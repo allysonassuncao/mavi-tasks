@@ -48,7 +48,7 @@ export function tutorialCardUrl(
   artifact: Pick<TutorialArtifact, "tutorial" | "anchor">,
   path = window.location.pathname,
 ) {
-  return `${pageUrl("tutorials", routeParts(path).company)}?tutorial=${artifact.tutorial}${artifact.anchor ? `#${artifact.anchor}` : ""}`;
+  return `${pageUrl("tutorials", routeParts(path).company)}?tutorial=${artifact.tutorial}&de=mavi${artifact.anchor ? `#${artifact.anchor}` : ""}`;
 }
 
 /**

@@ -10,7 +10,9 @@ import type { Meter } from "./_social-leads.js";
  * 20270420090000_tutorials_mavi):
  * - "tutorial-search": o vetor da pergunta + public.search_tutorials com a
  *   sessão da pessoa (só os tutoriais do público dela). Sem nenhuma seção, a
- *   pergunta vira uma dúvida sem tutorial.
+ *   pergunta vira uma dúvida sem tutorial. Cada busca fica registrada para as
+ *   métricas (log_tutorial_search); o id volta para a tela, que o leva junto
+ *   ao abrir um resultado.
  * - "tutorial-answer": a resposta curta da MAVI (funcionalidade
  *   'tutorial_search'), só com as seções encontradas e citando cada uma. Se
  *   elas não respondem, a MAVI diz que não achou (sem inventar passos) e a
@@ -147,8 +149,16 @@ export async function handleTutorialSearch(
     const hits = found.data ?? [];
 
     if (!answering) {
-      if (!hits.length) await gap();
-      return { status: 200, body: { hits, embedding } };
+      const [logged] = await Promise.all([
+        rpc<number>("log_tutorial_search", {
+          p_company: company,
+          p_query: query,
+          p_module: module,
+          p_results: new Set(hits.map((h) => h.tutorial_id)).size,
+        }).catch(() => null),
+        hits.length ? null : gap(),
+      ]);
+      return { status: 200, body: { hits, embedding, search_id: logged?.ok ? (logged.data ?? null) : null } };
     }
 
     if (!hits.length) {

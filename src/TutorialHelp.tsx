@@ -126,7 +126,7 @@ export function TutorialHelp({
           ) : rows.length ? (
             <ul className="tutorial-help-list">
               {rows.map((r) => {
-                const href = `${base}?${TUTORIAL_PARAM}=${r.id}`;
+                const href = `${base}?${TUTORIAL_PARAM}=${r.id}&de=ajuda`;
                 return (
                   <li key={r.id}>
                     <a href={href} onClick={(e) => go(e, href)}>

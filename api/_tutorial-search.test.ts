@@ -36,6 +36,7 @@ function deps(hits: TutorialHit[], answer = '{"answer":"Mude o prazo e escreva o
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.endsWith("/search_tutorials")) return json(hits);
     if (url.endsWith("/ai_check_limits")) return json({ blocked: false, message: null });
+    if (url.endsWith("/log_tutorial_search")) return json(42);
     return json(null);
   });
   const llm = vi.fn(async () => ({
@@ -85,6 +86,11 @@ describe("busca nos tutoriais", () => {
       p_limit: 30,
     });
     expect(rpc(calls, "log_tutorial_gap")).toEqual([]);
+    // A busca fica nas métricas, com quantos tutoriais vieram; o id volta para a tela.
+    expect(rpc(calls, "log_tutorial_search")).toEqual([
+      { p_company: company, p_query: "como mudo o prazo", p_module: "tasks", p_results: 1 },
+    ]);
+    expect(res.body.search_id).toBe(42);
     // O vetor custa e fica no consumo.
     expect(rpc(calls, "ai_log_usage")[0]).toMatchObject({ p_module: "tutorials", p_embedding: 6 });
   });

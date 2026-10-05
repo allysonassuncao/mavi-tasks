@@ -70,6 +70,7 @@ const MODULE_LABELS: Record<string, string> = {
   campaigns: "Campanhas",
   campaign_insights: "Insights das campanhas",
   dashboards: "Dashboards (MAVI)",
+  tutorials: "Tutoriais",
 };
 
 const money = (v: number) => {
