@@ -456,19 +456,38 @@ export interface InsightsBackend {
   setOwners(company: string, campaign: string, users: string[]): Promise<CampaignOwner[]>;
   /** Os funis do MakeCRM do cliente (para escolher a etapa que importa). */
   crmPipelines(company: string, client: string): Promise<{ linked: boolean; pipelines: CrmPipeline[] }>;
-  /** A etapa que importa e a meta de custo por lead nela (nulo tira). */
-  setCrmGoal(company: string, campaign: string, goal: CrmGoalInput | null): Promise<CrmGoal | null>;
+  /** As etapas que importam (do cliente ou só da campanha); sem etapas, tira. */
+  setCrmGoal(company: string, campaign: string, goal: CrmGoalInput): Promise<CrmGoal | null>;
 }
 export type CampaignOwner = { id: string; name: string };
 export type CrmPipeline = { id: string; name: string; stages: { id: string; name: string; order: number | null }[] };
-export type CrmGoalInput = {
+export type GoalStage = {
   pipeline_id: string;
   pipeline_name: string;
   stage_id: string;
   stage_name: string;
   cost_goal: number | null;
 };
-export type CrmGoal = CrmGoalInput & { updated_at?: string; updated_by_name?: string | null };
+/** client: o padrão de todas as campanhas do cliente; campaign: só esta campanha. */
+export type CrmGoalInput = { scope: "client" | "campaign"; stages: GoalStage[] };
+/** As etapas que valem na campanha: as dela ou, sem elas, as do cliente. */
+export type CrmGoal = {
+  source: "client" | "campaign";
+  stages: GoalStage[];
+  /** O padrão do cliente (mesmo quando a campanha tem as próprias). */
+  client_stages?: GoalStage[] | null;
+  updated_at?: string;
+  updated_by_name?: string | null;
+};
+const goalFrom = (g: CrmGoal | null): CrmGoal | null => {
+  if (!g) return null;
+  const fix = (list: GoalStage[] | null | undefined) =>
+    (list ?? []).map((x) => ({ ...x, cost_goal: x.cost_goal === null || x.cost_goal === undefined ? null : Number(x.cost_goal) }));
+  return { ...g, stages: fix(g.stages), client_stages: g.client_stages ? fix(g.client_stages) : null };
+};
+/** "Negociação ≤ R$ 45,00" (sem meta, só o nome). */
+export const goalStageText = (x: GoalStage) =>
+  x.cost_goal ? `${x.stage_name} ≤ ${x.cost_goal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : x.stage_name;
 export type InsightEvent = {
   action: "applied" | "dismissed" | "snoozed" | "reopened" | "returned" | "task" | "expired" | "resolved";
   reason: string;
@@ -496,7 +515,7 @@ export const serverInsights: InsightsBackend = {
       p_campaign: campaign,
       p_runs: 20,
     });
-    return { ...v, runs: (v.runs ?? []).map(runFrom), current: v.current ?? [] };
+    return { ...v, runs: (v.runs ?? []).map(runFrom), current: v.current ?? [], crm_goal: goalFrom(v.crm_goal ?? null) };
   },
   request: (company, campaign) =>
     rpc<RequestResult>("request_campaign_insight", { p_company: company, p_campaign: campaign }),
@@ -540,7 +559,7 @@ export const serverInsights: InsightsBackend = {
       p_campaign: campaign,
       p_goal: goal,
     });
-    return g ? { ...g, cost_goal: g.cost_goal === null ? null : Number(g.cost_goal) } : null;
+    return goalFrom(g);
   },
 };
 
@@ -822,11 +841,11 @@ export function demoInsights(): InsightsBackend {
         owners: [DEMO_PEOPLE[0]],
         can_set_owners: true,
         crm_goal: {
-          pipeline_id: "demo-funil",
-          pipeline_name: "Vendas",
-          stage_id: "demo-etapa-3",
-          stage_name: "Negociação",
-          cost_goal: 45,
+          source: "client",
+          stages: [
+            { pipeline_id: "demo-funil", pipeline_name: "Vendas", stage_id: "demo-etapa-2", stage_name: "Qualificado", cost_goal: 25 },
+            { pipeline_id: "demo-funil", pipeline_name: "Vendas", stage_id: "demo-etapa-3", stage_name: "Negociação", cost_goal: 45 },
+          ],
         },
         blocker: null,
         capped: false,
@@ -988,7 +1007,9 @@ export function demoInsights(): InsightsBackend {
       };
     },
     async setCrmGoal(_c, _campaign, goal) {
-      return goal ? { ...goal, updated_by_name: "Você", updated_at: new Date().toISOString() } : null;
+      return goal.stages.length
+        ? { source: goal.scope, stages: goal.stages, client_stages: goal.scope === "client" ? goal.stages : null, updated_by_name: "Você" }
+        : null;
     },
     async badges(_company, campaigns) {
       return {

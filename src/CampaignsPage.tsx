@@ -37,6 +37,7 @@ import type { FormPreset } from "./forms";
 import {
   CampaignInsightsAside,
   CampaignInsightsTab,
+  CrmGoalControl,
   useCampaignInsights,
 } from "./CampaignInsights";
 import { CampaignMaviCell } from "./CampaignMaviCell";
@@ -339,6 +340,13 @@ export function CampaignsPage({
       />
     ) : null;
   };
+  // The same, as a function (the campaign's "Abrir no CRM ▾" with the stages that matter).
+  const crmOpener = (contract: string) => {
+    const client = contractParts(data, contract).client;
+    return client && client.id in crmLinks
+      ? () => openCrmTab({ backend: crm, company, client: client.id, clientName: client.name, notify })
+      : null;
+  };
   // Plataforma: the CRM's deals per UTM of the campaign's client.
   const platformCrm = (contract: string): PlatformCrm | null => {
     const client = contractParts(data, contract).client;
@@ -441,6 +449,7 @@ export function CampaignsPage({
           onMavi={(open) => setMaviOpen(open ? "1" : "")}
           onAlerts={() => setAlertsView("lista")}
           crm={crmButton(campaign.contract_id)}
+          crmOpen={crmOpener(campaign.contract_id)}
           platformCrm={platformCrm(campaign.contract_id)}
           link={window.location.origin + href(campaign.id)}
           onBack={() =>
@@ -1537,6 +1546,7 @@ function CampaignDetail({
   onMavi,
   onAlerts,
   crm,
+  crmOpen,
   platformCrm,
   link,
   onBack,
@@ -1572,6 +1582,8 @@ function CampaignDetail({
   onAlerts: () => void;
   /** Abrir no CRM (null: the client isn't linked to the MakeCRM). */
   crm: ReactNode;
+  /** The same, as a function: "Abrir no CRM ▾" with the stages that matter (Insights da MAVI). */
+  crmOpen: (() => Promise<void>) | null;
   /** Plataforma: the client's MakeCRM numbers (null: no client). */
   platformCrm: PlatformCrm | null;
   /** The campaign's own address, to share. */
@@ -1648,7 +1660,19 @@ function CampaignDetail({
       >
         <Link2 size={15} /> Copiar link
       </Button>
-      {crm}
+      {crmOpen && insightsView?.enabled ? (
+        <CrmGoalControl
+          openCrm={crmOpen}
+          state={insightsState}
+          backend={insights}
+          company={company}
+          campaign={campaign.id}
+          notify={notify}
+          ctx={insightsCtx}
+        />
+      ) : (
+        crm
+      )}
     </>
   );
   const actions = !canEdit ? (

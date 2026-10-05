@@ -739,33 +739,46 @@ await check("Fase 5: responsáveis recebem os avisos; a ordem da análise; amost
   await rpc("save_campaign_insight_settings", [A, JSON.stringify({ min_results: 10, max_insights: 4 })]);
 });
 
-await check("Fase 6: a etapa do CRM que importa e a meta de custo por campanha", async () => {
-  const stage = "00000000-0000-4000-8000-0000000000a2";
+await check("Fase 6: as etapas do CRM que importam — padrão do cliente, ajuste da campanha, várias com meta", async () => {
+  const st = (n) => `00000000-0000-4000-8000-0000000000a${n}`;
   const pipeline = "00000000-0000-4000-8000-0000000000b1";
+  const stage = (n, name, cost) => ({ pipeline_id: pipeline, pipeline_name: "Vendas", stage_id: st(n), stage_name: name, cost_goal: cost });
   await as(trafego);
-  const goal = await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({
-    pipeline_id: pipeline, pipeline_name: "Vendas", stage_id: stage, stage_name: "Negociação", cost_goal: "45.5",
+  // O padrão do cliente: a campanha usa.
+  let goal = await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({
+    scope: "client", stages: [stage(1, "Qualificado", 30), stage(2, "Negociação", "80.5"), stage(2, "Negociação", 1)],
   })]);
-  assert.deepEqual([goal.stage_name, goal.pipeline_name, Number(goal.cost_goal), goal.updated_by_name], ["Negociação", "Vendas", 45.5, "Tiago Tráfego"]);
-  await assert.rejects(rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ pipeline_id: pipeline, stage_id: "x", stage_name: "N" })]), /Escolha a etapa/);
-  await assert.rejects(rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ pipeline_id: pipeline, stage_id: stage, stage_name: "N", cost_goal: -1 })]), /maior que zero/);
+  assert.equal(goal.source, "client");
+  assert.deepEqual(goal.stages.map((x) => [x.stage_name, x.cost_goal === null ? null : Number(x.cost_goal)]), [["Qualificado", 30], ["Negociação", 80.5]]);
+  assert.equal(goal.updated_by_name, "Tiago Tráfego");
+  // O ajuste da campanha vence, e mostra o padrão do cliente ao lado.
+  goal = await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ scope: "campaign", stages: [stage(3, "Contrato", null)] })]);
+  assert.equal(goal.source, "campaign");
+  assert.deepEqual(goal.stages.map((x) => [x.stage_name, x.cost_goal]), [["Contrato", null]]);
+  assert.equal(goal.client_stages.length, 2);
+  await assert.rejects(rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ scope: "campaign", stages: [{ ...stage(1, "N", 1), stage_id: "x" }] })]), /Escolha as etapas/);
+  await assert.rejects(rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ scope: "campaign", stages: [stage(1, "N", -1)] })]), /maior que zero/);
+  await assert.rejects(rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ scope: "campaign", stages: [1, 2, 3, 4, 5, 6, 7].map((n) => stage(n, "E", 1)) })]), /até 6/);
   const v = await rpc("campaign_insights", [A, campaign, 8]);
-  assert.equal(v.crm_goal.stage_id, stage);
+  assert.equal(v.crm_goal.stages[0].stage_id, st(3));
   await as(other);
   await assert.rejects(rpc("set_campaign_crm_goal", [A, campaign, null]), /Sem permissão/);
-  // O worker recebe a etapa no material.
+  // O worker recebe as etapas que valem.
   const [run] = await sql(`insert into campaign_insight_runs(company_id, campaign_id, trigger, status, started_at, attempts, local_day)
     values ($1,$2,'schedule','running',now(),1,$3) returning id`, [A, campaign, today]);
   await as(null);
   const material = await worker("ai_campaign_insight_material", [SECRET, run.id]);
-  assert.deepEqual([material.crm_goal.stage_name, Number(material.crm_goal.cost_goal)], ["Negociação", 45.5]);
+  assert.deepEqual(material.crm_goal.stages.map((x) => x.stage_name), ["Contrato"]);
   await sql(`update campaign_insight_runs set status='done', claimed_until=null where id=$1`, [run.id]);
-  // Sem meta de custo vale; nulo tira.
+  // Tirar o ajuste: volta ao padrão do cliente; tirar o padrão: nada.
   await as(trafego);
-  const noCost = await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ pipeline_id: pipeline, stage_id: stage, stage_name: "Negociação" })]);
-  assert.equal(noCost.cost_goal, null);
-  assert.equal(await rpc("set_campaign_crm_goal", [A, campaign, null]), null);
-  assert.equal((await rpc("campaign_insights", [A, campaign, 8])).crm_goal, null);
+  goal = await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ scope: "campaign", stages: [] })]);
+  assert.equal(goal.source, "client");
+  // Salvar o padrão a partir de uma campanha com ajuste: a campanha passa a usá-lo.
+  await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ scope: "campaign", stages: [stage(3, "Contrato", null)] })]);
+  goal = await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ scope: "client", stages: [stage(2, "Negociação", 70)] })]);
+  assert.deepEqual([goal.source, goal.stages[0].stage_name], ["client", "Negociação"]);
+  assert.equal(await rpc("set_campaign_crm_goal", [A, campaign, JSON.stringify({ scope: "client", stages: [] })]), null);
 });
 
 await check("Fase 7: a vigia diária pelos números do dia e a leitura das plataformas", async () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import * as Popover from "@radix-ui/react-popover";
 import {
   ArrowRight,
   BadgeCheck,
@@ -14,6 +15,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   CircleAlert,
+  ExternalLink,
   Copy,
   History,
   Lightbulb,
@@ -44,6 +46,7 @@ import {
   basisLabel,
   dayLabel,
   effectText,
+  goalStageText,
   insightTaskPreset,
   negativeLine,
   negativesText,
@@ -58,8 +61,9 @@ import {
   type CampaignInsight,
   type CampaignInsightsView,
   type CampaignOwner,
-  type CrmGoalInput,
+  type CrmGoal,
   type CrmPipeline,
+  type GoalStage,
   type InsightNegative,
   type InsightBadge,
   type InsightKind,
@@ -711,7 +715,9 @@ function NegativesList({ list, compact }: { list: InsightNegative[]; compact: bo
       ) : (
         rows
       )}
-      <small className="insight-negatives-hint">[exata] bloqueia só o termo; "frase" bloqueia qualquer busca que o contenha.</small>
+      <small className="insight-negatives-hint">
+        [exata] bloqueia só o termo; "frase" bloqueia qualquer busca que o contenha.
+      </small>
     </div>
   );
 }
@@ -1150,10 +1156,217 @@ function Owners({
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 /**
- * A etapa do CRM que importa nesta campanha (ex.: Negociação) e a meta de
- * custo por lead que chega a ela: a régua principal da MAVI. As etapas vêm do
- * MakeCRM do cliente na hora.
+ * As etapas do CRM que importam (ex.: Qualificado, Negociação, Ganho), cada
+ * uma com a meta de custo por lead: a régua principal da MAVI. Valem para o
+ * cliente (todas as campanhas dele) ou só para esta campanha. As etapas vêm
+ * do MakeCRM do cliente na hora.
  */
+function CrmGoalEditor({
+  state,
+  backend,
+  company,
+  campaign,
+  notify,
+  ctx,
+  onClose,
+}: {
+  state: InsightsState;
+  backend: InsightsBackend;
+  company: string;
+  campaign: string;
+  notify: (message: string) => void;
+  ctx: InsightContext;
+  onClose: () => void;
+}) {
+  const goal = state.view?.crm_goal ?? null;
+  const basis = state.view?.money_basis ?? "net";
+  const contract = ctx.data.contracts.find((c) => c.id === ctx.campaign.contract_id);
+  const client = contract?.client_id ?? "";
+  const clientName = ctx.data.clients.find((c) => c.id === client)?.name ?? "o cliente";
+  const [pipelines, setPipelines] = useState<CrmPipeline[] | null>(null);
+  const [linked, setLinked] = useState(true);
+  const [scope, setScope] = useState<"client" | "campaign">(goal?.source ?? "client");
+  // O padrão do cliente (quando a campanha usa o padrão, são as próprias etapas que valem).
+  const clientStages = goal?.client_stages ?? (goal?.source === "client" ? goal.stages : []);
+  const initial = (s: "client" | "campaign") =>
+    s === "client" ? clientStages : goal?.source === "campaign" ? goal.stages : clientStages;
+  const [chosen, setChosen] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      initial(goal?.source ?? "client").map((x) => [x.stage_id, x.cost_goal ? String(x.cost_goal) : ""]),
+    ),
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    backend.crmPipelines(company, client).then(
+      (r) => {
+        if (!live) return;
+        setLinked(r.linked);
+        setPipelines(r.pipelines);
+      },
+      (e: Error) => live && setError(e.message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [backend, company, client]);
+  const switchScope = (s: "client" | "campaign") => {
+    setScope(s);
+    setChosen(Object.fromEntries(initial(s).map((x) => [x.stage_id, x.cost_goal ? String(x.cost_goal) : ""])));
+  };
+  const save = async (clear = false) => {
+    setBusy(true);
+    setError("");
+    try {
+      const stages: GoalStage[] = [];
+      if (!clear)
+        for (const p of pipelines ?? [])
+          for (const st of p.stages) {
+            if (!(st.id in chosen)) continue;
+            const raw = chosen[st.id].trim().replace(",", ".");
+            const value = raw ? Number(raw) : null;
+            if (value !== null && !(value > 0)) throw Error(`A meta de "${st.name}" precisa ser maior que zero.`);
+            stages.push({
+              pipeline_id: p.id,
+              pipeline_name: p.name,
+              stage_id: st.id,
+              stage_name: st.name,
+              cost_goal: value,
+            });
+          }
+      if (!clear && !stages.length) throw Error("Escolha ao menos uma etapa.");
+      await backend.setCrmGoal(company, campaign, { scope, stages });
+      onClose();
+      notify(
+        clear
+          ? scope === "campaign"
+            ? "A campanha voltou ao padrão do cliente."
+            : "Etapas do cliente removidas."
+          : "Etapas que importam salvas.",
+      );
+      state.reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const many = (pipelines?.length ?? 0) > 1;
+  const count = Object.keys(chosen).length;
+  return (
+    <Modal title="Etapas que importam no CRM" onClose={onClose} busy={busy}>
+      <form
+        className="entity-form insights-reason crm-goal-editor"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <p className="insights-owners-help">
+          Marque as etapas do funil que mostram que o lead é bom (ex.: Qualificado, Negociação, Ganho) e, se quiser, a
+          meta de custo por lead em cada uma. A MAVI mede quanto custa cada lead que chega a elas e mostra onde o funil
+          estoura.
+        </p>
+        <div className="cins-radio crm-goal-scope" role="radiogroup" aria-label="Para quem vale">
+          {(
+            [
+              ["client", `Padrão de ${clientName}`, "Vale para todas as campanhas do cliente."],
+              ["campaign", "Só esta campanha", "Ajuste próprio: a campanha ignora o padrão do cliente."],
+            ] as const
+          ).map(([value, label, hint]) => (
+            <label key={value} className={scope === value ? "on" : ""}>
+              <input type="radio" name="crm-goal-scope" checked={scope === value} onChange={() => switchScope(value)} />
+              <span>
+                <strong>{label}</strong>
+                <small>{hint}</small>
+              </span>
+            </label>
+          ))}
+        </div>
+        {!pipelines && !error && <Loading variant="list" />}
+        {pipelines && !linked && <p className="insights-empty">O cliente desta campanha não está ligado ao MakeCRM.</p>}
+        {pipelines && linked && (
+          <div className="crm-goal-pipelines">
+            {pipelines.map((p) => (
+              <fieldset key={p.id}>
+                {many && <legend>{p.name}</legend>}
+                {p.stages.map((st) => {
+                  const on = st.id in chosen;
+                  return (
+                    <div key={st.id} className={`crm-goal-stage${on ? " on" : ""}`}>
+                      <label className="cins-check">
+                        <Checkbox
+                          checked={on}
+                          disabled={!on && count >= 6}
+                          onCheckedChange={(v) =>
+                            setChosen((c) => {
+                              const next = { ...c };
+                              if (v === true) next[st.id] = "";
+                              else delete next[st.id];
+                              return next;
+                            })
+                          }
+                        />
+                        <span>{st.name}</span>
+                      </label>
+                      {on && (
+                        <Input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          inputMode="decimal"
+                          value={chosen[st.id]}
+                          placeholder={`Meta R$ (${basisLabel(basis)})`}
+                          aria-label={`Meta de custo por lead em ${st.name}`}
+                          onChange={(e) => setChosen((c) => ({ ...c, [st.id]: e.target.value }))}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </fieldset>
+            ))}
+          </div>
+        )}
+        <small className="crm-goal-note">
+          Até 6 etapas. A meta é opcional: acima dela, a MAVI avisa — com calma quando muitos leads ainda são recentes.
+        </small>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="form-footer">
+          {((scope === "campaign" && goal?.source === "campaign") ||
+            (scope === "client" && clientStages.length > 0)) && (
+            <Button type="button" className="btn secondary" onClick={() => void save(true)} disabled={busy}>
+              {scope === "campaign" ? "Voltar ao padrão do cliente" : "Remover o padrão"}
+            </Button>
+          )}
+          <Button type="button" className="btn secondary" onClick={onClose} disabled={busy}>
+            Cancelar
+          </Button>
+          <Button type="submit" className="btn primary" loading={busy} disabled={!pipelines || !linked}>
+            Salvar
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** O resumo das etapas: "Negociação ≤ R$ 45,00 · +1". */
+function goalSummary(goal: CrmGoal | null) {
+  if (!goal?.stages.length) return { short: "", full: "" };
+  const parts = goal.stages.map(goalStageText);
+  return {
+    short: `${parts[parts.length - 1]}${parts.length > 1 ? ` · +${parts.length - 1}` : ""}`,
+    full: `${parts.join(" · ")} (${goal.source === "client" ? "padrão do cliente" : "só desta campanha"})`,
+  };
+}
+
+/** Na aba Insights: a linha com as etapas e o atalho para mudar. */
 function CrmGoalLine({
   state,
   backend,
@@ -1170,152 +1383,152 @@ function CrmGoalLine({
   ctx: InsightContext;
 }) {
   const v = state.view;
-  const goal = v?.crm_goal ?? null;
-  const client = ctx.data.contracts.find((c) => c.id === ctx.campaign.contract_id)?.client_id ?? "";
   const [open, setOpen] = useState(false);
-  const [pipelines, setPipelines] = useState<CrmPipeline[] | null>(null);
-  const [linked, setLinked] = useState(true);
-  const [stage, setStage] = useState("");
-  const [cost, setCost] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const start = () => {
-    setOpen(true);
-    setError("");
-    setPipelines(null);
-    setStage(goal?.stage_id ?? "");
-    setCost(goal?.cost_goal ? String(goal.cost_goal) : "");
-    backend.crmPipelines(company, client).then(
-      (r) => {
-        setLinked(r.linked);
-        setPipelines(r.pipelines);
-      },
-      (e: Error) => setError(e.message),
-    );
-  };
-  const save = async (clear = false) => {
-    setBusy(true);
-    setError("");
-    try {
-      let input: CrmGoalInput | null = null;
-      if (!clear) {
-        const p = pipelines?.find((x) => x.stages.some((st) => st.id === stage));
-        const st = p?.stages.find((x) => x.id === stage);
-        if (!p || !st) throw Error("Escolha a etapa do funil.");
-        const value = cost.trim() ? Number(cost.replace(",", ".")) : null;
-        if (value !== null && !(value > 0)) throw Error("A meta de custo precisa ser maior que zero.");
-        input = { pipeline_id: p.id, pipeline_name: p.name, stage_id: st.id, stage_name: st.name, cost_goal: value };
-      }
-      await backend.setCrmGoal(company, campaign, input);
-      setOpen(false);
-      notify(clear ? "Etapa que importa removida." : "Etapa que importa salva.");
-      state.reload();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
   if (!v) return null;
-  const many = (pipelines?.length ?? 0) > 1;
+  const goal = v.crm_goal ?? null;
+  const sum = goalSummary(goal);
   return (
     <div className="insights-owners insights-goal">
       <Target size={14} aria-hidden="true" />
       <span>
-        <strong>Etapa que importa no CRM:</strong>{" "}
-        {goal ? (
-          <>
-            {goal.stage_name}
-            {goal.pipeline_name ? ` (${goal.pipeline_name})` : ""}
-            {goal.cost_goal ? (
-              <>
-                {" "}
-                · meta de {brl(goal.cost_goal)} por lead{" "}
-                <span className="insights-goal-basis" title={basisHint(v.money_basis)}>
-                  ({basisLabel(v.money_basis)})
-                </span>
-              </>
-            ) : (
-              " · sem meta de custo"
-            )}
-          </>
-        ) : (
-          "não definida — com ela, a MAVI compara anúncios e conjuntos pelo custo do lead que avança no funil"
-        )}
+        <strong>Etapas que importam no CRM:</strong>{" "}
+        {goal
+          ? sum.full
+          : "não definidas — com elas, a MAVI compara anúncios e conjuntos pelo custo do lead que avança no funil"}
       </span>
-      {v.can_set_owners && client && (
-        <button type="button" className="text-btn" onClick={start}>
+      {v.can_set_owners && (
+        <button type="button" className="text-btn" onClick={() => setOpen(true)}>
           {goal ? "Alterar" : "Definir"}
         </button>
       )}
       {open && (
-        <Modal title="Etapa que importa no CRM" onClose={() => setOpen(false)} busy={busy}>
-          <form
-            className="entity-form insights-reason"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void save();
-            }}
-          >
-            <p className="insights-owners-help">
-              Escolha a etapa do funil do MakeCRM que mostra que o lead é bom (ex.: Negociação). A MAVI passa a medir
-              quanto custa cada lead que chega a ela (ou além) e compara anúncios, conjuntos e palavras-chave por isso.
-            </p>
-            {!pipelines && !error && <Loading variant="list" />}
-            {pipelines && !linked && (
-              <p className="insights-empty">O cliente desta campanha não está ligado ao MakeCRM.</p>
-            )}
-            {pipelines && linked && (
-              <>
-                <label>
-                  <span>Etapa</span>
-                  <Select value={stage} onValueChange={setStage} aria-label="Etapa que importa">
-                    {pipelines.flatMap((p) =>
-                      p.stages.map((st) => (
-                        <SelectOption key={st.id} value={st.id}>
-                          {many ? `${p.name} › ${st.name}` : st.name}
-                        </SelectOption>
-                      )),
-                    )}
-                  </Select>
-                </label>
-                <label>
-                  <span>Meta de custo por lead nessa etapa (R$, {basisLabel(v.money_basis)})</span>
-                  <Input
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={cost}
-                    placeholder="Opcional"
-                    onChange={(e) => setCost(e.target.value)}
-                  />
-                  <small>Acima dela, a MAVI avisa — com calma quando muitos leads ainda são recentes demais.</small>
-                </label>
-              </>
-            )}
-            {error && (
-              <p className="form-error" role="alert">
-                {error}
-              </p>
-            )}
-            <div className="form-footer">
-              {goal && (
-                <Button type="button" className="btn secondary" onClick={() => void save(true)} disabled={busy}>
-                  Remover
-                </Button>
-              )}
-              <Button type="button" className="btn secondary" onClick={() => setOpen(false)} disabled={busy}>
-                Cancelar
-              </Button>
-              <Button type="submit" className="btn primary" loading={busy} disabled={!pipelines || !linked}>
-                Salvar
-              </Button>
-            </div>
-          </form>
-        </Modal>
+        <CrmGoalEditor
+          state={state}
+          backend={backend}
+          company={company}
+          campaign={campaign}
+          notify={notify}
+          ctx={ctx}
+          onClose={() => setOpen(false)}
+        />
       )}
     </div>
+  );
+}
+
+/**
+ * No topo da campanha: "Abrir no CRM ▾" (o menu abre o CRM ou as etapas que
+ * importam) e, ao lado, o selo com as etapas — em destaque quando faltam.
+ */
+export function CrmGoalControl({
+  openCrm,
+  state,
+  backend,
+  company,
+  campaign,
+  notify,
+  ctx,
+}: {
+  /** Abre o MakeCRM do cliente numa aba nova. */
+  openCrm: () => Promise<void>;
+  state: InsightsState;
+  backend: InsightsBackend;
+  company: string;
+  campaign: string;
+  notify: (message: string) => void;
+  ctx: InsightContext;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const v = state.view;
+  const goal = v?.crm_goal ?? null;
+  const sum = goalSummary(goal);
+  const canEdit = !!v?.can_set_owners;
+  // As etapas só fazem sentido com os insights ligados.
+  const withGoal = !!v?.enabled;
+  const open = async () => {
+    if (busy) return;
+    setBusy(true);
+    await openCrm();
+    setBusy(false);
+  };
+  return (
+    <>
+      <div className="crm-split" role="group" aria-label="MakeCRM">
+        <Button className="btn crm-open crm-split-main" onClick={() => void open()} loading={busy}>
+          <ExternalLink size={15} /> Abrir no CRM
+        </Button>
+        {withGoal && (
+          <Popover.Root open={menu} onOpenChange={setMenu}>
+            <Popover.Trigger asChild>
+              <button type="button" className="btn crm-open crm-split-caret" aria-label="Mais opções do MakeCRM">
+                <ChevronDown size={15} aria-hidden="true" />
+              </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content className="crm-split-menu" align="end" sideOffset={6}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenu(false);
+                    void open();
+                  }}
+                >
+                  <ExternalLink size={15} aria-hidden="true" />
+                  <span>
+                    <strong>Abrir no CRM</strong>
+                    <small>Numa aba nova, já logado</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!canEdit}
+                  title={canEdit ? undefined : "Só quem edita campanhas muda as etapas"}
+                  onClick={() => {
+                    setMenu(false);
+                    setEditing(true);
+                  }}
+                >
+                  <Target size={15} aria-hidden="true" />
+                  <span>
+                    <strong>Etapas que importam…</strong>
+                    <small>{goal ? sum.full : "Ainda não definidas"}</small>
+                  </span>
+                </button>
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        )}
+      </div>
+      {withGoal && (goal || canEdit) && (
+        <button
+          type="button"
+          className={`crm-goal-chip${goal ? "" : " empty"}`}
+          onClick={() => canEdit && setEditing(true)}
+          disabled={!canEdit}
+          title={
+            goal
+              ? `Etapas que importam: ${sum.full}`
+              : "A MAVI compara anúncios e conjuntos pelo custo do lead que avança no funil"
+          }
+        >
+          <Target size={14} aria-hidden="true" />
+          {goal ? sum.short : "Definir etapas que importam"}
+        </button>
+      )}
+      {editing && (
+        <CrmGoalEditor
+          state={state}
+          backend={backend}
+          company={company}
+          campaign={campaign}
+          notify={notify}
+          ctx={ctx}
+          onClose={() => setEditing(false)}
+        />
+      )}
+    </>
   );
 }
 

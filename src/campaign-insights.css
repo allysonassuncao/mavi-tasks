@@ -1107,3 +1107,192 @@
   color: var(--muted);
   font-size: 0.68rem;
 }
+
+/* "Abrir no CRM ▾" e o selo das etapas que importam (topo da campanha). */
+.crm-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.crm-split .btn.crm-split-main:has(+ .crm-split-caret) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.btn.crm-open.crm-split-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+}
+.crm-split-menu {
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 260px;
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(20, 30, 25, 0.14);
+}
+.crm-split-menu button {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.crm-split-menu button:hover:not(:disabled),
+.crm-split-menu button:focus-visible {
+  background: #f1f5fd;
+}
+.crm-split-menu button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.crm-split-menu button > svg {
+  flex: none;
+  margin-top: 2px;
+  color: #3b82f6;
+}
+.crm-split-menu span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.crm-split-menu strong {
+  font-size: 0.84rem;
+}
+.crm-split-menu small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.crm-goal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  padding: 0 12px;
+  align-self: stretch;
+  min-height: 36px;
+  border: 1px solid #c7d7f5;
+  border-radius: 999px;
+  background: #f1f5fd;
+  color: #1e3a8a;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.crm-goal-chip:hover:not(:disabled) {
+  background: #e4ecfb;
+}
+.crm-goal-chip:disabled {
+  cursor: default;
+}
+.crm-goal-chip.empty {
+  border-style: dashed;
+  border-color: #3b82f6;
+  background: #fff;
+  color: #2563eb;
+}
+
+/* O editor das etapas. */
+.crm-goal-editor .cins-radio label {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.crm-goal-editor .cins-radio input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  padding: 0;
+  accent-color: #7a4fb3;
+}
+.crm-goal-pipelines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.crm-goal-pipelines fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.crm-goal-pipelines legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #7c877f;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.crm-goal-stage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.crm-goal-stage.on {
+  border-color: #c7d7f5;
+  background: #f7f9fe;
+}
+.crm-goal-stage label.cins-check {
+  flex: 1;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.crm-goal-stage input[type="number"] {
+  width: 150px;
+  flex: none;
+}
+.crm-goal-note {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+@media (max-width: 560px) {
+  .crm-goal-stage {
+    flex-wrap: wrap;
+  }
+  .crm-goal-stage input[type="number"] {
+    width: 100%;
+  }
+  .crm-goal-chip {
+    max-width: 100%;
+  }
+}
