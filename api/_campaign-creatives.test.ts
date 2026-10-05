@@ -42,7 +42,12 @@ describe("os criativos do Meta", () => {
       kind: "video",
       image: "https://t/9.jpg",
       video: "v9",
+      link: null,
     });
+    expect(metaSource({ id: "c5", instagram_permalink_url: "https://www.instagram.com/p/x" }).link).toBe(
+      "https://www.instagram.com/p/x",
+    );
+    expect(metaSource({ id: "c6", effective_object_story_id: "1_2" }).link).toBe("https://www.facebook.com/1_2");
     expect(
       metaSource({ id: "c2", object_story_spec: { link_data: { image_hash: "h1", picture: "https://p/1.jpg" } } }),
     ).toMatchObject({ key: "i:h1", kind: "image", image: "https://p/1.jpg" });
@@ -135,6 +140,9 @@ describe("ler os criativos", () => {
     expect(r.byEntity.get("a:1")!.line).toBe("resumo i:h1 | promessa: promessa de i:h1");
     expect(r.byEntity.get("a:3")!.line).toBe(r.byEntity.get("a:1")!.line);
     expect(r.byEntity.get("a:2")!.transcript).toBe("Frete grátis só hoje");
+    // O criativo de cada anúncio (para a miniatura dos insights), com o que foi lido.
+    expect(r.byAd.get("a:2")).toMatchObject({ key: "v:v9", kind: "video", summary: { promessa: "promessa de v:v9" } });
+    expect(r.byAd.get("a:3")!.key).toBe(r.byAd.get("a:1")!.key);
     // Uma chamada ao modelo de visão para os dois criativos, com o texto, a capa e o áudio.
     const vision = calls.filter((c) => c.url === "https://api.anthropic.com/v1/messages");
     expect(vision).toHaveLength(1);

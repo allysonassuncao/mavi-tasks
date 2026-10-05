@@ -57,6 +57,8 @@ export type CreativeSource = {
   kind: "image" | "video";
   image: string | null;
   video?: string | null;
+  /** O anúncio publicado (Meta: Instagram ou Facebook), para a prévia dos insights. */
+  link?: string | null;
   /** Meta: a conta (para ler o vídeo com o token dela). */
   account?: string;
   ads: CreativeAd[];
@@ -97,6 +99,7 @@ const hashUrl = (url: string) => {
  * é lido uma vez.
  */
 export function metaSource(c: Row): Omit<CreativeSource, "ads" | "account"> {
+  const story = str(c.effective_object_story_id);
   const oss = (c.object_story_spec ?? {}) as Row;
   const link = (oss.link_data ?? {}) as Row;
   const vdata = (oss.video_data ?? {}) as Row;
@@ -117,6 +120,7 @@ export function metaSource(c: Row): Omit<CreativeSource, "ads" | "account"> {
     kind: video ? "video" : "image",
     image: image || null,
     video: video || null,
+    link: str(c.instagram_permalink_url) || (story ? `https://www.facebook.com/${story}` : null),
   };
 }
 
@@ -307,9 +311,20 @@ export type CreativesInput = {
   /** Quanto as leituras novas podem gastar (US$). */
   budget: number;
 };
+/** O criativo de um anúncio: para a miniatura e a prévia dos insights. */
+export type CreativeRef = {
+  key: string;
+  kind: "image" | "video";
+  image: string | null;
+  link: string | null;
+  summary: CreativeSummary | null;
+  transcript: string;
+};
 export type CreativesResult = {
   /** O resumo de cada anúncio (pela entidade). */
   byEntity: Map<string, { line: string; transcript: string }>;
+  /** O criativo de cada anúncio (pela entidade), lido ou não. */
+  byAd: Map<string, CreativeRef>;
   usage: Usage[];
   notes: string[];
   read: number;
@@ -330,7 +345,7 @@ export const imageEstimate = (price: { input: number; output: number }) => (1200
  * novos (até o limite da empresa e do orçamento) são lidos e guardados.
  */
 export async function readCreatives(env: CreativesEnv, deps: AiDeps, input: CreativesInput): Promise<CreativesResult> {
-  const result: CreativesResult = { byEntity: new Map(), usage: [], notes: [], read: 0, reused: 0 };
+  const result: CreativesResult = { byEntity: new Map(), byAd: new Map(), usage: [], notes: [], read: 0, reused: 0 };
   if (!input.ads.length) return result;
   // 1. De onde vem cada criativo (Meta: uma chamada por conta para todos).
   const sources = new Map<string, CreativeSource>();
@@ -338,6 +353,7 @@ export async function readCreatives(env: CreativesEnv, deps: AiDeps, input: Crea
     const found = sources.get(s.key) ?? { ...s, ads: [] };
     found.ads.push(ad);
     if (!found.image && s.image) found.image = s.image;
+    if (!found.link && s.link) found.link = s.link;
     sources.set(s.key, found);
   };
   if (input.platform === "meta") {
@@ -351,7 +367,7 @@ export async function readCreatives(env: CreativesEnv, deps: AiDeps, input: Crea
       const found = await graph<Record<string, Row>>(env.ads, input.platformFetch, token, "/", {
         ids: ids.join(","),
         fields:
-          "id,object_type,image_url,image_hash,video_id,thumbnail_url,object_story_spec{link_data{picture,image_hash},video_data{video_id,image_url}},asset_feed_spec{images{hash,url},videos{video_id,thumbnail_url}}",
+          "id,object_type,image_url,image_hash,video_id,thumbnail_url,instagram_permalink_url,effective_object_story_id,object_story_spec{link_data{picture,image_hash},video_data{video_id,image_url}},asset_feed_spec{images{hash,url},videos{video_id,thumbnail_url}}",
         thumbnail_width: "720",
         thumbnail_height: "720",
       });
@@ -365,6 +381,9 @@ export async function readCreatives(env: CreativesEnv, deps: AiDeps, input: Crea
       if (ad.google?.image) add({ key: hashUrl(ad.google.image), kind: "image", image: ad.google.image }, ad);
   }
   if (!sources.size) return result;
+  for (const s of sources.values())
+    for (const ad of s.ads)
+      result.byAd.set(ad.entity, { key: s.key, kind: s.kind, image: s.image, link: s.link ?? null, summary: null, transcript: "" });
   // 2. O que já foi lido (e as escolhas da empresa).
   const cached = await workerRpc<{
     settings: { images: boolean; videos: boolean; new_max: number };
@@ -536,8 +555,11 @@ export async function readCreatives(env: CreativesEnv, deps: AiDeps, input: Crea
     const r = all.get(key);
     if (!r) continue;
     if (known.has(key)) result.reused++;
-    for (const ad of s.ads)
+    for (const ad of s.ads) {
       result.byEntity.set(ad.entity, { line: creativeLine(r.summary), transcript: (r.transcript ?? "").slice(0, 300) });
+      const ref = result.byAd.get(ad.entity);
+      if (ref) Object.assign(ref, { summary: r.summary, transcript: (r.transcript ?? "").slice(0, 600) });
+    }
   }
   return result;
 }

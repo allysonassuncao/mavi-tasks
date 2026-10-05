@@ -32,7 +32,8 @@ import {
   type CrmUtmDeals,
 } from "./_crm.js";
 import { modelPrice } from "./_social-leads.js";
-import { readCreatives, type CreativeAd } from "./_campaign-creatives.js";
+import { readCreatives, type CreativeAd, type CreativeRef } from "./_campaign-creatives.js";
+import { attachCreatives, type InsightCreative, type ToWebp } from "./_campaign-creative-thumbs.js";
 import { learnFromFeedback } from "./_campaign-insight-learning.js";
 import { watchPlatforms } from "./_campaign-watch.js";
 import { meteredFetch, newApiMeter, type ApiMeter, type Throttle } from "./_ads-meter.js";
@@ -518,8 +519,8 @@ export type Insight = {
   source: "rule" | "mavi";
   fingerprint: string;
   confidence?: number;
-  /** Fase 8: a lista de negativas para copiar. */
-  extra?: { negatives: Negative[] };
+  /** Fase 8: a lista de negativas para copiar; os criativos citados (com a miniatura). */
+  extra?: { negatives?: Negative[]; creatives?: InsightCreative[] };
 };
 
 const KINDS: InsightKind[] = ["highlight", "opportunity", "problem", "tracking"];
@@ -1879,7 +1880,11 @@ export type CampaignInsightsEnv = AiEnv & {
   ads: AdsEnv;
   crm: CrmEnv;
   insightsBudgetMs?: number;
+  /** O bucket público das miniaturas dos criativos. */
+  publicBucket?: string;
 };
+/** toWebp: reduz as miniaturas dos criativos (o sharp, no servidor). */
+export type InsightsDeps = AiDeps & { toWebp?: ToWebp };
 type Usage = {
   kind: string;
   model: string;
@@ -2192,7 +2197,7 @@ const minutesFromNow = (now: number, minutes: number) => new Date(now + minutes 
 /** Uma análise inteira (a fila já reservou). */
 export async function analyse(
   env: CampaignInsightsEnv,
-  deps: AiDeps,
+  deps: InsightsDeps,
   runId: string,
   companies: Map<string, Promise<Company>>,
   read: typeof readAnalysis = readAnalysis,
@@ -2279,6 +2284,7 @@ export async function analyse(
   const cap = Number(m.settings.run_cap_usd) || 0.5;
   const usage: Usage[] = [];
   const notes = [...full.notes];
+  let adCreatives = new Map<string, CreativeRef>();
   // Os criativos dos anúncios que pesam (cada um lido uma vez; até 40% do teto).
   const withCreative = full.entities
     .filter((e) => e.level === "ad" && e.source)
@@ -2312,6 +2318,7 @@ export async function analyse(
         if (!e) continue;
         e.info = { ...(e.info ?? {}), criativo: c.line, ...(c.transcript ? { audio: c.transcript } : {}) };
       }
+      adCreatives = cr.byAd;
       usage.push(...cr.usage);
       notes.push(...cr.notes);
       if (cr.read || cr.reused)
@@ -2418,6 +2425,20 @@ export async function analyse(
       `${list.length - ranked.length} ${list.length - ranked.length === 1 ? "insight de menor prioridade ficou" : "insights de menor prioridade ficaram"} de fora pelo limite de ${maxInsights(m)} por análise.`,
     );
   list = ranked;
+  // A miniatura dos criativos que cada insight cita (nunca trava a análise).
+  if (adCreatives.size)
+    try {
+      const r = await attachCreatives(env, deps, {
+        company: m.company_id,
+        platform: m.campaign.platform,
+        insights: list,
+        entities,
+        refs: adCreatives,
+      });
+      notes.push(...r.notes);
+    } catch (e) {
+      notes.push(`As miniaturas dos criativos não puderam ser guardadas: ${(e as Error).message}`.slice(0, 200));
+    }
   await workerRpc(env, deps, "ai_campaign_insight_store", {
     p_run: runId,
     p_result: {
@@ -2445,7 +2466,7 @@ export async function analyse(
 /** Pega as análises da fila (duas por vez) até o tempo acabar. */
 export async function runCampaignInsights(
   env: CampaignInsightsEnv,
-  deps: AiDeps,
+  deps: InsightsDeps,
   /** A leitura da plataforma e do CRM (trocada nos testes). */
   read: typeof readAnalysis = readAnalysis,
   /** A leitura dos criativos (trocada nos testes). */
@@ -2508,7 +2529,7 @@ export async function runCampaignInsights(
 export async function handleCampaignInsightsWorker(
   authorization: string | null,
   env: CampaignInsightsEnv,
-  deps: AiDeps,
+  deps: InsightsDeps,
 ): Promise<{ status: number; body: Row }> {
   if (!workerAuthorized(authorization, env)) return { status: 401, body: { error: "Não autorizado." } };
   try {

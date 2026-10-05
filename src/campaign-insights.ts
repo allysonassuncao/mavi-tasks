@@ -50,8 +50,8 @@ export type CampaignInsight = {
   target: { key: string; level: InsightLevel; name: string; parent?: string } | null;
   /** watch: a vigia diária (sem a MAVI). */
   source: "rule" | "mavi" | "watch";
-  /** Fase 8: as negativas do Google para copiar. */
-  extra?: { negatives?: InsightNegative[] } | null;
+  /** Fase 8: as negativas do Google para copiar; os criativos citados (com a miniatura). */
+  extra?: { negatives?: InsightNegative[]; creatives?: InsightCreative[] } | null;
   money_basis: MoneyBasis;
   confidence: number | null;
   status: InsightStatus;
@@ -638,6 +638,46 @@ export type InsightNegative = {
   campaign: string;
   why: string;
 };
+/** Um criativo que o insight cita: a miniatura e o que a MAVI leu nele. */
+export type InsightCreative = {
+  /** O anúncio (a mesma chave das evidências). */
+  entity: string;
+  name: string;
+  /** O conjunto (ou grupo) do anúncio. */
+  parent?: string;
+  key: string;
+  kind: "image" | "video";
+  thumb: string;
+  /** O anúncio publicado (Instagram ou Facebook). */
+  link?: string;
+  summary?: Partial<Record<CreativeField, string>>;
+  transcript?: string;
+};
+export type CreativeField =
+  | "resumo"
+  | "formato"
+  | "promessa"
+  | "gancho"
+  | "oferta"
+  | "prova"
+  | "cta"
+  | "publico_aparente"
+  | "texto_na_imagem";
+/** O que a MAVI leu no criativo, na ordem da prévia (o resumo vai à parte). */
+export const CREATIVE_FIELDS: { id: Exclude<CreativeField, "resumo">; label: string }[] = [
+  { id: "promessa", label: "Promessa" },
+  { id: "gancho", label: "Gancho" },
+  { id: "oferta", label: "Oferta" },
+  { id: "prova", label: "Prova" },
+  { id: "cta", label: "Chamada" },
+  { id: "publico_aparente", label: "Para quem fala" },
+  { id: "texto_na_imagem", label: "Texto na imagem" },
+  { id: "formato", label: "Formato" },
+];
+/** "Ver no Instagram" / "Ver no Facebook", pelo endereço do anúncio. */
+export const creativeLinkLabel = (link: string) =>
+  /instagram\.com/.test(link) ? "Ver no Instagram" : "Ver no Facebook";
+
 /** Como o Google Ads lê ao colar: [exata] ou "frase". */
 export const negativeLine = (n: Pick<InsightNegative, "term" | "match">) =>
   n.match === "phrase" ? `"${n.term}"` : `[${n.term}]`;
@@ -765,6 +805,65 @@ function demoSettings(): InsightSettingsView {
   };
 }
 const ago = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString();
+/** Um "criativo" de exemplo (SVG), para o ambiente demonstrativo. */
+const demoThumb = (from: string, to: string, line1: string, line2: string) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="800" viewBox="0 0 640 800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="640" height="800" fill="url(#g)"/><circle cx="500" cy="170" r="120" fill="#ffffff22"/><text x="48" y="560" fill="#fff" font-family="Arial, sans-serif" font-size="60" font-weight="700">${line1}</text><text x="48" y="640" fill="#ffffffdd" font-family="Arial, sans-serif" font-size="36">${line2}</text></svg>`,
+  )}`;
+const DEMO_CREATIVES: Record<string, InsightCreative> = {
+  frete: {
+    entity: "a:2",
+    name: "Frete grátis em 24h",
+    parent: "Público frio – 25-44",
+    key: "i:demo1",
+    kind: "image",
+    thumb: demoThumb("#2f7d4f", "#0f3d2a", "Frete grátis", "Chega em 24h na sua casa"),
+    link: "https://www.instagram.com/",
+    summary: {
+      resumo: "Caixa chegando à porta com o selo \"Frete grátis em 24h\" e o preço em destaque; fala com quem tem pressa.",
+      formato: "Imagem única, produto em destaque",
+      promessa: "Receber em 24 horas sem pagar frete",
+      gancho: "A caixa na porta com o selo de 24h",
+      oferta: "Frete grátis para todo o estado",
+      prova: "4,9 estrelas em 2 mil avaliações",
+      cta: "Comprar agora",
+      publico_aparente: "Quem já pesquisou e quer resolver logo",
+      texto_na_imagem: "Frete grátis · Chega em 24h",
+    },
+  },
+  depoimento: {
+    entity: "a:5",
+    name: "Depoimento Juliana",
+    parent: "Remarketing",
+    key: "v:demo2",
+    kind: "video",
+    thumb: demoThumb("#7a4bc2", "#2b1a52", "\"Mudou tudo\"", "Juliana, cliente há 2 anos"),
+    link: "https://www.instagram.com/",
+    summary: {
+      resumo: "Cliente conta, em 30 segundos, como resolveu o problema; fecha com o desconto da primeira compra.",
+      formato: "Vídeo, depoimento",
+      promessa: "Resolver o problema sem complicação",
+      gancho: "\"Eu já tinha desistido\" nos primeiros 2 segundos",
+      prova: "Cliente real com nome e tempo de uso",
+      cta: "Saiba mais",
+    },
+    transcript: "Eu já tinha desistido de procurar. Uma amiga me indicou, comprei numa terça e na quarta já estava aqui…",
+  },
+  promo: {
+    entity: "a:6",
+    name: "Promoção 20% OFF",
+    parent: "Público frio – 25-44",
+    key: "i:demo3",
+    kind: "image",
+    thumb: demoThumb("#d9822b", "#7a3a0c", "20% OFF", "Só até domingo"),
+    summary: {
+      resumo: "Percentual grande no centro, sem produto nem prova; chama atenção, mas atrai quem só quer desconto.",
+      formato: "Imagem única, oferta",
+      oferta: "20% de desconto até domingo",
+      cta: "Aproveitar",
+    },
+  },
+};
 /** Exemplos para o ambiente demonstrativo (nada vai ao banco). */
 const DEMO_PEOPLE: CampaignOwner[] = [
   { id: "demo-ana", name: "Ana Tráfego" },
@@ -810,6 +909,7 @@ export function demoInsights(): InsightsBackend {
         { label: 'Chegaram a "Negociação" ou além', value: 9, unit: "count", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "stage:demo" },
       ],
       target: { key: "a:2", level: "ad", name: "Frete grátis em 24h", parent: "Público frio – 25-44" },
+      extra: { creatives: [DEMO_CREATIVES.frete] },
       source: "mavi",
       money_basis: "net",
       confidence: 0.91,
@@ -890,6 +990,26 @@ export function demoInsights(): InsightsBackend {
             created_at: ago(120),
           },
           ...list,
+          {
+            ...list[1],
+            id: "dc-1",
+            kind: "opportunity",
+            priority: "medium",
+            title: "Os anúncios com prova real trazem oportunidades pela metade do custo da promoção",
+            body: "O depoimento e o anúncio do frete grátis custaram menos da metade por oportunidade que a promoção de 20%, que tem muitos cliques mas poucos leads que avançam no CRM.",
+            action:
+              "Tire 30% da verba da \"Promoção 20% OFF\" e passe para o depoimento\nGrave mais um depoimento curto com outro cliente\nDaqui a 7 dias, compare o custo por oportunidade",
+            evidence: [
+              { label: "Custo por oportunidade (CRM)", value: 21.8, unit: "money", window: "cycle", entity: "a:5", name: "Depoimento Juliana", metric: "crm_cpl" },
+              { label: "Custo por oportunidade (CRM)", value: 23.4, unit: "money", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "crm_cpl" },
+              { label: "Custo por oportunidade (CRM)", value: 52.1, unit: "money", window: "cycle", entity: "a:6", name: "Promoção 20% OFF", metric: "crm_cpl" },
+              { label: "Taxa de cliques (CTR)", value: 2.9, unit: "pct", window: "cycle", entity: "a:6", name: "Promoção 20% OFF", metric: "ctr" },
+            ],
+            target: null,
+            extra: { creatives: [DEMO_CREATIVES.depoimento, DEMO_CREATIVES.frete, DEMO_CREATIVES.promo] },
+            seen_count: 1,
+            created_at: ago(90),
+          },
           {
             ...list[0],
             id: "dn-1",

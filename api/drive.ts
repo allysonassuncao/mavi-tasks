@@ -454,8 +454,19 @@ export default async function handler(
         ads: adsEnv(),
         crm: crmEnv(),
         insightsBudgetMs: Number(process.env.CAMPAIGN_INSIGHTS_BUDGET_MS) || 240_000,
+        publicBucket: process.env.GCS_BUCKET || "maso_storage_main",
       };
-      const result = await handleCampaignInsightsWorker(authorization, env, aiDeps(env));
+      // As miniaturas dos criativos citados nos insights (WebP, até 640 px).
+      const { default: sharp } = await import("sharp");
+      const result = await handleCampaignInsightsWorker(authorization, env, {
+        ...aiDeps(env),
+        toWebp: (bytes) =>
+          sharp(bytes)
+            .rotate()
+            .resize(640, 640, { fit: "inside", withoutEnlargement: true })
+            .webp({ quality: 74 })
+            .toBuffer(),
+      });
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

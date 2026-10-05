@@ -1007,6 +1007,7 @@ describe("criativos na análise (Fase 3)", () => {
       expect(input.budget).toBeCloseTo(0.2);
       return {
         byEntity: new Map([["a:7", { line: "Caixa chegando | promessa: frete grátis em 24h", transcript: "chega amanhã" }]]),
+        byAd: new Map(),
         usage: [{ kind: "campaign_creative_image", model: "claude-opus-5-5", input: 2400, output: 300, cache_read: 0, cache_write: 0, cost: 0.02 }],
         notes: [],
         read: 1,

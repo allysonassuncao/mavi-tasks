@@ -6,11 +6,13 @@ import {
   Check,
   Clock,
   ListPlus,
+  Play,
   RotateCcw,
   ThumbsDown,
   ThumbsUp,
   X,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
@@ -44,6 +46,7 @@ import {
   type RqNamed,
 } from "./rq-billing";
 import {
+  CREATIVE_FIELDS,
   DISMISS_REASONS,
   KIND_LABELS,
   LEVEL_LABELS,
@@ -53,6 +56,7 @@ import {
   WINDOW_LABELS,
   basisHint,
   basisLabel,
+  creativeLinkLabel,
   dayLabel,
   effectText,
   goalStageText,
@@ -73,6 +77,7 @@ import {
   type CrmGoal,
   type CrmPipeline,
   type GoalStage,
+  type InsightCreative,
   type InsightNegative,
   type InsightBadge,
   type InsightKind,
@@ -577,6 +582,9 @@ export function InsightCard({
         )}
       </header>
       <h4>{insight.title}</h4>
+      {!!insight.extra?.creatives?.length && (
+        <CreativeStrip insight={insight} list={insight.extra.creatives} compact={compact} />
+      )}
       {insight.target && (
         <p className="insight-target">
           {LEVEL_LABELS[insight.target.level]}: <strong>{insight.target.name}</strong>
@@ -659,6 +667,197 @@ export function InsightCard({
         )}
       </footer>
     </article>
+  );
+}
+
+/**
+ * Os criativos que o insight cita: até 3 miniaturas (+N); com um só, a
+ * miniatura vem com o nome. O clique abre a prévia.
+ */
+function CreativeStrip({
+  insight,
+  list,
+  compact,
+}: {
+  insight: CampaignInsight;
+  list: InsightCreative[];
+  compact: boolean;
+}) {
+  const [open, setOpen] = useState<number | null>(null);
+  const [broken, setBroken] = useState<Set<string>>(() => new Set());
+  const shown = list.filter((c) => !broken.has(c.key));
+  if (!shown.length) return null;
+  const visible = shown.slice(0, 3);
+  const more = shown.length - visible.length;
+  const single = shown.length === 1 ? shown[0] : null;
+  const thumb = (c: InsightCreative, k: number) => (
+    <button
+      key={c.key}
+      type="button"
+      className="insight-creative-thumb"
+      onClick={() => setOpen(k)}
+      title={`${c.kind === "video" ? "Vídeo" : "Imagem"}: ${c.name}`}
+      aria-label={`Ver o criativo ${c.name}`}
+    >
+      <img
+        src={c.thumb}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        onError={() => setBroken((b) => new Set(b).add(c.key))}
+      />
+      {c.kind === "video" && (
+        <span className="insight-creative-play" aria-hidden="true">
+          <Play size={compact ? 10 : 12} fill="currentColor" />
+        </span>
+      )}
+    </button>
+  );
+  return (
+    <div className={`insight-creatives${single ? " single" : ""}`} aria-label="Criativos citados">
+      {visible.map(thumb)}
+      {single ? (
+        <button type="button" className="insight-creative-caption" onClick={() => setOpen(0)}>
+          {single.name !== insight.target?.name && <strong>{single.name}</strong>}
+          <span>
+            Ver o {single.kind === "video" ? "vídeo" : "criativo"} <ChevronRight size={12} aria-hidden="true" />
+          </span>
+        </button>
+      ) : (
+        more > 0 && (
+          <button
+            type="button"
+            className="insight-creative-thumb more"
+            onClick={() => setOpen(3)}
+            aria-label={`Ver mais ${more} ${more === 1 ? "criativo" : "criativos"}`}
+          >
+            +{more}
+          </button>
+        )
+      )}
+      {open !== null && shown[open] && (
+        <CreativePreview insight={insight} list={shown} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
+      )}
+    </div>
+  );
+}
+
+/** A prévia de um criativo: a imagem grande, o que a MAVI leu e os números dele no insight. */
+function CreativePreview({
+  insight,
+  list,
+  index,
+  onIndex,
+  onClose,
+}: {
+  insight: CampaignInsight;
+  list: InsightCreative[];
+  index: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+}) {
+  const c = list[index];
+  const many = list.length > 1;
+  const go = (step: number) => onIndex((index + step + list.length) % list.length);
+  useEffect(() => {
+    if (!many) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      onIndex((index + (e.key === "ArrowLeft" ? -1 : 1) + list.length) % list.length);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [many, index, list.length, onIndex]);
+  const numbers = insight.evidence.filter((e) => e.entity === c.entity);
+  const fields = CREATIVE_FIELDS.filter((f) => c.summary?.[f.id]);
+  return (
+    <Modal
+      title={c.name}
+      onClose={onClose}
+      className="creative-preview"
+      actions={
+        many ? (
+          <span className="creative-preview-nav">
+            <button type="button" className="icon-btn" onClick={() => go(-1)} aria-label="Criativo anterior">
+              <ChevronLeft size={18} />
+            </button>
+            <small>
+              {index + 1} de {list.length}
+            </small>
+            <button type="button" className="icon-btn" onClick={() => go(1)} aria-label="Próximo criativo">
+              <ChevronRight size={18} />
+            </button>
+          </span>
+        ) : undefined
+      }
+    >
+      <div className="creative-preview-body">
+        <figure className="creative-preview-media">
+          <img key={c.key} src={c.thumb} alt={`Criativo do anúncio ${c.name}`} />
+          {c.kind === "video" && (
+            <figcaption>
+              <Play size={11} fill="currentColor" aria-hidden="true" /> Vídeo · capa
+            </figcaption>
+          )}
+        </figure>
+        <div className="creative-preview-info">
+          {c.parent && (
+            <p className="creative-preview-parent">
+              Em <strong>{c.parent}</strong>
+            </p>
+          )}
+          {c.summary?.resumo || fields.length ? (
+            <section>
+              <span className="insight-label">
+                <Sparkles size={13} aria-hidden="true" /> O que a MAVI leu no criativo
+              </span>
+              {c.summary?.resumo && <p className="creative-preview-summary">{c.summary.resumo}</p>}
+              {!!fields.length && (
+                <dl className="creative-preview-fields">
+                  {fields.map((f) => (
+                    <div key={f.id}>
+                      <dt>{f.label}</dt>
+                      <dd>{c.summary![f.id]}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              {c.transcript && (
+                <details className="creative-preview-transcript">
+                  <summary>Trecho do áudio</summary>
+                  <p>{c.transcript}</p>
+                </details>
+              )}
+            </section>
+          ) : (
+            <p className="creative-preview-empty">
+              A MAVI ainda não leu este criativo: a leitura acontece nas próximas análises (pelo limite de criativos novos
+              do Painel da MAVI).
+            </p>
+          )}
+          {!!numbers.length && (
+            <section>
+              <span className="insight-label">Os números dele neste insight</span>
+              <ul className="insight-evidence">
+                {numbers.map((e) => (
+                  <li key={`${e.window}|${e.metric}`}>
+                    <span>{e.label}</span>
+                    <strong>{formatEvidence(e)}</strong>
+                    <small>{WINDOW_LABELS[e.window]}</small>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {c.link && (
+            <a className="btn secondary creative-preview-link" href={c.link} target="_blank" rel="noreferrer">
+              <ExternalLink size={14} aria-hidden="true" /> {creativeLinkLabel(c.link)}
+            </a>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }
 

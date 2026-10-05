@@ -885,6 +885,41 @@ await check("Fase 8: a lista de negativas vai com o insight (só o bem formado)"
   ] });
 });
 
+await check("miniaturas dos criativos: guardadas pela chave; a lista vai com o insight (e chega ao reconfirmado)", async () => {
+  await as(null);
+  const thumb = "https://storage.googleapis.com/publico/campaign-creatives/x/1.webp";
+  assert.equal(await worker("ai_campaign_creative_thumbs_put", [SECRET, A, "meta", JSON.stringify({
+    "i:h1": thumb, "v:v2": "https://outro.example/2.webp", x: thumb,
+  })]), 1);
+  assert.deepEqual(await worker("ai_campaign_creative_thumbs_get", [SECRET, A, "meta", ["i:h1", "v:v2"]]), { "i:h1": thumb });
+  await assert.rejects(worker("ai_campaign_creative_thumbs_get", ["errado", A, "meta", ["i:h1"]]), /Sem permissão/);
+  const store = async (extra) => {
+    const [run] = await sql(`insert into campaign_insight_runs(company_id, campaign_id, trigger, status, started_at, attempts, local_day)
+      values ($1,$2,'manual','running',now(),1,$3) returning id`, [A, campaign, today]);
+    await as(null);
+    await worker("ai_campaign_insight_store", [SECRET, run.id, JSON.stringify({
+      status: "done",
+      insights: [insight("highlight#a:1#frete-gratis", { kind: "highlight", title: "Frete grátis se destacou", target: null, ...extra })],
+    })]);
+    await as(trafego);
+    return (await rpc("campaign_insights", [A, campaign, 8])).current.find((i) => i.title === "Frete grátis se destacou");
+  };
+  // Primeiro sem a miniatura; reconfirmado, ganha a lista (só o bem formado).
+  assert.equal((await store({})).extra, null);
+  const i = await store({ extra: { creatives: [
+    { entity: "a:1", name: "Frete", parent: "Público", key: "i:h1", kind: "video", thumb,
+      link: "https://www.instagram.com/p/1", summary: { promessa: "Chega amanhã", outro: "x" }, transcript: "" },
+    { entity: "a:2", name: "Sem miniatura", key: "i:h2", kind: "image", thumb: "https://outro.example/2.webp" },
+    { entity: "a:3", name: "Link estranho", key: "i:h3", kind: "gif", thumb, link: "https://golpe.example/" },
+  ] } });
+  assert.equal(i.seen_count, 2);
+  assert.deepEqual(i.extra, { creatives: [
+    { entity: "a:1", name: "Frete", parent: "Público", key: "i:h1", kind: "video", thumb,
+      link: "https://www.instagram.com/p/1", summary: { promessa: "Chega amanhã" } },
+    { entity: "a:3", name: "Link estranho", key: "i:h3", kind: "image", thumb },
+  ] });
+});
+
 await check("a campanha que não pode ser analisada diz por quê", async () => {
   await sql(`update ad_campaigns set status='inactive' where id=$1`, [campaign]);
   await as(trafego);
