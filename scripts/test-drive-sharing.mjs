@@ -111,12 +111,36 @@ await check("quem é de fora da equipe não vê a pasta", async () => {
   assert.equal(await sees(outsider, "drive_files", deliveryFile), 0);
 });
 
-await check("só quem criou a pasta ou um gestor compartilha", async () => {
-  await as(teamMember);
+await check("quem é de fora da equipe não compartilha", async () => {
+  await as(outsider);
   await assert.rejects(
     () => rpc("set_drive_folder_sharing", [deliveries, false, [outsider]]),
     /Sem permissão/,
   );
+});
+
+await check("a equipe do cliente compartilha pasta que não criou", async () => {
+  await as(teamMember);
+  const shared = await rpc("set_drive_folder_sharing", [
+    photos,
+    false,
+    [outsider],
+  ]);
+  assert.deepEqual(shared.members, [outsider]);
+  await as(teamMember);
+  assert.deepEqual((await rpc("drive_folder_sharing", [photos])).members, [
+    outsider,
+  ]);
+  const [log] = await sql(
+    "select actor_id, details from drive_audit where action='folder_shared' and folder_id=$1 order by id desc limit 1",
+    [photos],
+  );
+  assert.equal(log.actor_id, teamMember);
+  assert.equal(log.details.by, "team");
+  assert.equal(log.details.owner, admin);
+  assert.deepEqual(log.details.added, [outsider]);
+  await as(teamMember);
+  await rpc("set_drive_folder_sharing", [photos, false, []]);
 });
 
 await check("pasta fora de um produto não pode ser compartilhada", async () => {
@@ -163,6 +187,11 @@ await check("a pessoa baixa arquivos da pasta compartilhada", async () => {
 await check("compartilhar não dá permissão de enviar ou criar", async () => {
   await as(outsider);
   await assert.rejects(() => folder("Invasão", deliveries));
+  await as(outsider);
+  await assert.rejects(
+    () => rpc("set_drive_folder_sharing", [deliveries, true, [outsider]]),
+    /Sem permissão/,
+  );
 });
 
 await check("aparece em Compartilhadas comigo", async () => {
@@ -461,7 +490,7 @@ const send = async (tokenValue, name, size, type = "application/pdf") => {
 };
 
 await check("só quem compartilha escolhe o que o link recebe", async () => {
-  await as(teamMember);
+  await as(outsider);
   await assert.rejects(
     () => rpc("set_drive_folder_sharing", [deliveries, true, [], docsOnly]),
     /Sem permissão/,

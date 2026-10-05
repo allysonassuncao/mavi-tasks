@@ -116,6 +116,16 @@ export function auditText(data: Snapshot) {
         ...(added.length ? [`incluiu ${added.join(", ")}`] : []),
         ...(removed.length ? [`removeu ${removed.join(", ")}`] : []),
         ...(d.via === "move" ? ["ao ir para fora de um produto"] : []),
+        // Quem mudou o compartilhamento de uma pasta que não criou.
+        ...(d.by === "leader" || d.by === "team"
+          ? [
+              `${d.by === "leader" ? "como líder" : "como equipe do cliente"}${
+                typeof d.owner === "string" && d.owner !== e.actor_id
+                  ? `, pasta criada por ${who(d.owner)}`
+                  : ""
+              }`,
+            ]
+          : []),
       ].join(" · ");
     }
     if (e.action === "public_upload_rejected")

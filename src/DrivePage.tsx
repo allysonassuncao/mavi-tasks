@@ -2174,10 +2174,11 @@ function DriveTree({
                               canWrite && (isLeader || f.created_by === user)
                                 ? () => void removeFolder(f)
                                 : undefined,
-                            // Same rule as the database: creator or leader.
+                            // Same rule as the database: whoever edits here
+                            // (or created the folder).
                             share:
                               shareableFolder(f) &&
-                              (isLeader || f.created_by === user)
+                              (canWrite || f.created_by === user)
                                 ? () => setSharing(f)
                                 : undefined,
                             move: canWrite
