@@ -69,6 +69,7 @@
     "test:db:copilot-quality": "node scripts/test-copilot-quality.mjs",
     "test:db:lesson-alerts": "node scripts/test-lesson-alerts.mjs",
     "test:db:temperature": "node scripts/test-client-temperature.mjs",
+    "test:db:temperature-corrections": "node scripts/test-temperature-corrections.mjs",
     "test:db:radar": "node scripts/test-client-radar.mjs",
     "test:db:personal-radar": "node scripts/test-personal-radar.mjs",
     "test:db:radar-agents": "node scripts/test-radar-agents.mjs",

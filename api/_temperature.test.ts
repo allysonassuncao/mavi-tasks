@@ -9,11 +9,16 @@ import {
   askJev,
   buildQuestions,
   decisionsUrl,
+  examplesFor,
   handleTemperatureWorker,
+  lessonsMessage,
   parseAnswers,
+  parseLessonOps,
   scorePercent,
   shrinkState,
   summaryMessage,
+  type Example,
+  type LessonsClaim,
   type Questions,
 } from "./_temperature";
 
@@ -354,7 +359,7 @@ describe("worker do termômetro", () => {
       embed,
     });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ signals: 1, failed: 1, skipped: 1, clients: 1, summaries: 1 });
+    expect(res.body).toEqual({ signals: 1, failed: 1, skipped: 1, removed: 0, clients: 1, summaries: 1, lessons: 0 });
     expect(
       calls.filter((c) => c.url.includes("rpc/ai_temperature_material")).map((c) => c.body.p_id).sort(),
     ).toEqual([signalA, signalB, signalC].sort());
@@ -447,6 +452,183 @@ describe("worker do termômetro", () => {
     expect(msg).toMatch(/Risco de cancelamento 5 \(-60 em 30 dias\)/);
     expect(msg).toMatch(/Sinais de alerta: Fala em cancelar \(25\/09\/2026\)/);
     expect(msg).toMatch(/Explicação anterior \(01\/09\/2026, nota 72, faixa Quente\): Estava tudo bem\./);
+  });
+});
+
+describe("correções do time e regras da MAVI", () => {
+  const other = "00000000-0000-4000-8000-000000000003";
+  const example = (over: Partial<Example>): Example => ({
+    client_id: client,
+    client: "4282",
+    signal_id: null,
+    kind: "flag",
+    key: "cancelamento",
+    before: true,
+    after: false,
+    note: "Era brincadeira sobre férias.",
+    type: "meeting",
+    day: "2026-09-12",
+    excerpt: "Vou sumir em dezembro, hein!",
+    ...over,
+  });
+
+  it("as regras vão nas perguntas; com regras de leitura, o Jev confere se a leitura conta", () => {
+    const plain = buildQuestions(questions, "meeting");
+    expect(plain.relevante).toBeUndefined();
+    const q = buildQuestions(questions, "meeting", {
+      cancelamento: ["Férias não é cancelar."],
+      satisfacao: ["Pedido de relatório não é insatisfação."],
+      motivo: ["Verba nova é Financeiro."],
+      leitura: ["Reunião só com o time não conta."],
+    });
+    expect(q.f_cancelamento.instructions).toMatch(/Regras que o time da agência ensinou \(siga\): \(1\) Férias não é cancelar\.$/);
+    expect(q.i_satisfacao.instructions).toMatch(/Pedido de relatório/);
+    expect(q.e_satisfacao.instructions).toMatch(/Pedido de relatório/);
+    expect(q.motivo.instructions).toMatch(/Verba nova é Financeiro/);
+    expect(q.relevante).toMatchObject({ type: "noul" });
+    expect(q.relevante.instructions).toMatch(/Reunião só com o time não conta/);
+    const parsed = parseAnswers(questions, { answers: { relevante: { noul: 0.1 } } });
+    expect(parsed.relevant).toBe(0.1);
+    expect(parseAnswers(questions, { answers: {} }).relevant).toBeUndefined();
+  });
+
+  it("os exemplos: do mesmo cliente primeiro, até 8, sem repetir", () => {
+    expect(examplesFor(null, client, questions)).toBeNull();
+    expect(examplesFor({ lessons: {}, examples: [] }, client, questions)).toBeNull();
+    const examples = [
+      ...Array.from({ length: 6 }, (_, i) =>
+        example({ client_id: other, client: "9001", day: `2026-09-0${i + 1}`, note: `outro ${i}` }),
+      ),
+      example({ kind: "reason", key: null, before: "resultados", after: "prazos", note: "" }),
+      example({ kind: "score", key: "satisfacao", before: { v: 20 }, after: { v: 75, e: 1 } }),
+      example({ kind: "score", key: "satisfacao", before: { v: 20 }, after: { v: 20, e: 0 } }),
+      example({ kind: "remove", key: null, before: null, after: null, note: "Reunião interna." }),
+      example({ kind: "remove", key: null, before: null, after: null, note: "Reunião interna." }),
+    ];
+    const text = examplesFor({ lessons: {}, examples }, client, questions)!;
+    const lines = text.split("\n").slice(1);
+    expect(lines).toHaveLength(8);
+    expect(lines[0]).toBe(
+      '- [4282 · reunião de 12/09] o assunto era "Prazos", não "Resultados". Trecho: "Vou sumir em dezembro, hein!"',
+    );
+    expect(lines[1]).toMatch(/"Satisfação com resultados" \(0 a 100\) era 75, não 20\. Motivo: Era brincadeira/);
+    expect(lines[2]).toMatch(/"Satisfação com resultados": o material não fala disso/);
+    expect(lines[3]).toMatch(/o time retirou a leitura: não conta para o termômetro\. Motivo: Reunião interna\./);
+    expect(lines[4]).toMatch(/^- \[9001 · reunião de 01\/09\] o time tirou o sinal "Fala em cancelar"/);
+    expect(text).toMatch(/^Correções que o time da agência já fez/);
+  });
+
+  it("as mudanças da MAVI: só chaves e regras conhecidas, com as correções citadas", () => {
+    const claim: LessonsClaim = {
+      company,
+      indicators: questions.indicators.map(({ key, kind, name, description }) => ({ key, kind, name, description })),
+      reasons: questions.reasons!,
+      lessons: [{ id: "l1", key: "cancelamento", text: "Férias não é cancelar.", status: "active", origin: "person", locked: true }],
+      feedback: [
+        { id: 7, kind: "flag", key: "cancelamento", before: true, after: false, note: "Brincadeira.", type: "meeting", day: "2026-09-12", title: "Reunião", excerpt: "Vou sumir", client: "4282" },
+        { id: 9, kind: "restore", key: null, before: { auto: true }, after: null, note: "", type: "whatsapp", day: "2026-09-13", title: "Grupo", excerpt: "", client: "4282" },
+      ],
+    };
+    const msg = lessonsMessage(claim);
+    expect(msg).toMatch(/- id l1 · cancelamento · travada por pessoa: Férias não é cancelar\./);
+    expect(msg).toMatch(/\[F1\] Reunião de 2026-09-12 · chave cancelamento: o time tirou o sinal "Fala em cancelar" \(não aconteceu\)\.\n  motivo do time: Brincadeira\./);
+    expect(msg).toMatch(/\[F2\] WhatsApp de 2026-09-13 · chave leitura: o time devolveu uma leitura que a MAVI tinha retirado sozinha/);
+    const ops = parseLessonOps(
+      `Aqui: {"ops":[{"op":"add","key":"cancelamento","text":"Brincadeira sobre sumir não é cancelar.","feedback":["F1","F9"]},
+        {"op":"add","key":"desconhecida","text":"Não entra."},{"op":"update","id":"l1","text":"Ok mudado.","feedback":["F2"]},
+        {"op":"retire","id":"zzz"},{"op":"add","key":"leitura","text":"oi"}]}`,
+      claim,
+    );
+    expect(ops).toEqual([
+      { op: "add", key: "cancelamento", text: "Brincadeira sobre sumir não é cancelar.", feedback: [7] },
+      { op: "update", id: "l1", text: "Ok mudado.", feedback: [9] },
+    ]);
+    expect(() => parseLessonOps("sem json", claim)).toThrow(/JSON/);
+  });
+
+  it("o worker manda regras e exemplos ao Jev, retira o que não conta e escreve as regras", async () => {
+    let claims = 0;
+    let lessonClaims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_temperature_claim": () =>
+        claims++ === 0
+          ? [signalA, signalB].map((id) => ({ id, company_id: company, client_id: client, source_type: "meeting", version: 3 }))
+          : [],
+      "rpc/ai_temperature_material": (b: any) => ({
+        state: { cliente: "4282", transcricao: b.p_id === signalA ? "boa" : "interna" },
+        excerpt: "",
+        message_id: null,
+        client_lines: 2,
+      }),
+      "rpc/ai_temperature_config": {
+        version: 3,
+        questions,
+        route: {
+          provider_id: provider,
+          provider: "OpenRouter",
+          kind: "openrouter",
+          base_url: "https://openrouter.ai/api/v1",
+          key_cipher: seal(providerKey, "sk-or"),
+          model: "~typesafe/jev-latest",
+          price: { id: "~typesafe/jev-latest", input: 0.042, output: 0 },
+        },
+      },
+      "rpc/ai_temperature_learning": {
+        lessons: { leitura: ["Reunião só com o time não conta."], cancelamento: ["Férias não é cancelar."] },
+        examples: [example({})],
+      },
+      "alpha/decisions": (b: any) => ({
+        answers: {
+          relevante: { noul: b.state.transcricao === "interna" ? 0.05 : 0.9 },
+          i_satisfacao: { score: 3, confidence: 0.9 },
+          e_satisfacao: { noul: 0.9 },
+        },
+        usage: { input_tokens: 100, cost: 0.00001 },
+      }),
+      "rpc/ai_temperature_store": 2,
+      "rpc/ai_temperature_irrelevant": 1,
+      "rpc/ai_temperature_refresh": 0,
+      "rpc/ai_temperature_summary_claim": [],
+      "rpc/ai_temperature_lessons_claim": () =>
+        lessonClaims++ === 0
+          ? {
+              company,
+              indicators: [{ key: "cancelamento", kind: "flag", name: "Fala em cancelar", description: "Cancelar?" }],
+              reasons: [{ key: "resultados", label: "Resultados" }],
+              lessons: [],
+              feedback: [
+                { id: 3, kind: "flag", key: "cancelamento", before: true, after: false, note: "Brincadeira.", type: "meeting", day: "2026-09-12", title: "Reunião", excerpt: "Vou sumir", client: "4282" },
+              ],
+            }
+          : null,
+      "rpc/ai_worker_route": null,
+      "rpc/ai_temperature_lessons_store": 1,
+    });
+    const llm: LlmAdapter = async (req) => {
+      expect(req.instructions).toMatch(/regras curtas/);
+      expect(req.messages[0].content).toMatch(/\[F1\]/);
+      const meter = newMeter("claude-haiku-4-5");
+      return {
+        text: '{"ops":[{"op":"add","key":"cancelamento","text":"Brincadeira sobre sumir não é cancelar.","feedback":["F1"]}]}',
+        meter,
+        rounds: 0,
+      };
+    };
+    const res = await handleTemperatureWorker(`Bearer ${env.workerSecret}`, env, { fetch: fetchImpl, llm, embed });
+    expect(res.body).toMatchObject({ signals: 2, removed: 1, lessons: 1 });
+    const jev = calls.filter((c) => c.url.includes("alpha/decisions"));
+    expect(jev[0].body.state.correcoes_do_time).toMatch(/o time tirou o sinal "Fala em cancelar"/);
+    expect(jev[0].body.questions.f_cancelamento.instructions).toMatch(/Férias não é cancelar/);
+    expect(jev[0].body.questions.relevante).toBeTruthy();
+    const store = calls.find((c) => c.url.includes("rpc/ai_temperature_store"))!;
+    expect(store.body.p_results.every((r: any) => !("relevant" in r))).toBe(true);
+    const irrelevant = calls.find((c) => c.url.includes("rpc/ai_temperature_irrelevant"))!;
+    expect(irrelevant.body.p_ids).toEqual([signalB]);
+    const lessons = calls.find((c) => c.url.includes("rpc/ai_temperature_lessons_store"))!;
+    expect(lessons.body.p_ops).toEqual([
+      { op: "add", key: "cancelamento", text: "Brincadeira sobre sumir não é cancelar.", feedback: [3] },
+    ]);
+    expect(lessons.body.p_learned).toEqual([3]);
   });
 });
 

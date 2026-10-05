@@ -107,6 +107,69 @@ export type TemperatureSignal = {
   client_lines?: number;
   /** WhatsApp: o nome do grupo. */
   group?: string | null;
+  /** O time corrigiu (migration 20270508090000): o que o Jev disse e quem. */
+  corrected?: {
+    overrides: SignalOverrides;
+    jev: {
+      answers: Record<string, { v: number; c?: number; e?: number }>;
+      flags: Record<string, number>;
+      reason: string | null;
+    };
+    at: string | null;
+    by: string | null;
+  } | null;
+  /** Retirada do cálculo (por uma pessoa ou, com auto, pela MAVI). */
+  removed?: { at: string; reason: string | null; auto: boolean; by: string | null } | null;
+};
+export type SignalOverrides = {
+  answers?: Record<string, { v: number; c?: number; e?: number }>;
+  flags?: Record<string, number>;
+  reason?: string;
+};
+/**
+ * Uma correção: o assunto, sinais (true põe, false tira) e notas ({v} outro
+ * nível, {e: 0} "não fala disso"); null volta ao que o Jev disse.
+ */
+export type SignalChanges = {
+  reason?: string | null;
+  flags?: Record<string, boolean | null>;
+  answers?: Record<string, { v: number } | { e: 0 } | null>;
+};
+/** As regras que a MAVI (ou um líder) escreveu com as correções do time. */
+export type TemperatureLesson = {
+  id: string;
+  /** A chave de um indicador, "motivo" (o assunto) ou "leitura". */
+  key: string;
+  text: string;
+  status: "active" | "paused";
+  origin: "mavi" | "person";
+  locked: boolean;
+  feedback: number;
+  updated_at: string;
+  updated_by: string | null;
+};
+export type TemperatureFeedback = {
+  id: number;
+  kind: "reason" | "flag" | "score" | "remove" | "restore";
+  key: string | null;
+  before: unknown;
+  after: unknown;
+  note: string;
+  type: TemperatureSource;
+  day: string;
+  title: string;
+  client_id: string;
+  client: string;
+  by: string | null;
+  at: string;
+  learned: boolean;
+};
+export type TemperatureLearning = {
+  lessons: TemperatureLesson[];
+  feedback: TemperatureFeedback[];
+  pending: number;
+  learned_at: string | null;
+  error: string | null;
 };
 /** As leituras de uma fonte: lidas, na fila, com erro e sem fala do cliente. */
 export type SourceCounts = {
@@ -116,6 +179,8 @@ export type SourceCounts = {
   skipped: number;
   /** WhatsApp: os grupos ligados ao cliente. */
   groups?: number;
+  /** Retiradas do cálculo (migration 20270508090000). */
+  removed?: number;
 };
 /** Uma mensagem do cliente num dia de grupo (o que o Jev leu como [cliente]). */
 export type SignalMessage = {
@@ -150,6 +215,8 @@ export type ClientTemperature = {
   failed: number;
   jev: boolean;
   can_configure: boolean;
+  /** Líderes e supervisores das equipes do cliente corrigem as leituras. */
+  can_correct?: boolean;
 };
 export type PortfolioClient = {
   client_id: string;
@@ -265,6 +332,90 @@ export async function loadSignalMessages(company: string, signal: string) {
   });
   return r.messages ?? [];
 }
+// ------------------------------------------------------------ correções
+/** Corrige uma leitura; devolve quantas mudanças o banco registrou. */
+export async function correctSignal(
+  company: string,
+  signal: string,
+  changes: SignalChanges,
+  note: string,
+) {
+  if (offline(company)) return demoCorrect(signal, changes, note);
+  const r = await rpc<{ changes: number }>("correct_temperature_signal", {
+    p_company: company,
+    p_signal: signal,
+    p_changes: changes,
+    p_note: note.trim() || null,
+  });
+  return r.changes;
+}
+/** Retira a leitura do cálculo (o motivo ensina a MAVI). */
+export async function removeSignal(company: string, signal: string, reason: string) {
+  if (offline(company)) return demoRemove(signal, reason);
+  await rpc("remove_temperature_signal", { p_company: company, p_signal: signal, p_reason: reason.trim() });
+}
+export async function restoreSignal(company: string, signal: string) {
+  if (offline(company)) return demoRestore(signal);
+  await rpc("restore_temperature_signal", { p_company: company, p_signal: signal, p_note: null });
+}
+/** Tira um sinal de alerta do cliente (de todas as leituras da janela). */
+export async function clearClientFlag(company: string, client: string, key: string, note: string) {
+  if (offline(company)) return demoClearFlag(key, note);
+  return rpc<number>("clear_temperature_flag", {
+    p_company: company,
+    p_client: client,
+    p_key: key,
+    p_note: note.trim(),
+  });
+}
+export async function loadTemperatureLearning(company: string) {
+  if (offline(company)) return structuredClone(demoLearning);
+  return rpc<TemperatureLearning>("temperature_learning", { p_company: company });
+}
+/** Cria (sem id) ou muda uma regra; quem mexe trava a regra para a MAVI. */
+export async function saveTemperatureLesson(
+  company: string,
+  lesson: { id: string | null; key: string; text: string; status: "active" | "paused" },
+) {
+  if (offline(company)) {
+    const now = new Date().toISOString();
+    const found = demoLearning.lessons.find((l) => l.id === lesson.id);
+    if (found) Object.assign(found, { ...lesson, id: found.id, locked: true, updated_at: now, updated_by: "Você" });
+    else
+      demoLearning.lessons.push({
+        ...lesson,
+        id: `demo-lesson-${Date.now()}`,
+        origin: "person",
+        locked: true,
+        feedback: 0,
+        updated_at: now,
+        updated_by: "Você",
+      });
+    return;
+  }
+  await rpc("save_temperature_lesson", {
+    p_company: company,
+    p_id: lesson.id,
+    p_key: lesson.key,
+    p_text: lesson.text.trim(),
+    p_status: lesson.status,
+  });
+}
+export async function deleteTemperatureLesson(company: string, id: string) {
+  if (offline(company)) {
+    demoLearning.lessons = demoLearning.lessons.filter((l) => l.id !== id);
+    return;
+  }
+  await rpc("delete_temperature_lesson", { p_company: company, p_id: id });
+}
+
+/** A posição de um nível na escala, de 0 a 100 (como o worker converte). */
+export const levelPercent = (index: number, levels: number) =>
+  levels < 2 ? 50 : Math.round((index / (levels - 1)) * 1000) / 10;
+/** O nível mais perto de uma nota (para mostrar a nota como o nível). */
+export const nearestLevel = (v: number, levels: number) =>
+  levels < 2 ? 0 : Math.min(levels - 1, Math.max(0, Math.round((v / 100) * (levels - 1))));
+
 export async function loadPortfolio(company: string, clients: { id: string; name: string; color: string }[] = []) {
   if (offline(company)) return demoPortfolio(clients);
   return rpc<Portfolio>("clients_temperature", { p_company: company });
@@ -521,7 +672,162 @@ function demoHistory() {
     return { day: isoDay(i - 119), score, band: bandIndex(DEFAULT_BANDS, score), flags: i > 112 ? ["cancelamento"] : [] };
   });
 }
+// A demonstração guarda as correções enquanto a página está aberta.
+let demoClientData: ClientTemperature | null = null;
 function demoClient(): ClientTemperature {
+  demoClientData ??= buildDemoClient();
+  return structuredClone(demoClientData);
+}
+function demoSignal(id: string) {
+  const data = (demoClientData ??= buildDemoClient());
+  const s = data.signals.find((x) => x.id === id);
+  if (!s) throw Error("Leitura não encontrada.");
+  return { data, s };
+}
+function demoFeedback(
+  s: TemperatureSignal,
+  kind: TemperatureFeedback["kind"],
+  key: string | null,
+  before: unknown,
+  after: unknown,
+  note: string,
+) {
+  demoLearning.feedback.unshift({
+    id: Date.now() + Math.random(),
+    kind, key, before, after, note,
+    type: s.type, day: s.day, title: s.title, client_id: "demo", client: "Cliente da demonstração",
+    by: "Você", at: new Date().toISOString(), learned: false,
+  });
+  demoLearning.pending++;
+}
+/** O resultado de uma leitura: o que o Jev disse com as correções por cima. */
+function demoApply(s: TemperatureSignal) {
+  const c = s.corrected!;
+  s.answers = { ...c.jev.answers, ...(c.overrides.answers ?? {}) };
+  s.flags = { ...c.jev.flags, ...(c.overrides.flags ?? {}) };
+  s.reason = c.overrides.reason ?? c.jev.reason;
+  if (!Object.keys(c.overrides).length) s.corrected = null;
+}
+function demoCorrect(id: string, changes: SignalChanges, note: string) {
+  const { data, s } = demoSignal(id);
+  const threshold = data.settings.flag_threshold;
+  s.corrected ??= {
+    overrides: {},
+    jev: { answers: { ...s.answers }, flags: { ...s.flags }, reason: s.reason },
+    at: null,
+    by: null,
+  };
+  const c = s.corrected;
+  const ov = structuredClone(c.overrides);
+  let n = 0;
+  if ("reason" in changes) {
+    const before = s.reason;
+    if (!changes.reason || changes.reason === c.jev.reason) delete ov.reason;
+    else ov.reason = changes.reason;
+    if ((ov.reason ?? c.jev.reason) !== before) {
+      demoFeedback(s, "reason", null, before, ov.reason ?? c.jev.reason, note);
+      n++;
+    }
+  }
+  for (const [k, v] of Object.entries(changes.flags ?? {})) {
+    const flags = (ov.flags ??= {});
+    const before = (s.flags[k] ?? 0) >= threshold;
+    if (v === null || v === (c.jev.flags[k] ?? 0) >= threshold) delete flags[k];
+    else flags[k] = v ? 1 : 0;
+    const after = (flags[k] ?? c.jev.flags[k] ?? 0) >= threshold;
+    if (after !== before) {
+      demoFeedback(s, "flag", k, before, after, note);
+      n++;
+    }
+  }
+  for (const [k, v] of Object.entries(changes.answers ?? {})) {
+    const answers = (ov.answers ??= {});
+    const before = s.answers[k];
+    if (v === null) delete answers[k];
+    else if ("v" in v) answers[k] = { v: v.v, c: 1, e: 1 };
+    else answers[k] = { v: c.jev.answers[k]?.v ?? 50, c: 1, e: 0 };
+    if (JSON.stringify(answers[k] ?? c.jev.answers[k]) !== JSON.stringify(before)) {
+      demoFeedback(s, "score", k, before, answers[k] ?? c.jev.answers[k], note);
+      n++;
+    }
+  }
+  if (ov.flags && !Object.keys(ov.flags).length) delete ov.flags;
+  if (ov.answers && !Object.keys(ov.answers).length) delete ov.answers;
+  c.overrides = ov;
+  c.at = new Date().toISOString();
+  c.by = "Você";
+  demoApply(s);
+  demoRefresh(data);
+  return n;
+}
+function demoRemove(id: string, reason: string) {
+  const { data, s } = demoSignal(id);
+  if (reason.trim().length < 3) throw Error("Conte por que a leitura não conta (a MAVI aprende com isso).");
+  s.removed = { at: new Date().toISOString(), reason: reason.trim(), auto: false, by: "Você" };
+  demoFeedback(s, "remove", null, null, null, reason);
+  demoRefresh(data);
+}
+function demoRestore(id: string) {
+  const { data, s } = demoSignal(id);
+  demoFeedback(s, "restore", null, { auto: s.removed?.auto ?? false }, null, "");
+  s.removed = null;
+  demoRefresh(data);
+}
+function demoClearFlag(key: string, note: string) {
+  if (note.trim().length < 3) throw Error("Conte por que o sinal não vale (a MAVI aprende com isso).");
+  const data = (demoClientData ??= buildDemoClient());
+  let n = 0;
+  for (const s of data.signals)
+    if (!s.removed && (s.flags[key] ?? 0) >= data.settings.flag_threshold) {
+      demoCorrect(s.id, { flags: { [key]: false } }, note);
+      n++;
+    }
+  return n;
+}
+/** Os sinais de hoje e as leituras contadas seguem as correções. */
+function demoRefresh(data: ClientTemperature) {
+  if (!data.current) return;
+  const live = data.signals.filter((s) => !s.removed);
+  const names = new Map(demoIndicators.map((i) => [i.key, i]));
+  const flags = new Map<string, CurrentFlag>();
+  for (const s of live)
+    for (const [k, p] of Object.entries(s.flags))
+      if (p >= data.settings.flag_threshold && names.get(k)?.kind === "flag" && !flags.has(k))
+        flags.set(k, { key: k, name: names.get(k)!.name, alert: names.get(k)!.alert, p, at: s.date });
+  data.current.flags = [...flags.values()];
+  data.current.signals = 20 + live.length;
+}
+let demoLearning: TemperatureLearning = {
+  lessons: [
+    {
+      id: "demo-lesson-1",
+      key: "cancelamento",
+      text: "Brincadeira ou comentário sobre férias, folga ou feriado não é falar em cancelar.",
+      status: "active",
+      origin: "mavi",
+      locked: false,
+      feedback: 3,
+      updated_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+      updated_by: null,
+    },
+    {
+      id: "demo-lesson-2",
+      key: "leitura",
+      text: "Reunião só com o time da agência, sem ninguém do cliente, não conta para o termômetro.",
+      status: "active",
+      origin: "person",
+      locked: true,
+      feedback: 0,
+      updated_at: new Date(Date.now() - 6 * 86400000).toISOString(),
+      updated_by: "Ana Admin",
+    },
+  ],
+  feedback: [],
+  pending: 0,
+  learned_at: new Date(Date.now() - 86400000).toISOString(),
+  error: null,
+};
+function buildDemoClient(): ClientTemperature {
   const history = demoHistory();
   const last = history.at(-1)!;
   const indicator = (key: string, name: string, value: number, weight: number, d30: number): CurrentIndicator => ({
@@ -594,6 +900,7 @@ function demoClient(): ClientTemperature {
     failed: 0,
     jev: true,
     can_configure: true,
+    can_correct: true,
   };
 }
 function demoMessages(signal: string): SignalMessage[] {

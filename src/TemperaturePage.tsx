@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { AlertTriangle, RefreshCw, Settings2, Thermometer } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { AlertTriangle, ExternalLink, RefreshCw, Settings2, Thermometer } from "lucide-react";
 import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
-import { Empty } from "./components";
+import { Empty, Modal } from "./components";
 import type { Snapshot } from "./types";
 import {
   appPath,
@@ -17,12 +17,17 @@ import {
 } from "./temperature";
 
 const ALL = "__all__";
+// A aba do cliente, a mesma do Drive, no painel lateral.
+const ClientTemperature = lazy(() =>
+  import("./ClientTemperature").then((m) => ({ default: m.ClientTemperature })),
+);
 
 /**
  * Termômetro dos clientes: a carteira do cliente mais frio ao mais quente,
  * com a tendência, os sinais de alerta e o assunto que mais mexe com cada
- * um. Cada pessoa vê os clientes que vê no Drive; a linha abre a aba
- * Termômetro do cliente.
+ * um. Cada pessoa vê os clientes que vê no Drive; a linha abre o
+ * termômetro do cliente num painel lateral (sem sair da carteira), com o
+ * atalho para a aba no Drive.
  */
 export function TemperaturePage({
   company,
@@ -40,6 +45,9 @@ export function TemperaturePage({
   const [bandsOn, setBandsOn] = useState<number[]>([]);
   const [alertsOnly, setAlertsOnly] = useState(false);
   const [withoutScore, setWithoutScore] = useState(false);
+  const [open, setOpen] = useState<{ id: string; name: string } | null>(null);
+  // Uma correção no painel: a carteira recarrega ao fechar.
+  const changed = useRef(false);
 
   function load() {
     setBusy(true);
@@ -50,6 +58,13 @@ export function TemperaturePage({
       .finally(() => setBusy(false));
   }
   useEffect(load, [company]); // eslint-disable-line react-hooks/exhaustive-deps
+  const close = () => {
+    setOpen(null);
+    if (changed.current) {
+      changed.current = false;
+      load();
+    }
+  };
 
   const bands = portfolio?.settings.bands ?? [];
   const rows = useMemo(() => {
@@ -209,16 +224,21 @@ export function TemperaturePage({
                 return (
                   <tr
                     key={c.client_id}
-                    className="thermo-row"
-                    onClick={() => openInApp(clientTemperaturePath(c.client_id))}
+                    className={`thermo-row${open?.id === c.client_id ? " selected" : ""}`}
+                    onClick={() => setOpen({ id: c.client_id, name: c.name })}
                   >
                     <td>
                       <a
                         href={appPath(clientTemperaturePath(c.client_id))}
                         onClick={(e) => {
+                          // Ctrl/⌘ + clique abre a aba do Drive em outra guia.
+                          if (e.metaKey || e.ctrlKey || e.shiftKey) {
+                            e.stopPropagation();
+                            return;
+                          }
                           e.preventDefault();
                           e.stopPropagation();
-                          openInApp(clientTemperaturePath(c.client_id));
+                          setOpen({ id: c.client_id, name: c.name });
                         }}
                         className="thermo-client"
                       >
@@ -269,6 +289,41 @@ export function TemperaturePage({
             </tbody>
           </table>
         </div>
+      )}
+
+      {open && (
+        <Modal
+          title={`Termômetro · ${open.name}`}
+          onClose={close}
+          wide
+          className="thermo-sheet"
+          actions={
+            <a
+              className="btn secondary compact"
+              href={appPath(clientTemperaturePath(open.id))}
+              onClick={(e) => {
+                e.preventDefault();
+                openInApp(clientTemperaturePath(open.id));
+              }}
+            >
+              <ExternalLink size={14} aria-hidden="true" /> Abrir no Drive
+            </a>
+          }
+        >
+          <div className="thermo-sheet-body">
+            <Suspense fallback={<Loading variant="chart" />}>
+              <ClientTemperature
+                key={open.id}
+                company={company}
+                client={open.id}
+                clientName={open.name}
+                onChanged={() => {
+                  changed.current = true;
+                }}
+              />
+            </Suspense>
+          </div>
+        </Modal>
       )}
     </div>
   );

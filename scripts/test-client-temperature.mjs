@@ -304,8 +304,8 @@ await check("as leituras do WhatsApp mostram o grupo e as mensagens do cliente",
   const wa = t.signals.find((s) => s.type === "whatsapp");
   assert.equal(wa.group, "4282 - Tráfego");
   assert.equal(typeof wa.client_lines, "number");
-  assert.deepEqual(t.sources.whatsapp, { read: 1, pending: 0, failed: 0, skipped: 1, groups: 1 });
-  assert.deepEqual(t.sources.meeting, { read: 1, pending: 0, failed: 0, skipped: 0 });
+  assert.deepEqual(t.sources.whatsapp, { read: 1, pending: 0, failed: 0, skipped: 1, removed: 0, groups: 1 });
+  assert.deepEqual(t.sources.meeting, { read: 1, pending: 0, failed: 0, skipped: 0, removed: 0 });
   // Uma fonte não esconde a outra: o limite vale por fonte.
   const one = await rpc("client_temperature", [A, client, 30, 1]);
   assert.deepEqual(one.signals.map((s) => s.type).sort(), ["meeting", "whatsapp"]);

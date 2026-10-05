@@ -25693,6 +25693,176 @@ label.drive-pick-file {
 .thermo-row:hover {
   background: #fafbfb;
 }
+.thermo-row.selected {
+  background: #f3f7f4;
+}
+
+/* O termômetro do cliente no painel lateral da carteira (/termometro). */
+.modal.sheet.thermo-sheet {
+  width: min(860px, 100vw);
+  inset: 0 0 0 auto;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  border-radius: 15px 0 0 15px;
+}
+.modal.sheet > .thermo-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 24px 32px;
+}
+/* O título do painel já diz o nome. */
+.thermo-sheet .thermo-head h2 {
+  display: none;
+}
+.thermo-sheet .modal-head .btn {
+  margin-left: auto;
+}
+@media (max-width: 760px) {
+  .modal.sheet.thermo-sheet {
+    width: 100vw;
+    border-radius: 0;
+  }
+  .modal.sheet > .thermo-sheet-body {
+    padding: 14px 16px 28px;
+  }
+}
+
+/* Correções do time nas leituras e nos sinais do cliente. */
+.thermo-flags li .thermo-flag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0 -4px 0 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.thermo-flags li .thermo-flag-remove:hover,
+.thermo-flags li .thermo-flag-remove:focus-visible {
+  opacity: 1;
+  background: rgb(0 0 0 / 0.08);
+}
+.thermo-fix {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e3e8e8;
+  border-radius: 10px;
+  background: #fafbfb;
+}
+.thermo-fix p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #3c4a4b;
+}
+.thermo-fix-field,
+.thermo-fix-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.thermo-fix-field > span,
+.thermo-fix-field > legend,
+.thermo-fix-note > span {
+  padding: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #4c5a5b;
+}
+.thermo-fix-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.thermo-fix-flags .thermo-check {
+  font-size: 0.82rem;
+}
+.thermo-fix-scores {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 12px;
+}
+.thermo-fix-scores label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: #3c4a4b;
+}
+.thermo-fix-note textarea {
+  font-size: 16px;
+}
+@media (min-width: 761px) {
+  .thermo-fix-note textarea {
+    font-size: 0.85rem;
+  }
+}
+.thermo-fix-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.thermo-fix-actions .thermo-fix-undo {
+  margin-right: auto;
+}
+.thermo-signal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 4px;
+}
+.thermo-chip.corrected {
+  border-style: dashed;
+}
+.thermo-chip.corrected svg:last-child {
+  opacity: 0.7;
+}
+.thermo-chip.removed {
+  --band: #9aa4a4;
+  text-decoration: line-through;
+}
+.thermo-fixed-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.thermo-signals li.thermo-signal-removed > :not(.thermo-open) {
+  opacity: 0.78;
+}
+.thermo-removed-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 6px 0 0;
+  color: #7a5a14;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.thermo-removed-note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
 .thermo-client {
   display: inline-flex;
   align-items: center;
@@ -25809,6 +25979,78 @@ label.drive-pick-file {
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+.thermo-settings-block > header strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.thermo-learning-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.thermo-lessons ul,
+.thermo-feedback ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.thermo-lessons li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  padding: 8px 0;
+  border-top: 1px solid #f0f2f3;
+}
+.thermo-lessons li:first-child {
+  border-top: 0;
+}
+.thermo-lessons li > .thermo-lesson-editor {
+  grid-column: 1 / -1;
+}
+.thermo-lessons li p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+.thermo-lessons li small {
+  grid-row: 2;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.thermo-lessons li.paused p {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.thermo-lesson-actions {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+.thermo-lesson-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 720px;
+}
+.thermo-feedback li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 0;
+  border-top: 1px solid #f0f2f3;
+  font-size: 0.82rem;
+}
+.thermo-feedback li q {
+  margin-left: 6px;
+  color: #4c5a5b;
+}
+.thermo-feedback li small {
+  color: var(--muted);
+  font-size: 0.74rem;
 }
 .thermo-settings-block > header small {
   color: var(--muted);

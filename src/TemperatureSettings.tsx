@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   AlertTriangle,
+  GraduationCap,
   Info,
+  Pause,
+  Pencil,
+  Play,
   Plus,
   RotateCcw,
   Save,
@@ -12,8 +16,15 @@ import { Button, Checkbox, Input, Loading, Select, SelectOption, Textarea } from
 import type { Snapshot } from "./types";
 import {
   DEFAULT_BANDS,
+  dateBr,
+  deleteTemperatureLesson,
   loadTemperatureConfig,
+  loadTemperatureLearning,
   saveTemperatureConfig,
+  saveTemperatureLesson,
+  type TemperatureFeedback,
+  type TemperatureLearning,
+  type TemperatureLesson,
   type IndicatorConfig,
   type ProductRule,
   type TemperatureConfig,
@@ -524,6 +535,13 @@ export function TemperatureSettings({
         )}
       </section>
 
+      <LearningBlock
+        company={company}
+        indicators={config.indicators}
+        reasons={config.settings.reasons}
+        notify={notify}
+      />
+
       <div className={`thermo-savebar${dirty ? " dirty" : ""}`}>
         <span>
           <Info size={14} aria-hidden="true" />
@@ -543,6 +561,335 @@ export function TemperatureSettings({
             <Save size={15} /> Salvar
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** O nome de uma chave de regra: um indicador, o assunto ou as leituras. */
+function keyLabel(key: string, indicators: IndicatorConfig[]) {
+  if (key === "motivo") return "Assunto que mais mexe";
+  if (key === "leitura") return "Leituras que não contam";
+  return indicators.find((i) => i.key === key)?.name ?? key;
+}
+
+/** Uma correção do time em uma frase. */
+function feedbackText(f: TemperatureFeedback, indicators: IndicatorConfig[], reasons: TemperatureReason[]) {
+  const name = keyLabel(f.key ?? "", indicators);
+  const reason = (k: unknown) => reasons.find((r) => r.key === k)?.label.split(" (")[0] ?? String(k ?? "nenhum");
+  const v = (a: unknown) => {
+    const x = a as { v?: number; e?: number } | null;
+    if (!x) return "sem nota";
+    if (x.e === 0) return "não fala disso";
+    return typeof x.v === "number" ? String(Math.round(x.v)) : "?";
+  };
+  switch (f.kind) {
+    case "reason":
+      return `Assunto: ${reason(f.before)} → ${reason(f.after)}`;
+    case "flag":
+      return f.after === true ? `Pôs o sinal "${name}"` : `Tirou o sinal "${name}"`;
+    case "score":
+      return `${name}: ${v(f.before)} → ${v(f.after)}`;
+    case "remove":
+      return "Retirou a leitura do cálculo";
+    default:
+      return (f.before as { auto?: boolean } | null)?.auto
+        ? "Devolveu uma leitura que a MAVI tinha retirado"
+        : "Devolveu a leitura ao cálculo";
+  }
+}
+
+/**
+ * As regras que a MAVI escreveu com as correções do time (e as dos líderes):
+ * vão junto das perguntas ao Jev nas próximas leituras. Quem edita, pausa ou
+ * exclui uma regra trava a regra para a MAVI. Salva na hora (fora da barra).
+ */
+function LearningBlock({
+  company,
+  indicators,
+  reasons,
+  notify,
+}: {
+  company: string;
+  indicators: IndicatorConfig[];
+  reasons: TemperatureReason[];
+  notify: (message: string) => void;
+}) {
+  const [learning, setLearning] = useState<TemperatureLearning | null>(null);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState<{ id: string | null; key: string; text: string } | null>(null);
+  const [busy, setBusy] = useState("");
+  const [showFeedback, setShowFeedback] = useState(false);
+  const load = () =>
+    loadTemperatureLearning(company)
+      .then(setLearning)
+      .catch((e) => setError((e as Error).message));
+  useEffect(() => {
+    load();
+  }, [company]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const keys = [
+    ...indicators.filter((i) => i.key && i.active).map((i) => i.key!),
+    "motivo",
+    "leitura",
+  ];
+  async function run(id: string, fn: () => Promise<void>, done: string) {
+    setBusy(id);
+    setError("");
+    try {
+      await fn();
+      await load();
+      notify(done);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+  const save = (l: { id: string | null; key: string; text: string; status: "active" | "paused" }) =>
+    run(
+      l.id ?? "new",
+      async () => {
+        await saveTemperatureLesson(company, l);
+        setEditing(null);
+      },
+      l.id ? "Regra salva. A MAVI não mexe mais nela." : "Regra criada. Entra nas próximas leituras.",
+    );
+  const groups = keys
+    .map((k) => ({ key: k, list: (learning?.lessons ?? []).filter((l) => l.key === k) }))
+    .filter((g) => g.list.length || editing?.key === g.key && editing.id === null);
+  const author = (l: TemperatureLesson) =>
+    l.origin === "person"
+      ? `Escrita por ${l.updated_by ?? "um líder"}`
+      : l.locked
+        ? `Da MAVI, editada por ${l.updated_by ?? "um líder"}`
+        : `Da MAVI · ${l.feedback} ${l.feedback === 1 ? "correção" : "correções"}`;
+
+  return (
+    <section className="panel thermo-settings-block" aria-label="Aprendizado">
+      <header>
+        <strong>
+          <GraduationCap size={15} aria-hidden="true" /> Aprendizado com as correções
+        </strong>
+        <small>
+          Quando o time corrige uma leitura (assunto, sinal, nota) ou retira uma que
+          não conta, a correção vira exemplo para o Jev nas próximas leituras (do
+          mesmo cliente primeiro) e a MAVI junta as correções em regras curtas, que
+          entram em uso na hora. Edite, pause ou exclua uma regra: a MAVI não mexe
+          no que o time mexeu. Regras de "Leituras que não contam" fazem a MAVI
+          retirar sozinha as leituras parecidas (o time devolve na aba Retiradas).
+        </small>
+      </header>
+      {!learning ? (
+        error ? (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        ) : (
+          <Loading compact label="Carregando o aprendizado" />
+        )
+      ) : (
+        <>
+          <p className="thermo-learning-status">
+            {[
+              learning.pending > 0
+                ? `${learning.pending} ${learning.pending === 1 ? "correção esperando" : "correções esperando"} a MAVI (ela lê em lotes, uns 10 minutos depois da última)`
+                : "Nenhuma correção esperando a MAVI",
+              learning.learned_at && `regras revistas em ${dateBr(learning.learned_at)}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+          {learning.error && (
+            <p className="thermo-missing">
+              <AlertTriangle size={13} aria-hidden="true" /> A MAVI não conseguiu escrever as
+              regras: {learning.error}
+            </p>
+          )}
+          {!groups.length && !editing && (
+            <p className="muted">
+              Ainda sem regras. Elas aparecem conforme o time corrige as leituras no
+              Termômetro de cada cliente.
+            </p>
+          )}
+          {groups.map((g) => (
+            <div key={g.key} className="thermo-lessons">
+              <h4 className="thermo-subhead">{keyLabel(g.key, indicators)}</h4>
+              <ul>
+                {g.list.map((l) =>
+                  editing?.id === l.id ? (
+                    <li key={l.id}>
+                      <LessonEditor
+                        value={editing}
+                        keys={keys}
+                        indicators={indicators}
+                        busy={busy === l.id}
+                        onChange={setEditing}
+                        onCancel={() => setEditing(null)}
+                        onSave={() => save({ ...editing, status: l.status })}
+                      />
+                    </li>
+                  ) : (
+                    <li key={l.id} className={l.status === "paused" ? "paused" : undefined}>
+                      <p>{l.text}</p>
+                      <small>
+                        {author(l)}
+                        {l.status === "paused" && " · pausada"}
+                      </small>
+                      <span className="thermo-lesson-actions">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          aria-label="Editar a regra"
+                          title="Editar"
+                          onClick={() => setEditing({ id: l.id, key: l.key, text: l.text })}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <Button
+                          className="icon-btn"
+                          aria-label={l.status === "paused" ? "Voltar a usar" : "Pausar"}
+                          title={l.status === "paused" ? "Voltar a usar" : "Pausar"}
+                          loading={busy === `${l.id}:status`}
+                          onClick={() =>
+                            run(
+                              `${l.id}:status`,
+                              () =>
+                                saveTemperatureLesson(company, {
+                                  ...l,
+                                  status: l.status === "paused" ? "active" : "paused",
+                                }),
+                              l.status === "paused" ? "A regra voltou a valer." : "Regra pausada.",
+                            )
+                          }
+                        >
+                          {l.status === "paused" ? <Play size={14} /> : <Pause size={14} />}
+                        </Button>
+                        <Button
+                          className="icon-btn"
+                          aria-label="Excluir a regra"
+                          title="Excluir"
+                          loading={busy === `${l.id}:delete`}
+                          onClick={() =>
+                            run(
+                              `${l.id}:delete`,
+                              () => deleteTemperatureLesson(company, l.id),
+                              "Regra excluída. A MAVI não a escreve de novo.",
+                            )
+                          }
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </span>
+                    </li>
+                  ),
+                )}
+              </ul>
+            </div>
+          ))}
+          {editing?.id === null ? (
+            <LessonEditor
+              value={editing}
+              keys={keys}
+              indicators={indicators}
+              busy={busy === "new"}
+              onChange={setEditing}
+              onCancel={() => setEditing(null)}
+              onSave={() => save({ ...editing, status: "active" })}
+            />
+          ) : (
+            <div className="thermo-settings-row-actions">
+              <Button
+                className="btn secondary"
+                onClick={() => setEditing({ id: null, key: keys[0] ?? "motivo", text: "" })}
+              >
+                <Plus size={15} /> Escrever uma regra
+              </Button>
+            </div>
+          )}
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          {learning.feedback.length > 0 && (
+            <div className="thermo-feedback">
+              <button
+                type="button"
+                className="text-btn"
+                aria-expanded={showFeedback}
+                onClick={() => setShowFeedback((v) => !v)}
+              >
+                {showFeedback ? "Esconder" : "Ver"} as correções recentes ({learning.feedback.length})
+              </button>
+              {showFeedback && (
+                <ul>
+                  {learning.feedback.map((f) => (
+                    <li key={f.id}>
+                      <span>
+                        <strong>{feedbackText(f, indicators, reasons)}</strong>
+                        {f.note && <q>{f.note}</q>}
+                      </span>
+                      <small>
+                        {f.client} · {f.type === "meeting" ? "reunião" : "WhatsApp"} de {dateBr(f.day)} ·{" "}
+                        {f.by ?? "alguém do time"} em {dateBr(f.at)}
+                        {!f.learned && " · esperando a MAVI"}
+                      </small>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function LessonEditor({
+  value,
+  keys,
+  indicators,
+  busy,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  value: { id: string | null; key: string; text: string };
+  keys: string[];
+  indicators: IndicatorConfig[];
+  busy: boolean;
+  onChange: (v: { id: string | null; key: string; text: string }) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const ok = value.text.trim().length >= 5 && value.text.trim().length <= 400;
+  return (
+    <div className="thermo-lesson-editor">
+      <Select aria-label="Onde a regra vale" value={value.key} onValueChange={(key) => onChange({ ...value, key })}>
+        {keys.map((k) => (
+          <SelectOption key={k} value={k}>
+            {keyLabel(k, indicators)}
+          </SelectOption>
+        ))}
+      </Select>
+      <Textarea
+        aria-label="Regra"
+        value={value.text}
+        rows={2}
+        maxLength={400}
+        autoFocus
+        placeholder="Ex.: Brincadeira sobre férias ou folga não é falar em cancelar."
+        onChange={(e) => onChange({ ...value, text: e.target.value })}
+      />
+      <div className="thermo-fix-actions">
+        <Button className="btn secondary compact" onClick={onCancel} disabled={busy}>
+          Cancelar
+        </Button>
+        <Button className="btn primary compact" onClick={onSave} loading={busy} disabled={!ok}>
+          Salvar regra
+        </Button>
       </div>
     </div>
   );
