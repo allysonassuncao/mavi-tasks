@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { handleDrive, signGcsUrl, type DriveEnv } from "./_drive";
+import { callRpc, handleDrive, signGcsUrl, type DriveEnv } from "./_drive";
 
 const { privateKey } = crypto.generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -20,6 +20,45 @@ const rpcReply = (data: unknown, status = 200) =>
     .mockResolvedValue(
       new Response(JSON.stringify(data), { status }),
     ) as unknown as typeof fetch;
+
+describe("callRpc", () => {
+  const env = { supabaseUrl: "https://db.example.com", supabaseKey: "k" };
+  const reply = (body: unknown, status: number) =>
+    (async () =>
+      new Response(JSON.stringify(body), {
+        status,
+      })) as unknown as typeof fetch;
+  it("a consulta que passou do tempo diz qual função foi", async () => {
+    const r = await callRpc(
+      env,
+      reply(
+        {
+          code: "57014",
+          message: "canceling statement due to statement timeout",
+        },
+        500,
+      ),
+      null,
+      "ai_index_step",
+      {},
+    );
+    expect(r).toEqual({
+      ok: false,
+      status: 500,
+      error: "canceling statement due to statement timeout (ai_index_step)",
+    });
+  });
+  it("os outros erros ficam como vieram", async () => {
+    const r = await callRpc(
+      env,
+      reply({ code: "42501", message: "Sem permissão" }, 403),
+      null,
+      "x",
+      {},
+    );
+    expect(r).toEqual({ ok: false, status: 403, error: "Sem permissão" });
+  });
+});
 
 describe("signGcsUrl", () => {
   it("assina GET com nome de arquivo codificado e prazo curto", () => {

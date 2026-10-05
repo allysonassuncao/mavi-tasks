@@ -447,7 +447,10 @@ async function rpc<T>(
           : res.status === 401 || res.status === 403
             ? 403
             : res.status,
-      error: body?.message ?? "Não foi possível acessar o banco.",
+      // A consulta que passou do tempo diz qual função foi (como em _drive.ts).
+      error:
+        (body?.message ?? "Não foi possível acessar o banco.") +
+        (body?.code === "57014" ? ` (${name})` : ""),
       code: body?.code,
       hint: body?.hint,
     };

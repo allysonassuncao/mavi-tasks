@@ -107,6 +107,16 @@ export function signGcsUrl(
   return `https://storage.googleapis.com${canonicalUri}?${canonicalQuery}&X-Goog-Signature=${signature}`;
 }
 
+/**
+ * The database's message. A query that ran out of time (57014) says which
+ * function it was: the workers answer the schedule with this message, and
+ * that is the only place where it shows up.
+ */
+export function rpcError(name: string, body: any, fallback: string): string {
+  const message: string = body?.message ?? fallback;
+  return body?.code === "57014" ? `${message} (${name})` : message;
+}
+
 /** Calls a database function through PostgREST, as the user or anonymously. */
 export async function callRpc<T>(
   env: Pick<DriveEnv, "supabaseUrl" | "supabaseKey">,
@@ -137,7 +147,7 @@ export async function callRpc<T>(
     return {
       ok: false,
       status: res.status === 401 || res.status === 403 ? 403 : res.status,
-      error: body?.message ?? "Não foi possível acessar o arquivo.",
+      error: rpcError(name, body, "Não foi possível acessar o arquivo."),
     };
   return { ok: true, data: body as T };
 }
