@@ -145,6 +145,8 @@ describe("servidor MCP", () => {
       "campaign_results",
       "list_tasks",
       "find_tasks",
+      // Os tutoriais, sem registrar dúvidas (isso é da conversa no app).
+      "search_tutorials",
       "client_temperature",
       "client_radar",
       "media_account",

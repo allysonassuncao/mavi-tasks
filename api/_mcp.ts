@@ -65,6 +65,7 @@ export function mcpTools() {
     client_temperature: "Termômetro do cliente",
     client_radar: "Radar do cliente",
     media_account: "Conta de mídia (Financeiro › Mídia)",
+    search_tutorials: "Buscar nos tutoriais",
   };
   return [
     {
@@ -79,7 +80,8 @@ export function mcpTools() {
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ...TOOLS.map((t) => {
+    // Registrar dúvidas sem tutorial é da conversa no app, não de apps de fora.
+    ...TOOLS.filter((t) => t.name !== "report_missing_tutorial").map((t) => {
       const params = t.parameters as {
         properties: Json;
         required?: string[];
@@ -103,6 +105,8 @@ export function sourceLink(origin: string, s: AiSource) {
   const q = new URLSearchParams();
   let path = "/drive";
   if (s.type === "task") return `${origin}/tarefas/${s.id}`;
+  if (s.type === "tutorial")
+    return `${origin}/tutoriais?tutorial=${encodeURIComponent(s.id)}${s.anchor && /^[a-z0-9-]+$/.test(s.anchor) ? `#${s.anchor}` : ""}`;
   if (s.type === "meeting") {
     q.set("gravacao", s.id);
     if (s.start && s.start > 0) q.set("t", String(Math.floor(s.start)));
@@ -205,7 +209,7 @@ async function callTool(
             .join("\n")
         : "Nenhuma empresa ativa.",
     );
-  if (!TOOLS.some((t) => t.name === name))
+  if (!TOOLS.some((t) => t.name === name) || name === "report_missing_tutorial")
     return text(`Ferramenta desconhecida: ${name}.`, true);
   const picked = pickWorkspace(workspaces.data, args.workspace);
   if (!picked.workspace) return text(picked.error!, true);

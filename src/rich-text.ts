@@ -22,6 +22,8 @@ export type RichNode = {
     mediaId?: string;
     provider?: VideoProvider;
     videoId?: string;
+    /** Vídeo de YouTube, Loom ou Vimeo: a transcrição colada por quem edita. */
+    transcript?: string;
   };
 };
 /** Where an embedded video plays. Only the id is stored; the app builds the address. */
@@ -245,7 +247,17 @@ export function sanitizeDescription(value: unknown): RichNode {
         Object.hasOwn(VIDEO_IDS, provider) &&
         typeof videoId === "string" &&
         VIDEO_IDS[provider].test(videoId)
-        ? { type: "tutorialVideo", attrs: { provider, videoId, label } }
+        ? {
+            type: "tutorialVideo",
+            attrs: {
+              provider,
+              videoId,
+              label,
+              ...(typeof node.attrs?.transcript === "string" && node.attrs.transcript.trim()
+                ? { transcript: node.attrs.transcript.trim().slice(0, 60000) }
+                : {}),
+            },
+          }
         : null;
     }
     if (

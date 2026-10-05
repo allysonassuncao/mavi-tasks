@@ -5,7 +5,9 @@
  * da agência e os modelos liberados. "anthropic" fala a API da Claude; todos
  * os outros falam a API de chat da OpenAI (/chat/completions), que o Gemini,
  * o OpenRouter, o Groq, o DeepSeek, a Mistral e o xAI também oferecem — e
- * "custom" aceita qualquer outro endereço compatível.
+ * "custom" aceita qualquer outro endereço compatível. Deepgram e AssemblyAI
+ * só transcrevem, pelo link do arquivo (sem o limite de 25 MB): por enquanto,
+ * os vídeos dos tutoriais.
  */
 
 export type ProviderKind =
@@ -17,8 +19,10 @@ export type ProviderKind =
   | "deepseek"
   | "mistral"
   | "xai"
-  | "custom";
-export type ProviderApi = "anthropic" | "openai";
+  | "custom"
+  | "deepgram"
+  | "assemblyai";
+export type ProviderApi = "anthropic" | "openai" | "transcribe";
 
 /** Um modelo liberado, com os preços em US$ por milhão de tokens. */
 export type ProviderModel = {
@@ -148,6 +152,30 @@ export const CATALOG: CatalogEntry[] = [
     pricingUrl: "",
     models: [],
   },
+  {
+    kind: "deepgram",
+    label: "Deepgram (transcrição)",
+    api: "transcribe",
+    baseUrl: "https://api.deepgram.com/v1",
+    keysUrl: "https://console.deepgram.com",
+    pricingUrl: "https://deepgram.com/pricing",
+    models: [
+      { id: "nova-3", label: "Nova-3", input: 0, output: 0 },
+      { id: "nova-2", label: "Nova-2", input: 0, output: 0 },
+    ],
+  },
+  {
+    kind: "assemblyai",
+    label: "AssemblyAI (transcrição)",
+    api: "transcribe",
+    baseUrl: "https://api.assemblyai.com/v2",
+    keysUrl: "https://www.assemblyai.com/app/api-keys",
+    pricingUrl: "https://www.assemblyai.com/pricing",
+    models: [
+      { id: "universal", label: "Universal", input: 0, output: 0 },
+      { id: "slam-1", label: "Slam-1", input: 0, output: 0 },
+    ],
+  },
 ];
 
 export const catalogEntry = (kind: string) =>
@@ -240,6 +268,8 @@ export type AiFeature =
   | "campaign_creative_image"
   | "campaign_creative_transcribe"
   | "campaign_daily"
+  | "tutorial_search"
+  | "tutorial_transcribe"
   | "mavi_judge"
   | "mavi_judge_check";
 
@@ -263,6 +293,11 @@ export type FeatureInfo = {
    * e modelos de transcrição, e sem herdar o padrão da empresa.
    */
   transcription?: boolean;
+  /**
+   * Transcreve arquivos grandes: aceita também os provedores que
+   * transcrevem pelo link (Deepgram, AssemblyAI), com qualquer modelo deles.
+   */
+  largeFiles?: boolean;
   /**
    * Gera e edita imagens: só provedores com o endpoint de imagens da OpenAI
    * e modelos de imagem, e sem herdar o padrão da empresa.
@@ -477,6 +512,24 @@ export const FEATURES: FeatureInfo[] = [
     note: "Uma chamada curta a cada busca: a MAVI lê o pedido, preenche os filtros e escreve os termos e as variações; a busca por significado usa os vetores da base. Prefira um modelo rápido (ex.: Claude Haiku, GPT mini). Se a MAVI falhar, a tela busca pelo termo exato.",
   },
   {
+    id: "tutorial_search",
+    group: "Tutoriais",
+    label: "Busca nos tutoriais: a resposta curta da MAVI",
+    conversation: false,
+    env: "TUTORIAL_SEARCH_MODEL",
+    note: "Uma chamada curta a cada busca com Enter na página Tutoriais: a MAVI lê as seções encontradas e responde em 2 ou 3 linhas, citando os tutoriais. Prefira um modelo rápido (ex.: Claude Haiku, GPT mini). Se a MAVI falhar, a lista aparece sem a resposta.",
+  },
+  {
+    id: "tutorial_transcribe",
+    group: "Tutoriais",
+    label: "Transcrição dos vídeos enviados aos tutoriais",
+    conversation: false,
+    env: "WHATSAPP_TRANSCRIBE_MODEL",
+    transcription: true,
+    largeFiles: true,
+    note: "Os vídeos têm até 500 MB. Deepgram e AssemblyAI transcrevem pelo link, de qualquer tamanho; os provedores com o endpoint da OpenAI (Whisper, gpt-4o-transcribe) só até 25 MB. Sem regra, a OpenAI do servidor (até 25 MB). Nos maiores, quem edita escreve a transcrição.",
+  },
+  {
     id: "client_dossier",
     group: "Tarefas",
     label: "Dossiê do cliente (atualizado em segundo plano)",
@@ -665,6 +718,10 @@ export const featureInfo = (id: string) => FEATURES.find((f) => f.id === id);
  * mavi_private.ai_transcribe_model no banco.
  */
 export const TRANSCRIBE_KINDS: ProviderKind[] = ["openai", "groq", "mistral", "custom"];
+/** Os que só transcrevem, pelo link do arquivo (qualquer modelo deles). */
+export const LINK_TRANSCRIBE_KINDS: ProviderKind[] = ["deepgram", "assemblyai"];
+export const isLinkTranscriber = (kind: string) =>
+  (LINK_TRANSCRIBE_KINDS as string[]).includes(kind);
 export const isTranscribeModel = (id: string) => /(whisper|transcri|voxtral)/i.test(id);
 /**
  * Imagens: os provedores que falam o endpoint de imagens da OpenAI
@@ -689,6 +746,10 @@ const TRANSCRIBE_PRICES: [RegExp, number][] = [
   [/whisper-1/i, 0.006],
   [/voxtral-mini/i, 0.001],
   [/voxtral/i, 0.002],
+  [/^nova-3/i, 0.0043],
+  [/^nova-2/i, 0.0043],
+  [/^slam-1/i, 0.0045],
+  [/^universal/i, 0.0025],
 ];
 export function transcribePerMinute(model: string, fallback: number) {
   return TRANSCRIBE_PRICES.find(([re]) => re.test(model))?.[1] ?? fallback;
@@ -734,6 +795,11 @@ export function serverModel(
     case "task_search":
       // Entender o pedido da busca: um modelo rápido basta (o Painel da MAVI vence).
       return env.TASK_SEARCH_MODEL || "claude-haiku-4-5";
+    case "tutorial_search":
+      // A resposta curta da busca nos tutoriais: um modelo rápido basta.
+      return env.TUTORIAL_SEARCH_MODEL || "claude-haiku-4-5";
+    case "tutorial_transcribe":
+      return env.WHATSAPP_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
     case "client_dossier":
       return env.CLIENT_DOSSIER_MODEL || env.AI_MODEL || fallback;
     case "copilot_learning":

@@ -124,6 +124,7 @@ function renderNode(node: RichNode, key: number, ctx: Ctx): ReactNode {
           provider={node.attrs?.provider}
           videoId={node.attrs?.videoId}
           label={node.attrs?.label}
+          transcript={node.attrs?.transcript}
         />
       );
     case "bulletList":

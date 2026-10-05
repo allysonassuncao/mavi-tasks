@@ -15,6 +15,7 @@ import { Button, Checkbox, Input, Loading, Select, SelectOption, Textarea } from
 import { MultiPick } from "./MultiPick";
 import RichTextEditor from "./RichTextEditor";
 import { RichTextContent } from "./RichTextContent";
+import { TutorialVideoInfo, type VideoInfoContext } from "./TutorialVideo";
 import { parseDescription, serializeDescription } from "./rich-text";
 import {
   MAX_MODULES,
@@ -28,6 +29,8 @@ import {
   type TutorialAudience,
   type TutorialContent,
   type TutorialDetail,
+  type TutorialGap,
+  type TutorialMedia,
   type TutorialFacet,
   type TutorialVersion,
   type TutorialVersionRow,
@@ -58,6 +61,7 @@ export function TutorialEditor({
   data,
   user,
   detail,
+  gap,
   facets,
   demo,
   notify,
@@ -68,6 +72,8 @@ export function TutorialEditor({
   data: Snapshot;
   user: string;
   detail: TutorialDetail | null;
+  /** Escrito a partir de uma dúvida sem tutorial (id vazio: da busca, sem registro aberto). */
+  gap?: Pick<TutorialGap, "question"> & Partial<Pick<TutorialGap, "id">>;
   facets: TutorialFacet[];
   demo: boolean;
   notify: (message: string) => void;
@@ -75,7 +81,10 @@ export function TutorialEditor({
   onClose: (id: string | null) => void;
 }) {
   const initial = useMemo(
-    () => (detail ? contentOf(detail) : emptyTutorial()),
+    () =>
+      detail
+        ? contentOf(detail)
+        : { ...emptyTutorial(), title: gap?.question.replace(/[?¿]+\s*$/, "").slice(0, 160) ?? "" },
     [detail],
   );
   const [form, setForm] = useState<TutorialContent>(initial);
@@ -96,6 +105,54 @@ export function TutorialEditor({
   const [error, setError] = useState("");
   const [tagText, setTagText] = useState("");
   const [versions, setVersions] = useState(false);
+  // A transcrição de cada vídeo enviado, atualizada pelos avisos ao vivo.
+  const [media, setMedia] = useState<TutorialMedia[]>(detail?.media ?? []);
+  const reloadMedia = useMemo(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return (target: string | null) => {
+      clearTimeout(timer);
+      if (!target) return;
+      timer = setTimeout(() => {
+        api
+          .detail(target)
+          .then((d) => d && setMedia(d.media))
+          .catch(() => {});
+      }, 300);
+    };
+  }, [api]);
+  useEffect(() => {
+    const onLive = (e: Event) => {
+      const t = (e as CustomEvent<{ tutorial?: string }>).detail?.tutorial;
+      if (id && (!t || t === id)) reloadMedia(id);
+    };
+    window.addEventListener("mavi:tutorials", onLive);
+    return () => window.removeEventListener("mavi:tutorials", onLive);
+  }, [id, reloadMedia]);
+  const videoInfo: VideoInfoContext = {
+    media: Object.fromEntries(
+      media.map((m) => [
+        m.id,
+        {
+          transcript: m.transcript ?? null,
+          transcript_status: m.transcript_status ?? "pending",
+          transcript_source: m.transcript_source ?? null,
+          transcript_error: m.transcript_error ?? null,
+        },
+      ]),
+    ),
+    edit: {
+      save: async (m, text) => {
+        await api.setTranscript(m, text);
+        reloadMedia(id);
+        notify(text ? "Transcrição salva." : "Transcrição apagada: o vídeo volta para a fila.");
+      },
+      retry: async (m) => {
+        await api.retryTranscript(m);
+        reloadMedia(id);
+        notify("O vídeo voltou para a fila de transcrição.");
+      },
+    },
+  };
   const set = <K extends keyof TutorialContent>(k: K, v: TutorialContent[K]) => {
     setForm((f) => ({ ...f, [k]: v }));
     setDirty(true);
@@ -147,6 +204,8 @@ export function TutorialEditor({
             ? `Alterações publicadas (versão ${r.version}).`
             : "Tutorial publicado. O público escolhido já pode ler.",
         );
+        // A dúvida que deu origem ao tutorial fica resolvida por ele.
+        if (gap?.id) await api.setGap(gap.id, "resolved", r.id).catch(() => {});
         onClose(r.id);
       } else
         notify(
@@ -177,7 +236,9 @@ export function TutorialEditor({
       setId(r.id);
       setRevision(r.revision);
     }
-    return api.upload(target, file, onProgress);
+    const mediaId = await api.upload(target, file, onProgress);
+    reloadMedia(target);
+    return mediaId;
   };
 
   async function run(
@@ -282,6 +343,7 @@ export function TutorialEditor({
               disabled={locked}
             />
           </label>
+          <TutorialVideoInfo.Provider value={videoInfo}>
           <RichTextEditor
             name="tutorial-body"
             label="Conteúdo"
@@ -298,6 +360,7 @@ export function TutorialEditor({
               setDirty(true);
             }}
           />
+          </TutorialVideoInfo.Provider>
         </div>
 
         <aside className="tutorial-editor-side entity-form">

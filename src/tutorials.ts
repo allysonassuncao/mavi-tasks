@@ -1,9 +1,17 @@
 import { rpc } from "./api";
 import { supabase } from "./supabase";
 import { fold } from "./domain";
-import { MODULES, moduleOf } from "./modules";
+import { moduleOf } from "./modules";
+import { EXTRA_MODULES } from "./tutorial-modules";
 import type { Page } from "./router";
-import { DESCRIPTION_PREFIX, richTextPlain, type RichNode } from "./rich-text";
+import {
+  DESCRIPTION_PREFIX,
+  parseDescription,
+  richTextPlain,
+  slugify,
+  type RichNode,
+} from "./rich-text";
+import type { VideoInfo } from "./TutorialVideo";
 import type { Role, Snapshot } from "./types";
 
 /**
@@ -53,11 +61,64 @@ export interface TutorialRow {
   can_edit: boolean;
   total: number;
 }
-export interface TutorialMedia {
+export interface TutorialMedia extends Partial<VideoInfo> {
   id: string;
   name: string;
   content_type: string;
   size_bytes: number;
+  duration_seconds?: number | null;
+}
+/** A seção de um tutorial que a busca achou (public.search_tutorials). */
+export interface TutorialHit {
+  chunk_id: number;
+  tutorial_id: string;
+  title: string;
+  summary: string;
+  modules: string[];
+  category: string;
+  /** A âncora da seção ("" = a introdução). */
+  anchor: string;
+  section: string;
+  content: string;
+  score: number;
+  similarity: number | null;
+  words: number;
+}
+export type TutorialCitation = {
+  n: number;
+  tutorial_id: string;
+  title: string;
+  anchor: string;
+  section: string;
+};
+export type TutorialAnswer = {
+  answer: string;
+  found: boolean;
+  citations: TutorialCitation[];
+};
+export type TutorialSearchQuery = {
+  query: string;
+  module: string;
+  category: string;
+  tags: string[];
+};
+export type GapStatus = "open" | "resolved" | "dismissed";
+/** Uma dúvida sem tutorial (Tutoriais › Dúvidas). */
+export interface TutorialGap {
+  id: string;
+  question: string;
+  source: "search" | "mavi";
+  module: string | null;
+  asks: number;
+  people: number;
+  asker_names: string[];
+  status: GapStatus;
+  tutorial_id: string | null;
+  tutorial_title: string | null;
+  first_asked_at: string;
+  last_asked_at: string;
+  handled_by_name: string | null;
+  handled_at: string | null;
 }
 export interface TutorialDetail {
   id: string;
@@ -149,27 +210,13 @@ export const ROLE_LABEL: Record<Role, string> = {
   member: "Colaboradores",
 };
 
-/** Screens outside "Módulos visíveis" that also have tutorials. */
-const EXTRA_MODULES = [
-  { id: "inbox", label: "Caixa de entrada" },
-  { id: "profile", label: "Meu perfil" },
-  { id: "settings", label: "Equipe e configurações" },
-] as const;
-/** The modules a tutorial can be about (the "?" of each screen opens them). */
-export const TUTORIAL_MODULES: { id: string; label: string }[] = [
-  ...MODULES.map((m) =>
-    m.id === "assistant" ? { id: m.id, label: "MAVI" } : { id: m.id, label: m.label },
-  ),
-  ...EXTRA_MODULES,
-];
-export const moduleLabel = (id: string) =>
-  TUTORIAL_MODULES.find((m) => m.id === id)?.label ?? id;
+export { TUTORIAL_MODULES, moduleLabel } from "./tutorial-modules";
 /** The module of the page on screen, for the "?" (none: no module). */
 export function tutorialModuleOf(page: Page | null | undefined): string | null {
   if (!page || page === "tutorials") return null;
   const module = moduleOf(page);
   if (module) return module;
-  return EXTRA_MODULES.some((m) => m.id === page) ? page : null;
+  return (EXTRA_MODULES as readonly string[]).includes(page) ? page : null;
 }
 
 export const cleanLabel = (value: string) =>
@@ -291,6 +338,21 @@ export interface TutorialsApi {
     onProgress: (fraction: number) => void,
   ): Promise<string>;
   mediaUrls(ids: string[]): Promise<Record<string, string>>;
+  /** A busca com a MAVI: as seções e o vetor da pergunta (para a resposta). */
+  search(
+    company: string,
+    q: TutorialSearchQuery,
+  ): Promise<{ hits: TutorialHit[]; embedding: string | null }>;
+  /** A resposta curta da MAVI, citando as seções. */
+  answer(
+    company: string,
+    q: TutorialSearchQuery & { embedding: string | null },
+  ): Promise<TutorialAnswer>;
+  setTranscript(media: string, text: string): Promise<void>;
+  retryTranscript(media: string): Promise<void>;
+  gaps(company: string, status: GapStatus | "all"): Promise<TutorialGap[]>;
+  gapCount(company: string): Promise<number>;
+  setGap(id: string, status: GapStatus, tutorial?: string | null): Promise<void>;
 }
 
 export const serverTutorials: TutorialsApi = {
@@ -378,7 +440,10 @@ export const serverTutorials: TutorialsApi = {
         reject(Error(`${file.name}: falha de conexão no envio.`));
       xhr.send(file);
     });
-    await rpc("confirm_tutorial_media", { p_media: id });
+    await rpc("confirm_tutorial_media", {
+      p_media: id,
+      p_duration: await videoDuration(file),
+    });
     return id;
   },
   async mediaUrls(ids) {
@@ -389,7 +454,128 @@ export const serverTutorials: TutorialsApi = {
     });
     return urls;
   },
+  async search(company, q) {
+    return server({
+      action: "tutorial-search",
+      company,
+      query: q.query,
+      module: q.module || null,
+      category: q.category || null,
+      tags: q.tags,
+    });
+  },
+  async answer(company, q) {
+    return server({
+      action: "tutorial-answer",
+      company,
+      query: q.query,
+      module: q.module || null,
+      category: q.category || null,
+      tags: q.tags,
+      embedding: q.embedding,
+    });
+  },
+  async setTranscript(media, text) {
+    await rpc("set_tutorial_media_transcript", { p_media: media, p_text: text });
+  },
+  async retryTranscript(media) {
+    await rpc("retry_tutorial_media_transcript", { p_media: media });
+  },
+  async gaps(company, status) {
+    return ((await rpc("tutorial_gaps_list", {
+      p_company: company,
+      p_status: status,
+      p_limit: 200,
+    })) ?? []) as TutorialGap[];
+  },
+  async gapCount(company) {
+    return ((await rpc("tutorial_gap_count", { p_company: company })) ?? 0) as number;
+  },
+  async setGap(id, status, tutorial) {
+    await rpc("set_tutorial_gap", {
+      p_gap: id,
+      p_status: status,
+      p_tutorial: tutorial ?? null,
+    });
+  },
 };
+
+/** As palavras que a busca ignora (as mesmas de public.search_tutorials). */
+const STOP_WORDS = new Set(
+  "que como para com uma por dos das nos nas mais onde qual quais quando faco fazer sobre tem ter meu minha seu sua isso esse essa este esta pra pelo pela nao sim ser sao estou posso consigo".split(
+    " ",
+  ),
+);
+/** As palavras que contam numa busca: sem acento, de 3 letras ou mais. */
+export const tutorialQueryWords = (query: string) => [
+  ...new Set(
+    fold(query)
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 3 && !STOP_WORDS.has(w)),
+  ),
+];
+
+/** Quantos segundos o vídeo tem (o custo da transcrição); null se o navegador não souber. */
+export function videoDuration(file: File): Promise<number | null> {
+  if (typeof document === "undefined" || typeof URL.createObjectURL !== "function")
+    return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    const done = (value: number | null) => {
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), 8000);
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      clearTimeout(timer);
+      done(Number.isFinite(video.duration) ? Math.round(video.duration) : null);
+    };
+    video.onerror = () => {
+      clearTimeout(timer);
+      done(null);
+    };
+    video.src = url;
+  });
+}
+
+/**
+ * As seções de um tutorial como o cérebro da MAVI as guarda
+ * (mavi_private.tutorial_index): a introdução (resumo + o que vem antes do
+ * primeiro título) e uma por título, com a mesma âncora da tela.
+ */
+export function tutorialSections(summary: string, body: string) {
+  const out: { anchor: string; title: string; text: string }[] = [];
+  const used = new Map<string, number>();
+  let current = { anchor: "", title: "", text: summary.trim() };
+  const plain = (n: RichNode): string =>
+    n.type === "text"
+      ? (n.text ?? "")
+      : n.type === "paragraph" || n.type === "heading"
+        ? (n.content ?? []).map(plain).join("")
+        : (n.content ?? []).map(plain).filter(Boolean).join("\n");
+  for (const node of parseDescription(body).content ?? []) {
+    if (node.type === "heading") {
+      const label = plain(node).trim();
+      if (label) {
+        out.push(current);
+        const base = slugify(label);
+        const n = (used.get(base) ?? 0) + 1;
+        used.set(base, n);
+        current = { anchor: n > 1 ? `${base}-${n}` : base, title: label, text: "" };
+        continue;
+      }
+    }
+    const text =
+      node.type === "tutorialVideo"
+        ? `[Vídeo${node.attrs?.label ? `: ${node.attrs.label}` : ""}]${node.attrs?.transcript ? `\nTranscrição do vídeo: ${node.attrs.transcript}` : ""}`
+        : plain(node).trim();
+    if (text) current.text = [current.text, text].filter(Boolean).join("\n");
+  }
+  out.push(current);
+  return out.filter((s) => s.text || s.title);
+}
 
 /**
  * Asks for video links in batches: the videos of one page share a request,
@@ -439,6 +625,7 @@ type DemoTutorial = TutorialDetail & {
 };
 let demoStore: DemoTutorial[] | null = null;
 const demoVideos = new Map<string, string>();
+let demoGaps: TutorialGap[] = [];
 
 const paragraph = (text: string): RichNode => ({
   type: "paragraph",
@@ -825,6 +1012,10 @@ export function demoTutorials(data: Snapshot, user: string): TutorialsApi {
         name: file.name,
         content_type: file.type,
         size_bytes: file.size,
+        transcript: null,
+        transcript_status: "skipped",
+        transcript_source: null,
+        transcript_error: "Na demonstração os vídeos não são transcritos: escreva a transcrição.",
       });
       onProgress(1);
       return id;
@@ -836,5 +1027,106 @@ export function demoTutorials(data: Snapshot, user: string): TutorialsApi {
         ),
       );
     },
+    async search(_company, q) {
+      const words = tutorialQueryWords(q.query);
+      const hits: TutorialHit[] = [];
+      for (const t of store.filter(forMe)) {
+        if (q.module && !t.modules.includes(q.module)) continue;
+        if (q.category && fold(t.category) !== fold(q.category)) continue;
+        if (q.tags.length && !t.tags.some((g) => q.tags.some((x) => fold(x) === fold(g)))) continue;
+        for (const sec of tutorialSections(t.summary, t.body)) {
+          const text = fold(`${t.title} ${sec.title} ${sec.text}`);
+          const n = words.filter((w) => text.includes(w)).length;
+          if (!n) continue;
+          hits.push({
+            chunk_id: hits.length + 1,
+            tutorial_id: t.id,
+            title: t.title,
+            summary: t.summary,
+            modules: t.modules,
+            category: t.category,
+            anchor: sec.anchor,
+            section: sec.title,
+            content: [sec.title && `Seção: ${sec.title}`, sec.text].filter(Boolean).join("\n"),
+            score: n,
+            similarity: null,
+            words: n,
+          });
+        }
+      }
+      hits.sort((a, b) => b.score - a.score);
+      if (!hits.length) logGap(q.query, "search", q.module);
+      return { hits: hits.slice(0, 30), embedding: null };
+    },
+    async answer(company, q) {
+      const { hits } = await this.search(company, q);
+      if (!hits.length) return { answer: "", found: false, citations: [] };
+      const first = hits[0];
+      return {
+        answer: `Na demonstração, a MAVI não escreve a resposta: ela leria as seções encontradas e responderia em poucas linhas, como em “${first.section || first.title}” [1].`,
+        found: true,
+        citations: [
+          { n: 1, tutorial_id: first.tutorial_id, title: first.title, anchor: first.anchor, section: first.section },
+        ],
+      };
+    },
+    async setTranscript(media, text) {
+      const m = store.flatMap((t) => (canEdit(t) ? t.media : [])).find((x) => x.id === media);
+      if (!m) throw Error("Sem permissão");
+      Object.assign(m, text
+        ? { transcript: text, transcript_status: "ready", transcript_source: "manual", transcript_error: null }
+        : { transcript: null, transcript_status: "pending", transcript_source: null });
+    },
+    async retryTranscript(media) {
+      const m = store.flatMap((t) => (canEdit(t) ? t.media : [])).find((x) => x.id === media);
+      if (!m) throw Error("Sem permissão");
+      Object.assign(m, {
+        transcript_status: "skipped",
+        transcript_error: "Na demonstração os vídeos não são transcritos: escreva a transcrição.",
+      });
+    },
+    async gaps(_company, status) {
+      return leader ? demoGaps.filter((g) => status === "all" || g.status === status) : [];
+    },
+    async gapCount() {
+      return leader ? demoGaps.filter((g) => g.status === "open").length : 0;
+    },
+    async setGap(id, status, tutorial) {
+      if (!leader) throw Error("Sem permissão");
+      const g = demoGaps.find((x) => x.id === id);
+      if (!g) return;
+      g.status = status;
+      g.tutorial_id = status === "resolved" ? (tutorial ?? g.tutorial_id) : null;
+      g.tutorial_title = store.find((t) => t.id === g.tutorial_id)?.title ?? null;
+      g.handled_by_name = status === "open" ? null : name(user);
+      g.handled_at = status === "open" ? null : now();
+    },
   };
+  function logGap(question: string, source: TutorialGap["source"], module: string) {
+    const key = fold(question).replace(/[^a-z0-9]+/g, " ").trim();
+    if (key.length < 3) return;
+    const g = demoGaps.find((x) => fold(x.question).replace(/[^a-z0-9]+/g, " ").trim() === key);
+    if (g) {
+      g.asks++;
+      g.last_asked_at = now();
+      if (g.status === "resolved") g.status = "open";
+      return;
+    }
+    demoGaps.unshift({
+      id: crypto.randomUUID(),
+      question: question.trim().slice(0, 300),
+      source,
+      module: module || null,
+      asks: 1,
+      people: 1,
+      asker_names: [name(user)],
+      status: "open",
+      tutorial_id: null,
+      tutorial_title: null,
+      first_asked_at: now(),
+      last_asked_at: now(),
+      handled_by_name: null,
+      handled_at: null,
+    });
+  }
 }

@@ -9,6 +9,7 @@ import {
 import {
   ArrowLeft,
   BookOpen,
+  CircleHelp,
   Clock3,
   Copy,
   Film,
@@ -25,8 +26,10 @@ import { Empty } from "./components";
 import { Button, Loading, Select, SelectOption } from "./ui";
 import { MultiPick } from "./MultiPick";
 import { RichTextContent } from "./RichTextContent";
-import { TutorialMediaContext } from "./TutorialVideo";
+import { TutorialMediaContext, TutorialVideoInfo } from "./TutorialVideo";
 import { TutorialEditor } from "./TutorialEditor";
+import { TutorialSearchResults } from "./TutorialSearch";
+import { TutorialGaps } from "./TutorialGaps";
 import { headingAnchors } from "./rich-text";
 import {
   TUTORIAL_MODULES,
@@ -40,6 +43,7 @@ import {
   videoUrlCache,
   type TutorialDetail,
   type TutorialFacet,
+  type TutorialGap,
   type TutorialRow,
   type TutorialScope,
   type TutorialsApi,
@@ -102,20 +106,22 @@ export function TutorialsPage({
   const [facets, setFacets] = useState<TutorialFacet[]>([]);
   const [editing, setEditing] = useState<{
     detail: TutorialDetail | null;
+    /** Criado a partir de uma dúvida sem tutorial: ela fica resolvida ao publicar. */
+    gap?: TutorialGap;
   } | null>(null);
+  const [gapCount, setGapCount] = useState(0);
+  const gapsTab = tab === "duvidas" && isLeader;
   const scope: TutorialScope = tab === "admin" && isLeader ? "admin" : "library";
   const tags = useMemo(() => tagParam.split("|").filter(Boolean), [tagParam]);
+  // Na biblioteca, buscar é com a MAVI (Enter); a lista mostra os resultados dela.
+  const searching = !gapsTab && scope === "library" && !!term;
   const request = useRef(0);
 
-  // Digitar não refaz a busca a cada letra.
-  useEffect(() => {
-    const t = setTimeout(() => setTerm(typed.trim()), 280);
-    return () => clearTimeout(t);
-  }, [typed, setTerm]);
   useEffect(() => setTyped(term), [term]);
 
   const load = useCallback(
     (offset = 0) => {
+      if (searching || gapsTab) return;
       const n = ++request.current;
       if (!offset) setError("");
       api
@@ -142,14 +148,19 @@ export function TutorialsPage({
         });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api, company, scope, term, module, category, tagParam],
+    [api, company, scope, term, module, category, tagParam, searching, gapsTab],
   );
   const loadFacets = useCallback(() => {
     api
       .facets(company)
       .then(setFacets)
       .catch(() => {});
-  }, [api, company]);
+    if (isLeader)
+      api
+        .gapCount(company)
+        .then(setGapCount)
+        .catch(() => {});
+  }, [api, company, isLeader]);
   useEffect(() => load(0), [load]);
   useEffect(loadFacets, [loadFacets]);
 
@@ -199,6 +210,7 @@ export function TutorialsPage({
           data={data}
           user={user}
           detail={editing.detail}
+          gap={editing.gap}
           facets={facets}
           demo={demo}
           notify={notify}
@@ -237,7 +249,15 @@ export function TutorialsPage({
 
   return (
     <div className="tutorials-page">
-      <section className="cases-top">
+      <form
+        className="cases-top"
+        role="search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (gapsTab) setTab("");
+          setTerm(typed.trim());
+        }}
+      >
         <label className="cases-search">
           <Search size={20} aria-hidden="true" />
           <input
@@ -246,48 +266,76 @@ export function TutorialsPage({
             onChange={(e) => setTyped(e.target.value)}
             placeholder="O que você quer aprender? Ex.: como mudar o prazo de uma tarefa"
             aria-label="Buscar nos tutoriais"
+            enterKeyHint="search"
           />
           {typed && (
             <button
               type="button"
               className="icon-btn"
               aria-label="Limpar busca"
-              onClick={() => setTyped("")}
+              onClick={() => {
+                setTyped("");
+                setTerm("");
+              }}
             >
               <X size={16} />
             </button>
           )}
+          <button type="submit" className="btn primary tutorials-search-go" disabled={!typed.trim()}>
+            Buscar
+          </button>
         </label>
         {isLeader && (
           <Button
             className="btn primary"
             onClick={() => setEditing({ detail: null })}
+            type="button"
           >
             <Plus size={17} /> Novo tutorial
           </Button>
         )}
-      </section>
+      </form>
 
       {isLeader && (
         <nav className="cases-tabs" aria-label="Tutoriais">
           {[
             { param: "", label: "Tutoriais", icon: BookOpen },
             { param: "admin", label: "Administração", icon: Settings2 },
+            { param: "duvidas", label: "Dúvidas sem tutorial", icon: CircleHelp },
           ].map((t) => (
             <button
               type="button"
               key={t.param}
-              className={tab === t.param || (!t.param && tab !== "admin") ? "active" : ""}
+              className={
+                tab === t.param || (!t.param && tab !== "admin" && tab !== "duvidas")
+                  ? "active"
+                  : ""
+              }
               aria-current={tab === t.param ? "page" : undefined}
               onClick={() => setTab(t.param)}
             >
               <t.icon size={16} />
               {t.label}
+              {t.param === "duvidas" && gapCount > 0 && (
+                <span className="nav-count">{gapCount}</span>
+              )}
             </button>
           ))}
         </nav>
       )}
 
+      {gapsTab ? (
+        <TutorialGaps
+          api={api}
+          company={company}
+          tick={tick}
+          notify={notify}
+          onCreate={(gap) => setEditing({ detail: null, gap })}
+          onOpenTutorial={(id) => setOpenId(id)}
+          onChanged={refresh}
+        />
+      ) : (
+      <>
       <div className="cases-filters">
         <div
           className="cases-niche-row"
@@ -364,6 +412,31 @@ export function TutorialsPage({
         </div>
       </div>
 
+      {searching ? (
+        <TutorialSearchResults
+          key={`${term}|${module}|${category}|${tagParam}`}
+          api={api}
+          company={company}
+          query={{ query: term, module, category, tags }}
+          isLeader={isLeader}
+          onOpen={(id, anchor) => {
+            setOpenId(id);
+            if (anchor)
+              window.history.replaceState(
+                window.history.state,
+                "",
+                `${window.location.pathname}${window.location.search}#${anchor}`,
+              );
+          }}
+          onCreate={(question) =>
+            setEditing({
+              detail: null,
+              gap: { question } as TutorialGap,
+            })
+          }
+        />
+      ) : (
+      <>
       {error && <p className="form-error">{error}</p>}
       {rows === null && !error ? (
         <Loading variant={scope === "admin" ? "list" : "grid"} />
@@ -431,6 +504,10 @@ export function TutorialsPage({
           )}
         </div>
       ) : null}
+      </>
+      )}
+      </>
+      )}
     </div>
   );
 }
@@ -753,7 +830,9 @@ function TutorialReader({
             </div>
           </header>
           <div className="tutorial-body" ref={body}>
-            <RichTextContent value={detail.body} />
+            <TutorialVideoInfo.Provider value={{ media: mediaInfo(detail) }}>
+              <RichTextContent value={detail.body} />
+            </TutorialVideoInfo.Provider>
           </div>
           {!!detail.tags.length && (
             <footer className="tutorial-tags">
@@ -805,6 +884,21 @@ function TutorialReader({
         )}
       </div>
     </div>
+  );
+}
+
+/** A transcrição de cada vídeo enviado, para o player mostrar. */
+export function mediaInfo(detail: Pick<TutorialDetail, "media">) {
+  return Object.fromEntries(
+    detail.media.map((m) => [
+      m.id,
+      {
+        transcript: m.transcript ?? null,
+        transcript_status: m.transcript_status ?? "pending",
+        transcript_source: m.transcript_source ?? null,
+        transcript_error: m.transcript_error ?? null,
+      },
+    ]),
   );
 }
 

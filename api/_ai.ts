@@ -24,6 +24,7 @@ import {
 import {
   describeStep,
   findTasks,
+  searchTutorials,
   runTool,
   summarizeStep,
   temperatureLine,
@@ -66,7 +67,9 @@ import {
   type Power,
   type SearchArtifact,
   type TaskArtifact,
+  type TutorialArtifact,
 } from "../src/mavi-artifacts.js";
+import { isTutorialModule, moduleLabel } from "../src/tutorial-modules.js";
 import {
   catalogContext,
   describeSkillStep,
@@ -201,6 +204,7 @@ Como trabalhar:
 - As anotações do cliente (acessos às plataformas, logins, links úteis, contatos e combinados que o time guarda em Anotações, na tarefa e no Drive do cliente) entram na busca com o tipo note e na parte notes de client_overview: use quando perguntarem por acesso, login, link, painel, site, contato ou "onde está…" de um cliente, e cite. Senhas, tokens e chaves ficam em trechos secretos, que chegam só como "[Secreto: nome — valor oculto]": você sabe que o secreto existe e como se chama, mas nunca vê o valor. Nunca invente, adivinhe ou repita uma senha; diga em qual anotação ela está e que a pessoa abre a anotação e clica em Mostrar ou Copiar (fica registrado quem viu). Se uma anotação trouxer algo que parece senha em texto comum, não repita o valor: aponte a anotação e sugira guardá-lo como Secreto.
 - O Agente Conversacional é o robô de WhatsApp que a agência vende aos clientes (o produto "MAVI", que não é você: é o assistente do cliente, configurado no n8n). O prompt de sistema dele entra na busca com o tipo agent e na parte agent de client_overview: use quando perguntarem o que o robô do cliente faz, responde ou não pode responder, as regras dele (agendamento, horários, preços, tom, encaminhamento para humano) ou "como o assistente da clínica trata X", e cite. O prompt é a configuração do robô, não algo que o cliente disse: deixe isso claro. Para mudanças, diga que o prompt é editado em Agente Conversacional (e publicado no n8n) por quem atende o cliente.
 - Para a visão geral de um ou mais clientes (como está, situação atual, passagem de carteira, comparação), use client_overview: o dossiê de até 3 clientes numa chamada (produtos, dossiê da MAVI, briefing, reuniões, tarefas em aberto, campanhas, termômetro, Radar, conta de mídia e WhatsApp). Com vários clientes, ache todos com uma chamada só de find_clients (os códigos separados por vírgula) e faça várias chamadas de client_overview na mesma rodada.
+- Para dúvidas de uso do próprio sistema (como fazer algo numa tela, onde fica um botão ou uma configuração, o que uma funcionalidade faz, por que algo aparece de um jeito), use search_tutorials: os tutoriais que a agência escreveu, com as transcrições dos vídeos. Responda só com o que os tutoriais dizem, cite [S#] e coloque o cartão do tutorial que respondeu. Se nenhum tutorial responde, diga que ainda não há tutorial sobre isso, não invente menus, botões nem passos, e chame report_missing_tutorial com a dúvida (a pessoa pode perguntar a um administrador ou gestor).
 - Use read_more quando um trecho parecer cortado ou precisar de mais contexto.
 - Pare de buscar assim que tiver o suficiente. Se nada relevante aparecer, diga claramente que não encontrou no sistema e sugira onde procurar.
 
@@ -600,6 +604,10 @@ export async function buildContext(
     );
   }
   lines.push(insightsContextLine(insights));
+  if (scope.screen)
+    lines.push(
+      `A pessoa está na tela ${moduleLabel(scope.screen)} do sistema. Numa dúvida de uso ("como faço isso", "onde fica"), comece pelos tutoriais dessa tela.`,
+    );
   if (scope.module === "meetings")
     lines.push(
       "A pessoa está na pasta Gravações da MAVI: reuniões costumam ser o foco, mas use também as tarefas quando ajudar.",
@@ -710,6 +718,8 @@ async function ask(
     module:
       typeof raw.module === "string" ? raw.module.slice(0, 40) : undefined,
     campaign: id(raw.campaign),
+    // A tela em que a pessoa está (bolinha): os tutoriais dela vêm primeiro.
+    screen: isTutorialModule(raw.screen) ? raw.screen : undefined,
   };
   const conversationId = id(body.conversation) ?? null;
   const question = typeof body.question === "string" ? body.question : "";
@@ -1274,6 +1284,11 @@ async function ask(
             ? // A busca de tarefas: o botão da Busca avançada com a mesma busca.
               findTasks(ctx, input as Record<string, unknown>, (card) =>
                 add<SearchArtifact>(kit, "B", { type: "search", ...card }).ref,
+              )
+          : name === "search_tutorials"
+            ? // Os tutoriais: os cartões que abrem o tutorial na seção.
+              searchTutorials(ctx, input as Record<string, unknown>, (card) =>
+                add<TutorialArtifact>(kit, "B", { type: "tutorial", ...card }).ref,
               )
           : kind === "read"
             ? runTool(ctx, name, input)

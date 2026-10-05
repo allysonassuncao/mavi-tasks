@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  GraduationCap,
   AlertTriangle,
   Check,
   CheckSquare,
@@ -33,8 +34,9 @@ import {
   type ActionArtifact,
   type AiArtifact,
   type SearchArtifact,
+  type TutorialArtifact,
 } from "./mavi-artifacts";
-import { SearchCard } from "./MaviSearchCard";
+import { SearchCard, TutorialCard } from "./MaviSearchCard";
 import { MaviMarkdown } from "./MaviMarkdown";
 import { QuestionCard } from "./MaviQuestions";
 import {
@@ -250,6 +252,7 @@ const SOURCE_ICONS = {
   media: Wallet,
   note: NotebookPen,
   agent: BotMessageSquare,
+  tutorial: GraduationCap,
 };
 function SourceIcon({ type }: { type: AiSource["type"] }) {
   const Icon = SOURCE_ICONS[type] ?? FileText;
@@ -563,9 +566,15 @@ const drawnActions = (list: AiArtifact[] | undefined) =>
   (list ?? []).filter(
     (a): a is ActionArtifact => a.type === "action" && a.action.kind === "campaign_alert",
   );
-/** O botão "Ver na Busca avançada" das buscas de tarefas (find_tasks). */
-const drawnSearches = (list: AiArtifact[] | undefined) =>
-  (list ?? []).filter((a): a is SearchArtifact => a.type === "search");
+/**
+ * O botão "Ver na Busca avançada" das buscas de tarefas (find_tasks) e os
+ * cartões "Abrir tutorial" que a resposta citou (search_tutorials).
+ */
+const drawnSearches = (list: AiArtifact[] | undefined, text = "") =>
+  (list ?? []).filter(
+    (a): a is SearchArtifact | TutorialArtifact =>
+      a.type === "search" || (a.type === "tutorial" && text.includes(`[[${a.ref}]]`)),
+  );
 
 export function AiChat({
   intro,
@@ -674,7 +683,7 @@ export function AiChat({
                       typing,
                       [
                         ...(renderAction ? drawnActions(t.artifacts) : []),
-                        ...drawnSearches(t.artifacts),
+                        ...drawnSearches(t.artifacts, t.content),
                       ].map((a) => a.ref),
                     )
                   }
@@ -687,9 +696,13 @@ export function AiChat({
                   </div>
                 ))}
               {!t.streaming &&
-                drawnSearches(t.artifacts).map((a) => (
+                drawnSearches(t.artifacts, t.content).map((a) => (
                   <div key={a.id} className="answer-artifact">
-                    <SearchCard artifact={a} />
+                    {a.type === "tutorial" ? (
+                      <TutorialCard artifact={a} />
+                    ) : (
+                      <SearchCard artifact={a} />
+                    )}
                   </div>
                 ))}
               {t.artifacts?.map((a) =>

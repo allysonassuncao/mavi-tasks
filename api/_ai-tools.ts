@@ -2,6 +2,7 @@ import { callRpc } from "./_drive.js";
 import type { CostTurn } from "./_ai-cost.js";
 import { vectorLiteral, type Embedder } from "./_ai-embeddings.js";
 import type { ToolSpec } from "./_ai-llm.js";
+import { isTutorialModule, moduleLabel } from "../src/tutorial-modules.js";
 import {
   cleanTerms,
   searchLinkQuery,
@@ -28,6 +29,8 @@ export type AiScope = {
   module?: string;
   /** Campanhas › Conversar com a MAVI: a campanha aberta (o foco da conversa). */
   campaign?: string;
+  /** A tela em que a pessoa está (o módulo, ex.: "tasks"): os tutoriais dela vêm primeiro. */
+  screen?: string;
 };
 export type AiSource = {
   ref: string;
@@ -46,7 +49,9 @@ export type AiSource = {
     /** Anotações do cliente: o id é a anotação. */
     | "note"
     /** Agente Conversacional (robô de WhatsApp do cliente): o id é o prompt. */
-    | "agent";
+    | "agent"
+    /** Tutoriais: o id é o tutorial; anchor, a seção. */
+    | "tutorial";
   /** Página da internet (busca da Claude). */
   url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
@@ -61,6 +66,8 @@ export type AiSource = {
   start?: number;
   /** Arquivo: a página/slide/planilha citada. */
   page?: number;
+  /** Tutorial: a âncora da seção citada. */
+  anchor?: string;
   label?: string;
   /** Tarefa que quem pergunta não abre (Assistente MAVI: só título e status). */
   restricted?: boolean;
@@ -341,6 +348,37 @@ export const TOOLS: ToolSpec[] = [
     ),
   },
   {
+    name: "search_tutorials",
+    description:
+      "Busca nos tutoriais do sistema: os guias de uso que a agência escreveu (passo a passo das telas, onde fica cada coisa, o que cada funcionalidade faz), com as transcrições dos vídeos. Use em toda dúvida de como usar o sistema: 'como mudo o prazo de uma tarefa', 'onde vejo o saldo de mídia', 'o que é o Radar', 'como publico um aviso no Mural'. Os tutoriais da tela em que a pessoa está vêm primeiro. Devolve as seções com [S#] para citar e os cartões que abrem o tutorial na seção.",
+    parameters: obj(
+      {
+        query: {
+          type: "string",
+          description: "A dúvida em poucas palavras, com os termos que o tutorial usaria (ex.: 'mudar prazo da tarefa com motivo').",
+        },
+        module: {
+          type: "string",
+          description:
+            "Só quando a dúvida for claramente de outra tela que não a atual: o módulo (tasks, campaigns, drive, notices, cases, radar, dashboards, financeMedia, onboarding, socialMedia, agents, assistant, aiUsage, settings, profile, inbox…).",
+        },
+        limit: { type: "integer", minimum: 1, maximum: 10, description: "Quantas seções (padrão 6)." },
+      },
+      ["query"],
+    ),
+  },
+  {
+    name: "report_missing_tutorial",
+    description:
+      "Registra uma dúvida de uso do sistema que nenhum tutorial responde, para os administradores e gestores escreverem o tutorial (Tutoriais › Dúvidas). Chame uma vez, depois de search_tutorials não trazer nada que responda, com a dúvida como a pessoa perguntou.",
+    parameters: obj(
+      {
+        question: { type: "string", description: "A dúvida, como a pessoa perguntou (até 300 caracteres)." },
+      },
+      ["question"],
+    ),
+  },
+  {
     name: "client_temperature",
     description:
       "Termômetro do cliente: a temperatura da relação com o cliente (0 a 100 e a faixa, como Frio ou Quente), calculada lendo as reuniões gravadas e os grupos de WhatsApp — os indicadores (satisfação com resultados, risco de cancelamento, relação, engajamento e os que a agência criou), os sinais de alerta (ex.: fala em cancelar), os assuntos que mais mexem com o cliente, a tendência em 7 e 30 dias e a explicação da MAVI. Com client_id: o termômetro do cliente e as leituras recentes que mais pesaram, com citação. Sem client_id: a carteira do cliente mais frio ao mais quente. Use para 'como está o cliente', 'ele está satisfeito?', 'tem risco de cancelar?', 'quais clientes estão frios ou em risco'. Para o que exatamente foi dito, complete com search_knowledge.",
@@ -485,7 +523,8 @@ export function cite(ctx: ToolContext, source: Omit<AiSource, "ref">) {
       x.type === source.type &&
       x.id === source.id &&
       x.start === source.start &&
-      x.page === source.page,
+      x.page === source.page &&
+      x.anchor === source.anchor,
   );
   if (same) return same.ref;
   const ref = `S${ctx.sources.length + 1}`;
@@ -1233,6 +1272,9 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
     const what = str(input.request) || cleanTerms(input.terms).join(", ") || str(input.topic);
     return `Localizando tarefas${what ? ` “${what.slice(0, 80)}”` : ""}${inClient}`;
   }
+  if (name === "search_tutorials")
+    return `Procurando nos tutoriais “${str(input.query).slice(0, 80)}”`;
+  if (name === "report_missing_tutorial") return "Registrando a dúvida sem tutorial";
   if (name === "find_clients") {
     const terms = clientTerms(str(input.query));
     return terms.length > 1
@@ -1274,6 +1316,9 @@ export function summarizeStep(name: string, output: string) {
     return refs
       ? `${refs} ${refs === 1 ? "reunião" : "reuniões"}`
       : "nenhuma reunião";
+  if (name === "search_tutorials")
+    return refs ? `${refs} ${refs === 1 ? "seção de tutorial" : "seções de tutoriais"}` : "nenhum tutorial";
+  if (name === "report_missing_tutorial") return "dúvida registrada";
   if (name === "list_tasks")
     return refs
       ? `${refs} ${refs === 1 ? "tarefa" : "tarefas"}`
@@ -1940,6 +1985,104 @@ async function mediaAccount(ctx: ToolContext, input: Record<string, unknown>) {
 }
 
 /** Executa uma ferramenta pelo nome (entradas conferidas aqui). */
+/** O cartão "Abrir tutorial" (só nas conversas): abre o tutorial na seção. */
+export type TutorialCard = {
+  tutorial: string;
+  anchor: string;
+  title: string;
+  section: string;
+  summary: string;
+};
+type TutorialRow = {
+  tutorial_id: string;
+  title: string;
+  summary: string;
+  modules: string[];
+  category: string;
+  anchor: string;
+  section: string;
+  content: string;
+};
+
+/**
+ * search_tutorials: as seções dos tutoriais que a pessoa vê
+ * (public.search_tutorials, como ela), com os da tela atual primeiro. Nas
+ * conversas, até 2 cartões "Abrir tutorial" (onCard devolve a referência).
+ */
+export async function searchTutorials(
+  ctx: ToolContext,
+  input: Record<string, unknown>,
+  onCard?: (card: TutorialCard) => string,
+) {
+  const query = str(input.query).slice(0, 300);
+  if (query.length < 2) return "Informe a dúvida a procurar nos tutoriais.";
+  const asked = str(input.module);
+  const module = isTutorialModule(asked) ? asked : ctx.scope.screen;
+  const embedding = await embedOnce(ctx, query)
+    .then((out) => (out.vectors[0] ? vectorLiteral(out.vectors[0]) : null))
+    .catch(() => null);
+  const r = await callRpc<TutorialRow[]>(ctx, ctx.fetch, ctx.auth, "search_tutorials", {
+    p_company: ctx.company,
+    p_query: query,
+    p_embedding: embedding,
+    p_module: module ?? null,
+    p_strict: false,
+    p_category: null,
+    p_tags: null,
+    p_limit: int(input.limit, 6, 1, 10),
+  });
+  if (!r.ok) throw new Error(r.error);
+  const rows = r.data ?? [];
+  if (!rows.length)
+    return "Nenhum tutorial trata disso. Diga à pessoa que ainda não há tutorial sobre o assunto, sem inventar menus nem passos de tela, e chame report_missing_tutorial com a dúvida.";
+  const lines = rows.map((row) => {
+    const ref = cite(ctx, {
+      type: "tutorial",
+      id: row.tutorial_id,
+      title: row.title,
+      label: row.section || undefined,
+      anchor: row.anchor || undefined,
+      date: null,
+      client_id: null,
+    });
+    const where = row.modules.length ? ` · ${row.modules.map(moduleLabel).join(", ")}` : "";
+    return `[${ref}] Tutorial “${row.title}”${row.section ? ` › ${row.section}` : ""}${where}\n${row.content.slice(0, 1500)}`;
+  });
+  // Os cartões: a melhor seção de cada um dos 2 primeiros tutoriais.
+  const cards: string[] = [];
+  if (onCard)
+    for (const row of rows) {
+      if (cards.length >= 2) break;
+      if (rows.findIndex((x) => x.tutorial_id === row.tutorial_id) !== rows.indexOf(row)) continue;
+      cards.push(
+        `${onCard({
+          tutorial: row.tutorial_id,
+          anchor: row.anchor,
+          title: row.title,
+          section: row.section,
+          summary: row.summary.slice(0, 200),
+        })} (“${row.title}”${row.section ? ` › ${row.section}` : ""})`,
+      );
+    }
+  const card = cards.length
+    ? `\n\nCartões que abrem o tutorial na seção: ${cards.join("; ")}. Escreva [[B#]] do tutorial que respondeu, sozinho numa linha, no fim da resposta.`
+    : "";
+  return `${lines.join("\n\n")}\n\nResponda só com o que estas seções dizem e cite [S#]. Se nenhuma responde à dúvida, diga que ainda não há tutorial sobre isso (sem inventar passos) e chame report_missing_tutorial.${card}`;
+}
+
+async function reportMissingTutorial(ctx: ToolContext, input: Record<string, unknown>) {
+  const question = str(input.question).slice(0, 300);
+  if (question.length < 3) return "Informe a dúvida.";
+  const r = await callRpc(ctx, ctx.fetch, ctx.auth, "log_tutorial_gap", {
+    p_company: ctx.company,
+    p_question: question,
+    p_source: "mavi",
+    p_module: ctx.scope.screen ?? null,
+  });
+  if (!r.ok) throw new Error(r.error);
+  return "Dúvida registrada para os administradores e gestores escreverem o tutorial (Tutoriais › Dúvidas). Diga isso à pessoa numa frase.";
+}
+
 export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   const input =
     raw && typeof raw === "object" && !Array.isArray(raw)
@@ -1950,6 +2093,8 @@ export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "list_meetings") return listMeetings(ctx, input);
   if (name === "list_tasks") return listTasks(ctx, input);
   if (name === "find_tasks") return findTasks(ctx, input);
+  if (name === "search_tutorials") return searchTutorials(ctx, input);
+  if (name === "report_missing_tutorial") return reportMissingTutorial(ctx, input);
   if (name === "find_clients") return findClients(ctx, input);
   if (name === "campaign_results") return campaignResults(ctx, input);
   if (name === "client_temperature") return clientTemperature(ctx, input);

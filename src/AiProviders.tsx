@@ -54,6 +54,7 @@ import {
   isTranscribeModel,
   IMAGE_KINDS,
   TRANSCRIBE_KINDS,
+  isLinkTranscriber,
   WEB_KINDS,
   keyHint as keyHintOf,
   pickRoute,
@@ -738,6 +739,8 @@ function ProviderDialog({
                     <small>
                       {c.api === "anthropic"
                         ? "API oficial da Claude"
+                        : c.api === "transcribe"
+                          ? "Só transcreve, pelo link: os vídeos dos tutoriais"
                         : c.kind === "openai"
                           ? "API oficial da OpenAI"
                           : c.kind === "custom"
@@ -860,8 +863,9 @@ function ProviderDialog({
                 </span>
               </div>
               <small className="ai-field-help">
-                Preços em US$ por milhão de tokens, usados no consumo da MAVI e
-                nos limites.
+                {entry.api === "transcribe"
+                  ? "Transcrição: o custo é por minuto de vídeo, pela tabela do provedor; deixe 0 nos preços de tokens."
+                  : "Preços em US$ por milhão de tokens, usados no consumo da MAVI e nos limites."}
                 {entry.pricingUrl && (
                   <>
                     {" "}
@@ -1317,11 +1321,13 @@ export function AiRoutesPanel({
   // Conversa: sem o Jev e sem os modelos que só transcrevem ou geram vetores.
   const choices = (
     <>
-      {providers.map((p) =>
-        p.models
-          .filter((m) => !isJevModel(m.id) && !isNonChatModel(m.id))
-          .map((m) => option(p, m)),
-      )}
+      {providers
+        .filter((p) => !isLinkTranscriber(p.kind))
+        .map((p) =>
+          p.models
+            .filter((m) => !isJevModel(m.id) && !isNonChatModel(m.id))
+            .map((m) => option(p, m)),
+        )}
     </>
   );
   // Transcrição: provedores com o endpoint de transcrição e os modelos que transcrevem.
@@ -1335,6 +1341,20 @@ export function AiRoutesPanel({
   ) : (
     <SelectOption value="none" disabled>
       Cadastre um modelo de transcrição (ex.: Whisper)
+    </SelectOption>
+  );
+  // Arquivos grandes (vídeos dos tutoriais): também Deepgram e AssemblyAI, pelo link.
+  const largeTranscribeOptions = [
+    ...providers
+      .filter((p) => isLinkTranscriber(p.kind))
+      .flatMap((p) => p.models.map((m) => option(p, m))),
+    ...transcribeOptions,
+  ];
+  const largeTranscribeChoices = largeTranscribeOptions.length ? (
+    <>{largeTranscribeOptions}</>
+  ) : (
+    <SelectOption value="none" disabled>
+      Cadastre o Deepgram, a AssemblyAI ou um modelo de transcrição
     </SelectOption>
   );
   // Imagens: provedores com o endpoint de imagens e os modelos que geram imagens.
@@ -1446,6 +1466,7 @@ export function AiRoutesPanel({
         choices={choices}
         jevChoices={jevChoices}
         transcribeChoices={transcribeChoices}
+        largeTranscribeChoices={largeTranscribeChoices}
         imageChoices={imageChoices}
         webChoices={webChoices}
         routeLabel={(r) => choiceLabel(r)}
@@ -1580,6 +1601,7 @@ function FeatureRoutes({
   choices,
   jevChoices,
   transcribeChoices,
+  largeTranscribeChoices,
   imageChoices,
   webChoices,
   routeLabel,
@@ -1599,6 +1621,8 @@ function FeatureRoutes({
   jevChoices: ReactNode;
   /** Os modelos de transcrição (OpenAI, Groq, Mistral, endereço próprio). */
   transcribeChoices: ReactNode;
+  /** Os de transcrição mais Deepgram e AssemblyAI (vídeos grandes dos tutoriais). */
+  largeTranscribeChoices: ReactNode;
   /** Os modelos de imagem (OpenAI, Google, xAI, OpenRouter, endereço próprio). */
   imageChoices: ReactNode;
   /** Os modelos da busca na internet (Claude e OpenRouter). */
@@ -1660,10 +1684,10 @@ function FeatureRoutes({
                     <div className="ai-feature-name">
                       <span className="ai-feature-group">{f.group}</span>
                       <span className="ai-usage-name">{f.label}</span>
-                      {(outsideClaude || f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary" || f.id === "task_title" || f.id === "task_search") &&
+                      {(outsideClaude || f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary" || f.id === "task_title" || f.id === "task_search" || f.id === "tutorial_search") &&
                         f.note && (
                         <small
-                          className={`ai-feature-note${f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary" || f.id === "task_title" || f.id === "task_search" ? " info" : ""}`}
+                          className={`ai-feature-note${f.transcription || f.images || f.own || f.web || f.id === "mavi_page" || f.id === "conversation_summary" || f.id === "task_title" || f.id === "task_search" || f.id === "tutorial_search" ? " info" : ""}`}
                         >
                           {f.note}
                         </small>
@@ -1697,7 +1721,9 @@ function FeatureRoutes({
                         {f.decisions
                           ? jevChoices
                           : f.transcription
-                            ? transcribeChoices
+                            ? f.largeFiles
+                              ? largeTranscribeChoices
+                              : transcribeChoices
                             : f.images
                               ? imageChoices
                               : f.web

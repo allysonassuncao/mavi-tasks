@@ -29,6 +29,13 @@ import { handleMcpCallback } from "./_ai-mcp.js";
 import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
 import { handleTutorials } from "./_tutorials.js";
+import { handleTutorialSearch } from "./_tutorial-search.js";
+import {
+  handleTutorialTranscribe,
+  tutorialTranscribeAllowed,
+  tutorialTranscribeEnv,
+} from "./_tutorial-transcribe.js";
+import { providerKeyFrom } from "./_ai-providers.js";
 import { handleNotices } from "./_notices.js";
 import { handleNoticeWriter } from "./_notice-writer.js";
 import { handleReportWriter } from "./_campaign-report-writer.js";
@@ -509,7 +516,33 @@ export default async function handler(
       );
     else if (action.startsWith("case-"))
       result = await handleCases(body, authorization, driveEnv(), fetch);
-    else if (action.startsWith("tutorial-"))
+    // Tutoriais: a transcrição dos vídeos (o worker, com o segredo), a busca
+    // com a resposta curta da MAVI ('tutorial_search') e os vídeos.
+    else if (action === "tutorial-transcribe") {
+      // Responde na hora (o pg_net não espera) e transcreve em segundo plano.
+      const env = tutorialTranscribeEnv(
+        driveEnv(),
+        process.env,
+        providerKeyFrom(process.env.AI_PROVIDER_KEY),
+      );
+      if (!tutorialTranscribeAllowed(authorization, env))
+        result = { status: 401, body: { error: "Não autorizado." } };
+      else {
+        waitUntil(
+          handleTutorialTranscribe(authorization, env, { fetch }).catch((e) =>
+            console.error("tutorial-transcribe", e),
+          ),
+        );
+        result = { status: 202, body: { started: true } };
+      }
+    }
+    else if (action === "tutorial-search" || action === "tutorial-answer") {
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("tutorial_search", process.env),
+      };
+      result = await handleTutorialSearch(body, authorization, env, aiDeps(env));
+    } else if (action.startsWith("tutorial-"))
       result = await handleTutorials(body, authorization, driveEnv(), fetch);
     else if (action === "notice-mavi") {
       // A MAVI na escrita de um aviso (funcionalidade 'notice_writer').

@@ -91,7 +91,7 @@ const ImageNode = Node.create({
     return ReactNodeViewRenderer(ImageNodeView);
   },
 });
-function VideoNodeView({ node }: NodeViewProps) {
+function VideoNodeView({ node, updateAttributes }: NodeViewProps) {
   return (
     <NodeViewWrapper className="editor-video" contentEditable={false}>
       <TutorialVideo
@@ -99,6 +99,8 @@ function VideoNodeView({ node }: NodeViewProps) {
         provider={node.attrs.provider || undefined}
         videoId={node.attrs.videoId || undefined}
         label={node.attrs.label || undefined}
+        transcript={node.attrs.transcript || undefined}
+        onTranscript={(transcript) => updateAttributes({ transcript })}
       />
     </NodeViewWrapper>
   );
@@ -115,6 +117,7 @@ const VideoNode = Node.create({
       provider: { default: "" },
       videoId: { default: "" },
       label: { default: "" },
+      transcript: { default: "" },
     };
   },
   parseHTML() {

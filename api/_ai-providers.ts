@@ -848,6 +848,11 @@ async function listModels(
     [...c.entry.models, ...c.models].map((m) => [m.id, m] as const),
   );
   let listed: ListedModel[] = [];
+  // Os que só transcrevem não listam modelos: valem os do catálogo.
+  if (c.entry.api === "transcribe") {
+    await checkTranscriber(fetchImpl, c);
+    return { models: c.entry.models.map((m) => ({ ...m })) };
+  }
   if (c.entry.api === "anthropic") {
     const client =
       anthropicClient?.(c.apiKey, c.baseUrl) ??
@@ -912,6 +917,31 @@ async function listModels(
   return { models };
 }
 
+/**
+ * Deepgram e AssemblyAI: uma leitura que só passa com a chave certa (sem
+ * transcrever nada).
+ */
+async function checkTranscriber(
+  fetchImpl: Fetch,
+  c: { entry: { kind: string; label: string }; baseUrl: string; apiKey: string },
+) {
+  const res =
+    c.entry.kind === "deepgram"
+      ? await fetchImpl(`${c.baseUrl}/projects`, {
+          headers: { Authorization: `Token ${c.apiKey}` },
+        })
+      : await fetchImpl(`${c.baseUrl}/transcript?limit=1`, {
+          headers: { Authorization: c.apiKey },
+        });
+  if (!res.ok)
+    throw new ProviderError(
+      400,
+      res.status === 401 || res.status === 403
+        ? `A API Key foi recusada pelo ${c.entry.label}.`
+        : `O ${c.entry.label} respondeu com erro ${res.status}.`,
+    );
+}
+
 /** Uma pergunta curtinha ao modelo, para saber se chave, endereço e modelo funcionam. */
 async function testProvider(
   env: ProviderEnv,
@@ -926,6 +956,10 @@ async function testProvider(
   if (!model) throw new ProviderError(400, "Escolha o modelo para testar.");
   const started = now();
   let reply = "";
+  if (c.entry.api === "transcribe") {
+    await checkTranscriber(fetchImpl, c);
+    return { ok: true, ms: now() - started, reply: "chave aceita" };
+  }
   if (c.entry.api === "anthropic") {
     const client =
       anthropicClient?.(c.apiKey, c.baseUrl) ??

@@ -1,6 +1,6 @@
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, GraduationCap, Search } from "lucide-react";
 import { navigate, pageUrl, routeParts } from "./router";
-import type { SearchArtifact } from "./mavi-artifacts";
+import type { SearchArtifact, TutorialArtifact } from "./mavi-artifacts";
 import "./mavi-artifacts.css";
 
 /**
@@ -36,6 +36,42 @@ export function SearchCard({ artifact }: { artifact: SearchArtifact }) {
         <strong>Ver na Busca avançada</strong>
         <small>
           {total} · “{artifact.request}”
+        </small>
+      </span>
+      <ArrowRight size={15} aria-hidden="true" />
+    </a>
+  );
+}
+
+/** O tutorial da agência aberto na seção (?tutorial=<id>#secao). */
+export function tutorialCardUrl(
+  artifact: Pick<TutorialArtifact, "tutorial" | "anchor">,
+  path = window.location.pathname,
+) {
+  return `${pageUrl("tutorials", routeParts(path).company)}?tutorial=${artifact.tutorial}${artifact.anchor ? `#${artifact.anchor}` : ""}`;
+}
+
+/**
+ * O cartão "Abrir tutorial" da MAVI (search_tutorials): o tutorial que
+ * respondeu à dúvida, aberto na seção.
+ */
+export function TutorialCard({ artifact }: { artifact: TutorialArtifact }) {
+  const url = tutorialCardUrl(artifact);
+  return (
+    <a
+      className="mavi-search-card mavi-tutorial-card"
+      href={url}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        navigate(url);
+      }}
+    >
+      <GraduationCap size={16} aria-hidden="true" />
+      <span>
+        <strong>Abrir tutorial: {artifact.title}</strong>
+        <small>
+          {artifact.section ? `Seção “${artifact.section}”` : artifact.summary || "Do começo"}
         </small>
       </span>
       <ArrowRight size={15} aria-hidden="true" />

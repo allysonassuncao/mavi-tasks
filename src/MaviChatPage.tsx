@@ -1,3 +1,5 @@
+import { tutorialModuleOf } from "./tutorials";
+import { resolvePage } from "./router";
 import {
   useEffect,
   useRef,
@@ -934,7 +936,12 @@ export function BubbleThread({
       send={(question, _history, handlers, extra) =>
         askAi(
           company,
-          { client: client || undefined, module: "assistant" },
+          {
+            client: client || undefined,
+            module: "assistant",
+            // A tela em que a pessoa está: os tutoriais dela vêm primeiro.
+            screen: tutorialModuleOf(resolvePage(window.location.pathname)) ?? undefined,
+          },
           question,
           conversation,
           handlers,

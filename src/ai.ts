@@ -28,6 +28,8 @@ export type AiScope = {
   module?: string;
   /** Campanhas › Conversar com a MAVI: a campanha aberta. */
   campaign?: string;
+  /** A tela em que a pessoa está (bolinha): os tutoriais dela vêm primeiro. */
+  screen?: string;
 };
 export type AiSource = {
   ref: string;
@@ -47,7 +49,9 @@ export type AiSource = {
     /** Anotações do cliente (id: a anotação). */
     | "note"
     /** Agente Conversacional (id: o prompt). */
-    | "agent";
+    | "agent"
+    /** Tutoriais (id: o tutorial; anchor: a seção). */
+    | "tutorial";
   /** Página da internet (busca na internet do módulo MAVI). */
   url?: string;
   /** Whatsapp: o id é a mensagem; o grupo abre a conversa. */
@@ -62,6 +66,8 @@ export type AiSource = {
   start?: number;
   /** Arquivo: página, slide ou planilha citada. */
   page?: number;
+  /** Tutorial: a âncora da seção citada. */
+  anchor?: string;
   label?: string;
   /** Tarefa que a pessoa não abre (Assistente MAVI: só título e status). */
   restricted?: boolean;
@@ -754,6 +760,7 @@ export function sourceLabel(s: AiSource) {
   if (s.type === "media") return "Conta de mídia";
   if (s.type === "note") return "Anotação do cliente";
   if (s.type === "agent") return "Agente Conversacional";
+  if (s.type === "tutorial") return s.label ? `Tutorial · ${s.label}` : "Tutorial";
   if (s.type === "whatsapp")
     return [
       `Whatsapp ${shortDate(s.date)}`,
@@ -776,6 +783,8 @@ export function sourceUrl(s: AiSource) {
   // O anexo abre pelo link assinado (openAiSource).
   if (s.type === "attachment") return "#";
   if (s.type === "task") return taskUrl({ id: s.id, title: s.title }, company);
+  if (s.type === "tutorial")
+    return `${pageUrl("tutorials", company)}?tutorial=${encodeURIComponent(s.id)}${s.anchor && /^[a-z0-9-]+$/.test(s.anchor) ? `#${s.anchor}` : ""}`;
   const q = new URLSearchParams();
   let page: "drive" | "onboarding" | "campaigns" | "cases" | "financeMedia" | "agents" = "drive";
   if (s.type === "meeting") {

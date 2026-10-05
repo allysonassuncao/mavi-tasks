@@ -703,6 +703,322 @@ button.tutorial-module:hover {
   margin-left: auto;
 }
 
+/* Busca com a MAVI */
+.tutorials-search-go {
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+}
+.tutorial-results {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.tutorial-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  background: linear-gradient(180deg, #f7fbef, #fff);
+  border: 1px solid #d9e9bf;
+  border-radius: 14px;
+}
+.tutorial-answer.loading {
+  gap: 8px;
+}
+.tutorial-answer-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #56793a;
+}
+.tutorial-answer p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.tutorial-cite {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin: 0 2px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: #e2f0cd;
+  color: #3d5a24;
+  font-size: 0.68rem;
+  font-weight: 700;
+  vertical-align: 2px;
+  cursor: pointer;
+}
+.tutorial-cite:hover {
+  background: #cfe6ab;
+}
+.tutorial-answer-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tutorial-answer-sources .chip b {
+  margin-right: 4px;
+  color: #56793a;
+}
+.tutorial-answer-none,
+.tutorial-answer-error {
+  color: #5f6d6b !important;
+  font-size: 0.84rem !important;
+}
+.tutorial-answer-create {
+  display: block;
+  margin-top: 10px;
+}
+.tutorial-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tutorial-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.tutorial-hit-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+}
+.tutorial-hit-title svg {
+  margin-top: 2px;
+  color: #6e8a4c;
+  flex-shrink: 0;
+}
+.tutorial-hit-title span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tutorial-hit-title small {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #6e8a4c;
+}
+.tutorial-hit-title strong {
+  font-size: 0.95rem;
+}
+.tutorial-hit-title:hover strong {
+  text-decoration: underline;
+}
+.tutorial-hit-sections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tutorial-hit-sections button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: #f7f9f6;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+}
+.tutorial-hit-sections button:hover {
+  background: #eef4e6;
+}
+.tutorial-hit-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #3d5a24;
+}
+.tutorial-hit-snippet {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #5f6d6b;
+}
+.tutorial-hit-snippet mark {
+  background: #fef3a6;
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* Transcrição dos vídeos */
+.tutorial-transcript {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafbfa;
+}
+.tutorial-transcript summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #5f6d6b;
+  cursor: pointer;
+}
+.tutorial-transcript p {
+  margin: 0;
+  padding: 0 12px 12px;
+  max-height: 280px;
+  overflow-y: auto;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.tutorial-transcript-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 8px;
+  font-size: 0.76rem;
+}
+.tutorial-transcript-state {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.tutorial-transcript-state.ready {
+  color: #46682a;
+}
+.tutorial-transcript-state.failed,
+.tutorial-transcript-state.skipped {
+  color: #8a6416;
+}
+.tutorial-transcript-state small {
+  flex-basis: 100%;
+  font-size: 0.7rem;
+  color: #8a6416;
+}
+.tutorial-transcript-form textarea {
+  min-height: 260px;
+}
+.tutorial-transcript-form .form-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Dúvidas sem tutorial */
+.tutorial-gaps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tutorial-gaps-intro {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #5f6d6b;
+}
+.tutorial-gaps-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tutorial-gap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tutorial-gap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.tutorial-gap-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.tutorial-gap-main > strong {
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.tutorial-gap-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.tutorial-gap-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tutorial-gap-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* O cartão da MAVI que abre o tutorial */
+.mavi-tutorial-card svg:first-child {
+  color: #56793a;
+}
+
+@media (max-width: 720px) {
+  .tutorial-gap {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .tutorial-gap-actions .btn {
+    flex: 1;
+  }
+  .tutorials-search-go {
+    padding: 0 12px;
+  }
+}
+
 @media (max-width: 1080px) {
   .tutorial-layout.with-toc {
     grid-template-columns: minmax(0, 1fr);

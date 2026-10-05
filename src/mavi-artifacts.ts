@@ -299,7 +299,8 @@ export type AiArtifact =
   | CanvasArtifact
   | QuestionArtifact
   | TaskArtifact
-  | SearchArtifact;
+  | SearchArtifact
+  | TutorialArtifact;
 
 // ------------------------------------------------------------ busca de tarefas
 /**
@@ -313,6 +314,18 @@ export type SearchArtifact = Base & {
   /** O pedido, como aparece no campo da Busca. */
   request: string;
   total: number;
+};
+
+// ------------------------------------------------------------ tutoriais
+/** O cartão "Abrir tutorial" da ferramenta search_tutorials: o tutorial na seção. */
+export type TutorialArtifact = Base & {
+  type: "tutorial";
+  tutorial: string;
+  /** A âncora da seção ("" = o começo). */
+  anchor: string;
+  title: string;
+  section: string;
+  summary: string;
 };
 
 export type ImageSize = "square" | "portrait" | "landscape";
@@ -741,6 +754,21 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       total: total && total > 0 ? Math.round(total) : 0,
     };
   }
+  if (a.type === "tutorial") {
+    const tutorial = text(a.tutorial, 40);
+    if (!/^[0-9a-f-]{36}$/i.test(tutorial)) return null;
+    const anchor = text(a.anchor, 80);
+    return {
+      id,
+      ref,
+      type: "tutorial",
+      tutorial,
+      anchor: /^[a-z0-9-]*$/.test(anchor) ? anchor : "",
+      title: text(a.title, 160) || "Tutorial",
+      section: text(a.section, 160),
+      summary: text(a.summary, 200),
+    };
+  }
   if (a.type === "action") {
     const action = sanitizeAction(a.action);
     if (!action) return null;
@@ -798,6 +826,8 @@ export function artifactSummary(a: AiArtifact): string {
     return `imagem${a.edited_from ? ` (edição de ${a.edited_from})` : ""}: ${a.prompt.slice(0, 120)}`;
   if (a.type === "search")
     return `botão da Busca avançada com “${a.request}” (${a.total} tarefas)`;
+  if (a.type === "tutorial")
+    return `cartão que abre o tutorial “${a.title}”${a.section ? ` na seção “${a.section}”` : ""}`;
   if (a.type === "question")
     return `perguntas para a pessoa: ${a.questions.map((q) => `“${q.question}”`).join("; ")}`;
   if (a.type === "task")
