@@ -14699,6 +14699,8 @@ tr:hover .campaign-edit-record,
 .sl-ready {
   padding: 18px;
   display: grid;
+  /* Sem isso o botão "Gerar plano…" (nowrap) alarga a coluna e o painel corta. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 11px;
   position: sticky;
   top: 16px;
@@ -14726,6 +14728,12 @@ tr:hover .campaign-edit-record,
 }
 .sl-generate {
   width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+/* Coluna estreita: 9 botões numa linha ficam espremidos; 5 por linha. */
+.sl-ready .sl-count-options {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 /* Plano */

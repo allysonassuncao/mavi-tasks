@@ -382,7 +382,13 @@
 .sl-ai-reading {
   display: grid;
   gap: 16px;
-  padding: 4px 0;
+  /* Mesmas margens das outras telas do modal (.sl-ai-fill-modal). */
+  padding: 20px 24px 22px;
+}
+@media (max-width: 760px) {
+  .sl-ai-reading {
+    padding: 16px;
+  }
 }
 .sl-ai-reading-head {
   display: flex;
