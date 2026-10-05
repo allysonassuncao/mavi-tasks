@@ -1501,21 +1501,17 @@ export function CrmGoalControl({
           </Popover.Root>
         )}
       </div>
-      {withGoal && (goal || canEdit) && (
+      {/* Só com etapas definidas (sem elas, o caminho é o menu ▾ ou a aba Insights). */}
+      {withGoal && goal && (
         <button
           type="button"
-          className={`btn secondary crm-goal-chip${goal ? "" : " empty"}`}
+          className="btn secondary crm-goal-chip"
           onClick={() => canEdit && setEditing(true)}
           disabled={!canEdit}
-          title={
-            goal
-              ? `Etapas que importam: ${sum.full}`
-              : "A MAVI compara anúncios e conjuntos pelo custo do lead que avança no funil"
-          }
+          title={`Etapas que importam: ${sum.full}`}
         >
           <Target size={15} aria-hidden="true" />
-          <span>{goal ? sum.short : "Definir etapas que importam"}</span>
-          {!goal && <i className="crm-goal-dot" aria-hidden="true" />}
+          <span>{sum.short}</span>
         </button>
       )}
       {editing && (

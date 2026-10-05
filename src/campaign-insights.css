@@ -1212,17 +1212,6 @@
   color: #57645f;
   cursor: default;
 }
-/* Sem etapas: um ponto azul chama a atenção, sem gritar. */
-.crm-goal-dot {
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 9px;
-  height: 9px;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  background: #3b82f6;
-}
 
 /* O editor das etapas. */
 .crm-goal-editor .cins-radio label {
