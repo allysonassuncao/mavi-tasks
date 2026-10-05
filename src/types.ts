@@ -277,6 +277,7 @@ export const recurrenceFrequencies: Record<RecurrenceFrequency, string> = {
 /** A task's repetition, as its details show it (from task_extras). */
 export interface TaskRecurrence {
   id: string;
+  source_task_id?: string;
   frequency: RecurrenceFrequency;
   /** The date the next copy opens. */
   next_run: string;

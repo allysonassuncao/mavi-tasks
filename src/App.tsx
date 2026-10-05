@@ -774,7 +774,9 @@ export default function App() {
     setDetailLoading(true);
     const promise = demo
       ? Promise.resolve(
-          demoStore.current.data.tasks.find((t) => t.id === selected) ?? null,
+          demoStore.current.data.tasks.find(
+            (t) => t.id === selected && !t.archived,
+          ) ?? null,
         )
       : api.taskById(company, selected);
     promise
@@ -1011,9 +1013,9 @@ export default function App() {
       const demoMember = demoData.members.find((m) => m.user_id === user);
       const isDemoLeader =
         demoMember?.role === "admin" || demoMember?.role === "manager";
-      const tasks = isDemoLeader
-        ? demoData.tasks
-        : demoData.tasks.filter((t) => canSeeTask(demoData, t, user));
+      const tasks = demoData.tasks.filter(
+        (t) => !t.archived && (isDemoLeader || canSeeTask(demoData, t, user)),
+      );
       setData({ ...demoData, tasks });
       setLoading(false);
       return;
@@ -1891,7 +1893,6 @@ export default function App() {
         setData((d) => ({ ...d, hours: upsertById(d.hours, entry) }));
         api.patchCachedHours(company, entry);
       } else if (name === "stop_task_recurrence" && args.p_task) {
-        // Only the repetition in the task's details changed.
         api.invalidateTaskExtras(args.p_task as string);
         setExtrasTick((v) => v + 1);
       } else if (name === "add_comment" && args.p_task) {
@@ -1960,6 +1961,27 @@ export default function App() {
           setRefresh((v) => v + 1);
         }
       }
+      if (name === "stop_task_recurrence") {
+        const archived = new Set<string>(result?.archived_task_ids ?? []);
+        if (archived.size) {
+          setData((d) => ({
+            ...d,
+            tasks: d.tasks.filter((t) => !archived.has(t.id)),
+          }));
+          setOpenTasks((list) => list.filter((t) => !archived.has(t.id)));
+          for (const id of archived) {
+            tray.remove(id);
+            if (!demo) api.forgetTask(company, id);
+          }
+          if (!demo) {
+            // Reload even without Realtime, including calendar and counts.
+            api.invalidateTasksCache(company);
+            setLiveTick((v) => v + 1);
+            setReportRefresh((v) => v + 1);
+            setTimerTick((v) => v + 1);
+          }
+        }
+      }
       if (demo && name === "create_task")
         createdTask = demoStore.current.data.tasks.find((t) => t.id === result);
       // A task sent to a team: say who received it.
@@ -1974,6 +1996,12 @@ export default function App() {
             ? result === "archived"
               ? "Produto removido do cliente. Como já tinha histórico, ficou arquivado."
               : "Produto removido do cliente."
+            : name === "stop_task_recurrence"
+            ? `Repetição cancelada. ${result?.archived_count
+                ? `${result.archived_count} ${result.archived_count === 1 ? "cópia retirada" : "cópias retiradas"} da lista e do calendário.`
+                : args.p_remove_future
+                  ? "Nenhuma cópia posterior pendente para retirar."
+                  : "As cópias já criadas foram mantidas."}${demo ? " (Demonstração)" : ""}`
             : demo
             ? "Alteração feita na demonstração."
             : "Alteração salva.",

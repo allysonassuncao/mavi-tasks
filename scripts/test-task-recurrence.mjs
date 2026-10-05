@@ -353,6 +353,68 @@ await check("gestor para a de outra pessoa", async () => {
   assert.equal(r.active, false);
 });
 
+await check(
+  "cancelar por uma cópia para toda a série, inclusive nos próximos dias",
+  async () => {
+    const id = await create(ana, { repeat: "daily", due: await plus(3) });
+    await run(await plus(1));
+    await run(await plus(2));
+    const tasks = await sql(
+      "select id,due_date::text from tasks where recurrence_id=(select recurrence_id from tasks where id=$1) order by due_date",
+      [id],
+    );
+    assert.equal(tasks.length, 3);
+    assert.deepEqual(
+      tasks.map((t) => t.due_date),
+      [await plus(3), await plus(4), await plus(5)],
+    );
+    const copy = tasks.find((t) => t.id !== id);
+    await as(bia);
+    await assert.rejects(
+      rpc("stop_task_recurrence", [copy.id]),
+      /Sem acesso|pará-la/,
+    );
+    await as(ana);
+    await rpc("stop_task_recurrence", [copy.id]);
+    for (const task of tasks) {
+      const extras = await rpc("task_extras", [task.id]);
+      assert.equal(extras.recurrence.active, false);
+      assert.equal(extras.recurrence.copies, 2);
+    }
+    // Future deadlines do not mean future creation: these copies already
+    // exist at cancellation and must remain, without creating any more.
+    for (const days of [3, 4, 5, 30]) await run(await plus(days));
+    assert.deepEqual(
+      await sql(
+        "select id,due_date::text from tasks where recurrence_id=(select recurrence_id from tasks where id=$1) order by due_date",
+        [id],
+      ),
+      tasks,
+    );
+  },
+);
+
+await check(
+  "cancelar novamente por outra tarefa não reativa nem duplica o registro",
+  async () => {
+    const [stopped] = await sql(
+      "select r.id,r.source_task_id,r.stopped_at,r.stopped_by from task_recurrences r where not r.active and r.copies=2",
+    );
+    await as(ana);
+    await rpc("stop_task_recurrence", [stopped.source_task_id]);
+    const [after] = await sql(
+      "select active,stopped_at,stopped_by,(select count(*)::int from task_events e join tasks t on t.id=e.task_id where t.recurrence_id=r.id and e.action='recurrence_stopped') as events from task_recurrences r where r.id=$1",
+      [stopped.id],
+    );
+    assert.deepEqual(after, {
+      active: false,
+      stopped_at: stopped.stopped_at,
+      stopped_by: stopped.stopped_by,
+      events: 1,
+    });
+  },
+);
+
 await check("frequência inválida não cria a tarefa", async () => {
   await assert.rejects(create(ana, { repeat: "anual" }), /repete/);
   const rows = await sql(
@@ -360,6 +422,144 @@ await check("frequência inválida não cria a tarefa", async () => {
   );
   assert.equal(rows[0].n, 0);
 });
+
+await check(
+  "retira próximas cópias de uma série já cancelada e preserva histórico",
+  async () => {
+    const id = await create(ana, { repeat: "daily", due: await plus(3) });
+    const unrelated = await create(ana, {
+      repeat: "daily",
+      due: await plus(3),
+    });
+    for (const days of [1, 2, 3, 4]) await run(await plus(days));
+    const copies = await sql(
+      "select id,version from tasks where recurrence_id=(select recurrence_id from tasks where id=$1) and id<>$1 order by due_date",
+      [id],
+    );
+    const done = copies.at(-1);
+    await as(ana);
+    await rpc("transition_task", [
+      done.id,
+      done.version,
+      "move",
+      "",
+      "done",
+      null,
+    ]);
+    const timer = await rpc("start_timer", [copies[0].id]);
+    await rpc("stop_task_recurrence", [id]);
+    assert.equal((await rpc("task_extras", [id])).recurrence.active, false);
+    await as(bia);
+    await assert.rejects(rpc("stop_task_recurrence", [id, true]), /pará-la/);
+    await as(admin);
+    const result = await rpc("stop_task_recurrence", [id, true]);
+    assert.equal(result.archived_count, 3);
+    assert.deepEqual(
+      result.archived_task_ids.sort(),
+      copies
+        .slice(0, 3)
+        .map((t) => t.id)
+        .sort(),
+    );
+    const tasks = await sql(
+      "select id,archived,version from tasks where recurrence_id=(select recurrence_id from tasks where id=$1)",
+      [id],
+    );
+    assert.equal(tasks.length, 5, "arquiva, não apaga as tarefas");
+    for (const task of tasks) {
+      assert.equal(task.archived, result.archived_task_ids.includes(task.id));
+      if (task.archived)
+        assert.equal(
+          task.version,
+          copies.find((t) => t.id === task.id).version + 1,
+        );
+    }
+    const [stoppedTimer] = await sql(
+      "select ended_at from time_entries where id=$1",
+      [timer.id],
+    );
+    assert.ok(
+      stoppedTimer.ended_at,
+      "não deixa cronômetro rodando em tarefa arquivada",
+    );
+    const [other] = await sql(
+      "select count(*)::int as n from tasks where recurrence_id=(select recurrence_id from tasks where id=$1) and archived",
+      [unrelated],
+    );
+    assert.equal(other.n, 0, "outra série com o mesmo título não é afetada");
+    const [events] = await sql(
+      "select count(*)::int as n from task_events where task_id=any($1::uuid[]) and action='recurrence_copy_archived'",
+      [result.archived_task_ids],
+    );
+    assert.equal(events.n, 3);
+    await as(ana);
+    assert.deepEqual(await rpc("stop_task_recurrence", [id, true]), {
+      archived_task_ids: [],
+      archived_count: 0,
+    });
+    await run(await plus(30));
+    const [count] = await sql(
+      "select count(*)::int as n from tasks where recurrence_id=(select recurrence_id from tasks where id=$1)",
+      [id],
+    );
+    assert.equal(count.n, 5, "não cria novas cópias depois de limpar");
+  },
+);
+
+await check(
+  "cancelar numa cópia mantém a selecionada e as anteriores",
+  async () => {
+    const id = await create(ana, { repeat: "daily", due: await plus(3) });
+    for (const days of [1, 2, 3]) await run(await plus(days));
+    const tasks = await sql(
+      "select id from tasks where recurrence_id=(select recurrence_id from tasks where id=$1) order by due_date",
+      [id],
+    );
+    await as(ana);
+    const result = await rpc("stop_task_recurrence", [tasks[2].id, true]);
+    assert.deepEqual(result, {
+      archived_count: 1,
+      archived_task_ids: [tasks[3].id],
+    });
+    const remaining = await sql(
+      "select id from tasks where recurrence_id=(select recurrence_id from tasks where id=$1) and not archived order by due_date",
+      [id],
+    );
+    assert.deepEqual(remaining, tasks.slice(0, 3));
+  },
+);
+
+await check(
+  "criador desativado e usuário de outra empresa não podem retirar cópias",
+  async () => {
+    const id = await create(ana, { repeat: "daily", due: await plus(3) });
+    await run(await plus(1));
+    await sql(
+      "update memberships set active=false where company_id=$1 and user_id=$2",
+      [A, ana],
+    );
+    await as(ana);
+    await assert.rejects(rpc("stop_task_recurrence", [id, true]), /Sem acesso/);
+    await sql(
+      "update memberships set active=true where company_id=$1 and user_id=$2",
+      [A, ana],
+    );
+    const external = uid(90);
+    await sql("insert into auth.users(id) values($1)", [external]);
+    await as(external);
+    await assert.rejects(rpc("stop_task_recurrence", [id, true]), /Sem acesso/);
+    await as(null);
+    await assert.rejects(
+      rpc("stop_task_recurrence", [id, true]),
+      /permission denied/,
+    );
+    const [rule] = await sql(
+      "select r.active from task_recurrences r join tasks t on t.recurrence_id=r.id where t.id=$1",
+      [id],
+    );
+    assert.equal(rule.active, true);
+  },
+);
 
 await check("quem é de fora não vê a regra", async () => {
   await as(outsider);

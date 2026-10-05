@@ -1123,6 +1123,7 @@ export class DemoStore {
           const today = dateKey();
           const recurrence: TaskRecurrence = {
             id: crypto.randomUUID(),
+            source_task_id: id,
             frequency: a.p_repeat,
             next_run: nextRecurrence(a.p_repeat, today, today),
             active: true,
@@ -1146,7 +1147,7 @@ export class DemoStore {
       case "stop_task_recurrence": {
         // Mirrors public.stop_task_recurrence.
         const r = this.recurrences.find((x) => x.id === task?.recurrence_id);
-        if (!r) throw Error("Esta tarefa não se repete");
+        if (!r || !task) throw Error("Esta tarefa não se repete");
         const role = this.data.members.find(
           (m) => m.user_id === demoUser,
         )?.role;
@@ -1158,7 +1159,44 @@ export class DemoStore {
           r.active = false;
           event("recurrence_stopped");
         }
-        break;
+        const today = dateKey(
+          new Date(),
+          this.data.companies.find((c) => c.id === task.company_id)?.timezone,
+        );
+        const cutoff = task.due_date > today ? task.due_date : today;
+        const removed = a.p_remove_future
+          ? this.data.tasks.filter(
+              (t) =>
+                t.company_id === task.company_id &&
+                t.recurrence_id === r.id && t.id !== task.id &&
+                t.id !== r.source_task_id && t.due_date > cutoff &&
+                !t.archived && t.status !== "done",
+            )
+          : [];
+        for (const copy of removed) {
+          copy.archived = true;
+          copy.version++;
+          for (const entry of this.data.hours.filter(
+            (h) => h.task_id === copy.id && !h.ended_at,
+          )) {
+            entry.ended_at = new Date(
+              Math.max(Date.now(), Date.parse(entry.started_at) + 1),
+            ).toISOString();
+          }
+          this.events.unshift({
+            id: crypto.randomUUID(),
+            task_id: copy.id,
+            actor_id: demoUser,
+            action: "recurrence_copy_archived",
+            detail: { recurrence_id: r.id, from_task: task.id, after_due: cutoff },
+            created_at: now,
+          });
+        }
+        const archived_task_ids = removed.map((t) => t.id);
+        if (removed.length) event("recurrence_future_removed", {
+          count: removed.length, after_due: cutoff, tasks: archived_task_ids,
+        });
+        return { archived_task_ids, archived_count: removed.length };
       }
       case "set_task_due": {
         // Mirrors public.set_task_due (migration 20270110090000): only the

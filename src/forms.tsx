@@ -623,27 +623,50 @@ function eventLabel(e: TaskEvent) {
         approve_client: "Aprovação do cliente registrada",
         edited: "Tarefa editada",
         recurrence_stopped: "Repetição cancelada",
+        recurrence_copy_archived: "Cópia retirada após cancelar a repetição",
+        recurrence_future_removed: "Próximas cópias retiradas do calendário",
       } as Record<string, string>
     )[e.action] ?? e.action
   );
 }
 /**
  * A task's repetition in its details: how often, when the next copy opens
- * and, for whoever set it up or a leader, a button to cancel it (confirmed;
- * the copies already opened stay).
+ * and, for whoever set it up or a leader, cancellation with optional
+ * archival of later copies. Cleanup is also available after cancellation.
  */
-function RecurrenceRow({
+export function RecurrenceRow({
   recurrence,
+  cutoff,
   canStop,
   busy,
   onStop,
 }: {
   recurrence: TaskRecurrence;
+  cutoff: string;
   canStop: boolean;
   busy: boolean;
-  onStop: () => Promise<unknown>;
+  onStop: (removeFuture: boolean) => Promise<unknown>;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState("");
+  const [stopping, setStopping] = useState(false);
+  const [removeFuture, setRemoveFuture] = useState(true);
+  async function stop() {
+    setError("");
+    setStopping(true);
+    try {
+      await onStop(removeFuture);
+      setConfirming(false);
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível cancelar a repetição. Tente novamente.",
+      );
+    } finally {
+      setStopping(false);
+    }
+  }
   return (
     <div className="property-row">
       <span className="property-label">
@@ -663,29 +686,56 @@ function RecurrenceRow({
             A última cópia não abriu: {recurrence.last_error}
           </small>
         )}
-        {recurrence.active &&
-          canStop &&
+        {canStop &&
           (confirming ? (
             <div className="recurrence-confirm" role="alertdialog">
               <small>
-                Nenhuma nova cópia será aberta. As tarefas já abertas continuam.
+                {recurrence.active
+                  ? "Nenhuma nova cópia será criada. "
+                  : "A repetição já está cancelada. "}
+                Esta tarefa será mantida.
               </small>
+              <label className="check-label">
+                <Checkbox
+                  checked={removeFuture}
+                  disabled={busy || stopping || !recurrence.active}
+                  onCheckedChange={(checked) => setRemoveFuture(checked === true)}
+                />
+                Retirar também as cópias com prazo após {dateLabel(cutoff)}
+              </label>
+              <small>
+                {removeFuture
+                  ? "As cópias não concluídas sairão da lista e do calendário por arquivamento. O histórico será preservado."
+                  : "As cópias já criadas serão mantidas, mesmo com prazo futuro."}
+              </small>
+              {error && (
+                <small className="form-error" role="alert">
+                  {error}
+                </small>
+              )}
               <span>
                 <Button
                   type="button"
                   className="btn secondary"
-                  disabled={busy}
-                  onClick={() => setConfirming(false)}
+                  disabled={busy || stopping}
+                  onClick={() => {
+                    setError("");
+                    setConfirming(false);
+                  }}
                 >
                   Voltar
                 </Button>
                 <Button
                   type="button"
                   className="btn danger"
-                  loading={busy}
-                  onClick={() => onStop().finally(() => setConfirming(false))}
+                  loading={busy || stopping}
+                  onClick={stop}
                 >
-                  Cancelar repetição
+                  {removeFuture
+                    ? recurrence.active
+                      ? "Cancelar e retirar próximas"
+                      : "Retirar próximas cópias"
+                    : "Só cancelar repetição"}
                 </Button>
               </span>
             </div>
@@ -693,9 +743,14 @@ function RecurrenceRow({
             <button
               type="button"
               className="recurrence-cancel"
-              onClick={() => setConfirming(true)}
+              disabled={busy || stopping}
+              onClick={() => {
+                setRemoveFuture(true);
+                setConfirming(true);
+              }}
             >
-              <CircleX size={14} /> Cancelar repetição
+              <CircleX size={14} />
+              {recurrence.active ? "Cancelar repetição" : "Retirar próximas cópias"}
             </button>
           ))}
       </div>
@@ -1141,6 +1196,8 @@ export function TaskDetail({
   const timezone = data.companies.find(
     (c) => c.id === task.company_id,
   )?.timezone;
+  const today = dateKey(new Date(), timezone);
+  const recurrenceCutoff = task.due_date > today ? task.due_date : today;
   const deliveredDays = deliveryOffset(task, timezone);
   useEffect(() => {
     let alive = true;
@@ -1768,10 +1825,14 @@ export function TaskDetail({
               {extras.recurrence && (
                 <RecurrenceRow
                   recurrence={extras.recurrence}
+                  cutoff={recurrenceCutoff}
                   canStop={isLeader || extras.recurrence.creator_id === user}
                   busy={busy}
-                  onStop={() =>
-                    mutate("stop_task_recurrence", { p_task: task.id }).then(
+                  onStop={(removeFuture) =>
+                    mutate("stop_task_recurrence", {
+                      p_task: task.id,
+                      p_remove_future: removeFuture,
+                    }).then(
                       () => setLocalRefresh((v) => v + 1),
                     )
                   }
