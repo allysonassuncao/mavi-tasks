@@ -3,6 +3,7 @@ import type { AiEnv } from "./_ai";
 import type { LlmAdapter } from "./_ai-llm";
 import { newMeter } from "./_social-leads";
 import {
+  ASSISTANT_INSTRUCTIONS,
   draftMessage,
   handlePersonalDraft,
   parseDraft,
@@ -109,6 +110,64 @@ describe("o pedido para a MAVI", () => {
     expect(text).toMatch(/A versão anterior desta resposta \(melhore\):\n"Olá Fernanda, segue o relatório\."/);
     expect(text).toMatch(/Pedido da pessoa para esta versão: Mais curto\./);
     expect(refs.campaigns.get("C1")?.id).toBe(campaign);
+  });
+});
+
+describe("respostas menos repetidas e a base do robô", () => {
+  const prompt = "00000000-0000-4000-8000-0000000000b1";
+  const withExtras = (): DraftMaterial => ({
+    ...material(),
+    product: "MAVI",
+    team_examples: ["Oi! Já ajustamos o robô para responder o horário novo."],
+    lessons: [
+      { scope: "person", text: "Sem emojis." },
+      { scope: "product", text: "Em ajuste no robô, diga quando entra no ar." },
+    ],
+    knowledge: [
+      {
+        id: prompt,
+        workflow: "3110 - Atendimento",
+        node: "AI Agent",
+        full: true,
+        chars: 60,
+        text: "Você é a Vida. Atendemos de segunda a sexta, das 8h às 18h.",
+      },
+    ],
+  });
+
+  it("o tom é só tom, os exemplos do produto são conteúdo, e a base entra numerada", () => {
+    const { text, refs } = draftMessage(withExtras(), ORIGIN);
+    expect(text).toMatch(/grupo "3110 - Clínica Vida" · produto MAVI\./);
+    expect(text).toMatch(/Como a pessoa escreve \(respostas que ela mandou; só o tom — não copie frases nem a estrutura\):/);
+    expect(text).toMatch(/Respostas aprovadas de colegas em situações do produto MAVI \(referência do que costuma ser respondido, não do tom\):\n- "Oi! Já ajustamos/);
+    expect(text).toMatch(/Base do Agente Conversacional do cliente .*\n\[K1\] fluxo "3110 - Atendimento" › nó "AI Agent"\nVocê é a Vida/);
+    expect(text).toMatch(/- Do produto: Em ajuste no robô, diga quando entra no ar\./);
+    expect(refs.knowledge.get("K1")?.id).toBe(prompt);
+  });
+
+  it("a evidência da base diz de onde veio", () => {
+    const { refs } = draftMessage(withExtras(), ORIGIN);
+    const draft = parseDraft(
+      JSON.stringify({
+        reply: "Oi Fernanda! O robô já informa: de segunda a sexta, das 8h às 18h.",
+        evidence: [
+          { title: "Horário no robô", detail: "Atendemos de segunda a sexta, das 8h às 18h.", source: "K1" },
+          { title: "Inventado", detail: "Atendemos sábado", source: "K1" },
+        ],
+      }),
+      refs,
+      [],
+    );
+    expect(draft.evidence[0]).toEqual({
+      title: "Horário no robô",
+      detail: "Atendemos de segunda a sexta, das 8h às 18h. (Agente Conversacional: 3110 - Atendimento › AI Agent)",
+    });
+    expect(draft.evidence[1].detail).toMatch(/confira o trecho\)$/);
+  });
+
+  it("a regra pede para não copiar os exemplos e usar a base", () => {
+    expect(ASSISTANT_INSTRUCTIONS).toMatch(/não copie frases, aberturas, despedidas nem a estrutura/);
+    expect(ASSISTANT_INSTRUCTIONS).toMatch(/base do Agente Conversacional do cliente/);
   });
 });
 
@@ -282,6 +341,35 @@ describe("personal-radar-draft", () => {
     expect(store.body.p_draft.actions[0]).toMatchObject({ kind: "report", start: "2026-09-01", end: "2026-09-30" });
     expect(store.body.p_usage).toMatchObject({ model: "claude-opus-5-5", input: 12000, output: 500, cost: 0.09 });
     expect(calls.some((c) => c.url.includes("rpc/personal_radar_draft_fail"))).toBe(false);
+  });
+
+  it("usa os exemplos parecidos, as lições do produto e a base do robô do cliente", async () => {
+    const product = "00000000-0000-4000-8000-0000000000d1";
+    const { fetchImpl, calls } = database({
+      ...baseRoutes,
+      "rpc/personal_radar_draft_start": material(),
+      "rpc/personal_radar_reply_examples": { product: "MAVI", product_id: product, mine: ["Fala, Fe!"], team: ["Ajustado."] },
+      "rpc/personal_radar_reply_lessons": [{ scope: "product", text: "Diga quando entra no ar." }],
+      "rpc/agent_knowledge": [{ id: "k", workflow: "3110", node: "AI Agent", full: true, chars: 10, text: "Você é a Vida." }],
+      "rpc/personal_radar_draft_store": (b: any) => ({ id: b.p_item }),
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      const text = req.messages[0].content;
+      expect(text).toMatch(/- "Fala, Fe!"/);
+      expect(text).not.toMatch(/Oi Fe! Tudo certo por aqui/);
+      expect(text).toMatch(/colegas em situações do produto MAVI[\s\S]*- "Ajustado\."/);
+      expect(text).toMatch(/- Do produto: Diga quando entra no ar\./);
+      expect(text).toMatch(/\[K1\] fluxo "3110" › nó "AI Agent"\nVocê é a Vida\./);
+      return { text: JSON.stringify({ reply: "Oi!" }), meter: newMeter("x"), rounds: 1 };
+    });
+    const res = await handlePersonalDraft({ company, item }, auth, env, { fetch: fetchImpl, llm, embed: vi.fn() });
+    expect(res.status).toBe(200);
+    const lessons = calls.find((c) => c.url.includes("rpc/personal_radar_reply_lessons"))!;
+    expect(lessons.body).toEqual({ p_company: company, p_client: client, p_product: product });
+    const kb = calls.find((c) => c.url.includes("rpc/agent_knowledge"))!;
+    expect(kb.auth).toBe(auth);
+    expect(kb.body).toMatchObject({ p_company: company, p_client: client, p_chars: 16000 });
+    expect(kb.body.p_query).toMatch(/Relatório de setembro/);
   });
 
   it("no limite de gasto da MAVI ou com erro do modelo, a resposta volta para a fila", async () => {

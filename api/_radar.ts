@@ -4,6 +4,7 @@ import { workerAuthorized } from "./_copilot.js";
 import { askJev, scorePercent, type JevQuestion, type JevResponse } from "./_temperature.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { LlmAdapter } from "./_ai-llm.js";
+import { checkWithAgents, knowledgeQuery, type AgentCase, type AgentKnowledge } from "./_agent-knowledge.js";
 
 /**
  * Radar do cliente · o worker (ação "ai-radar" de /api/ai, só o pg_cron com
@@ -21,6 +22,9 @@ import type { LlmAdapter } from "./_ai-llm.js";
  * 4. O Jev confere cada item (é mesmo do tópico?) e dá a gravidade. Sem o
  *    Jev, ou com o Jev fora do ar, os itens entram sem gravidade.
  * 5. O banco grava itens, ocorrências e o custo.
+ *    Antes, cada item é conferido com a base do Agente Conversacional do
+ *    cliente (o prompt do robô): já tem, falta, está diferente ou não tem a
+ *    ver, com o trecho e o ajuste sugerido (migration 20270512090000).
  * 6. Os itens novos vão para temas: a MAVI (funcionalidade
  *    'client_radar_themes') junta os de cada tópico e produto num tema que já
  *    existe ou num novo (migration 20261230090000).
@@ -108,6 +112,8 @@ export type RadarMaterial = {
    * n8n): referência das regras do robô, nunca item.
    */
   agent_rules?: { workflow: string; node: string; text: string }[];
+  /** Os casos do cliente que o time excluiu (exemplos do que não anotar). */
+  removed?: { topic: string; title: string; reason: string; note?: string; quote?: string }[];
 };
 
 const ROLE_TAG: Record<RadarRole, string> = {
@@ -148,6 +154,12 @@ export function clipLines(lines: RadarLine[], max: number) {
 
 const lineLabel = (l: RadarLine) =>
   `${l.at ? `${l.at} ` : l.t !== undefined ? `${clock(l.t)} ` : ""}[${ROLE_TAG[l.role] ?? "não identificado"}] ${l.who}: ${l.text}`;
+
+const REMOVED_REASON: Record<string, string> = {
+  mavi_error: "a MAVI leu errado",
+  not_client: "quem falou não era o cliente",
+  duplicate: "era repetido",
+};
 
 const SPEAKER_RULE: Record<RadarTopic["speaker"], string> = {
   client: "só falas do cliente ([cliente], ou [não identificado] quando o contexto mostra que é o cliente)",
@@ -262,6 +274,15 @@ export function extractionMessage(m: RadarMaterial, maxChars = 110_000) {
       ...rules,
     );
   }
+  if (m.removed?.length)
+    header.push(
+      "",
+      "Casos deste cliente que o time excluiu do Radar (não anote de novo o mesmo, nem parecido pelo mesmo motivo):",
+      ...m.removed.map(
+        (r) =>
+          `- ${r.topic ? `${r.topic}: ` : ""}${r.title} (${REMOVED_REASON[r.reason] ?? r.reason}${r.note ? `: ${r.note}` : ""})${r.quote ? ` — fala: "${r.quote}"` : ""}`,
+      ),
+    );
   if (m.summary) header.push("", "Resumo da reunião (feito pela MAVI):", m.summary.slice(0, 4000));
   if (m.context?.length)
     header.push(
@@ -968,6 +989,10 @@ async function readSignal(env: AiEnv, deps: AiDeps, company: Company, c: Claimed
     p_client: m.client_id,
     p_chars: 4000,
   }).catch(() => []);
+  // Os casos excluídos (sem a migração 20270512090000, nenhum).
+  m.removed = await workerRpc<NonNullable<RadarMaterial["removed"]>>(env, deps, "radar_removed_for_worker", {
+    p_client: m.client_id,
+  }).catch(() => []);
   const usage: Usage[] = [];
   const { text, refs } = extractionMessage(m);
   const result = await company.llm({
@@ -1023,6 +1048,7 @@ async function readSignal(env: AiEnv, deps: AiDeps, company: Company, c: Claimed
     }
     list = kept;
   }
+  const agents = await agentCheck(env, deps, company, m, list);
   const stored = await workerRpc<number>(env, deps, "ai_radar_store", {
     p_id: c.id,
     p_result: {
@@ -1048,7 +1074,59 @@ async function readSignal(env: AiEnv, deps: AiDeps, company: Company, c: Claimed
       usage,
     },
   });
+  // A conferência entra no item depois de gravado (a fala identifica o item).
+  if (agents)
+    await workerRpc(env, deps, "ai_radar_agent_store", {
+      p_signal: c.id,
+      p_checks: agents.checks,
+      p_usage: agents.usage,
+    }).catch((e) => console.error("radar · agente", c.id, (e as Error).message));
   return { items: stored, skipped: false };
+}
+
+/**
+ * Confere os itens com a base do Agente Conversacional do cliente (só quem
+ * tem robô). Uma falha não atrapalha a leitura.
+ */
+async function agentCheck(env: AiEnv, deps: AiDeps, company: Company, m: RadarMaterial, list: RadarCandidate[]) {
+  if (!list.length) return null;
+  const cases: AgentCase[] = list.map((x) => ({
+    kind: x.topic.name,
+    title: x.title || x.existing?.title || "",
+    summary: x.summary || x.existing?.summary || "",
+    quotes: x.lines.map((l) => l.quote || l.line.text),
+  }));
+  try {
+    const kb = await workerRpc<AgentKnowledge[]>(env, deps, "agent_knowledge_for_worker", {
+      p_company: m.company_id,
+      p_client: m.client_id,
+      p_query: knowledgeQuery(cases),
+      p_chars: 24000,
+    });
+    if (!Array.isArray(kb) || !kb.length) return null;
+    const run = await checkWithAgents(company.llm, m.client_name, cases, kb);
+    const checks = list.flatMap((x, i) => {
+      const check = run.checks.get(i);
+      const line = x.lines.find((l) => l.line.msg || l.line.t !== undefined)?.line;
+      if (!check || !line) return [];
+      return [{ ...(line.msg ? { message_id: line.msg } : { at_seconds: line.t }), check }];
+    });
+    return {
+      checks,
+      usage: {
+        model: run.meter.model || company.model,
+        input: run.meter.input,
+        output: run.meter.output,
+        cache_read: run.meter.cacheRead,
+        cache_write: run.meter.cacheWrite,
+        cost: Math.round(run.meter.cost * 1e6) / 1e6,
+        ...(company.route ? { provider_id: company.route.provider_id, provider: company.route.provider } : {}),
+      },
+    };
+  } catch (e) {
+    console.error("radar · base do agente", m.id, (e as Error).message);
+    return null;
+  }
 }
 
 /** Agrupa os itens sem tema de um tópico e produto. */

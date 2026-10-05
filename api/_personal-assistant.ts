@@ -6,6 +6,7 @@ import { adsTurn, ADS_RULES } from "./_ai-ads.js";
 import { embeddingCost } from "./_ai-embeddings.js";
 import { appOrigin } from "./_origin.js";
 import type { ToolOutput } from "./_ai-llm.js";
+import { inKnowledge, knowledgeBlock, knowledgeQuery, type AgentKnowledge } from "./_agent-knowledge.js";
 
 /**
  * Radar pessoal · Fase 2: a resposta que a MAVI Assistente Pessoal daria a
@@ -22,6 +23,13 @@ import type { ToolOutput } from "./_ai-llm.js";
  *
  * Sem item, escreve a próxima resposta da fila da pessoa (a tela pede uma por
  * vez enquanto houver).
+ *
+ * Migration 20270512090000: os exemplos de tom são as respostas da pessoa
+ * mais parecidas com a situação (tipo, cliente, produto), as aprovadas de
+ * colegas no mesmo produto entram como referência de conteúdo, as lições do
+ * produto valem junto com as da pessoa, e a base do Agente Conversacional do
+ * cliente (o prompt do robô) é fonte quando a situação é sobre o que o robô
+ * sabe ou faz.
  */
 
 type Row = Record<string, unknown>;
@@ -64,8 +72,14 @@ export type DraftMaterial = {
   feedback: { action: string; note?: string; reason?: string; title?: string; draft?: string; final?: string }[];
   guidance: string;
   previous?: string | null;
-  /** As lições de resposta em uso (da pessoa, do cliente e da equipe). */
-  lessons?: { scope: "person" | "team" | "client"; text: string }[];
+  /** As lições de resposta em uso (da pessoa, do cliente, do produto e da equipe). */
+  lessons?: { scope: "person" | "team" | "client" | "product"; text: string }[];
+  /** O produto da situação (nulo: geral). */
+  product?: string | null;
+  /** Respostas aprovadas de colegas no mesmo produto (conteúdo, não tom). */
+  team_examples?: string[];
+  /** A base do Agente Conversacional do cliente (o prompt do robô). */
+  knowledge?: AgentKnowledge[];
   shareables: {
     recordings: { id: string; title?: string; at: string; token?: string }[];
     files: { id: string; name: string; type: string; folder?: string; at: string; token?: string; can_share?: boolean }[];
@@ -111,9 +125,11 @@ A resposta ("reply"):
 - Responda o que foi perguntado com os fatos encontrados (números com o período, datas, nomes de arquivos). Nunca invente: se não achou, diga o que vai ser feito e quando, sem prometer o que ninguém combinou. Não cite ferramentas, a MAVI nem o sistema.
 - Quando um link ajudar (o relatório, a gravação da reunião, o arquivo), use um link que já existe (está na lista) ou proponha criar um em "actions" e escreva no texto o marcador {{A1}}, {{A2}}… onde o link vai entrar. Nunca escreva um endereço que não esteja na lista.
 - Se a situação não pede resposta escrita (ex.: o cliente só mandou um arquivo), escreva uma confirmação curta de recebimento e o próximo passo.
+- Escreva para ESTA situação. Os exemplos da pessoa mostram só o tom: não copie frases, aberturas, despedidas nem a estrutura deles, e não use a mesma fórmula em toda resposta. Quando dá para responder de verdade, responda — "vou verificar e já te retorno" é só para quando falta mesmo a informação.
+- Quando houver a base do Agente Conversacional do cliente (o robô de WhatsApp dele, K#) e a situação for sobre o que o robô sabe ou faz (preço, horário, serviço, regra do atendimento, uma resposta do robô), use a base como fonte e diga se a informação já está no robô ou se falta ajustar. Cite o trecho em "evidence" com "source": "K#".
 - Nunca revele senhas, acessos ou trechos marcados como secretos das anotações.
 
-As evidências ("evidence", só para a pessoa conferir): de 1 a 6, cada uma com o fato e de onde veio ("source": o [S#] da busca, quando houver).
+As evidências ("evidence", só para a pessoa conferir): de 1 a 6, cada uma com o fato e de onde veio ("source": o [S#] da busca ou o K# da base do robô, quando houver).
 Os links ("actions"): só da lista de links possíveis — G# (gravação), F# (arquivo do Drive que a pessoa pode compartilhar) ou C# (relatório de campanha; "period": "cycle" para o ciclo atual, "previous" para o anterior, ou as datas {"start":"AAAA-MM-DD","end":"AAAA-MM-DD"}). Cada um com "key" (A1, A2…), o "ref" e um "label" curto ("Relatório de setembro").
 "checks": o que a pessoa deve confirmar antes de mandar (números que mudam rápido, datas, algo que você não achou). "confidence": "high" quando tudo está nas fontes, "medium" quando falta algum detalhe, "low" quando a resposta depende dela.
 
@@ -128,7 +144,7 @@ export function draftMessage(m: DraftMaterial, origin: string) {
   const i = m.item;
   const out: string[] = [
     `Pessoa: ${m.person.name}${m.person.teams.length ? ` (equipes: ${m.person.teams.join(", ")})` : ""}${m.person.about ? ` — o que é com ela: ${m.person.about}` : ""}.`,
-    `Cliente: ${i.client_name} · grupo "${i.group}".`,
+    `Cliente: ${i.client_name} · grupo "${i.group}"${m.product ? ` · produto ${m.product}` : ""}.`,
     "",
     `Situação (${KIND[i.kind] ?? i.kind}${i.urgency >= 2 ? ", urgente" : ""}${i.asks > 1 ? `, o cliente cobrou ${i.asks}x` : ""}, desde ${i.first_at}): ${i.title}${i.summary ? ` — ${i.summary}` : ""}`,
     i.reason ? `Por que é com ela: ${i.reason}.` : "",
@@ -167,7 +183,24 @@ export function draftMessage(m: DraftMaterial, origin: string) {
   });
   out.push("", "Links possíveis:", ...(links.length ? links : ["(nenhum)"]));
   if (m.style.length)
-    out.push("", "Como a pessoa escreve (respostas que ela mandou):", ...m.style.map((s) => `- "${s}"`));
+    out.push(
+      "",
+      "Como a pessoa escreve (respostas que ela mandou; só o tom — não copie frases nem a estrutura):",
+      ...m.style.map((s) => `- "${s}"`),
+    );
+  if (m.team_examples?.length)
+    out.push(
+      "",
+      `Respostas aprovadas de colegas em situações do produto ${m.product ?? ""} (referência do que costuma ser respondido, não do tom):`,
+      ...m.team_examples.map((s) => `- "${s}"`),
+    );
+  const kb = m.knowledge?.length ? knowledgeBlock(m.knowledge) : null;
+  if (kb)
+    out.push(
+      "",
+      "Base do Agente Conversacional do cliente (o prompt do robô de WhatsApp dele; K#):",
+      kb.text,
+    );
   const fb = m.feedback.filter((f) => f.note || f.final || f.reason);
   if (fb.length)
     out.push(
@@ -184,15 +217,18 @@ export function draftMessage(m: DraftMaterial, origin: string) {
   if (m.lessons?.length)
     out.push(
       "",
-      "O que você aprendeu (siga; a da pessoa vale mais que a do cliente, que vale mais que a da equipe):",
-      ...m.lessons.map((l) => `- ${l.scope === "person" ? "Da pessoa" : l.scope === "client" ? "Do cliente" : "Da equipe"}: ${l.text}`),
+      "O que você aprendeu (siga; a da pessoa vale mais que a do cliente, que vale mais que a do produto, que vale mais que a da equipe):",
+      ...m.lessons.map(
+        (l) =>
+          `- ${l.scope === "person" ? "Da pessoa" : l.scope === "client" ? "Do cliente" : l.scope === "product" ? "Do produto" : "Da equipe"}: ${l.text}`,
+      ),
     );
   if (m.previous) out.push("", `A versão anterior desta resposta (melhore):\n"${m.previous}"`);
   if (m.guidance) out.push("", `Pedido da pessoa para esta versão: ${m.guidance}`);
   out.push("", "Prepare a resposta.");
   return {
     text: out.filter((l, n, a) => !(l === "" && a[n - 1] === "")).join("\n"),
-    refs: { recordings, files, campaigns },
+    refs: { recordings, files, campaigns, knowledge: kb?.refs ?? new Map<string, AgentKnowledge>() },
   };
 }
 
@@ -294,6 +330,15 @@ export function parseDraft(
     if (!title && !detail) return [];
     const ref = clean(e.source, 8).replace(/[[\]]/g, "").toUpperCase();
     const source = sources.find((s) => s.ref === ref);
+    // Da base do robô: diz de onde veio (sem link de busca).
+    const k = refs.knowledge?.get(ref);
+    if (k)
+      return [
+        {
+          title: title || detail.slice(0, 80),
+          detail: `${detail}${detail ? " " : ""}(Agente Conversacional: ${k.workflow} › ${k.node}${inKnowledge(k, detail) ? "" : ", confira o trecho"})`,
+        },
+      ];
     return [{ title: title || detail.slice(0, 80), detail, ...(source ? { source } : {}) }];
   });
   const confidence = ["high", "medium", "low"].includes(String(o.confidence))
@@ -361,11 +406,37 @@ export async function writeDraft(
     });
     if (limits?.blocked) throw new AssistantError(429, limits.message ?? "O limite de gasto da MAVI foi atingido.");
     const now = (deps.now ?? Date.now)();
-    // As lições de resposta (sem a migração 20270307, nenhuma).
+    // Os exemplos mais parecidos com a situação (sem a migração 20270512, o tom
+    // fica com as últimas aprovadas que o banco mandou).
+    const examples = await rpc<{ product: string | null; product_id: string | null; mine: string[]; team: string[] }>(
+      env,
+      deps,
+      auth,
+      "personal_radar_reply_examples",
+      { p_company: company, p_item: item },
+    ).catch(() => null);
+    if (examples) {
+      if (Array.isArray(examples.mine) && examples.mine.length) m.style = examples.mine;
+      m.team_examples = Array.isArray(examples.team) ? examples.team : [];
+      m.product = examples.product;
+    }
+    // As lições de resposta (sem a migração 20270307, nenhuma), com as do produto.
     m.lessons = await rpc<NonNullable<DraftMaterial["lessons"]>>(env, deps, auth, "personal_radar_reply_lessons", {
       p_company: company,
       p_client: client,
+      ...(examples?.product_id ? { p_product: examples.product_id } : {}),
     }).catch(() => []);
+    // A base do robô do cliente (só quem tem Agente Conversacional).
+    m.knowledge = await rpc<AgentKnowledge[]>(env, deps, auth, "agent_knowledge", {
+      p_company: company,
+      p_client: client,
+      p_query: knowledgeQuery([
+        { kind: m.item.kind, title: m.item.title, summary: m.item.summary, quotes: m.quotes.map((q) => q.text) },
+      ]),
+      p_chars: 16000,
+    })
+      .then((k) => (Array.isArray(k) ? k : []))
+      .catch(() => []);
     const [base, provider] = await Promise.all([
       buildContext(env, deps, auth, company, { client, module: "personal_radar" }, now),
       featureProvider(env, deps.fetch, auth, company, "personal_assistant", { client }),

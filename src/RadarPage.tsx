@@ -605,6 +605,10 @@ export function RadarPage({
             setItems((list) => list?.map((x) => (x.id === next.id ? { ...x, ...next } : x)) ?? list);
             loadTop();
           }}
+          onRemoved={(id) => {
+            setItems((list) => list?.filter((x) => x.id !== id) ?? list);
+            loadTop();
+          }}
         />
       )}
     </div>

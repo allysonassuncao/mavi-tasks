@@ -4,6 +4,7 @@ import { saveMeetingShare, publicRecordingUrl } from "./meetings";
 import { setDriveVisibility } from "./drive";
 import { defaultConfig, reportUrl, supabaseReports } from "./campaign-reports";
 import type { AdObjective } from "./campaigns";
+import type { AgentCheck, RemoveReason } from "./agent-check";
 
 /**
  * Radar pessoal (Radar › Pessoal): a MAVI Assistente Pessoal lê os grupos de
@@ -101,7 +102,7 @@ export type PersonalItem = {
   first_at: string;
   last_at: string;
   resolved_at?: string;
-  resolved_how?: "auto" | "person";
+  resolved_how?: "auto" | "person" | "knowledge";
   resolved_by_name?: string;
   reopened_at?: string;
   client: { id: string; name: string };
@@ -116,6 +117,14 @@ export type PersonalItem = {
   task?: { id: string; title: string; status: string };
   radar?: { id: string; title: string };
   reply?: PersonalReply;
+  /** O produto da situação (migration 20270512090000); sem ele, geral. */
+  product?: { id: string; name: string };
+  /** A pessoa escolheu o produto (a MAVI não troca). */
+  product_person?: boolean;
+  /** Os produtos ativos do cliente (para trocar). */
+  products?: { id: string; name: string }[];
+  /** A conferência com a base do robô do cliente. */
+  agent_check?: AgentCheck;
 };
 export type PersonalStatus = "open" | "resolved" | "dismissed" | "all";
 export type PersonalFilters = {
@@ -191,6 +200,7 @@ export function resolvedLine(i: PersonalItem, me?: string) {
         minute: "2-digit",
       }).format(new Date(i.resolved_at))
     : "";
+  if (i.resolved_how === "knowledge") return "Fechado pela MAVI: o robô já tinha essa informação";
   return i.resolved_how === "auto"
     ? `Resolvido por ${i.resolved_by_name ?? "alguém do time"} no grupo${at ? ` às ${at}` : ""}`
     : `Resolvido por ${who}${at ? ` às ${at}` : ""}`;
@@ -275,6 +285,31 @@ export async function act(company: string, item: string, action: PersonalAction,
     p_action: action,
     p_note: note,
   });
+}
+
+/** Exclui a situação (some para todos os donos; migration 20270512090000). */
+export async function removeItem(company: string, item: string, reason: RemoveReason, note: string) {
+  if (offline(company)) {
+    const i = demo.items.findIndex((x) => x.id === item);
+    if (i >= 0) demo.items.splice(i, 1);
+    return { removed: true, temperature: reason === "mavi_error" || reason === "not_client" ? 1 : 0 };
+  }
+  return rpc<{ removed: boolean; temperature: number }>("personal_radar_remove", {
+    p_company: company,
+    p_item: item,
+    p_reason: reason,
+    p_note: note,
+  });
+}
+/** Troca o produto da situação (nulo: geral). */
+export async function setItemProduct(company: string, item: string, product: string | null) {
+  if (offline(company)) {
+    const i = demo.items.find((x) => x.id === item)!;
+    i.product = i.products?.find((p) => p.id === product);
+    i.product_person = true;
+    return { ...i };
+  }
+  return rpc<PersonalItem>("personal_radar_set_product", { p_company: company, p_item: item, p_product: product });
 }
 
 /** O texto com os links criados no lugar dos marcadores ({{A1}}…). */
@@ -396,17 +431,18 @@ export const LESSON_KIND_LABEL: Record<LessonKind, string> = {
   detection: "O que é comigo",
   reply: "Como responder",
 };
-export type LessonStatus = "active" | "paused" | "dismissed" | "checking" | "refused";
+export type LessonStatus = "active" | "paused" | "dismissed" | "checking" | "refused" | "suggested";
 export const LESSON_STATUS_LABEL: Record<LessonStatus, string> = {
   active: "Em uso",
   paused: "Pausada",
   dismissed: "Excluída",
   checking: "O Jev está conferindo",
   refused: "Recusada pelo Jev",
+  suggested: "Esperando aprovação",
 };
 export type Lesson = {
   id: string;
-  scope: "person" | "team" | "client";
+  scope: "person" | "team" | "client" | "product";
   kind: LessonKind;
   text: string;
   status: LessonStatus;
@@ -418,7 +454,13 @@ export type Lesson = {
   user?: { id: string; name: string };
   team?: { id: string; name: string };
   client?: { id: string; name: string };
+  product?: { id: string; name: string };
   promoted?: { scope: "team" | "client"; status: LessonStatus }[];
+};
+/** As lições por produto (líderes editam; os demais veem as em uso). */
+export type ProductLessonsView = {
+  can_edit: boolean;
+  products: { id: string; name: string; suggested: number; lessons: Lesson[] }[];
 };
 export type LessonsView = {
   mine: Lesson[];
@@ -473,6 +515,32 @@ export async function promoteLesson(company: string, id: string, scope: "team" |
     return;
   }
   await rpc("promote_personal_radar_lesson", { p_company: company, p_id: id, p_scope: scope, p_target: target });
+}
+export async function loadProductLessons(company: string) {
+  if (offline(company)) return demoProductLessons();
+  return rpc<ProductLessonsView>("personal_radar_product_lessons", { p_company: company });
+}
+export async function saveProductLesson(company: string, id: string | null, product: string, kind: LessonKind, text: string) {
+  if (offline(company)) {
+    const l = id ? demo.productLessons.find((x) => x.id === id) : undefined;
+    if (l) Object.assign(l, { text, kind, updated_at: new Date().toISOString() });
+    else
+      demo.productLessons.unshift({
+        id: `demo-pl${Date.now()}`, scope: "product", kind, text, status: "active", origin: "leader",
+        updated_at: new Date().toISOString(), evidence: 0, product: demoProducts.find((p) => p.id === product),
+      });
+    return;
+  }
+  await rpc("save_personal_radar_product_lesson", { p_company: company, p_id: id, p_product: product, p_kind: kind, p_text: text });
+}
+/** Aprovar (em uso), pausar ou recusar/excluir uma lição do produto. */
+export async function setProductLesson(company: string, id: string, status: "active" | "paused" | "dismissed") {
+  if (offline(company)) {
+    const l = demo.productLessons.find((x) => x.id === id);
+    if (l) Object.assign(l, { status, ...(l.status === "suggested" && status === "active" ? { check_note: "Aprovada por você." } : {}) });
+    return;
+  }
+  await rpc("set_personal_radar_product_lesson", { p_company: company, p_id: id, p_status: status });
 }
 export async function loadAutonomy(company: string, user: string | null) {
   if (offline(company)) return demo.autonomy;
@@ -542,6 +610,11 @@ const demo = {
     { id: "demo-l3", scope: "person", kind: "reply", text: "Chame o cliente pelo primeiro nome e use no máximo um emoji.", status: "active", origin: "person", updated_at: ago(60 * 48), evidence: 0 },
     { id: "demo-l4", scope: "team", kind: "reply", text: "Ao falar de CPL, traga o valor, o período e a meta do ciclo.", status: "active", origin: "leader", check_note: "Conferida pelo Jev.", updated_at: ago(60 * 4), evidence: 2, team: { id: "demo-team", name: "Tráfego" } },
     { id: "demo-l5", scope: "client", kind: "detection", text: "Na Facilita, o Carlos manda prints de leads: confirme o recebimento, não é reclamação.", status: "refused", origin: "leader", check_note: "O Jev recusou: parece valer só para uma pessoa, ou não está clara.", updated_at: ago(90), evidence: 1, client: { id: "demo-c1", name: "4282 · Facilita" } },
+  ] as Lesson[],
+  productLessons: [
+    { id: "demo-pl1", scope: "product", kind: "reply", text: "Pedido de ajuste no robô: confirme o que muda, quem aprova e quando entra no ar.", status: "suggested", origin: "mavi", check_note: "Conferida pelo Jev.", updated_at: ago(40), evidence: 4, product: { id: "demo-pd-mavi", name: "MAVI" } },
+    { id: "demo-pl2", scope: "product", kind: "reply", text: "Se o robô respondeu errado, peça o print da conversa e o número do contato antes de prometer prazo.", status: "active", origin: "leader", updated_at: ago(60 * 30), evidence: 0, product: { id: "demo-pd-mavi", name: "MAVI" } },
+    { id: "demo-pl3", scope: "product", kind: "reply", text: "Ao falar de resultados, traga o número do período e compare com o ciclo anterior.", status: "active", origin: "mavi", check_note: "Aprovada por Gabi Gestora.", updated_at: ago(60 * 70), evidence: 6, product: { id: "demo-pd-ads", name: "Make Ads" } },
   ] as Lesson[],
   autonomy: [
     { kind: "question", enabled: true, days: 30, min_rate: 0.9, min_count: 10, decided: 14, approved: 13, edited: 1, rejected: 0, rate: 0.929, ready: true },
@@ -646,6 +719,19 @@ function demoFeedback(id: string, action: string, text: string): PersonalItem {
   }
   return { ...i };
 }
+const demoProducts = [
+  { id: "demo-pd-mavi", name: "MAVI" },
+  { id: "demo-pd-ads", name: "Make Ads" },
+];
+function demoProductLessons(): ProductLessonsView {
+  return {
+    can_edit: true,
+    products: demoProducts.map((p) => {
+      const lessons = demo.productLessons.filter((l) => l.product?.id === p.id);
+      return { ...p, suggested: lessons.filter((l) => l.status === "suggested").length, lessons };
+    }),
+  };
+}
 function demoLessons(): LessonsView {
   return {
     mine: demo.lessons.filter((l) => l.scope === "person"),
@@ -699,3 +785,29 @@ function demoAct(id: string, action: PersonalAction): PersonalItem {
   }
   return { ...i };
 }
+
+// O produto e a conferência com o robô na demonstração.
+for (const i of demo.items) i.products = demoProducts;
+Object.assign(demo.items[0], { product: demoProducts[1] });
+demo.items.splice(2, 0, {
+  id: "demo-p5", kind: "request", title: "Robô precisa avisar que agora abrimos aos sábados", urgency: 2, status: "open", asks: 1,
+  summary: "A clínica passou a atender aos sábados de manhã e o robô continua dizendo que é só de segunda a sexta.",
+  first_at: ago(50), last_at: ago(50), client: { id: "demo-clinica", name: "Clínica Sorriso" },
+  group: { id: "demo-g3", title: "Clínica Sorriso & Make" }, reason: "role", why: "Você cuida do robô", state: "open",
+  mention_count: 1, products: demoProducts, product: demoProducts[0],
+  mentions: [{ message_id: "m9", role: "client", speaker: "Dra. Paula", quote: "Agora abrimos sábado das 8h às 12h, o robô ainda fala que é só durante a semana.", at: ago(50) }],
+  agent_check: {
+    status: "conflict",
+    note: "O robô ainda informa só o horário de segunda a sexta.",
+    evidence: [{ prompt_id: "demo-p-1", workflow: "[Clínica Sorriso] Atendimento WhatsApp", node: "AI Agent", excerpt: "Atendemos de segunda a sexta, das 8h às 18h." }],
+    suggestion: {
+      prompt_id: "demo-p-1",
+      workflow: "[Clínica Sorriso] Atendimento WhatsApp",
+      node: "AI Agent",
+      before: "Atendemos de segunda a sexta, das 8h às 18h.",
+      after: "Atendemos de segunda a sexta, das 8h às 18h, e aos sábados, das 8h às 12h.",
+      why: "A clínica passou a abrir aos sábados",
+    },
+    done: false,
+  },
+});

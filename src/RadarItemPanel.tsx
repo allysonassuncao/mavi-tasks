@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { AlertTriangle, ExternalLink, Layers, Link2, MessageCircle, Plus, RotateCcw, Unlink, Video } from "lucide-react";
+import { AlertTriangle, ExternalLink, Layers, Link2, MessageCircle, Plus, RotateCcw, Trash2, Unlink, Video } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import { Modal } from "./components";
 import { type Member, type Snapshot, type Task } from "./types";
@@ -9,12 +9,16 @@ import { tasksByIds } from "./api";
 import { buildNameLookup, dateKey } from "./domain";
 import { TaskTable } from "./TaskTable";
 import { RadarTaskPicker } from "./RadarTaskPicker";
+import { AgentCheckCard, RemoveCaseForm } from "./RadarCaseTools";
+import { removedMessage } from "./agent-check";
 import {
   SEVERITY_COLORS,
   clock,
   dateBr,
   loadItem,
+  loadItemExtras,
   occurrencePath,
+  removeItem,
   linkTask,
   unlinkTask,
   overdue,
@@ -24,6 +28,7 @@ import {
   statusOf,
   updateItem,
   type RadarItemDetail,
+  type RadarItemExtras,
   type RadarPatch,
   type RadarTask,
   type ThemeMove,
@@ -58,7 +63,9 @@ function stub(t: RadarTask, item: RadarItemDetail, members: Member[], data?: Sna
  * com o trecho e o link para o momento da reunião ou a mensagem do grupo.
  * Quem edita o item muda o tema, cria tarefas a partir dele e vincula ou
  * desvincula tarefas que já existem; os demais (pela aba do cliente no
- * Drive) só leem.
+ * Drive) só leem. Também mostra a conferência com o robô do cliente
+ * (Agente Conversacional) e, para administradores e gestores, excluir o caso
+ * (migration 20270512090000).
  */
 export function RadarItemPanel({
   company,
@@ -70,6 +77,7 @@ export function RadarItemPanel({
   user,
   onNewTask,
   onTaskLinked,
+  onRemoved,
   notify,
 }: {
   company: string;
@@ -83,6 +91,8 @@ export function RadarItemPanel({
   onNewTask?: (preset: FormPreset) => void;
   /** Uma tarefa ficou ligada ao item (ou deixou de ficar). */
   onTaskLinked?: (item: string) => void;
+  /** O caso foi excluído (o painel fecha). */
+  onRemoved?: (item: string) => void;
   notify?: (message: string) => void;
 }) {
   const [item, setItem] = useState<RadarItemDetail | null>(null);
@@ -96,6 +106,8 @@ export function RadarItemPanel({
   const [unlinking, setUnlinking] = useState<string | null>(null);
   // As tarefas do item como a lista de Tarefas as mostra (as colunas da lista).
   const [rows, setRows] = useState<Task[] | null>(null);
+  const [extras, setExtras] = useState<RadarItemExtras>({});
+  const [removing, setRemoving] = useState(false);
   const taskIds = item?.tasks.map((t) => t.id).join(",") ?? "";
 
   useEffect(() => {
@@ -107,6 +119,7 @@ export function RadarItemPanel({
         setFields(i.fields ?? {});
       })
       .catch((e) => setError((e as Error).message));
+    void loadItemExtras(company, itemId).then(setExtras);
   }, [company, itemId]);
 
   useEffect(() => {
@@ -447,6 +460,7 @@ export function RadarItemPanel({
               </>
             )}
           </p>
+          {extras.agent_check && <AgentCheckCard check={extras.agent_check} notify={(m) => notify?.(m)} />}
           {!item.speaker_confirmed && (
             <p className="radar-unconfirmed">
               <AlertTriangle size={14} aria-hidden="true" />
@@ -460,6 +474,26 @@ export function RadarItemPanel({
             </p>
           )}
 
+          {extras.can_remove &&
+            (removing ? (
+              <RemoveCaseForm
+                name={item.title}
+                scope="Ele sai do Radar para todos."
+                onCancel={() => setRemoving(false)}
+                onConfirm={async (reason, note) => {
+                  const r = await removeItem(company, item.id, reason, note);
+                  notify?.(removedMessage(r));
+                  onRemoved?.(item.id);
+                  onClose();
+                }}
+              />
+            ) : (
+              <div>
+                <Button className="btn quiet compact" onClick={() => setRemoving(true)}>
+                  <Trash2 size={14} aria-hidden="true" /> Excluir caso
+                </Button>
+              </div>
+            ))}
           {(item.tasks.length > 0 || edit) && (
             <div className="radar-tasks">
               <div className="radar-tasks-head">

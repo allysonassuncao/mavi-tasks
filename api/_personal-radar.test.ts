@@ -13,7 +13,10 @@ import {
   learningMessage,
   lessonQuestions,
   parseLearningOps,
+  parseProductOps,
+  productLearningMessage,
   type LearningClaim,
+  type ProductLearningClaim,
   handlePersonalRadarWorker,
   PERSONAL_RADAR_INSTRUCTIONS,
   parsePersonal,
@@ -204,7 +207,7 @@ describe("worker do Radar pessoal", () => {
       { ...env, personalRadarBudgetMs: 400_000 },
       { fetch: fetchImpl, llm, embed, now: () => (t += 60_000) },
     );
-    expect(stats).toEqual({ groups: 1, items: 1, skipped: 0, failed: 0, merged: 0, learned: 0, checked: 0 });
+    expect(stats).toEqual({ groups: 1, items: 1, skipped: 0, failed: 0, merged: 0, learned: 0, products: 0, checked: 0 });
     const store = calls.find((c) => c.url.includes("rpc/ai_personal_radar_store"))!;
     expect(store.body.p_secret).toBe(env.workerSecret);
     expect(store.body.p_group).toBe(group);
@@ -226,7 +229,7 @@ describe("worker do Radar pessoal", () => {
     });
     const llm = vi.fn();
     const stats = await runPersonalRadar({ ...env, personalRadarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
-    expect(stats).toEqual({ groups: 0, items: 0, skipped: 1, failed: 0, merged: 0, learned: 0, checked: 0 });
+    expect(stats).toEqual({ groups: 0, items: 0, skipped: 1, failed: 0, merged: 0, learned: 0, products: 0, checked: 0 });
     expect(llm).not.toHaveBeenCalled();
     expect(calls.some((c) => c.url.includes("rpc/ai_personal_radar_store"))).toBe(false);
   });
@@ -389,6 +392,154 @@ describe("aprendizado da pessoa", () => {
     expect(checked.body.p_note).toMatch(/parece valer só para uma pessoa.*dado sensível/);
     expect(checked.body.p_usage).toMatchObject({ input: 300, provider: "OpenRouter" });
     expect(lessonQuestions({ scope: "team", target: "Tráfego" } as never).general.instructions).toMatch(/equipe "Tráfego"/);
+  });
+});
+
+describe("produto e base do robô no Radar pessoal", () => {
+  it("o produto vem da lista do cliente; nome fora da lista vira geral", () => {
+    const { refs } = personalMessage(material());
+    const { items } = parsePersonal(
+      JSON.stringify({
+        items: [
+          { kind: "question", title: "Quando sai a arte", lines: [{ ref: "L2" }], product: "make ads" },
+          { kind: "request", title: "Logo novo", lines: [{ ref: "L4" }], product: "Inventado" },
+        ],
+      }),
+      refs,
+    );
+    expect(items.map((i) => i.product)).toEqual(["Make Ads", null]);
+    expect(PERSONAL_RADAR_INSTRUCTIONS).toMatch(/"product": o nome do produto do cliente/);
+  });
+
+  it("depois de gravar, manda o produto e a conferência com o robô de cada item", async () => {
+    let claims = 0;
+    const prompt = "00000000-0000-4000-8000-0000000000b9";
+    const { fetchImpl, calls } = database({
+      "rpc/ai_personal_radar_claim": () => (claims++ === 0 ? [{ group_id: group, company_id: company }] : []),
+      "rpc/ai_personal_radar_material": material(),
+      "rpc/ai_worker_route": null,
+      "rpc/ai_personal_radar_store": 1,
+      "rpc/agent_knowledge_for_worker": [
+        { id: prompt, workflow: "4282 - Robô", node: "AI Agent", full: true, chars: 50, text: "As artes novas saem toda segunda-feira." },
+      ],
+      "rpc/ai_personal_radar_extras_store": 1,
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      const meter = newMeter("claude-sonnet-5-5");
+      meter.cost = 0.001;
+      if (/Agente Conversacional: um robô/.test(req.instructions))
+        return {
+          text: JSON.stringify({
+            cases: [{ case: 1, status: "covered", note: "O robô já diz isso.", evidence: [{ ref: "K1", excerpt: "As artes novas saem toda segunda-feira." }], done: false }],
+          }),
+          meter,
+          rounds: 1,
+        };
+      return {
+        text: JSON.stringify({ items: [{ kind: "question", title: "Quando sai a arte", lines: [{ ref: "L2" }], owners: [], product: "Make Ads" }] }),
+        meter,
+        rounds: 1,
+      };
+    });
+    await runPersonalRadar({ ...env, personalRadarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
+    const extras = calls.find((c) => c.url.includes("rpc/ai_personal_radar_extras_store"))!;
+    expect(extras.body.p_group).toBe(group);
+    expect(extras.body.p_items).toEqual([
+      {
+        message_ids: [msg(2)],
+        product: "Make Ads",
+        check: {
+          status: "covered",
+          note: "O robô já diz isso.",
+          evidence: [{ prompt_id: prompt, workflow: "4282 - Robô", node: "AI Agent", excerpt: "As artes novas saem toda segunda-feira." }],
+          suggestion: null,
+          done: false,
+        },
+      },
+    ]);
+    expect(extras.body.p_usage).toMatchObject({ cost: 0.001 });
+  });
+});
+
+describe("aprendizado por produto", () => {
+  const fid = (n: number) => `00000000-0000-4000-8000-0000000003${String(n).padStart(2, "0")}`;
+  const suggestion = "00000000-0000-4000-8000-000000000401";
+  const active = "00000000-0000-4000-8000-000000000402";
+  const claim = (): ProductLearningClaim => ({
+    company,
+    product: "00000000-0000-4000-8000-0000000000d7",
+    product_name: "MAVI",
+    clients: 12,
+    feedback: [
+      { id: fid(1), action: "edited", kind: "request", title: "Ajuste no robô", draft: "Vamos ver.", final: "Ajustamos hoje, entra no ar às 18h.", at: "02/10 10:00" },
+      { id: fid(2), action: "rejected", reason: "incomplete", note: "Faltou dizer quando entra no ar.", at: "02/10 11:00" },
+    ],
+    lessons: [
+      { id: suggestion, kind: "reply", text: "Diga o prazo.", status: "suggested", origin: "mavi" },
+      { id: active, kind: "reply", text: "Seja direta.", status: "active", origin: "leader" },
+    ],
+  });
+
+  it("mostra o produto, as lições com quem decidiu e os retornos sem nomes", () => {
+    const text = productLearningMessage(claim());
+    expect(text).toMatch(/^Produto: MAVI \(12 clientes com ele\)\./);
+    expect(text).toMatch(/reply · sua sugestão, esperando um líder: Diga o prazo\./);
+    expect(text).toMatch(/reply · escrita por um líder \(em uso\): Seja direta\./);
+    expect(text).toMatch(/\[F2\] 02\/10 11:00 · reprovou a resposta \(incompleta\)\n  nota: Faltou dizer quando entra no ar\./);
+  });
+
+  it("só sugere (até 4) e só reescreve as próprias sugestões ainda não aprovadas", () => {
+    const ops = parseProductOps(
+      JSON.stringify({
+        ops: [
+          { op: "add", kind: "reply", text: "Em ajuste no robô, diga quando entra no ar.", feedback: ["F1", "F2"] },
+          { op: "update", id: suggestion, text: "Diga o prazo e o horário.", feedback: ["F2"] },
+          { op: "update", id: active, text: "Mexendo no que o líder escreveu." },
+          { op: "retire", id: active },
+        ],
+      }),
+      claim(),
+    );
+    expect(ops).toEqual([
+      { op: "add", kind: "reply", text: "Em ajuste no robô, diga quando entra no ar.", feedback: [fid(1), fid(2)] },
+      { op: "update", id: suggestion, text: "Diga o prazo e o horário.", feedback: [fid(2)] },
+    ]);
+  });
+
+  it("o worker aprende por produto e o Jev confere a sugestão como do produto", async () => {
+    let product = 0;
+    let check = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_personal_radar_claim": [],
+      "rpc/ai_worker_route": null,
+      "rpc/ai_personal_radar_learning_claim": null,
+      "rpc/ai_personal_radar_product_claim": () => (product++ === 0 ? claim() : null),
+      "rpc/ai_personal_radar_product_store": 1,
+      "rpc/ai_personal_radar_check_claim": () =>
+        check++ === 0
+          ? { id: suggestion, company, scope: "product", kind: "reply", text: "Diga o prazo.", target: "MAVI", others: [], jev: jevRoute }
+          : null,
+      "rpc/ai_personal_radar_check_store": null,
+      "alpha/decisions": (b: any) => {
+        expect(b.state.onde).toBe("Produto MAVI");
+        expect(b.questions.general.instructions).toMatch(/clientes do produto "MAVI"/);
+        return { model: "typesafe/jev-1.13", answers: { general: { noul: 0.9 }, safe: { noul: 0.9 } }, usage: { input_tokens: 200, cost: 0.00001 } };
+      },
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      expect(req.instructions).toMatch(/sugerir lições do produto/);
+      const meter = newMeter("claude-sonnet-5-5");
+      meter.cost = 0.002;
+      return { text: JSON.stringify({ ops: [{ op: "add", kind: "reply", text: "Diga quando entra no ar.", feedback: ["F1"] }] }), meter, rounds: 1 };
+    });
+    const stats = await runPersonalRadar({ ...env, personalRadarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
+    expect(stats).toMatchObject({ products: 1, checked: 1, failed: 0 });
+    const store = calls.find((c) => c.url.includes("rpc/ai_personal_radar_product_store"))!;
+    expect(store.body).toMatchObject({ p_company: company, p_product: claim().product });
+    expect(store.body.p_ops).toEqual([{ op: "add", kind: "reply", text: "Diga quando entra no ar.", feedback: [fid(1)] }]);
+    expect(store.body.p_usage.cost).toBe(0.002);
+    const checked = calls.find((c) => c.url.includes("rpc/ai_personal_radar_check_store"))!;
+    expect(checked.body).toMatchObject({ p_lesson: suggestion, p_ok: true });
   });
 });
 

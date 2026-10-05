@@ -893,3 +893,24 @@
     font-size: 16px;
   }
 }
+
+/* Aprendizado › Por produto (migration 20270512090000). */
+.pradar-product-lessons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.pradar-product-lessons > summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.pradar-product-lessons[open] > summary {
+  margin-bottom: 8px;
+}
+.pradar-lesson-status.s-suggested {
+  color: #8a5a00;
+}

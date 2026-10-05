@@ -1,0 +1,152 @@
+/* Radar: a conferência com o Agente Conversacional e a exclusão de casos
+   (migration 20270512090000_radar_agents_learning). */
+.radar-agent {
+  --agent: #6b52b3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--agent);
+  border-radius: 10px;
+  background: #fbfaff;
+  font-size: 0.84rem;
+}
+.radar-agent.status-covered {
+  --agent: #2f9e6b;
+}
+.radar-agent.status-missing {
+  --agent: #b07c12;
+}
+.radar-agent.status-conflict {
+  --agent: #d0503c;
+}
+.radar-agent.status-unrelated {
+  --agent: #a3acab;
+}
+.radar-agent header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.radar-agent header svg {
+  color: var(--agent);
+}
+.radar-agent p {
+  margin: 0;
+}
+.radar-agent-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.radar-agent-evidence li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.radar-agent-evidence q,
+.radar-agent-suggestion q {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.radar-agent-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.radar-agent-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.radar-agent-suggestion {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f4f1fc;
+}
+.radar-agent-suggestion .del q {
+  color: #a8322a;
+  text-decoration: line-through;
+}
+.radar-agent-suggestion .add q {
+  color: #1f7a50;
+}
+.radar-agent-done {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #1f7a50;
+}
+
+.radar-remove {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #f1d4cf;
+  border-radius: 10px;
+  background: #fdf6f5;
+  font-size: 0.84rem;
+}
+.radar-remove fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.radar-remove legend {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.radar-remove label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.radar-remove input[type="radio"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: #263334;
+}
+.radar-remove p {
+  margin: 0;
+}
+.radar-remove-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.radar-product {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  align-self: flex-start;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+.radar-product > :last-child {
+  min-width: 180px;
+}

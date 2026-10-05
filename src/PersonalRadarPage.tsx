@@ -19,6 +19,7 @@ import {
   Sparkles,
   Tag,
   ThumbsDown,
+  Trash2,
   Users,
 } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
@@ -53,6 +54,8 @@ import {
   REASON_LABEL,
   URGENCY_LABEL,
   act,
+  removeItem,
+  setItemProduct,
   loadList,
   loadPeople,
   loadState,
@@ -73,9 +76,13 @@ import {
   type PersonalStatus,
 } from "./personal-radar";
 import { sourceUrl } from "./ai";
+import { AgentCheckCard, RemoveCaseForm } from "./RadarCaseTools";
+import { removedMessage } from "./agent-check";
+import { ProductLessons } from "./PersonalRadarProductLessons";
 import "./personal-radar.css";
 
 const ALL = "__all__";
+const GENERAL = "__general__";
 const PAGE = 50;
 const savedKey = (company: string, user: string) =>
   `mavi:personal-radar:${company}:${user}`;
@@ -435,6 +442,11 @@ export function PersonalRadarPage({
                     // Sai da aba em que estava: recarrega as contagens.
                     load(0);
                   }}
+                  onRemoved={(message) => {
+                    notify(message);
+                    load(0);
+                  }}
+                  notify={notify}
                 />
               ))}
             </ul>
@@ -601,6 +613,8 @@ function ItemCard({
   ready = false,
   siblings = [],
   onChanged,
+  onRemoved,
+  notify,
 }: {
   company: string;
   item: PersonalItem;
@@ -609,11 +623,15 @@ function ItemCard({
   /** As outras situações abertas do mesmo grupo (para "Juntar com…"). */
   siblings?: PersonalItem[];
   onChanged: (item: PersonalItem, message?: string) => void;
+  /** A situação foi excluída (some da lista). */
+  onRemoved?: (message: string) => void;
+  notify?: (message: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [joining, setJoining] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [dismissing, setDismissing] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [reason, setReason] = useState<DismissReason>("not_mine");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -668,6 +686,37 @@ function ItemCard({
       </div>
       <h3>{item.title}</h3>
       {item.summary && <p className="pradar-summary">{item.summary}</p>}
+      {(!!item.product || (!readOnly && !!item.products?.length)) && (
+        <div className="radar-product">
+          <span className="muted">Produto</span>
+          {readOnly || !item.products?.length ? (
+            <strong>{item.product?.name}</strong>
+          ) : (
+            <Select
+              aria-label="Produto da situação"
+              className="compact"
+              disabled={busy}
+              value={item.product?.id ?? GENERAL}
+              onValueChange={(v) => {
+                setBusy(true);
+                setError("");
+                setItemProduct(company, item.id, v === GENERAL ? null : v)
+                  .then((next) => onChanged(next, "Produto trocado. A MAVI aprende com as respostas deste produto."))
+                  .catch((err) => setError((err as Error).message))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              <SelectOption value={GENERAL}>Geral / Agência</SelectOption>
+              {item.products.map((p) => (
+                <SelectOption key={p.id} value={p.id}>
+                  {p.name}
+                </SelectOption>
+              ))}
+            </Select>
+          )}
+        </div>
+      )}
+      {item.agent_check && <AgentCheckCard check={item.agent_check} notify={(m) => notify?.(m)} />}
       <p className="pradar-reason">
         <ReasonIcon size={13} aria-hidden="true" />
         <span>{item.why || REASON_LABEL[item.reason]}</span>
@@ -769,13 +818,18 @@ function ItemCard({
       {!readOnly && (
         <div className="pradar-actions">
           {closed ? (
-            <Button
-              className="btn secondary compact"
-              onClick={() => run("reopened", "Situação reaberta.")}
-              loading={busy}
-            >
-              <RotateCcw size={14} aria-hidden="true" /> Reabrir
-            </Button>
+            <>
+              <Button
+                className="btn secondary compact"
+                onClick={() => run("reopened", "Situação reaberta.")}
+                loading={busy}
+              >
+                <RotateCcw size={14} aria-hidden="true" /> Reabrir
+              </Button>
+              <Button className="btn quiet compact" onClick={() => setRemoving((v) => !v)} aria-expanded={removing}>
+                <Trash2 size={14} aria-hidden="true" /> Excluir
+              </Button>
+            </>
           ) : (
             <>
               <Button
@@ -804,9 +858,24 @@ function ItemCard({
                   <Merge size={14} aria-hidden="true" /> Juntar com…
                 </Button>
               )}
+              <Button className="btn quiet compact" onClick={() => setRemoving((v) => !v)} aria-expanded={removing}>
+                <Trash2 size={14} aria-hidden="true" /> Excluir
+              </Button>
             </>
           )}
         </div>
+      )}
+      {removing && !readOnly && (
+        <RemoveCaseForm
+          name={item.title}
+          scope="Ela sai da sua lista e da de quem mais estiver nela."
+          onCancel={() => setRemoving(false)}
+          onConfirm={async (why, text) => {
+            const r = await removeItem(company, item.id, why, text);
+            setRemoving(false);
+            onRemoved?.(removedMessage(r));
+          }}
+        />
       )}
       {joining && !closed && (
         <div className="pradar-dismiss">
@@ -1454,7 +1523,7 @@ function LearningModal({
   onAutonomy: (rows: AutonomyRow[]) => void;
   notify: (message: string) => void;
 }) {
-  const [tab, setTab] = useState<"lessons" | "autonomy">("lessons");
+  const [tab, setTab] = useState<"lessons" | "products" | "autonomy">("lessons");
   const [view, setView] = useState<LessonsView | null>(null);
   const [rows, setRows] = useState<AutonomyRow[] | null>(null);
   const [editing, setEditing] = useState<{ id: string | null; kind: LessonKind; text: string } | null>(null);
@@ -1598,11 +1667,16 @@ function LearningModal({
           <button type="button" className={tab === "lessons" ? "selected" : ""} aria-pressed={tab === "lessons"} onClick={() => setTab("lessons")}>
             Lições
           </button>
+          <button type="button" className={tab === "products" ? "selected" : ""} aria-pressed={tab === "products"} onClick={() => setTab("products")}>
+            Por produto
+          </button>
           <button type="button" className={tab === "autonomy" ? "selected" : ""} aria-pressed={tab === "autonomy"} onClick={() => setTab("autonomy")}>
             Autonomia
           </button>
         </nav>
-        {tab === "lessons" ? (
+        {tab === "products" ? (
+          <ProductLessons company={company} notify={notify} />
+        ) : tab === "lessons" ? (
           !view ? (
             <Loading variant="list" />
           ) : (
@@ -1671,8 +1745,10 @@ function LearningModal({
                     ? "As que você e outros líderes promoveram. O Jev confere cada uma antes de valer; recusada, você decide."
                     : "As que valem para você porque são da sua equipe ou dos seus clientes."}
                 </small>
-                {view.shared.length ? (
-                  <ul className="pradar-lessons">{view.shared.map((l) => lessonRow(l, false))}</ul>
+                {view.shared.some((l) => l.scope !== "product") ? (
+                  <ul className="pradar-lessons">
+                    {view.shared.filter((l) => l.scope !== "product").map((l) => lessonRow(l, false))}
+                  </ul>
                 ) : (
                   <p className="muted pradar-empty-note">Nenhuma ainda.</p>
                 )}

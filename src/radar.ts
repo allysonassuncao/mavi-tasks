@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import type { AgentCheck, RemoveReason } from "./agent-check";
 import { canCreateTaskIn } from "./domain";
 import { serializeDescription, type RichNode } from "./rich-text";
 import { appPath } from "./temperature";
@@ -701,6 +702,29 @@ export async function updateItem(company: string, item: string, patch: RadarPatc
     p_patch: patch,
   });
 }
+/**
+ * O que o painel do item mostra além do item: quem pode excluir e a
+ * conferência com o robô do cliente (migration 20270512090000).
+ */
+export type RadarItemExtras = { can_remove?: boolean; has_agent?: boolean; agent_check?: AgentCheck };
+export async function loadItemExtras(company: string, item: string): Promise<RadarItemExtras> {
+  if (offline(company)) return demoExtras(item);
+  return rpc<RadarItemExtras>("radar_item_extras", { p_company: company, p_item: item }).catch(() => ({}));
+}
+/** Exclui o caso (administradores e gestores); devolve quantas leituras do Termômetro voltam. */
+export async function removeItem(company: string, item: string, reason: RemoveReason, note: string) {
+  if (offline(company)) {
+    const i = demo.items.findIndex((x) => x.id === item);
+    if (i >= 0) demo.items.splice(i, 1);
+    return { removed: true, temperature: reason === "mavi_error" || reason === "not_client" ? 1 : 0 };
+  }
+  return rpc<{ removed: boolean; temperature: number }>("remove_radar_item", {
+    p_company: company,
+    p_item: item,
+    p_reason: reason,
+    p_note: note,
+  });
+}
 export async function linkTask(company: string, item: string, task: string) {
   if (offline(company)) {
     const i = demo.items.find((x) => x.id === item);
@@ -1362,6 +1386,32 @@ function demoItems(f: RadarFilters): RadarPage {
   const offset = f.offset ?? 0;
   return { total: list.length, items: list.slice(offset, offset + (f.limit ?? 50)).map(strip) };
 }
+/** Na demonstração, o item das artes mostra a conferência com o robô. */
+function demoExtras(id: string): RadarItemExtras {
+  return {
+    can_remove: true,
+    has_agent: id === "demo-2",
+    ...(id === "demo-2"
+      ? {
+          agent_check: {
+            status: "missing",
+            note: "O robô de atendimento não sabe que a marca mudou: continua mandando o catálogo com o logo antigo.",
+            evidence: [],
+            suggestion: {
+              prompt_id: "demo-prompt",
+              workflow: "Norte Coffee - Atendimento",
+              node: "AI Agent",
+              before: "",
+              after: "Ao enviar o catálogo, use sempre o link do catálogo 2026 (com a marca nova).",
+              why: "O cliente trocou a marca em setembro",
+            },
+            done: false,
+          },
+        }
+      : {}),
+  };
+}
+
 function demoDetail(id: string): RadarItemDetail {
   const i = demo.items.find((x) => x.id === id);
   if (!i) throw Error("Item não encontrado.");

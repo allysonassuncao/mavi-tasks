@@ -47,6 +47,7 @@ import {
   type AgentWorkflow,
 } from "./agents";
 import { diffLines, diffStats, type DiffLine } from "./text-diff";
+import { applySuggestion } from "./agent-check";
 import "./agents.css";
 
 const when = (iso: string | null | undefined) =>
@@ -435,18 +436,24 @@ export function DiffView({ lines }: { lines: DiffLine[] }) {
 // ------------------------------------------------------------ o prompt
 type Mode = "view" | "edit" | "review";
 
+/** Um ajuste sugerido pelo Radar (migration 20270512090000). */
+export type PromptSuggestion = { before: string; after: string; why?: string };
+
 /**
  * Um prompt: a ficha do nó, o texto, as versões e (quem edita) editar,
- * revisar a diferença e publicar no n8n.
+ * revisar a diferença e publicar no n8n. Com `suggestion` (o ajuste que o
+ * Radar propôs), quem edita aplica e cai direto na revisão.
  */
 export function AgentPromptSheet({
   promptId,
   onClose,
   notify,
+  suggestion,
 }: {
   promptId: string;
   onClose: () => void;
   notify: (message: string) => void;
+  suggestion?: PromptSuggestion;
 }) {
   const [prompt, setPrompt] = useState<AgentPrompt | null>(null);
   const [error, setError] = useState("");
@@ -634,6 +641,45 @@ export function AgentPromptSheet({
               />
             ) : mode === "view" ? (
               <>
+                {suggestion && (
+                  <div className="agent-suggestion">
+                    <strong>Ajuste sugerido pelo Radar</strong>
+                    {suggestion.why && <p className="muted">{suggestion.why}</p>}
+                    {suggestion.before && (
+                      <p>
+                        <span className="muted">Trocar: </span>
+                        <q>{suggestion.before}</q>
+                      </p>
+                    )}
+                    <p>
+                      <span className="muted">{suggestion.before ? "Por: " : "Acrescentar: "}</span>
+                      <q>{suggestion.after}</q>
+                    </p>
+                    {w.can_edit && !prompt.removed ? (
+                      <Button
+                        className="btn primary compact"
+                        onClick={() => {
+                          const next = applySuggestion(prompt.prompt, suggestion);
+                          setNote(suggestion.why ? `Radar: ${suggestion.why}`.slice(0, 500) : "Ajuste sugerido pelo Radar");
+                          if (next === null) {
+                            // O texto mudou depois da conferência: a pessoa ajusta à mão.
+                            setDraft(prompt.prompt);
+                            setWarning("O trecho sugerido não está mais no prompt: ajuste à mão com o texto acima.");
+                            setMode("edit");
+                          } else {
+                            setDraft(next);
+                            setWarning("");
+                            setMode("review");
+                          }
+                        }}
+                      >
+                        <Check size={14} aria-hidden="true" /> Aplicar e revisar
+                      </Button>
+                    ) : (
+                      <p className="muted">Só quem edita este produto no Drive publica o ajuste.</p>
+                    )}
+                  </div>
+                )}
                 <div className="agent-text-toolbar">
                   <span className="muted">{chars(prompt.prompt.length)}</span>
                   <Button
@@ -668,6 +714,11 @@ export function AgentPromptSheet({
               </>
             ) : mode === "edit" ? (
               <>
+                {warning && (
+                  <p className="agent-warning" role="alert">
+                    <TriangleAlert size={15} aria-hidden="true" /> {warning}
+                  </p>
+                )}
                 <Textarea
                   className="agent-editor"
                   value={draft}

@@ -476,6 +476,11 @@ function RadarThemePanel({
               else void reload();
             } else void reload();
           }}
+          onRemoved={() => {
+            onChanged();
+            if (theme && theme.items.length <= 1) onClose();
+            else void reload();
+          }}
         />
       )}
     </Modal>

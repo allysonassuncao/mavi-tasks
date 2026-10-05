@@ -310,6 +310,103 @@ describe("worker do Radar", () => {
     expect(calls.filter((c) => c.url.includes("rpc/ai_radar_fail"))).toHaveLength(0);
   });
 
+  it("confere com a base do Agente Conversacional e leva os casos excluídos à leitura", async () => {
+    let claims = 0;
+    const prompt = "00000000-0000-4000-8000-0000000000b1";
+    const { fetchImpl, calls } = database({
+      "rpc/ai_radar_claim": () =>
+        claims++ === 0 ? [{ id: signal, company_id: company, client_id: client, source_type: "whatsapp" }] : [],
+      "rpc/ai_radar_material": material(),
+      "rpc/ai_worker_route": null,
+      "rpc/ai_radar_config": { jev: null },
+      "rpc/radar_removed_for_worker": [
+        { topic: "Problemas / reclamações", title: "Robô não responde", reason: "mavi_error", quote: "o robô é ótimo" },
+      ],
+      "rpc/agent_knowledge_for_worker": [
+        {
+          id: prompt,
+          workflow: "4282 - Atendimento",
+          node: "AI Agent",
+          full: true,
+          chars: 80,
+          text: "Você é a Ana da 4282. Horário: segunda a sexta, das 8h às 18h.",
+        },
+      ],
+      "rpc/ai_radar_store": 1,
+      "rpc/ai_radar_agent_store": 1,
+    });
+    const llm: LlmAdapter = vi.fn(async (req) => {
+      const meter = newMeter("claude-haiku-4-5");
+      meter.input = 1000;
+      meter.cost = 0.002;
+      if (/Agente Conversacional: um robô/.test(req.instructions)) {
+        expect(req.messages[0].content).toMatch(/\[K1\] fluxo "4282 - Atendimento"/);
+        expect(req.messages[0].content).toMatch(/1\. \[Problemas \/ reclamações\] Leads caíram/);
+        return {
+          text: JSON.stringify({
+            cases: [
+              {
+                case: 1,
+                status: "unrelated",
+                note: "Não tem a ver com o robô.",
+                evidence: [{ ref: "K1", excerpt: "isso não está na base" }],
+                suggestion: null,
+                done: true,
+              },
+            ],
+          }),
+          meter,
+          rounds: 1,
+        };
+      }
+      expect(req.messages[0].content).toMatch(/excluiu do Radar[\s\S]*Robô não responde \(a MAVI leu errado\) — fala: "o robô é ótimo"/);
+      return {
+        text: JSON.stringify({
+          items: [{ topic: "T1", title: "Leads caíram", product: "P2", lines: [{ ref: "L1", quote: "Os leads caíram" }] }],
+        }),
+        meter,
+        rounds: 1,
+      };
+    });
+    const stats = await runRadar({ ...env, radarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
+    expect(stats).toMatchObject({ signals: 1, items: 1, failed: 0 });
+    expect(llm).toHaveBeenCalledTimes(2);
+    const kb = calls.find((c) => c.url.includes("rpc/agent_knowledge_for_worker"))!;
+    expect(kb.body).toMatchObject({ p_company: company, p_client: client, p_chars: 24000 });
+    expect(kb.body.p_query).toMatch(/Leads caíram/);
+    const store = calls.find((c) => c.url.includes("rpc/ai_radar_agent_store"))!;
+    expect(store.body.p_signal).toBe(signal);
+    // O trecho que não está na base sai; "done" só vale para o que o robô já tem.
+    expect(store.body.p_checks).toEqual([
+      { message_id: msg1, check: { status: "unrelated", note: "Não tem a ver com o robô.", evidence: [], suggestion: null, done: false } },
+    ]);
+    expect(store.body.p_usage).toMatchObject({ input: 1000, cost: 0.002 });
+    // A conferência vai depois de gravar o item.
+    const order = calls.map((c) => c.url).filter((u) => /ai_radar_store|ai_radar_agent_store/.test(u));
+    expect(order[0]).toMatch(/ai_radar_store/);
+    expect(order[1]).toMatch(/ai_radar_agent_store/);
+  });
+
+  it("cliente sem robô: não confere nada", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_radar_claim": () =>
+        claims++ === 0 ? [{ id: signal, company_id: company, client_id: client, source_type: "whatsapp" }] : [],
+      "rpc/ai_radar_material": material(),
+      "rpc/ai_worker_route": null,
+      "rpc/ai_radar_config": { jev: null },
+      "rpc/ai_radar_store": 1,
+    });
+    const llm: LlmAdapter = vi.fn(async () => ({
+      text: JSON.stringify({ items: [{ topic: "T1", title: "Leads caíram", lines: [{ ref: "L1" }] }] }),
+      meter: newMeter("x"),
+      rounds: 1,
+    }));
+    await runRadar({ ...env, radarBudgetMs: 400_000 }, { fetch: fetchImpl, llm, embed });
+    expect(llm).toHaveBeenCalledTimes(1);
+    expect(calls.some((c) => c.url.includes("rpc/ai_radar_agent_store"))).toBe(false);
+  });
+
   it("resposta sem JSON vai para ai_radar_fail", async () => {
     let claims = 0;
     const { fetchImpl, calls } = database({

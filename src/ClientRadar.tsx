@@ -129,6 +129,7 @@ export function ClientRadar({
           onChanged={(next) =>
             setData((d) => d && { ...d, items: d.items.map((x) => (x.id === next.id ? { ...x, ...next } : x)) })
           }
+          onRemoved={(id) => setData((d) => d && { ...d, items: d.items.filter((x) => x.id !== id) })}
         />
       )}
     </section>
