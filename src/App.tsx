@@ -1273,6 +1273,37 @@ export default function App() {
       alive = false;
     };
   }, [demo, company, session, isLeader, skillsTick, skillNotices]);
+  // Tutoriais no menu: as trilhas obrigatórias que a pessoa ainda não
+  // concluiu; relido pelos avisos ao vivo das trilhas e do progresso dela e
+  // quando chega o aviso de uma trilha na caixa de entrada.
+  const [pendingTrails, setPendingTrails] = useState<number | undefined>();
+  const [trailsTick, setTrailsTick] = useState(0);
+  const trailNotices = inbox.filter((n) => n.kind === "tutorial_trail").length;
+  useEffect(() => {
+    if (demo || !company || !session) {
+      setPendingTrails(undefined);
+      return;
+    }
+    let alive = true;
+    api
+      .rpc("my_tutorial_trails_pending", { p_company: company })
+      .then((n) => {
+        if (alive) setPendingTrails(Number(n) || undefined);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [demo, company, session, trailsTick, trailNotices]);
+  useEffect(() => {
+    const onLive = (e: Event) => {
+      const c = (e as CustomEvent<{ trails?: boolean; progress?: boolean; user?: string }>).detail ?? {};
+      if (!Object.keys(c).length || c.trails || (c.progress && (!c.user || c.user === user)))
+        setTrailsTick((n) => n + 1);
+    };
+    window.addEventListener("mavi:tutorials", onLive);
+    return () => window.removeEventListener("mavi:tutorials", onLive);
+  }, [user]);
   const personalAllowed = canOpenPage("personalRadar", member?.role, hiddenPages);
   useEffect(() => {
     if (!company || (!demo && !session) || !personalAllowed) {
@@ -2778,6 +2809,7 @@ export default function App() {
             caseCount={pendingCases}
             skillCount={pendingSkills}
             personalRadarCount={personalOpen}
+            tutorialCount={pendingTrails}
             noticeCount={noticeCount || undefined}
             products={data.products.filter(
               (p) =>

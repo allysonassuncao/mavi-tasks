@@ -80,6 +80,7 @@ export function SidebarNav({
   skillCount,
   noticeCount,
   personalRadarCount,
+  tutorialCount,
   products,
   href,
   onNavigate,
@@ -101,6 +102,8 @@ export function SidebarNav({
   noticeCount?: number;
   /** Radar › Pessoal: as situações em aberto da pessoa. */
   personalRadarCount?: number;
+  /** Tutoriais: as trilhas obrigatórias que a pessoa ainda não concluiu. */
+  tutorialCount?: number;
   products: Pick<Product, "id" | "name" | "color">[];
   href: (to: NavTarget) => string;
   onNavigate: (to: NavTarget) => void;
@@ -342,6 +345,7 @@ export function SidebarNav({
           label: "Tutoriais",
           icon: GraduationCap,
           to: { page: "tutorials" },
+          count: tutorialCount,
         },
       ],
     },

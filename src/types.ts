@@ -212,7 +212,9 @@ export interface AppNotification {
     /** Campanhas › Insights da MAVI: análise pronta com insights novos (link /campanhas/<id>?aba=insights) ou o teto do mês atingido (link /mavi#campanhas). */
     | "campaign_insight"
     /** Painel da MAVI › Avisos de falhas: uma rotina falhou, parou ou voltou (link para onde a rotina aparece). */
-    | "job_alert";
+    | "job_alert"
+    /** Tutoriais › Trilhas: uma trilha obrigatória chegou à pessoa, ou o prazo dela venceu (link /tutoriais?trilha=<id>). */
+    | "tutorial_trail";
   /** Null for notices that aren't about a task (they carry a link). */
   task_id: string | null;
   /** The task's title, or the notice's own title. */

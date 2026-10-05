@@ -148,7 +148,22 @@ export interface TutorialDetail {
     saved_by_name: string;
   } | null;
   can_edit: boolean;
+  /** A pessoa tem este tutorial (publicado e no público dela): o progresso conta. */
+  trackable?: boolean;
+  /** O progresso da pessoa (nulo: nunca abriu). */
+  progress?: TutorialProgress | null;
+  /** As trilhas que têm este tutorial (as que a pessoa vê). */
+  trails?: { id: string; title: string }[];
 }
+export interface TutorialProgress {
+  completed_at: string | null;
+  completed_version: number | null;
+  completed_how: "auto" | "manual" | null;
+  /** Desmarcou à mão: chegar ao fim não conclui sozinho de novo. */
+  undone: boolean;
+}
+/** 'auto': chegou ao fim; 'complete': o botão (também "li a versão nova"). */
+export type ProgressAction = "open" | "auto" | "complete" | "undo";
 export interface TutorialVersionRow {
   version: number;
   title: string;
@@ -353,6 +368,10 @@ export interface TutorialsApi {
   gaps(company: string, status: GapStatus | "all"): Promise<TutorialGap[]>;
   gapCount(company: string): Promise<number>;
   setGap(id: string, status: GapStatus, tutorial?: string | null): Promise<void>;
+  /** Registra o progresso da pessoa (nulo: o tutorial não conta para ela). */
+  progress(id: string, action: ProgressAction): Promise<TutorialProgress | null>;
+  /** Quem concluiu volta a pendente; devolve quantas pessoas. */
+  askReread(id: string): Promise<number>;
 }
 
 export const serverTutorials: TutorialsApi = {
@@ -498,6 +517,15 @@ export const serverTutorials: TutorialsApi = {
       p_tutorial: tutorial ?? null,
     });
   },
+  async progress(id, action) {
+    return (await rpc("set_tutorial_progress", {
+      p_tutorial: id,
+      p_action: action,
+    })) as TutorialProgress | null;
+  },
+  async askReread(id) {
+    return ((await rpc("ask_tutorial_reread", { p_tutorial: id })) ?? 0) as number;
+  },
 };
 
 /** As palavras que a busca ignora (as mesmas de public.search_tutorials). */
@@ -626,6 +654,8 @@ type DemoTutorial = TutorialDetail & {
 let demoStore: DemoTutorial[] | null = null;
 const demoVideos = new Map<string, string>();
 let demoGaps: TutorialGap[] = [];
+/** O progresso de quem está na demonstração, por tutorial. */
+const demoProgress = new Map<string, TutorialProgress>();
 
 const paragraph = (text: string): RichNode => ({
   type: "paragraph",
@@ -788,6 +818,9 @@ export function demoTutorials(data: Snapshot, user: string): TutorialsApi {
       audience: edit ? t.aud : null,
       draft: edit ? t.draft : null,
       can_edit: edit,
+      trackable: forMe(t),
+      progress: demoProgress.get(t.id) ?? null,
+      trails: [],
     };
   };
   const find = (id: string) => {
@@ -1100,6 +1133,36 @@ export function demoTutorials(data: Snapshot, user: string): TutorialsApi {
       g.tutorial_title = store.find((t) => t.id === g.tutorial_id)?.title ?? null;
       g.handled_by_name = status === "open" ? null : name(user);
       g.handled_at = status === "open" ? null : now();
+    },
+    async progress(id, action) {
+      const t = store.find((x) => x.id === id);
+      if (!t || !forMe(t)) return null;
+      const p = demoProgress.get(id) ?? {
+        completed_at: null,
+        completed_version: null,
+        completed_how: null,
+        undone: false,
+      };
+      const before = p.completed_at;
+      if (action === "auto" && !p.completed_at && !p.undone)
+        Object.assign(p, { completed_at: now(), completed_version: t.version, completed_how: "auto" });
+      else if (action === "complete")
+        Object.assign(p, { completed_at: now(), completed_version: t.version, completed_how: "manual", undone: false });
+      else if (action === "undo")
+        Object.assign(p, { completed_at: null, completed_version: null, completed_how: null, undone: true });
+      demoProgress.set(id, p);
+      if (p.completed_at !== before)
+        window.dispatchEvent(
+          new CustomEvent("mavi:tutorials", { detail: { kind: "tutorials", progress: true, user, tutorial: id } }),
+        );
+      return { ...p };
+    },
+    async askReread(id) {
+      find(id);
+      const p = demoProgress.get(id);
+      if (!p?.completed_at) return 0;
+      demoProgress.set(id, { completed_at: null, completed_version: null, completed_how: null, undone: false });
+      return 1;
     },
   };
   function logGap(question: string, source: TutorialGap["source"], module: string) {

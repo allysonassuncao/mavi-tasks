@@ -59,6 +59,7 @@
     "test:db:cases": "node scripts/test-success-cases.mjs",
     "test:db:tutorials": "node scripts/test-tutorials.mjs",
     "test:db:tutorials-mavi": "node scripts/test-tutorials-mavi.mjs",
+    "test:db:tutorial-trails": "node scripts/test-tutorial-trails.mjs",
     "test:db:notices": "node scripts/test-notice-board.mjs",
     "test:db:copilot": "node scripts/test-task-copilot.mjs",
     "test:db:copilot-learning": "node scripts/test-copilot-learning.mjs",

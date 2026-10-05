@@ -105,6 +105,8 @@ export function TutorialEditor({
   const [error, setError] = useState("");
   const [tagText, setTagText] = useState("");
   const [versions, setVersions] = useState(false);
+  // Ao publicar uma alteração: quem já concluiu volta a pendente.
+  const [reread, setReread] = useState(false);
   // A transcrição de cada vídeo enviado, atualizada pelos avisos ao vivo.
   const [media, setMedia] = useState<TutorialMedia[]>(detail?.media ?? []);
   const reloadMedia = useMemo(() => {
@@ -199,9 +201,10 @@ export function TutorialEditor({
       setDirty(false);
       setTagText("");
       if (publish) {
+        const again = reread && r.version > 1 ? await api.askReread(r.id).catch(() => 0) : 0;
         notify(
           r.version > 1
-            ? `Alterações publicadas (versão ${r.version}).`
+            ? `Alterações publicadas (versão ${r.version}).${again ? ` ${again === 1 ? "1 pessoa volta" : `${again} pessoas voltam`} a ter o tutorial pendente.` : ""}`
             : "Tutorial publicado. O público escolhido já pode ler.",
         );
         // A dúvida que deu origem ao tutorial fica resolvida por ele.
@@ -463,6 +466,24 @@ export function TutorialEditor({
             }}
           />
 
+          {published && (
+            <fieldset className="notice-block">
+              <legend>Ao publicar</legend>
+              <label className="checkbox-label">
+                <Checkbox
+                  checked={reread}
+                  onCheckedChange={(v) => setReread(v === true)}
+                  disabled={locked}
+                />
+                Pedir que releiam
+              </label>
+              <small>
+                Quem já concluiu volta a ter o tutorial pendente (também nas trilhas). Sem marcar, continua
+                concluído e vê o aviso de que ele foi atualizado.
+              </small>
+            </fieldset>
+          )}
+
           {id && detail && (
             <fieldset className="notice-block tutorial-danger">
               <legend>Mais</legend>
@@ -537,19 +558,35 @@ export function TutorialEditor({
 const KINDS = { role: "Papel", team: "Equipe", user: "Pessoa" } as const;
 type Kind = keyof typeof KINDS;
 
-/** Quem vê: todos, ou a soma de papéis, equipes e pessoas, com exclusões. */
-function AudiencePicker({
+/**
+ * Quem vê: todos, ou a soma de papéis, equipes e pessoas, com exclusões.
+ * As trilhas também usam para quem é obrigado (sem exclusões, sem "todos"
+ * marcado de início).
+ */
+export function AudiencePicker({
   data,
   user,
   value,
   disabled,
   onChange,
+  legend = "Quem vê",
+  allLabel = "Todos da agência",
+  hint = "Os públicos se somam. Quem entrar depois numa equipe escolhida passa a ver na hora.",
+  exclude = true,
+  estimate = "além de quem edita",
 }: {
   data: Snapshot;
   user: string;
   value: TutorialAudience;
   disabled: boolean;
   onChange: (a: Partial<TutorialAudience>) => void;
+  legend?: string;
+  allLabel?: string;
+  hint?: string;
+  /** Mostra "Excluir alguém…". */
+  exclude?: boolean;
+  /** O fim da conta de pessoas ("Hoje: 3 pessoas, …"). */
+  estimate?: string;
 }) {
   const [kind, setKind] = useState<Kind>("role");
   const active = data.members.filter((m) => m.active);
@@ -610,20 +647,18 @@ function AudiencePicker({
   }).length;
   return (
     <fieldset className="notice-block">
-      <legend>Quem vê</legend>
+      <legend>{legend}</legend>
       <label className="checkbox-label">
         <Checkbox
           checked={value.aud_all}
           onCheckedChange={(v) => onChange({ aud_all: v === true })}
           disabled={disabled}
         />
-        Todos da agência
+        {allLabel}
       </label>
       {!value.aud_all && (
         <>
-          <small>
-            Os públicos se somam. Quem entrar depois numa equipe escolhida passa a ver na hora.
-          </small>
+          <small>{hint}</small>
           <div className="notice-audience-add">
             <Select
               value={kind}
@@ -677,6 +712,7 @@ function AudiencePicker({
           )}
         </>
       )}
+      {exclude && (
       <div className="notice-exclude">
         <Select
           key={`x-${value.aud_exclude.length}`}
@@ -711,9 +747,11 @@ function AudiencePicker({
           </span>
         ))}
       </div>
+      )}
       <p className="notice-estimate">
         <Users size={15} aria-hidden="true" />
-        Hoje: {people === 1 ? "1 pessoa" : `${people} pessoas`}, além de quem edita
+        Hoje: {people === 1 ? "1 pessoa" : `${people} pessoas`}
+        {estimate ? `, ${estimate}` : ""}
       </p>
     </fieldset>
   );

@@ -8,7 +8,9 @@ import {
 } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
+  CircleCheck,
   CircleHelp,
   Clock3,
   Copy,
@@ -17,6 +19,8 @@ import {
   ListTree,
   Pencil,
   Plus,
+  RefreshCw,
+  Route,
   Search,
   Settings2,
   Users,
@@ -30,6 +34,18 @@ import { TutorialMediaContext, TutorialVideoInfo } from "./TutorialVideo";
 import { TutorialEditor } from "./TutorialEditor";
 import { TutorialSearchResults } from "./TutorialSearch";
 import { TutorialGaps } from "./TutorialGaps";
+import { RequiredTrails, TrailBar, TrailView, TrailsTab } from "./TutorialTrails";
+import { TutorialTrailEditor } from "./TutorialTrailEditor";
+import {
+  TRAIL_PARAM,
+  demoTrails,
+  itemStates,
+  nextInTrail,
+  serverTrails,
+  type TrailDetail,
+  type TrailRow,
+  type TrailsApi,
+} from "./tutorial-trails";
 import { headingAnchors } from "./rich-text";
 import {
   TUTORIAL_MODULES,
@@ -44,6 +60,7 @@ import {
   type TutorialDetail,
   type TutorialFacet,
   type TutorialGap,
+  type TutorialProgress,
   type TutorialRow,
   type TutorialScope,
   type TutorialsApi,
@@ -92,8 +109,15 @@ export function TutorialsPage({
     [demo],
   ); // eslint-disable-line react-hooks/exhaustive-deps
   const videoUrls = useMemo(() => videoUrlCache(api), [api]);
+  const trailsApi = useMemo(
+    () => (demo ? demoTrails(data, user, api) : serverTrails),
+    [api],
+  ); // eslint-disable-line react-hooks/exhaustive-deps
   const [tab, setTab] = useUrlState<string>("aba", "");
   const [openId, setOpenId] = useUrlState<string>(TUTORIAL_PARAM, "");
+  const [trailId, setTrailId] = useUrlState<string>(TRAIL_PARAM, "");
+  const [editingTrail, setEditingTrail] = useState<{ detail: TrailDetail | null } | null>(null);
+  const [trailRows, setTrailRows] = useState<TrailRow[]>([]);
   const [term, setTerm] = useUrlState<string>("termo", "");
   const [module, setModule] = useUrlState<string>("modulo", "");
   const [category, setCategory] = useUrlState<string>("categoria", "");
@@ -111,17 +135,18 @@ export function TutorialsPage({
   } | null>(null);
   const [gapCount, setGapCount] = useState(0);
   const gapsTab = tab === "duvidas" && isLeader;
+  const trailsTab = tab === "trilhas";
   const scope: TutorialScope = tab === "admin" && isLeader ? "admin" : "library";
   const tags = useMemo(() => tagParam.split("|").filter(Boolean), [tagParam]);
   // Na biblioteca, buscar é com a MAVI (Enter); a lista mostra os resultados dela.
-  const searching = !gapsTab && scope === "library" && !!term;
+  const searching = !gapsTab && !trailsTab && scope === "library" && !!term;
   const request = useRef(0);
 
   useEffect(() => setTyped(term), [term]);
 
   const load = useCallback(
     (offset = 0) => {
-      if (searching || gapsTab) return;
+      if (searching || gapsTab || trailsTab) return;
       const n = ++request.current;
       if (!offset) setError("");
       api
@@ -148,7 +173,7 @@ export function TutorialsPage({
         });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api, company, scope, term, module, category, tagParam, searching, gapsTab],
+    [api, company, scope, term, module, category, tagParam, searching, gapsTab, trailsTab],
   );
   const loadFacets = useCallback(() => {
     api
@@ -165,11 +190,20 @@ export function TutorialsPage({
   useEffect(loadFacets, [loadFacets]);
 
   // Avisos ao vivo (App.tsx repassa como "mavi:tutorials"): a lista pergunta
-  // de novo o que a pessoa pode ver, agrupando rajadas de avisos.
+  // de novo o que a pessoa pode ver, agrupando rajadas de avisos. Os de
+  // trilhas e de progresso só releem as trilhas (o tutorial aberto fica).
   const reloadSoon = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const trailSoon = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const [tick, setTick] = useState(0);
+  const [trailTick, setTrailTick] = useState(0);
+  const refreshTrails = useCallback(() => {
+    clearTimeout(trailSoon.current);
+    trailSoon.current = setTimeout(() => setTrailTick((n) => n + 1), 400);
+  }, []);
   const refresh = useCallback(() => {
     clearTimeout(reloadSoon.current);
     reloadSoon.current = setTimeout(() => {
@@ -177,14 +211,35 @@ export function TutorialsPage({
       loadFacets();
       setTick((n) => n + 1);
     }, 400);
-  }, [load, loadFacets]);
+    refreshTrails();
+  }, [load, loadFacets, refreshTrails]);
   useEffect(() => {
-    window.addEventListener("mavi:tutorials", refresh);
-    return () => {
-      window.removeEventListener("mavi:tutorials", refresh);
-      clearTimeout(reloadSoon.current);
+    const onLive = (e: Event) => {
+      const change = (e as CustomEvent<{ trails?: boolean; progress?: boolean }>).detail ?? {};
+      if (change.trails || change.progress) refreshTrails();
+      else refresh();
     };
-  }, [refresh]);
+    window.addEventListener("mavi:tutorials", onLive);
+    return () => {
+      window.removeEventListener("mavi:tutorials", onLive);
+      clearTimeout(reloadSoon.current);
+      clearTimeout(trailSoon.current);
+    };
+  }, [refresh, refreshTrails]);
+  // As trilhas da pessoa: as obrigatórias no topo da biblioteca e o número na aba.
+  useEffect(() => {
+    let alive = true;
+    trailsApi
+      .list(company)
+      .then((r) => alive && setTrailRows(r))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [trailsApi, company, trailTick]);
+  const pendingTrails = trailRows.filter(
+    (r) => r.required_for_me && !(r.total > 0 && r.done === r.total),
+  ).length;
 
   const categories = facets.filter((f) => f.kind === "category");
   const tagFacets = facets.filter((f) => f.kind === "tag");
@@ -200,6 +255,25 @@ export function TutorialsPage({
   const companyPath = routeParts(window.location.pathname).company;
   const linkTo = (id: string, anchor = "") =>
     `${window.location.origin}${pageUrl("tutorials", companyPath)}?${TUTORIAL_PARAM}=${id}${anchor ? `#${anchor}` : ""}`;
+
+  if (editingTrail)
+    return (
+      <TutorialTrailEditor
+        api={trailsApi}
+        tutorials={api}
+        company={company}
+        data={data}
+        user={user}
+        detail={editingTrail.detail}
+        notify={notify}
+        onClose={(id) => {
+          setEditingTrail(null);
+          setTrailId(id ?? "");
+          if (!id) setTab("trilhas");
+          refreshTrails();
+        }}
+      />
+    );
 
   if (editing)
     return (
@@ -229,6 +303,9 @@ export function TutorialsPage({
         <TutorialReader
           key={`${openId}-${tick}`}
           api={api}
+          trailsApi={trailsApi}
+          trailId={trailId}
+          trailTick={trailTick}
           id={openId}
           data={data}
           videoUrls={videoUrls}
@@ -236,8 +313,17 @@ export function TutorialsPage({
           notify={notify}
           onBack={() => setOpenId("")}
           onEdit={(detail) => setEditing({ detail })}
+          onOpenTrail={(id) => {
+            setOpenId("");
+            setTrailId(id);
+          }}
+          onOpenTutorial={(id) => {
+            setOpenId(id);
+            window.scrollTo({ top: 0 });
+          }}
           onPick={(kind, value) => {
             setOpenId("");
+            setTrailId("");
             setTab("");
             if (kind === "module") setModule(value);
             else if (kind === "category") setCategory(value);
@@ -247,6 +333,26 @@ export function TutorialsPage({
       </TutorialMediaContext.Provider>
     );
 
+  if (trailId)
+    return (
+      <TrailView
+        api={trailsApi}
+        id={trailId}
+        data={data}
+        isLeader={isLeader}
+        tick={trailTick}
+        onBack={() => {
+          setTrailId("");
+          setTab("trilhas");
+        }}
+        onOpenTutorial={(id) => {
+          setOpenId(id);
+          window.scrollTo({ top: 0 });
+        }}
+        onEdit={(detail) => setEditingTrail({ detail })}
+      />
+    );
+
   return (
     <div className="tutorials-page">
       <form
@@ -254,7 +360,7 @@ export function TutorialsPage({
         role="search"
         onSubmit={(e) => {
           e.preventDefault();
-          if (gapsTab) setTab("");
+          if (gapsTab || trailsTab) setTab("");
           setTerm(typed.trim());
         }}
       >
@@ -296,35 +402,48 @@ export function TutorialsPage({
         )}
       </form>
 
-      {isLeader && (
-        <nav className="cases-tabs" aria-label="Tutoriais">
-          {[
-            { param: "", label: "Tutoriais", icon: BookOpen },
-            { param: "admin", label: "Administração", icon: Settings2 },
-            { param: "duvidas", label: "Dúvidas sem tutorial", icon: CircleHelp },
-          ].map((t) => (
+      <nav className="cases-tabs" aria-label="Tutoriais">
+        {[
+          { param: "", label: "Tutoriais", icon: BookOpen, count: 0 },
+          { param: "trilhas", label: "Trilhas", icon: Route, count: pendingTrails },
+          ...(isLeader
+            ? [
+                { param: "admin", label: "Administração", icon: Settings2, count: 0 },
+                { param: "duvidas", label: "Dúvidas sem tutorial", icon: CircleHelp, count: gapCount },
+              ]
+            : []),
+        ].map((t) => {
+          const on =
+            (t.param === "trilhas" && trailsTab) ||
+            (t.param === "admin" && scope === "admin") ||
+            (t.param === "duvidas" && gapsTab) ||
+            (!t.param && !trailsTab && scope !== "admin" && !gapsTab);
+          return (
             <button
               type="button"
               key={t.param}
-              className={
-                tab === t.param || (!t.param && tab !== "admin" && tab !== "duvidas")
-                  ? "active"
-                  : ""
-              }
-              aria-current={tab === t.param ? "page" : undefined}
+              className={on ? "active" : ""}
+              aria-current={on ? "page" : undefined}
               onClick={() => setTab(t.param)}
             >
               <t.icon size={16} />
               {t.label}
-              {t.param === "duvidas" && gapCount > 0 && (
-                <span className="nav-count">{gapCount}</span>
-              )}
+              {t.count > 0 && <span className="nav-count">{t.count}</span>}
             </button>
-          ))}
-        </nav>
-      )}
+          );
+        })}
+      </nav>
 
-      {gapsTab ? (
+      {trailsTab ? (
+        <TrailsTab
+          api={trailsApi}
+          company={company}
+          isLeader={isLeader}
+          tick={trailTick}
+          onOpen={setTrailId}
+          onNew={() => setEditingTrail({ detail: null })}
+        />
+      ) : gapsTab ? (
         <TutorialGaps
           api={api}
           company={company}
@@ -336,6 +455,9 @@ export function TutorialsPage({
         />
       ) : (
       <>
+      {scope === "library" && !filtered && (
+        <RequiredTrails rows={trailRows} onOpen={setTrailId} />
+      )}
       <div className="cases-filters">
         <div
           className="cases-niche-row"
@@ -654,6 +776,9 @@ function AdminTable({
 /** A tutorial for reading: index on the side, sections with anchors. */
 function TutorialReader({
   api,
+  trailsApi,
+  trailId,
+  trailTick,
   id,
   data,
   videoUrls,
@@ -661,9 +786,15 @@ function TutorialReader({
   notify,
   onBack,
   onEdit,
+  onOpenTrail,
+  onOpenTutorial,
   onPick,
 }: {
   api: TutorialsApi;
+  trailsApi: TrailsApi;
+  /** Aberto por uma trilha: a faixa no topo e o próximo no fim. */
+  trailId: string;
+  trailTick: number;
   id: string;
   data: Snapshot;
   videoUrls: (ids: string[]) => Promise<Record<string, string>>;
@@ -671,23 +802,104 @@ function TutorialReader({
   notify: (message: string) => void;
   onBack: () => void;
   onEdit: (detail: TutorialDetail) => void;
+  onOpenTrail: (id: string) => void;
+  onOpenTutorial: (id: string) => void;
   onPick: (kind: "module" | "category" | "tag", value: string) => void;
 }) {
   const [detail, setDetail] = useState<TutorialDetail | null | undefined>();
   const [error, setError] = useState("");
   const [active, setActive] = useState("");
+  const [progress, setProgress] = useState<TutorialProgress | null>(null);
+  const [trail, setTrail] = useState<TrailDetail | null>(null);
+  const [marking, setMarking] = useState(false);
   const body = useRef<HTMLDivElement>(null);
+  const end = useRef<HTMLDivElement>(null);
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
 
   useEffect(() => {
     let alive = true;
     api
       .detail(id)
-      .then((d) => alive && setDetail(d))
+      .then((d) => {
+        if (!alive) return;
+        setDetail(d);
+        setProgress(d?.progress ?? null);
+      })
       .catch((e) => alive && setError((e as Error).message));
     return () => {
       alive = false;
     };
   }, [api, id]);
+
+  // A trilha de onde veio (relida quando o progresso muda).
+  useEffect(() => {
+    if (!trailId) {
+      setTrail(null);
+      return;
+    }
+    let alive = true;
+    trailsApi
+      .detail(trailId)
+      .then((t) => alive && setTrail(t))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [trailsApi, trailId, trailTick, progress?.completed_at]);
+
+  // Abrir conta como "abriu"; chegar ao fim (depois de um tempo na página)
+  // conclui sozinho, menos para quem desmarcou.
+  const trackable = !!detail?.trackable;
+  useEffect(() => {
+    if (!detail || !trackable) return;
+    void api.progress(detail.id, "open").catch(() => {});
+    const el = end.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const started = Date.now();
+    const minimum = Math.min(30_000, Math.max(8_000, readingMinutes(detail.body) * 15_000));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let fired = false;
+    const fire = () => {
+      const p = progressRef.current;
+      if (fired || p?.completed_at || p?.undone) return;
+      fired = true;
+      api
+        .progress(detail.id, "auto")
+        .then((next) => {
+          if (!next) return;
+          setProgress(next);
+          if (next.completed_at) notify("Tutorial concluído.");
+        })
+        .catch(() => {
+          fired = false;
+        });
+    };
+    const observer = new IntersectionObserver((entries) => {
+      clearTimeout(timer);
+      if (!entries.some((e) => e.isIntersecting)) return;
+      timer = setTimeout(fire, Math.max(0, minimum - (Date.now() - started)));
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
+  }, [api, detail, trackable]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const mark = async (action: "complete" | "undo") => {
+    if (!detail) return;
+    setMarking(true);
+    try {
+      const next = await api.progress(detail.id, action);
+      if (next) setProgress(next);
+      notify(action === "undo" ? "Marcado como não concluído." : "Tutorial concluído.");
+    } catch (e) {
+      notify((e as Error).message || "Não foi possível marcar.");
+    } finally {
+      setMarking(false);
+    }
+  };
 
   const sections = useMemo(
     () => (detail ? headingAnchors(detail.body) : []),
@@ -771,11 +983,35 @@ function TutorialReader({
     );
 
   const unpublished = detail.status === "draft";
+  const completed = !!progress?.completed_at;
+  const updated =
+    completed && progress?.completed_version != null && detail.version > progress.completed_version;
+  // Na trilha: a posição deste tutorial, se está travado e o próximo.
+  const inTrail = trail?.items.some((i) => i.tutorial_id === detail.id) ? trail : null;
+  const trailState = inTrail
+    ? itemStates(inTrail, inTrail.items)[inTrail.items.findIndex((i) => i.tutorial_id === detail.id)]
+    : null;
+  const next = inTrail ? nextInTrail(inTrail.items, detail.id) : null;
+  const nextLocked = !!inTrail?.sequential && !completed;
   return (
     <div className="tutorial-reader">
-      <BackLink onBack={onBack} />
+      {inTrail ? (
+        <button type="button" className="text-btn tutorial-back" onClick={() => onOpenTrail(inTrail.id)}>
+          <ArrowLeft size={15} /> Voltar à trilha
+        </button>
+      ) : (
+        <BackLink onBack={onBack} />
+      )}
+      {inTrail && (
+        <TrailBar trail={inTrail} tutorial={detail.id} onOpenTrail={() => onOpenTrail(inTrail.id)} />
+      )}
       <div className={`tutorial-layout ${sections.length ? "with-toc" : ""}`}>
         <article className="tutorial-article">
+          {trailState === "locked" && (
+            <p className="tutorial-banner" role="status">
+              Esta trilha é em sequência: conclua os tutoriais anteriores antes deste.
+            </p>
+          )}
           {(unpublished || detail.draft) && (
             <p className="tutorial-banner" role="status">
               {unpublished
@@ -808,6 +1044,25 @@ function TutorialReader({
               {detail.audience && (
                 <span>
                   <Users size={14} /> {audienceSummary(detail.audience, data)}
+                </span>
+              )}
+              {completed && (
+                <span className={`tutorial-done-chip ${updated ? "updated" : ""}`}>
+                  {updated ? <RefreshCw size={13} /> : <CircleCheck size={13} />}
+                  {updated ? "Atualizado depois que você concluiu" : "Concluído"}
+                </span>
+              )}
+              {!!detail.trails?.length && (
+                <span className="tutorial-in-trails">
+                  <Route size={14} /> Trilha{detail.trails.length > 1 ? "s" : ""}:{" "}
+                  {detail.trails.map((t, i) => (
+                    <span key={t.id}>
+                      {i > 0 && ", "}
+                      <button type="button" className="link-btn" onClick={() => onOpenTrail(t.id)}>
+                        {t.title}
+                      </button>
+                    </span>
+                  ))}
                 </span>
               )}
             </div>
@@ -848,6 +1103,94 @@ function TutorialReader({
               ))}
             </footer>
           )}
+          {trackable && (
+            <section className={`tutorial-finish ${completed ? (updated ? "updated" : "done") : ""}`} aria-label="Conclusão">
+              {!completed ? (
+                <>
+                  <span>
+                    <strong>Terminou?</strong>
+                    <small>
+                      {progress?.undone
+                        ? "Você desmarcou: chegar ao fim não marca mais sozinho."
+                        : "Chegar ao fim marca sozinho; ou marque agora."}
+                    </small>
+                  </span>
+                  <Button className="btn primary" onClick={() => void mark("complete")} loading={marking}>
+                    <CircleCheck size={15} /> Marcar como concluído
+                  </Button>
+                </>
+              ) : updated ? (
+                <>
+                  <span>
+                    <strong>
+                      <RefreshCw size={15} /> Atualizado depois que você concluiu
+                    </strong>
+                    <small>
+                      Você concluiu a versão {progress?.completed_version}; agora está na versão {detail.version}.
+                    </small>
+                  </span>
+                  <span className="tutorial-finish-actions">
+                    <button type="button" className="text-btn" onClick={() => void mark("undo")} disabled={marking}>
+                      Desmarcar
+                    </button>
+                    <Button className="btn primary" onClick={() => void mark("complete")} loading={marking}>
+                      Li a versão nova
+                    </Button>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    <strong>
+                      <CircleCheck size={15} /> Concluído
+                    </strong>
+                    <small>
+                      Em {shortDate(progress!.completed_at)}
+                      {progress?.completed_how === "auto" ? ", ao chegar ao fim" : ""}.
+                    </small>
+                  </span>
+                  <button type="button" className="text-btn" onClick={() => void mark("undo")} disabled={marking}>
+                    Desmarcar
+                  </button>
+                </>
+              )}
+            </section>
+          )}
+          {inTrail && (
+            <section className="tutorial-trail-next" aria-label="Na trilha">
+              {next ? (
+                <>
+                  <span>
+                    <small>Próximo na trilha</small>
+                    <strong>{next.title}</strong>
+                    {nextLocked && <small>Conclua este tutorial para liberar o próximo.</small>}
+                  </span>
+                  <Button
+                    className="btn secondary"
+                    onClick={() => onOpenTutorial(next.tutorial_id)}
+                    disabled={nextLocked}
+                  >
+                    Próximo <ArrowRight size={15} />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span>
+                    <small>Último tutorial da trilha</small>
+                    <strong>
+                      {inTrail.total > 0 && inTrail.done === inTrail.total
+                        ? "Você concluiu a trilha."
+                        : `${inTrail.done} de ${inTrail.total} concluídos.`}
+                    </strong>
+                  </span>
+                  <Button className="btn secondary" onClick={() => onOpenTrail(inTrail.id)}>
+                    Ver a trilha
+                  </Button>
+                </>
+              )}
+            </section>
+          )}
+          <div ref={end} className="tutorial-end" aria-hidden="true" />
         </article>
         {!!sections.length && (
           <aside className="tutorial-toc" aria-label="Índice do tutorial">

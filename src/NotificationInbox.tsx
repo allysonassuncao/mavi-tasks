@@ -21,6 +21,7 @@ import {
   Megaphone,
   Lightbulb,
   ServerCrash,
+  Route,
 } from "lucide-react";
 import "./due-rules.css";
 import { useState } from "react";
@@ -113,6 +114,10 @@ export function InboxList({
                 <span className="inbox-system due-risk" aria-hidden="true">
                   <ServerCrash size={15} />
                 </span>
+              ) : n.kind === "tutorial_trail" ? (
+                <span className="inbox-system" aria-hidden="true">
+                  <Route size={15} />
+                </span>
               ) : n.kind === "media_balance" ? (
                 <span className="inbox-system due-risk" aria-hidden="true">
                   <Wallet size={15} />
@@ -154,6 +159,7 @@ export function InboxList({
                 n.kind === "campaign_alert" ||
                 n.kind === "campaign_insight" ||
                 n.kind === "job_alert" ||
+                n.kind === "tutorial_trail" ||
                 n.kind === "tasks_assigned" ||
                 n.kind === "tasks_priority" ||
                 n.kind === "copilot_lessons" ||
