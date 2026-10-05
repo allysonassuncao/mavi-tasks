@@ -231,6 +231,21 @@ describe("worker do Radar pessoal", () => {
     expect(calls.some((c) => c.url.includes("rpc/ai_personal_radar_store"))).toBe(false);
   });
 
+  it("a reserva devolve só o mesmo grupo vazio: para em vez de girar em falso", async () => {
+    let claims = 0;
+    const { fetchImpl } = database({
+      "rpc/ai_personal_radar_claim": () => (claims++, [{ group_id: group, company_id: company }]),
+      "rpc/ai_personal_radar_material": null,
+      "rpc/ai_worker_route": null,
+    });
+    const stats = await runPersonalRadar(
+      { ...env, personalRadarBudgetMs: 400_000 },
+      { fetch: fetchImpl, llm: vi.fn(), embed, now: () => 0 },
+    );
+    expect(stats.skipped).toBe(1);
+    expect(claims).toBe(2);
+  });
+
   it("resposta sem JSON vai para ai_personal_radar_fail", async () => {
     let claims = 0;
     const { fetchImpl, calls } = database({

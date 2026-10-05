@@ -881,6 +881,8 @@ export async function runPersonalRadar(env: PersonalRadarEnv, deps: AiDeps) {
     if (!companies.has(id)) companies.set(id, companyOf(env, deps, id));
     return companies.get(id)!;
   };
+  // Os grupos que voltaram sem nada para ler nesta rodada.
+  const empty = new Set<string>();
   // Uma leitura leva até ~60 s (200 mensagens e o contexto).
   while (now() < deadline - 70_000) {
     const claimed = await workerRpc<{ group_id: string; company_id: string }[]>(
@@ -890,13 +892,20 @@ export async function runPersonalRadar(env: PersonalRadarEnv, deps: AiDeps) {
       { p_limit: 4 },
     );
     if (!claimed.length) break;
+    // Só os mesmos grupos vazios de novo: a fila está girando em falso.
+    if (claimed.every((c) => empty.has(c.group_id))) {
+      console.error("radar pessoal: a reserva devolveu só grupos sem nada para ler", claimed.map((c) => c.group_id));
+      break;
+    }
     await Promise.all(
       claimed.map(async (c) => {
         try {
           // Com mais para ler (o histórico), o grupo volta na próxima reserva.
           const r = await readGroup(env, deps, await company(c.company_id), c.group_id);
-          if (r.skipped) stats.skipped++;
-          else {
+          if (r.skipped) {
+            stats.skipped++;
+            empty.add(c.group_id);
+          } else {
             stats.groups++;
             stats.items += r.items;
           }

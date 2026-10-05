@@ -878,4 +878,35 @@ await check("filtro por período: pela chegada, e as contagens seguem o período
   assert.equal(bad.counts.open, all.counts.open);
 });
 
+// ------------------------------------------------------------ a fila não gira em falso
+await check("grupo nunca lido e sem mensagem no histórico: conferido, não volta até chegar mensagem", async () => {
+  const EMPTY = uid(960);
+  // Os outros grupos em dia.
+  await sql(`update whatsapp_groups set synced_until = now() - interval '1 day' where company_id = $1`, [A]);
+  await sql(`update personal_radar_groups set checked_until = now(), claimed_until = null, retry_at = null`);
+  await sql(`insert into whatsapp_groups(id, company_id, jid, title, client_id, synced_until) values ($1,$2,'4@g.us','4282 - Suporte',$3, now())`,
+    [EMPTY, A, client]);
+  await as(null);
+  await rpc("whatsapp_store_members", [WA_SECRET, EMPTY, JSON.stringify([
+    { jid: "5511987654321@s.whatsapp.net", lid: "184@lid", phone: "5511987654321", name: "Bruno" },
+  ]), null]);
+  assert.equal((await sql(`select mavi_private.personal_radar_due($1) as due`, [A]))[0].due, true);
+  assert.deepEqual((await claim()).map((c) => c.group_id), [EMPTY]);
+  assert.equal(await material(EMPTY), null);
+  // Antes: o material soltava a reserva e o grupo voltava na mesma hora, sem fim.
+  assert.deepEqual(await claim(), []);
+  assert.equal((await sql(`select mavi_private.personal_radar_due($1) as due`, [A]))[0].due, false);
+  const [q] = await sql(`select cursor_at, checked_until is not null as checked from personal_radar_groups where group_id = $1`, [EMPTY]);
+  assert.deepEqual([q.cursor_at, q.checked], [null, true]);
+  // Chegou mensagem: volta para a fila.
+  await sql(
+    `insert into whatsapp_messages(id, company_id, group_id, wa_id, sent_at, sender, sender_phone, from_me, kind, body) values
+     ($1,$2,$3,'E1', now(),'186@lid','5511911112222',false,'text','Oi, alguém pode me ajudar?')`,
+    [uid(1301), A, EMPTY],
+  );
+  await touch(EMPTY);
+  assert.deepEqual((await claim()).map((c) => c.group_id), [EMPTY]);
+  assert.equal((await material(EMPTY)).lines.length, 1);
+});
+
 console.log(`\n${passed} verificações do Radar pessoal passaram.`);
