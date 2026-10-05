@@ -28,6 +28,7 @@ import { handleMcp, protectedResource } from "./_mcp.js";
 import { handleMcpCallback } from "./_ai-mcp.js";
 import { handleWhatsapp, whatsappEnv } from "./_whatsapp.js";
 import { handleCases } from "./_cases.js";
+import { handleTutorials } from "./_tutorials.js";
 import { handleNotices } from "./_notices.js";
 import { handleNoticeWriter } from "./_notice-writer.js";
 import { handleReportWriter } from "./_campaign-report-writer.js";
@@ -508,6 +509,8 @@ export default async function handler(
       );
     else if (action.startsWith("case-"))
       result = await handleCases(body, authorization, driveEnv(), fetch);
+    else if (action.startsWith("tutorial-"))
+      result = await handleTutorials(body, authorization, driveEnv(), fetch);
     else if (action === "notice-mavi") {
       // A MAVI na escrita de um aviso (funcionalidade 'notice_writer').
       const env = {

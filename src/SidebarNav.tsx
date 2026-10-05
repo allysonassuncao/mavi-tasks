@@ -7,6 +7,7 @@ import {
   Clock3,
   Database,
   FolderKanban,
+  GraduationCap,
   HardDrive,
   LayoutDashboard,
   PanelsTopLeft,
@@ -330,6 +331,17 @@ export function SidebarNav({
           label: "Dashboards",
           icon: PanelsTopLeft,
           to: { page: "dashboards" },
+        },
+      ],
+    },
+    {
+      label: "Ajuda",
+      items: [
+        {
+          key: "tutorials",
+          label: "Tutoriais",
+          icon: GraduationCap,
+          to: { page: "tutorials" },
         },
       ],
     },

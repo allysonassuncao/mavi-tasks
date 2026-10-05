@@ -57,6 +57,7 @@
     "test:db:conversational-agents": "node scripts/test-conversational-agents.mjs",
     "test:db:import-maso-notes": "node scripts/test-import-maso-notes.mjs",
     "test:db:cases": "node scripts/test-success-cases.mjs",
+    "test:db:tutorials": "node scripts/test-tutorials.mjs",
     "test:db:notices": "node scripts/test-notice-board.mjs",
     "test:db:copilot": "node scripts/test-task-copilot.mjs",
     "test:db:copilot-learning": "node scripts/test-copilot-learning.mjs",

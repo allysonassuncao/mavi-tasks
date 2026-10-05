@@ -1,5 +1,6 @@
 import { calendarDays, monthRange } from "./schedule";
 import { EditEntityForm, type EntityEdit } from "./EditEntityForm";
+import { TutorialHelp } from "./TutorialHelp";
 import {
   dashboardIdFromPath,
   maviChatIdFromPath,
@@ -57,6 +58,7 @@ import {
   Megaphone,
   Rocket,
   Trophy,
+  GraduationCap,
   Thermometer,
   Radar,
   BotMessageSquare,
@@ -305,6 +307,10 @@ const AgentsPage = lazy(() =>
 const DashboardsPage = lazy(() =>
   import("./DashboardsPage").then((m) => ({ default: m.DashboardsPage })),
 );
+// Editor and reader of the guides: loaded when first opened.
+const TutorialsPage = lazy(() =>
+  import("./TutorialsPage").then((m) => ({ default: m.TutorialsPage })),
+);
 
 const navigation = [
   { id: "overview", label: "Visão geral", icon: LayoutDashboard },
@@ -332,6 +338,7 @@ const navigation = [
   { id: "storage", label: "Armazenamento", icon: Database },
   { id: "aiUsage", label: "Painel da MAVI", icon: Sparkles },
   { id: "dashboards", label: "Dashboards", icon: PanelsTopLeft },
+  { id: "tutorials", label: "Tutoriais", icon: GraduationCap },
 ] as const;
 // Mutations that return the affected row (see the RPCs in
 // supabase/migrations/20260921120000_performance_optimizations.sql) patch
@@ -1476,6 +1483,7 @@ export default function App() {
       );
       window.dispatchEvent(new CustomEvent("mavi:meetings", { detail: {} }));
       window.dispatchEvent(new CustomEvent("mavi:cases", { detail: {} }));
+      window.dispatchEvent(new CustomEvent("mavi:tutorials", { detail: {} }));
       window.dispatchEvent(new CustomEvent("mavi:notices", { detail: {} }));
       window.dispatchEvent(
         new CustomEvent("mavi:client-notes", { detail: {} }),
@@ -1623,6 +1631,13 @@ export default function App() {
         // Financeiro › Mídia listens for its own notices.
         if (change.kind === "media") {
           window.dispatchEvent(new CustomEvent("mavi:media", { detail: change }));
+          return;
+        }
+        // Tutoriais listens for its own notices.
+        if (change.kind === "tutorials") {
+          window.dispatchEvent(
+            new CustomEvent("mavi:tutorials", { detail: change }),
+          );
           return;
         }
         // Cases de Sucesso listens for its own notices.
@@ -2841,6 +2856,14 @@ export default function App() {
               </Button>
             )}
             <InstallApp notify={notify} />
+            <TutorialHelp
+              page={page}
+              company={company}
+              companyPath={companyPath}
+              data={data}
+              user={user}
+              demo={demo}
+            />
             <button
               type="button"
               className="inbox-toggle"
@@ -3011,6 +3034,9 @@ export default function App() {
                         : "Quanto a MAVI custou, os limites de gasto e o que o Assistente MAVI aprendeu com o feedback do time.",
                       dashboards:
                         "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
+                      tutorials: isLeader
+                        ? "Guias de uso do sistema: escreva passo a passos com seções, imagens e vídeos e escolha quem vê."
+                        : "Guias de uso do sistema: aprenda cada tela com passo a passos, imagens e vídeos.",
                       profile: "Seu nome, sua foto e sua senha.",
                       person:
                         "Quem é, as equipes, a jornada e as tarefas de quem trabalha com você.",
@@ -3055,6 +3081,7 @@ export default function App() {
                   page !== "skills" &&
                   page !== "connections" &&
                   page !== "dashboards" &&
+                  page !== "tutorials" &&
                   page !== "settings" &&
                   (!["products", "contracts", "clients", "projects"].includes(
                     page,
@@ -4269,6 +4296,19 @@ export default function App() {
                     key={company}
                     company={company}
                     data={catalogData}
+                  />
+                </Suspense>
+              )}
+              {page === "tutorials" && (
+                <Suspense fallback={<Loading variant="grid" />}>
+                  <TutorialsPage
+                    key={company}
+                    data={catalogData}
+                    company={company}
+                    user={user}
+                    isLeader={isLeader}
+                    demo={demo}
+                    notify={notify}
                   />
                 </Suspense>
               )}

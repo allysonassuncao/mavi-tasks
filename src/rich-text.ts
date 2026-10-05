@@ -7,7 +7,10 @@ export type RichNode = {
   marks?: RichMark[];
   /**
    * inlineImage: imageId and alt; mention: id (the person) and label;
-   * noteSecret: secretId (o valor cifrado, fora do texto) and label.
+   * noteSecret: secretId (o valor cifrado, fora do texto) and label;
+   * heading (Tutoriais): level 2 or 3; tutorialVideo (Tutoriais): mediaId
+   * (a vídeo enviado) or provider + videoId (YouTube, Loom, Vimeo), and an
+   * optional label.
    */
   attrs?: {
     imageId?: string;
@@ -15,8 +18,97 @@ export type RichNode = {
     id?: string;
     label?: string;
     secretId?: string;
+    level?: number;
+    mediaId?: string;
+    provider?: VideoProvider;
+    videoId?: string;
   };
 };
+/** Where an embedded video plays. Only the id is stored; the app builds the address. */
+export type VideoProvider = "youtube" | "loom" | "vimeo";
+const VIDEO_IDS: Record<VideoProvider, RegExp> = {
+  youtube: /^[\w-]{11}$/,
+  loom: /^[0-9a-f]{32}$/i,
+  vimeo: /^\d{6,12}$/,
+};
+/**
+ * The video of a YouTube, Loom or Vimeo link (the addresses people paste:
+ * watch, youtu.be, shorts, embed, share…), or null.
+ */
+export function videoFromUrl(
+  value: string,
+): { provider: VideoProvider; videoId: string } | null {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  const host = url.hostname.replace(/^(www\.|m\.)/, "");
+  const parts = url.pathname.split("/").filter(Boolean);
+  const pick = (provider: VideoProvider, id: string | null | undefined) =>
+    id && VIDEO_IDS[provider].test(id) ? { provider, videoId: id } : null;
+  if (host === "youtu.be") return pick("youtube", parts[0]);
+  if (host === "youtube.com" || host === "youtube-nocookie.com")
+    return ["embed", "shorts", "live", "v"].includes(parts[0])
+      ? pick("youtube", parts[1])
+      : pick("youtube", url.searchParams.get("v"));
+  if (host === "loom.com" && ["share", "embed"].includes(parts[0]))
+    return pick("loom", parts[1]);
+  if (host === "vimeo.com") return pick("vimeo", parts[0]);
+  if (host === "player.vimeo.com" && parts[0] === "video")
+    return pick("vimeo", parts[1]);
+  return null;
+}
+/** The player's address for an embedded video (built here, never stored). */
+export function videoEmbedUrl(provider: VideoProvider, videoId: string) {
+  if (!VIDEO_IDS[provider]?.test(videoId)) return null;
+  return provider === "youtube"
+    ? `https://www.youtube-nocookie.com/embed/${videoId}?rel=0`
+    : provider === "loom"
+      ? `https://www.loom.com/embed/${videoId}`
+      : `https://player.vimeo.com/video/${videoId}`;
+}
+/** A heading's anchor: its words, without accents, joined by "-". */
+export function slugify(text: string) {
+  return (
+    text
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "secao"
+  );
+}
+/**
+ * The sections of a text (its headings, in order) with unique anchors:
+ * the second "Passo a passo" becomes "passo-a-passo-2".
+ */
+export function headingAnchors(
+  value: string | RichNode,
+): { id: string; level: number; text: string }[] {
+  const doc = typeof value === "string" ? parseDescription(value) : value;
+  const used = new Map<string, number>();
+  const out: { id: string; level: number; text: string }[] = [];
+  const text = (n: RichNode): string =>
+    n.type === "text" ? (n.text ?? "") : (n.content ?? []).map(text).join("");
+  for (const node of doc.content ?? []) {
+    if (node.type !== "heading") continue;
+    const label = text(node).trim();
+    if (!label) continue;
+    const base = slugify(label);
+    const n = (used.get(base) ?? 0) + 1;
+    used.set(base, n);
+    out.push({
+      id: n > 1 ? `${base}-${n}` : base,
+      level: node.attrs?.level === 3 ? 3 : 2,
+      text: label,
+    });
+  }
+  return out;
+}
 /** Text formatting; colored ones carry `attrs.color` as "#rrggbb". */
 export type RichMark = {
   type: string;
@@ -124,6 +216,38 @@ export function sanitizeDescription(value: unknown): RichNode {
             },
           }
         : null;
+    // Títulos de seção (Tutoriais): só os níveis 2 e 3.
+    if (node.type === "heading")
+      return {
+        type: "heading",
+        attrs: { level: node.attrs?.level === 3 ? 3 : 2 },
+        content: Array.isArray(node.content)
+          ? node.content
+              .map((n) => clean(n, depth + 1))
+              .filter((n): n is RichNode => n?.type === "text")
+          : [],
+      };
+    // Vídeo (Tutoriais): um enviado (o id dele) ou o id num provedor
+    // conhecido; nunca um endereço livre.
+    if (node.type === "tutorialVideo") {
+      const label =
+        typeof node.attrs?.label === "string"
+          ? node.attrs.label.slice(0, 200)
+          : "";
+      if (typeof node.attrs?.mediaId === "string" && UUID.test(node.attrs.mediaId))
+        return {
+          type: "tutorialVideo",
+          attrs: { mediaId: node.attrs.mediaId, label },
+        };
+      const provider = node.attrs?.provider;
+      const videoId = node.attrs?.videoId;
+      return provider &&
+        Object.hasOwn(VIDEO_IDS, provider) &&
+        typeof videoId === "string" &&
+        VIDEO_IDS[provider].test(videoId)
+        ? { type: "tutorialVideo", attrs: { provider, videoId, label } }
+        : null;
+    }
     if (
       node.type === "inlineImage" &&
       typeof node.attrs?.imageId === "string" &&
@@ -190,6 +314,7 @@ export function serializeDescription(value: unknown): string {
   const doc = sanitizeDescription(value);
   const hasText = (node: RichNode): boolean =>
     node.type === "inlineImage" ||
+    node.type === "tutorialVideo" ||
     node.type === "mention" ||
     node.type === "noteSecret" ||
     !!node.text?.trim() ||
@@ -283,6 +408,20 @@ export function richTextClipboard(value: string): {
       const { text, html } = inline(node);
       lines.push(text);
       return `<p>${html || "<br>"}</p>`;
+    }
+    if (node.type === "heading") {
+      const { text, html } = inline(node);
+      const tag = node.attrs?.level === 3 ? "h3" : "h2";
+      lines.push(text);
+      return `<${tag}>${html}</${tag}>`;
+    }
+    if (node.type === "tutorialVideo") {
+      const url = node.attrs?.provider
+        ? videoEmbedUrl(node.attrs.provider, node.attrs.videoId ?? "")
+        : null;
+      const label = `[Vídeo${node.attrs?.label ? `: ${node.attrs.label}` : ""}]`;
+      lines.push(url ? `${label} ${url}` : label);
+      return `<p>${escapeHtml(label)}</p>`;
     }
     return (node.content ?? []).map((n) => block(n, depth)).join("");
   };

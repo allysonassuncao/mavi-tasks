@@ -1,5 +1,6 @@
 import { Node, type Editor } from "@tiptap/core";
 import { InlineImage, uploadInlineImage } from "./inline-images";
+import { TutorialVideo } from "./TutorialVideo";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import {
   EditorContent,
@@ -24,8 +25,17 @@ import {
   Redo2,
   ImagePlus,
   KeyRound,
+  Heading2,
+  Heading3,
+  Clapperboard,
+  X,
 } from "lucide-react";
-import { parseDescription, safeHref, serializeDescription } from "./rich-text";
+import {
+  parseDescription,
+  safeHref,
+  serializeDescription,
+  videoFromUrl,
+} from "./rich-text";
 import { mentionExtension, type MentionPerson } from "./mentions";
 import { Loading } from "./ui";
 import { NoteSecretForm, noteSecretExtension } from "./NoteSecret";
@@ -38,6 +48,7 @@ function readableText(editor: Editor) {
   const text = editor.getText({
     textSerializers: {
       inlineImage: () => "[imagem]",
+      tutorialVideo: () => "[vídeo]",
       noteSecret: ({ node }) => `[secreto: ${node.attrs.label}]`,
     },
   });
@@ -80,6 +91,47 @@ const ImageNode = Node.create({
     return ReactNodeViewRenderer(ImageNodeView);
   },
 });
+function VideoNodeView({ node }: NodeViewProps) {
+  return (
+    <NodeViewWrapper className="editor-video" contentEditable={false}>
+      <TutorialVideo
+        mediaId={node.attrs.mediaId || undefined}
+        provider={node.attrs.provider || undefined}
+        videoId={node.attrs.videoId || undefined}
+        label={node.attrs.label || undefined}
+      />
+    </NodeViewWrapper>
+  );
+}
+/** Vídeo no texto (Tutoriais): enviado (mediaId) ou de um provedor. */
+const VideoNode = Node.create({
+  name: "tutorialVideo",
+  group: "block",
+  atom: true,
+  draggable: true,
+  addAttributes() {
+    return {
+      mediaId: { default: "" },
+      provider: { default: "" },
+      videoId: { default: "" },
+      label: { default: "" },
+    };
+  },
+  parseHTML() {
+    return [];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["span", { "data-video": "" }, HTMLAttributes.label || "Vídeo"];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(VideoNodeView);
+  },
+});
+/** Envia um vídeo (Tutoriais) e devolve o id dele. */
+export type VideoUploader = (
+  file: File,
+  onProgress: (fraction: number) => void,
+) => Promise<string>;
 export default function RichTextEditor({
   name = "description",
   defaultValue = "",
@@ -94,6 +146,8 @@ export default function RichTextEditor({
   onChange,
   appendRef,
   secrets,
+  headings = false,
+  videos,
 }: {
   name?: string;
   defaultValue?: string;
@@ -117,6 +171,10 @@ export default function RichTextEditor({
    * aberta, para registrar onde o valor foi visto.
    */
   secrets?: { company: string; client: string; note: string | null };
+  /** Títulos de seção (níveis 2 e 3), que viram o índice (Tutoriais). */
+  headings?: boolean;
+  /** Vídeos no texto: enviados por aqui ou de YouTube, Loom e Vimeo (Tutoriais). */
+  videos?: VideoUploader;
 }) {
   const secretContext = useRef({ note: secrets?.note ?? null });
   secretContext.current.note = secrets?.note ?? null;
@@ -134,13 +192,19 @@ export default function RichTextEditor({
   const fileInput = useRef<HTMLInputElement>(null);
   const uploadLock = useRef(false);
   const [value, setValue] = useState(defaultValue);
+  const [videoPanel, setVideoPanel] = useState(false);
+  const [videoLink, setVideoLink] = useState("");
+  const [videoLabel, setVideoLabel] = useState("");
+  const [videoProgress, setVideoProgress] = useState<number | null>(null);
+  const videoInput = useRef<HTMLInputElement>(null);
   const editor = useEditor({
     extensions: [
       ImageNode,
+      VideoNode,
       noteSecretExtension(secretContext),
       mentionExtension(people),
       StarterKit.configure({
-        heading: false,
+        heading: headings ? { levels: [2, 3] } : false,
         blockquote: false,
         code: false,
         codeBlock: false,
@@ -242,10 +306,56 @@ export default function RichTextEditor({
       onUploading?.(false);
     }
   }
+  function insertVideo(attrs: Record<string, string>) {
+    if (!editor || editor.isDestroyed) return;
+    editor
+      .chain()
+      .focus()
+      .insertContent([
+        { type: "tutorialVideo", attrs: { ...attrs, label: videoLabel.trim() } },
+        { type: "paragraph" },
+      ])
+      .run();
+    setVideoPanel(false);
+    setVideoLink("");
+    setVideoLabel("");
+  }
+  function insertVideoLink() {
+    const found = videoFromUrl(videoLink);
+    if (!found)
+      return setError(
+        "Cole o link de um vídeo do YouTube, do Loom ou do Vimeo.",
+      );
+    setError("");
+    insertVideo(found);
+  }
+  async function uploadVideo(file: File | undefined) {
+    if (!file || !videos || uploadLock.current) return;
+    if (!file.type.startsWith("video/"))
+      return setError("Escolha um arquivo de vídeo (MP4, WebM ou MOV).");
+    uploadLock.current = true;
+    setUploading(true);
+    onUploading?.(true);
+    setError("");
+    setVideoProgress(0);
+    try {
+      const mediaId = await videos(file, setVideoProgress);
+      insertVideo({ mediaId });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      uploadLock.current = false;
+      setUploading(false);
+      setVideoProgress(null);
+      onUploading?.(false);
+    }
+  }
   const state = useEditorState({
     editor,
     selector: ({ editor }) => ({
       bold: editor?.isActive("bold"),
+      h2: editor?.isActive("heading", { level: 2 }),
+      h3: editor?.isActive("heading", { level: 3 }),
       italic: editor?.isActive("italic"),
       bullet: editor?.isActive("bulletList"),
       ordered: editor?.isActive("orderedList"),
@@ -339,6 +449,26 @@ export default function RichTextEditor({
             clearLabel="Sem destaque"
           />
           <span className="editor-toolbar-sep" aria-hidden="true" />
+          {headings &&
+            [
+              { level: 2 as const, icon: Heading2, label: "Título de seção", on: state?.h2 },
+              { level: 3 as const, icon: Heading3, label: "Subtítulo", on: state?.h3 },
+            ].map((h) => (
+              <button
+                key={h.level}
+                type="button"
+                disabled={disabled || uploading}
+                className="icon-btn"
+                aria-label={h.label}
+                title={`${h.label} (aparece no índice)`}
+                aria-pressed={h.on}
+                onClick={() =>
+                  editor.chain().focus().toggleHeading({ level: h.level }).run()
+                }
+              >
+                <h.icon size={17} />
+              </button>
+            ))}
           {actions.slice(2).map((a) => (
             <button
               key={a.label}
@@ -363,6 +493,19 @@ export default function RichTextEditor({
               onClick={() => fileInput.current?.click()}
             >
               <ImagePlus size={17} />
+            </button>
+          )}
+          {videos && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Inserir vídeo"
+              title="Inserir vídeo: enviar arquivo ou link do YouTube, Loom ou Vimeo"
+              aria-pressed={videoPanel}
+              disabled={disabled || uploading}
+              onClick={() => setVideoPanel((v) => !v)}
+            >
+              <Clapperboard size={17} />
             </button>
           )}
           {secrets && (
@@ -394,7 +537,83 @@ export default function RichTextEditor({
             />
           )}
         </div>
-        {uploading && <Loading variant="inline" label="Enviando imagem…" />}
+        {videos && videoPanel && (
+          <div className="editor-video-panel" role="group" aria-label="Inserir vídeo">
+            <input
+              className="ui-input"
+              type="url"
+              value={videoLink}
+              onChange={(e) => setVideoLink(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  insertVideoLink();
+                }
+              }}
+              placeholder="Link do YouTube, Loom ou Vimeo"
+              aria-label="Link do vídeo"
+              disabled={uploading}
+            />
+            <input
+              className="ui-input"
+              type="text"
+              value={videoLabel}
+              maxLength={200}
+              onChange={(e) => setVideoLabel(e.target.value)}
+              placeholder="Legenda (opcional)"
+              aria-label="Legenda do vídeo"
+              disabled={uploading}
+            />
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={uploading || !videoLink.trim()}
+              onClick={insertVideoLink}
+            >
+              Inserir link
+            </button>
+            <span className="editor-video-or">ou</span>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={uploading}
+              onClick={() => videoInput.current?.click()}
+            >
+              Enviar arquivo
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Fechar inserir vídeo"
+              disabled={uploading}
+              onClick={() => setVideoPanel(false)}
+            >
+              <X size={16} />
+            </button>
+            <input
+              ref={videoInput}
+              className="sr-only"
+              type="file"
+              accept="video/mp4,video/webm,video/quicktime,video/*"
+              tabIndex={-1}
+              aria-label="Arquivo de vídeo"
+              onChange={(e) => {
+                void uploadVideo(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+          </div>
+        )}
+        {uploading && (
+          <Loading
+            variant="inline"
+            label={
+              videoProgress !== null
+                ? `Enviando vídeo… ${Math.round(videoProgress * 100)}%`
+                : "Enviando imagem…"
+            }
+          />
+        )}
         <EditorContent editor={editor} />
         <input type="hidden" name={name} value={value} />
       </div>
@@ -429,6 +648,8 @@ export default function RichTextEditor({
         {images
           ? "Formate o texto e insira, cole ou arraste imagens JPG, PNG e WebP (até 5 MB)."
           : "Negrito, itálico, cores, listas e links."}
+        {headings ? " Os títulos de seção viram o índice." : ""}
+        {videos ? " Vídeos: envie até 500 MB ou cole um link." : ""}
         {mentions?.length ? " Digite @ para mencionar alguém." : ""}
         {secrets
           ? " Senhas e tokens: use o botão Secreto (a chave), nunca o texto comum."

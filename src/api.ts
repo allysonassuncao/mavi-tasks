@@ -1323,6 +1323,8 @@ export type LiveChange =
   | { kind: "meeting"; table: string; recording?: string; client?: string }
   /** Cases de Sucesso: a case, its edit waiting for approval or its media changed. */
   | { kind: "cases"; table: string; case?: string }
+  /** Tutoriais: um tutorial (ou a alteração em rascunho dele) mudou. */
+  | { kind: "tutorials"; tutorial?: string }
   /**
    * Mural de avisos: um aviso entregue ou mudado. `users`: quem acabou de
    * recebê-lo, quando são poucos (null: todos recarregam).

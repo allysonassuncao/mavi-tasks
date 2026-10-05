@@ -1,6 +1,7 @@
 import { InlineImage } from "./inline-images";
 import { Fragment, type ReactNode } from "react";
-import { parseDescription, type RichNode } from "./rich-text";
+import { headingAnchors, parseDescription, type RichNode } from "./rich-text";
+import { TutorialVideo } from "./TutorialVideo";
 import { navigate } from "./router";
 import { NoteSecretChip } from "./NoteSecret";
 
@@ -41,12 +42,13 @@ function RichLink({ href, children }: { href: string; children: ReactNode }) {
     </a>
   );
 }
-function renderNode(
-  node: RichNode,
-  key: number,
-  note: string | null = null,
-): ReactNode {
-  const children = node.content?.map((n, i) => renderNode(n, i, note));
+/** What every node of one text shares: the note of secrets and the anchors of its sections, in order. */
+type Ctx = { note: string | null; anchors: string[]; next: number };
+const plainText = (n: RichNode): string =>
+  n.type === "text" ? (n.text ?? "") : (n.content ?? []).map(plainText).join("");
+function renderNode(node: RichNode, key: number, ctx: Ctx): ReactNode {
+  const note = ctx.note;
+  const children = node.content?.map((n, i) => renderNode(n, i, ctx));
   if (node.type === "text") {
     let text: ReactNode = node.text;
     for (const mark of node.marks ?? []) {
@@ -101,6 +103,29 @@ function renderNode(
       );
     case "paragraph":
       return <p key={key}>{children?.length ? children : <br />}</p>;
+    case "heading": {
+      // A âncora de cada seção (o índice do tutorial e os links levam até ela).
+      const id = plainText(node).trim() ? ctx.anchors[ctx.next++] : undefined;
+      return node.attrs?.level === 3 ? (
+        <h3 key={key} id={id} className="rt-heading">
+          {children}
+        </h3>
+      ) : (
+        <h2 key={key} id={id} className="rt-heading">
+          {children}
+        </h2>
+      );
+    }
+    case "tutorialVideo":
+      return (
+        <TutorialVideo
+          key={key}
+          mediaId={node.attrs?.mediaId}
+          provider={node.attrs?.provider}
+          videoId={node.attrs?.videoId}
+          label={node.attrs?.label}
+        />
+      );
     case "bulletList":
       return <ul key={key}>{children}</ul>;
     case "orderedList":
@@ -124,7 +149,11 @@ export function RichTextContent({
   return (
     <div className="rich-text-content">
       {value ? (
-        renderNode(parseDescription(value), 0, note)
+        (() => {
+          const doc = parseDescription(value);
+          const anchors = headingAnchors(doc).map((a) => a.id);
+          return renderNode(doc, 0, { note, anchors, next: 0 });
+        })()
       ) : (
         <p>Nenhuma descrição adicionada.</p>
       )}

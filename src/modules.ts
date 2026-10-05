@@ -56,6 +56,8 @@ export const MEMBER_PAGES: readonly Page[] = [
   "profile",
   "person",
   "inbox",
+  // Tutoriais: todos leem (cada tutorial tem o seu público); líderes escrevem.
+  "tutorials",
   ...MEMBER_OPT_IN,
 ];
 /**

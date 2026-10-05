@@ -29,6 +29,7 @@ export const pagePaths = {
   skills: "/mavi/skills",
   connections: "/mavi/conexoes",
   dashboards: "/dashboards",
+  tutorials: "/tutoriais",
   profile: "/perfil",
   /** The profile of another person: /pessoas/<id> (personIdFromPath). */
   person: "/pessoas",
