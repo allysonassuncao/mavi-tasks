@@ -108,6 +108,39 @@ describe("worker de indexação", () => {
     ]);
   });
 
+  it("grava os vetores de 16 em 16 (cabe nos 3 s do banco)", async () => {
+    let claims = 0;
+    const { fetchImpl, calls } = database({
+      "rpc/ai_index_step": 0,
+      "rpc/ai_claim_chunks": () =>
+        claims++ === 0
+          ? Array.from({ length: 40 }, (_, i) => ({
+              id: i + 1,
+              company_id: company,
+              content: "x",
+            }))
+          : [],
+      "rpc/ai_store_embeddings": (b: any) => b.p_items.length,
+      "rpc/ai_log_indexing": null,
+    });
+    const embed = vi.fn(async (texts: string[]) => ({
+      vectors: texts.map(vec),
+      tokens: 40,
+      model: "text-embedding-3-small",
+    }));
+    const stats = await runIndexer(env, {
+      fetch: fetchImpl,
+      llm: vi.fn(),
+      embed,
+    });
+    expect(stats.embedded).toBe(40);
+    expect(
+      calls
+        .filter((c) => c.url.includes("ai_store_embeddings"))
+        .map((c) => c.body.p_items.length),
+    ).toEqual([16, 16, 8]);
+  });
+
   it("para quando o tempo acaba", async () => {
     let t = 0;
     const { fetchImpl } = database({

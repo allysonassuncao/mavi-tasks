@@ -1899,6 +1899,9 @@ async function readFiles(env: AiEnv, deps: AiDeps) {
   return files.length;
 }
 
+/** Vetores gravados por chamada (ver em runIndexer). */
+const STORE_BATCH = 16;
+
 export async function runIndexer(env: AiEnv, deps: AiDeps) {
   const now = deps.now ?? Date.now;
   const deadline = now() + env.workerBudgetMs;
@@ -1948,8 +1951,11 @@ export async function runIndexer(env: AiEnv, deps: AiDeps) {
         e.cost += cost * share;
         perCompany.set(c.company_id, e);
       }
-      for (let i = 0; i < batch.length; i += 64) {
-        const items = batch.slice(i, i + 64).map((c, k) => ({
+      // Cada vetor entra no índice HNSW: em 05/10/2026, 64 vetores levaram
+      // 2,3 s, quase o limite de 3 s do anon (passava às vezes e o lote
+      // inteiro, já pago na OpenAI, voltava para a fila). De 16 em 16: ~0,6 s.
+      for (let i = 0; i < batch.length; i += STORE_BATCH) {
+        const items = batch.slice(i, i + STORE_BATCH).map((c, k) => ({
           id: c.id,
           embedding: vectorLiteral(vectors[i + k]),
         }));
