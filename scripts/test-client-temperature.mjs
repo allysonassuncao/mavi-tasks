@@ -585,6 +585,19 @@ await check("o pg_cron só acorda o worker quando há trabalho", async () => {
   await sql(`update temperature_signals set status = 'done' where status = 'pending'`);
   await sql(`select mavi_private.ai_temperature_kick()`);
   assert.equal((await sql(`select count(*)::int as n from net.requests`))[0].n, 0);
+  // A leitura pendente de cliente arquivado: a reserva não entrega, o acordar não chama.
+  const [{ id: old }] = await sql(
+    `update temperature_signals set status = 'pending', dirty_at = now() - interval '1 hour', claimed_until = null
+     where id = (select id from temperature_signals limit 1) returning id`,
+  );
+  const [{ client_id: gone }] = await sql(`select client_id from temperature_signals where id = $1`, [old]);
+  await sql(`update clients set archived = true where id = $1`, [gone]);
+  await sql(`select mavi_private.ai_temperature_kick()`);
+  assert.equal((await sql(`select count(*)::int as n from net.requests`))[0].n, 0, "cliente arquivado não acorda");
+  await as(null);
+  assert.ok(!(await rpc("ai_temperature_claim", [SECRET, 60])).some((c) => c.id === old));
+  await sql(`update clients set archived = false where id = $1`, [gone]);
+  await sql(`update temperature_signals set status = 'done' where id = $1`, [old]);
   await sql(`select mavi_private.temperature_daily()`);
   await sql(`select mavi_private.ai_temperature_kick()`);
   const [req] = await sql(`select body, headers from net.requests`);
