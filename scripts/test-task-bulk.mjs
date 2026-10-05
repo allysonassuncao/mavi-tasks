@@ -300,6 +300,61 @@ await check("limite de 500 tarefas por vez", async () => {
   await assert.rejects(bulk(out, [], { kind: "shift", value: 1 }), /ao menos uma/);
 });
 
+await check("mudar o status escolhe quem fica com cada tarefa", async () => {
+  // Migração 20270421090000: a sugestão do novo status, uma pessoa ou manter.
+  const s1 = await newTask(bia, "Post do Dia das Crianças", ana);
+  const s2 = await newTask(caio, "Reels da clínica", ana);
+  const s3 = await newTask(bia, "Banner do site", ana);
+  const r = await bulk(admin, [s1, s2], { kind: "status", value: "review", assignee: "suggested" });
+  assert.deepEqual(
+    r.results.map((x) => [x.ok, x.before.assignee_id, x.after.assignee_id]),
+    [
+      [true, ana, bia],
+      [true, ana, caio],
+    ],
+  );
+  assert.equal((await task(s1)).assignee_id, bia);
+  // Quem recebeu ganha o aviso agrupado, dizendo o novo status.
+  const [notice] = await sql(
+    "select title from notifications where user_id=$1 and kind='tasks_assigned' and link like $2",
+    [bia, `%lote=${r.operation}`],
+  );
+  assert.equal(notice.title, "Ana Admin moveu para Em validação e passou 1 tarefa para você");
+  // Voltar para Correção sugere quem executou por último.
+  const back = await bulk(admin, [s1], {
+    kind: "status",
+    value: "correction",
+    note: "Faltou o logo",
+    assignee: "suggested",
+  });
+  assert.equal(back.results[0].after.assignee_id, ana);
+  // Uma pessoa para todas.
+  const person = await bulk(admin, [s3], { kind: "status", value: "review", assignee: caio });
+  assert.equal(person.results[0].after.assignee_id, caio);
+  // Sem escolha (ou "keep"), cada uma fica com o responsável que tem.
+  const kept = await bulk(admin, [s2], { kind: "status", value: "progress" });
+  assert.equal(kept.results[0].after.assignee_id, caio);
+  // Projeto validado pelo supervisor: vai para o supervisor da equipe.
+  await as(admin);
+  await rpc("update_team", [design, "Design", [ana, bia], [caio]]);
+  const project = await rpc("create_project", [A, contract, "Validação pelo supervisor", null, true, "supervisor"]);
+  const s4 = await as(bia).then(() =>
+    rpc("create_task", [A, contract, "Folder da clínica", ana, "2026-10-02", project, design]),
+  );
+  const sup = await bulk(admin, [s4], { kind: "status", value: "review", assignee: "suggested" });
+  assert.equal(sup.results[0].after.assignee_id, caio);
+  await as(admin);
+  await rpc("update_team", [design, "Design", [ana, bia, caio], []]);
+  await assert.rejects(
+    bulk(admin, [s2], { kind: "status", value: "review", assignee: out.replace("4000", "4999") }),
+    /responsável ativo/,
+  );
+  await assert.rejects(
+    bulk(admin, [s2], { kind: "status", value: "review", assignee: "ninguém" }),
+    /responsável ativo/,
+  );
+});
+
 await check("visões são de cada pessoa e uma abre por padrão", async () => {
   await as(ana);
   const first = await rpc("save_task_view", [A, null, "Pacotes do dia", JSON.stringify({ group: "pack" }), true]);

@@ -3,6 +3,7 @@ import {
   dateKey,
   nextRecurrence,
   projectReview,
+  suggestedAssignee,
   taskActions,
   teamAssignee,
 } from "./domain";
@@ -129,14 +130,20 @@ export class DemoStore {
       const problem = dueReasonError(change.reason);
       if (problem) throw Error(problem);
     }
+    // The review runs on copies: the screen holds the very task objects, so
+    // changing them in place would show the change before applying it.
     const saved = preview
       ? {
-          tasks: structuredClone(this.data.tasks),
+          tasks: this.data.tasks,
           events: [...this.events],
           comments: [...this.comments],
-          hours: structuredClone(this.data.hours),
+          hours: this.data.hours,
         }
       : null;
+    if (preview) {
+      this.data.tasks = structuredClone(this.data.tasks);
+      this.data.hours = structuredClone(this.data.hours);
+    }
     const me = this.data.members.find((m) => m.user_id === demoUser);
     const leader = me?.role === "admin" || me?.role === "manager";
     const name = (id: string) =>
@@ -193,7 +200,24 @@ export class DemoStore {
         } else if (change.kind === "status") {
           if (t.status === change.value)
             reason = `Já está em ${statuses[change.value].label}`;
-          else move(change.value, null, change.note ?? "");
+          else {
+            // Who holds it next (migration 20270421090000).
+            const who = change.value === "done" ? "keep" : (change.assignee ?? "keep");
+            move(
+              change.value,
+              who === "keep"
+                ? null
+                : who === "suggested"
+                  ? suggestedAssignee(
+                      this.data,
+                      t,
+                      change.value,
+                      this.events.filter((e) => e.task_id === t.id),
+                    )
+                  : who,
+              change.note ?? "",
+            );
+          }
         } else if (change.kind === "priority") {
           if (t.priority === change.value)
             reason = `Já está com prioridade ${priorities[change.value]}`;

@@ -27065,6 +27065,25 @@ label.drive-pick-file {
 .bulk-option:hover {
   background: #f3f6f1;
 }
+.bulk-option.on {
+  background: #eef3e8;
+}
+.bulk-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid #b9c4bf;
+  flex-shrink: 0;
+  margin: 0 6px;
+}
+.bulk-option.on .bulk-radio {
+  border: 5px solid #4f6a3c;
+}
+.bulk-option-check {
+  margin-left: auto;
+  color: #4f6a3c;
+  flex-shrink: 0;
+}
 .bulk-option-text {
   display: flex;
   flex-direction: column;

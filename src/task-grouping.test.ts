@@ -225,11 +225,14 @@ describe("Alteração em massa (demonstração)", () => {
     const other = store.data.members.find((m) => m.user_id !== demoUser && m.active)!;
     const mine = store.data.tasks.filter((t) => t.status !== "done").slice(0, 3);
     const before = structuredClone(store.data.tasks);
+    const shown = mine.map((t) => ({ ...t }));
     const r = store.bulk(
       mine.map((t) => t.id),
       { kind: "assignee", value: other.user_id },
       true,
     );
+    // The screen holds these same objects: they can't change either.
+    expect(mine).toEqual(shown);
     expect(r.preview).toBe(true);
     expect(r.results).toHaveLength(3);
     expect(store.data.tasks).toEqual(before);
@@ -266,6 +269,20 @@ describe("Alteração em massa (demonstração)", () => {
     expect(r.operation).toBeNull();
   });
 
+  it("mudar o status passa cada tarefa para quem o novo status sugere", () => {
+    const store = new DemoStore();
+    const other = store.data.members.find((m) => m.user_id !== demoUser && m.active)!;
+    const t = store.data.tasks.find((x) => x.status === "progress")!;
+    t.creator_id = other.user_id;
+    t.assignee_id = demoUser;
+    const r = store.bulk([t.id], { kind: "status", value: "returned", note: "Falta o logo", assignee: "suggested" }, true);
+    expect(r.results[0].after?.assignee_id).toBe(other.user_id);
+    const kept = store.bulk([t.id], { kind: "status", value: "returned", note: "Falta o logo" }, true);
+    expect(kept.results[0].after?.assignee_id).toBe(demoUser);
+    const s = sides(r.results[0], { kind: "status", value: "returned" }, (id) => member(store, id));
+    expect(s?.after).toBe(`Devolvida · ${other.name}`);
+  });
+
   it("não desfaz a tarefa que alguém mexeu depois do lote", () => {
     const store = new DemoStore();
     const t = store.data.tasks.find((x) => x.status !== "done")!;
@@ -285,6 +302,12 @@ describe("Textos da alteração em massa", () => {
     );
     expect(describeChange({ kind: "assignee", value: "x" }, names)).toBe(
       "Trocar o responsável para Ana Souza.",
+    );
+    expect(describeChange({ kind: "status", value: "review", assignee: "x" }, names)).toBe(
+      "Mudar o status para Em validação e passar todas para Ana Souza.",
+    );
+    expect(describeChange({ kind: "status", value: "review" }, names)).toBe(
+      "Mudar o status para Em validação, mantendo o responsável de cada tarefa.",
     );
     expect(dayLabel("2026-09-30")).toBe("30/09 (qua)");
     expect(

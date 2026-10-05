@@ -7,16 +7,35 @@ import { priorities, statuses, type Status, type Task } from "./types";
  * due date counted again by its due rule. Every due date change needs
  * `reason` (migration 20270110090000), which also justifies a date before
  * the rule's minimum. "priority": Alta and Urgente only where the person
- * may prioritize (migration 20270130090000).
+ * may prioritize (migration 20270130090000). "status" also picks who holds
+ * each task (migration 20270421090000): see StatusAssignee.
  */
 export type BulkChange =
   | { kind: "assignee"; value: string }
   | { kind: "team"; value: string }
-  | { kind: "status"; value: Status; note?: string }
+  | { kind: "status"; value: Status; note?: string; assignee?: StatusAssignee }
   | { kind: "due"; value: string; reason: string }
   | { kind: "shift"; value: number; reason: string }
   | { kind: "rule"; reason: string }
   | { kind: "priority"; value: Task["priority"] };
+
+/**
+ * Who holds each task after a status change, as "Responsável a partir de
+ * agora" one by one: whom the new status suggests in each task
+ * (mavi_private.suggested_assignee, like suggestedAssignee), one person's id
+ * for all, or each keeps its own (the default when missing). Entregue
+ * keeps the responsible.
+ */
+export type StatusAssignee = "suggested" | "keep" | (string & {});
+
+/** Whom "Sugerido para cada tarefa" picks, per target status. */
+export function suggestionHint(target: Status) {
+  return target === "returned"
+    ? "Volta para quem criou cada tarefa"
+    : target === "review"
+      ? "Vai para quem valida: o criador ou o supervisor da equipe"
+      : "Volta para quem executou cada tarefa por último";
+}
 
 interface BulkSide {
   status: Status;
@@ -78,8 +97,15 @@ export function describeChange(
       return `Trocar o responsável para ${names.member(change.value)}.`;
     case "team":
       return `Distribuir na equipe ${names.team(change.value)}: cada tarefa vai para quem tem menos tarefas em aberto naquele momento.`;
-    case "status":
-      return `Mudar o status para ${statuses[change.value].label}.`;
+    case "status": {
+      const to = `Mudar o status para ${statuses[change.value].label}`;
+      const who = change.value === "done" ? "keep" : (change.assignee ?? "keep");
+      return who === "keep"
+        ? `${to}, mantendo o responsável de cada tarefa.`
+        : who === "suggested"
+          ? `${to}. Responsável sugerido para cada tarefa: ${suggestionHint(change.value).toLowerCase()}.`
+          : `${to} e passar todas para ${names.member(who)}.`;
+    }
     case "due":
       return `Definir o prazo de todas para ${dayLabel(change.value)}.`;
     case "shift": {
@@ -112,11 +138,14 @@ export function sides(
 ): { before: string; after: string } | null {
   if (!item.before || !item.after) return null;
   const field = changedField(change);
+  // A status change that also hands the task over shows both.
+  const handed = field === "status" && item.before.assignee_id !== item.after.assignee_id;
   const label = (side: BulkSide) =>
     field === "assignee_id"
       ? member(side.assignee_id)
       : field === "status"
-        ? (statuses[side.status]?.label ?? side.status)
+        ? (statuses[side.status]?.label ?? side.status) +
+          (handed ? ` · ${member(side.assignee_id)}` : "")
         : field === "priority"
           ? side.priority
             ? priorities[side.priority]

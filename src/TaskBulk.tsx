@@ -34,10 +34,12 @@ import {
   describeChange,
   plural,
   sides,
+  suggestionHint,
   undoMessage,
   type BulkChange,
   type BulkResult,
   type BulkUndo,
+  type StatusAssignee,
 } from "./task-bulk";
 
 export type SelectState = "all" | "some" | "none";
@@ -201,7 +203,7 @@ export function BulkEditor({
             icon={<CircleDot size={16} />}
             label="Status"
           >
-            <StatusPanel onPick={openReview} />
+            <StatusPanel data={data} me={me} onPick={openReview} />
           </ActionPopover>
           <ActionPopover
             open={panel === "priority"}
@@ -491,40 +493,124 @@ function DuePanel({ onPick }: { onPick: (change: BulkChange) => void }) {
   );
 }
 
-function StatusPanel({ onPick }: { onPick: (change: BulkChange) => void }) {
+/**
+ * The status, then (but for Entregue) who holds each task from now on, as
+ * one by one: whom the new status suggests in each task, one person for all,
+ * or each keeps its responsible. The statuses that need a description ask it
+ * in the same step.
+ */
+function StatusPanel({
+  data,
+  me,
+  onPick,
+}: {
+  data: Snapshot;
+  me: string;
+  onPick: (change: BulkChange) => void;
+}) {
   const [target, setTarget] = useState<Status | null>(null);
   const [note, setNote] = useState("");
+  const [who, setWho] = useState<StatusAssignee>("suggested");
+  const [term, setTerm] = useState("");
+  const people = useMemo(
+    () =>
+      data.members
+        .filter((m) => m.active && fold(m.name).includes(fold(term)))
+        .sort((a, b) =>
+          a.user_id === me ? -1 : b.user_id === me ? 1 : a.name.localeCompare(b.name, "pt-BR"),
+        ),
+    [data.members, term, me],
+  );
   const ask = target ? NOTE_STATUSES[target] : undefined;
-  if (target && ask)
+  if (target) {
+    const choice = (value: StatusAssignee, label: string, hint: string) => (
+      <button
+        type="button"
+        role="radio"
+        aria-checked={who === value}
+        className={`bulk-option ${who === value ? "on" : ""}`}
+        onClick={() => setWho(value)}
+      >
+        <span className="bulk-radio" aria-hidden="true" />
+        <span className="bulk-option-text">
+          {label}
+          <small>{hint}</small>
+        </span>
+      </button>
+    );
     return (
       <>
         <h3>{statuses[target].label}</h3>
-        <p className="bulk-panel-sub">
-          O texto entra no comentário de cada tarefa, como quando se muda uma por uma.
-        </p>
-        <label className="bulk-field">
-          {ask}
-          <Textarea
-            rows={3}
-            value={note}
-            autoFocus
-            onChange={(e) => setNote(e.target.value)}
+        {ask && (
+          <>
+            <p className="bulk-panel-sub">
+              O texto entra no comentário de cada tarefa, como quando se muda uma por uma.
+            </p>
+            <label className="bulk-field">
+              {ask}
+              <Textarea
+                rows={3}
+                value={note}
+                autoFocus
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </label>
+          </>
+        )}
+        <p className="bulk-cap">Responsável a partir de agora</p>
+        <div className="bulk-options" role="radiogroup" aria-label="Responsável a partir de agora">
+          {choice("suggested", "Sugerido para cada tarefa", suggestionHint(target))}
+          {choice("keep", "Manter o responsável de cada uma", "Ninguém troca de responsável")}
+          <p className="bulk-cap">Uma pessoa para todas</p>
+          <Input
+            type="search"
+            aria-label="Buscar pessoa"
+            placeholder="Buscar pessoa…"
+            value={term}
+            autoFocus={!ask}
+            onChange={(e) => setTerm(e.target.value)}
           />
-        </label>
+          {people.map((m) => (
+            <button
+              key={m.user_id}
+              type="button"
+              role="radio"
+              aria-checked={who === m.user_id}
+              className={`bulk-option ${who === m.user_id ? "on" : ""}`}
+              onClick={() => setWho(m.user_id)}
+            >
+              <Avatar name={m.name} src={m.avatar_url} size="small" />
+              <span className="bulk-option-text">
+                {m.name}
+                {m.user_id === me && <small>Você</small>}
+              </span>
+              {who === m.user_id && <Check size={15} className="bulk-option-check" />}
+            </button>
+          ))}
+          {!people.length && <p className="bulk-empty">Ninguém encontrado.</p>}
+        </div>
         <div className="bulk-panel-foot">
           <Button className="btn secondary" onClick={() => setTarget(null)}>
             Voltar
           </Button>
           <Button
             className="btn primary"
-            disabled={note.trim().length < 3}
-            onClick={() => onPick({ kind: "status", value: target, note: note.trim() })}
+            disabled={!!ask && note.trim().length < 3}
+            onClick={() =>
+              onPick({
+                kind: "status",
+                value: target,
+                ...(ask ? { note: note.trim() } : {}),
+                assignee: who,
+              })
+            }
           >
             Revisar alterações
           </Button>
         </div>
       </>
     );
+  }
   return (
     <>
       <h3>Mudar status</h3>
@@ -536,7 +622,8 @@ function StatusPanel({ onPick }: { onPick: (change: BulkChange) => void }) {
             type="button"
             className="bulk-option"
             onClick={() =>
-              NOTE_STATUSES[s] ? setTarget(s) : onPick({ kind: "status", value: s })
+              // Entregue keeps the responsible, as one by one.
+              s === "done" ? onPick({ kind: "status", value: s }) : setTarget(s)
             }
           >
             <span className={`badge ${s}`}>
