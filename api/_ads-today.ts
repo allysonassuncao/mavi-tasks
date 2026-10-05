@@ -56,8 +56,11 @@ export type TodayTarget = Pick<
   | "google_token"
 >;
 
+/** O que basta para juntar os ciclos por conta (o "hoje" e o orçamento). */
+type Linked = Pick<TodayTarget, "company_id" | "platform" | "today" | "links">;
+
 /** Uma conta de anúncios e os ciclos que leem dela. */
-export type AccountGroup = {
+export type AccountGroup<T extends Linked = TodayTarget> = {
   company: string;
   platform: "meta" | "google";
   account: string;
@@ -66,21 +69,21 @@ export type AccountGroup = {
   /** Algum ciclo vinculou a conta inteira: sem filtro de campanhas. */
   whole: boolean;
   campaigns: string[];
-  targets: TodayTarget[];
+  targets: T[];
 };
 
 const validCampaign = (platform: "meta" | "google", id: string) =>
   platform === "google" ? /^[0-9]+$/.test(id) : !!id;
 
 /** Junta os ciclos por empresa, plataforma e conta. */
-export function groupByAccount(targets: TodayTarget[]): AccountGroup[] {
-  const groups = new Map<string, AccountGroup>();
+export function groupByAccount<T extends Linked>(targets: T[]): AccountGroup<T>[] {
+  const groups = new Map<string, AccountGroup<T>>();
   for (const t of targets)
     for (const l of t.links ?? []) {
       const account = accountId(t.platform, l.account_id);
       if (!account) continue;
       const key = `${t.company_id}|${t.platform}|${account}`;
-      const g = groups.get(key) ?? {
+      const g: AccountGroup<T> = groups.get(key) ?? {
         company: t.company_id,
         platform: t.platform,
         account,
@@ -100,7 +103,7 @@ export function groupByAccount(targets: TodayTarget[]): AccountGroup[] {
 }
 
 /** As campanhas de um ciclo nesta conta (null: a conta toda). */
-export function ownCampaigns(t: TodayTarget, g: AccountGroup): Set<string> | null {
+export function ownCampaigns<T extends Linked>(t: T, g: AccountGroup<T>): Set<string> | null {
   const own = new Set<string>();
   for (const l of t.links ?? []) {
     if (accountId(t.platform, l.account_id) !== g.account) continue;
@@ -166,33 +169,42 @@ async function readMetaAccount(env: SyncEnv, fetchImpl: Fetch, g: AccountGroup) 
   );
 }
 
-async function readGoogleAccount(env: SyncEnv, fetchImpl: Fetch, g: AccountGroup, access: string) {
-  const search = async (query: string) => {
-    const res = await fetchImpl(
-      `https://googleads.googleapis.com/${env.google.version}/customers/${g.account}/googleAds:searchStream`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${access}`,
-          "developer-token": env.google.developerToken,
-          "login-customer-id": g.manager || g.account,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ query }),
+/** Uma consulta GAQL numa conta do Google (com o gerente do vínculo). */
+export async function googleSearch<R = GoogleRow>(
+  env: SyncEnv,
+  fetchImpl: Fetch,
+  g: Pick<AccountGroup, "account" | "manager">,
+  access: string,
+  query: string,
+): Promise<R[]> {
+  const res = await fetchImpl(
+    `https://googleads.googleapis.com/${env.google.version}/customers/${g.account}/googleAds:searchStream`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${access}`,
+        "developer-token": env.google.developerToken,
+        "login-customer-id": g.manager || g.account,
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify({ query }),
+    },
+  );
+  const body = (await res.json().catch(() => ({}))) as unknown;
+  if (!res.ok) {
+    const error = (Array.isArray(body) ? body[0] : body) as {
+      error?: { message?: string; details?: { errors?: { message?: string }[] }[] };
+    };
+    throw new AdsError(
+      502,
+      `Google Ads: ${error?.error?.details?.[0]?.errors?.[0]?.message ?? error?.error?.message ?? res.statusText}`,
     );
-    const body = (await res.json().catch(() => ({}))) as unknown;
-    if (!res.ok) {
-      const error = (Array.isArray(body) ? body[0] : body) as {
-        error?: { message?: string; details?: { errors?: { message?: string }[] }[] };
-      };
-      throw new AdsError(
-        502,
-        `Google Ads: ${error?.error?.details?.[0]?.errors?.[0]?.message ?? error?.error?.message ?? res.statusText}`,
-      );
-    }
-    return (body as { results?: GoogleRow[] }[]).flatMap((b) => b.results ?? []);
-  };
+  }
+  return (body as { results?: R[] }[]).flatMap((b) => b.results ?? []);
+}
+
+async function readGoogleAccount(env: SyncEnv, fetchImpl: Fetch, g: AccountGroup, access: string) {
+  const search = (query: string) => googleSearch(env, fetchImpl, g, access, query);
   const filter =
     g.whole || !g.campaigns.length ? "" : ` AND campaign.id IN (${g.campaigns.join(",")})`;
   const period = `segments.date BETWEEN '${g.today}' AND '${g.today}'`;
@@ -232,7 +244,11 @@ const SOFT_LIMIT_PCT = 75;
 const inMinutes = (now: number, minutes: number) => new Date(now + minutes * 60_000).toISOString();
 
 /** O que a leitura de uma conta deixou: totais por ciclo, erro e pausas. */
-export function cooldownsOf(g: AccountGroup, meter: ApiMeter, now: number): Cooldown[] {
+export function cooldownsOf(
+  g: Pick<AccountGroup, "platform" | "account">,
+  meter: ApiMeter,
+  now: number,
+): Cooldown[] {
   if (meter.throttle)
     return [
       {
@@ -256,7 +272,7 @@ export function cooldownsOf(g: AccountGroup, meter: ApiMeter, now: number): Cool
 }
 
 /** Cada chamada às plataformas desiste depois de 15 s (a função tem 60 s). */
-const withTimeout =
+export const withTimeout =
   (fetchImpl: Fetch, ms: number): Fetch =>
   (input, init) =>
     fetchImpl(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(ms) });
@@ -336,7 +352,7 @@ export async function readToday(
   return { rows, errors, cooldowns, accounts: groups.length };
 }
 
-function sameSecret(given: string, expected: string) {
+export function sameSecret(given: string, expected: string) {
   const a = Buffer.from(given),
     b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b);

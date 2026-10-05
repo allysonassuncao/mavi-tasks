@@ -43,6 +43,7 @@ export const ALERT_METRICS = [
   "spend_pace",
   "results_pace",
   "cost_vs_goal",
+  "platform_budget",
 ] as const;
 export type AlertMetric = (typeof ALERT_METRICS)[number];
 export type AlertUnit = "money" | "number" | "percent";
@@ -65,6 +66,7 @@ export const METRIC_INFO: Record<
   spend_pace: { label: "Ritmo de gasto", unit: "percent", cycle: true, zero: false, hint: "O gasto até ontem em % do esperado para os dias que passaram (100% = no ritmo)." },
   results_pace: { label: "Ritmo de resultados", unit: "percent", cycle: true, zero: false, hint: "As conversões até ontem em % do esperado pela meta do ciclo (100% = no ritmo)." },
   cost_vs_goal: { label: "Custo × meta", unit: "percent", cycle: true, zero: false, hint: "O custo por resultado do ciclo em % do custo da meta (verba ÷ meta). Acima de 100%, mais caro que o combinado." },
+  platform_budget: { label: "Orçamento na plataforma × recomendado", unit: "percent", cycle: true, zero: false, hint: "A diferença, em %, entre o orçamento diário configurado no Meta/Google e o Orçamento diário recomendado (sem M). Parada na plataforma = 100%." },
 };
 export const isMoney = (m: AlertMetric) => METRIC_INFO[m].unit === "money";
 
@@ -183,6 +185,13 @@ export const METRIC_HELP: Record<
     example: "R$ 2.000 de mídia para 100 leads = meta de R$ 20 por lead. Se o ciclo está em R$ 26 por lead, o custo × meta é 130%.",
     tip: "Funciona para qualquer cliente sem ajustar o valor: \"chegar a 120%\" avisa quando o custo passa 20% do combinado.",
     sample: { condition: "above", period: "cycle", days: 1, value: 120, tolerance: 0 },
+  },
+  platform_budget: {
+    what: "Se o orçamento diário configurado no Meta ou no Google está alinhado com o que o ciclo precisa gastar por dia.",
+    calc: "A diferença entre o diário da plataforma (o valor real, a soma das campanhas ou conjuntos que estão entregando) e o Orçamento diário recomendado sem M, em % do recomendado — para mais ou para menos. Campanha parada na plataforma conta 100%. Confere a cada leitura do orçamento (~3 h e no botão Atualizar da lista); com orçamento vitalício não confere.",
+    example: "O recomendado é R$ 120/dia e o Meta está com R$ 150/dia: diferença de 25%. Com R$ 90/dia, também 25% (para menos).",
+    tip: "\"Chegar a 25%\" pega orçamento esquecido depois de uma mudança de verba, campanha que vai sobrar verba ou acabar antes, e campanha pausada por engano.",
+    sample: { condition: "above", period: "cycle", days: 1, value: 25, tolerance: 0 },
   },
 };
 

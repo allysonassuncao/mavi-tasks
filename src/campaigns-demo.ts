@@ -27,6 +27,7 @@ import {
   type RowResults,
 } from "./campaigns";
 import { contractParts, dateKey } from "./domain";
+import type { PlatformBudget } from "./campaign-platform-budget";
 import { cycleFit, demoMediaRoom } from "./campaign-media";
 import {
   multiplierError,
@@ -376,6 +377,10 @@ export function demoCampaigns(
               current && c.status === "active"
                 ? demoResults(store, current, today)
                 : noResults(),
+            platform_budget:
+              current && c.status === "active"
+                ? demoPlatformBudget(c, current, demoSpent(store, current, today).gross, today)
+                : null,
           };
         })
         .sort(
@@ -1519,6 +1524,52 @@ function demoSpent(store: Store, y: AdCycle, today: string) {
     .sort((a, b) => b.taken_on.localeCompare(a.taken_on))[0];
   const spend = last?.spend ?? 0;
   return { net: spend, gross: spend * y.multiplier };
+}
+/**
+ * O orçamento na plataforma de demonstração: perto do recomendado, um pouco
+ * acima, bem acima, parada ou vitalício, conforme a campanha.
+ */
+function demoPlatformBudget(c: AdCampaign, y: AdCycle, gross: number, today: string): PlatformBudget | null {
+  if (c.platform !== "meta" && c.platform !== "google") return null;
+  if (today < y.start_date || today > y.end_date) return null;
+  const from = today < y.start_date ? y.start_date : today;
+  const left = Math.max(Math.round((Date.parse(y.end_date) - Date.parse(from)) / 86_400_000) + 1, 1);
+  const rec = Math.max(y.budget / y.multiplier - gross / y.multiplier, 0) / left;
+  const seed = [...c.id].reduce((t, ch) => t + ch.charCodeAt(0), 0) % 6;
+  const read = new Date(Date.now() - (20 + seed * 17) * 60_000).toISOString();
+  const kind = (["near", "above", "far", "near", "stopped", "lifetime"] as const)[seed];
+  const factor = { near: 1.04, above: 1.18, far: 1.6, stopped: 1, lifetime: 0 }[kind];
+  const daily = kind === "lifetime" ? 0 : Math.round(rec * factor);
+  const active = kind === "stopped" ? 0 : 2;
+  const item = (n: number, value: number) => ({
+    id: `${c.id}-${n}`,
+    name: c.platform === "meta" ? `[LEAD] Conjunto ${n}` : `Pesquisa ${n}`,
+    level: c.platform === "meta" ? ("adset" as const) : ("campaign" as const),
+    campaign_id: `${c.id}-c`,
+    active: kind !== "stopped",
+    status: kind === "stopped" ? "PAUSED" : "ACTIVE",
+    daily: kind === "lifetime" ? 0 : value,
+    lifetime: kind === "lifetime" ? value * left : 0,
+    lifetime_left: kind === "lifetime" ? value * (left - 1) : 0,
+  });
+  const half = Math.round(daily / 2);
+  return {
+    daily: kind === "stopped" ? 0 : daily,
+    lifetime: kind === "lifetime" ? Math.round(rec) * left : 0,
+    lifetime_left: kind === "lifetime" ? Math.round(rec) * (left - 1) : 0,
+    active,
+    total: 2,
+    items:
+      kind === "lifetime"
+        ? [item(1, Math.round(rec / 2)), item(2, Math.round(rec / 2))]
+        : [item(1, half), item(2, daily - half)],
+    currency: "BRL",
+    previous_daily: kind === "above" ? Math.round(rec) : null,
+    changed_at: kind === "above" ? new Date(Date.now() - 95 * 60_000).toISOString() : null,
+    read_at: read,
+    tried_at: read,
+    error: null,
+  };
 }
 /** Hoje: a parte do dia que já passou de um dia como ontem. */
 function demoResults(store: Store, y: AdCycle, today: string): RowResults {

@@ -29,6 +29,7 @@
     "test:db:campaign-alerts": "node scripts/test-campaign-alerts.mjs",
     "test:db:campaign-insights": "node scripts/test-campaign-insights.mjs",
     "test:db:campaign-list-results": "node scripts/test-campaign-list-results.mjs",
+    "test:db:campaign-platform-budget": "node scripts/test-campaign-platform-budget.mjs",
     "test:db:campaign-daily-read": "node scripts/test-campaign-daily-read.mjs",
     "test:db:job-alerts": "node scripts/test-job-alerts.mjs",
     "test:db:whatsapp-sweep": "node scripts/test-whatsapp-sweep-fast.mjs",

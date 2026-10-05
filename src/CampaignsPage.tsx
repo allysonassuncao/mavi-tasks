@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -18,6 +19,7 @@ import {
   Pencil,
   Plug,
   Plus,
+  RefreshCw,
   Search,
   Sparkles,
   Star,
@@ -126,6 +128,14 @@ import {
 } from "./CampaignMultiplier";
 import { sameMultiplier, type MultiplierApply } from "./campaign-multiplier";
 import { dailyBudget, daysRemaining } from "./campaign-metrics";
+import {
+  GAP_OK,
+  GAP_WARN,
+  budgetState,
+  itemStatus,
+  refreshPlatformBudget,
+  type PlatformBudget,
+} from "./campaign-platform-budget";
 import { CampaignPlatform } from "./CampaignPlatform";
 import { CampaignReports } from "./CampaignReports";
 import { GooglePlatform } from "./GooglePlatform";
@@ -763,6 +773,160 @@ function DailyBudget({
   );
 }
 
+/** "às 14:10" hoje; "em 04/10 às 21:30" de outro dia. */
+function readAt(at: string, today: string) {
+  const d = new Date(at);
+  return dateKey(d) === today
+    ? `às ${clock(at)}`
+    : `em ${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} às ${clock(at)}`;
+}
+const signedMoney = (v: number) => `${v >= 0 ? "+" : "−"}${money(Math.abs(v))}`;
+
+/**
+ * Embaixo do "Orçamento diário": o orçamento configurado no Meta/Google
+ * (sempre o valor real) comparado ao recomendado sem M — verde até 10% de
+ * diferença, amarelo até 25%, vermelho acima; parada na plataforma em
+ * vermelho; o vitalício à parte. O botão lê a campanha agora (o servidor
+ * deixa uma vez a cada 5 min); a lista se relê pelo aviso de sempre.
+ */
+function PlatformBudgetLine({
+  campaign,
+  cycle,
+  spent,
+  budget,
+  today,
+  demo,
+}: {
+  campaign: AdCampaign;
+  cycle: AdCycle | null;
+  spent: CampaignRow["spent"];
+  budget: PlatformBudget | null;
+  today: string;
+  demo: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  if (campaign.platform !== "meta" && campaign.platform !== "google")
+    return null;
+  if (campaign.status !== "active" || !cycle) return null;
+  if (today < cycle.start_date || today > cycle.end_date) return null;
+  const rec = spent ? dailyBudget(cycle, spent.gross, today, false) : null;
+  const state = budgetState(budget, rec);
+  const where = campaign.platform === "meta" ? "no Meta" : "no Google";
+  const refresh = async (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    setProblem("");
+    try {
+      if (demo) await new Promise((r) => setTimeout(r, 600));
+      else await refreshPlatformBudget(campaign.id);
+      window.dispatchEvent(new CustomEvent("mavi:campaign-today"));
+    } catch (err) {
+      setProblem((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const lines: string[] = [
+    `Orçamento configurado ${where} (valor real, sem M).`,
+  ];
+  if (state.kind === "daily" && state.gap && rec !== null)
+    lines.push(
+      `Recomendado sem M: ${money(rec)}/dia → ${signedMoney(state.gap.diff)} (${Math.round(state.gap.pct)}%). Verde até ${GAP_OK}%, amarelo até ${GAP_WARN}%, vermelho acima.`,
+    );
+  if (budget?.lifetime)
+    lines.push(
+      `Vitalício: ${money(budget.lifetime)}${budget.lifetime_left ? ` (restam ${money(budget.lifetime_left)})` : ""}; não entra na comparação com o diário.`,
+    );
+  if (budget?.items.length) {
+    lines.push("");
+    for (const i of budget.items.slice(0, 12)) {
+      const value = i.daily
+        ? `${money(i.daily)}/dia`
+        : i.lifetime
+          ? `${money(i.lifetime)} vitalício`
+          : "—";
+      lines.push(
+        `• ${i.name}: ${value} (${itemStatus(i)}${i.shared ? ", orçamento compartilhado" : ""})`,
+      );
+    }
+    if (budget.total > 12) lines.push(`… e mais ${budget.total - 12}`);
+  }
+  if (budget?.changed_at && budget.previous_daily !== null)
+    lines.push(
+      "",
+      `Mudou de ${money(budget.previous_daily)} para ${money(budget.daily)} ${readAt(budget.changed_at, today)}.`,
+    );
+  if (budget?.read_at)
+    lines.push(`Lido ${readAt(budget.read_at, today)}. O MAVI lê a cada ~3 h.`);
+  if (budget?.error) lines.push(`Última tentativa: ${budget.error}`);
+  const tone =
+    state.kind === "daily"
+      ? (state.gap?.tone ?? "")
+      : state.kind === "stopped" || state.kind === "missing"
+        ? "bad"
+        : state.kind === "error"
+          ? "warn"
+          : "";
+  return (
+    <div className={`platform-budget ${tone}`} title={lines.join("\n")}>
+      <span className="platform-budget-value">
+        {state.kind === "waiting" ? (
+          <span className="muted">Na plataforma: aguardando leitura</span>
+        ) : state.kind === "error" ? (
+          <>Na plataforma: não foi possível ler</>
+        ) : state.kind === "missing" ? (
+          <>Não encontrada {where}</>
+        ) : state.kind === "stopped" ? (
+          <>Pausada {where}</>
+        ) : state.kind === "lifetime" ? (
+          <span className="muted">
+            Vitalício {where}: <strong>{money(budget!.lifetime)}</strong>
+          </span>
+        ) : (
+          <>
+            Na plataforma: <strong>{money(budget!.daily)}</strong>
+            {state.gap && state.gap.tone !== "good" && (
+              <span className="platform-budget-diff">
+                {" "}
+                {signedMoney(state.gap.diff)}
+              </span>
+            )}
+          </>
+        )}
+      </span>
+      {state.kind === "daily" && budget!.lifetime > 0 && (
+        <small className="platform-budget-extra">
+          Vitalício: {money(budget!.lifetime)}
+        </small>
+      )}
+      <small className="platform-budget-meta">
+        {problem ? (
+          <span className="platform-budget-problem">{problem}</span>
+        ) : budget?.read_at ? (
+          <>
+            {budget.error && (
+              <TriangleAlert size={11} aria-label="A última tentativa falhou" />
+            )}
+            lido {readAt(budget.read_at, today)}
+          </>
+        ) : null}
+        <button
+          type="button"
+          className="platform-budget-refresh"
+          onClick={refresh}
+          disabled={busy}
+          aria-label={`Atualizar o orçamento ${where}`}
+          title={`Ler o orçamento ${where} agora`}
+        >
+          <RefreshCw size={11} className={busy ? "spin" : undefined} />
+        </button>
+      </small>
+    </div>
+  );
+}
+
 /** A leitura de hoje mais velha que isso aparece como desatualizada. */
 const STALE_TODAY_MS = 3 * 60 * 60_000;
 const count = (n: number) =>
@@ -1333,6 +1497,7 @@ function CampaignList({
                     waiting,
                     spent,
                     results,
+                    platform_budget,
                   }) => (
                     <tr
                       key={campaign.id}
@@ -1404,6 +1569,14 @@ function CampaignList({
                           spent={spent}
                           today={today}
                           withM={withM}
+                        />
+                        <PlatformBudgetLine
+                          campaign={campaign}
+                          cycle={cycle}
+                          spent={spent}
+                          budget={platform_budget}
+                          today={today}
+                          demo={demo}
                         />
                       </td>
                       <td data-label="Resultados">

@@ -1,4 +1,9 @@
 import { supabase } from "./supabase";
+import {
+  platformBudgetFrom,
+  type PlatformBudget,
+  type RawPlatformBudget,
+} from "./campaign-platform-budget";
 import { fetchAllRows, rpc } from "./api";
 import type { MetricsBackend } from "./campaign-metrics";
 import { loadMediaRoom, type MediaRoom } from "./campaign-media";
@@ -547,6 +552,8 @@ export type CampaignRow = {
   spent: { net: number; gross: number } | null;
   /** Resultados e gasto (sem M) de hoje, ontem e do ciclo atual. */
   results: RowResults;
+  /** O orçamento configurado no Meta/Google (a última leitura do ciclo atual). */
+  platform_budget: PlatformBudget | null;
 };
 /**
  * Os números da lista: o ciclo (o último acumulado, como o cabeçalho da
@@ -1167,6 +1174,7 @@ export const supabaseCampaigns: CampaignsBackend = {
         waiting?: boolean;
         spent?: { net: number | string; gross: number | string } | null;
         results?: Parameters<typeof resultsFrom>[0];
+        platform_budget?: RawPlatformBudget | null;
       }[];
     };
     return {
@@ -1185,6 +1193,7 @@ export const supabaseCampaigns: CampaignsBackend = {
           ? { net: Number(r.spent.net), gross: Number(r.spent.gross) }
           : null,
         results: resultsFrom(r.results),
+        platform_budget: platformBudgetFrom(r.platform_budget),
       })),
     };
   },

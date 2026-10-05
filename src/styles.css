@@ -9967,6 +9967,83 @@ p.task-search-mavi,
   background: #c4cbc0;
   animation: none;
 }
+/* Orçamento diário: o configurado no Meta/Google embaixo do recomendado. */
+.platform-budget {
+  display: grid;
+  gap: 1px;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px dashed #e6eadf;
+  font-size: 0.7rem;
+  color: #6f7a69;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.platform-budget strong,
+.platform-budget-diff,
+.platform-budget-meta {
+  white-space: nowrap;
+}
+.platform-budget strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+.platform-budget .muted {
+  color: #9da793;
+}
+.platform-budget.good .platform-budget-value strong {
+  color: #3f7a2c;
+}
+.platform-budget.warn .platform-budget-value,
+.platform-budget.warn .platform-budget-value strong {
+  color: #a8741a;
+}
+.platform-budget.bad .platform-budget-value,
+.platform-budget.bad .platform-budget-value strong {
+  color: #b0433a;
+}
+.platform-budget-diff {
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+.platform-budget-extra,
+.platform-budget-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #9da793;
+  font-size: 0.64rem;
+}
+.platform-budget-meta svg {
+  color: #c08a2a;
+}
+.platform-budget-problem {
+  color: #b0433a;
+  white-space: normal;
+  max-width: 180px;
+}
+.platform-budget-refresh {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #8b9786;
+  padding: 0;
+  cursor: pointer;
+}
+.platform-budget-refresh svg {
+  color: inherit;
+}
+.platform-budget-refresh:hover:not(:disabled) {
+  background: #eef2e8;
+  color: var(--ink);
+}
+.platform-budget-refresh:disabled {
+  cursor: progress;
+}
 /* Painel da MAVI › Campanhas: a Leitura do dia logo abaixo dos insights
    (que reservam 80px embaixo para a barra de salvar). */
 .cins-settings.cins-daily {
