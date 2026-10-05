@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ago, filterGroups, groupFilter, type WhatsappGroup } from "./whatsapp";
+import { ago, filterGroups, groupFilter, minutesLabel, type WhatsappGroup } from "./whatsapp";
 
 const group = (over: Partial<WhatsappGroup>): WhatsappGroup => ({
   id: "g",
@@ -375,5 +375,14 @@ describe("tarefa inteligente a partir de mensagens", () => {
     expect(fallbackTitle([msg({ kind: "image" })])).toBe(
       "Ver imagem de Kamilli no grupo",
     );
+  });
+});
+
+describe("intervalo da varredura", () => {
+  it("mostra minutos e horas", () => {
+    expect(minutesLabel(15)).toBe("15 min");
+    expect(minutesLabel(60)).toBe("1 h");
+    expect(minutesLabel(90)).toBe("1 h 30 min");
+    expect(minutesLabel(240)).toBe("4 h");
   });
 });

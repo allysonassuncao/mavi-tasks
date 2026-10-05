@@ -20,7 +20,10 @@ import {
   filterGroups,
   groupFilter,
   listWhatsappGroups,
+  minutesLabel,
   setWhatsappGroup,
+  setWhatsappSweep,
+  SWEEP_CHOICES,
   whatsappGroup,
   whatsappStatus,
   type GroupFilter,
@@ -180,6 +183,15 @@ function GroupsPanel({
       </div>
 
       {status && <SyncStatus status={status} canEdit={canEdit} />}
+      {status?.configured && (
+        <SweepInterval
+          company={company}
+          status={status}
+          canEdit={canEdit}
+          onChange={setStatus}
+          notify={notify}
+        />
+      )}
 
       <div className="whatsapp-groups-toolbar">
         <div
@@ -328,6 +340,92 @@ function SyncStatus({
         </p>
       )}
     </>
+  );
+}
+
+/** De quanto em quanto tempo a varredura busca os grupos e as mensagens novas. */
+function SweepInterval({
+  company,
+  status,
+  canEdit,
+  onChange,
+  notify,
+}: {
+  company: string;
+  status: WhatsappStatus;
+  canEdit: boolean;
+  onChange: (status: WhatsappStatus) => void;
+  notify: (message: string) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const auto = status.auto_minutes ?? status.sweep_hours * 60;
+  const chosen = status.sweep_minutes ?? null;
+  const autoHint = status.radar_minutes
+    ? `Automático: segue o Radar pessoal (a cada ${minutesLabel(status.radar_minutes)}) enquanto alguém usa; senão, a cada ${minutesLabel(status.sweep_hours * 60)}.`
+    : `Automático: a cada ${minutesLabel(auto)}; com alguém usando o Radar pessoal, segue o ritmo dele.`;
+
+  async function save(value: string) {
+    const minutes = value === "auto" ? null : Number(value);
+    setSaving(true);
+    setError("");
+    try {
+      onChange(await setWhatsappSweep(company, minutes));
+      notify(
+        minutes === null
+          ? "A varredura volta ao intervalo automático."
+          : `A varredura passa a rodar a cada ${minutesLabel(minutes)}.`,
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="whatsapp-sweep">
+      <div className="whatsapp-sweep-row">
+        <span id="whatsapp-sweep-label">Intervalo da varredura</span>
+        {canEdit ? (
+          <Select
+            aria-labelledby="whatsapp-sweep-label"
+            value={chosen === null ? "auto" : String(chosen)}
+            disabled={saving}
+            onValueChange={(v) => void save(v)}
+          >
+            <SelectOption value="auto">
+              Automático ({minutesLabel(auto)})
+            </SelectOption>
+            {SWEEP_CHOICES.map((m) => (
+              <SelectOption key={m} value={String(m)}>
+                A cada {minutesLabel(m)}
+              </SelectOption>
+            ))}
+          </Select>
+        ) : (
+          <strong>
+            {chosen === null
+              ? `Automático (${minutesLabel(auto)})`
+              : `A cada ${minutesLabel(chosen)}`}
+          </strong>
+        )}
+      </div>
+      <small>
+        A varredura traz os grupos novos e avisa quais têm mensagem nova para
+        ler. Intervalos menores trazem as conversas mais cedo para o Radar, o
+        Termômetro e o Radar pessoal. {autoHint}
+        {chosen !== null &&
+          status.radar_minutes &&
+          chosen > status.radar_minutes &&
+          ` O intervalo escolhido é maior que o do Radar pessoal (${minutesLabel(status.radar_minutes)}): ele vai ler as conversas com atraso.`}
+      </small>
+      {error && (
+        <p className="whatsapp-groups-error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

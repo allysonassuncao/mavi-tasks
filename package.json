@@ -31,6 +31,7 @@
     "test:db:campaign-list-results": "node scripts/test-campaign-list-results.mjs",
     "test:db:campaign-daily-read": "node scripts/test-campaign-daily-read.mjs",
     "test:db:job-alerts": "node scripts/test-job-alerts.mjs",
+    "test:db:whatsapp-sweep": "node scripts/test-whatsapp-sweep-fast.mjs",
     "test:db:ai": "node scripts/test-ai-knowledge.mjs",
     "test:db:ai-assistant": "node scripts/test-ai-assistant.mjs",
     "test:db:ai-sources": "node scripts/test-ai-sources.mjs",

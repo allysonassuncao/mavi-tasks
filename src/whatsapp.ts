@@ -33,6 +33,12 @@ export interface WhatsappStatus {
   last_sweep_at: string | null;
   last_sweep_error: string | null;
   sweep_hours: number;
+  /** Minutos entre as varreduras escolhidos pelo administrador; null: automático. */
+  sweep_minutes?: number | null;
+  /** O intervalo automático, em minutos (o do Radar pessoal com alguém usando). */
+  auto_minutes?: number | null;
+  /** O ritmo do Radar pessoal, quando alguém usa. */
+  radar_minutes?: number | null;
   backfill_days: number;
   groups_pending: number;
   groups_with_error: number;
@@ -77,6 +83,25 @@ export async function whatsappStatus(company: string) {
   return (await rpc("whatsapp_status", {
     p_company: company,
   })) as WhatsappStatus;
+}
+
+/** O intervalo da varredura escolhido pelo administrador (null: automático). */
+export async function setWhatsappSweep(company: string, minutes: number | null) {
+  return (await rpc("set_whatsapp_sweep", {
+    p_company: company,
+    p_minutes: minutes,
+  })) as WhatsappStatus;
+}
+
+/** Os intervalos oferecidos, em minutos. */
+export const SWEEP_CHOICES = [5, 10, 15, 30, 60, 120, 240];
+
+/** "15 min", "1 h", "1 h 30 min". */
+export function minutesLabel(minutes: number) {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
 }
 
 /** Ligar a um cliente (e produtos), ignorar ou voltar ao automático. */

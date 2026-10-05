@@ -19856,6 +19856,38 @@ td.ai-log-actions {
 .whatsapp-groups-error {
   margin: 0 20px 12px;
 }
+.whatsapp-sweep {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 20px 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfcfa;
+}
+.whatsapp-sweep-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.whatsapp-sweep-row > :last-child {
+  flex: 0 1 260px;
+  width: 260px;
+  max-width: 100%;
+}
+.whatsapp-sweep small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.whatsapp-sweep .whatsapp-groups-error {
+  margin: 0;
+}
 .whatsapp-group-row {
   flex-wrap: wrap;
 }
