@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import {
   ArrowRight,
@@ -34,6 +34,15 @@ import { navigate, taskUrl, useUrlState } from "./router";
 import { appPath } from "./temperature";
 import type { FormPreset } from "./forms";
 import type { Snapshot } from "./types";
+import { RqBillingFields, rqBackend, rqInputProblem } from "./RqBilling";
+import {
+  isRqProduct,
+  rqInputFrom,
+  rqInputOut,
+  type RqBillingView,
+  type RqConfigInput,
+  type RqNamed,
+} from "./rq-billing";
 import {
   DISMISS_REASONS,
   KIND_LABELS,
@@ -127,6 +136,8 @@ export type InsightContext = {
   user: string;
   /** Abre o formulário de tarefa (sem ele, não há "Criar tarefa"). */
   onNewTask?: (preset: FormPreset) => void;
+  /** Demonstração: a cobrança do Make Ads RQ só lê. */
+  demo?: boolean;
 };
 type Handlers = {
   status: (i: CampaignInsight, status: InsightStatus) => void;
@@ -1184,7 +1195,37 @@ function CrmGoalEditor({
   const client = contract?.client_id ?? "";
   const clientName = ctx.data.clients.find((c) => c.id === client)?.name ?? "o cliente";
   const [pipelines, setPipelines] = useState<CrmPipeline[] | null>(null);
+  const [crmLists, setCrmLists] = useState<{ sources: RqNamed[]; campaigns: RqNamed[] }>({ sources: [], campaigns: [] });
   const [linked, setLinked] = useState(true);
+  // Make Ads RQ: a regra de cobrança do cliente (vale para todas as campanhas dele).
+  const isRq =
+    !!client &&
+    ctx.data.contracts.some(
+      (k) =>
+        k.client_id === client &&
+        !k.archived &&
+        isRqProduct(ctx.data.products.find((p) => p.id === k.product_id)?.name),
+    );
+  const rq = useMemo(() => rqBackend(!!ctx.demo), [ctx.demo]);
+  const [rqView, setRqView] = useState<RqBillingView | null>(null);
+  const [rqInput, setRqInput] = useState<RqConfigInput | null>(null);
+  const [rqOn, setRqOn] = useState(false);
+  useEffect(() => {
+    if (!isRq) return;
+    let live = true;
+    rq.billing(company, client).then(
+      (v) => {
+        if (!live) return;
+        setRqView(v);
+        setRqInput(rqInputFrom(v.config));
+        setRqOn(!!v.config);
+      },
+      () => live && setRqView(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [isRq, rq, company, client]);
   const [scope, setScope] = useState<"client" | "campaign">(goal?.source ?? "client");
   // O padrão do cliente (quando a campanha usa o padrão, são as próprias etapas que valem).
   const clientStages = goal?.client_stages ?? (goal?.source === "client" ? goal.stages : []);
@@ -1204,6 +1245,7 @@ function CrmGoalEditor({
         if (!live) return;
         setLinked(r.linked);
         setPipelines(r.pipelines);
+        setCrmLists({ sources: r.sources ?? [], campaigns: r.campaigns ?? [] });
       },
       (e: Error) => live && setError(e.message),
     );
@@ -1236,7 +1278,14 @@ function CrmGoalEditor({
             });
           }
       if (!clear && !stages.length) throw Error("Escolha ao menos uma etapa.");
+      // A cobrança do RQ: conferida antes de gravar qualquer coisa; só grava se mudou.
+      const rqSave = rqChange();
+      if (rqSave && rqSave.config) {
+        const problem = rqInputProblem(rqSave.config);
+        if (problem) throw Error(problem);
+      }
       await backend.setCrmGoal(company, campaign, { scope, stages });
+      if (rqSave) await rq.setBilling(company, client, rqSave.config ? rqInputOut(rqSave.config) : null);
       onClose();
       notify(
         clear
@@ -1252,6 +1301,20 @@ function CrmGoalEditor({
       setBusy(false);
     }
   };
+  /** O que gravar na cobrança do RQ (null: nada mudou; config null: remover). */
+  function rqChange(): { config: RqConfigInput | null } | null {
+    if (!isRq || !rqView?.can_edit || !rqInput) return null;
+    if (!rqOn) return rqView.config ? { config: null } : null;
+    const before = rqView.config ? JSON.stringify(rqInputOut(rqInputFrom(rqView.config))) : "";
+    return JSON.stringify(rqInputOut(rqInput)) === before ? null : { config: rqInput };
+  }
+  // A etapa que gera cobrança entra nas etapas que importam (se couber).
+  const onRqInput = (next: RqConfigInput) => {
+    setRqInput(next);
+    if (next.model === "meeting" && next.stage_id && next.stage_id !== rqInput?.stage_id)
+      setChosen((c) => (next.stage_id! in c || Object.keys(c).length >= 6 ? c : { ...c, [next.stage_id!]: "" }));
+  };
+  const billingStage = rqOn && rqInput?.model === "meeting" ? rqInput.stage_id : null;
   const many = (pipelines?.length ?? 0) > 1;
   const count = Object.keys(chosen).length;
   return (
@@ -1309,6 +1372,7 @@ function CrmGoalEditor({
                           }
                         />
                         <span>{st.name}</span>
+                        {st.id === billingStage && <span className="rq-stage-badge">gera cobrança</span>}
                       </label>
                       {on && (
                         <Input
@@ -1332,6 +1396,40 @@ function CrmGoalEditor({
         <small className="crm-goal-note">
           Até 6 etapas. A meta é opcional: acima dela, a MAVI avisa — com calma quando muitos leads ainda são recentes.
         </small>
+        {isRq && rqView && (
+          <section className="rq-section" aria-label="Cobrança do Make Ads RQ">
+            <header>
+              <strong>Cobrança do Make Ads RQ</strong>
+              {rqView.can_edit && rqOn && (
+                <button type="button" className="text-btn" onClick={() => setRqOn(false)}>
+                  {rqView.config ? "Remover a cobrança" : "Agora não"}
+                </button>
+              )}
+            </header>
+            <small>
+              {clientName} tem o Make Ads RQ: escolha o que gera cobrança. Vale para o cliente, em todas as campanhas; no
+              começo de cada mês, o fechamento do mês anterior fica em Financeiro › Make Ads RQ.
+            </small>
+            {!rqView.can_edit ? (
+              <p className="rq-note">Só quem tem o módulo Financeiro › Make Ads RQ define a cobrança.</p>
+            ) : !rqOn ? (
+              <div className="rq-off">
+                <span>{rqView.config ? "A cobrança será removida ao salvar." : "Ainda não definida."}</span>
+                <Button type="button" className="btn secondary" onClick={() => setRqOn(true)}>
+                  {rqView.config ? "Manter a cobrança" : "Definir a cobrança"}
+                </Button>
+              </div>
+            ) : (
+              rqInput && (
+                <RqBillingFields
+                  input={rqInput}
+                  onChange={onRqInput}
+                  options={pipelines ? { linked, pipelines, ...crmLists } : null}
+                />
+              )
+            )}
+          </section>
+        )}
         {error && (
           <p className="form-error" role="alert">
             {error}

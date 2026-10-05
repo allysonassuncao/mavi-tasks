@@ -130,7 +130,7 @@ await check("colaborador: os módulos opcionais começam desligados", async () =
   );
   assert.deepEqual(await pages(fresh), { hidden_pages: [], shown_pages: [] });
   // Everything off but Campanhas and Radar: those two are turned on.
-  await set(admin, member, ["overview", "dashboards", "financeMedia", "personalRadar", "agenda"]);
+  await set(admin, member, ["overview", "dashboards", "financeMedia", "financeMakeAdsRq", "personalRadar", "agenda"]);
   assert.deepEqual(await pages(member), {
     hidden_pages: ["agenda"],
     shown_pages: ["campaigns", "radar"],
@@ -139,9 +139,9 @@ await check("colaborador: os módulos opcionais começam desligados", async () =
   await set(admin, member, []);
   assert.deepEqual(await pages(member), {
     hidden_pages: [],
-    shown_pages: ["campaigns", "dashboards", "financeMedia", "overview", "personalRadar", "radar"],
+    shown_pages: ["campaigns", "dashboards", "financeMakeAdsRq", "financeMedia", "overview", "personalRadar", "radar"],
   });
-  await set(admin, member, ["overview", "campaigns", "radar", "dashboards", "financeMedia", "personalRadar"]);
+  await set(admin, member, ["overview", "campaigns", "radar", "dashboards", "financeMedia", "financeMakeAdsRq", "personalRadar"]);
   assert.deepEqual(await pages(member), { hidden_pages: [], shown_pages: [] });
 });
 

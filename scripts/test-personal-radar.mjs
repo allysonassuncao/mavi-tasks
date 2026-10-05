@@ -110,8 +110,8 @@ await check("o colaborador só liga depois que o administrador libera", async ()
   await rejects(() => rpc("set_personal_radar", [A, true, null]), /liberado/);
   await as(admin);
   // Liberar = tirar dos ocultos (a tela de Módulos manda a lista de ocultos).
-  await rpc("set_member_pages", [A, member, ["overview", "campaigns", "radar", "dashboards", "financeMedia"]]);
-  await rpc("set_member_pages", [A, other, ["overview", "campaigns", "radar", "dashboards", "financeMedia"]]);
+  await rpc("set_member_pages", [A, member, ["overview", "campaigns", "radar", "dashboards", "financeMedia", "financeMakeAdsRq"]]);
+  await rpc("set_member_pages", [A, other, ["overview", "campaigns", "radar", "dashboards", "financeMedia", "financeMakeAdsRq"]]);
   const [m] = await sql(`select shown_pages from memberships where user_id = $1`, [member]);
   assert.deepEqual(m.shown_pages, ["personalRadar"]);
   await as(member);

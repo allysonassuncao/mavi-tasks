@@ -21,8 +21,9 @@ import type { Role } from "./types";
  * Radar and Campanhas configuration of the agency stays with leaders;
  * Dashboards they create show only their clients; Financeiro › Mídia
  * launches and reverses only on their clients' accounts; Radar pessoal
- * reads only the groups of their clients). Migrations 20270105090000,
- * 20270107090000, 20270114090000 and 20270304090000.
+ * reads only the groups of their clients; Financeiro › Make Ads RQ closes
+ * only their clients' months). Migrations 20270105090000, 20270107090000,
+ * 20270114090000, 20270304090000 and 20270430090000.
  */
 export const MEMBER_OPT_IN = [
   "overview",
@@ -30,6 +31,7 @@ export const MEMBER_OPT_IN = [
   "radar",
   "dashboards",
   "financeMedia",
+  "financeMakeAdsRq",
   "personalRadar",
 ] as const satisfies readonly Page[];
 
@@ -79,6 +81,7 @@ export const MODULES = [
   { id: "agenda", label: "Agenda" },
   { id: "campaigns", label: "Campanhas" },
   { id: "financeMedia", label: "Financeiro › Mídia" },
+  { id: "financeMakeAdsRq", label: "Financeiro › Make Ads RQ" },
   { id: "onboarding", label: "Planejamento › Social Leads" },
   { id: "socialMedia", label: "Planejamento › Social Media" },
   { id: "cases", label: "Cases de Sucesso" },

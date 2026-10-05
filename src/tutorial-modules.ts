@@ -12,6 +12,7 @@ export const TUTORIAL_MODULES: { id: string; label: string }[] = [
   { id: "agenda", label: "Agenda" },
   { id: "campaigns", label: "Campanhas" },
   { id: "financeMedia", label: "Financeiro › Mídia" },
+  { id: "financeMakeAdsRq", label: "Financeiro › Make Ads RQ" },
   { id: "onboarding", label: "Planejamento › Social Leads" },
   { id: "socialMedia", label: "Planejamento › Social Media" },
   { id: "cases", label: "Cases de Sucesso" },

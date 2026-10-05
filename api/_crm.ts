@@ -1,4 +1,12 @@
 import { callRpc } from "./_drive.js";
+import {
+  rqCompute,
+  rqFrozenLead,
+  rqLeadsFrom,
+  rqMonthRange,
+  type RqAdjustment,
+  type RqConfig,
+} from "./_rq-billing.js";
 
 /**
  * Campanhas › Abrir no CRM (migração 20270320090000_makecrm_links).
@@ -22,6 +30,12 @@ import { callRpc } from "./_drive.js";
  *    os números da página Anúncios do CRM, para Campanhas › Plataforma. Quem
  *    vê o cliente em Campanhas lê a ligação dele (regra da tabela
  *    client_crm_links); sem ligação, {linked: false}.
+ *  - {action: "pipelines", company, client}: os funis e etapas, as origens e
+ *    as campanhas do CRM do cliente (etapas que importam e cobrança do RQ).
+ *  - {action: "rq-month", company, client, month}: a conta do Make Ads RQ do
+ *    mês (leads que geram cobrança, os de fora, receita e mídia); validado,
+ *    o que ficou congelado. {action: "rq-validate", …}: conta de novo e
+ *    congela (api/_rq-billing.ts).
  */
 export type CrmEnv = {
   supabaseUrl: string;
@@ -257,6 +271,13 @@ export function funnelFrom(raw: any): CrmFunnel {
 }
 
 export type CrmPipeline = { id: string; name: string; stages: { id: string; name: string; order: number | null }[] };
+/** As origens e campanhas do CRM (filtro dos leads cobrados no RQ). */
+export function namedFrom(raw: unknown): { id: string; name: string }[] {
+  return list<any>(raw, (x) => x && (typeof x.id === "string" || typeof x.id === "number")).map((x) => ({
+    id: String(x.id),
+    name: String(x.name ?? ""),
+  }));
+}
 /** Os funis ativos de uma empresa do CRM, com as etapas (para escolher a etapa que importa). */
 export function pipelinesFrom(raw: any): CrmPipeline[] {
   return list<any>(raw?.pipelines, (p) => typeof p?.id === "string").map((p) => ({
@@ -313,6 +334,19 @@ async function linkedCrmCompany(
   const crmCompany = Array.isArray(rows) ? rows[0]?.crm_company_id : null;
   return crmCompany && UUID.test(crmCompany) ? crmCompany : "";
 }
+
+/** O mês do Make Ads RQ como o banco devolve (public.rq_month). */
+type RqMonthView = {
+  client: string;
+  client_name: string;
+  month: string;
+  config: RqConfig | null;
+  closing: { status: string; leads: unknown[]; totals: Record<string, unknown> } | null;
+  adjustments: RqAdjustment[];
+  billed: Record<string, string>;
+  spend: { net: number; gross: number; campaigns: number };
+  crm_company_id: string | null;
+};
 
 export async function handleCrm(
   body: any,
@@ -371,12 +405,75 @@ export async function handleCrm(
   if (action === "pipelines") {
     const { client } = body;
     if (!UUID.test(client ?? "")) return fail(400, "Cliente inválido.");
-    const crmCompany = await linkedCrmCompany(env, fetchImpl, authorization, company, client);
+    let crmCompany = await linkedCrmCompany(env, fetchImpl, authorization, company, client);
     if (typeof crmCompany !== "string") return crmCompany;
-    if (!crmCompany) return { status: 200, body: { linked: false, pipelines: [] } };
+    // Sem Campanhas, quem tem o Financeiro › Make Ads RQ do cliente também lê a ligação.
+    if (!crmCompany) {
+      const rq = await callRpc<string | null>(env, fetchImpl, authorization, "rq_crm_company", {
+        p_company: company,
+        p_client: client,
+      });
+      crmCompany = rq.ok && typeof rq.data === "string" && UUID.test(rq.data) ? rq.data : "";
+    }
+    if (!crmCompany) return { status: 200, body: { linked: false, pipelines: [], sources: [], campaigns: [] } };
     const r = await askCrm<Record<string, unknown>>(env, fetchImpl, { action: "pipelines", company_id: crmCompany });
     if (!r.ok) return fail(r.status, r.error);
-    return { status: 200, body: { linked: true, pipelines: pipelinesFrom(r.data) } };
+    return {
+      status: 200,
+      body: {
+        linked: true,
+        pipelines: pipelinesFrom(r.data),
+        sources: namedFrom(r.data?.sources),
+        campaigns: namedFrom(r.data?.campaigns),
+      },
+    };
+  }
+
+  if (action === "rq-month" || action === "rq-validate") {
+    const { client, month } = body;
+    if (!UUID.test(client ?? "")) return fail(400, "Cliente inválido.");
+    const range = rqMonthRange(String(month ?? ""));
+    if (!range) return fail(400, "Mês inválido.");
+    const m = await callRpc<RqMonthView>(env, fetchImpl, authorization, "rq_month", {
+      p_company: company,
+      p_client: client,
+      p_month: month,
+    });
+    if (!m.ok) return fail(m.status, m.error);
+    const { crm_company_id, ...view } = m.data;
+    const out = { view, crm_url: env.crmUrl };
+    if (view.closing?.status === "validated") {
+      if (action === "rq-validate") return fail(409, "O mês já foi validado.");
+      const c = view.closing;
+      return { status: 200, body: { ...out, frozen: true, result: { leads: c.leads, outside: [], totals: c.totals } } };
+    }
+    if (!view.config) return { status: 200, body: { ...out, missing: "config" } };
+    if (!crm_company_id || !UUID.test(crm_company_id)) return { status: 200, body: { ...out, missing: "crm" } };
+    const config = view.config;
+    const r = await askCrm<Record<string, unknown>>(env, fetchImpl, {
+      action: "billing",
+      company_id: crm_company_id,
+      date_start: range.start,
+      date_end: range.end,
+      mode: config.model,
+      pipeline_id: config.pipeline_id,
+      stage_id: config.model === "meeting" ? config.stage_id : null,
+    });
+    if (!r.ok) return fail(r.status, r.error);
+    const result = rqCompute(config, rqLeadsFrom(r.data), view.adjustments ?? [], view.billed ?? {}, view.spend);
+    if (action === "rq-month") return { status: 200, body: { ...out, frozen: false, result } };
+    const { updated_at: _at, updated_by_name: _by, ...rule } = config as RqConfig & {
+      updated_at?: string;
+      updated_by_name?: string;
+    };
+    const saved = await callRpc<Record<string, unknown>>(env, fetchImpl, authorization, "rq_validate", {
+      p_company: company,
+      p_client: client,
+      p_month: month,
+      p_result: { config: rule, leads: result.leads.map(rqFrozenLead), totals: result.totals },
+    });
+    if (!saved.ok) return fail(saved.status, saved.error);
+    return { status: 200, body: { ...out, frozen: true, closing: saved.data, result: { ...result, outside: [] } } };
   }
 
   if (action === "open") {

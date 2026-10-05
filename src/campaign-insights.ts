@@ -455,7 +455,16 @@ export interface InsightsBackend {
   /** Os responsáveis (até 5): recebem os avisos dos insights. */
   setOwners(company: string, campaign: string, users: string[]): Promise<CampaignOwner[]>;
   /** Os funis do MakeCRM do cliente (para escolher a etapa que importa). */
-  crmPipelines(company: string, client: string): Promise<{ linked: boolean; pipelines: CrmPipeline[] }>;
+  crmPipelines(
+    company: string,
+    client: string,
+  ): Promise<{
+    linked: boolean;
+    pipelines: CrmPipeline[];
+    /** Origens e campanhas do CRM (o filtro da cobrança do Make Ads RQ). */
+    sources?: { id: string; name: string }[];
+    campaigns?: { id: string; name: string }[];
+  }>;
   /** As etapas que importam (do cliente ou só da campanha); sem etapas, tira. */
   setCrmGoal(company: string, campaign: string, goal: CrmGoalInput): Promise<CrmGoal | null>;
 }
@@ -551,7 +560,12 @@ export const serverInsights: InsightsBackend = {
     rpc<CampaignOwner[]>("set_campaign_owners", { p_company: company, p_campaign: campaign, p_users: users }),
   async crmPipelines(company, client) {
     const { crmServer } = await import("./CampaignCrm");
-    return crmServer<{ linked: boolean; pipelines: CrmPipeline[] }>({ action: "pipelines", company, client });
+    return crmServer<{
+      linked: boolean;
+      pipelines: CrmPipeline[];
+      sources?: { id: string; name: string }[];
+      campaigns?: { id: string; name: string }[];
+    }>({ action: "pipelines", company, client });
   },
   async setCrmGoal(company, campaign, goal) {
     const g = await rpc<CrmGoal | null>("set_campaign_crm_goal", {

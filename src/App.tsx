@@ -301,6 +301,9 @@ const NoticesPage = lazy(() =>
 const FinanceMediaPage = lazy(() =>
   import("./FinanceMediaPage").then((m) => ({ default: m.FinanceMediaPage })),
 );
+const FinanceRqPage = lazy(() =>
+  import("./FinanceRqPage").then((m) => ({ default: m.FinanceRqPage })),
+);
 // Leaders only, and heavy (editor, charts): loaded when first opened.
 const AgentsPage = lazy(() =>
   import("./AgentsPage").then((m) => ({ default: m.AgentsPage })),
@@ -326,6 +329,7 @@ const navigation = [
   { id: "projects", label: "Projetos", icon: FolderKanban },
   { id: "campaigns", label: "Campanhas", icon: Megaphone },
   { id: "financeMedia", label: "Financeiro › Mídia", icon: Wallet },
+  { id: "financeMakeAdsRq", label: "Financeiro › Make Ads RQ", icon: Wallet },
   { id: "onboarding", label: "Social Leads", icon: Rocket },
   { id: "socialMedia", label: "Social Media", icon: Rocket },
   { id: "cases", label: "Cases de Sucesso", icon: Trophy },
@@ -3071,6 +3075,8 @@ export default function App() {
                         "Campanhas de tráfego pago de cada cliente e seus ciclos de verba.",
                       financeMedia:
                         "A conta de mídia de cada cliente e produto: entradas, saídas, estornos e o gasto das Campanhas, com o motivo e quem lançou.",
+                      financeMakeAdsRq:
+                        "O fechamento mensal do Make Ads RQ: os leads que geraram cobrança no mês, a receita da Make e a mídia investida em cada cliente.",
                       cases:
                         "Resultados reais de clientes para usar na venda: busque por termo ou nicho e cadastre os seus.",
                       temperature:
@@ -3133,6 +3139,7 @@ export default function App() {
                   page !== "inbox" &&
                   page !== "campaigns" &&
                   page !== "financeMedia" &&
+                  page !== "financeMakeAdsRq" &&
                   page !== "onboarding" &&
                   page !== "socialMedia" &&
                   page !== "cases" &&
@@ -4258,6 +4265,11 @@ export default function App() {
                     demo={demo}
                     notify={notify}
                   />
+                </Suspense>
+              )}
+              {page === "financeMakeAdsRq" && (
+                <Suspense fallback={<Loading variant="table" />}>
+                  <FinanceRqPage key={company} company={company} demo={demo} notify={notify} />
                 </Suspense>
               )}
               {page === "agents" && (

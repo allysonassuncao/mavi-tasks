@@ -43,6 +43,8 @@ import {
   useCampaignInsights,
 } from "./CampaignInsights";
 import { CampaignMaviCell } from "./CampaignMaviCell";
+import { RqCampaignButton } from "./RqBilling";
+import { isRqProduct } from "./rq-billing";
 import { demoDaily, serverDaily, type DailyRead } from "./campaign-daily";
 import {
   demoInsights,
@@ -1781,6 +1783,7 @@ function CampaignDetail({
     data,
     user,
     onNewTask,
+    demo,
   };
   const current = currentCycle(state, campaign);
   const alert = cycleAlert(state, campaign, today);
@@ -1846,6 +1849,21 @@ function CampaignDetail({
       ) : (
         crm
       )}
+      {parts.client &&
+        data.contracts.some(
+          (k) =>
+            k.client_id === parts.client!.id &&
+            !k.archived &&
+            isRqProduct(data.products.find((p) => p.id === k.product_id)?.name),
+        ) && (
+          <RqCampaignButton
+            company={company}
+            client={parts.client.id}
+            clientName={parts.client.name}
+            demo={demo}
+            notify={notify}
+          />
+        )}
     </>
   );
   const actions = !canEdit ? (

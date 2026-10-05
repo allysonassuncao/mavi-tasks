@@ -250,9 +250,16 @@ export function SidebarNav({
           key: "finance",
           label: "Financeiro",
           icon: Wallet,
-          to: { page: "financeMedia" },
+          // Opens the first of its modules the person has.
+          to: {
+            page:
+              allowed("financeMedia") || !allowed("financeMakeAdsRq")
+                ? "financeMedia"
+                : "financeMakeAdsRq",
+          },
           children: [
             { key: "finance-media", label: "Mídia", to: { page: "financeMedia" } },
+            { key: "finance-make-ads-rq", label: "Make Ads RQ", to: { page: "financeMakeAdsRq" } },
           ],
         },
         {

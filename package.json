@@ -26,6 +26,7 @@
     "test:db:meeting-move": "node scripts/test-meeting-move.mjs",
     "test:db:campaign-reports": "node scripts/test-campaign-reports.mjs",
     "test:db:finance-media": "node scripts/test-finance-media.mjs",
+    "test:db:make-ads-rq": "node scripts/test-make-ads-rq.mjs",
     "test:db:campaign-alerts": "node scripts/test-campaign-alerts.mjs",
     "test:db:campaign-insights": "node scripts/test-campaign-insights.mjs",
     "test:db:campaign-list-results": "node scripts/test-campaign-list-results.mjs",

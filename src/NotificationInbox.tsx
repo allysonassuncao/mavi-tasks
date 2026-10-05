@@ -118,7 +118,7 @@ export function InboxList({
                 <span className="inbox-system" aria-hidden="true">
                   <Route size={15} />
                 </span>
-              ) : n.kind === "media_balance" ? (
+              ) : n.kind === "media_balance" || n.kind === "rq_closing" ? (
                 <span className="inbox-system due-risk" aria-hidden="true">
                   <Wallet size={15} />
                 </span>
@@ -156,6 +156,7 @@ export function InboxList({
                 n.kind === "radar_report" ||
                 n.kind === "radar_alert" ||
                 n.kind === "media_balance" ||
+                n.kind === "rq_closing" ||
                 n.kind === "campaign_alert" ||
                 n.kind === "campaign_insight" ||
                 n.kind === "job_alert" ||

@@ -81,6 +81,11 @@ export const NOTICE_TYPES: {
     hint: "Quando a conta de mídia de um cliente seu (Financeiro › Mídia) fica abaixo do saldo mínimo ou negativa.",
   },
   {
+    key: "rq_closing",
+    label: "Fechamento do Make Ads RQ",
+    hint: "No dia 1 de cada mês, os clientes do Make Ads RQ do mês anterior que ainda faltam validar (Financeiro › Make Ads RQ).",
+  },
+  {
     key: "success_case",
     label: "Cases de Sucesso",
     hint: "Um case para aprovar, ou o seu aprovado ou devolvido.",

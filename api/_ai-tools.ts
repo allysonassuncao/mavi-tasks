@@ -360,7 +360,7 @@ export const TOOLS: ToolSpec[] = [
         module: {
           type: "string",
           description:
-            "Só quando a dúvida for claramente de outra tela que não a atual: o módulo (tasks, campaigns, drive, notices, cases, radar, dashboards, financeMedia, onboarding, socialMedia, agents, assistant, aiUsage, settings, profile, inbox…).",
+            "Só quando a dúvida for claramente de outra tela que não a atual: o módulo (tasks, campaigns, drive, notices, cases, radar, dashboards, financeMedia, financeMakeAdsRq, onboarding, socialMedia, agents, assistant, aiUsage, settings, profile, inbox…).",
         },
         limit: { type: "integer", minimum: 1, maximum: 10, description: "Quantas seções (padrão 6)." },
       },

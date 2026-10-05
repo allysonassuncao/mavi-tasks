@@ -22,6 +22,7 @@ export const INBOX_KINDS: { id: string; label: string; kinds: AppNotification["k
   { id: "campaign_alert", label: "Avisos de campanhas", kinds: ["campaign_alert"] },
   { id: "campaign_insight", label: "Insights das campanhas", kinds: ["campaign_insight"] },
   { id: "media_balance", label: "Financeiro › Mídia", kinds: ["media_balance"] },
+  { id: "rq_closing", label: "Financeiro › Make Ads RQ", kinds: ["rq_closing"] },
   { id: "success_case", label: "Cases de Sucesso", kinds: ["success_case"] },
   { id: "social_leads", label: "Social Leads", kinds: ["social_leads"] },
   { id: "mavi", label: "MAVI", kinds: ["ai_share", "ai_answer", "ai_skill"] },

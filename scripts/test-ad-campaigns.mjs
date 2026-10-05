@@ -2074,7 +2074,7 @@ await check(
     await assert.rejects(page(trafego), /Sem permissão: Campanhas/);
     assert.equal((await visible(trafego, "ad_campaigns")).length, 0);
     await as(admin);
-    await rpc("set_member_pages", [A, trafego, ["overview", "radar", "dashboards", "financeMedia", "personalRadar"]]);
+    await rpc("set_member_pages", [A, trafego, ["overview", "radar", "dashboards", "financeMedia", "financeMakeAdsRq", "personalRadar"]]);
     assert.deepEqual(
       (
         await sql(

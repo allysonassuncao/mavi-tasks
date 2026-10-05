@@ -11,6 +11,7 @@ export const pagePaths = {
   projects: "/projetos",
   campaigns: "/campanhas",
   financeMedia: "/financeiro/midia",
+  financeMakeAdsRq: "/financeiro/make-ads-rq",
   onboarding: "/onboarding/social-leads",
   socialMedia: "/planejamento/social-media",
   cases: "/cases-de-sucesso",

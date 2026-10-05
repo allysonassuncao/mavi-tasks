@@ -363,21 +363,38 @@ describe("A etapa que importa (Fase 6 dos Insights)", () => {
     const f = fake((url) =>
       url.includes("/rest/v1/client_crm_links")
         ? [200, [{ crm_company_id: crmCompany }]]
-        : [200, { pipelines: [{ id: "p1", name: "Vendas", stages: [{ id: "s1", name: "Novo", order: 1 }, { nome: "lixo" }] }, { name: "sem id" }] }],
+        : [
+            200,
+            {
+              pipelines: [{ id: "p1", name: "Vendas", stages: [{ id: "s1", name: "Novo", order: 1 }, { nome: "lixo" }] }, { name: "sem id" }],
+              sources: [{ id: 7, name: "Meta" }, { name: "sem id" }],
+            },
+          ],
     );
     const r = await handleCrm({ action: "pipelines", company, client }, auth, env, f.impl);
     expect(r).toEqual({
       status: 200,
-      body: { linked: true, pipelines: [{ id: "p1", name: "Vendas", stages: [{ id: "s1", name: "Novo", order: 1 }] }] },
+      body: {
+        linked: true,
+        pipelines: [{ id: "p1", name: "Vendas", stages: [{ id: "s1", name: "Novo", order: 1 }] }],
+        sources: [{ id: "7", name: "Meta" }],
+        campaigns: [],
+      },
     });
     expect(f.calls[0].headers.Authorization).toBe(auth);
     expect(f.calls[1].body).toEqual({ action: "pipelines", company_id: crmCompany });
-    const none = fake(() => [200, []]);
+    // Sem a ligação por Campanhas, tenta pelo Financeiro › Make Ads RQ (rq_crm_company).
+    const none = fake((url) => (url.includes("/rpc/rq_crm_company") ? [403, { message: "Sem permissão" }] : [200, []]));
     expect(await handleCrm({ action: "pipelines", company, client }, auth, env, none.impl)).toEqual({
       status: 200,
-      body: { linked: false, pipelines: [] },
+      body: { linked: false, pipelines: [], sources: [], campaigns: [] },
     });
-    expect(none.calls).toHaveLength(1);
+    expect(none.calls).toHaveLength(2);
+    const rq = fake((url) =>
+      url.includes("/rpc/rq_crm_company") ? [200, crmCompany] : url.includes("client_crm_links") ? [200, []] : [200, { pipelines: [] }],
+    );
+    expect((await handleCrm({ action: "pipelines", company, client }, auth, env, rq.impl)).body).toMatchObject({ linked: true });
+    expect(rq.calls[2].body).toEqual({ action: "pipelines", company_id: crmCompany });
     expect((await handleCrm({ action: "pipelines", company, client: "x" }, auth, env, none.impl)).status).toBe(400);
   });
 });

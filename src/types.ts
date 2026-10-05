@@ -199,6 +199,8 @@ export interface AppNotification {
     | "radar_alert"
     /** Financeiro › Mídia: o saldo de uma conta ficou baixo ou negativo (link /financeiro/midia?contrato=<id>). */
     | "media_balance"
+    /** Financeiro › Make Ads RQ: dia 1, os clientes do mês anterior para validar (link /financeiro/make-ads-rq?mes=AAAA-MM). */
+    | "rq_closing"
     /** Prioridades: a tarefa da pessoa subiu para Alta ou Urgente (headline: "marcou como prioridade Urgente"). */
     | "priority"
     /** Prioridades em massa: "Ana marcou 3 tarefas suas como prioridade Alta" (link /tarefas?escopo=mine&prioritarias=1). */
