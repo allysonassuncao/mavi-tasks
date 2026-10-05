@@ -45,7 +45,7 @@ const when = (iso: string) =>
   });
 
 /**
- * Equipe e configurações › Avisos de falhas: as rotinas que rodam sozinhas,
+ * Painel da MAVI › Avisos de falhas: as rotinas que rodam sozinhas,
  * como estão agora e, para cada uma, quando avisar e quem recebe. Só
  * administradores.
  */
@@ -58,7 +58,7 @@ export function JobAlertsPanel(props: {
 }) {
   if (props.demo)
     return (
-      <section className="panel" id="config-avisos">
+      <section className="panel" id="mavi-avisos">
         <Empty
           title="Avisos de falhas na conta real"
           body="A demonstração não tem rotinas rodando."
@@ -67,7 +67,7 @@ export function JobAlertsPanel(props: {
     );
   if (!props.isAdmin)
     return (
-      <section className="panel" id="config-avisos">
+      <section className="panel" id="mavi-avisos">
         <Empty
           title="Exclusivo de administradores"
           body="Peça a um administrador para configurar os avisos de falhas."
@@ -116,7 +116,7 @@ function Jobs({
 
   if (!jobs)
     return (
-      <section className="panel job-alerts" id="config-avisos">
+      <section className="panel job-alerts" id="mavi-avisos">
         {error ? (
           <p className="job-alerts-error" role="alert">
             {error}
@@ -130,7 +130,7 @@ function Jobs({
   const failing = jobs.filter((j) => jobHealth(j) === "failing").length;
   const stale = jobs.filter((j) => jobHealth(j) === "stale").length;
   return (
-    <section className="panel job-alerts" id="config-avisos">
+    <section className="panel job-alerts" id="mavi-avisos">
       <div className="panel-heading">
         <div>
           <h2>

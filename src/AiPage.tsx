@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import {
   BarChart3,
+  BellRing,
   Boxes,
   Brain,
   GraduationCap,
   Lightbulb,
+  MessageCircle,
   Radar,
   Route,
   Thermometer,
@@ -24,6 +26,8 @@ import { AiPowersPanel } from "./AiPowersPanel";
 import { NoticeAnimationAdmin } from "./NoticeAnimationAdmin";
 import { noticesApi } from "./notices";
 import { SettingsHistory, SettingsLogProvider } from "./AiSettingsLog";
+import { WhatsappGroupsPanel } from "./WhatsappGroups";
+import { JobAlertsPanel } from "./JobAlerts";
 
 const TABS: {
   id: AiTab;
@@ -45,6 +49,13 @@ const TABS: {
   { id: "poderes", label: "Poderes", icon: Zap, admin: false },
   { id: "provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
   { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: false },
+  {
+    id: "whatsapp",
+    label: "Grupos do Whatsapp",
+    icon: MessageCircle,
+    admin: false,
+  },
+  { id: "avisos", label: "Avisos de falhas", icon: BellRing, admin: true },
 ];
 
 /**
@@ -53,9 +64,11 @@ const TABS: {
  * (#aprendizado), o Termômetro do cliente
  * (#termometro), os tópicos do Radar do cliente (#radar), os insights da
  * MAVI nas campanhas (#campanhas), os poderes do módulo MAVI (#poderes) e as regras de quem usa qual provedor e modelo (por
- * funcionalidade, pessoa, cliente, produto e projeto, #regras); para
+ * funcionalidade, pessoa, cliente, produto e projeto, #regras) e os grupos
+ * do WhatsApp lidos pela MAVI (#whatsapp; só administradores ajustam); para
  * administradores, também a biblioteca de provedores e API Keys
- * (#provedores). Cada aba tem o seu endereço.
+ * (#provedores) e os avisos de falhas das rotinas (#avisos). Cada aba tem o
+ * seu endereço.
  */
 export function AiPage({
   company,
@@ -72,8 +85,10 @@ export function AiPage({
   notify: (message: string) => void;
 }) {
   const hash = aiTab(useHash());
-  // Gestores veem tudo menos a biblioteca de provedores (as API Keys).
-  const tab = isAdmin || hash !== "provedores" ? hash : "consumo";
+  // Gestores veem tudo menos a biblioteca de provedores (as API Keys) e os
+  // avisos de falhas.
+  const tab =
+    isAdmin || !TABS.find((t) => t.id === hash)?.admin ? hash : "consumo";
   const tabs = TABS.filter((t) => isAdmin || !t.admin);
   return (
     <div className="ai-page">
@@ -95,7 +110,23 @@ export function AiPage({
           ))}
         </nav>
       )}
-      {tab === "poderes" ? (
+      {tab === "whatsapp" ? (
+        <WhatsappGroupsPanel
+          data={data}
+          company={company}
+          canEdit={isAdmin}
+          demo={demo}
+          notify={notify}
+        />
+      ) : tab === "avisos" ? (
+        <JobAlertsPanel
+          data={data}
+          company={company}
+          isAdmin={isAdmin}
+          demo={demo}
+          notify={notify}
+        />
+      ) : tab === "poderes" ? (
         <AiPowersPanel
           company={company}
           data={data}

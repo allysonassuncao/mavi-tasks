@@ -179,7 +179,7 @@ export function WhatsappFolder({
       <div className="panel">
         <Empty
           title="Nenhum grupo de WhatsApp"
-          body="Os grupos entram sozinhos quando o título tem o código do cliente. Um administrador também pode ligar um grupo em Configurações › Grupos do Whatsapp."
+          body="Os grupos entram sozinhos quando o título tem o código do cliente. Um administrador também pode ligar um grupo no Painel da MAVI › Grupos do Whatsapp."
         />
       </div>
     );

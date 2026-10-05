@@ -1,7 +1,7 @@
 import { rpc } from "./api";
 
 /**
- * Equipe e configurações › Avisos de falhas (migração 20270406090000_job_alerts):
+ * Painel da MAVI › Avisos de falhas (migração 20270406090000_job_alerts):
  * as rotinas que rodam sozinhas e o que o admin escolheu para cada uma. A
  * rodada do banco (a cada 2 minutos) manda os avisos 'job_alert'.
  */

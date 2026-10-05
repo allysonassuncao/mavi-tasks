@@ -73,7 +73,7 @@ export const NOTICE_TYPES: {
   {
     key: "job_alert",
     label: "Falhas nas rotinas",
-    hint: "Quando uma rotina automática (varredura do WhatsApp, sincronização das campanhas…) falha, para ou volta a funcionar — se um administrador escolheu você em Equipe e configurações › Avisos de falhas.",
+    hint: "Quando uma rotina automática (varredura do WhatsApp, sincronização das campanhas…) falha, para ou volta a funcionar — se um administrador escolheu você no Painel da MAVI › Avisos de falhas.",
   },
   {
     key: "media_balance",

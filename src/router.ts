@@ -101,8 +101,6 @@ export const SETTINGS_TABS = [
   "config-templates",
   "config-prazos",
   "config-sugestoes",
-  "config-whatsapp",
-  "config-avisos",
   "config-api",
 ] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
@@ -117,8 +115,18 @@ export const AI_TABS = [
   "poderes",
   "provedores",
   "regras",
+  "whatsapp",
+  "avisos",
 ] as const;
 export type AiTab = (typeof AI_TABS)[number];
+/**
+ * Abas que saíram de "Equipe e configurações" para o "Painel da MAVI": os
+ * endereços antigos (links e avisos já enviados) levam para a aba nova.
+ */
+export const MOVED_SETTINGS_TABS: Record<string, AiTab> = {
+  "config-whatsapp": "whatsapp",
+  "config-avisos": "avisos",
+};
 export function aiTab(hash: string): AiTab {
   const tab = hash.replace(/^ia-/, "");
   return (AI_TABS as readonly string[]).includes(tab)

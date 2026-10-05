@@ -311,7 +311,7 @@ function Signals({
       {filter === "whatsapp" && wa && (
         <p className="thermo-source-note">
           {wa.groups === 0
-            ? "Nenhum grupo de WhatsApp está ligado a este cliente. Um administrador liga o grupo em Configurações › Grupos do Whatsapp."
+            ? "Nenhum grupo de WhatsApp está ligado a este cliente. Um administrador liga o grupo no Painel da MAVI › Grupos do Whatsapp."
             : [
                 `${wa.groups} ${wa.groups === 1 ? "grupo ligado" : "grupos ligados"}`,
                 `${wa.read} ${wa.read === 1 ? "dia lido" : "dias lidos"}`,

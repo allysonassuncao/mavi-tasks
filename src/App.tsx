@@ -16,6 +16,8 @@ import {
   taskBackground,
   useHash,
   settingsTab,
+  MOVED_SETTINGS_TABS,
+  pagePaths,
   type SettingsTab,
   navigate,
   pageUrl,
@@ -155,7 +157,6 @@ import { useNow } from "./useClock";
 import { Expandable, Paged, Pagination } from "./Pagination";
 import { TaskTemplatesPanel } from "./TaskTemplates";
 import { DueRulesPanel } from "./DueRulesPanel";
-import { WhatsappGroupsPanel } from "./WhatsappGroups";
 import { SuggestionDialog, SuggestionSettingsPanel } from "./SuggestionDialog";
 import { SidebarNav, type NavTarget } from "./SidebarNav";
 import { requestPasswordReset } from "./profile";
@@ -185,7 +186,6 @@ import { MemberForm } from "./MemberForm";
 import { MemberModulesMenu } from "./MemberModulesMenu";
 import { MemberAccessLogs } from "./MemberAccessLogs";
 import { ApiKeysPanel } from "./ApiKeys";
-import { JobAlertsPanel } from "./JobAlerts";
 import { logAccess } from "./access-logs";
 import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
@@ -390,7 +390,8 @@ export default function App() {
   // address bar itself (the task's).
   const location = useLocation();
   const address = useAddress();
-  const settingsView = settingsTab(useHash());
+  const hash = useHash();
+  const settingsView = settingsTab(hash);
   const isLogin = address.split("?")[0].replace(/\/+$/, "") === "/login";
   const requestedCompany = data.companies.find(
     (c) => c.id === companyRef || companySlug(c, data.companies) === companyRef,
@@ -405,6 +406,21 @@ export default function App() {
     setCompanyRef(next ? companySlug(next, data.companies) : "");
   }
   const page = usePage();
+  // Grupos do Whatsapp e Avisos de falhas saíram das configurações para o
+  // Painel da MAVI: os endereços antigos levam para lá.
+  useEffect(() => {
+    const moved = page === "settings" ? MOVED_SETTINGS_TABS[hash] : undefined;
+    if (moved)
+      navigate(
+        window.location.pathname.replace(
+          new RegExp(`${pagePaths.settings}$`),
+          pagePaths.aiUsage,
+        ) +
+          window.location.search +
+          `#${moved}`,
+        true,
+      );
+  }, [page, hash]);
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
   const [notifications, setNotifications] =
     useState<NotificationState>(notificationState);
@@ -2991,7 +3007,7 @@ export default function App() {
                       storage:
                         "Quanto espaço os arquivos enviados ocupam, na agência, por pessoa e por cliente.",
                       aiUsage: isAdmin
-                        ? "Consumo e limites de gasto, o aprendizado do Assistente MAVI, a biblioteca de provedores e modelos, e qual modelo cada funcionalidade, pessoa, cliente, produto e projeto usa."
+                        ? "Consumo e limites de gasto, o aprendizado do Assistente MAVI, a biblioteca de provedores e modelos, qual modelo cada funcionalidade, pessoa, cliente, produto e projeto usa, os grupos do WhatsApp e os avisos de falhas das rotinas."
                         : "Quanto a MAVI custou, os limites de gasto e o que o Assistente MAVI aprendeu com o feedback do time.",
                       dashboards:
                         "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
@@ -4472,12 +4488,8 @@ export default function App() {
                           data.dueRules?.length ?? 0,
                         ],
                         ["config-sugestoes", "Sugestões", null],
-                        ["config-whatsapp", "Grupos do Whatsapp", null],
                         ...(isAdmin
-                          ? [
-                              ["config-avisos", "Avisos de falhas", null],
-                              ["config-api", "Chaves de API", null],
-                            ]
+                          ? [["config-api", "Chaves de API", null]]
                           : []),
                       ] as [SettingsTab, string, number | null][]
                     ).map(([id, label, n]) => (
@@ -4813,24 +4825,6 @@ export default function App() {
                         user={user}
                         demo={demo}
                         mutate={mutate}
-                        notify={notify}
-                      />
-                    )}
-                    {settingsView === "config-whatsapp" && (
-                      <WhatsappGroupsPanel
-                        data={data}
-                        company={company}
-                        canEdit={isAdmin}
-                        demo={demo}
-                        notify={notify}
-                      />
-                    )}
-                    {settingsView === "config-avisos" && (
-                      <JobAlertsPanel
-                        data={data}
-                        company={company}
-                        isAdmin={isAdmin}
-                        demo={demo}
                         notify={notify}
                       />
                     )}

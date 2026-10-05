@@ -13,6 +13,7 @@ import {
   taskIdFromPath,
   settingsTab,
   SETTINGS_TABS,
+  MOVED_SETTINGS_TABS,
   aiTab,
   driveLocationFromPath,
   driveUrl,
@@ -123,6 +124,12 @@ it("abre Equipe e configurações na aba do endereço, ou em Pessoas", () => {
   for (const tab of SETTINGS_TABS) expect(settingsTab(tab)).toBe(tab);
   expect(settingsTab("")).toBe("config-pessoas");
   expect(settingsTab("qualquer-coisa")).toBe("config-pessoas");
+});
+
+it("leva Grupos do Whatsapp e Avisos de falhas para o Painel da MAVI", () => {
+  expect(SETTINGS_TABS).not.toContain("config-whatsapp");
+  expect(aiTab(MOVED_SETTINGS_TABS["config-whatsapp"])).toBe("whatsapp");
+  expect(aiTab(MOVED_SETTINGS_TABS["config-avisos"])).toBe("avisos");
 });
 
 it("volta à tela de permissão do OAuth depois do login, e a nada mais", () => {

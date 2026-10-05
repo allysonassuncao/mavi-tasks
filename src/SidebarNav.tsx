@@ -427,6 +427,20 @@ export function SidebarNav({
               label: "Quem usa qual modelo",
               to: { page: "aiUsage" as const, hash: "regras" },
             },
+            {
+              key: "ai-whatsapp",
+              label: "Grupos do Whatsapp",
+              to: { page: "aiUsage" as const, hash: "whatsapp" },
+            },
+            ...(isAdmin
+              ? [
+                  {
+                    key: "ai-job-alerts",
+                    label: "Avisos de falhas",
+                    to: { page: "aiUsage" as const, hash: "avisos" },
+                  },
+                ]
+              : []),
           ],
         },
       ],

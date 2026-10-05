@@ -35,7 +35,7 @@ const TABS: [GroupFilter, string][] = [
 ];
 
 /**
- * Configurações › Grupos do Whatsapp: cada grupo é ligado sozinho ao cliente
+ * Painel da MAVI › Grupos do Whatsapp: cada grupo é ligado sozinho ao cliente
  * cujo código está no título; aqui o admin liga os que ficaram sem cliente,
  * corrige os errados e ignora os que não são de cliente.
  */
@@ -48,7 +48,7 @@ export function WhatsappGroupsPanel(props: {
 }) {
   if (props.demo)
     return (
-      <section className="panel" id="config-whatsapp">
+      <section className="panel" id="mavi-whatsapp">
         <Empty
           title="Grupos do Whatsapp na conta conectada"
           body="Os grupos vêm do número de WhatsApp da sua empresa; a demonstração não se conecta a ele."
@@ -160,7 +160,7 @@ function GroupsPanel({
   }
 
   return (
-    <section className="panel whatsapp-groups" id="config-whatsapp">
+    <section className="panel whatsapp-groups" id="mavi-whatsapp">
       <div className="panel-heading">
         <div>
           <h2>Grupos do Whatsapp</h2>
@@ -313,13 +313,11 @@ function SyncStatus({
           {canEdit && (
             <a
               className="whatsapp-status-alerts"
-              href="#config-avisos"
+              href="#avisos"
               onClick={(e) => {
                 e.preventDefault();
                 navigate(
-                  window.location.pathname +
-                    window.location.search +
-                    "#config-avisos",
+                  window.location.pathname + window.location.search + "#avisos",
                   true,
                 );
               }}

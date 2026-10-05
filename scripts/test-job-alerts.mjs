@@ -100,7 +100,7 @@ await check(
       n.body,
       "3 vezes seguidas. Último erro: whatsapp_sweep: canceling statement due to statement timeout",
     );
-    assert.equal(n.link, "/configuracoes#config-whatsapp");
+    assert.equal(n.link, "/mavi#whatsapp");
     assert.equal((await inbox(admin2)).length, 1);
     assert.equal((await inbox(member)).length, 0, "membro não é administrador");
     assert.equal((await inbox(gone)).length, 0, "inativo não recebe");
