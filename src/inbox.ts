@@ -26,6 +26,7 @@ export const INBOX_KINDS: { id: string; label: string; kinds: AppNotification["k
   { id: "social_leads", label: "Social Leads", kinds: ["social_leads"] },
   { id: "mavi", label: "MAVI", kinds: ["ai_share", "ai_answer", "ai_skill"] },
   { id: "lessons", label: "Aprendizados da MAVI", kinds: ["copilot_lessons", "mavi_lessons"] },
+  { id: "job_alert", label: "Falhas nas rotinas", kinds: ["job_alert"] },
 ];
 
 /** The database kinds of the groups picked in the "Tipo" filter. */

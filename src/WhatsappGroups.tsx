@@ -13,6 +13,8 @@ import { Empty } from "./components";
 import { MultiPick } from "./MultiPick";
 import { Paged } from "./Pagination";
 import type { Snapshot } from "./types";
+import { navigate } from "./router";
+import "./job-alerts.css";
 import {
   ago,
   filterGroups,
@@ -177,7 +179,7 @@ function GroupsPanel({
         </Button>
       </div>
 
-      {status && <SyncStatus status={status} />}
+      {status && <SyncStatus status={status} canEdit={canEdit} />}
 
       <div className="whatsapp-groups-toolbar">
         <div
@@ -262,7 +264,13 @@ function GroupsPanel({
   );
 }
 
-function SyncStatus({ status }: { status: WhatsappStatus }) {
+function SyncStatus({
+  status,
+  canEdit,
+}: {
+  status: WhatsappStatus;
+  canEdit: boolean;
+}) {
   if (!status.configured)
     return (
       <p className="whatsapp-status-note" role="status">
@@ -302,6 +310,23 @@ function SyncStatus({ status }: { status: WhatsappStatus }) {
           {status.last_sweep_error
             ? `A última varredura falhou: ${status.last_sweep_error}`
             : `${status.groups_with_error} ${status.groups_with_error === 1 ? "grupo teve" : "grupos tiveram"} erro na última leitura; eles são lidos de novo na próxima.`}
+          {canEdit && (
+            <a
+              className="whatsapp-status-alerts"
+              href="#config-avisos"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(
+                  window.location.pathname +
+                    window.location.search +
+                    "#config-avisos",
+                  true,
+                );
+              }}
+            >
+              Configurar avisos
+            </a>
+          )}
         </p>
       )}
     </>

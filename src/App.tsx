@@ -185,6 +185,7 @@ import { MemberForm } from "./MemberForm";
 import { MemberModulesMenu } from "./MemberModulesMenu";
 import { MemberAccessLogs } from "./MemberAccessLogs";
 import { ApiKeysPanel } from "./ApiKeys";
+import { JobAlertsPanel } from "./JobAlerts";
 import { logAccess } from "./access-logs";
 import { TaskSearch } from "./TaskSearch";
 import { useInstall } from "./pwa";
@@ -4473,7 +4474,10 @@ export default function App() {
                         ["config-sugestoes", "Sugestões", null],
                         ["config-whatsapp", "Grupos do Whatsapp", null],
                         ...(isAdmin
-                          ? [["config-api", "Chaves de API", null]]
+                          ? [
+                              ["config-avisos", "Avisos de falhas", null],
+                              ["config-api", "Chaves de API", null],
+                            ]
                           : []),
                       ] as [SettingsTab, string, number | null][]
                     ).map(([id, label, n]) => (
@@ -4817,6 +4821,15 @@ export default function App() {
                         data={data}
                         company={company}
                         canEdit={isAdmin}
+                        demo={demo}
+                        notify={notify}
+                      />
+                    )}
+                    {settingsView === "config-avisos" && (
+                      <JobAlertsPanel
+                        data={data}
+                        company={company}
+                        isAdmin={isAdmin}
                         demo={demo}
                         notify={notify}
                       />

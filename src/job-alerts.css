@@ -1,0 +1,279 @@
+/* Equipe e configurações › Avisos de falhas (JobAlerts.tsx). */
+.job-alerts-overview {
+  margin: 0 23px 14px;
+  color: #57645f;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.job-alerts-error {
+  margin: 0 23px 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #fdf1ef;
+  color: #9a4235;
+  font-size: 0.8rem;
+}
+.job-alert-editor .job-alerts-error {
+  margin: 0;
+}
+.job-alerts-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+.job-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 23px;
+  border-bottom: 1px solid var(--border);
+}
+.job-alert:last-child {
+  border-bottom: 0;
+}
+.job-alert.off .job-alert-title strong,
+.job-alert.off .job-alert-about {
+  color: var(--muted);
+}
+.job-alert-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.job-alert-icon {
+  flex: none;
+  color: #8fa392;
+}
+.job-alert.ok .job-alert-icon {
+  color: #5f8f3a;
+}
+.job-alert.failing .job-alert-icon {
+  color: #c0503d;
+}
+.job-alert.stale .job-alert-icon {
+  color: #b27a17;
+}
+.job-alert-title {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.job-alert-title strong {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+.job-alert-pill {
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: #f2f4f3;
+  color: #6f7d78;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.job-alert-pill.ok {
+  background: #eef6e4;
+  color: #456b26;
+}
+.job-alert-pill.failing {
+  background: #fdf1ef;
+  color: #9a4235;
+}
+.job-alert-pill.stale {
+  background: #fdf5e3;
+  color: #8a5d0e;
+}
+.job-alert-configure {
+  flex: none;
+  min-height: 34px;
+  padding: 7px 13px;
+}
+.job-alert-about,
+.job-alert-meta,
+.job-alert-summary {
+  margin: 0 0 0 28px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.job-alert-about {
+  color: #57645f;
+}
+.job-alert-meta {
+  color: var(--muted);
+}
+.job-alert-meta a {
+  color: #4a6b34;
+  font-weight: 600;
+}
+.job-alert-summary {
+  color: #6f7d78;
+  font-weight: 600;
+}
+.job-alert-failures {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 0 28px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fdf1ef;
+  color: #9a4235;
+  font-size: 0.78rem;
+  list-style: none;
+}
+.job-alert-failures li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.job-alert-failures span {
+  color: #a8695e;
+}
+.job-alert-failures code {
+  flex-basis: 100%;
+  color: #7d3529;
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.job-alert-more {
+  color: #a8695e;
+  font-style: italic;
+}
+.job-alert-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 6px 0 0 28px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fafbf9;
+}
+.job-alert-editor fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.job-alert-editor fieldset:disabled {
+  opacity: 0.55;
+}
+.job-alert-editor legend {
+  margin-bottom: 6px;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.job-alert-scope {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f1f3f2;
+}
+.job-alert-scope button {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.job-alert-scope button[aria-checked="true"] {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+.job-alert-who .multi-pick,
+.job-alert-who > button {
+  max-width: 360px;
+}
+.job-alert-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
+.job-alert-option.on {
+  border-color: #cfe0bc;
+}
+.job-alert-option .ui-checkbox {
+  flex: none;
+  margin-top: 4px;
+}
+.job-alert-option-title {
+  display: block;
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 2;
+  cursor: pointer;
+}
+.job-alert-option p {
+  margin: 2px 0 0;
+  color: #6f7d78;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+.job-alert-number.ui-input {
+  display: inline-block;
+  width: 64px;
+  min-height: 0;
+  padding: 3px 6px;
+  font-size: 0.84rem;
+  text-align: center;
+  vertical-align: baseline;
+}
+.job-alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .job-alert {
+    padding: 14px 16px;
+  }
+  .job-alert-about,
+  .job-alert-meta,
+  .job-alert-summary,
+  .job-alert-failures,
+  .job-alert-editor {
+    margin-left: 0;
+  }
+  .job-alert-editor {
+    padding: 12px;
+  }
+  .job-alert-scope {
+    border-radius: 12px;
+  }
+  .job-alert-scope button {
+    border-radius: 9px;
+  }
+  .job-alert-number.ui-input {
+    font-size: 16px;
+  }
+}
+/* Grupos do Whatsapp: o atalho na faixa de erro (WhatsappGroups.tsx). */
+.whatsapp-status-alerts {
+  flex: none;
+  margin-left: auto;
+  color: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+}

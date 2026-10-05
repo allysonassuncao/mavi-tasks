@@ -102,6 +102,7 @@ export const SETTINGS_TABS = [
   "config-prazos",
   "config-sugestoes",
   "config-whatsapp",
+  "config-avisos",
   "config-api",
 ] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];

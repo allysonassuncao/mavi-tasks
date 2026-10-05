@@ -71,6 +71,11 @@ export const NOTICE_TYPES: {
     hint: "Quando a MAVI analisa uma campanha de um cliente seu e encontra insights novos (pela prioridade escolhida no Painel da MAVI), ou quando a análise que você pediu fica pronta.",
   },
   {
+    key: "job_alert",
+    label: "Falhas nas rotinas",
+    hint: "Quando uma rotina automática (varredura do WhatsApp, sincronização das campanhas…) falha, para ou volta a funcionar — se um administrador escolheu você em Equipe e configurações › Avisos de falhas.",
+  },
+  {
     key: "media_balance",
     label: "Saldo de mídia",
     hint: "Quando a conta de mídia de um cliente seu (Financeiro › Mídia) fica abaixo do saldo mínimo ou negativa.",
