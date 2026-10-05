@@ -1181,36 +1181,47 @@
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
-.crm-goal-chip {
+/* O MakeCRM no topo: o botão dividido e, colado nele, as etapas que importam. */
+.crm-control {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 280px;
-  padding: 0 12px;
-  align-self: stretch;
-  min-height: 36px;
-  border: 1px solid #c7d7f5;
-  border-radius: 999px;
-  background: #f1f5fd;
-  color: #1e3a8a;
-  font-size: 0.8rem;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 100%;
+}
+.btn.secondary.crm-goal-chip {
+  position: relative;
+  max-width: 260px;
+  min-width: 0;
+  color: #1d4ed8;
   cursor: pointer;
 }
-.crm-goal-chip:hover:not(:disabled) {
-  background: #e4ecfb;
+.btn.secondary.crm-goal-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.crm-goal-chip:disabled {
+.btn.secondary.crm-goal-chip > svg {
+  flex: none;
+  color: #3b82f6;
+}
+.btn.secondary.crm-goal-chip:hover:not(:disabled) {
+  border-color: #c7d7f5;
+  background: #f5f8fe;
+}
+.btn.secondary.crm-goal-chip:disabled {
+  color: #57645f;
   cursor: default;
 }
-.crm-goal-chip.empty {
-  border-style: dashed;
-  border-color: #3b82f6;
-  background: #fff;
-  color: #2563eb;
+/* Sem etapas: um ponto azul chama a atenção, sem gritar. */
+.crm-goal-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #3b82f6;
 }
 
 /* O editor das etapas. */
@@ -1292,7 +1303,10 @@
   .crm-goal-stage input[type="number"] {
     width: 100%;
   }
-  .crm-goal-chip {
+  .crm-control {
+    flex-wrap: wrap;
+  }
+  .btn.secondary.crm-goal-chip {
     max-width: 100%;
   }
 }

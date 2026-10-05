@@ -1454,7 +1454,7 @@ export function CrmGoalControl({
     setBusy(false);
   };
   return (
-    <>
+    <div className="crm-control">
       <div className="crm-split" role="group" aria-label="MakeCRM">
         <Button className="btn crm-open crm-split-main" onClick={() => void open()} loading={busy}>
           <ExternalLink size={15} /> Abrir no CRM
@@ -1504,7 +1504,7 @@ export function CrmGoalControl({
       {withGoal && (goal || canEdit) && (
         <button
           type="button"
-          className={`crm-goal-chip${goal ? "" : " empty"}`}
+          className={`btn secondary crm-goal-chip${goal ? "" : " empty"}`}
           onClick={() => canEdit && setEditing(true)}
           disabled={!canEdit}
           title={
@@ -1513,8 +1513,9 @@ export function CrmGoalControl({
               : "A MAVI compara anúncios e conjuntos pelo custo do lead que avança no funil"
           }
         >
-          <Target size={14} aria-hidden="true" />
-          {goal ? sum.short : "Definir etapas que importam"}
+          <Target size={15} aria-hidden="true" />
+          <span>{goal ? sum.short : "Definir etapas que importam"}</span>
+          {!goal && <i className="crm-goal-dot" aria-hidden="true" />}
         </button>
       )}
       {editing && (
@@ -1528,7 +1529,7 @@ export function CrmGoalControl({
           onClose={() => setEditing(false)}
         />
       )}
-    </>
+    </div>
   );
 }
 
