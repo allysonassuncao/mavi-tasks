@@ -381,6 +381,7 @@ await check(
   },
 );
 
+
 await check(
   "trechos que ficam mudam de posição; repetidos são pareados um a um",
   async () => {
@@ -537,6 +538,34 @@ await check("texto longo sem pontuação vira vários trechos (cabe na OpenAI)",
   assert.deepEqual(await split(prose), ["Primeira frase. Segunda frase!\n\nOutro parágrafo."]);
   const sentences = Array.from({ length: 200 }, (_, i) => `Frase número ${i}.`).join(" ");
   assert.ok((await split(sentences)).every((t) => t.length <= 1500));
+});
+
+await check("gravar os vetores para em 1,5 s e solta na hora os que faltaram", async () => {
+  await sql(`insert into ai_chunks(company_id, document_id, ord, content, meta, source_type, access, client_id)
+   select company_id, document_id, ord + g, content || g, meta, source_type, access, client_id
+   from (select * from ai_chunks limit 1) c, generate_series(100, 105) g`);
+  await sql(`update ai_chunks set embedding = null, claimed_at = null`);
+  const claimed = await rows("ai_claim_chunks", [SECRET, 6]);
+  assert.equal(claimed.length, 6);
+  // Disco lento: cada vetor leva 0,4 s.
+  await sql(`create function pg_temp.slow() returns trigger language plpgsql as $$
+   begin perform pg_sleep(0.4); return new; end $$`);
+  await sql(`create trigger slow before update of embedding on ai_chunks
+   for each row execute function pg_temp.slow()`);
+  const items = JSON.stringify(claimed.map((c, k) => ({ id: Number(c.id), embedding: axis(k % 3) })));
+  const t = performance.now();
+  const n = await rpc("ai_store_embeddings", [SECRET, "m", items]);
+  const ms = performance.now() - t;
+  await sql(`drop trigger slow on ai_chunks`);
+  assert.ok(n >= 1 && n < claimed.length, `gravou ${n} de ${claimed.length}`);
+  assert.ok(ms < 2500, `${Math.round(ms)} ms`);
+  const left = await sql(
+    `select count(*)::int as n from ai_chunks where id = any($1::bigint[]) and embedding is null and claimed_at is null`,
+    [claimed.map((c) => c.id)],
+  );
+  assert.equal(left[0].n, claimed.length - n, "os que faltaram ficam livres para a próxima reserva");
+  const again = await rows("ai_claim_chunks", [SECRET, 100]);
+  assert.equal(again.length >= claimed.length - n, true);
 });
 
 await check("ninguém lê as tabelas da IA direto", async () => {
