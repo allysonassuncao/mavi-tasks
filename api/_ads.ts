@@ -31,6 +31,7 @@ import {
   type ReportMeta,
   type ReportSources,
 } from "./_ads-platform.js";
+import { platformAudience, reportAudiences } from "./_ads-audience.js";
 import {
   googleDetail,
   googleList,
@@ -1114,7 +1115,7 @@ export type AdsRequest =
     }
   /** Meta: the Ads Manager view of an account (api/_ads-platform.ts). */
   | {
-      action: "platform" | "platform-detail" | "platform-preview";
+      action: "platform" | "platform-detail" | "platform-preview" | "platform-audience";
       company: string;
       provider: "meta";
       account: string;
@@ -1402,7 +1403,8 @@ export async function handleAds(
     if (
       req.action === "platform" ||
       req.action === "platform-detail" ||
-      req.action === "platform-preview"
+      req.action === "platform-preview" ||
+      req.action === "platform-audience"
     ) {
       if (provider !== "meta") return fail(400, "Só no Facebook.");
       const account = accountId("meta", req.account);
@@ -1422,7 +1424,9 @@ export async function handleAds(
             ? await platformList(env, fetchImpl, token, platformQuery(raw))
             : req.action === "platform-detail"
               ? await platformDetail(env, fetchImpl, token, raw)
-              : await platformPreview(env, fetchImpl, token, raw),
+              : req.action === "platform-audience"
+                ? await platformAudience(env, fetchImpl, token, raw)
+                : await platformPreview(env, fetchImpl, token, raw),
       };
     }
 
@@ -1508,6 +1512,23 @@ export async function handleAds(
               ? e.message
               : "Não foi possível ler os anúncios no Facebook.",
         }));
+      // The ad sets' audience, a photo of today (the section "Público").
+      if (
+        sources.platform === "meta" &&
+        sources.links.length &&
+        (config.sections as Record<string, unknown> | undefined)?.audience === true &&
+        !("error" in meta)
+      ) {
+        const audiences = await reportAudiences(
+          env,
+          fetchImpl,
+          (account) => metaAccountToken(env, fetchImpl, authorization, company, account),
+          sources.links,
+          start,
+          end,
+        ).catch(() => null);
+        if (audiences) meta = { ...(meta as ReportMeta), audiences };
+      }
       const report = await rpc<Record<string, unknown>>(
         env,
         fetchImpl,

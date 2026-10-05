@@ -77,6 +77,14 @@ function fake(owner: Record<string, string> = {}) {
       if (path === "/act_111/insights")
         return json({ data: [{ campaign_id: "120000000001", spend: "120.5", impressions: "1000", clicks: "30" }] });
       if (path.endsWith("/insights") || path.endsWith("/adsets")) return json({ data: [] });
+      if (path === "/120000000002")
+        return json({
+          id: "120000000002",
+          name: "Conjunto A",
+          account_id: "111",
+          effective_status: "ACTIVE",
+          targeting: { geo_locations: { countries: ["BR"] }, age_min: 25, flexible_spec: [{ interests: [{ id: "1", name: "Imóveis" }] }] },
+        });
       return json({ id: path.slice(1), targeting: { age_min: 25 }, paging: { next: "https://graph.facebook.com/x?access_token=SEGREDO" } });
     }
     if (url.includes("googleads.googleapis.com")) return json([{ results: [{ campaign: { name: "Busca" } }] }]);
@@ -108,6 +116,7 @@ describe("adsTurn", () => {
       "ad_accounts",
       "meta_ads_report",
       "meta_ads_detail",
+      "meta_ads_audience",
       "meta_ads_graph",
       "google_ads_search",
       "google_ads_fields",
@@ -146,6 +155,18 @@ describe("adsTurn", () => {
     // O link da próxima página leva o token: nunca vai para a conversa.
     expect(out).not.toContain("SEGREDO");
     expect(out).toContain("há mais páginas");
+  });
+
+  it("o público do conjunto, em texto, só de um item da conta", async () => {
+    const { turn } = await turnOf();
+    const out = await turn.run("meta_ads_audience", { account_id: "act_111", id: "120000000002" });
+    expect(out).toContain('Conjunto 120000000002 "Conjunto A"');
+    expect(out).toContain("Locais: Brasil");
+    expect(out).toContain("Interesses: Imóveis");
+    expect(turn.label("meta_ads_audience", {})).toBe("Consultando o Meta Ads: público do conjunto");
+    // An item without the account's id (another account): refused.
+    expect(await turn.run("meta_ads_audience", { account_id: "act_111", id: "120000000009" })).toMatch(/não é da conta/);
+    expect(await turn.run("meta_ads_audience", { account_id: "act_999", id: "120000000002" })).toMatch(/^Recusado/);
   });
 
   it("Graph: só caminhos da conta e sem parâmetros de token", async () => {

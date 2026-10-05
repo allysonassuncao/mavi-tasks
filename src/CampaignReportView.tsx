@@ -33,6 +33,7 @@ import {
   type ReportChart,
   type ReportView,
 } from "./campaign-reports";
+import { AudienceList } from "./AudienceView";
 import "./campaign-reports.css";
 
 /**
@@ -465,6 +466,16 @@ export function CampaignReportView({
           result={result}
           currency={currency}
         />
+      )}
+      {config.sections.audience && !google && !!view.audiences?.length && (
+        <section className="creport-audience">
+          <h2>Público dos conjuntos</h2>
+          <p className="creport-audience-note">
+            Como o público de cada conjunto estava configurado no Meta em{" "}
+            {new Date(view.captured_at).toLocaleDateString("pt-BR")}.
+          </p>
+          <AudienceList adsets={view.audiences} showName />
+        </section>
       )}
       {config.sections.keywords && keywords.length > 0 && (
         <ItemTable

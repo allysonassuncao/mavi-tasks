@@ -82,6 +82,42 @@ export type PlatformDetail = {
   age_gender: { age: string; gender: string; metrics: Metrics }[];
   placements: { key: string; label: string; metrics: Metrics }[];
 };
+/** An ad set's audience, as api/_ads-audience.ts puts it. */
+export type AudiencePlace = { kind: string; name: string; radius?: string };
+export type AudienceDetailed = { category: string; items: string[] }[];
+export type CustomAudience = { id: string; name: string; type?: string };
+export type AdsetAudience = {
+  id: string;
+  name: string;
+  delivery: Delivery;
+  advantage: { audience: boolean; detailed: boolean; custom: boolean; lookalike: boolean };
+  locations: { included: AudiencePlace[]; excluded: AudiencePlace[]; presence: string };
+  age: { min: number; max: number; plus: boolean; suggested?: { min: number; max: number } };
+  gender: string;
+  languages: { count: number; names: string[] };
+  /** AND between the groups, OR inside each group. */
+  detailed: AudienceDetailed[];
+  excluded_detailed: AudienceDetailed;
+  custom: { included: CustomAudience[]; excluded: CustomAudience[] };
+  placements: {
+    automatic: boolean;
+    platforms: string[];
+    positions: { platform: string; items: string[] }[];
+    devices: string[];
+    os: string[];
+    wifi_only: boolean;
+  };
+  /** null: Meta gave no estimate; absent: not asked (after the first ad sets). */
+  estimate?: { lower: number; upper: number } | null;
+  summary?: { label: string; items: string[] }[];
+};
+export type PlatformAudience = {
+  level: PlatformLevel;
+  adsets: AdsetAudience[];
+  /** How many ad sets came with the estimate. */
+  estimated: number;
+  fetched_at: string;
+};
 export const PREVIEW_FORMATS: [string, string][] = [
   ["MOBILE_FEED_STANDARD", "Feed do Facebook (celular)"],
   ["DESKTOP_FEED_STANDARD", "Feed do Facebook (computador)"],
@@ -106,6 +142,11 @@ export interface PlatformBackend {
     id: string,
     format: string,
   ): Promise<{ src: string | null }>;
+  /** The audience of an ad set, of a campaign's ad sets or of an ad's ad set. */
+  audience(
+    company: string,
+    q: { account: string; level: PlatformLevel; id: string },
+  ): Promise<PlatformAudience>;
 }
 
 // ------------------------------------------------------------ cache
@@ -143,6 +184,8 @@ export const serverPlatform: PlatformBackend = {
       id,
       format,
     }),
+  audience: (company, q) =>
+    adsServer({ action: "platform-audience", company, provider: "meta", ...q }),
 };
 
 // ------------------------------------------------------------ periods
@@ -1072,5 +1115,78 @@ export function demoPlatform(linked: string[] = []): PlatformBackend {
       });
     },
     preview: () => wait({ src: null }),
+    audience: (_company, q) => {
+      // The demo's ids end in <ad set index><1 or the ad index>.
+      const sets = q.level === "campaign" ? DEMO_ADSETS : [DEMO_ADSETS[Number(q.id.slice(-2, -1))] ?? DEMO_ADSETS[0]];
+      return wait({
+        level: q.level,
+        adsets: sets.map((name, i) => demoAudience(q.level === "campaign" ? `${q.id.slice(0, 16)}${i}1` : q.id, name)),
+        estimated: sets.length,
+        fetched_at: new Date().toISOString(),
+      } satisfies PlatformAudience);
+    },
+  };
+}
+
+/** The demo report's ad sets ("Aberto 25-54", "Remarketing 30 dias"). */
+export const demoAudiences = () =>
+  [DEMO_ADSETS[0], DEMO_ADSETS[2]].map((name) => demoAudience(`demo-set-${name}`, name));
+function demoAudience(id: string, name: string): AdsetAudience {
+  const open = name.startsWith("Aberto");
+  const lookalike = name.startsWith("Semelhante");
+  return {
+    id,
+    name,
+    delivery: { code: "ACTIVE", label: "Ativo", tone: "on" },
+    advantage: { audience: open, detailed: !open && !lookalike, custom: false, lookalike: false },
+    locations: {
+      included: [
+        { kind: "Cidade", name: "São Paulo, São Paulo, Brasil", radius: "+25 km" },
+        { kind: "Cidade", name: "Campinas, São Paulo, Brasil", radius: "+17 km" },
+      ],
+      excluded: lookalike ? [{ kind: "CEP", name: "01310-000, São Paulo" }] : [],
+      presence: "Pessoas que moram ou estiveram recentemente nestes locais",
+    },
+    age: open ? { min: 18, max: 65, plus: true, suggested: { min: 25, max: 54 } } : { min: 25, max: 54, plus: false },
+    gender: "Todos os gêneros",
+    languages: { count: 1, names: ["Português (Brasil)"] },
+    detailed: open || lookalike
+      ? []
+      : [
+          [
+            { category: "Interesses", items: ["Empreendedorismo", "Pequenas empresas", "Marketing digital"] },
+            { category: "Comportamentos", items: ["Administradores de páginas de empresas"] },
+          ],
+          [{ category: "Cargos", items: ["Proprietário", "Diretor"] }],
+        ],
+    excluded_detailed: open || lookalike ? [] : [{ category: "Interesses", items: ["Concursos públicos"] }],
+    custom: lookalike
+      ? {
+          included: [{ id: "1", name: "Semelhante (BR, 1%) – Clientes 2026", type: "Semelhante" }],
+          excluded: [{ id: "2", name: "Clientes ativos (lista)", type: "Lista de clientes" }],
+        }
+      : name.startsWith("Remarketing")
+        ? {
+            included: [
+              { id: "3", name: "Visitantes do site 30 dias", type: "Site" },
+              { id: "4", name: "Envolvimento Instagram 30 dias", type: "Envolvimento" },
+            ],
+            excluded: [{ id: "5", name: "Leads 30 dias", type: "Site" }],
+          }
+        : { included: [], excluded: [] },
+    placements: open
+      ? { automatic: true, platforms: [], positions: [], devices: [], os: [], wifi_only: false }
+      : {
+          automatic: false,
+          platforms: ["Facebook", "Instagram"],
+          positions: [
+            { platform: "Facebook", items: ["Feed", "Stories", "Reels"] },
+            { platform: "Instagram", items: ["Feed", "Stories", "Reels", "Explorar"] },
+          ],
+          devices: ["Celular"],
+          os: [],
+          wifi_only: false,
+        },
+    estimate: open ? { lower: 4_200_000, upper: 4_900_000 } : lookalike ? { lower: 1_300_000, upper: 1_600_000 } : { lower: 380_000, upper: 450_000 },
   };
 }

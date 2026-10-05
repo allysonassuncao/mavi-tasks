@@ -361,6 +361,28 @@ await check("Google: fontes com a MCC e as conversões; palavras-chave e termos 
   assert.doesNotMatch(JSON.stringify(page), /"m"|multiplier/);
 });
 
+await check("Meta: o público dos conjuntos fica na foto e só vai ao link com a seção ligada", async () => {
+  await as(trafego);
+  const audience = { id: "s1", name: "Aberto", age: { min: 25, max: 54, plus: false }, gender: "Mulheres" };
+  const meta = JSON.stringify({ currency: "BRL", reach: 10, ad_results: true, ads: [], adsets: [], audiences: [audience] });
+  const on = await rpc("create_ad_report", [
+    campaign, "Com público", "2026-09-01", "2026-09-02",
+    config({ sections: { ads: false, adsets: false, audience: true, analysis: false, goal: false } }), meta,
+    "", true, null, null,
+  ]);
+  const off = await rpc("create_ad_report", [
+    campaign, "Sem público", "2026-09-01", "2026-09-02",
+    config({ sections: { ads: false, adsets: false, analysis: false, goal: false } }), meta,
+    "", true, null, null,
+  ]);
+  // The team sees it either way; the link only with the section on.
+  assert.deepEqual(on.view.audiences, [audience]);
+  assert.deepEqual(off.view.audiences, [audience]);
+  await as(null);
+  assert.deepEqual((await rpc("ad_report_public", [on.link.token, null])).view.audiences, [audience]);
+  assert.equal((await rpc("ad_report_public", [off.link.token, null])).view.audiences, undefined);
+});
+
 await check("a MAVI na análise: funcionalidade 'campaign_report' no Painel", async () => {
   const [{ ok }] = await sql(
     `select pg_get_constraintdef(oid) like '%campaign_report%' as ok from pg_constraint

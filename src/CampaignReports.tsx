@@ -967,6 +967,25 @@ function ReportForm({
               </span>
             </label>
           )}
+          {meta && !google && (
+            <label className="share-toggle">
+              <Checkbox
+                checked={!!config.sections.audience}
+                disabled={mode === "edit" && !report?.view?.audiences?.length}
+                onCheckedChange={(v) =>
+                  setConfig((c) => ({ ...c, sections: { ...c.sections, audience: v === true } }))
+                }
+              />
+              <span>
+                <strong>Público dos conjuntos</strong>
+                <small>
+                  {mode === "edit" && !report?.view?.audiences?.length
+                    ? "O público é lido do Meta na criação: este relatório foi criado sem ele."
+                    : "Como o público de cada conjunto que veiculou está configurado: locais, idade, gênero, interesses, comportamentos, públicos personalizados e o tamanho estimado (a foto do dia da criação)."}
+                </small>
+              </span>
+            </label>
+          )}
           {google && (
             <label className="share-toggle">
               <Checkbox
@@ -1146,7 +1165,7 @@ function ReportForm({
                 ? "Confirmar e criar sem M"
                 : "Confirmar e salvar sem M"
               : mode === "create"
-                ? meta && (config.sections.ads || config.sections.adsets || config.sections.keywords || config.sections.search_terms)
+                ? meta && (config.sections.ads || config.sections.adsets || config.sections.audience || config.sections.keywords || config.sections.search_terms)
                   ? `Criar relatório (lê os anúncios no ${platformName})`
                   : "Criar relatório"
                 : "Salvar"}

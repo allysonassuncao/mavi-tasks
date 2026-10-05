@@ -1,6 +1,7 @@
 import { AdsError, graph, graphAll, type AdsEnv, type Fetch } from "./_ads.js";
 import { metaResults } from "./_ads-sync.js";
 import { ruleOn, type MetaConversionRule } from "./_meta-conversions.js";
+import type { AdsetAudience } from "./_ads-audience.js";
 
 /**
  * Campanhas › Plataforma and Relatórios: the Meta ad account read live, as
@@ -1124,6 +1125,8 @@ export type ReportMeta = {
   ad_results: boolean;
   ads: ReportItem[];
   adsets: ReportItem[];
+  /** The ad sets' audience (the section "Público", api/_ads-audience.ts). */
+  audiences?: AdsetAudience[];
   error?: string;
 };
 const IMAGE_HOSTS = /(^|\.)(fbcdn\.net|facebook\.com|cdninstagram\.com|fbsbx\.com)$/;

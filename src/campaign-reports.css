@@ -652,3 +652,22 @@
     background: #fff;
   }
 }
+
+/* Meta: the ad sets' audience (AudienceView), a photo of the creation day. */
+.creport-audience {
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.creport-audience h2 {
+  margin: 0;
+}
+.creport-audience-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}

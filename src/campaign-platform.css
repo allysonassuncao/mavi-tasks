@@ -635,3 +635,8 @@
     min-width: 0;
   }
 }
+
+.mplat-audience-intro {
+  margin: 0;
+  font-size: 0.78rem;
+}

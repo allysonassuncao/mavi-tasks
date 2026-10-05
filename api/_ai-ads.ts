@@ -9,6 +9,7 @@ import {
   type Metrics,
   type PlatformRow,
 } from "./_ads-platform.js";
+import { audienceText, platformAudience } from "./_ads-audience.js";
 import type { ToolOutput, ToolSpec } from "./_ai-llm.js";
 
 /**
@@ -17,7 +18,8 @@ import type { ToolOutput, ToolSpec } from "./_ai-llm.js";
  *
  * - Meta Ads: pela conexão do Facebook que as Campanhas já têm (o botão
  *   Conectar, ads_read). meta_ads_report e meta_ads_detail são as leituras da
- *   aba Plataforma; meta_ads_graph é uma consulta livre ao Graph (só GET)
+ *   aba Plataforma; meta_ads_audience é o público dos conjuntos (a aba
+ *   Público da Plataforma); meta_ads_graph é uma consulta livre ao Graph (só GET)
  *   para o resto (criativos, públicos, segmentação…).
  * - Google Ads: as mesmas consultas do MCP oficial do Google (contas, GAQL e
  *   os campos de cada recurso), pela conexão da agência (MCC).
@@ -131,7 +133,7 @@ function reportRow(r: PlatformRow) {
 export const ADS_RULES = `
 Campanhas ao vivo (Meta Ads e Google Ads), só consulta:
 - ad_accounts lista as contas de anúncio que a pessoa pode consultar, por cliente, com as campanhas do MAVI e os ids das campanhas na plataforma. Comece por ela quando precisar de uma conta ou campanha (com o client_id quando souber o cliente).
-- Meta Ads (pela conexão do Facebook das Campanhas): meta_ads_report traz campanhas, conjuntos ou anúncios de uma conta com veiculação, orçamento, otimização, criativo e os números do período (como o Gerenciador de Anúncios), com detalhamento opcional (idade, gênero, posicionamento, dispositivo, dia…); meta_ads_detail traz um item dia a dia e por idade/gênero e posicionamento; meta_ads_graph é uma leitura livre do Graph (só GET) para o que faltar (segmentação de um conjunto, criativos, públicos). Sempre de uma conta listada em ad_accounts.
+- Meta Ads (pela conexão do Facebook das Campanhas): meta_ads_report traz campanhas, conjuntos ou anúncios de uma conta com veiculação, orçamento, otimização, criativo e os números do período (como o Gerenciador de Anúncios), com detalhamento opcional (idade, gênero, posicionamento, dispositivo, dia…); meta_ads_detail traz um item dia a dia e por idade/gênero e posicionamento; meta_ads_audience traz o público configurado dos conjuntos (locais, idade, gênero, idiomas, interesses, comportamentos e dados demográficos com E/OU, exclusões, públicos personalizados e semelhantes, Advantage+, posicionamentos e o tamanho estimado); meta_ads_graph é uma leitura livre do Graph (só GET) para o que faltar (criativos, a lista de públicos da conta, prévias). Sempre de uma conta listada em ad_accounts.
 - google_ads_search roda uma consulta GAQL ao vivo numa conta do Google Ads listada em ad_accounts (pela MCC da agência). Na dúvida sobre um campo, confira com google_ads_fields. Período: segments.date BETWEEN 'AAAA-MM-DD' AND 'AAAA-MM-DD' (ou DURING LAST_7_DAYS etc.); custos vêm em micros (÷ 1.000.000).
 - Nesta versão você só consulta e analisa: não pausa, não muda orçamento, lance ou público e não cria nada nas plataformas. Se pedirem, diga que por enquanto a MAVI só consulta e sugira o que fazer (ou proponha uma tarefa, quando puder).
 - campaign_results traz os números sincronizados uma vez por dia, com a verba, a meta e o M de cada ciclo. As ferramentas ao vivo trazem o detalhe e o dia de hoje. Os valores das plataformas são sem o M (índice de performance): não misture com os valores "Com M".
@@ -190,6 +192,21 @@ const META_DETAIL: ToolSpec = {
       until,
     },
     required: ["account_id", "level", "id"],
+    additionalProperties: false,
+  },
+};
+const META_AUDIENCE: ToolSpec = {
+  name: "meta_ads_audience",
+  description:
+    "Meta Ads ao vivo: o público configurado de um conjunto de anúncios (ou de cada conjunto de uma campanha, ou do conjunto de um anúncio), como a seção Público do Gerenciador — locais (incluídos, excluídos, raio), idade, gênero, idiomas, direcionamento detalhado (interesses, comportamentos, dados demográficos; OU dentro de um grupo, E entre grupos), exclusões, públicos personalizados e semelhantes (incluídos e excluídos), Público Advantage+, posicionamentos e dispositivos, e o tamanho estimado do público.",
+  parameters: {
+    type: "object",
+    properties: {
+      account_id,
+      level: { type: "string", enum: ["campaign", "adset", "ad"], description: "O tipo do item: campanha (todos os conjuntos dela), conjunto (padrão) ou anúncio (o conjunto dele)." },
+      id: { type: "string", description: "O id do item na plataforma." },
+    },
+    required: ["account_id", "id"],
     additionalProperties: false,
   },
 };
@@ -306,7 +323,7 @@ export async function adsTurn(
   );
   const tools: ToolSpec[] = [
     AD_ACCOUNTS,
-    ...(metaLive.size ? [META_REPORT, META_DETAIL, META_GRAPH] : []),
+    ...(metaLive.size ? [META_REPORT, META_DETAIL, META_AUDIENCE, META_GRAPH] : []),
     ...(googleAccounts.size ? [GOOGLE_SEARCH, GOOGLE_FIELDS] : []),
   ];
   const names = new Set(tools.map((t) => t.name));
@@ -410,6 +427,17 @@ export async function adsTurn(
         })}`,
       );
     }
+    if (name === "meta_ads_audience") {
+      const id = String(input.id ?? "");
+      if (!ID.test(id)) return "Informe o id do item na plataforma.";
+      const level = input.level === "campaign" || input.level === "ad" ? input.level : "adset";
+      // platformAudience also refuses an item of another account.
+      const a = await platformAudience(ads, fetchImpl, token, { account: acc.id, level, id }, new Date(now()));
+      if (!a.adsets.length) return `Nenhum conjunto de anúncios em ${id}.`;
+      return cut(
+        `Meta Ads ao vivo · público de ${level === "campaign" ? `${a.adsets.length} conjunto(s) da campanha` : level === "ad" ? "o conjunto do anúncio" : "o conjunto"} ${id} na conta ${metaId(acc.id)} (como está configurado agora)${a.estimated < a.adsets.length ? `; tamanho estimado só dos ${a.estimated} primeiros` : ""}:\n\n${a.adsets.map(audienceText).join("\n\n")}`,
+      );
+    }
     // meta_ads_graph: só GET, começando pela conta ou por um objeto dela.
     const path = String(input.path ?? "").trim().replace(/^\/+|\/+$/g, "");
     const [first, ...edges] = path.split("/");
@@ -445,6 +473,7 @@ export async function adsTurn(
       if (name === "meta_ads_report")
         return `Consultando o Meta Ads: ${input.level === "ad" ? "anúncios" : input.level === "adset" ? "conjuntos" : "campanhas"}`;
       if (name === "meta_ads_detail") return "Consultando o Meta Ads: dia a dia do item";
+      if (name === "meta_ads_audience") return "Consultando o Meta Ads: público do conjunto";
       return `Consultando o Meta Ads (${String(input.path ?? "").slice(0, 60)})`;
     },
     async run(name, raw) {

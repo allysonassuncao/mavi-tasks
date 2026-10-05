@@ -21,6 +21,7 @@ import { AnalysisText, CampaignReportView } from "./CampaignReportView";
 import {
   COLUMNS,
   PRESETS,
+  demoAudiences,
   demoPlatform,
   formatValue,
   presetRange,
@@ -152,6 +153,35 @@ describe("a página do relatório", () => {
     expect(html).toContain("Imagem");
     expect(html).not.toContain(">Vídeo<");
     expect(html).not.toMatch(/\bM\b|multiplic/i);
+  });
+
+  it("o público dos conjuntos só com a seção ligada", () => {
+    const [audience] = demoAudiences();
+    const page = (on: boolean) =>
+      renderToStaticMarkup(
+        <CampaignReportView
+          company="Make"
+          title="Relatório"
+          view={{ ...view, audiences: [{ ...audience, detailed: [[{ category: "Interesses", items: ["Café especial"] }]] }] }}
+          config={{
+            metrics: ["spend"],
+            charts: [],
+            sections: { ads: false, adsets: false, audience: on, analysis: false, goal: false },
+            ads_limit: 1,
+            allow_filter: true,
+          }}
+          analysis=""
+          periodStart="2026-09-01"
+          periodEnd="2026-09-03"
+        />,
+      ).replace(/\u00a0/g, " ");
+    const html = page(true);
+    expect(html).toContain("Público dos conjuntos");
+    expect(html).toContain("Aberto 25-54");
+    expect(html).toContain("Café especial");
+    expect(html).toContain("4.200.000 – 4.900.000");
+    expect(html).toContain("Público Advantage+ ligado");
+    expect(page(false)).not.toContain("Público dos conjuntos");
   });
 
   it("a análise não aceita HTML", () => {

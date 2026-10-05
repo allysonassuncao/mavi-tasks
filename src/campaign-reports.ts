@@ -8,6 +8,7 @@ import {
   type AdObjective,
 } from "./campaigns";
 import type { MetricsBackend } from "./campaign-metrics";
+import { demoAudiences, type AdsetAudience } from "./campaign-platform";
 
 /**
  * Campanhas › Relatórios (migration 20270113090000_campaign_reports): a
@@ -53,6 +54,8 @@ export type ReportConfig = {
     adsets: boolean;
     analysis: boolean;
     goal: boolean;
+    /** Meta: the ad sets' audience (read when the report is made). */
+    audience?: boolean;
     /** Google: the keywords and the search terms. */
     keywords?: boolean;
     search_terms?: boolean;
@@ -120,6 +123,8 @@ export type ReportView = {
   /** Google. */
   keywords?: ReportItem[];
   search_terms?: ReportItem[];
+  /** Meta: the ad sets' audience on the day the report was made. */
+  audiences?: AdsetAudience[] | null;
   meta_error?: string | null;
 };
 export type ReportLink = {
@@ -263,7 +268,7 @@ export function defaultConfig(
     charts: ["results", "spend", "cpa", "cumulative", ...(sale ? (["funnel"] as const) : []), "ads"],
     sections: google
       ? { ads: true, adsets: true, analysis: true, goal: true, keywords: true, search_terms: true }
-      : { ads: true, adsets: false, analysis: true, goal: true },
+      : { ads: true, adsets: false, audience: false, analysis: true, goal: true },
     ads_limit: 10,
     allow_filter: true,
   };
@@ -689,7 +694,7 @@ export function demoReports(deps: {
   user: string;
 }): ReportsBackend {
   type Stored = Omit<CampaignReport, "view" | "can_manage"> & {
-    raw: { days: (ReportDay & { m: number })[]; cycles: AdCycle[]; ads: ReportItem[]; adsets: ReportItem[]; keywords?: ReportItem[]; search_terms?: ReportItem[]; reach: number | null; compare_reach: number | null };
+    raw: { days: (ReportDay & { m: number })[]; cycles: AdCycle[]; ads: ReportItem[]; adsets: ReportItem[]; keywords?: ReportItem[]; search_terms?: ReportItem[]; audiences?: AdsetAudience[]; reach: number | null; compare_reach: number | null };
     company: string;
     password: string | null;
   };
@@ -738,6 +743,7 @@ export function demoReports(deps: {
       ads: items(r.raw.ads),
       adsets: items(r.raw.adsets),
       ...(r.raw.keywords ? { keywords: items(r.raw.keywords), search_terms: items(r.raw.search_terms ?? []) } : {}),
+      ...(r.raw.audiences ? { audiences: r.raw.audiences } : {}),
     };
   };
   const out = (r: Stored, withView = true): CampaignReport => ({
@@ -888,6 +894,7 @@ export function demoReports(deps: {
           ads: ads.slice(0, Math.max(input.config.ads_limit, 5)),
           adsets,
           ...(keywords ? { keywords, search_terms: searchTerms } : {}),
+          ...(!google && input.config.sections.audience ? { audiences: demoAudiences() } : {}),
           // Google has no deduplicated reach.
           reach: google
             ? null

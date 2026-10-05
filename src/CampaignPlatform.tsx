@@ -48,6 +48,7 @@ import {
   type PlatformBackend,
   type PlatformDetail,
   type PlatformLevel,
+  type PlatformAudience,
   type PlatformList,
   type PlatformRow,
 } from "./campaign-platform";
@@ -60,13 +61,15 @@ import {
   type PlatformCrm,
 } from "./platform-crm";
 import { CrmLeadsLink, CrmNotice, CrmUnmatched, useCrmUtm } from "./PlatformCrm";
+import { AudienceList } from "./AudienceView";
 import "./campaign-platform.css";
 
 /**
  * Campanhas › Plataforma: the client's Meta ad account as the Ads Manager
  * shows it (read only): campaigns, ad sets and ads, the column presets, the
  * breakdowns, the period, the selection that filters the next level, the
- * charts of a row and the ad's preview. The campaigns linked to this MAVI
+ * charts of a row, its audience (the ad sets' targeting) and the ad's
+ * preview. The campaigns linked to this MAVI
  * campaign are marked. With the client linked to the MakeCRM, the CRM's
  * opportunities and wins per UTM come as columns (src/platform-crm.ts).
  */
@@ -1028,7 +1031,7 @@ function ColumnChooser({
 }
 
 // ------------------------------------------------------------ detail
-type DetailTab = "desempenho" | "demografia" | "posicionamento" | "previa";
+type DetailTab = "desempenho" | "demografia" | "posicionamento" | "publico" | "previa";
 const COLORS = ["#1877f2", "#42b72a", "#f7b928", "#a879c9"];
 function DetailPanel({
   row,
@@ -1082,6 +1085,7 @@ function DetailPanel({
     ["desempenho", "Desempenho"],
     ["demografia", "Demografia"],
     ["posicionamento", "Posicionamento"],
+    ["publico", "Público"],
     ...(row.level === "ad" ? ([["previa", "Pré-visualização"]] as [DetailTab, string][]) : []),
   ];
   const m = row.metrics;
@@ -1238,6 +1242,9 @@ function DetailPanel({
               </tbody>
             </table>
           ))}
+        {tab === "publico" && (
+          <AudienceTab row={row} company={company} account={account} backend={backend} />
+        )}
         {tab === "previa" && (
           <AdPreview
             row={row}
@@ -1355,6 +1362,52 @@ function Demographics({ detail, currency }: { detail: PlatformDetail; currency: 
       ) : (
         <p className="muted">Sem veiculação no período.</p>
       )}
+    </>
+  );
+}
+
+/** The ad set's targeting; a campaign's ad sets; an ad's ad set. */
+function AudienceTab({
+  row,
+  company,
+  account,
+  backend,
+}: {
+  row: PlatformRow;
+  company: string;
+  account: string;
+  backend: PlatformBackend;
+}) {
+  const [audience, setAudience] = useState<PlatformAudience | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    setAudience(null);
+    setError("");
+    const q = { account, level: row.level, id: row.id };
+    cached(JSON.stringify(["audience", company, q]), () => backend.audience(company, q))
+      .then((a) => live && setAudience(a))
+      .catch((e) => live && setError((e as Error).message));
+    return () => {
+      live = false;
+    };
+  }, [row.id, row.level, account, company, backend]);
+  if (error) return <p className="form-error">{error}</p>;
+  if (!audience) return <Loading variant="detail" />;
+  return (
+    <>
+      <p className="muted mplat-audience-intro">
+        {row.level === "campaign"
+          ? `O público de cada conjunto desta campanha (${audience.adsets.length}), como está configurado no Meta agora.`
+          : row.level === "ad"
+            ? `O público do conjunto deste anúncio${audience.adsets[0] ? ` (${audience.adsets[0].name})` : ""}, como está configurado no Meta agora.`
+            : "Como o público deste conjunto está configurado no Meta agora."}
+      </p>
+      <AudienceList
+        adsets={audience.adsets}
+        estimated={audience.estimated}
+        showName={row.level !== "adset"}
+      />
     </>
   );
 }
