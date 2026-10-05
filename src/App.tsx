@@ -157,6 +157,7 @@ import {
 } from "./domain";
 import { useNow } from "./useClock";
 import { Expandable, Paged, Pagination } from "./Pagination";
+import { HoursHistory } from "./HoursHistory";
 import { TaskTemplatesPanel } from "./TaskTemplates";
 import { DueRulesPanel } from "./DueRulesPanel";
 import { SuggestionDialog, SuggestionSettingsPanel } from "./SuggestionDialog";
@@ -645,6 +646,7 @@ export default function App() {
     [detailTick, setDetailTick] = useState(0),
     [extrasTick, setExtrasTick] = useState(0),
     [timerTick, setTimerTick] = useState(0),
+    [hoursTick, setHoursTick] = useState(0),
     [reportRefresh, setReportRefresh] = useState(0);
   useEffect(() => {
     if (!legacyMine) return;
@@ -1892,6 +1894,7 @@ export default function App() {
         );
         setData((d) => ({ ...d, hours: upsertById(d.hours, entry) }));
         api.patchCachedHours(company, entry);
+        setHoursTick((v) => v + 1);
       } else if (name === "stop_task_recurrence" && args.p_task) {
         api.invalidateTaskExtras(args.p_task as string);
         setExtrasTick((v) => v + 1);
@@ -1955,6 +1958,7 @@ export default function App() {
           api.invalidateHoursCache(company);
           const hours = await api.companyHours(company, true);
           setData((d) => ({ ...d, hours }));
+          setHoursTick((v) => v + 1);
           setReportRefresh((v) => v + 1);
         } else {
           api.invalidateCompanyCache(company);
@@ -4116,76 +4120,15 @@ export default function App() {
                       )
                     )}
                   </section>
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>Apontamentos recentes</h2>
-                        <p>
-                          {isLeader
-                            ? "Os 100 registros mais recentes"
-                            : "Seus 100 registros mais recentes"}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="table-scroll">
-                      <table className="stack-mobile stack-3">
-                        <thead>
-                          <tr>
-                            <th>Tarefa</th>
-                            {isLeader && <th>Pessoa</th>}
-                            <th>Data</th>
-                            <th>Origem</th>
-                            <th>Tempo</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {visibleHours.map((h) => (
-                            <tr key={h.id}>
-                              <td>
-                                {data.tasks.find((t) => t.id === h.task_id)
-                                  ?.title ?? "Tarefa fora da seleção atual"}
-                                <small className="cell-note">{h.note}</small>
-                              </td>
-                              {isLeader && (
-                                <td data-label="Pessoa">
-                                  {
-                                    data.members.find(
-                                      (m) => m.user_id === h.user_id,
-                                    )?.name
-                                  }
-                                </td>
-                              )}
-                              <td data-label="Data">
-                                {new Date(h.started_at).toLocaleDateString(
-                                  "pt-BR",
-                                )}
-                              </td>
-                              <td data-label="Origem">
-                                {h.source === "timer" ? "Cronômetro" : "Manual"}
-                              </td>
-                              <td data-label="Tempo">
-                                <strong>
-                                  <LiveDuration entry={h} />
-                                </strong>
-                                {!h.ended_at && (
-                                  <span className="running-label">
-                                    {" "}
-                                    em andamento
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {!visibleHours.length && (
-                      <Empty
-                        title="Nenhum apontamento"
-                        body="Registre o tempo dedicado às suas tarefas."
-                      />
-                    )}
-                  </section>
+                  <HoursHistory
+                    key={`${company}:${user}:${isLeader}:${demo}`}
+                    company={company}
+                    user={user}
+                    isLeader={isLeader}
+                    members={data.members}
+                    refreshKey={`${refresh}:${liveTick}:${timerTick}:${hoursTick}`}
+                    demoData={demo ? data : undefined}
+                  />
                 </>
               )}
               {page === "profile" && (

@@ -667,6 +667,42 @@ export async function myOpenTaskCount(
   );
 }
 
+export const HOURS_PAGE_SIZE = 25;
+
+export type HourRow = TimeEntry & { task: { title: string } | null };
+export interface HoursPage {
+  entries: HourRow[];
+  count: number;
+}
+
+/** History is read on demand, independently of the recent timer snapshot. */
+export async function companyHoursPage(
+  company: string,
+  page: number,
+  user?: string,
+  signal?: AbortSignal,
+): Promise<HoursPage> {
+  if (!supabase) throw Error("Supabase não configurado");
+  const from = Math.max(0, Math.trunc(page)) * HOURS_PAGE_SIZE;
+  let query = supabase
+    .from("time_entries")
+    .select(
+      "id,company_id,task_id,user_id,started_at,ended_at,note,source,task:tasks(title)",
+      { count: "exact" },
+    )
+    .eq("company_id", company);
+  // Filter before pagination so other people's entries never consume a page.
+  if (user) query = query.eq("user_id", user);
+  query = query
+    .order("started_at", { ascending: false })
+    .order("id", { ascending: false })
+    .range(from, from + HOURS_PAGE_SIZE - 1);
+  if (signal) query = query.abortSignal(signal);
+  const { data, count, error } = await query;
+  if (error) throw error;
+  return { entries: (data ?? []) as unknown as HourRow[], count: count ?? 0 };
+}
+
 export async function companyHours(
   company: string,
   forceRefresh = false,
