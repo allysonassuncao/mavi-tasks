@@ -417,6 +417,45 @@ describe("embeddings da OpenAI", () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+  it("o texto acima do limite de tokens é cortado e o lote passa", async () => {
+    const sent: string[][] = [];
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      const { input } = JSON.parse(String(init.body)) as { input: string[] };
+      sent.push(input);
+      return input[1].length > 3000
+        ? new Response(
+            JSON.stringify({
+              error: {
+                message:
+                  "Invalid 'input[1]': maximum input length is 8192 tokens.",
+              },
+            }),
+            { status: 400 },
+          )
+        : new Response(
+            JSON.stringify({
+              data: [
+                { index: 0, embedding: [1] },
+                { index: 1, embedding: [2] },
+              ],
+              usage: { total_tokens: 5 },
+            }),
+          );
+    }) as unknown as typeof fetch;
+    const out = await openAiEmbedder(env, fetchImpl)(["a", "9".repeat(30000)]);
+    expect(out.vectors).toEqual([[1], [2]]);
+    expect(sent.map((s) => s[1].length)).toEqual([8000, 4000, 2000]);
+    expect(sent.every((s) => s[0] === "a")).toBe(true);
+  });
+  it("outro erro 400 não fica tentando", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response('{"error":{"message":"bad"}}', { status: 400 }),
+    ) as unknown as typeof fetch;
+    await expect(openAiEmbedder(env, fetchImpl)(["a"])).rejects.toThrow(
+      /400.*bad/,
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
   it("sem chave, avisa o que falta", async () => {
     await expect(
       openAiEmbedder({ ...env, openaiKey: "" })(["a"]),

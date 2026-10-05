@@ -520,6 +520,25 @@ await check("agendamento: só acorda o worker quando há trabalho", async () => 
   assert.equal(req.headers.Authorization, `Bearer ${SECRET}`);
 });
 
+await check("texto longo sem pontuação vira vários trechos (cabe na OpenAI)", async () => {
+  const split = async (text, size = 1500) =>
+    (await sql(`select mavi_private.ai_split($1, $2) as t`, [text, size])).map((r) => r.t);
+  const list = Array.from({ length: 400 }, (_, i) => `item ${i} https://x.com/${i}`).join("\n");
+  const out = await split(list);
+  assert.ok(out.length > 5 && out.every((t) => t.length <= 1500), out.map((t) => t.length).join());
+  assert.equal(out.join(" ").replace(/\s+/g, " "), list.replace(/\s+/g, " "));
+  const blob = "9".repeat(4000);
+  assert.deepEqual((await split(blob)).map((t) => t.length), [1500, 1500, 1000]);
+  const words = Array.from({ length: 900 }, () => "palavra").join(" ");
+  const w = await split(words);
+  assert.ok(w.every((t) => t.length <= 1500 && !t.startsWith(" ") && /^palavra( palavra)*$/.test(t)));
+  // O que já cabia sai igual.
+  const prose = "Primeira frase. Segunda frase!\n\nOutro parágrafo.";
+  assert.deepEqual(await split(prose), ["Primeira frase. Segunda frase!\n\nOutro parágrafo."]);
+  const sentences = Array.from({ length: 200 }, (_, i) => `Frase número ${i}.`).join(" ");
+  assert.ok((await split(sentences)).every((t) => t.length <= 1500));
+});
+
 await check("ninguém lê as tabelas da IA direto", async () => {
   await as(admin);
   await assert.rejects(

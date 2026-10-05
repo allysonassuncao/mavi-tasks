@@ -33,8 +33,16 @@ export class EmbeddingError extends Error {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * O limite da OpenAI é de 8192 tokens por texto. Os trechos têm ~1500
+ * caracteres; um texto sem pontuação nem parágrafos (lista, tabela, links)
+ * pode passar disso, e com números e códigos são ~2 caracteres por token.
+ */
+const MAX_CHARS = 8000;
+
+/**
  * Um lote de textos (até 2048 por chamada, ~300 mil tokens). Tenta de novo em
- * 429 e 5xx, respeitando o retry-after.
+ * 429 e 5xx, respeitando o retry-after. O texto que ainda passar do limite de
+ * tokens é cortado pela metade até caber: um trecho grande não trava o lote.
  */
 export function openAiEmbedder(
   env: EmbeddingEnv,
@@ -48,7 +56,8 @@ export function openAiEmbedder(
       );
     if (!texts.length)
       return { vectors: [], tokens: 0, model: env.embeddingModel };
-    for (let attempt = 0; ; attempt++) {
+    const input = texts.map((t) => t.slice(0, MAX_CHARS) || " ");
+    for (let attempt = 0, cuts = 0; ; attempt++) {
       const res = await fetchImpl("https://api.openai.com/v1/embeddings", {
         method: "POST",
         headers: {
@@ -57,7 +66,7 @@ export function openAiEmbedder(
         },
         body: JSON.stringify({
           model: env.embeddingModel,
-          input: texts.map((t) => t.slice(0, 24000) || " "),
+          input,
           dimensions: EMBEDDING_DIMENSIONS,
           encoding_format: "float",
         }),
@@ -77,8 +86,18 @@ export function openAiEmbedder(
         };
       }
       const retryable = res.status === 429 || res.status >= 500;
+      const detail =
+        !retryable || attempt >= 4 ? await res.text().catch(() => "") : "";
+      // "Invalid 'input[54]': maximum input length is 8192 tokens."
+      const long = /input\[(\d+)\]'?: maximum input length/i.exec(detail);
+      const at = long ? Number(long[1]) : -1;
+      if (res.status === 400 && at >= 0 && at < input.length && cuts < 8) {
+        cuts++;
+        attempt--;
+        input[at] = input[at].slice(0, Math.ceil(input[at].length / 2));
+        continue;
+      }
       if (!retryable || attempt >= 4) {
-        const detail = await res.text().catch(() => "");
         throw new EmbeddingError(
           res.status === 401 ? 503 : 502,
           res.status === 401
