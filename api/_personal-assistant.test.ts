@@ -171,6 +171,61 @@ describe("respostas menos repetidas e a base do robô", () => {
   });
 });
 
+describe("a tarefa sugerida", () => {
+  const ana = "00000000-0000-4000-8000-000000000021";
+  const criacao = "00000000-0000-4000-8000-000000000031";
+  const contract = "00000000-0000-4000-8000-000000000041";
+  const withTask = (): DraftMaterial => ({
+    ...material(),
+    task_context: {
+      people: [
+        { id: user, name: "Bruno Tráfego", teams: ["Tráfego"], me: true },
+        { id: ana, name: "Ana Design", teams: ["Criação"], about: "Artes e criativos." },
+      ],
+      teams: [{ id: criacao, name: "Criação", members: ["Ana Design"] }],
+      contracts: [{ id: contract, product: "Make Ads", product_id: "p1" }],
+      product_id: "p1",
+      open_tasks: [{ title: "Trocar público da campanha", status: "progress", assignee: "Bruno Tráfego" }],
+    },
+    lessons: [{ scope: "product", kind: "task", text: "Troca de arte vira tarefa da Criação." }],
+  });
+
+  it("a MAVI vê quem atende o cliente, os produtos, as tarefas abertas e quando sugerir", () => {
+    const { text } = draftMessage(withTask(), ORIGIN);
+    expect(text).toMatch(/pessoas que atendem o cliente \(P#\):\n- P1 Bruno Tráfego \(a própria pessoa\) · equipes: Tráfego\n- P2 Ana Design · equipes: Criação · o que é com ela: Artes e criativos\./);
+    expect(text).toMatch(/- E1 Criação \(Ana Design\)/);
+    expect(text).toMatch(/- Q1 Make Ads \(o da situação\)/);
+    expect(text).toMatch(/Tarefas abertas do cliente:\n- Trocar público da campanha \(progress, com Bruno Tráfego\)/);
+    expect(text).toMatch(/Quando sugerir tarefa \(o que você aprendeu; siga\):\n- Do produto: Troca de arte vira tarefa da Criação\./);
+    expect(ASSISTANT_INSTRUCTIONS).toMatch(/A tarefa \("task"\), SÓ quando a situação pede trabalho operacional/);
+  });
+
+  it("troca as referências pelos ids; pessoa vale mais que equipe; sem título ou fora da lista, nada", () => {
+    const { refs } = draftMessage(withTask(), ORIGIN);
+    const draft = parseDraft(
+      JSON.stringify({
+        reply: "Oi! Já pedi a arte nova.",
+        task: { title: "Criar arte nova do post", description: "O cliente pediu.", assignee: "P2", team: "E1", product: "Q1", due: "2026-10-09", priority: "high", why: "Precisa de arte." },
+      }),
+      refs,
+      [],
+    );
+    expect(draft.task).toEqual({
+      title: "Criar arte nova do post",
+      description: "O cliente pediu.",
+      assignee_id: ana,
+      contract_id: contract,
+      due: "2026-10-09",
+      priority: "high",
+      why: "Precisa de arte.",
+    });
+    const team = parseDraft(JSON.stringify({ reply: "Oi!", task: { title: "Criar arte", team: "E1", assignee: "P9", priority: "max" } }), refs, []);
+    expect(team.task).toEqual({ title: "Criar arte", team_id: criacao });
+    expect(parseDraft(JSON.stringify({ reply: "Oi!", task: { title: "x" } }), refs, []).task).toBeNull();
+    expect(parseDraft(JSON.stringify({ reply: "Oi!", task: null }), refs, []).task).toBeNull();
+  });
+});
+
 describe("a resposta da MAVI, conferida", () => {
   const { refs } = draftMessage(material(), ORIGIN);
   const sources = [{ ref: "S1", type: "campaign" as const, id: campaign, title: "Leads Clínica", date: "2026-09-30" }];

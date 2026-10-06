@@ -3,8 +3,10 @@ import {
   AtSign,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
-  Copy,
+  Crosshair,
   CornerDownRight,
   ExternalLink,
   EyeOff,
@@ -18,7 +20,6 @@ import {
   Settings2,
   Sparkles,
   Tag,
-  ThumbsDown,
   Trash2,
   Users,
 } from "lucide-react";
@@ -27,7 +28,6 @@ import { Empty, Modal } from "./components";
 import { appPath, openInApp } from "./temperature";
 import { taskUrl, navigate } from "./router";
 import {
-  CONFIDENCE_LABEL,
   LESSON_KIND_LABEL,
   LESSON_STATUS_LABEL,
   loadAutonomy,
@@ -41,15 +41,8 @@ import {
   type LessonKind,
   type LessonsView,
   DISMISS_LABEL,
-  REJECT_LABEL,
-  createLink,
   drainDrafts,
   joinItems,
-  fillLinks,
-  pendingKeys,
-  replyFeedback,
-  requestDraft,
-  type RejectReason,
   KIND_LABEL,
   REASON_LABEL,
   URGENCY_LABEL,
@@ -75,13 +68,15 @@ import {
   type PersonalState,
   type PersonalStatus,
 } from "./personal-radar";
-import { sourceUrl } from "./ai";
-import { AgentCheckCard, RemoveCaseForm } from "./RadarCaseTools";
-import { removedMessage } from "./agent-check";
+import { AgentCheckCard } from "./RadarCaseTools";
+import { REMOVE_LABEL, removedMessage, type RemoveReason } from "./agent-check";
+import { ChoiceMenu, InlineAsk, NextStep } from "./PersonalRadarNextStep";
+import type { FormPreset } from "./forms";
 import { ProductLessons } from "./PersonalRadarProductLessons";
 import "./personal-radar.css";
 
 const ALL = "__all__";
+const END = "__end__";
 const GENERAL = "__general__";
 const PAGE = 50;
 const savedKey = (company: string, user: string) =>
@@ -118,10 +113,13 @@ export function PersonalRadarPage({
   company,
   user,
   notify,
+  onNewTask,
 }: {
   company: string;
   user: string;
   notify: (message: string) => void;
+  /** Abre o formulário de tarefa preenchido (a tarefa sugerida pela MAVI). */
+  onNewTask?: (preset: FormPreset) => void;
 }) {
   const key = savedKey(company, user);
   const initial = useMemo(() => readSaved(key), [key]);
@@ -142,6 +140,10 @@ export function PersonalRadarPage({
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [learningOpen, setLearningOpen] = useState(false);
+  // Modo foco: uma situação por vez; ao terminar, passa para a próxima.
+  // focusId nulo = a primeira da lista; END = acabou o que estava carregado.
+  const [focus, setFocus] = useState(false);
+  const [focusId, setFocusId] = useState<string | null>(null);
   // Os tipos em que a pessoa já está pronta para a MAVI responder sozinha (só o selo).
   const [ready, setReady] = useState<Set<string>>(new Set());
   const request = useRef(0);
@@ -247,6 +249,16 @@ export function PersonalRadarPage({
           }
         : l,
     );
+
+  const canFocus = !readOnly && status === "open" && !!list?.items.length;
+  // A em foco sumiu da lista (resolvida por outra pessoa): volta para a primeira.
+  const position = !list ? -1 : focusId === END ? -1 : Math.max(0, focusId ? list.items.findIndex((x) => x.id === focusId) : 0);
+  const current = list && position >= 0 ? list.items[position] : null;
+  // A próxima da lista (a atual pode sair dela ao ser resolvida).
+  const next = () => {
+    if (!list || !current) return;
+    setFocusId(list.items[position + 1]?.id ?? END);
+  };
 
   return (
     <div className="pradar">
@@ -404,6 +416,51 @@ export function PersonalRadarPage({
             </div>
           </div>
           {!readOnly && <Status state={state} />}
+          {canFocus && (
+            <div className={`pradar-focus-bar${focus ? " on" : ""}`}>
+              {focus ? (
+                <>
+                  <Crosshair size={15} aria-hidden="true" />
+                  <strong>Modo foco</strong>
+                  <span className="muted">
+                    {current ? `${position + 1} de ${list!.total}` : "tudo visto"}
+                  </span>
+                  <Button
+                    className="icon-btn"
+                    aria-label="Situação anterior"
+                    disabled={!current || position <= 0}
+                    onClick={() => setFocusId(list!.items[position - 1]?.id ?? null)}
+                  >
+                    <ChevronLeft size={15} />
+                  </Button>
+                  <Button
+                    className="icon-btn"
+                    aria-label="Próxima situação"
+                    disabled={!current}
+                    onClick={next}
+                  >
+                    <ChevronRight size={15} />
+                  </Button>
+                  <Button className="btn quiet compact" onClick={() => setFocus(false)}>
+                    Ver a lista
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span className="muted">Uma situação por vez, passando para a próxima quando você termina.</span>
+                  <Button
+                    className="btn secondary compact"
+                    onClick={() => {
+                      setFocusId(null);
+                      setFocus(true);
+                    }}
+                  >
+                    <Crosshair size={14} aria-hidden="true" /> Modo foco
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
           {error && <p className="form-error">{error}</p>}
           {!list ? (
             <Loading variant="list" />
@@ -425,8 +482,23 @@ export function PersonalRadarPage({
               }
             />
           ) : (
-            <ul className="pradar-list">
-              {list.items.map((i) => (
+            <ul className={`pradar-list${focus && canFocus ? " focus" : ""}`}>
+              {focus && canFocus && !current && (
+                <li className="pradar-focus-end">
+                  <CheckCircle2 size={18} aria-hidden="true" />
+                  <strong>Você passou por todas as situações carregadas.</strong>
+                  {list.items.length < list.total ? (
+                    <Button className="btn secondary compact" onClick={() => load(list.items.length)} loading={busy}>
+                      Carregar mais ({list.total - list.items.length})
+                    </Button>
+                  ) : (
+                    <Button className="btn secondary compact" onClick={() => setFocusId(null)}>
+                      Começar de novo
+                    </Button>
+                  )}
+                </li>
+              )}
+              {(focus && canFocus ? (current ? [current] : []) : list.items).map((i) => (
                 <ItemCard
                   key={i.id}
                   company={company}
@@ -447,11 +519,13 @@ export function PersonalRadarPage({
                     load(0);
                   }}
                   notify={notify}
+                  onNewTask={readOnly ? undefined : onNewTask}
+                  onDone={focus && canFocus ? next : undefined}
                 />
               ))}
             </ul>
           )}
-          {list && list.items.length < list.total && (
+          {list && list.items.length < list.total && !(focus && canFocus) && (
             <div className="pradar-more">
               <Button
                 className="btn secondary"
@@ -615,6 +689,8 @@ function ItemCard({
   onChanged,
   onRemoved,
   notify,
+  onNewTask,
+  onDone,
 }: {
   company: string;
   item: PersonalItem;
@@ -626,14 +702,16 @@ function ItemCard({
   /** A situação foi excluída (some da lista). */
   onRemoved?: (message: string) => void;
   notify?: (message: string) => void;
+  /** Abre o formulário de tarefa preenchido (a tarefa sugerida). */
+  onNewTask?: (preset: FormPreset) => void;
+  /** A pessoa terminou esta situação (o modo foco passa para a próxima). */
+  onDone?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [joining, setJoining] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
-  const [dismissing, setDismissing] = useState(false);
-  const [removing, setRemoving] = useState(false);
-  const [reason, setReason] = useState<DismissReason>("not_mine");
-  const [note, setNote] = useState("");
+  // A pergunta de uma linha do "Outro motivo" (descartar ou excluir).
+  const [asking, setAsking] = useState<null | "dismiss" | "remove">(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const mentions = item.mentions ?? [];
@@ -647,13 +725,28 @@ function ItemCard({
     setError("");
     act(company, item.id, action, text)
       .then((next) => {
-        setDismissing(false);
+        setAsking(null);
         onChanged(next, message);
+        if (action !== "reopened") onDone?.();
       })
       .catch((e) => setError((e as Error).message))
       .finally(() => setBusy(false));
   };
   const closed = item.status === "resolved" || item.state === "dismissed";
+  const dismiss = (r: DismissReason, text = "") =>
+    run(r, r === "already_resolved" ? "Marcado como resolvido." : "Tirado da sua lista. A MAVI vai levar isso em conta.", text);
+  const remove = (why: RemoveReason, text = "") => {
+    setBusy(true);
+    setError("");
+    removeItem(company, item.id, why, text)
+      .then((r) => {
+        setAsking(null);
+        onRemoved?.(removedMessage(r));
+        onDone?.();
+      })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setBusy(false));
+  };
   const ReasonIcon =
     item.reason === "mention"
       ? AtSign
@@ -754,12 +847,14 @@ function ItemCard({
         </p>
       )}
       {(item.reply || (!closed && !readOnly)) && (
-        <ReplyPanel
+        <NextStep
           company={company}
           item={item}
           ready={ready}
           readOnly={readOnly || closed}
           onChanged={onChanged}
+          onNewTask={onNewTask}
+          onDone={onDone}
         />
       )}
       {closed && (
@@ -826,26 +921,28 @@ function ItemCard({
               >
                 <RotateCcw size={14} aria-hidden="true" /> Reabrir
               </Button>
-              <Button className="btn quiet compact" onClick={() => setRemoving((v) => !v)} aria-expanded={removing}>
-                <Trash2 size={14} aria-hidden="true" /> Excluir
-              </Button>
+              <RemoveMenu disabled={busy} onPick={(why) => (why === "other" ? setAsking("remove") : remove(why))} />
             </>
           ) : (
             <>
               <Button
                 className="btn secondary compact"
                 onClick={() => run("resolved", "Marcado como resolvido.")}
-                loading={busy && !dismissing}
+                loading={busy && !asking}
               >
                 <CheckCircle2 size={14} aria-hidden="true" /> Resolvido
               </Button>
-              <Button
-                className="btn quiet compact"
-                onClick={() => setDismissing((v) => !v)}
-                aria-expanded={dismissing}
-              >
-                <EyeOff size={14} aria-hidden="true" /> Descartar
-              </Button>
+              <ChoiceMenu
+                label={
+                  <>
+                    <EyeOff size={14} aria-hidden="true" /> Descartar
+                  </>
+                }
+                title="Por que sair da sua lista?"
+                options={(Object.keys(DISMISS_LABEL) as DismissReason[]).map((r) => ({ value: r, label: DISMISS_LABEL[r] }))}
+                disabled={busy}
+                onPick={(r) => (r === "other" ? setAsking("dismiss") : dismiss(r))}
+              />
               {siblings.length > 0 && (
                 <Button
                   className="btn quiet compact"
@@ -858,23 +955,21 @@ function ItemCard({
                   <Merge size={14} aria-hidden="true" /> Juntar com…
                 </Button>
               )}
-              <Button className="btn quiet compact" onClick={() => setRemoving((v) => !v)} aria-expanded={removing}>
-                <Trash2 size={14} aria-hidden="true" /> Excluir
-              </Button>
+              <RemoveMenu disabled={busy} onPick={(why) => (why === "other" ? setAsking("remove") : remove(why))} />
             </>
           )}
         </div>
       )}
-      {removing && !readOnly && (
-        <RemoveCaseForm
-          name={item.title}
-          scope="Ela sai da sua lista e da de quem mais estiver nela."
-          onCancel={() => setRemoving(false)}
-          onConfirm={async (why, text) => {
-            const r = await removeItem(company, item.id, why, text);
-            setRemoving(false);
-            onRemoved?.(removedMessage(r));
-          }}
+      {asking && !readOnly && (
+        <InlineAsk
+          busy={busy}
+          placeholder={
+            asking === "remove"
+              ? "Por que excluir? (some para todos)"
+              : "Por que sair da sua lista? A MAVI aprende com isso (ex.: artes são com a Duda)."
+          }
+          onCancel={() => setAsking(null)}
+          onSend={(text) => (asking === "remove" ? remove("other", text) : dismiss("other", text))}
         />
       )}
       {joining && !closed && (
@@ -919,61 +1014,32 @@ function ItemCard({
           </div>
         </div>
       )}
-      {dismissing && !closed && (
-        <div className="pradar-dismiss">
-          <fieldset>
-            <legend>Por que sair da sua lista?</legend>
-            {(Object.keys(DISMISS_LABEL) as DismissReason[]).map((r) => (
-              <label key={r}>
-                <input
-                  type="radio"
-                  name={`dismiss-${item.id}`}
-                  checked={reason === r}
-                  onChange={() => setReason(r)}
-                />
-                {DISMISS_LABEL[r]}
-              </label>
-            ))}
-          </fieldset>
-          <Textarea
-            rows={2}
-            maxLength={1000}
-            value={note}
-            placeholder="Se quiser, explique para a MAVI acertar da próxima vez (ex.: artes são com a Duda)."
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <div className="pradar-actions">
-            <Button
-              className="btn primary compact"
-              loading={busy}
-              onClick={() =>
-                run(
-                  reason,
-                  reason === "already_resolved"
-                    ? "Marcado como resolvido."
-                    : "Tirado da sua lista. A MAVI vai levar isso em conta.",
-                  note,
-                )
-              }
-            >
-              Confirmar
-            </Button>
-            <Button
-              className="btn secondary compact"
-              onClick={() => setDismissing(false)}
-              disabled={busy}
-            >
-              Cancelar
-            </Button>
-          </div>
-        </div>
-      )}
       {error && <p className="form-error">{error}</p>}
     </li>
   );
 }
 
 /** Meu Radar (o que é comigo, ligar/desligar), o ritmo (líderes) e o teto (administradores). */
+/** Excluir: um clique pelo motivo (erro ou "não foi o cliente" refaz o Termômetro). */
+function RemoveMenu({ disabled, onPick }: { disabled?: boolean; onPick: (why: RemoveReason) => void }) {
+  return (
+    <ChoiceMenu
+      label={
+        <>
+          <Trash2 size={14} aria-hidden="true" /> Excluir
+        </>
+      }
+      title="Excluir para todos. Por quê?"
+      options={(Object.keys(REMOVE_LABEL) as RemoveReason[]).map((r) => ({
+        value: r,
+        label: r === "mavi_error" || r === "not_client" ? `${REMOVE_LABEL[r]} · refaz o Termômetro` : REMOVE_LABEL[r],
+      }))}
+      disabled={disabled}
+      onPick={onPick}
+    />
+  );
+}
+
 function SettingsModal({
   company,
   state,
@@ -1213,295 +1279,6 @@ function SettingsModal({
  * evidências. Copiar = aprovar (com edição, o texto final vai junto);
  * Refazer, Reprovar e Ensinar a MAVI ficam no aprendizado dela.
  */
-function ReplyPanel({
-  company,
-  item,
-  readOnly,
-  ready = false,
-  onChanged,
-}: {
-  company: string;
-  item: PersonalItem;
-  readOnly: boolean;
-  ready?: boolean;
-  onChanged: (item: PersonalItem, message?: string) => void;
-}) {
-  const reply = item.reply;
-  const base = reply?.approved_text ?? reply?.text ?? "";
-  const [text, setText] = useState(base);
-  const [links, setLinks] = useState<Record<string, string>>({});
-  const [linking, setLinking] = useState<string | null>(null);
-  const [mode, setMode] = useState<null | "redo" | "reject" | "teach">(null);
-  const [note, setNote] = useState("");
-  const [reason, setReason] = useState<RejectReason>("wrong_info");
-  const [showEvidence, setShowEvidence] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const version = reply?.version ?? 0;
-  // Uma versão nova da MAVI troca o texto (a edição da anterior fica no aprendizado).
-  useEffect(() => {
-    setText(base);
-    setLinks({});
-  }, [version, item.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const write = (opts: { force?: boolean; guidance?: string } = {}) => {
-    setBusy(true);
-    setError("");
-    requestDraft(company, item.id, opts)
-      .then((r) => {
-        setMode(null);
-        setNote("");
-        if (r.item) onChanged(r.item, "A MAVI escreveu uma nova resposta.");
-      })
-      .catch((e) => setError((e as Error).message))
-      .finally(() => setBusy(false));
-  };
-  if (!reply || reply.status === "pending")
-    return (
-      <div className="pradar-reply waiting">
-        <Sparkles size={14} aria-hidden="true" />
-        <span>A MAVI ainda não escreveu a resposta.</span>
-        {!readOnly && (
-          <Button className="btn secondary compact" onClick={() => write()} loading={busy}>
-            Escrever agora
-          </Button>
-        )}
-        {error && <p className="form-error">{error}</p>}
-      </div>
-    );
-  if (reply.status === "running")
-    return (
-      <div className="pradar-reply waiting" role="status">
-        <Sparkles size={14} aria-hidden="true" className="pradar-pulse" />
-        <span>A MAVI está escrevendo a resposta: lendo o cliente, as reuniões e as campanhas…</span>
-      </div>
-    );
-  if (reply.status === "failed" && !reply.text)
-    return (
-      <div className="pradar-reply waiting">
-        <span>A MAVI não conseguiu escrever a resposta{reply.error ? `: ${reply.error}` : "."}</span>
-        {!readOnly && (
-          <Button className="btn secondary compact" onClick={() => write({ force: true })} loading={busy}>
-            Tentar de novo
-          </Button>
-        )}
-        {error && <p className="form-error">{error}</p>}
-      </div>
-    );
-
-  const filled = fillLinks(text, links);
-  const missing = pendingKeys(filled);
-  const original = fillLinks(reply.text ?? "", links);
-  const copy = () => {
-    // Os marcadores sem link criado saem do texto copiado.
-    const final = missing.reduce((t, k) => t.replaceAll(`{{${k}}}`, ""), filled).replace(/[ \t]{2,}/g, " ").trim();
-    void navigator.clipboard?.writeText(final).catch(() => {});
-    const edited = final !== original.trim() && final !== (reply.approved_text ?? "").trim();
-    setBusy(true);
-    setError("");
-    replyFeedback(company, item.id, edited ? "edited" : "approved", edited ? final : "")
-      .then((next) =>
-        onChanged(next, edited ? "Copiado com as suas edições. A MAVI vai aprender com elas." : "Copiado. Cole no grupo do cliente."),
-      )
-      .catch((e) => setError((e as Error).message))
-      .finally(() => setBusy(false));
-  };
-  const makeLink = async (key: string) => {
-    const a = reply.actions.find((x) => x.key === key);
-    if (!a) return;
-    setLinking(key);
-    setError("");
-    try {
-      const url = await createLink(company, a);
-      setLinks((l) => ({ ...l, [key]: url }));
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLinking(null);
-    }
-  };
-  const sendFeedback = () => {
-    setBusy(true);
-    setError("");
-    replyFeedback(company, item.id, mode === "reject" ? "rejected" : "training", note, mode === "reject" ? reason : null)
-      .then((next) => {
-        setMode(null);
-        setNote("");
-        onChanged(next, mode === "reject" ? "Resposta reprovada. A MAVI vai levar isso em conta." : "Anotado. A MAVI segue isso daqui para a frente.");
-      })
-      .catch((e) => setError((e as Error).message))
-      .finally(() => setBusy(false));
-  };
-  const rejected = reply.status === "rejected";
-  return (
-    <div className={`pradar-reply${rejected ? " rejected" : ""}`}>
-      <div className="pradar-reply-head">
-        <span className="pradar-reply-title">
-          <Sparkles size={14} aria-hidden="true" /> Resposta sugerida pela MAVI
-        </span>
-        {reply.confidence && (
-          <span className={`pradar-confidence c-${reply.confidence}`}>{CONFIDENCE_LABEL[reply.confidence]}</span>
-        )}
-        {version > 1 && <span className="muted">versão {version}</span>}
-        {reply.approved_at && (
-          <span className="pradar-approved">
-            <CheckCircle2 size={13} aria-hidden="true" /> Copiada {whenBr(reply.approved_at)}
-          </span>
-        )}
-        {rejected && <span className="pradar-rejected">Reprovada</span>}
-        {ready && !readOnly && (
-          <span className="pradar-ready" title="Pela sua regra de autonomia, a MAVI já acerta este tipo de resposta. Por enquanto ela não envia nada sozinha.">
-            Pronta para responder sozinha
-          </span>
-        )}
-      </div>
-      {reply.stale && !readOnly && (
-        <p className="pradar-warn">
-          <Info size={14} aria-hidden="true" /> O cliente falou de novo depois desta resposta.{" "}
-          <button type="button" className="pradar-link" onClick={() => write({ force: true })} disabled={busy}>
-            Atualizar a resposta
-          </button>
-        </p>
-      )}
-      {readOnly ? (
-        <p className="pradar-reply-text">{filled}</p>
-      ) : (
-        <Textarea
-          className="pradar-reply-input"
-          aria-label="Resposta para o grupo"
-          value={filled}
-          rows={Math.min(10, Math.max(3, Math.ceil(filled.length / 90)))}
-          maxLength={6000}
-          onChange={(e) => {
-            // O link criado volta a ser marcador na edição (a próxima troca põe de novo).
-            let next = e.target.value;
-            for (const [k, url] of Object.entries(links)) next = next.replaceAll(url, `{{${k}}}`);
-            setText(next);
-          }}
-        />
-      )}
-      {reply.actions.length > 0 && (
-        <ul className="pradar-reply-actions">
-          {reply.actions.map((a) => (
-            <li key={a.key}>
-              <span className="pradar-key">{`{{${a.key}}}`}</span>
-              <span className="pradar-action-label">{a.label}</span>
-              {links[a.key] ? (
-                <a href={links[a.key]} target="_blank" rel="noreferrer" className="pradar-link-ok">
-                  <CheckCircle2 size={13} aria-hidden="true" /> Link criado
-                </a>
-              ) : readOnly ? (
-                <span className="muted">link sugerido</span>
-              ) : (
-                <Button className="btn secondary compact" onClick={() => makeLink(a.key)} loading={linking === a.key} disabled={!!linking}>
-                  Criar link
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {reply.checks.length > 0 && (
-        <ul className="pradar-checks">
-          {reply.checks.map((c, n) => (
-            <li key={n}>
-              <Info size={13} aria-hidden="true" /> {c}
-            </li>
-          ))}
-        </ul>
-      )}
-      {reply.evidence.length > 0 && (
-        <>
-          <button type="button" className="pradar-link" onClick={() => setShowEvidence((v) => !v)}>
-            {showEvidence ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-            Evidências ({reply.evidence.length})
-          </button>
-          {showEvidence && (
-            <ul className="pradar-evidence">
-              {reply.evidence.map((e, n) => (
-                <li key={n}>
-                  <strong>{e.title}</strong>
-                  {e.detail && <span>{e.detail}</span>}
-                  {e.source && (
-                    <a
-                      href={sourceUrl(e.source)}
-                      onClick={(ev) => {
-                        ev.preventDefault();
-                        navigate(sourceUrl(e.source!));
-                      }}
-                    >
-                      <ExternalLink size={12} aria-hidden="true" /> {e.source.title}
-                    </a>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-      {!readOnly && (
-        <div className="pradar-actions">
-          <Button className="btn primary compact" onClick={copy} loading={busy && !mode}>
-            <Copy size={14} aria-hidden="true" /> {missing.length ? "Copiar sem os links" : "Copiar"}
-          </Button>
-          <Button className="btn quiet compact" onClick={() => setMode(mode === "redo" ? null : "redo")} aria-expanded={mode === "redo"}>
-            <RotateCcw size={14} aria-hidden="true" /> Refazer
-          </Button>
-          <Button className="btn quiet compact" onClick={() => setMode(mode === "reject" ? null : "reject")} aria-expanded={mode === "reject"}>
-            <ThumbsDown size={14} aria-hidden="true" /> Reprovar
-          </Button>
-          <Button className="btn quiet compact" onClick={() => setMode(mode === "teach" ? null : "teach")} aria-expanded={mode === "teach"}>
-            <GraduationCap size={14} aria-hidden="true" /> Ensinar a MAVI
-          </Button>
-        </div>
-      )}
-      {mode && (
-        <div className="pradar-dismiss">
-          {mode === "reject" && (
-            <fieldset>
-              <legend>O que está errado?</legend>
-              {(Object.keys(REJECT_LABEL) as RejectReason[]).map((r) => (
-                <label key={r}>
-                  <input type="radio" name={`reject-${item.id}`} checked={reason === r} onChange={() => setReason(r)} />
-                  {REJECT_LABEL[r]}
-                </label>
-              ))}
-            </fieldset>
-          )}
-          <Textarea
-            rows={2}
-            maxLength={2000}
-            value={note}
-            placeholder={
-              mode === "redo"
-                ? "O que mudar nesta resposta? (ex.: mais curta, cite o relatório de setembro)"
-                : mode === "reject"
-                  ? "Se quiser, explique (ex.: o CPL certo é de R$ 13)."
-                  : "O que a MAVI deve fazer sempre? (ex.: chame o cliente pelo primeiro nome e não use emojis)"
-            }
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <div className="pradar-actions">
-            <Button
-              className="btn primary compact"
-              loading={busy}
-              disabled={mode === "teach" && !note.trim()}
-              onClick={() => (mode === "redo" ? write({ force: true, guidance: note.trim() }) : sendFeedback())}
-            >
-              {mode === "redo" ? "Escrever de novo" : mode === "reject" ? "Reprovar" : "Ensinar"}
-            </Button>
-            <Button className="btn secondary compact" onClick={() => setMode(null)} disabled={busy}>
-              Cancelar
-            </Button>
-          </div>
-        </div>
-      )}
-      {error && <p className="form-error">{error}</p>}
-      {reply.model && <p className="pradar-model muted">Escrita por {reply.model}</p>}
-    </div>
-  );
-}
-
 /**
  * O aprendizado da MAVI: as lições da pessoa (a MAVI escreve a partir dos
  * retornos; a pessoa edita, pausa, exclui e escreve as suas), as da equipe e
@@ -1699,6 +1476,7 @@ function LearningModal({
                     <Select aria-label="Tipo da lição" value={editing.kind} onValueChange={(v) => setEditing({ ...editing, kind: v as LessonKind })}>
                       <SelectOption value="detection">{LESSON_KIND_LABEL.detection}</SelectOption>
                       <SelectOption value="reply">{LESSON_KIND_LABEL.reply}</SelectOption>
+                      <SelectOption value="task">{LESSON_KIND_LABEL.task}</SelectOption>
                     </Select>
                     <Textarea
                       rows={2}

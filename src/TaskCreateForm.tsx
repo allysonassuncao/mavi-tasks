@@ -97,6 +97,7 @@ export function TaskCreateForm({
   initialDescription,
   initialDue,
   initialAssignee,
+  initialTeam,
   initialPriority,
   onCreated,
   demo,
@@ -120,6 +121,8 @@ export function TaskCreateForm({
   initialDue?: string;
   /** A person of the company (a MAVI proposal). */
   initialAssignee?: string;
+  /** A team instead of a person (a MAVI proposal; the database picks who). */
+  initialTeam?: string;
   initialPriority?: keyof typeof priorities;
   /** The task was saved (the MAVI marks its proposal as confirmed). */
   onCreated?: (task: string) => void;
@@ -159,8 +162,12 @@ export function TaskCreateForm({
       ? initialAssignee
       : user,
   );
-  const [assignMode, setAssignMode] = useState<"person" | "team">("person");
-  const [assignTeam, setAssignTeam] = useState("");
+  const [assignMode, setAssignMode] = useState<"person" | "team">(() =>
+    initialTeam && !initialAssignee && data.teams.some((t) => t.id === initialTeam) ? "team" : "person",
+  );
+  const [assignTeam, setAssignTeam] = useState(() =>
+    initialTeam && !initialAssignee && data.teams.some((t) => t.id === initialTeam) ? initialTeam : "",
+  );
   // The due date follows the rule until picked by hand (a date handed in
   // from elsewhere counts as picked).
   const [pickedDue, setPickedDue] = useState(initialDue || dateKey());

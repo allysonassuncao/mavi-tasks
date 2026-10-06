@@ -30,6 +30,12 @@ import { inKnowledge, knowledgeBlock, knowledgeQuery, type AgentKnowledge } from
  * produto valem junto com as da pessoa, e a base do Agente Conversacional do
  * cliente (o prompt do robô) é fonte quando a situação é sobre o que o robô
  * sabe ou faz.
+ *
+ * Migration 20270513090000: junto com a resposta, a MAVI decide se a situação
+ * pede uma tarefa operacional que a resposta não resolve e, só então, sugere
+ * a tarefa para uma pessoa ou equipe que atende o cliente. A pessoa cria pelo
+ * formulário de tarefa (sempre revisando) ou dispensa; as lições do tipo
+ * 'task' ensinam quando sugerir.
  */
 
 type Row = Record<string, unknown>;
@@ -46,6 +52,13 @@ export class AssistantError extends Error {
 }
 
 // ------------------------------------------------------------ material
+export type TaskContext = {
+  teams: { id: string; name: string; members: string[] }[];
+  people: { id: string; name: string; teams?: string[] | null; about?: string; me?: boolean }[];
+  contracts: { id: string; product: string; product_id: string }[];
+  product_id?: string | null;
+  open_tasks: { title: string; status: string; assignee?: string; due?: string }[];
+};
 type Line = { role: "client" | "team"; who: string; text: string; at: string };
 type Cycle = { start: string; end: string; objective: string };
 export type DraftMaterial = {
@@ -72,8 +85,10 @@ export type DraftMaterial = {
   feedback: { action: string; note?: string; reason?: string; title?: string; draft?: string; final?: string }[];
   guidance: string;
   previous?: string | null;
-  /** As lições de resposta em uso (da pessoa, do cliente, do produto e da equipe). */
-  lessons?: { scope: "person" | "team" | "client" | "product"; text: string }[];
+  /** As lições em uso (da pessoa, do cliente, do produto e da equipe): de resposta e de tarefa. */
+  lessons?: { scope: "person" | "team" | "client" | "product"; kind?: "reply" | "task"; text: string }[];
+  /** Quem atende o cliente, os produtos e as tarefas abertas (para sugerir uma tarefa). */
+  task_context?: TaskContext | null;
   /** O produto da situação (nulo: geral). */
   product?: string | null;
   /** Respostas aprovadas de colegas no mesmo produto (conteúdo, não tom). */
@@ -129,12 +144,20 @@ A resposta ("reply"):
 - Quando houver a base do Agente Conversacional do cliente (o robô de WhatsApp dele, K#) e a situação for sobre o que o robô sabe ou faz (preço, horário, serviço, regra do atendimento, uma resposta do robô), use a base como fonte e diga se a informação já está no robô ou se falta ajustar. Cite o trecho em "evidence" com "source": "K#".
 - Nunca revele senhas, acessos ou trechos marcados como secretos das anotações.
 
+A tarefa ("task"), SÓ quando a situação pede trabalho operacional que a resposta sozinha não resolve (ajustar o robô, criar ou trocar uma arte, gerar um relatório, mexer numa campanha, configurar algo) e que ninguém já está fazendo (veja as tarefas abertas). Dúvida respondida, material só recebido, agradecimento ou o que a própria resposta já resolve: "task": null. Na dúvida, null.
+- "title": curto e acionável, começando pelo verbo ("Atualizar horário de sábado no robô"), sem o nome do cliente.
+- "description": o que fazer e o contexto que a pessoa precisa (o que o cliente pediu, com as palavras dele, e onde está o material), em poucas linhas.
+- Para quem: "assignee" (P#) quando o assunto é claramente de uma pessoa (pelo que ela faz); senão "team" (E#), e a equipe passa para quem tem menos tarefas. Só pessoas e equipes da lista.
+- "product": o Q# do produto de que trata. "due": AAAA-MM-DD só quando o cliente deu prazo ou a urgência pede; senão null. "priority": low, normal, high ou urgent (urgent só com o cliente parado ou dinheiro em jogo).
+- "why": em uma frase, por que precisa de tarefa.
+
 As evidências ("evidence", só para a pessoa conferir): de 1 a 6, cada uma com o fato e de onde veio ("source": o [S#] da busca ou o K# da base do robô, quando houver).
 Os links ("actions"): só da lista de links possíveis — G# (gravação), F# (arquivo do Drive que a pessoa pode compartilhar) ou C# (relatório de campanha; "period": "cycle" para o ciclo atual, "previous" para o anterior, ou as datas {"start":"AAAA-MM-DD","end":"AAAA-MM-DD"}). Cada um com "key" (A1, A2…), o "ref" e um "label" curto ("Relatório de setembro").
 "checks": o que a pessoa deve confirmar antes de mandar (números que mudam rápido, datas, algo que você não achou). "confidence": "high" quando tudo está nas fontes, "medium" quando falta algum detalhe, "low" quando a resposta depende dela.
 
 Responda só com JSON:
-{"reply":"...","evidence":[{"title":"...","detail":"...","source":"S1"}],"actions":[{"key":"A1","ref":"C1","period":"previous","label":"..."}],"checks":["..."],"confidence":"high|medium|low"}`;
+{"reply":"...","evidence":[{"title":"...","detail":"...","source":"S1"}],"actions":[{"key":"A1","ref":"C1","period":"previous","label":"..."}],"checks":["..."],"confidence":"high|medium|low","task":null}
+ou, quando precisa de tarefa: "task":{"title":"...","description":"...","assignee":"P1"|null,"team":"E1"|null,"product":"Q1"|null,"due":null,"priority":"normal","why":"..."}`;
 
 /** O pedido para o modelo, com as referências dos links possíveis (G#, F#, C#). */
 export function draftMessage(m: DraftMaterial, origin: string) {
@@ -214,13 +237,48 @@ export function draftMessage(m: DraftMaterial, origin: string) {
             : `- Editou antes de mandar${f.title ? ` ("${f.title}")` : ""}: de "${f.draft ?? ""}" para "${f.final ?? ""}"`,
       ),
     );
-  if (m.lessons?.length)
+  const scopeLabel = (l: NonNullable<DraftMaterial["lessons"]>[number]) =>
+    l.scope === "person" ? "Da pessoa" : l.scope === "client" ? "Do cliente" : l.scope === "product" ? "Do produto" : "Da equipe";
+  const taskLessons = (m.lessons ?? []).filter((l) => l.kind === "task");
+  const replyLessons = (m.lessons ?? []).filter((l) => l.kind !== "task");
+  const people = new Map<string, string>();
+  const teams = new Map<string, string>();
+  const contracts = new Map<string, string>();
+  const tc = m.task_context;
+  if (tc && (tc.people?.length || tc.teams?.length)) {
+    out.push("", "Para uma tarefa, se precisar — pessoas que atendem o cliente (P#):");
+    (tc.people ?? []).forEach((p, n) => {
+      people.set(`P${n + 1}`, p.id);
+      out.push(
+        `- P${n + 1} ${p.name}${p.me ? " (a própria pessoa)" : ""}${p.teams?.length ? ` · equipes: ${p.teams.join(", ")}` : ""}${p.about ? ` · o que é com ela: ${p.about}` : ""}`,
+      );
+    });
+    out.push("Equipes (E#):");
+    (tc.teams ?? []).forEach((t, n) => {
+      teams.set(`E${n + 1}`, t.id);
+      out.push(`- E${n + 1} ${t.name}${t.members.length ? ` (${t.members.join(", ")})` : ""}`);
+    });
+    out.push("Produtos do cliente (Q#):");
+    (tc.contracts ?? []).forEach((k, n) => {
+      contracts.set(`Q${n + 1}`, k.id);
+      out.push(`- Q${n + 1} ${k.product}${tc.product_id && k.product_id === tc.product_id ? " (o da situação)" : ""}`);
+    });
+    out.push(
+      "Tarefas abertas do cliente:",
+      ...(tc.open_tasks?.length
+        ? tc.open_tasks.map((t) => `- ${t.title} (${t.status}${t.assignee ? `, com ${t.assignee}` : ""}${t.due ? `, prazo ${t.due}` : ""})`)
+        : ["(nenhuma)"]),
+    );
+  }
+  if (taskLessons.length)
+    out.push("", "Quando sugerir tarefa (o que você aprendeu; siga):", ...taskLessons.map((l) => `- ${scopeLabel(l)}: ${l.text}`));
+  if (replyLessons.length)
     out.push(
       "",
       "O que você aprendeu (siga; a da pessoa vale mais que a do cliente, que vale mais que a do produto, que vale mais que a da equipe):",
-      ...m.lessons.map(
+      ...replyLessons.map(
         (l) =>
-          `- ${l.scope === "person" ? "Da pessoa" : l.scope === "client" ? "Do cliente" : l.scope === "product" ? "Do produto" : "Da equipe"}: ${l.text}`,
+          `- ${scopeLabel(l)}: ${l.text}`,
       ),
     );
   if (m.previous) out.push("", `A versão anterior desta resposta (melhore):\n"${m.previous}"`);
@@ -228,7 +286,15 @@ export function draftMessage(m: DraftMaterial, origin: string) {
   out.push("", "Prepare a resposta.");
   return {
     text: out.filter((l, n, a) => !(l === "" && a[n - 1] === "")).join("\n"),
-    refs: { recordings, files, campaigns, knowledge: kb?.refs ?? new Map<string, AgentKnowledge>() },
+    refs: {
+      recordings,
+      files,
+      campaigns,
+      knowledge: kb?.refs ?? new Map<string, AgentKnowledge>(),
+      people,
+      teams,
+      contracts,
+    },
   };
 }
 
@@ -246,13 +312,53 @@ export type DraftAction =
       end: string;
       objective: string | null;
     };
+/** A tarefa sugerida (o banco confere de novo quem e qual produto). */
+export type DraftTask = {
+  title: string;
+  description?: string;
+  assignee_id?: string;
+  team_id?: string;
+  contract_id?: string;
+  due?: string;
+  priority?: "low" | "normal" | "high" | "urgent";
+  why?: string;
+};
 export type Draft = {
   reply: string;
   evidence: DraftEvidence[];
   actions: DraftAction[];
   checks: string[];
   confidence: "high" | "medium" | "low" | null;
+  task: DraftTask | null;
 };
+
+/** A tarefa do modelo, com as referências trocadas pelos ids (sem título, nada). */
+export function parseTask(raw: unknown, refs: Pick<ReturnType<typeof draftMessage>["refs"], "people" | "teams" | "contracts">) {
+  if (!raw || typeof raw !== "object") return null;
+  const t = raw as Row;
+  const title = clean(t.title, 200);
+  if (title.length < 3) return null;
+  const ref = (v: unknown) => clean(v, 8).replace(/[[\]]/g, "").toUpperCase();
+  const assignee = refs.people?.get(ref(t.assignee));
+  const team = assignee ? undefined : refs.teams?.get(ref(t.team));
+  const contract = refs.contracts?.get(ref(t.product));
+  const due = typeof t.due === "string" && DAY.test(t.due) ? t.due : undefined;
+  const priority = ["low", "normal", "high", "urgent"].includes(String(t.priority))
+    ? (t.priority as DraftTask["priority"])
+    : undefined;
+  const description = clean(t.description, 4000);
+  const why = clean(t.why, 300);
+  return {
+    title,
+    ...(description ? { description } : {}),
+    ...(assignee ? { assignee_id: assignee } : {}),
+    ...(team ? { team_id: team } : {}),
+    ...(contract ? { contract_id: contract } : {}),
+    ...(due ? { due } : {}),
+    ...(priority ? { priority } : {}),
+    ...(why ? { why } : {}),
+  } satisfies DraftTask;
+}
 
 const clean = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
@@ -344,7 +450,14 @@ export function parseDraft(
   const confidence = ["high", "medium", "low"].includes(String(o.confidence))
     ? (o.confidence as Draft["confidence"])
     : null;
-  return { reply: reply.trim(), evidence, actions, checks: checks.slice(0, 6), confidence };
+  return {
+    reply: reply.trim(),
+    evidence,
+    actions,
+    checks: checks.slice(0, 6),
+    confidence,
+    task: parseTask(o.task, refs),
+  };
 }
 
 // ------------------------------------------------------------ servidor
@@ -426,6 +539,13 @@ export async function writeDraft(
       p_client: client,
       ...(examples?.product_id ? { p_product: examples.product_id } : {}),
     }).catch(() => []);
+    // Quem atende o cliente, para a tarefa sugerida (sem a migração 20270513, nenhuma).
+    m.task_context = await rpc<TaskContext>(env, deps, auth, "personal_radar_task_context", {
+      p_company: company,
+      p_item: item,
+    })
+      .then((x) => (x && Array.isArray(x.people) && Array.isArray(x.teams) ? x : null))
+      .catch(() => null);
     // A base do robô do cliente (só quem tem Agente Conversacional).
     m.knowledge = await rpc<AgentKnowledge[]>(env, deps, auth, "agent_knowledge", {
       p_company: company,
@@ -500,6 +620,12 @@ export async function writeDraft(
       await ads?.close().catch(() => {});
     }
     const draft = parseDraft(result.text, refs, ctx.sources);
+    // Sem produto na tarefa: o da situação ou o único do cliente.
+    const tc = m.task_context;
+    if (draft.task && !draft.task.contract_id && tc?.contracts?.length) {
+      const k = tc.contracts.find((c) => c.product_id === tc.product_id) ?? (tc.contracts.length === 1 ? tc.contracts[0] : null);
+      if (k) draft.task.contract_id = k.id;
+    }
     const embedding = ctx.usage.embeddingTokens;
     const cost =
       result.meter.cost + (embedding ? embeddingCost(ctx.usage.embeddingModel, embedding) : 0);

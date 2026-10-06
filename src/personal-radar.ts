@@ -73,6 +73,34 @@ export type PersonalReply = {
   approved_text?: string;
   stale?: boolean;
   guidance?: string;
+  /** Marcada como boa (migration 20270513090000), com os motivos. */
+  liked_at?: string;
+  liked_tags?: LikeTag[];
+  /** A tarefa sugerida pela MAVI, quando a situação pede. */
+  task?: TaskSuggestion;
+};
+export type LikeTag = "tone" | "data" | "concise" | "solved";
+export const LIKE_TAG_LABEL: Record<LikeTag, string> = {
+  tone: "Tom certo",
+  data: "Dados certos",
+  concise: "Objetiva",
+  solved: "Resolveu",
+};
+export type TaskSuggestion = {
+  title: string;
+  description?: string;
+  assignee_id?: string;
+  assignee_name?: string;
+  team_id?: string;
+  team_name?: string;
+  contract_id?: string;
+  product_name?: string;
+  due?: string;
+  priority?: "low" | "normal" | "high" | "urgent";
+  why?: string;
+  /** Criada pelo formulário ou dispensada. */
+  outcome?: "created" | "dismissed";
+  task_id?: string;
 };
 export const CONFIDENCE_LABEL = { high: "Tudo nas fontes", medium: "Falta algum detalhe", low: "Depende de você" } as const;
 export type RejectReason = "wrong_info" | "wrong_tone" | "incomplete" | "should_not_reply" | "other";
@@ -287,6 +315,32 @@ export async function act(company: string, item: string, action: PersonalAction,
   });
 }
 
+/** Marca (ou desmarca) a resposta como boa, com os motivos opcionais. */
+export async function likeReply(company: string, item: string, liked: boolean, tags: LikeTag[] = []) {
+  if (offline(company)) {
+    const i = demo.items.find((x) => x.id === item)!;
+    if (i.reply) i.reply = { ...i.reply, liked_at: liked ? (i.reply.liked_at ?? new Date().toISOString()) : undefined, liked_tags: liked ? tags : [] };
+    return { ...i };
+  }
+  return rpc<PersonalItem>("personal_radar_reply_like", { p_company: company, p_item: item, p_liked: liked, p_tags: tags });
+}
+/** A tarefa sugerida foi criada (pelo formulário) ou não precisava. */
+export async function taskOutcome(company: string, item: string, outcome: "created" | "dismissed", task?: string, note = "") {
+  if (offline(company)) {
+    const i = demo.items.find((x) => x.id === item)!;
+    if (i.reply?.task) i.reply = { ...i.reply, task: { ...i.reply.task, outcome, task_id: task } };
+    if (outcome === "created" && task) i.task = { id: task, title: i.reply?.task?.title ?? "Tarefa", status: "open" };
+    return { ...i };
+  }
+  return rpc<PersonalItem>("personal_radar_task_outcome", {
+    p_company: company,
+    p_item: item,
+    p_outcome: outcome,
+    p_task: task ?? null,
+    p_note: note,
+  });
+}
+
 /** Exclui a situação (some para todos os donos; migration 20270512090000). */
 export async function removeItem(company: string, item: string, reason: RemoveReason, note: string) {
   if (offline(company)) {
@@ -426,10 +480,11 @@ export async function joinItems(company: string, target: string, sources: string
 }
 
 // ------------------------------------------------------------ aprendizado
-export type LessonKind = "detection" | "reply";
+export type LessonKind = "detection" | "reply" | "task";
 export const LESSON_KIND_LABEL: Record<LessonKind, string> = {
   detection: "O que é comigo",
   reply: "Como responder",
+  task: "Quando criar tarefa",
 };
 export type LessonStatus = "active" | "paused" | "dismissed" | "checking" | "refused" | "suggested";
 export const LESSON_STATUS_LABEL: Record<LessonStatus, string> = {
@@ -796,6 +851,26 @@ demo.items.splice(2, 0, {
   group: { id: "demo-g3", title: "Clínica Sorriso & Make" }, reason: "role", why: "Você cuida do robô", state: "open",
   mention_count: 1, products: demoProducts, product: demoProducts[0],
   mentions: [{ message_id: "m9", role: "client", speaker: "Dra. Paula", quote: "Agora abrimos sábado das 8h às 12h, o robô ainda fala que é só durante a semana.", at: ago(50) }],
+  reply: {
+    status: "done",
+    version: 1,
+    updated_at: ago(40),
+    confidence: "high",
+    model: "claude-opus-5-5",
+    text: "Oi Dra. Paula! Obrigado pelo aviso. Vou atualizar o robô para informar o horário de sábado, das 8h às 12h, ainda hoje, e te confirmo aqui assim que estiver no ar.",
+    evidence: [{ title: "Prompt do robô", detail: "Atendemos de segunda a sexta, das 8h às 18h. (Agente Conversacional: [Clínica Sorriso] Atendimento WhatsApp › AI Agent)" }],
+    actions: [],
+    checks: [],
+    task: {
+      title: "Atualizar horário de sábado no robô da Clínica Sorriso",
+      description: "A clínica passou a atender aos sábados, das 8h às 12h. Ajustar o prompt do robô (fluxo [Clínica Sorriso] Atendimento WhatsApp) e confirmar com a Dra. Paula no grupo.",
+      team_id: "demo-team",
+      team_name: "Automação",
+      product_name: "MAVI",
+      priority: "high",
+      why: "O ajuste no robô é trabalho operacional que a resposta sozinha não resolve.",
+    },
+  },
   agent_check: {
     status: "conflict",
     note: "O robô ainda informa só o horário de segunda a sexta.",

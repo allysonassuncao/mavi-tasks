@@ -488,6 +488,21 @@ describe("aprendizado por produto", () => {
     expect(text).toMatch(/\[F2\] 02\/10 11:00 · reprovou a resposta \(incompleta\)\n  nota: Faltou dizer quando entra no ar\./);
   });
 
+  it("o boa (com os motivos) e a tarefa criada ou dispensada entram nos retornos", () => {
+    const c = claim();
+    c.feedback.push(
+      { id: fid(3), action: "liked", tags: ["tone", "solved"], draft: "Oi! Já ajustei.", final: "Oi! Já ajustei.", at: "02/10 12:00" },
+      { id: fid(4), action: "task_created", draft: "Tarefa sugerida: Ajustar robô · para a equipe Criação", final: "Tarefa criada: Ajustar robô · com Ana · mudou: assignee", at: "02/10 12:05" },
+      { id: fid(5), action: "task_dismissed", draft: "Tarefa sugerida: Enviar relatório", note: "Era só responder.", at: "02/10 12:10" },
+    );
+    const text = productLearningMessage(c);
+    expect(text).toMatch(/\[F3\] 02\/10 12:00 · marcou a resposta como boa \(tom certo, resolveu\)/);
+    expect(text).toMatch(/\[F4\] .* criou a tarefa\n  o que a MAVI sugeriu: Tarefa sugerida: Ajustar robô · para a equipe Criação\n  o que a pessoa fez: Tarefa criada: Ajustar robô · com Ana · mudou: assignee/);
+    expect(text).toMatch(/\[F5\] .* disse que a tarefa não precisava\n  o que a MAVI sugeriu: Tarefa sugerida: Enviar relatório\n  nota: Era só responder\./);
+    const ops = parseProductOps(JSON.stringify({ ops: [{ op: "add", kind: "task", text: "Ajuste no robô vai para a equipe Criação.", feedback: ["F4"] }] }), c);
+    expect(ops).toEqual([{ op: "add", kind: "task", text: "Ajuste no robô vai para a equipe Criação.", feedback: [fid(4)] }]);
+  });
+
   it("só sugere (até 4) e só reescreve as próprias sugestões ainda não aprovadas", () => {
     const ops = parseProductOps(
       JSON.stringify({

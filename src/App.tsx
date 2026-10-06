@@ -4290,6 +4290,7 @@ export default function App() {
                     company={company}
                     user={user}
                     notify={notify}
+                    onNewTask={(preset) => openForm("task", preset)}
                   />
                 </Suspense>
               )}
@@ -4979,6 +4980,7 @@ export default function App() {
           initialDescription={formPreset.description}
           initialDue={formPreset.due}
           initialAssignee={formPreset.assignee}
+          initialTeam={formPreset.team}
           initialPriority={formPreset.priority}
           onCreated={formPreset.onCreated}
           demo={demo}

@@ -914,3 +914,116 @@
 .pradar-lesson-status.s-suggested {
   color: #8a5a00;
 }
+
+/* O próximo passo: resposta + tarefa sugerida, ações sem formulário e o
+   modo foco (migration 20270513090000). */
+.pradar-lesson-kind.k-task {
+  background: #fdf1e1;
+  color: #8a5a00;
+}
+.pradar-step-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.pradar-task {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px dashed #d8cdf3;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 0.84rem;
+}
+.pradar-task.created {
+  border-style: solid;
+  border-color: #cfe9d9;
+}
+.pradar-task.dismissed {
+  opacity: 0.7;
+}
+.pradar-task-why {
+  color: #5d5875;
+  font-size: 0.8rem;
+}
+.pradar-task .pradar-actions {
+  margin-top: 4px;
+}
+.pradar-next-actions .btn.pradar-liked {
+  border-color: #b9dcc7;
+  background: #eef8f2;
+  color: #1f7a50;
+}
+.pradar-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+}
+.pradar-tag {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.pradar-tag.on {
+  border-color: #b9dcc7;
+  background: #eef8f2;
+  color: #1f7a50;
+  font-weight: 600;
+}
+.pradar-ask {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pradar-ask .input-control {
+  flex: 1;
+  min-width: 0;
+}
+.pradar-menu {
+  width: 270px;
+}
+.pradar-focus-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.84rem;
+}
+.pradar-focus-bar > .muted:first-child {
+  flex: 1;
+  min-width: 180px;
+}
+.pradar-focus-bar.on {
+  border-color: #d9cff5;
+  background: #f7f4fe;
+}
+.pradar-list.focus > .pradar-item {
+  box-shadow: 0 8px 28px #152c2014;
+}
+.pradar-focus-end {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: #1f7a50;
+  text-align: center;
+}

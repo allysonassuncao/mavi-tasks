@@ -66,6 +66,7 @@ export function ProductLessons({ company, notify }: { company: string; notify: (
       <div className="pradar-dismiss">
         <Select aria-label="Tipo da lição" value={editing.kind} onValueChange={(v) => setEditing({ ...editing, kind: v as LessonKind })}>
           <SelectOption value="reply">{LESSON_KIND_LABEL.reply}</SelectOption>
+          <SelectOption value="task">{LESSON_KIND_LABEL.task}</SelectOption>
           <SelectOption value="detection">O que é uma situação</SelectOption>
         </Select>
         <Textarea
@@ -99,7 +100,7 @@ export function ProductLessons({ company, notify }: { company: string; notify: (
   const row = (l: Lesson, product: string) => (
     <li key={l.id} className={`pradar-lesson status-${l.status}`}>
       <div className="pradar-lesson-top">
-        <span className={`pradar-lesson-kind k-${l.kind}`}>{l.kind === "reply" ? LESSON_KIND_LABEL.reply : "O que é uma situação"}</span>
+        <span className={`pradar-lesson-kind k-${l.kind}`}>{l.kind === "detection" ? "O que é uma situação" : LESSON_KIND_LABEL[l.kind]}</span>
         <span className={`pradar-lesson-status s-${l.status}`}>{LESSON_STATUS_LABEL[l.status]}</span>
         <span className="muted">
           {l.origin === "mavi"

@@ -73,6 +73,7 @@
     "test:db:radar": "node scripts/test-client-radar.mjs",
     "test:db:personal-radar": "node scripts/test-personal-radar.mjs",
     "test:db:radar-agents": "node scripts/test-radar-agents.mjs",
+    "test:db:personal-radar-next-step": "node scripts/test-personal-radar-next-step.mjs",
     "test:db:templates": "node scripts/test-task-templates.mjs",
     "test:db:assign-team": "node scripts/test-assign-to-team.mjs",
     "test:db:bulk": "node scripts/test-task-bulk.mjs",

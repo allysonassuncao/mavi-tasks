@@ -405,7 +405,7 @@ await check("líderes aprovam, escrevem e pausam; os demais só veem as em uso d
   assert.deepEqual([own.status, own.origin, own.scope], ["active", "leader", "product"]);
   await as(member);
   const lessons = await rpc("personal_radar_reply_lessons", [A, client, mavi]);
-  assert.deepEqual(lessons, [{ scope: "product", text: "Em ajuste no robô, diga quando entra no ar." }]);
+  assert.deepEqual(lessons, [{ scope: "product", kind: "reply", text: "Em ajuste no robô, diga quando entra no ar." }]);
   // Sem o produto do item: as dos produtos do cliente.
   assert.equal((await rpc("personal_radar_reply_lessons", [A, client, null])).length, 2);
   await as(manager);
