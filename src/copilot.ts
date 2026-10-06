@@ -216,8 +216,11 @@ const draftText = (d: CopilotDraft) =>
   clean(`${d.title} ${d.description} ${d.audio ?? ""}`);
 
 /**
- * Mudou o bastante para outra análise? Palavras novas ou removidas somando
- * pelo menos 15% (ou 6 palavras), ou o cliente/prazo mudou.
+ * Mudou o bastante para outra análise sozinha? Palavras novas ou removidas
+ * somando pelo menos 15% (ou 6 palavras) no título, na descrição ou nos
+ * áudios, ou o produto mudou. Campos do modelo, anexos e prazo não disparam
+ * a análise (cada um custava uma análise inteira): a anterior fica marcada
+ * como desatualizada e o "Revisar agora" confere de novo.
  */
 export function meaningfulChange(
   prev: CopilotDraft | null,
@@ -226,10 +229,7 @@ export function meaningfulChange(
   if (!prev) return true;
   if (
     prev.contract !== next.contract ||
-    prev.due !== next.due ||
-    prev.files !== next.files ||
-    (prev.audio ?? "") !== (next.audio ?? "") ||
-    prev.extra !== next.extra
+    (prev.audio ?? "") !== (next.audio ?? "")
   )
     return true;
   const words = (d: CopilotDraft) =>
@@ -531,6 +531,11 @@ export type CopilotState = {
   throttled: boolean;
   /** Os alertas vieram de um texto que já mudou. */
   stale: boolean;
+  /**
+   * A tarefa mudou desde a análise, mas não o bastante para outra sozinha
+   * (campos, anexos, prazo ou poucas palavras): só com "Revisar agora".
+   */
+  staleManual: boolean;
   /** Pede a análise agora (sem esperar a pausa nem a mudança mínima). */
   reviewNow: () => void;
 };
@@ -713,6 +718,11 @@ export function useTaskCopilot(
       error,
       throttled,
       stale: !!reviewedKey && reviewedKey !== key && !reviewing,
+      staleManual:
+        !!reviewedKey &&
+        reviewedKey !== key &&
+        !reviewing &&
+        !meaningfulChange(lastReviewed.current, draft),
       reviewNow: () => {
         lastReviewed.current = null;
         setForce((v) => v + 1);

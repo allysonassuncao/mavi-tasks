@@ -504,11 +504,23 @@ function CopilotResult({
           {state.model.provider && ` · ${state.model.provider}`}
         </small>
       )}
-      {state.stale && (
-        <small className="copilot-result-stale">
-          O texto mudou: a MAVI confere de novo quando você parar de digitar.
-        </small>
-      )}
+      {state.stale &&
+        (state.staleManual ? (
+          <small className="copilot-result-stale">
+            A tarefa mudou desde a análise.{" "}
+            <button
+              type="button"
+              className="copilot-result-recheck"
+              onClick={state.reviewNow}
+            >
+              Revisar agora
+            </button>
+          </small>
+        ) : (
+          <small className="copilot-result-stale">
+            O texto mudou: a MAVI confere de novo quando você parar de digitar.
+          </small>
+        ))}
     </div>
   );
 }

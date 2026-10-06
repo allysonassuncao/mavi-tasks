@@ -4,8 +4,14 @@ import {
   EmbeddingError,
   embeddingCost,
   vectorLiteral,
+  type Embedder,
 } from "./_ai-embeddings.js";
-import { llmFriendlyError, type LlmAdapter } from "./_ai-llm.js";
+import {
+  EFFORTS,
+  llmFriendlyError,
+  type Effort,
+  type LlmAdapter,
+} from "./_ai-llm.js";
 import {
   citeRow,
   type AiSource,
@@ -14,8 +20,9 @@ import {
 } from "./_ai-tools.js";
 import {
   adapterFor,
-  featureProvider,
+  resolveRoute,
   routeConfig,
+  withRouteEffort,
   type ProviderConfig,
   type ResolvedRoute,
 } from "./_ai-providers.js";
@@ -59,9 +66,22 @@ export const CANDIDATE = 0.35;
  */
 export const EVIDENCE_MIN = 0.3;
 const EVIDENCE_SPREAD = 0.15;
-const EVIDENCE_MAX = 8;
+const EVIDENCE_MAX = 5;
+/** Cada trecho do histórico no prompt (o banco devolve até 1.400). */
+export const EVIDENCE_CHARS = 900;
+/** Alertas recusados no prompt (o crivo do servidor usa todos). */
+export const REJECTED_IN_PROMPT = 8;
+/** O prompt do Agente Conversacional: por nó e no total. */
+const AGENT_NODE_CHARS = 4000;
+export const AGENT_TOTAL_CHARS = 12000;
 /** No máximo 2 alertas por análise: só o que muda a entrega. */
 export const MAX_ALERTS = 2;
+/**
+ * O esforço da análise sem escolha no Painel da MAVI: a revisão escrita
+ * (linha "review") já faz o crivo dos candidatos, então o raciocínio do
+ * modelo fica no mínimo — mais rápido e mais barato.
+ */
+export const COPILOT_EFFORT: Effort = "low";
 
 export class CopilotError extends Error {
   constructor(
@@ -216,6 +236,34 @@ type AgentPrompt = {
   text: string;
 };
 
+/**
+ * O vetor dos últimos rascunhos, nesta instância do servidor: os
+ * Relacionados (~1 s parado) e a análise (~3 s parado) costumam ler o mesmo
+ * texto, e a análise não espera a OpenAI de novo. Só reaproveita — o
+ * vetor depende apenas do texto e do modelo.
+ */
+const vectorCache = new Map<string, { vector: number[]; model: string }>();
+const VECTOR_CACHE_MAX = 200;
+export const clearVectorCache = () => vectorCache.clear();
+
+export async function cachedEmbed(embed: Embedder, text: string) {
+  const key = crypto.createHash("sha256").update(text).digest("hex");
+  const hit = vectorCache.get(key);
+  if (hit) {
+    // Mais recente no fim (o mais antigo sai primeiro).
+    vectorCache.delete(key);
+    vectorCache.set(key, hit);
+    return { vectors: [hit.vector], tokens: 0, model: hit.model };
+  }
+  const r = await embed([text]);
+  if (r.vectors[0]) {
+    vectorCache.set(key, { vector: r.vectors[0], model: r.model });
+    if (vectorCache.size > VECTOR_CACHE_MAX)
+      vectorCache.delete(vectorCache.keys().next().value!);
+  }
+  return r;
+}
+
 async function loadContext(
   env: AiEnv,
   deps: AiDeps,
@@ -224,7 +272,10 @@ async function loadContext(
   review: boolean,
 ) {
   const text = draftText(draft);
-  const { vectors, tokens, model } = await deps.embed([text.slice(0, 4000)]);
+  const { vectors, tokens, model } = await cachedEmbed(
+    deps.embed,
+    text.slice(0, 4000),
+  );
   // Na análise, o prompt do Agente Conversacional do produto (quando há):
   // ao mesmo tempo, e uma falha não atrapalha o resto.
   const agent =
@@ -233,7 +284,7 @@ async function loadContext(
           p_company: draft.company,
           p_client: null,
           p_contract: draft.contract,
-          p_chars: 6000,
+          p_chars: AGENT_NODE_CHARS,
         })
           .then((x) => (x.ok ? x.data : []))
           .catch(() => [] as AgentPrompt[])
@@ -480,24 +531,10 @@ export type PromptNotes = {
 };
 export const promptNotes = (): PromptNotes => ({ texts: new Map(), refs: [] });
 
-/** O fim do prompt: o rascunho e o que a busca achou, com as referências [S#]. */
-export function draftMessage(
-  draft: Draft,
-  ctx: ContextRow,
-  tool: ToolContext,
-  today: string,
-  memory?: ReviewMemory | null,
-  notes: PromptNotes = promptNotes(),
-) {
-  const similar = (ctx.similar ?? []).filter(
-    (t) => t.similarity != null && t.similarity >= CANDIDATE,
-  );
-  const cases = (ctx.cases ?? []).filter(
-    (c) => c.similarity != null && c.similarity >= CANDIDATE,
-  );
-  const evidence = relevantEvidence(ctx.evidence ?? []);
-  // Cada citação guarda o texto (para conferir o trecho que a MAVI citar).
-  const cited = (
+/** Cada citação guarda o texto (para conferir o trecho que a MAVI citar). */
+const citer =
+  (notes: PromptNotes) =>
+  (
     text: string,
     type: string,
     title: string,
@@ -512,6 +549,97 @@ export function draftMessage(
     }
     return text;
   };
+
+/**
+ * O começo do prompt, em cache no provedor: o dossiê e os aprendizados, o
+ * prompt do Agente Conversacional do produto e os alertas que o time recusou
+ * ou aprovou. Tudo isso muda pouco e é igual para quem cria tarefas do mesmo
+ * cliente e produto; o rascunho, que muda a cada análise, vem depois. Chame
+ * antes de draftMessage: os prompts do robô ficam com as primeiras [S#].
+ */
+export function copilotContext(
+  ctx: ContextRow,
+  tool: ToolContext,
+  memory?: ReviewMemory | null,
+  notes: PromptNotes = promptNotes(),
+) {
+  const cited = citer(notes);
+  const blocks = [dossierContext(ctx)];
+  const agent = ctx.agent ?? [];
+  // Os nós vêm do principal para os subfluxos: o que passa do total fica de fora.
+  let room = AGENT_TOTAL_CHARS;
+  const kept = agent.filter((a) => {
+    if (room <= 0) return false;
+    room -= a.text.length;
+    return true;
+  });
+  if (kept.length)
+    blocks.push(
+      "",
+      "Agente Conversacional deste produto (o prompt de sistema atual do robô de WhatsApp do cliente, no n8n):",
+      ...kept.map((a) =>
+        cited(
+          citeRow(tool, {
+            chunk_id: 0,
+            source_type: "agent_prompt",
+            source_id: a.id,
+            title: `${a.workflow} › ${a.node}`,
+            // A primeira linha é o cabeçalho (citeRow troca pela referência).
+            content: `\n${a.text}${a.chars > a.text.length ? "\n(… o prompt continua)" : ""}`,
+            meta: {},
+            client_id: ctx.client?.id ?? null,
+            contract_id: ctx.contract ?? null,
+            occurred_at: a.changed_at,
+            task_status: null,
+            task_assignee: null,
+            task_due: null,
+          }),
+          "agent",
+          `${a.workflow} › ${a.node}`,
+          a.changed_at,
+          null,
+        ),
+      ),
+      ...(agent.length > kept.length
+        ? [`(mais ${agent.length - kept.length} prompt(s) do robô ficaram de fora)`]
+        : []),
+    );
+  const rejected = (memory?.rejected ?? []).slice(0, REJECTED_IN_PROMPT);
+  if (rejected.length)
+    blocks.push(
+      "",
+      "Alertas que o time recusou (não repita nem diga o mesmo de outro jeito):",
+      ...rejected.map(
+        (r, i) =>
+          `[R${i + 1}] ${r.scope === "client" ? "Este cliente" : "Mesmo produto, outro cliente"} · ${r.kind} · "${r.title}"${r.text ? ` — ${r.text}` : ""} · motivo: ${DOWN_REASONS[r.reason ?? ""] ?? "não disse"}${r.comment ? ` · comentário do time: ${r.comment}` : ""}`,
+      ),
+    );
+  const helped = memory?.helped ?? [];
+  if (helped.length)
+    blocks.push(
+      "",
+      "Alertas que ajudaram o time (o tipo de ajuda que ele valoriza):",
+      ...helped.map((h) => `- ${h.kind} · "${h.title}"`),
+    );
+  return blocks.join("\n").replace(/\n(?=\[[SR]\d)/g, "\n\n");
+}
+
+/** O fim do prompt: o rascunho e o que a busca achou, com as referências [S#]. */
+export function draftMessage(
+  draft: Draft,
+  ctx: ContextRow,
+  tool: ToolContext,
+  today: string,
+  notes: PromptNotes = promptNotes(),
+) {
+  const similar = (ctx.similar ?? []).filter(
+    (t) => t.similarity != null && t.similarity >= CANDIDATE,
+  );
+  const cases = (ctx.cases ?? []).filter(
+    (c) => c.similarity != null && c.similarity >= CANDIDATE,
+  );
+  const evidence = relevantEvidence(ctx.evidence ?? []);
+  const cited = citer(notes);
   const blocks: string[] = [
     `Hoje: ${brDate(today)}.${ctx.product ? ` Produto da tarefa: ${ctx.product} (leia os termos da tarefa no sentido deste produto).` : ""}`,
     "",
@@ -599,7 +727,7 @@ export function draftMessage(
             source_type: e.type,
             source_id: e.id,
             title: e.title,
-            content: e.content,
+            content: e.content.slice(0, EVIDENCE_CHARS),
             meta: e.meta ?? {},
             client_id: ctx.client?.id ?? null,
             contract_id: e.contract,
@@ -614,52 +742,6 @@ export function draftMessage(
           e.similarity ?? null,
         ),
       ),
-    );
-  const agent = ctx.agent ?? [];
-  if (agent.length)
-    blocks.push(
-      "",
-      "Agente Conversacional deste produto (o prompt de sistema atual do robô de WhatsApp do cliente, no n8n):",
-      ...agent.map((a) =>
-        cited(
-          citeRow(tool, {
-            chunk_id: 0,
-            source_type: "agent_prompt",
-            source_id: a.id,
-            title: `${a.workflow} › ${a.node}`,
-            // A primeira linha é o cabeçalho (citeRow troca pela referência).
-            content: `\n${a.text}${a.chars > a.text.length ? "\n(… o prompt continua)" : ""}`,
-            meta: {},
-            client_id: ctx.client?.id ?? null,
-            contract_id: ctx.contract ?? null,
-            occurred_at: a.changed_at,
-            task_status: null,
-            task_assignee: null,
-            task_due: null,
-          }),
-          "agent",
-          `${a.workflow} › ${a.node}`,
-          a.changed_at,
-          null,
-        ),
-      ),
-    );
-  const rejected = memory?.rejected ?? [];
-  if (rejected.length)
-    blocks.push(
-      "",
-      "Alertas que o time recusou (não repita nem diga o mesmo de outro jeito):",
-      ...rejected.map(
-        (r, i) =>
-          `[R${i + 1}] ${r.scope === "client" ? "Este cliente" : "Mesmo produto, outro cliente"} · ${r.kind} · "${r.title}"${r.text ? ` — ${r.text}` : ""} · motivo: ${DOWN_REASONS[r.reason ?? ""] ?? "não disse"}${r.comment ? ` · comentário do time: ${r.comment}` : ""}`,
-      ),
-    );
-  const helped = memory?.helped ?? [];
-  if (helped.length)
-    blocks.push(
-      "",
-      "Alertas que ajudaram o time (o tipo de ajuda que ele valoriza):",
-      ...helped.map((h) => `- ${h.kind} · "${h.title}"`),
     );
   blocks.push(
     "",
@@ -948,6 +1030,20 @@ export function errorOf(err: unknown) {
   return { status, error };
 }
 
+/** Quanto tempo cada parte da análise levou (ms), para o registro. */
+export type CopilotTimings = {
+  /** Vetor + busca no banco (tarefas, cases, histórico, dossiê). */
+  context: number;
+  /** Do início até o modelo começar a escrever. */
+  first_token: number | null;
+  /** Só a chamada ao modelo. */
+  llm: number;
+  /** Do início até o "done". */
+  total: number;
+  /** O vetor veio do cache (os Relacionados já tinham lido o texto). */
+  vector_cached: boolean;
+};
+
 async function review(
   body: Row,
   auth: string,
@@ -956,16 +1052,52 @@ async function review(
   emit: (e: CopilotEvent) => void,
   signal?: AbortSignal,
 ) {
+  const clock = deps.now ?? Date.now;
+  const started = clock();
   const draft = readDraft(body);
   const userId = userIdFrom(auth);
-  const [me, loaded, memory] = await Promise.all([
+  const loading = loadContext(env, deps, auth, draft, true).then((l) => ({
+    ...l,
+    ms: clock() - started,
+  }));
+  // Tudo o que não depende do contexto sai junto com ele: quem é a pessoa,
+  // os 👎/👍 recentes, o modelo da funcionalidade (pelo produto, o banco
+  // acha o cliente) e o esforço do painel. O limite de gasto precisa do
+  // cliente: sai assim que o contexto chega, sem esperar o resto.
+  const routing = resolveRoute(
+    env,
+    deps.fetch,
+    auth,
+    draft.company,
+    { contract: draft.contract ?? undefined },
+    "task_copilot",
+  );
+  const limiting = loading.then(({ ctx }) =>
+    ctx.throttled
+      ? null
+      : callRpc<{ blocked: boolean; message: string | null }>(
+          env,
+          deps.fetch,
+          auth,
+          "ai_check_limits",
+          {
+            p_company: draft.company,
+            p_client: ctx.client!.id,
+            p_contract: ctx.contract ?? null,
+            p_project: null,
+          },
+        ),
+  );
+  // Sem o limite (falha do banco), a análise segue, como antes.
+  const limitsOk = limiting.catch(() => null);
+  const [me, loaded, memory, route, efforts] = await Promise.all([
     selectAs<{ hidden_pages: string[] | null }>(
       env,
       deps,
       auth,
       `memberships?select=hidden_pages&company_id=eq.${draft.company}&user_id=eq.${userId}`,
     ),
-    loadContext(env, deps, auth, draft, true),
+    loading,
     // Os 👎 e 👍 recentes: sem eles (banco antigo, falha), a análise segue.
     callRpc<ReviewMemory>(env, deps.fetch, auth, "copilot_review_memory", {
       p_company: draft.company,
@@ -974,6 +1106,17 @@ async function review(
     })
       .then((r) => (r.ok ? r.data : null))
       .catch(() => null),
+    routing,
+    // O esforço escolhido no Painel da MAVI (sem escolha: COPILOT_EFFORT).
+    callRpc<Record<string, string>>(env, deps.fetch, auth, "ai_efforts", {
+      p_company: draft.company,
+    })
+      .then((r) =>
+        r.ok && r.data && typeof r.data === "object" && !Array.isArray(r.data)
+          ? r.data
+          : {},
+      )
+      .catch(() => ({}) as Record<string, string>),
   ]);
   // A MAVI desligada para a pessoa (módulo "assistant") vale aqui também.
   if (!me[0]) throw new CopilotError(403, "Sem acesso a esta empresa.");
@@ -989,25 +1132,24 @@ async function review(
   }
   emit({ type: "related", ...related(ctx) });
   const client = ctx.client!.id;
-  const [limits, provider] = await Promise.all([
-    callRpc<{ blocked: boolean; message: string | null }>(
-      env,
-      deps.fetch,
-      auth,
-      "ai_check_limits",
-      {
-        p_company: draft.company,
-        p_client: client,
-        p_contract: ctx.contract ?? null,
-        p_project: null,
-      },
-    ),
-    featureProvider(env, deps.fetch, auth, draft.company, "task_copilot", {
-      client,
-      contract: ctx.contract,
-    }),
-  ]);
-  if (limits.ok && limits.data.blocked)
+  // Sem o produto no pedido (edição só com a tarefa), o modelo sai pelo cliente.
+  const chosen =
+    route ??
+    (draft.contract
+      ? null
+      : await resolveRoute(
+          env,
+          deps.fetch,
+          auth,
+          draft.company,
+          { client, contract: ctx.contract },
+          "task_copilot",
+        ));
+  const provider = chosen
+    ? { id: chosen.provider_id, config: routeConfig(env, chosen) }
+    : null;
+  const limits = await limitsOk;
+  if (limits?.ok && limits.data.blocked)
     throw new CopilotError(
       429,
       limits.data.message ?? "Limite de uso da MAVI atingido.",
@@ -1020,7 +1162,11 @@ async function review(
   const llm: LlmAdapter = provider
     ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
     : deps.llm;
-  const now = (deps.now ?? Date.now)();
+  const picked = withRouteEffort(efforts, chosen, "task_copilot").task_copilot;
+  const effort: Effort = EFFORTS.includes(picked as Effort)
+    ? (picked as Effort)
+    : COPILOT_EFFORT;
+  const now = clock();
   const tool: ToolContext = {
     supabaseUrl: env.supabaseUrl,
     supabaseKey: env.supabaseKey,
@@ -1037,7 +1183,9 @@ async function review(
     chunks: new Map(),
   };
   const notes = promptNotes();
-  const message = draftMessage(draft, ctx, tool, tool.today, memory, notes);
+  // O contexto antes do rascunho: os prompts do robô ficam com as primeiras [S#].
+  const context = copilotContext(ctx, tool, memory, notes);
+  const message = draftMessage(draft, ctx, tool, tool.today, notes);
   const reader = alertReader(
     ctx,
     tool.sources,
@@ -1060,30 +1208,12 @@ async function review(
   });
   let meter: Meter | undefined;
   let output = "";
-  try {
-    const result = await llm({
-      instructions: COPILOT_INSTRUCTIONS,
-      context: dossierContext(ctx),
-      cacheContext: true,
-      messages: [{ role: "user", content: message }],
-      tools: [],
-      execute: async () => "",
-      maxRounds: 0,
-      // A revisão antes dos alertas pede um pouco mais de raciocínio.
-      effort: "medium",
-      maxTokens: 4000,
-      signal,
-      onEvent: (e) => {
-        if (e.type !== "text") return;
-        output += e.text;
-        reader.push(e.text);
-      },
-    });
-    meter = result.meter;
-  } finally {
+  let firstToken: number | null = null;
+  const llmStart = clock();
+  const logUsage = () => {
     const cost =
       (meter?.cost ?? 0) + embeddingCost(embedding.model, embedding.tokens);
-    await callRpc(env, deps.fetch, auth, "ai_log_usage", {
+    return callRpc(env, deps.fetch, auth, "ai_log_usage", {
       p_company: draft.company,
       p_module: "tasks",
       p_kind: "copilot",
@@ -1100,7 +1230,35 @@ async function review(
       p_cost: Math.round(cost * 1e6) / 1e6,
       ...(provider ? { p_provider: provider.id } : {}),
     }).catch(() => {});
+  };
+  try {
+    const result = await llm({
+      instructions: COPILOT_INSTRUCTIONS,
+      context,
+      cacheContext: true,
+      // A OpenAI junta no mesmo cache as análises do mesmo cliente.
+      cacheKey: `copilot:${client}`,
+      messages: [{ role: "user", content: message }],
+      tools: [],
+      execute: async () => "",
+      maxRounds: 0,
+      effort,
+      maxTokens: 4000,
+      signal,
+      onEvent: (e) => {
+        if (e.type !== "text") return;
+        firstToken ??= clock() - started;
+        output += e.text;
+        reader.push(e.text);
+      },
+    });
+    meter = result.meter;
+  } catch (err) {
+    // O que foi gasto até a falha também conta.
+    await logUsage();
+    throw err;
   }
+  const llmMs = clock() - llmStart;
   const alerts = reader.end();
   const verdict = reader.verdict();
   const confirmed = reader.confirmed();
@@ -1119,8 +1277,14 @@ async function review(
     ),
     provider: provider?.config.name ?? null,
   });
-  // O registro da análise (para conferir depois por que um alerta apareceu).
-  await callRpc(env, deps.fetch, auth, "copilot_log_run", {
+  const timings: CopilotTimings = {
+    context: loaded.ms,
+    first_token: firstToken,
+    llm: llmMs,
+    total: clock() - started,
+    vector_cached: embedding.tokens === 0,
+  };
+  const run = {
     p_company: draft.company,
     p_client: client,
     p_task: draft.task,
@@ -1135,13 +1299,15 @@ async function review(
         date: it.seen_at,
         similarity: null,
       })),
-      ...(memory?.rejected ?? []).map((r, i) => ({
-        ref: `R${i + 1}`,
-        type: "rejected",
-        title: r.title,
-        date: null,
-        similarity: null,
-      })),
+      ...(memory?.rejected ?? [])
+        .slice(0, REJECTED_IN_PROMPT)
+        .map((r, i) => ({
+          ref: `R${i + 1}`,
+          type: "rejected",
+          title: r.title,
+          date: null,
+          similarity: null,
+        })),
     ],
     p_output: output,
     p_alerts: [
@@ -1154,7 +1320,22 @@ async function review(
       ...reader.dropped().map((d) => ({ dropped: d.why, title: d.title })),
     ],
     p_verdict: verdict.status,
-  }).catch(() => {});
+  };
+  const logRun = (args: Row): Promise<unknown> =>
+    callRpc(env, deps.fetch, auth, "copilot_log_run", args)
+      .then((r) =>
+        // Banco sem a migração 20270521090000: registra sem os tempos.
+        !r.ok && "p_timings" in args && /copilot_log_run|p_timings/i.test(r.error)
+          ? logRun(run)
+          : r,
+      )
+      .catch(() => {});
+  // Depois do "done" (a tela não espera): o gasto e o registro da análise
+  // (para conferir depois por que um alerta apareceu e quanto demorou).
+  await Promise.all([
+    logUsage(),
+    logRun({ ...run, p_timings: { ...timings, effort } }),
+  ]);
 }
 
 /** A análise em tempo real: cada evento vai para `write` assim que acontece. */

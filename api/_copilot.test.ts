@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AiEnv } from "./_ai";
 import type { AgentRequest, LlmAdapter } from "./_ai-llm";
 import {
+  AGENT_TOTAL_CHARS,
   alertReader,
+  cachedEmbed,
+  clearVectorCache,
+  copilotContext,
   copilotRelated,
   dossierContext,
   handleDossierWorker,
@@ -351,6 +355,24 @@ describe("leitura dos alertas", () => {
       clients: new Map(),
     } as unknown as Parameters<typeof draftMessage>[2];
     const notes = promptNotes();
+    const memory = {
+      rejected: [
+        {
+          kind: "avoids",
+          title: "Evite tratar ganhos como financeiro",
+          text: "",
+          reason: "not_applicable",
+          comment: "No CRM, ganhos são negócios ganhos",
+          scope: "client" as const,
+        },
+      ],
+      helped: [{ kind: "duplicate", title: "Já existe" }],
+    };
+    // As recusas vão no começo do prompt (em cache), não no rascunho.
+    const head = copilotContext(context, tool, memory, notes);
+    expect(head).toContain("[R1] Este cliente · avoids");
+    expect(head).toContain("comentário do time: No CRM");
+    expect(head).toContain('- duplicate · "Já existe"');
     const text = draftMessage(
       {
         ...readDraft({
@@ -368,19 +390,6 @@ describe("leitura dos alertas", () => {
       { ...context, product: "MakeCRM" },
       tool,
       "2026-09-29",
-      {
-        rejected: [
-          {
-            kind: "avoids",
-            title: "Evite tratar ganhos como financeiro",
-            text: "",
-            reason: "not_applicable",
-            comment: "No CRM, ganhos são negócios ganhos",
-            scope: "client",
-          },
-        ],
-        helped: [{ kind: "duplicate", title: "Já existe" }],
-      },
       notes,
     );
     expect(text).toContain("Produto da tarefa: MakeCRM");
@@ -389,11 +398,59 @@ describe("leitura dos alertas", () => {
     expect(text).toContain("Anexos:\nbriefing.pdf");
     expect(text).toContain("Subtarefas: Coletar dados");
     expect(text).toContain("Responsável: Kamilli");
-    expect(text).toContain("[R1] Este cliente · avoids");
-    expect(text).toContain("comentário do time: No CRM");
-    expect(text).toContain('- duplicate · "Já existe"');
+    expect(text).not.toContain("[R1]");
     expect(notes.texts.get("S1")).toContain("Post de Black Friday");
     expect(notes.refs[0]).toMatchObject({ ref: "S1", similarity: 0.81 });
+  });
+
+  it("o prompt do robô vai no começo (em cache), com teto no total", () => {
+    const tool = {
+      sources: [],
+      chunks: new Map(),
+      members: new Map(),
+      clients: new Map(),
+    } as unknown as Parameters<typeof copilotContext>[1];
+    const node = (n: number) => ({
+      id: `00000000-0000-4000-8000-0000000000e${n}`,
+      workflow: "Atendimento",
+      node: `Nó ${n}`,
+      role: "main",
+      active: true,
+      changed_at: "2026-09-01T10:00:00Z",
+      chars: 5000,
+      text: `Regra ${n}: ${"x".repeat(4990)}`,
+    });
+    const agent = [1, 2, 3, 4].map(node);
+    const notes = promptNotes();
+    const head = copilotContext({ ...context, agent }, tool, null, notes);
+    // 3 nós de ~5 mil cabem no teto de 12 mil (o terceiro estoura e entra); o quarto fica de fora.
+    expect(AGENT_TOTAL_CHARS).toBe(12000);
+    expect(head).toContain("[S1] Prompt do Agente Conversacional");
+    expect(head).toContain("Regra 3");
+    expect(head).not.toContain("Regra 4");
+    expect(head).toContain("(mais 1 prompt(s) do robô ficaram de fora)");
+    expect(head).toContain("(… o prompt continua)");
+    // O rascunho continua a numeração depois dos prompts do robô.
+    const text = draftMessage(
+      readDraft({ company, contract, title: "Post de Black Friday", description: "no feed" }),
+      context,
+      tool,
+      "2026-09-29",
+      notes,
+    );
+    expect(text).toContain("[S4] Tarefa");
+    expect(notes.texts.get("S1")).toContain("Regra 1");
+  });
+
+  it("o vetor do mesmo texto é lido uma vez (Relacionados e análise)", async () => {
+    const embedder = vi.fn(embed);
+    const a = await cachedEmbed(embedder, "texto único do cache");
+    const b = await cachedEmbed(embedder, "texto único do cache");
+    expect(embedder).toHaveBeenCalledTimes(1);
+    expect(a.tokens).toBe(50);
+    // Do cache: nada gasto de novo.
+    expect(b.tokens).toBe(0);
+    expect(b.vectors[0]).toEqual(a.vectors[0]);
   });
 
   it("o dossiê abre o prompt (igual para todos do cliente)", () => {
@@ -404,6 +461,7 @@ describe("leitura dos alertas", () => {
 });
 
 describe("análise em tempo real", () => {
+  beforeEach(() => clearVectorCache());
   function setup(over: Record<string, unknown> = {}) {
     return database({
       "memberships?": [{ hidden_pages: [] }],
@@ -482,7 +540,9 @@ describe("análise em tempo real", () => {
     // Uma chamada, sem ferramentas; o dossiê no contexto em cache e o rascunho na mensagem.
     expect(request!.tools).toEqual([]);
     expect(request!.cacheContext).toBe(true);
-    expect(request!.effort).toBe("medium");
+    // Sem escolha no Painel da MAVI: esforço baixo; cache por cliente.
+    expect(request!.effort).toBe("low");
+    expect(request!.cacheKey).toBe(`copilot:${client}`);
     expect(request!.context).toContain("Não gosta de vermelho");
     expect(request!.messages[0].content).toContain("Arte em vermelho");
     expect(request!.messages[0].content).toContain(
@@ -512,6 +572,44 @@ describe("análise em tempo real", () => {
       similarity: 0.81,
     });
     expect(run.body.p_alerts).toHaveLength(2);
+  });
+
+  it("esforço do Painel da MAVI; o \"done\" sai antes do registro, com os tempos", async () => {
+    const { fetchImpl, calls } = setup({
+      "rpc/ai_efforts": { task_copilot: "high" },
+    });
+    let request: AgentRequest | undefined;
+    const llm: LlmAdapter = async (req) => {
+      request = req;
+      req.onEvent?.({ type: "text", text: '{"verdict":"quiet","text":"ok"}\n' });
+      return { text: "", meter: newMeter("claude-sonnet-5"), rounds: 0 };
+    };
+    const order: string[] = [];
+    await streamCopilot(
+      body,
+      token(me),
+      env,
+      { fetch: fetchImpl, llm, embed },
+      (e) => {
+        order.push(`${e.type}@${calls.length}`);
+      },
+    );
+    expect(request!.effort).toBe("high");
+    const done = order.find((o) => o.startsWith("done@"))!;
+    const before = Number(done.split("@")[1]);
+    // Nenhum registro (gasto ou análise) foi chamado antes do "done".
+    expect(
+      calls
+        .slice(0, before)
+        .some((c) => /ai_log_usage|copilot_log_run/.test(c.url)),
+    ).toBe(false);
+    const run = calls.find((c) => c.url.includes("rpc/copilot_log_run"))!;
+    expect(run.body.p_timings).toMatchObject({
+      effort: "high",
+      vector_cached: false,
+    });
+    expect(typeof run.body.p_timings.total).toBe("number");
+    expect(typeof run.body.p_timings.first_token).toBe("number");
   });
 
   it("tempo do banco esgotado: mensagem clara", async () => {

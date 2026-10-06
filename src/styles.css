@@ -22342,6 +22342,17 @@ button.copilot-chip:hover {
 .copilot-result-stale {
   color: var(--muted);
 }
+/* Campos, anexos ou prazo mudaram: a nova análise é só no clique. */
+.copilot-result-recheck {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
 /* O modelo da análise: discreto, no canto, com o detalhe no balão. */
 .copilot-result-model {
   align-self: flex-end;

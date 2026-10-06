@@ -494,7 +494,7 @@ export const FEATURES: FeatureInfo[] = [
     label: "Assistente MAVI na criação e edição de tarefas",
     conversation: false,
     env: "TASK_COPILOT_MODEL",
-    note: "Roda a cada pausa na digitação: prefira um modelo rápido.",
+    note: "Roda quando a pessoa para de escrever: prefira um modelo rápido. Sem escolha, o esforço é Baixo (a MAVI já escreve a revisão dos pontos antes dos alertas).",
   },
   {
     id: "task_title",
