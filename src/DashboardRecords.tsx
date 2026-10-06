@@ -71,6 +71,12 @@ const groupHeading: Record<GroupBy, string> = {
   topic: "Tópico",
   theme: "Tema",
   severity: "Gravidade",
+  squad: "Squad",
+  cs_category: "Fase",
+  cs_adimplencia: "Adimplência",
+  cs_reason: "Motivo",
+  cs_band: "Faixa do HS",
+  cs_phase: "Mês do trial",
 };
 
 /** Metrics that count distinct things (each record is one of them). */
@@ -84,6 +90,11 @@ const DISTINCT = new Set([
   "temperature.alert_clients",
   "temperature.flag_clients",
   "radar.clients",
+  "cs_portfolio.active",
+  "cs_portfolio.payers",
+  "cs_health.hs_clients",
+  "cs_health.hs_critical",
+  "cs_trial.in_trial",
 ]);
 /** Rates: each record is a yes (100) or a no (0) — in words. */
 const YES_NO: Record<string, [string, string]> = {
@@ -99,6 +110,7 @@ const YES_NO: Record<string, [string, string]> = {
   "temperature.alert_rate": ["Em alerta", "Fora do alerta"],
   "social_leads.approval_rate": ["Aprovado", "Reprovado"],
   "social_leads.rejection_rate": ["Reprovado", "Aprovado"],
+  "cs_health.adimp_rate": ["Adimplente", "Inadimplente ou perda"],
 };
 /** What one record is, singular and plural. */
 const nouns: Record<RecordKind, [string, string]> = {
@@ -116,6 +128,7 @@ const nouns: Record<RecordKind, [string, string]> = {
   sl_contract: ["cliente", "clientes"],
   radar_item: ["item", "itens"],
   mention: ["ocorrência", "ocorrências"],
+  cs: ["registro", "registros"],
 };
 const noun = (kind: RecordKind, n: number) =>
   nouns[kind]?.[n === 1 ? 0 : 1] ?? (n === 1 ? "registro" : "registros");
@@ -483,6 +496,19 @@ function kindColumns(
           text: (r) => (r.source === "meeting" ? "Reunião" : "Whatsapp"),
         },
         dateCol("occurred_at", "Quando", true),
+      ];
+    case "cs":
+      return [
+        textCol("title", "Cliente", true),
+        textCol("squad", "Squad"),
+        {
+          key: "cs_month",
+          label: "Mês",
+          text: (r) => (r.cs_month ? `${r.cs_month.slice(5, 7)}/${r.cs_month.slice(0, 4)}` : ""),
+          sort: (r) => r.cs_month ?? "",
+        },
+        dateCol("d", "Data"),
+        textCol("note", "Detalhe", true),
       ];
   }
 }

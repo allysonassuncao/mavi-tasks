@@ -17,7 +17,11 @@ import {
   type PanelSpec,
   type RangePreset,
   type Source,
+  isCsSource,
+  isCsSpec,
 } from "../src/dashboard-catalog.js";
+import { runCsPanel } from "../src/cs-sources.js";
+import type { CsData } from "../src/cs-engine.js";
 
 /**
  * MAVI · Dashboards (ação "dashboard-mavi" de /api/drive, funcionalidade
@@ -107,6 +111,14 @@ const SOURCE_NOTES: Record<Source, string> = {
   radar:
     "Radar do cliente: itens (assuntos de um cliente num tópico: problemas, promessas…). Pessoa: o responsável pelo item. 'Ocorrências' conta cada vez que o assunto apareceu.",
   due_changes: "Mudanças de prazo das tarefas, com motivo. Pessoa: quem mudou o prazo.",
+  cs_finance:
+    "Customer Success · Financeiro: os ciclos de cobrança de cada cliente por mês de competência. Faturamento efetivo desconta R$ 3 mil do 1º mês de trial (regra M1); meta e atingimento só por mês e squad. 'Cliente' é o cliente de CS.",
+  cs_portfolio:
+    "Customer Success · Carteira: ativos e pagantes são o retrato do fim de cada mês (sem agrupar: o último mês do período); entradas, reativações e churns contam pela data. Agrupe churns por cs_reason para os motivos.",
+  cs_health:
+    "Customer Success · Saúde: as notas mensais de Health Score (0–100, faixas Satisfeito/Alerta/Crítico) e a adimplência dos ciclos.",
+  cs_trial:
+    "Customer Success · Trial: clientes em trial por mês do trial (M1, M2, M3, M4+), graduados para Base, taxa de graduação (graduados do mês ÷ entradas de 3 meses antes) e churns por mês do trial.",
 };
 
 const unitWord = { number: "número", hours: "horas", days: "dias", percent: "%", money: "R$" } as const;
@@ -148,6 +160,7 @@ export const DASHBOARD_GUIDE = `Como funciona um dashboard:
   .map((a) => `"${a.key}" = ${a.label}: ${a.hint}`)
   .join(" ")} Sem o campo vale "roles" (o padrão, quase sempre o certo). Para "tarefas de uma pessoa", filtre por executor (todos que executaram) — continua contando depois que ela envia para validação. "Tarefas criadas por alguém" é o filtro creator.
 - Horas: horas trabalhadas = fonte hours (cronômetro e apontamentos); horas estimadas = tasks.estimated_hours; tempo no status = status_history.hours (tempo parado, não é trabalho). Não confunda.
+- Customer Success (fontes cs_*, só para administradores e gestores): os números do painel CS Make (faturamento com a regra M1, carteira, Health Score, trial), sempre por mês — o período conta cada mês em que toca. Um painel não mistura fontes cs_* com as outras. Os filtros dessas fontes: client (ID do cliente do MAVI), squad (ID do squad, ache com find_options kind cs_squad) e cs_kind ("TRIAL" ou "BASE").
 - Tamanho (w de 1 a 12, h de 2 a 24 linhas de 64px): stat 3×3, gráficos de tempo 12×5 (ou 6×5 lado a lado), hbar/donut 6×6, table 12×6.
 
 As fontes:
@@ -324,13 +337,13 @@ export const BUILDER_TOOLS: ToolSpec[] = [
   {
     name: "find_options",
     description:
-      "Procura os IDs de clientes, produtos, projetos, equipes, pessoas, tópicos e temas do Radar ou indicadores do termômetro (pelo nome, parte do nome ou vazio para listar). Use antes de filtrar por qualquer um deles.",
+      "Procura os IDs de clientes, produtos, projetos, equipes, pessoas, tópicos e temas do Radar, indicadores do termômetro ou squads de Customer Success (pelo nome, parte do nome ou vazio para listar). Use antes de filtrar por qualquer um deles.",
     parameters: {
       type: "object",
       properties: {
         kind: {
           type: "string",
-          enum: ["client", "product", "project", "team", "person", "radar_topic", "radar_theme", "temperature_indicator"],
+          enum: ["client", "product", "project", "team", "person", "radar_topic", "radar_theme", "temperature_indicator", "cs_squad"],
         },
         search: { type: "string", description: "Parte do nome (opcional)." },
       },
@@ -390,6 +403,9 @@ export async function findOptions(
     items = (c.indicators ?? [])
       .filter((i) => i.kind === "score" && i.key)
       .map((i) => ({ id: String(i.key), name: i.name }));
+  } else if (kind === "cs_squad") {
+    const list = ((await load.rpc("cs_squads")) ?? []) as { id: string; name: string; archived?: boolean }[];
+    items = list.map((sq) => ({ id: sq.id, name: sq.archived ? `${sq.name} (arquivado)` : sq.name }));
   } else return "Tipo inválido.";
   const term = norm(search.trim());
   const hits = term ? items.filter((i) => norm(i.name).includes(term)) : items;
@@ -520,7 +536,8 @@ export async function handleDashboardBuilder(
       throw new DashError(403, "A MAVI está desligada para você nesta empresa.");
     const leader = me[0].role === "admin" || me[0].role === "manager";
     // Dashboards de colaboradores ficam nos clientes deles: sem o Mural.
-    const allowed = (Object.keys(sources) as Source[]).filter((k) => leader || k !== "notices");
+    // Colaboradores: sem o Mural nem as fontes de Customer Success.
+    const allowed = (Object.keys(sources) as Source[]).filter((k) => leader || (k !== "notices" && !isCsSource(k)));
     const [limits, route, tz] = await Promise.all([
       callRpc<{ blocked: boolean; message: string | null }>(env, deps.fetch, authorization, "ai_check_limits", {
         p_company: company,
@@ -586,6 +603,15 @@ export async function handleDashboardBuilder(
       if (name === "preview_panel") {
         const checked = checkSpec(args.spec, allowed);
         if (!checked.ok) return `Painel inválido: ${checked.error}`;
+        if (isCsSpec(checked.spec)) {
+          // As fontes de CS são calculadas pelo motor do painel CS Make.
+          if (!checked.spec.queries.every((q) => isCsSource(q.source)))
+            return "Painel inválido: não misture fontes de Customer Success com as outras no mesmo painel.";
+          const cs = await callRpc<CsData>(env, deps.fetch, authorization, "cs_company_data", { p_company: company });
+          if (!cs.ok || !cs.data) return `Erro do banco: ${cs.ok ? "sem dados de Customer Success" : cs.error}`;
+          const result = runCsPanel(cs.data, checked.spec, state.range, state.filters);
+          return `Período ${state.range.from} a ${state.range.to} (Customer Success, por mês):\n${previewText(checked.spec, result as never)}`;
+        }
         const res = await callRpc<{ series?: Record<string, Series> }>(
           env,
           deps.fetch,

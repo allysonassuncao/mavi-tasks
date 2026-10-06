@@ -915,7 +915,9 @@ export type RecordKind =
   | "sl_plan"
   | "sl_contract"
   | "radar_item"
-  | "mention";
+  | "mention"
+  // Migration 20270523090000: a Customer Success item (cycle, score, client in the month…).
+  | "cs";
 /**
  * One record: its id, category (k, l: the bar it is in), its part of the
  * value (v: the metric over this record alone), its date (d, the panel's
@@ -976,6 +978,9 @@ export type RecordRow = {
   quote?: string;
   speaker?: string | null;
   occurred_at?: string;
+  /** Customer Success: the squad and the month of the item. */
+  squad?: string | null;
+  cs_month?: string;
 };
 export type PanelRecords = {
   kind: RecordKind;

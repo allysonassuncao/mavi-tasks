@@ -1,4 +1,6 @@
 import { rpc } from "./api";
+import type { DashboardFilters, PanelResult, PanelSpec } from "./dashboard-catalog";
+import type { PanelRecords, RecordSelection } from "./dashboards";
 import {
   CS_DEFAULT_RULES,
   addDays,
@@ -32,15 +34,64 @@ export type CsLoaded = CsData & { access: "editor" | "viewer"; sync: CsSync };
 export type CsSource =
   | { kind: "app"; dashboard: string }
   | { kind: "link"; token: string; password?: string }
+  /** Quem monta painéis (prévia no editor): a base da empresa (migração 20270523090000). */
+  | { kind: "company"; company: string }
   | { kind: "demo" };
 
 export async function loadCsData(source: CsSource): Promise<CsLoaded> {
   if (source.kind === "demo") return demoCsData();
+  if (source.kind === "company") return (await rpc("cs_company_data", { p_company: source.company })) as CsLoaded;
   const data = (await rpc("cs_dashboard_data", source.kind === "app"
     ? { p_dashboard: source.dashboard }
     : { p_dashboard: null, p_token: source.token, p_password: source.password ?? null })) as CsLoaded & { error?: string };
   if (data.error) throw new Error(data.error);
   return data;
+}
+
+/**
+ * Os painéis de CS de um dashboard comum (fontes de CS no construtor): a
+ * base é baixada uma vez e serve a todos os painéis por um minuto; uma
+ * leitura da planilha (evento mavi:cs) descarta a cópia.
+ */
+const cached = new Map<string, { at: number; data: Promise<CsLoaded> }>();
+export function csDataCached(source: CsSource, fresh = false): Promise<CsLoaded> {
+  const key = JSON.stringify(source);
+  const hit = cached.get(key);
+  if (hit && !fresh && Date.now() - hit.at < 60_000) return hit.data;
+  const data = loadCsData(source);
+  cached.set(key, { at: Date.now(), data });
+  data.catch(() => cached.delete(key));
+  return data;
+}
+if (typeof window !== "undefined") window.addEventListener("mavi:cs", () => cached.clear());
+
+/**
+ * Os painéis com fontes de Customer Success (migração 20270523090000) são
+ * calculados na tela pelo motor do CS Make, com a base de CS do dashboard
+ * (ou da empresa, na prévia de quem monta). O motor só carrega quando há um.
+ */
+export async function csPanelData(
+  source: CsSource,
+  spec: PanelSpec,
+  range: { from: string; to: string },
+  filters: DashboardFilters,
+  compare: { from: string; to: string } | null,
+  fresh = false,
+): Promise<PanelResult> {
+  const [data, { runCsPanel }] = await Promise.all([csDataCached(source, fresh), import("./cs-sources")]);
+  return runCsPanel(data, spec, range, filters, compare);
+}
+export async function csPanelRecords(
+  source: CsSource,
+  spec: PanelSpec,
+  ref: string,
+  range: { from: string; to: string },
+  filters: DashboardFilters,
+  selection: RecordSelection,
+  fresh = false,
+): Promise<PanelRecords> {
+  const [data, { runCsRecords }] = await Promise.all([csDataCached(source, fresh), import("./cs-sources")]);
+  return runCsRecords(data, spec, ref, range, filters, selection);
 }
 
 export async function createCsDashboard(company: string, name: string, description: string) {

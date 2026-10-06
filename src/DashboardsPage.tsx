@@ -65,6 +65,9 @@ import {
   radarPanels,
   vizOptions,
   compact,
+  CS_SOURCES,
+  isCsSource,
+  isCsSpec,
   type Dashboard,
   type DashboardFilters,
   type DashboardRange,
@@ -84,11 +87,12 @@ import { loadTemperatureConfig } from "./temperature";
 import { loadThemeOptions } from "./radar";
 import { DashboardAssistant } from "./DashboardAssistant";
 import { applyProposal, type ProposalItem } from "./dashboard-mavi";
-import { createCsDashboard } from "./cs-dashboard";
-import { syncCsNow } from "./cs";
+import { createCsDashboard, csPanelData, csPanelRecords, demoCsData, type CsSource } from "./cs-dashboard";
+import { csApi, syncCsNow } from "./cs";
 
 // O painel de CS (motor + telas) só carrega quando um dashboard de CS abre.
 const CsDashboard = lazy(() => import("./CsDashboard").then((m) => ({ default: m.CsDashboard })));
+
 
 type Notify = (message: string) => void;
 
@@ -751,6 +755,8 @@ function useLookups(
   indicators: PickOption[] = [],
   radar: { topics: PickOption[]; themes: PickOption[] } = { topics: [], themes: [] },
   noNotices = false,
+  /** Os squads de CS: só para quem monta painéis de CS (nulo = sem as fontes de CS). */
+  csSquads: PickOption[] | null = null,
 ) {
   return useMemo(() => {
     const byName = (a: PickOption, b: PickOption) =>
@@ -807,14 +813,23 @@ function useLookups(
         { value: "progress", label: "Em andamento" },
         { value: "closed", label: "Fechado" },
       ],
+      squad: csSquads ?? [],
+      cs_kind: [
+        { value: "TRIAL", label: "Trial" },
+        { value: "BASE", label: "Base" },
+      ],
       indicators,
       // Dashboards de colaboradores ficam nos clientes dele: sem o Mural.
-      sources: noNotices ? sourceOrder.filter((k) => k !== "notices") : sourceOrder,
+      // Customer Success: só administradores e gestores (migração 20270523090000).
+      sources: [
+        ...(noNotices ? sourceOrder.filter((k) => k !== "notices") : sourceOrder),
+        ...(csSquads ? CS_SOURCES : []),
+      ],
     } satisfies Record<FilterField, PickOption[]> & {
       indicators: PickOption[];
       sources: Source[];
     };
-  }, [data, indicators, radar, noNotices]);
+  }, [data, indicators, radar, noNotices, csSquads]);
 }
 
 function DashboardView({
@@ -919,7 +934,19 @@ function DashboardView({
       )
       .catch(() => setRadarOptions({ topics: [], themes: [] }));
   }, [company, isLeader, canCreate]);
-  const lookups = useLookups(data, indicators, radarOptions, !isLeader);
+  // Os squads de CS, para o filtro das fontes de Customer Success (líderes).
+  const [csSquads, setCsSquads] = useState<PickOption[] | null>(null);
+  useEffect(() => {
+    if (!isLeader) return;
+    const toOptions = (list: { id: string; name: string }[]) => list.map((x) => ({ value: x.id, label: x.name }));
+    if (demo) setCsSquads(toOptions(demoCsData().squads));
+    else
+      csApi
+        .squads(company)
+        .then((list) => setCsSquads(toOptions(list)))
+        .catch(() => setCsSquads([]));
+  }, [company, isLeader, demo]);
+  const lookups = useLookups(data, indicators, radarOptions, !isLeader, csSquads);
 
   useEffect(() => {
     if (id === null) return;
@@ -973,8 +1000,17 @@ function DashboardView({
   const filters = vars.filters ?? {};
   const editing = !!draft;
   const loadKey = JSON.stringify([range, compare, editor ? filters : null, editing]);
+  // Customer Success: a base do dashboard; editando, a da empresa (líderes).
+  const csSource: CsSource = demo
+    ? { kind: "demo" }
+    : editing || id === null
+      ? { kind: "company", company }
+      : { kind: "app", dashboard: id };
+  const csFilters = editor ? filters : (saved?.variables.filters ?? {});
   const loader: PanelLoader = useCallback(
     (panel, fresh) => {
+      if (isCsSpec(panel.spec))
+        return csPanelData(csSource, panel.spec, range, csFilters, compare, fresh);
       if (demo)
         return Promise.resolve(
           runPanel(
@@ -1010,7 +1046,9 @@ function DashboardView({
       editing
         ? undefined
         : (panel, ref, selection, fresh) =>
-            demo
+            isCsSpec(panel.spec)
+              ? csPanelRecords(csSource, panel.spec, ref, range, csFilters, selection, fresh)
+              : demo
               ? Promise.resolve(
                   runRecords(
                     data,
@@ -1331,7 +1369,9 @@ function DashboardView({
           lookups={lookups}
           onClose={() => setEditingPanel(null)}
           preview={(spec) =>
-            demo
+            isCsSpec(spec)
+              ? csPanelData(demo ? { kind: "demo" } : { kind: "company", company }, spec, range, filters, compare)
+              : demo
               ? Promise.resolve(
                   runPanel(data, spec, range, filters, tz, undefined, compare),
                 )
@@ -1367,7 +1407,9 @@ function DashboardView({
           focus={mavi.focus}
           onClearFocus={() => setMavi((m) => ({ ...m, focus: null }))}
           preview={(spec, p) =>
-            previewPanel(company, spec, p ? resolveRange({ preset: p }, tz) : range, { filters })
+            isCsSpec(spec)
+              ? csPanelData({ kind: "company", company }, spec, p ? resolveRange({ preset: p }, tz) : range, filters, null)
+              : previewPanel(company, spec, p ? resolveRange({ preset: p }, tz) : range, { filters })
           }
           onApply={applyMavi}
           onClose={() => setMavi({ open: false, focus: null })}
@@ -1660,6 +1702,12 @@ function PanelEditor({
                 key={q.ref}
                 query={q}
                 lookups={lookups}
+                // Um painel é todo de Customer Success ou todo das outras fontes.
+                family={
+                  spec.queries.length > 1
+                    ? isCsSource(spec.queries.find((x) => x.ref !== q.ref)!.source)
+                    : null
+                }
                 canHide={!!spec.formula}
                 canRemove={spec.queries.length > 1}
                 onChange={(patch) => setQuery(q.ref, patch)}
@@ -1763,7 +1811,10 @@ function PanelEditor({
                 ))}
               </Select>
             </label>
-            {spec.groupBy === "time" && (
+            {spec.groupBy === "time" && isCsSpec(spec) && (
+              <small className="muted">Os dados de Customer Success são por mês.</small>
+            )}
+            {spec.groupBy === "time" && !isCsSpec(spec) && (
               <label>
                 Intervalo
                 <Select
@@ -1941,6 +1992,7 @@ function PanelEditor({
 function QueryEditor({
   query,
   lookups,
+  family = null,
   canHide,
   canRemove,
   onChange,
@@ -1948,6 +2000,8 @@ function QueryEditor({
 }: {
   query: Query;
   lookups: ReturnType<typeof useLookups>;
+  /** As fontes que cabem: só as de CS (true), só as outras (false) ou todas. */
+  family?: boolean | null;
   canHide: boolean;
   canRemove: boolean;
   onChange: (patch: Partial<Query>) => void;
@@ -2009,7 +2063,9 @@ function QueryEditor({
               });
             }}
           >
-            {lookups.sources.map((k) => (
+            {lookups.sources
+              .filter((k) => family === null || isCsSource(k) === family)
+              .map((k) => (
               <SelectOption key={k} value={k}>
                 {sources[k].label}
               </SelectOption>

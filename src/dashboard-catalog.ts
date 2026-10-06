@@ -15,7 +15,12 @@ export type Source =
   | "notices"
   | "temperature"
   | "radar"
-  | "due_changes";
+  | "due_changes"
+  // Migration 20270523090000: Customer Success (computed by src/cs-sources.ts).
+  | "cs_finance"
+  | "cs_portfolio"
+  | "cs_health"
+  | "cs_trial";
 export type Viz = "stat" | "line" | "area" | "bar" | "hbar" | "donut" | "table";
 export type GroupBy =
   | "none"
@@ -37,7 +42,13 @@ export type GroupBy =
   | "band"
   | "topic"
   | "theme"
-  | "severity";
+  | "severity"
+  | "squad"
+  | "cs_category"
+  | "cs_adimplencia"
+  | "cs_reason"
+  | "cs_band"
+  | "cs_phase";
 export type Interval = "auto" | "day" | "week" | "month";
 /** "money" (R$) is only drawn by Campanhas' charts, not a dashboard metric. */
 export type Unit = "number" | "hours" | "days" | "percent" | "money";
@@ -59,7 +70,9 @@ export type FilterField =
   | "topic"
   | "theme"
   | "severity"
-  | "state";
+  | "state"
+  | "squad"
+  | "cs_kind";
 
 /**
  * Tarefas (migration 20270131090000): who each task counts for when the
@@ -637,7 +650,66 @@ export const sources: Record<
     dateFields: [{ key: "created_at", label: "Data da mudança" }],
     filters: ["priority", "client", "product", "project", "team", "person", "creator"],
   },
+  // Customer Success (migration 20270523090000): the CS Make panel's engine
+  // (src/cs-engine.ts) computes these on the screen, by month. "Cliente" is
+  // the CS client; the dashboard's client filter uses its MAVI client.
+  cs_finance: {
+    label: "Customer Success · Financeiro",
+    metrics: [
+      { key: "revenue", label: "Faturamento efetivo (regra M1)", unit: "money", additive: true },
+      { key: "planned", label: "Planejado (provável)", unit: "money", additive: true },
+      { key: "best", label: "Planejado (melhor)", unit: "money", additive: true },
+      { key: "received", label: "Recebido (valor pago, sem a regra M1)", unit: "money", additive: true },
+      { key: "open", label: "Em aberto (a receber)", unit: "money", additive: true },
+      { key: "ticket", label: "Ticket médio (faturamento ÷ pagantes efetivos)", unit: "money", additive: false },
+      { key: "fees", label: "Mensalidades recebidas (fora da meta)", unit: "money", additive: true },
+      { key: "goal", label: "Meta de faturamento", unit: "money", additive: true },
+      { key: "attainment", label: "Atingimento da meta (%)", unit: "percent", additive: false },
+    ],
+    dateFields: [{ key: "month", label: "Mês do ciclo (competência)" }],
+    filters: ["client", "squad", "cs_kind"],
+  },
+  cs_portfolio: {
+    label: "Customer Success · Carteira",
+    metrics: [
+      { key: "active", label: "Clientes ativos (no fim do mês)", unit: "number", additive: false },
+      { key: "payers", label: "Pagantes (pagaram algo no mês)", unit: "number", additive: false },
+      { key: "new", label: "Entradas (clientes novos)", unit: "number", additive: true },
+      { key: "reactivations", label: "Reativações", unit: "number", additive: true },
+      { key: "churns", label: "Churns (saídas)", unit: "number", additive: true },
+      { key: "net", label: "Net churn (entradas − saídas)", unit: "number", additive: true },
+    ],
+    dateFields: [{ key: "event", label: "Mês (ativos e pagantes) ou data da entrada e da saída" }],
+    filters: ["client", "squad", "cs_kind"],
+  },
+  cs_health: {
+    label: "Customer Success · Saúde",
+    metrics: [
+      { key: "hs_avg", label: "Health Score médio (%)", unit: "percent", additive: false },
+      { key: "hs_clients", label: "Clientes com Health Score (no fim do período)", unit: "number", additive: false },
+      { key: "hs_critical", label: "Clientes em Crítico (no fim do período)", unit: "number", additive: false },
+      { key: "adimp_rate", label: "Taxa de adimplência dos ciclos (%)", unit: "percent", additive: false },
+      { key: "cycles", label: "Ciclos (agrupe por adimplência)", unit: "number", additive: true },
+    ],
+    dateFields: [{ key: "month", label: "Mês da nota e do ciclo" }],
+    filters: ["client", "squad", "cs_kind"],
+  },
+  cs_trial: {
+    label: "Customer Success · Trial",
+    metrics: [
+      { key: "in_trial", label: "Clientes em trial (no fim do período)", unit: "number", additive: false },
+      { key: "graduated", label: "Graduados para Base", unit: "number", additive: true },
+      { key: "grad_rate", label: "Taxa de graduação (graduados ÷ entradas de 3 meses antes) (%)", unit: "percent", additive: false },
+      { key: "trial_churns", label: "Churns por mês de trial", unit: "number", additive: true },
+    ],
+    dateFields: [{ key: "event", label: "Mês" }],
+    filters: ["client", "squad", "cs_kind"],
+  },
 };
+/** The Customer Success sources (computed on the screen, not by the database's SQL). */
+export const CS_SOURCES: Source[] = ["cs_finance", "cs_portfolio", "cs_health", "cs_trial"];
+export const isCsSource = (s: Source | string) => s.startsWith("cs_");
+export const isCsSpec = (spec: Pick<PanelSpec, "queries">) => spec.queries.some((q) => isCsSource(q.source));
 export const metricDef = (q: Pick<Query, "source" | "metric">) =>
   sources[q.source]?.metrics.find((m) => m.key === q.metric);
 
@@ -660,6 +732,8 @@ export const filterLabels: Record<FilterField, string> = {
   theme: "Tema do Radar",
   severity: "Gravidade",
   state: "Situação (aberto, em andamento, fechado)",
+  squad: "Squad",
+  cs_kind: "Tipo de cliente (Trial ou Base)",
 };
 
 export const groupOptions: {
@@ -680,6 +754,7 @@ export const groupOptions: {
       "temperature",
       "radar",
       "due_changes",
+      ...CS_SOURCES,
     ],
   },
   {
@@ -695,6 +770,7 @@ export const groupOptions: {
       "temperature",
       "radar",
       "due_changes",
+      ...CS_SOURCES,
     ],
   },
   {
@@ -709,6 +785,7 @@ export const groupOptions: {
       "temperature",
       "radar",
       "due_changes",
+      ...CS_SOURCES,
     ],
   },
   {
@@ -795,6 +872,13 @@ export const groupOptions: {
     label: "Etapa (clientes do Social Leads)",
     sources: ["social_leads"],
   },
+  // Customer Success (migration 20270523090000).
+  { key: "squad", label: "Squad (o do mês)", sources: CS_SOURCES },
+  { key: "cs_category", label: "Fase do ciclo (Trial, Base, ACL)", sources: ["cs_finance", "cs_health"] },
+  { key: "cs_adimplencia", label: "Adimplência do ciclo", sources: ["cs_finance", "cs_health"] },
+  { key: "cs_reason", label: "Motivo do churn", sources: ["cs_portfolio"] },
+  { key: "cs_band", label: "Faixa do Health Score", sources: ["cs_health"] },
+  { key: "cs_phase", label: "Mês do trial (M1, M2, M3, M4+)", sources: ["cs_trial"] },
 ];
 /** Groupings every query of the panel supports. */
 export const groupsFor = (queries: Pick<Query, "source">[]) =>

@@ -13,6 +13,7 @@ import { ComparePicker, PeriodPicker } from "./DashboardPeriod";
 import type { RecordsLoader } from "./DashboardRecords";
 import {
   datesLabel,
+  isCsSpec,
   panelData,
   panelRecords,
   resolveCompare,
@@ -22,6 +23,7 @@ import {
   type DashboardRange,
   type SharedDashboard,
 } from "./dashboards";
+import { csPanelData, csPanelRecords, type CsSource } from "./cs-dashboard";
 
 // O painel pronto de Customer Success (tipo 'cs', migração 20270522090000).
 const CsDashboard = lazy(() =>
@@ -67,31 +69,60 @@ export function PublicDashboard({ token }: { token: string }) {
     () => (dates ? resolveCompare(compareSetting, dates) : null),
     [dates, compareSetting],
   );
+  // Painéis com fontes de Customer Success: calculados na tela com a base
+  // de CS do dashboard (migração 20270523090000).
+  const csSource = useMemo<CsSource>(
+    () => ({ kind: "link", token, password: accepted }),
+    [token, accepted],
+  );
+  const savedFilters =
+    state?.status === "ok" ? (state.variables.filters ?? {}) : {};
   const loader: PanelLoader = useCallback(
     (panel, fresh) =>
-      panelData(
-        { kind: "link", token, password: accepted },
-        panel.id,
-        dates!,
-        null,
-        fresh,
-        compare,
-      ),
-    [token, accepted, dates, compare],
+      isCsSpec(panel.spec)
+        ? csPanelData(
+            csSource,
+            panel.spec,
+            dates!,
+            savedFilters,
+            compare,
+            fresh,
+          )
+        : panelData(
+            { kind: "link", token, password: accepted },
+            panel.id,
+            dates!,
+            null,
+            fresh,
+            compare,
+          ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, accepted, dates, compare, csSource, state],
   );
   // The records below each panel, when the dashboard shows them on the link.
   const recordsLoader: RecordsLoader = useCallback(
     (panel, ref, selection, fresh) =>
-      panelRecords(
-        { kind: "link", token, password: accepted },
-        panel.id,
-        ref,
-        dates!,
-        null,
-        selection,
-        fresh,
-      ),
-    [token, accepted, dates],
+      isCsSpec(panel.spec)
+        ? csPanelRecords(
+            csSource,
+            panel.spec,
+            ref,
+            dates!,
+            savedFilters,
+            selection,
+            fresh,
+          )
+        : panelRecords(
+            { kind: "link", token, password: accepted },
+            panel.id,
+            ref,
+            dates!,
+            null,
+            selection,
+            fresh,
+          ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, accepted, dates, csSource, state],
   );
 
   if (error)

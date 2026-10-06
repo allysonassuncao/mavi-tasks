@@ -31,6 +31,7 @@ import {
   type CsSquad,
 } from "./cs";
 import type { Snapshot } from "./types";
+import { CsRulesCard } from "./CsRules";
 import "./cs.css";
 
 const RUN_ICON = { ok: CheckCircle2, warning: AlertTriangle, error: XCircle };
@@ -104,6 +105,7 @@ export function CsSettingsPanel({
         }}
         notify={notify}
       />
+      <CsRulesCard api={api} company={company} notify={notify} />
     </div>
   );
 }

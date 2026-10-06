@@ -402,3 +402,145 @@
   line-height: 1.4;
   color: var(--muted);
 }
+
+/* ------------------------------------------------------------ regras (CsRules.tsx) */
+.cs-rules-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 23px 22px;
+}
+.cs-rules-title {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+}
+.cs-rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.cs-rules-section {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.76rem;
+}
+.cs-rules-section dl {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0;
+}
+.cs-rules-section dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 4px;
+  border-radius: 5px;
+}
+.cs-rules-section dl > div.changed {
+  background: #fdf3e1;
+}
+.cs-rules-section dt {
+  color: #6c7a77;
+}
+.cs-rules-section dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cs-rules-versions,
+.cs-rules-log {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cs-rules-versions > li,
+.cs-rules-log > li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.78rem;
+}
+.cs-rules-log > li {
+  display: grid;
+  gap: 2px;
+}
+.cs-rules-versions b {
+  margin-right: 6px;
+}
+.cs-rules-versions small,
+.cs-rules-log small {
+  display: block;
+  color: var(--muted);
+}
+.cs-rules-actions {
+  display: flex;
+  gap: 2px;
+}
+.cs-rules-diff {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: #4e5c5a;
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+.cs-rules-logtoggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  color: #5c6b68;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.modal.cs-rules-dialog {
+  width: 720px;
+}
+.cs-rules-fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.cs-rules-fieldset legend {
+  padding: 0 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.cs-rules-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px 12px;
+}
+.cs-rules-inputs label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.74rem;
+}
+.cs-rules-inputs label.changed .cs-rules-input {
+  box-shadow: 0 0 0 2px #f2d9a6;
+  border-radius: 8px;
+}
+.cs-rules-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cs-rules-input i {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.cs-rules-preview {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fdf6ea;
+  font-size: 0.78rem;
+}

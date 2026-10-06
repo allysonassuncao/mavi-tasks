@@ -1,5 +1,6 @@
 import { rpc } from "./api";
 import { supabase } from "./supabase";
+import { CS_DEFAULT_RULES, type CsRules } from "./cs-engine";
 
 /**
  * Customer Success (migração 20270520090000): os Squads, a planilha mestre
@@ -88,7 +89,22 @@ export type CsLinkLog = {
   by_name: string | null;
 };
 
+/** As regras com vigência (migração 20270523090000): as de hoje, as versões e o histórico. */
+export type CsRulesVersion = { valid_from: string; rules: CsRules; reason: string; set_at: string; set_by_name: string | null };
+export type CsRulesLog = {
+  valid_from: string; action: "set" | "delete"; before: CsRules | null; after: CsRules | null; reason: string; at: string;
+  by_name: string | null;
+};
+export type CsRulesAdmin = {
+  defaults: CsRules; current_month: string; current: CsRules; can_edit: boolean; versions: CsRulesVersion[]; log: CsRulesLog[];
+};
+
 export const csApi = {
+  rules: (company: string) => rpc("cs_rules_admin", { p_company: company }) as Promise<CsRulesAdmin>,
+  setRules: (company: string, validFrom: string, rules: CsRules, reason: string) =>
+    rpc("set_cs_rules", { p_company: company, p_valid_from: validFrom, p_rules: rules, p_reason: reason }) as Promise<CsRulesAdmin>,
+  deleteRules: (company: string, validFrom: string, reason: string) =>
+    rpc("delete_cs_rules", { p_company: company, p_valid_from: validFrom, p_reason: reason }) as Promise<CsRulesAdmin>,
   squads: (company: string) => rpc("cs_squads", { p_company: company }) as Promise<CsSquad[]>,
   saveSquad: (
     company: string,
@@ -220,6 +236,7 @@ let demoState: {
   clients: CsClient[];
   runs: CsRun[];
   logs: Record<string, CsLinkLog[]>;
+  rules: { versions: CsRulesVersion[]; log: CsRulesLog[] };
 } | null = null;
 
 /** A demonstração: uma planilha de exemplo, na memória do navegador. */
@@ -270,6 +287,7 @@ export function demoCs(data: { clients: { id: string; name: string; archived: bo
       clients,
       runs: [run],
       logs: {},
+      rules: { versions: [], log: [] },
       settings: {
         sheet_id: "1BY4n2nKKznZj0RDHU8fGUhYUbjFqC5i691ip3Zq1Ksc", enabled: true, can_edit: true, running: false,
         last_run: run, last_ok_at: now,
@@ -319,6 +337,24 @@ export function demoCs(data: { clients: { id: string; name: string; archived: bo
       return later(row);
     },
     linkLog: (id) => later(st.logs[id] ?? []),
+    rules: () => later(demoRules(st.rules)),
+    setRules: (_c, validFrom, rules, reason) => {
+      const r = st.rules;
+      const before = r.versions.find((v) => v.valid_from === validFrom)?.rules ?? demoRules(r, validFrom).current;
+      r.versions = [...r.versions.filter((v) => v.valid_from !== validFrom),
+        { valid_from: validFrom, rules, reason, set_at: new Date().toISOString(), set_by_name: "Você" }]
+        .sort((a, b) => b.valid_from.localeCompare(a.valid_from));
+      r.log.unshift({ valid_from: validFrom, action: "set", before, after: rules, reason, at: new Date().toISOString(), by_name: "Você" });
+      return later(demoRules(r));
+    },
+    deleteRules: (_c, validFrom, reason) => {
+      const r = st.rules;
+      const before = r.versions.find((v) => v.valid_from === validFrom)?.rules ?? null;
+      r.versions = r.versions.filter((v) => v.valid_from !== validFrom);
+      r.log.unshift({ valid_from: validFrom, action: "delete", before, after: demoRules(r, validFrom).current, reason,
+        at: new Date().toISOString(), by_name: "Você" });
+      return later(demoRules(r));
+    },
     sync: () => {
       const now = new Date().toISOString();
       const run: CsRun = { ...st.runs[0], id: `run${Date.now()}`, trigger: "manual", started_at: now, finished_at: now, stats: {}, by_name: "Você" };
@@ -327,6 +363,22 @@ export function demoCs(data: { clients: { id: string; name: string; archived: bo
       return later(run);
     },
   };
+}
+
+function demoRules(r: { versions: CsRulesVersion[]; log: CsRulesLog[] }, month?: string): CsRulesAdmin {
+  const d = new Date();
+  const cur = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  return {
+    defaults: CS_DEFAULT_RULES, current_month: cur, current: rulesAt(r.versions, month ?? cur), can_edit: true,
+    versions: r.versions, log: r.log,
+  };
+}
+/** As regras que valem num mês: o padrão com as versões até ele (cs_rules_at). */
+export function rulesAt(versions: { valid_from: string; rules: Partial<CsRules> }[], month: string): CsRules {
+  let r: CsRules = structuredClone(CS_DEFAULT_RULES);
+  for (const v of [...versions].sort((a, b) => a.valid_from.localeCompare(b.valid_from)))
+    if (v.valid_from <= month) r = { ...r, ...v.rules } as CsRules;
+  return r;
 }
 
 export const realCs: CsBackend = { ...csApi, sync: syncCsNow };
