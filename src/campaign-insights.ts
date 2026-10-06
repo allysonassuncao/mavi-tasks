@@ -50,8 +50,15 @@ export type CampaignInsight = {
   target: { key: string; level: InsightLevel; name: string; parent?: string } | null;
   /** watch: a vigia diária (sem a MAVI). */
   source: "rule" | "mavi" | "watch";
-  /** Fase 8: as negativas do Google para copiar; os criativos citados (com a miniatura). */
-  extra?: { negatives?: InsightNegative[]; creatives?: InsightCreative[] } | null;
+  /**
+   * Fase 8: as negativas do Google para copiar; os criativos citados (com a
+   * miniatura); de quem cada item citado é filho (a Plataforma soma nos de cima).
+   */
+  extra?: {
+    negatives?: InsightNegative[];
+    creatives?: InsightCreative[];
+    parents?: Record<string, string>;
+  } | null;
   money_basis: MoneyBasis;
   confidence: number | null;
   status: InsightStatus;
@@ -132,7 +139,7 @@ export type CampaignInsightsView = {
   schedule: InsightSchedule;
   timezone: string;
   last_scheduled_day: string | null;
-  places: { panel: boolean; badge: boolean; tab: boolean };
+  places: { panel: boolean; badge: boolean; tab: boolean; platform?: boolean };
   money_basis: MoneyBasis;
   min_interval_minutes: number;
   /** Dias abertos sem uso até o insight expirar (0: nunca). */
@@ -189,6 +196,8 @@ export type InsightSettings = {
   show_panel: boolean;
   show_badge: boolean;
   show_tab: boolean;
+  /** Na aba Plataforma: o selo na linha de cada item citado. */
+  show_platform?: boolean;
   mavi_context: boolean;
   notify_inbox: boolean;
   notify_min_priority: InsightPriority;
@@ -678,6 +687,110 @@ export const CREATIVE_FIELDS: { id: Exclude<CreativeField, "resumo">; label: str
 export const creativeLinkLabel = (link: string) =>
   /instagram\.com/.test(link) ? "Ver no Instagram" : "Ver no Facebook";
 
+/**
+ * Os insights na aba Plataforma (migração 20270516090000): cada linha (campanha,
+ * conjunto/grupo, anúncio, palavra-chave, termo, público) mostra os abertos e os
+ * aplicados cujo alvo ou cujos números citam aquele item; a campanha e o
+ * conjunto contam os dos itens de dentro (extra.parents).
+ */
+export type RowLevel = "campaign" | "adset" | "ad" | "keyword" | "search_term" | "age" | "gender";
+export type RowInsight = { insight: CampaignInsight; role: "target" | "cited" };
+export type InsightRowIndex = {
+  own: Map<string, RowInsight[]>;
+  /** Os insights dos itens de dentro de cada item (pela chave de cima). */
+  below: Map<string, Map<string, { ri: RowInsight; level: RowLevel }>>;
+  /** Os insights de cada nível (as abas da Plataforma). */
+  levels: Map<RowLevel, Set<string>>;
+};
+const PREFIX_LEVEL: Record<string, RowLevel> = { c: "campaign", s: "adset", a: "ad", k: "keyword", t: "search_term" };
+const LEVEL_PREFIX: Partial<Record<RowLevel, string>> = { campaign: "c", adset: "s", ad: "a", keyword: "k", search_term: "t" };
+/** O termo de pesquisa pelo texto (as negativas citam o termo, não a linha). */
+const termKey = (term: string) => `term:${term.trim().toLocaleLowerCase("pt-BR")}`;
+export function rowLevelOf(key: string): RowLevel | null {
+  if (key === "total") return "campaign";
+  if (key.startsWith("term:")) return "search_term";
+  const m = /^g:(age|gender):/.exec(key);
+  if (m) return m[1] as RowLevel;
+  return PREFIX_LEVEL[key.split(":")[0]] ?? null;
+}
+/**
+ * As chaves de uma linha da Plataforma (as mesmas das evidências): "total" vai
+ * nas campanhas vinculadas ao ciclo; o termo de pesquisa também pelo texto.
+ */
+export function platformRowKeys(level: RowLevel, id: string, opts: { name?: string; linked?: boolean } = {}) {
+  if (level === "age" || level === "gender") return [`g:${level}:${id}`];
+  const keys = [`${LEVEL_PREFIX[level]}:${id}`];
+  if (level === "campaign" && opts.linked) keys.push("total");
+  if (level === "search_term" && opts.name) keys.push(termKey(opts.name));
+  return keys;
+}
+const rankRow = (r: RowInsight) =>
+  (r.insight.status === "applied" ? 10 : 0) + (r.role === "cited" ? 3 : 0) + ({ high: 0, medium: 1, low: 2 } as const)[r.insight.priority];
+/** O índice das linhas: os abertos e os aplicados de uma campanha. */
+export function insightRowIndex(view: Pick<CampaignInsightsView, "current" | "applied"> | null): InsightRowIndex {
+  const index: InsightRowIndex = { own: new Map(), below: new Map(), levels: new Map() };
+  if (!view) return index;
+  const list = [...view.current.filter((i) => i.status === "new"), ...(view.applied ?? [])];
+  const parents = new Map<string, string>();
+  for (const i of list) for (const [k, v] of Object.entries(i.extra?.parents ?? {})) parents.set(k, v);
+  for (const insight of list) {
+    const roles = new Map<string, RowInsight["role"]>();
+    const put = (key: string, role: RowInsight["role"]) => {
+      // O público de um conjunto do Meta (g:<conjunto>:<faixa>) aparece no conjunto.
+      const meta = /^g:(\d+):/.exec(key);
+      const k = meta ? `s:${meta[1]}` : key;
+      if (!rowLevelOf(k) || roles.get(k) === "target") return;
+      roles.set(k, meta ? "cited" : role);
+    };
+    if (insight.target) put(insight.target.key, "target");
+    // Sem alvo, os números da campanha inteira ("total") são o assunto do insight.
+    for (const e of insight.evidence) put(e.entity, !insight.target && e.entity === "total" ? "target" : "cited");
+    for (const n of insight.extra?.negatives ?? []) put(termKey(n.term), "target");
+    for (const [key, role] of roles) {
+      const ri = { insight, role };
+      index.own.set(key, [...(index.own.get(key) ?? []), ri]);
+      const level = rowLevelOf(key)!;
+      index.levels.set(level, (index.levels.get(level) ?? new Set()).add(insight.id));
+      for (let up = parents.get(key), depth = 0; up && depth < 4; up = parents.get(up), depth++) {
+        const found = index.below.get(up) ?? new Map();
+        if (!found.has(insight.id) || ri.role === "target") found.set(insight.id, { ri, level });
+        index.below.set(up, found);
+      }
+    }
+  }
+  for (const list of index.own.values()) list.sort((a, b) => rankRow(a) - rankRow(b));
+  return index;
+}
+/** Os insights de uma linha (pelas chaves dela) e os dos itens de dentro. */
+export function rowInsights(index: InsightRowIndex, keys: string[]) {
+  const own = new Map<string, RowInsight>();
+  for (const k of keys)
+    for (const ri of index.own.get(k) ?? [])
+      if (!own.has(ri.insight.id) || ri.role === "target") own.set(ri.insight.id, ri);
+  const below = new Map<string, RowInsight>();
+  const levels = new Set<RowLevel>();
+  for (const k of keys)
+    for (const [id, x] of index.below.get(k) ?? [])
+      if (!own.has(id)) {
+        below.set(id, x.ri);
+        levels.add(x.level);
+      }
+  const sort = (m: Map<string, RowInsight>) => [...m.values()].sort((a, b) => rankRow(a) - rankRow(b));
+  return { own: sort(own), below: sort(below), levels };
+}
+/** "nos anúncios", "nos grupos e palavras-chave"… (Meta: conjuntos; Google: grupos). */
+export function belowText(levels: Set<RowLevel>, platform: "meta" | "google") {
+  const names: Partial<Record<RowLevel, string>> = {
+    adset: platform === "google" ? "grupos" : "conjuntos",
+    ad: "anúncios",
+    keyword: "palavras-chave",
+    search_term: "termos",
+  };
+  const list = (["adset", "ad", "keyword", "search_term"] as RowLevel[]).filter((l) => levels.has(l)).map((l) => names[l]!);
+  if (!list.length) return "nos itens de dentro";
+  return `nos ${list.length > 1 ? `${list.slice(0, -1).join(", ")} e ${list[list.length - 1]}` : list[0]}`;
+}
+
 /** Como o Google Ads lê ao colar: [exata] ou "frase". */
 export const negativeLine = (n: Pick<InsightNegative, "term" | "match">) =>
   n.match === "phrase" ? `"${n.term}"` : `[${n.term}]`;
@@ -772,6 +885,7 @@ export const DEFAULT_SETTINGS: InsightSettings = {
   show_panel: true,
   show_badge: true,
   show_tab: true,
+  show_platform: true,
   mavi_context: true,
   notify_inbox: true,
   notify_min_priority: "high",
@@ -812,7 +926,7 @@ const demoThumb = (from: string, to: string, line1: string, line2: string) =>
   )}`;
 const DEMO_CREATIVES: Record<string, InsightCreative> = {
   frete: {
-    entity: "a:2",
+    entity: "a:23850001011",
     name: "Frete grátis em 24h",
     parent: "Público frio – 25-44",
     key: "i:demo1",
@@ -832,7 +946,7 @@ const DEMO_CREATIVES: Record<string, InsightCreative> = {
     },
   },
   depoimento: {
-    entity: "a:5",
+    entity: "a:23850001110",
     name: "Depoimento Juliana",
     parent: "Remarketing",
     key: "v:demo2",
@@ -850,7 +964,7 @@ const DEMO_CREATIVES: Record<string, InsightCreative> = {
     transcript: "Eu já tinha desistido de procurar. Uma amiga me indicou, comprei numa terça e na quarta já estava aqui…",
   },
   promo: {
-    entity: "a:6",
+    entity: "a:23850001112",
     name: "Promoção 20% OFF",
     parent: "Público frio – 25-44",
     key: "i:demo3",
@@ -863,6 +977,15 @@ const DEMO_CREATIVES: Record<string, InsightCreative> = {
       cta: "Aproveitar",
     },
   },
+};
+/** As chaves acima batem com a Plataforma demonstrativa (demoPlatform(["23850001"])). */
+const DEMO_PARENTS: Record<string, string> = {
+  "a:23850001011": "s:2385000101",
+  "a:23850001110": "s:2385000111",
+  "a:23850001112": "s:2385000111",
+  "s:2385000101": "c:23850001",
+  "s:2385000111": "c:23850001",
+  "s:2385000121": "c:23850001",
 };
 /** Exemplos para o ambiente demonstrativo (nada vai ao banco). */
 const DEMO_PEOPLE: CampaignOwner[] = [
@@ -882,10 +1005,10 @@ export function demoInsights(): InsightsBackend {
       body: "No ciclo, a plataforma contou 48 cadastros, mas nenhum lead com o nome desta campanha entrou no MakeCRM. Os leads estão chegando com o nome \"leads-formulario\", escrito um pouco diferente, e por isso não contam para a campanha.",
       action: "Nos anúncios, troque a UTM \"leads-formulario\" por \"Leads – Formulário\" (exatamente igual)\nDepois de 1 ou 2 dias, confira se os novos leads aparecem no CRM com o nome certo",
       evidence: [
-        { label: "Resultados na plataforma", value: 48, unit: "count", window: "cycle", entity: "c:1", name: "Leads – Formulário", metric: "results" },
-        { label: "Oportunidades no CRM", value: 0, unit: "count", window: "cycle", entity: "c:1", name: "Leads – Formulário", metric: "crm_opportunities" },
+        { label: "Resultados na plataforma", value: 48, unit: "count", window: "cycle", entity: "c:23850001", name: "Leads – Formulário", metric: "results" },
+        { label: "Oportunidades no CRM", value: 0, unit: "count", window: "cycle", entity: "c:23850001", name: "Leads – Formulário", metric: "crm_opportunities" },
       ],
-      target: { key: "c:1", level: "campaign", name: "Leads – Formulário" },
+      target: { key: "c:23850001", level: "campaign", name: "Leads – Formulário" },
       source: "rule",
       money_basis: "net",
       confidence: null,
@@ -904,12 +1027,12 @@ export function demoInsights(): InsightsBackend {
       body: "Ele recebeu 22% da verba, mas trouxe 41% das oportunidades do CRM, e 9 já chegaram à Negociação. Provavelmente a promessa de entrega rápida e sem frete, a dor mais citada nas reuniões, atrai quem está pronto para comprar.",
       action: "No Gerenciador, duplique o conjunto deste anúncio\nNo novo conjunto, crie um vídeo curto com a mesma promessa\nDaqui a 5 dias, compare o custo por oportunidade dos dois",
       evidence: [
-        { label: "Oportunidades no CRM", value: 19, unit: "count", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "crm_opportunities" },
-        { label: "Custo por oportunidade (CRM)", value: 23.4, unit: "money", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "crm_cpl" },
-        { label: 'Chegaram a "Negociação" ou além', value: 9, unit: "count", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "stage:demo" },
+        { label: "Oportunidades no CRM", value: 19, unit: "count", window: "cycle", entity: "a:23850001011", name: "Frete grátis em 24h", metric: "crm_opportunities" },
+        { label: "Custo por oportunidade (CRM)", value: 23.4, unit: "money", window: "cycle", entity: "a:23850001011", name: "Frete grátis em 24h", metric: "crm_cpl" },
+        { label: 'Chegaram a "Negociação" ou além', value: 9, unit: "count", window: "cycle", entity: "a:23850001011", name: "Frete grátis em 24h", metric: "stage:demo" },
       ],
-      target: { key: "a:2", level: "ad", name: "Frete grátis em 24h", parent: "Público frio – 25-44" },
-      extra: { creatives: [DEMO_CREATIVES.frete] },
+      target: { key: "a:23850001011", level: "ad", name: "Frete grátis em 24h", parent: "Público frio – 25-44" },
+      extra: { creatives: [DEMO_CREATIVES.frete], parents: DEMO_PARENTS },
       source: "mavi",
       money_basis: "net",
       confidence: 0.91,
@@ -928,9 +1051,9 @@ export function demoInsights(): InsightsBackend {
       body: "Nos últimos 7 dias, cada lead desse público custou bem menos que a média do conjunto. Ainda é cedo para mudar tudo, mas vale testar separado.",
       action: "Crie um conjunto só com mulheres de 35 a 44 anos, com 20% da verba do Remarketing",
       evidence: [
-        { label: "Custo por resultado", value: 18.9, unit: "money", window: "cycle", entity: "g:3:35-44|female", name: "Remarketing · 35-44 · Mulheres", metric: "cpa" },
+        { label: "Custo por resultado", value: 18.9, unit: "money", window: "cycle", entity: "g:2385000121:35-44|female", name: "Remarketing · 35-44 · Mulheres", metric: "cpa" },
       ],
-      target: { key: "s:3", level: "adset", name: "Remarketing" },
+      target: { key: "s:2385000121", level: "adset", name: "Remarketing" },
       source: "mavi",
       money_basis: "net",
       confidence: 0.78,
@@ -948,7 +1071,7 @@ export function demoInsights(): InsightsBackend {
         schedule: { source: "company", rule: null, enabled: true, frequency: "weekdays", weekdays: [1, 4], every_days: 3, hour: 8 },
         timezone: "America/Sao_Paulo",
         last_scheduled_day: null,
-        places: { panel: true, badge: true, tab: true },
+        places: { panel: true, badge: true, tab: true, platform: true },
         money_basis: "net",
         min_interval_minutes: 240,
         expire_days: 15,
@@ -1000,13 +1123,16 @@ export function demoInsights(): InsightsBackend {
             action:
               "Tire 30% da verba da \"Promoção 20% OFF\" e passe para o depoimento\nGrave mais um depoimento curto com outro cliente\nDaqui a 7 dias, compare o custo por oportunidade",
             evidence: [
-              { label: "Custo por oportunidade (CRM)", value: 21.8, unit: "money", window: "cycle", entity: "a:5", name: "Depoimento Juliana", metric: "crm_cpl" },
-              { label: "Custo por oportunidade (CRM)", value: 23.4, unit: "money", window: "cycle", entity: "a:2", name: "Frete grátis em 24h", metric: "crm_cpl" },
-              { label: "Custo por oportunidade (CRM)", value: 52.1, unit: "money", window: "cycle", entity: "a:6", name: "Promoção 20% OFF", metric: "crm_cpl" },
-              { label: "Taxa de cliques (CTR)", value: 2.9, unit: "pct", window: "cycle", entity: "a:6", name: "Promoção 20% OFF", metric: "ctr" },
+              { label: "Custo por oportunidade (CRM)", value: 21.8, unit: "money", window: "cycle", entity: "a:23850001110", name: "Depoimento Juliana", metric: "crm_cpl" },
+              { label: "Custo por oportunidade (CRM)", value: 23.4, unit: "money", window: "cycle", entity: "a:23850001011", name: "Frete grátis em 24h", metric: "crm_cpl" },
+              { label: "Custo por oportunidade (CRM)", value: 52.1, unit: "money", window: "cycle", entity: "a:23850001112", name: "Promoção 20% OFF", metric: "crm_cpl" },
+              { label: "Taxa de cliques (CTR)", value: 2.9, unit: "pct", window: "cycle", entity: "a:23850001112", name: "Promoção 20% OFF", metric: "ctr" },
             ],
             target: null,
-            extra: { creatives: [DEMO_CREATIVES.depoimento, DEMO_CREATIVES.frete, DEMO_CREATIVES.promo] },
+            extra: {
+              creatives: [DEMO_CREATIVES.depoimento, DEMO_CREATIVES.frete, DEMO_CREATIVES.promo],
+              parents: DEMO_PARENTS,
+            },
             seen_count: 1,
             created_at: ago(90),
           },

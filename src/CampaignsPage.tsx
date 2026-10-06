@@ -38,6 +38,7 @@ import { Empty, Modal } from "./components";
 import type { FormPreset } from "./forms";
 import {
   CampaignInsightsAside,
+  PlatformInsights,
   CampaignInsightsTab,
   CrmGoalControl,
   useCampaignInsights,
@@ -2015,24 +2016,36 @@ function CampaignDetail({
           )
         }
         platformTab={
-          campaign.platform === "meta" ? (
-            <CampaignPlatform
+          campaign.platform === "meta" || campaign.platform === "google" ? (
+            // Os insights da MAVI na linha de cada item (sem eles, a Plataforma fica igual).
+            <PlatformInsights
+              state={insightsState}
+              backend={insights}
               company={company}
-              cycles={cycles}
-              current={current}
-              backend={platform}
-              today={today}
-              crm={platformCrm}
-            />
-          ) : campaign.platform === "google" ? (
-            <GooglePlatform
-              company={company}
-              cycles={cycles}
-              current={current}
-              backend={googlePlatform}
-              today={today}
-              crm={platformCrm}
-            />
+              ctx={insightsCtx}
+              notify={notify}
+              platform={campaign.platform}
+            >
+              {campaign.platform === "meta" ? (
+                <CampaignPlatform
+                  company={company}
+                  cycles={cycles}
+                  current={current}
+                  backend={platform}
+                  today={today}
+                  crm={platformCrm}
+                />
+              ) : (
+                <GooglePlatform
+                  company={company}
+                  cycles={cycles}
+                  current={current}
+                  backend={googlePlatform}
+                  today={today}
+                  crm={platformCrm}
+                />
+              )}
+            </PlatformInsights>
           ) : null
         }
         insightsTab={

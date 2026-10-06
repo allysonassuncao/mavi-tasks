@@ -920,6 +920,30 @@ await check("miniaturas dos criativos: guardadas pela chave; a lista vai com o i
   ] });
 });
 
+await check("na aba Plataforma: de quem os itens citados são filhos vai com o insight; o local é ligável", async () => {
+  const [run] = await sql(`insert into campaign_insight_runs(company_id, campaign_id, trigger, status, started_at, attempts, local_day)
+    values ($1,$2,'manual','running',now(),1,$3) returning id`, [A, campaign, today]);
+  await as(null);
+  await worker("ai_campaign_insight_store", [SECRET, run.id, JSON.stringify({
+    status: "done",
+    insights: [insight("problem#a:9#anuncio-caro", { title: "Anúncio caro", extra: {
+      parents: { "a:9": "s:9", "s:9": "c:9", "x": "c:9", "k:1": 5 },
+    } })],
+  })]);
+  await as(trafego);
+  let v = await rpc("campaign_insights", [A, campaign, 8]);
+  assert.deepEqual(v.current.find((i) => i.title === "Anúncio caro").extra, { parents: { "a:9": "s:9", "s:9": "c:9" } });
+  assert.equal(v.places.platform, true);
+  await as(admin);
+  const st = await rpc("save_campaign_insight_settings", [A, JSON.stringify({ show_platform: false })]);
+  assert.equal(st.settings.show_platform, false);
+  await as(trafego);
+  v = await rpc("campaign_insights", [A, campaign, 8]);
+  assert.equal(v.places.platform, false);
+  await as(admin);
+  await rpc("save_campaign_insight_settings", [A, JSON.stringify({ show_platform: true })]);
+});
+
 await check("a campanha que não pode ser analisada diz por quê", async () => {
   await sql(`update ad_campaigns set status='inactive' where id=$1`, [campaign]);
   await as(trafego);

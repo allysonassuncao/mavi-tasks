@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import {
   ArrowRight,
@@ -56,10 +56,12 @@ import {
   WINDOW_LABELS,
   basisHint,
   basisLabel,
+  belowText,
   creativeLinkLabel,
   dayLabel,
   effectText,
   goalStageText,
+  insightRowIndex,
   insightTaskPreset,
   negativeLine,
   negativesText,
@@ -67,6 +69,7 @@ import {
   localParts,
   money,
   nextScheduled,
+  rowInsights,
   scheduleText,
   usageText,
   waitText,
@@ -84,6 +87,9 @@ import {
   type InsightRun,
   type InsightsBackend,
   type InsightStatus,
+  type InsightRowIndex,
+  type RowInsight,
+  type RowLevel,
 } from "./campaign-insights";
 import "./campaign-insights.css";
 
@@ -533,9 +539,12 @@ export function InsightCard({
   compact = false,
   handlers,
   first = false,
+  focus,
 }: {
   insight: CampaignInsight;
   compact?: boolean;
+  /** Na Plataforma: os itens da linha (destacados nos números e nos criativos). */
+  focus?: string[];
   /** As ações (sem elas, só leitura — ex.: o histórico das análises). */
   handlers?: Handlers;
   /** O primeiro aberto da análise: "Comece por aqui". */
@@ -549,7 +558,7 @@ export function InsightCard({
   const numbers = (
     <ul className="insight-evidence" aria-label="Os números">
       {insight.evidence.map((e) => (
-        <li key={`${e.entity}|${e.window}|${e.metric}`}>
+        <li key={`${e.entity}|${e.window}|${e.metric}`} className={focus?.includes(e.entity) ? "focus" : undefined}>
           <span>{e.label}</span>
           <strong>{formatEvidence(e)}</strong>
           <small>
@@ -583,7 +592,7 @@ export function InsightCard({
       </header>
       <h4>{insight.title}</h4>
       {!!insight.extra?.creatives?.length && (
-        <CreativeStrip insight={insight} list={insight.extra.creatives} compact={compact} />
+        <CreativeStrip insight={insight} list={insight.extra.creatives} compact={compact} focus={focus} />
       )}
       {insight.target && (
         <p className="insight-target">
@@ -678,14 +687,18 @@ function CreativeStrip({
   insight,
   list,
   compact,
+  focus,
 }: {
   insight: CampaignInsight;
   list: InsightCreative[];
   compact: boolean;
+  /** Os anúncios da linha da Plataforma: vêm primeiro, destacados. */
+  focus?: string[];
 }) {
   const [open, setOpen] = useState<number | null>(null);
   const [broken, setBroken] = useState<Set<string>>(() => new Set());
-  const shown = list.filter((c) => !broken.has(c.key));
+  const mine = (c: InsightCreative) => !!focus?.includes(c.entity);
+  const shown = list.filter((c) => !broken.has(c.key)).sort((a, b) => Number(mine(b)) - Number(mine(a)));
   if (!shown.length) return null;
   const visible = shown.slice(0, 3);
   const more = shown.length - visible.length;
@@ -694,7 +707,7 @@ function CreativeStrip({
     <button
       key={c.key}
       type="button"
-      className="insight-creative-thumb"
+      className={`insight-creative-thumb${mine(c) ? " focus" : ""}`}
       onClick={() => setOpen(k)}
       title={`${c.kind === "video" ? "Vídeo" : "Imagem"}: ${c.name}`}
       aria-label={`Ver o criativo ${c.name}`}
@@ -858,6 +871,186 @@ function CreativePreview({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Os insights na aba Plataforma: o índice das linhas e as ações, para o selo
+ * de cada linha, o contador das abas e o filtro "Com insights".
+ */
+type RowInsightsValue = {
+  index: InsightRowIndex;
+  handlers: Handlers;
+  platform: "meta" | "google";
+  only: boolean;
+  setOnly: (only: boolean) => void;
+};
+const RowInsightsContext = createContext<RowInsightsValue | null>(null);
+export function PlatformInsights({
+  state,
+  backend,
+  company,
+  ctx,
+  notify,
+  platform,
+  children,
+}: {
+  state: InsightsState;
+  backend: InsightsBackend;
+  company: string;
+  ctx: InsightContext;
+  notify: (message: string) => void;
+  platform: "meta" | "google";
+  children: ReactNode;
+}) {
+  const { handlers, dialogs } = useInsightActions(state, backend, company, ctx, notify);
+  const v = state.view;
+  const index = useMemo(() => insightRowIndex(v?.enabled && v.places.platform !== false ? v : null), [v]);
+  const [only, setOnly] = useState(false);
+  return (
+    <RowInsightsContext.Provider value={{ index, handlers, platform, only, setOnly }}>
+      {children}
+      {dialogs}
+    </RowInsightsContext.Provider>
+  );
+}
+/** O filtro "Com insights" (null: desligado ou sem insights na Plataforma). */
+export function useInsightRowFilter(): ((keys: string[]) => boolean) | null {
+  const v = useContext(RowInsightsContext);
+  const on = !!v?.only && !!v.index.own.size;
+  const index = v?.index;
+  return useMemo(
+    () =>
+      on && index
+        ? (keys: string[]) => {
+            const r = rowInsights(index, keys);
+            return r.own.length > 0 || r.below.length > 0;
+          }
+        : null,
+    [on, index],
+  );
+}
+/** A caixa "Com insights" da barra da Plataforma. */
+export function InsightRowToggle() {
+  const v = useContext(RowInsightsContext);
+  if (!v?.index.own.size) return null;
+  return (
+    <label className="mplat-check row-insights-toggle" title="Mostrar só as linhas com insights da MAVI (nelas ou nos itens de dentro)">
+      <Checkbox checked={v.only} onCheckedChange={(x) => v.setOnly(x === true)} />
+      <Lightbulb size={14} aria-hidden="true" /> Com insights
+    </label>
+  );
+}
+/** Quantos insights abertos há nos itens de um nível (as abas da Plataforma). */
+export function InsightLevelCount({ levels }: { levels: RowLevel[] }) {
+  const v = useContext(RowInsightsContext);
+  if (!v) return null;
+  const ids = new Set<string>();
+  for (const l of levels) for (const id of v.index.levels.get(l) ?? []) ids.add(id);
+  const open = [...v.index.own.values()].flat().filter((r) => ids.has(r.insight.id) && r.insight.status !== "applied");
+  const n = new Set(open.map((r) => r.insight.id)).size;
+  if (!n) return null;
+  const high = open.some((r) => r.insight.priority === "high");
+  return (
+    <span className={`row-insights-count${high ? " high" : ""}`} title={`${n} ${n === 1 ? "insight aberto" : "insights abertos"} da MAVI aqui`}>
+      <Lightbulb size={11} aria-hidden="true" />
+      {n}
+    </span>
+  );
+}
+
+/**
+ * O selo de uma linha da Plataforma: os insights abertos (cor do tipo), os
+ * aplicados (✓) e os dos itens de dentro; o clique abre o balão com os cards e
+ * as ações.
+ */
+export function RowInsightsBadge({ keys, name }: { keys: string[]; name: string }) {
+  const v = useContext(RowInsightsContext);
+  const [open, setOpen] = useState(false);
+  if (!v) return null;
+  const { own, below, levels } = rowInsights(v.index, keys);
+  if (!own.length && !below.length) return null;
+  const opened = own.filter((r) => r.insight.status !== "applied");
+  const applied = own.filter((r) => r.insight.status === "applied");
+  const top = opened[0];
+  const Icon = top ? KIND_ICONS[top.insight.kind] : Lightbulb;
+  const onlyCited = !!opened.length && opened.every((r) => r.role === "cited");
+  const where = belowText(levels, v.platform);
+  const label = [
+    opened.length && `${opened.length} ${opened.length === 1 ? "insight aberto" : "insights abertos"}`,
+    applied.length && `${applied.length} ${applied.length === 1 ? "aplicado" : "aplicados"}`,
+    below.length && `${below.length} ${where}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const card = (r: RowInsight) => (
+    <div key={r.insight.id} className="row-insights-item">
+      {r.role === "cited" && <p className="row-insights-role">Citado nos números deste insight</p>}
+      <InsightCard insight={r.insight} compact handlers={v.handlers} focus={keys} />
+    </div>
+  );
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="row-insights"
+          aria-label={`Insights da MAVI: ${label}`}
+          title={label}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {top && (
+            <span className={`row-insights-open kind-${top.insight.kind}${onlyCited ? " cited" : ""}`}>
+              <Icon size={12} aria-hidden="true" />
+              {opened.length} {opened.length === 1 ? "insight" : "insights"}
+            </span>
+          )}
+          {!!applied.length && (
+            <span className="row-insights-applied">
+              <Check size={12} aria-hidden="true" />
+              {opened.length ? applied.length : `${applied.length} ${applied.length === 1 ? "aplicado" : "aplicados"}`}
+            </span>
+          )}
+          {!!below.length && (
+            <span className="row-insights-below">
+              {!top && !applied.length && <Lightbulb size={12} aria-hidden="true" />}
+              {below.length} {where}
+            </span>
+          )}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="row-insights-pop" align="start" side="bottom" sideOffset={6} collisionPadding={16}>
+          <header>
+            <Lightbulb size={15} aria-hidden="true" />
+            <div>
+              <strong>Insights da MAVI</strong>
+              <small title={name}>{name}</small>
+            </div>
+            <Popover.Close className="icon-btn" aria-label="Fechar">
+              <X size={16} />
+            </Popover.Close>
+          </header>
+          <div className="row-insights-list">
+            {opened.map(card)}
+            {!!applied.length && (
+              <>
+                <h5>Aplicados</h5>
+                {applied.map(card)}
+              </>
+            )}
+            {!!below.length && (
+              <>
+                <h5>
+                  {below.length} {where}
+                </h5>
+                {below.map(card)}
+              </>
+            )}
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 

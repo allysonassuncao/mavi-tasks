@@ -18,6 +18,8 @@ import { Modal } from "./components";
 import { PanelChart } from "./DashboardCharts";
 import type { Display, PanelSpec } from "./dashboards";
 import type { AdCycle } from "./campaigns";
+import { InsightLevelCount, InsightRowToggle, RowInsightsBadge, useInsightRowFilter } from "./CampaignInsights";
+import { platformRowKeys, type RowLevel } from "./campaign-insights";
 import { DATE_PRESETS, cached, formatValue, presetRange, type DatePreset } from "./campaign-platform";
 import {
   AUCTION_COLUMNS,
@@ -127,6 +129,19 @@ export function GooglePlatform({
     }),
     [cycles, current],
   );
+  // Insights da MAVI na linha: a chave da visão; "total" nas campanhas do ciclo.
+  const insightKeys = useCallback(
+    (v: GoogleView, r: GoogleRow) => {
+      const level = INSIGHT_LEVEL[v];
+      if (!level) return [];
+      return platformRowKeys(level, r.id, {
+        name: r.name,
+        linked: linked.now.size ? linked.now.has(r.id) : linked.all.has(r.id),
+      });
+    },
+    [linked],
+  );
+  const insightFilter = useInsightRowFilter();
   const saved = useMemo(loadPrefs, []);
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const account = accounts.find((a) => a.id === accountId) ?? accounts[0];
@@ -254,7 +269,8 @@ export function GooglePlatform({
     const filtered = list.rows.filter(
       (r) =>
         (!q || `${r.name} ${r.sub ?? ""}`.toLocaleLowerCase("pt-BR").includes(q)) &&
-        (!onlyEnabled || r.enabled !== false),
+        (!onlyEnabled || r.enabled !== false) &&
+        (!insightFilter || insightFilter(insightKeys(view, r))),
     );
     const col = columns.find((c) => c.id === sort.column);
     return [...filtered].sort((a, b) => {
@@ -268,7 +284,7 @@ export function GooglePlatform({
     });
     // Columns change with the view; the sort names one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, view, search, onlyEnabled, sort, preset, custom]);
+  }, [list, view, search, onlyEnabled, sort, preset, custom, insightFilter, insightKeys]);
 
   const open = (r: GoogleRow) => {
     if (view === "campaigns") {
@@ -376,6 +392,7 @@ export function GooglePlatform({
                   }}
                 >
                   {label}
+                  {INSIGHT_LEVEL[id] && <InsightLevelCount levels={[INSIGHT_LEVEL[id]!]} />}
                 </button>
               ))}
             </div>
@@ -431,6 +448,7 @@ export function GooglePlatform({
                 Removidos
               </label>
             )}
+            {INSIGHT_LEVEL[view] && <InsightRowToggle />}
             <span className="mplat-toolbar-right">
               {view === "locations" && (
                 <Select aria-label="Tipo de local" value={geo} onValueChange={(v) => setGeo(v as typeof geo)}>
@@ -519,7 +537,7 @@ export function GooglePlatform({
                           </td>
                         )}
                         <td className="mplat-name-col gplat-name-col">
-                          <NameCell row={r} view={view} linked={linked} onOpen={() => open(r)} onDetail={DETAILABLE.includes(view) ? () => setDetail(r) : undefined} />
+                          <NameCell row={r} view={view} linked={linked} insightKeys={insightKeys(view, r)} onOpen={() => open(r)} onDetail={DETAILABLE.includes(view) ? () => setDetail(r) : undefined} />
                         </td>
                         <td>
                           <span className={`mplat-delivery ${r.status.tone}`}>
@@ -608,6 +626,17 @@ export function GooglePlatform({
 
 const formatCustomer = (id: string) => id.replace(/^(\d{3})(\d{3})(\d{4})$/, "$1-$2-$3");
 const shortDate = (d: string) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "");
+/** As visões que têm insights da MAVI (o nível das chaves). */
+const INSIGHT_LEVEL: Partial<Record<GoogleView, RowLevel>> = {
+  campaigns: "campaign",
+  ad_groups: "adset",
+  ads: "ad",
+  keywords: "keyword",
+  search_terms: "search_term",
+  age: "age",
+  gender: "gender",
+};
+
 function segmentLabel(kind: GoogleSegment | "", label: string) {
   if (kind === "date") return shortDate(label);
   if (kind === "week") return `Semana de ${shortDate(label)}`;
@@ -631,12 +660,15 @@ function NameCell({
   row,
   view,
   linked,
+  insightKeys,
   onOpen,
   onDetail,
 }: {
   row: GoogleRow;
   view: GoogleView;
   linked: { now: Set<string>; all: Set<string> };
+  /** As chaves da linha nos insights da MAVI. */
+  insightKeys: string[];
   onOpen: () => void;
   onDetail?: () => void;
 }) {
@@ -657,6 +689,7 @@ function NameCell({
         ) : (
           <span className="gplat-plain" title={row.name}>{row.name}</span>
         )}
+        {!!insightKeys.length && <RowInsightsBadge keys={insightKeys} name={row.name} />}
         {view === "ads" && row.preview && <AdPreview preview={row.preview} compact />}
         <span className="mplat-name-sub">
           {row.sub && view !== "ads" && <span>{row.sub}</span>}

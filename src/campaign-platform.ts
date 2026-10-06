@@ -964,10 +964,10 @@ export function demoPlatform(linked: string[] = []): PlatformBackend {
       const campaignRand = seeded(`${cid}${q.since}${q.until}`);
       const scale = paused ? 0.05 : 1 - ci * 0.18;
       DEMO_ADSETS.forEach((s, si) => {
-        const sid = `${cid.slice(0, 16)}${si}1`;
+        const sid = `${cid}${si}1`;
         if (q.level !== "campaign" && q.adsets?.length && !q.adsets.includes(sid)) return;
         DEMO_ADS.slice(0, 2 + ((ci + si) % 3)).forEach((a, ai) => {
-          const id = `${sid.slice(0, 17)}${ai}`;
+          const id = `${sid}${ai}`;
           const m = demoMetrics(seeded(`${id}${q.since}${q.until}`), days, c.goal, scale / 6);
           rows.push({
             id,
@@ -1120,7 +1120,7 @@ export function demoPlatform(linked: string[] = []): PlatformBackend {
       const sets = q.level === "campaign" ? DEMO_ADSETS : [DEMO_ADSETS[Number(q.id.slice(-2, -1))] ?? DEMO_ADSETS[0]];
       return wait({
         level: q.level,
-        adsets: sets.map((name, i) => demoAudience(q.level === "campaign" ? `${q.id.slice(0, 16)}${i}1` : q.id, name)),
+        adsets: sets.map((name, i) => demoAudience(q.level === "campaign" ? `${q.id}${i}1` : q.id, name)),
         estimated: sets.length,
         fetched_at: new Date().toISOString(),
       } satisfies PlatformAudience);

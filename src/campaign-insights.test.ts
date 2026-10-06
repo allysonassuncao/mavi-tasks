@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   basisLabel,
+  belowText,
   dayLabel,
   formatEvidence,
+  insightRowIndex,
   nextScheduled,
+  platformRowKeys,
+  rowInsights,
+  rowLevelOf,
   scheduleText,
   waitText,
   whenText,
+  type CampaignInsight,
   type InsightSchedule,
 } from "./campaign-insights";
 
@@ -99,5 +105,79 @@ describe("Fase 8: negativas para colar no Google Ads", () => {
         { term: "clínica grátis", match: "exact", spend: 30, clicks: 10, campaign: "Pesquisa", why: "" },
       ]),
     ).toBe('"vaga de emprego"\n[clínica grátis]');
+  });
+});
+
+describe("os insights na aba Plataforma", () => {
+  const ev = (entity: string) => ({ label: "x", value: 1, unit: "count" as const, window: "cycle" as const, entity, name: entity, metric: "results" });
+  const ins = (id: string, x: Partial<CampaignInsight>): CampaignInsight =>
+    ({
+      id,
+      run_id: "r",
+      last_seen_run: "r",
+      kind: "problem",
+      priority: "medium",
+      title: id,
+      body: "",
+      action: "",
+      evidence: [],
+      target: null,
+      source: "mavi",
+      money_basis: "net",
+      confidence: null,
+      status: "new",
+      seen_count: 1,
+      last_seen_at: "",
+      created_at: "",
+      ...x,
+    }) as CampaignInsight;
+  const parents = { "a:1": "s:1", "a:2": "s:1", "s:1": "c:1", "k:9": "s:2", "s:2": "c:1" };
+  const view = {
+    current: [
+      // Compara dois anúncios: alvo no a:1, citado no a:2.
+      ins("cmp", { target: { key: "a:1", level: "ad", name: "A1" }, evidence: [ev("a:1"), ev("a:2")], extra: { parents } }),
+      ins("kw", { priority: "high", target: { key: "k:9", level: "keyword", name: "kw" }, evidence: [ev("k:9")], extra: { parents } }),
+      // Sem alvo: a campanha toda; o público do Meta (g:<conjunto>:<faixa>) cai no conjunto.
+      ins("tot", { evidence: [ev("total"), ev("g:123:35-44|female")] }),
+      ins("neg", { evidence: [ev("total")], extra: { negatives: [{ term: " Vaga Emprego ", match: "exact", spend: 1, clicks: 1, campaign: "", why: "" }] } }),
+      ins("snz", { status: "snoozed", target: { key: "a:1", level: "ad", name: "A1" } }),
+    ],
+    applied: [ins("app", { status: "applied", target: { key: "a:1", level: "ad", name: "A1" }, evidence: [ev("a:1")] })],
+  };
+  const index = insightRowIndex(view);
+  const ids = (list: { insight: CampaignInsight; role: string }[]) => list.map((r) => `${r.insight.id}:${r.role}`);
+
+  it("as chaves das linhas: a da plataforma, o total nas vinculadas e o termo pelo texto", () => {
+    expect(platformRowKeys("campaign", "1", { linked: true })).toEqual(["c:1", "total"]);
+    expect(platformRowKeys("campaign", "2", { linked: false })).toEqual(["c:2"]);
+    expect(platformRowKeys("search_term", "g~vaga emprego~x", { name: "vaga emprego" })).toEqual([
+      "t:g~vaga emprego~x",
+      "term:vaga emprego",
+    ]);
+    expect(platformRowKeys("age", "AGE_RANGE_25_34")).toEqual(["g:age:AGE_RANGE_25_34"]);
+    expect(rowLevelOf("g:gender:MALE")).toBe("gender");
+    expect(rowLevelOf("b:7")).toBeNull();
+  });
+
+  it("alvo e citados; abertos antes dos aplicados; adiado fica de fora", () => {
+    expect(ids(rowInsights(index, ["a:1"]).own)).toEqual(["cmp:target", "app:target"]);
+    expect(ids(rowInsights(index, ["a:2"]).own)).toEqual(["cmp:cited"]);
+    expect(ids(rowInsights(index, ["s:123"]).own)).toEqual(["tot:cited"]);
+    expect(ids(rowInsights(index, ["term:vaga emprego"]).own)).toEqual(["neg:target"]);
+    expect(ids(rowInsights(index, ["c:1", "total"]).own)).toEqual(["tot:target", "neg:target"]);
+  });
+
+  it("a campanha e o conjunto contam os de dentro (sem repetir os dela)", () => {
+    const c = rowInsights(index, ["c:1", "total"]);
+    expect(ids(c.below).sort()).toEqual(["app:target", "cmp:target", "kw:target"]);
+    expect(belowText(c.levels, "google")).toBe("nos anúncios e palavras-chave");
+    expect(belowText(rowInsights(index, ["s:1"]).levels, "meta")).toBe("nos anúncios");
+    expect(rowInsights(index, ["a:1"]).below).toEqual([]);
+    expect([...index.levels.get("ad")!].sort()).toEqual(["app", "cmp"]);
+    expect([...index.levels.get("search_term")!]).toEqual(["neg"]);
+  });
+
+  it("sem a Plataforma ligada (ou sem dados), nada", () => {
+    expect(insightRowIndex(null).own.size).toBe(0);
   });
 });

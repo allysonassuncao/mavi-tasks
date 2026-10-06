@@ -519,8 +519,11 @@ export type Insight = {
   source: "rule" | "mavi";
   fingerprint: string;
   confidence?: number;
-  /** Fase 8: a lista de negativas para copiar; os criativos citados (com a miniatura). */
-  extra?: { negatives?: Negative[]; creatives?: InsightCreative[] };
+  /**
+   * Fase 8: a lista de negativas para copiar; os criativos citados (com a
+   * miniatura); de quem cada item citado é filho (a Plataforma soma nos de cima).
+   */
+  extra?: { negatives?: Negative[]; creatives?: InsightCreative[]; parents?: Record<string, string> };
 };
 
 const KINDS: InsightKind[] = ["highlight", "opportunity", "problem", "tracking"];
@@ -2424,7 +2427,7 @@ export async function analyse(
     notes.push(
       `${list.length - ranked.length} ${list.length - ranked.length === 1 ? "insight de menor prioridade ficou" : "insights de menor prioridade ficaram"} de fora pelo limite de ${maxInsights(m)} por análise.`,
     );
-  list = ranked;
+  list = withParents(ranked, entities);
   // A miniatura dos criativos que cada insight cita (nunca trava a análise).
   if (adCreatives.size)
     try {
@@ -2461,6 +2464,26 @@ export async function analyse(
     },
   });
   return { insights: list.length };
+}
+
+/**
+ * A Plataforma mostra o insight na linha de cada item citado (o alvo e os dos
+ * números) e conta nos de cima: de quem cada um é filho (anúncio › conjunto ›
+ * campanha; palavra-chave e termo › grupo).
+ */
+export function withParents(list: Insight[], entities: Map<string, Entity>) {
+  for (const i of list) {
+    const parents: Record<string, string> = {};
+    for (const key of new Set([...(i.target ? [i.target.key] : []), ...i.evidence.map((e) => e.entity)])) {
+      let e = entities.get(key);
+      for (let depth = 0; e?.parent && depth < 3; depth++) {
+        parents[e.key] = e.parent;
+        e = entities.get(e.parent);
+      }
+    }
+    if (Object.keys(parents).length) i.extra = { ...(i.extra ?? {}), parents };
+  }
+  return list;
 }
 
 /** Pega as análises da fila (duas por vez) até o tempo acabar. */

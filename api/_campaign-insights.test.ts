@@ -37,6 +37,7 @@ import {
   sampleOk,
   stepsOf,
   runCampaignInsights,
+  withParents,
   skipReason,
   totalEntity,
   stageDaysOf,
@@ -1092,5 +1093,30 @@ describe("antes × depois dos aplicados (Fase 4)", () => {
     expect(line).toContain("[aberto, prioridade alta] Conjunto caro → Pausar (CPA: R$ 42,50)");
     expect(line).toContain("[aplicado em 2026-09-27] Pausar o amplo — efeito em 7 dias: melhorou (custo por resultado -23,1%)");
     expect(line).toContain("[descartado pelo time: Restrição do cliente] Frete grátis");
+  });
+});
+
+describe("a Plataforma soma nos de cima", () => {
+  it("cada item citado leva de quem é filho (anúncio › conjunto › campanha)", () => {
+    const e = (key: string, level: Entity["level"], parent?: string): Entity => ({ key, level, name: key, ...(parent ? { parent } : {}), n: {} });
+    const entities = new Map(
+      [e("c:1", "campaign"), e("s:1", "adset", "c:1"), e("a:1", "ad", "s:1"), e("k:1", "keyword", "s:2"), e("total", "total")].map(
+        (x) => [x.key, x],
+      ),
+    );
+    const evidence = (entity: string) => ({ label: "x", value: 1, unit: "count", window: "cycle" as const, entity, name: entity, metric: "results" });
+    const base = { kind: "problem" as const, priority: "high" as const, title: "t", body: "", action: "", source: "mavi" as const, fingerprint: "f" };
+    const [a, b, c] = withParents(
+      [
+        { ...base, target: { key: "a:1", level: "ad", name: "a" }, evidence: [evidence("k:1")], extra: { negatives: [] } },
+        { ...base, target: null, evidence: [evidence("total")] },
+        { ...base, target: { key: "c:1", level: "campaign", name: "c" }, evidence: [] },
+      ],
+      entities,
+    );
+    // O conjunto do k:1 (s:2) não foi lido: fica só o primeiro elo.
+    expect(a.extra).toEqual({ negatives: [], parents: { "a:1": "s:1", "s:1": "c:1", "k:1": "s:2" } });
+    expect(b.extra).toBeUndefined();
+    expect(c.extra).toBeUndefined();
   });
 });

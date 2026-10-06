@@ -62,6 +62,8 @@ import {
 } from "./platform-crm";
 import { CrmLeadsLink, CrmNotice, CrmUnmatched, useCrmUtm } from "./PlatformCrm";
 import { AudienceList } from "./AudienceView";
+import { InsightLevelCount, InsightRowToggle, RowInsightsBadge, useInsightRowFilter } from "./CampaignInsights";
+import { platformRowKeys } from "./campaign-insights";
 import "./campaign-platform.css";
 
 /**
@@ -135,6 +137,15 @@ export function CampaignPlatform({
     const all = new Set(cycles.flatMap((y) => y.links.map((l) => l.campaign_id)));
     return { now, all };
   }, [cycles, current]);
+  // Insights da MAVI na linha: a chave da plataforma; "total" nas campanhas do ciclo.
+  const insightKeys = useCallback(
+    (r: PlatformRow) =>
+      platformRowKeys(r.level, r.id, {
+        linked: linked.now.size ? linked.now.has(r.campaign_id) : linked.all.has(r.campaign_id),
+      }),
+    [linked],
+  );
+  const insightFilter = useInsightRowFilter();
 
   const saved = useMemo(loadPrefs, []);
   const [account, setAccount] = useState(accounts[0]?.id ?? "");
@@ -296,7 +307,8 @@ export function CampaignPlatform({
         (filter === "all" ||
           (filter === "active"
             ? r.delivery.tone === "on"
-            : (r.metrics.impressions ?? 0) > 0)),
+            : (r.metrics.impressions ?? 0) > 0)) &&
+        (!insightFilter || insightFilter(insightKeys(r))),
     );
     const col = columnById.get(sort.column) ?? columnById.get("spend")!;
     return [...filtered].sort((a, b) => {
@@ -308,7 +320,7 @@ export function CampaignPlatform({
           : (va as number) - (vb as number);
       return sort.desc ? -cmp : cmp;
     });
-  }, [list, search, filter, sort, currency]);
+  }, [list, search, filter, sort, currency, insightFilter, insightKeys]);
 
   const selectedHere = selected[level];
   const toggle = (id: string) =>
@@ -490,6 +502,7 @@ export function CampaignPlatform({
             <Icon size={17} aria-hidden="true" />
             <span>
               {levelLabel[l][0]}
+              <InsightLevelCount levels={[l]} />
               {l !== level && levelCount(l) > 0 && (
                 <small>
                   {" "}
@@ -543,6 +556,7 @@ export function CampaignPlatform({
           />
           Arquivados
         </label>
+        <InsightRowToggle />
         <span className="mplat-toolbar-right">
           <span className="mplat-labeled">
             <Columns3 size={15} aria-hidden="true" />
@@ -688,6 +702,7 @@ export function CampaignPlatform({
                           >
                             {r.name}
                           </button>
+                          <RowInsightsBadge keys={insightKeys(r)} name={r.name} />
                           <span className="mplat-name-sub">
                             {r.level !== "campaign" && (
                               <span title="Campanha">{r.campaign_name}</span>

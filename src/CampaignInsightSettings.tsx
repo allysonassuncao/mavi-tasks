@@ -260,6 +260,19 @@ export function CampaignInsightSettings({
           </span>
         </label>
         <label className="cins-check">
+          <Checkbox
+            checked={draft.show_platform !== false}
+            onCheckedChange={(v) => set({ show_platform: v === true })}
+          />
+          <span>
+            <strong>Na aba Plataforma</strong>
+            <small>
+              Um selo na linha de cada campanha, conjunto, anúncio, palavra-chave ou termo citado (abre o insight com as
+              ações), contadores nas abas e o filtro "Com insights".
+            </small>
+          </span>
+        </label>
+        <label className="cins-check">
           <Checkbox checked={draft.show_badge} onCheckedChange={(v) => set({ show_badge: v === true })} />
           <span>
             <strong>Selo na lista de Campanhas</strong>

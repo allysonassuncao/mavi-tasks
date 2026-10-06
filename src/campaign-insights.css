@@ -1535,3 +1535,177 @@
     max-width: 100%;
   }
 }
+
+/* ------------------------------------------------------------ na aba Plataforma */
+/* O selo na linha: abertos (cor do tipo), aplicados (✓) e os de dentro. */
+.row-insights {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 1px 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+.row-insights > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: filter 0.15s ease;
+}
+.row-insights:hover > span,
+.row-insights:focus-visible > span {
+  filter: brightness(0.95);
+}
+.row-insights:focus-visible {
+  outline: 2px solid #4f8fd6;
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+.row-insights-open {
+  font-weight: 700;
+  background: #efe8f8;
+  color: #5b3d8a;
+  border: 1px solid transparent;
+}
+.row-insights-open.kind-highlight {
+  background: #eaf4dc;
+  color: #3f6a17;
+}
+.row-insights-open.kind-opportunity {
+  background: #e4effb;
+  color: #245d9c;
+}
+.row-insights-open.kind-problem {
+  background: #fdeedb;
+  color: #8f520b;
+}
+.row-insights-open.kind-tracking {
+  background: #fde6e4;
+  color: #a8382f;
+}
+/* Só citado nos números (o insight é sobre outro item): contorno, sem fundo. */
+.row-insights-open.cited {
+  background: #fff;
+  border-color: currentColor;
+  border-style: dashed;
+}
+.row-insights-applied {
+  background: #f1f3f1;
+  color: #5d6a61;
+  font-weight: 600;
+}
+.row-insights-below {
+  color: #6b766e;
+  background: #f6f7f5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .row-insights > span {
+    transition: none;
+  }
+}
+
+/* O balão com os cards. */
+.row-insights-pop {
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(70vh, 640px, var(--radix-popover-content-available-height, 70vh));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 14px 40px rgba(20, 30, 25, 0.18);
+  overflow: hidden;
+}
+.row-insights-pop > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: #5b3d8a;
+}
+.row-insights-pop > header div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.row-insights-pop > header strong {
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+.row-insights-pop > header small {
+  font-size: 0.72rem;
+  color: var(--muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.row-insights-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.row-insights-list h5 {
+  margin: 4px 0 -2px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #7c877f;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.row-insights-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.row-insights-role {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+/* O contador nas abas (Meta) e no menu de visões (Google). */
+.row-insights-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #efe8f8;
+  color: #5b3d8a;
+  font-size: 0.66rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.row-insights-count.high {
+  background: #fde8e6;
+  color: #b0433a;
+}
+.row-insights-toggle svg {
+  color: #7a5bb0;
+}
+/* No balão da Plataforma: o item da linha dentro do insight. */
+.insight-creative-thumb.focus {
+  border-color: #7a5bb0;
+  box-shadow: 0 0 0 2px #7a5bb055;
+}
+.insight-evidence li.focus {
+  background: #f1ebfa;
+  box-shadow: inset 2px 0 0 #7a5bb0;
+}
