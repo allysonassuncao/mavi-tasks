@@ -259,7 +259,7 @@ await check("só administradores leem e salvam a configuração", async () => {
   await as(admin);
   const jobs = await rpc("job_alerts", [A]);
   assert.equal(jobs[0].job, "whatsapp_sweep");
-  assert.equal(jobs.length, 12);
+  assert.equal(jobs.length, 13);
   const w = jobs[0];
   assert.deepEqual(w.settings, {
     active: true,

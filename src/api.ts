@@ -1394,7 +1394,9 @@ export type LiveChange =
       version?: number;
     }
   /** Radar pessoal: as situações destas pessoas mudaram (a MAVI leu ou alguém agiu). */
-  | { kind: "personal_radar"; people: string[] };
+  | { kind: "personal_radar"; people: string[] }
+  /** Customer Success: squads, planilha, leitura ou ligação de clientes. */
+  | { kind: "cs"; scope: "squads" | "settings" | "sync" | "clients" };
 
 /**
  * Whether a task notice concerns the person: always for leaders (they see

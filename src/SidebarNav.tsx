@@ -377,6 +377,16 @@ export function SidebarNav({
               to: { page: "settings", hash: "config-equipes" },
             },
             {
+              key: "settings-squads",
+              label: "Squads",
+              to: { page: "settings", hash: "config-squads" },
+            },
+            {
+              key: "settings-cs",
+              label: "Customer Success",
+              to: { page: "settings", hash: "config-cs" },
+            },
+            {
               key: "settings-templates",
               label: "Templates de tarefa",
               to: { page: "settings", hash: "config-templates" },

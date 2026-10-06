@@ -78,6 +78,7 @@
     "test:db:templates": "node scripts/test-task-templates.mjs",
     "test:db:assign-team": "node scripts/test-assign-to-team.mjs",
     "test:db:product-teams": "node scripts/test-product-teams.mjs",
+    "test:db:customer-success": "node scripts/test-customer-success.mjs",
     "test:db:bulk": "node scripts/test-task-bulk.mjs",
     "test:db:recurrence": "node scripts/test-task-recurrence.mjs",
     "test:db:task-audio": "node scripts/test-task-audio.mjs",

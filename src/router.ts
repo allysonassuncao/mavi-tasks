@@ -103,6 +103,8 @@ export const SETTINGS_TABS = [
   "config-templates",
   "config-prazos",
   "config-sugestoes",
+  "config-squads",
+  "config-cs",
   "config-api",
 ] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];

@@ -266,6 +266,12 @@ const ScheduleNavigation = lazy(() =>
   import("./TaskSchedule").then((m) => ({ default: m.ScheduleNavigation })),
 );
 const Reports = lazy(() => import("./Reports"));
+const CsSquadsPanel = lazy(() =>
+  import("./CsSquads").then((m) => ({ default: m.CsSquadsPanel })),
+);
+const CsSettingsPanel = lazy(() =>
+  import("./CsSettings").then((m) => ({ default: m.CsSettingsPanel })),
+);
 const McpPage = lazy(() =>
   import("./McpPage").then((m) => ({ default: m.McpPage })),
 );
@@ -1671,6 +1677,11 @@ export default function App() {
         // Financeiro › Mídia listens for its own notices.
         if (change.kind === "media") {
           window.dispatchEvent(new CustomEvent("mavi:media", { detail: change }));
+          return;
+        }
+        // Equipe e configurações › Squads e Customer Success.
+        if (change.kind === "cs") {
+          window.dispatchEvent(new CustomEvent("mavi:cs", { detail: change }));
           return;
         }
         // Tutoriais listens for its own notices.
@@ -4551,6 +4562,8 @@ export default function App() {
                           data.dueRules?.length ?? 0,
                         ],
                         ["config-sugestoes", "Sugestões", null],
+                        ["config-squads", "Squads", null],
+                        ["config-cs", "Customer Success", null],
                         ...(isAdmin
                           ? [["config-api", "Chaves de API", null]]
                           : []),
@@ -4890,6 +4903,29 @@ export default function App() {
                         mutate={mutate}
                         notify={notify}
                       />
+                    )}
+                    {settingsView === "config-squads" && (
+                      <Suspense fallback={<Loading compact />}>
+                        <CsSquadsPanel
+                          key={company}
+                          data={data}
+                          company={company}
+                          isAdmin={isAdmin}
+                          demo={demo}
+                          notify={notify}
+                        />
+                      </Suspense>
+                    )}
+                    {settingsView === "config-cs" && (
+                      <Suspense fallback={<Loading compact />}>
+                        <CsSettingsPanel
+                          key={company}
+                          data={data}
+                          company={company}
+                          demo={demo}
+                          notify={notify}
+                        />
+                      </Suspense>
                     )}
                     {settingsView === "config-api" && (
                       <ApiKeysPanel

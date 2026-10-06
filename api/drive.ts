@@ -55,6 +55,7 @@ import { handleTaskTitle } from "./_task-title.js";
 import { handleTaskSearch } from "./_task-search.js";
 import { handleRadarSuggest } from "./_radar-link.js";
 import { agentEnv, handleAgents } from "./_agents.js";
+import { handleCsSync } from "./_cs-sync.js";
 import {
   handleTaskAudioCleanup,
   taskAudioCleanupEnv,
@@ -509,6 +510,10 @@ export default async function handler(
         taskAudioCleanupEnv(driveEnv()),
         { fetch },
       );
+    // Customer Success: a leitura da planilha mestre (o agendamento ou um
+    // administrador/gestor em "Sincronizar agora").
+    else if (action === "cs-sync")
+      result = await handleCsSync(body, authorization, driveEnv(), fetch);
     // Agente Conversacional: a leitura das VPS do n8n (o agendamento ou um
     // administrador), reler um fluxo e publicar um prompt.
     else if (action.startsWith("agent-"))
