@@ -20,6 +20,7 @@ import { navigate, taskUrl } from "./router";
 import { appPath } from "./temperature";
 import { sourceUrl } from "./ai";
 import type { FormPreset } from "./forms";
+import { serializeDescription, type RichNode } from "./rich-text";
 import {
   CONFIDENCE_LABEL,
   LIKE_TAG_LABEL,
@@ -135,15 +136,20 @@ export function InlineAsk({
   );
 }
 
-const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
 /** O formulário de tarefa preenchido com a sugestão da MAVI (a descrição leva o pedido do cliente). */
 export function taskPreset(item: PersonalItem, t: TaskSuggestion, onCreated: (task: string) => void): FormPreset {
   const quote = item.mentions?.filter((m) => m.role === "client").slice(-1)[0];
-  const description = [
-    t.description ? `<p>${esc(t.description).replace(/\n/g, "<br>")}</p>` : "",
-    quote ? `<p><em>${esc(quote.speaker)} no grupo "${esc(item.group.title)}": “${esc(quote.quote)}”</em></p>` : "",
-  ].join("");
+  const paragraph = (text: string, marks: RichNode["marks"] = []): RichNode => ({
+    type: "paragraph",
+    content: text ? [{ type: "text", text, marks }] : [],
+  });
+  const content: RichNode[] = [
+    ...(t.description ? t.description.split("\n").map((line) => paragraph(line)) : []),
+    ...(quote
+      ? [paragraph(`${quote.speaker} no grupo "${item.group.title}": “${quote.quote}”`, [{ type: "italic" }])]
+      : []),
+  ];
+  const description = serializeDescription({ type: "doc", content });
   return {
     contract: t.contract_id,
     title: t.title,

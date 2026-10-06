@@ -834,8 +834,7 @@ export function TaskCreateForm({
                 key={formKey}
                 defaultValue={
                   formKey === 0
-                    ? initialDescription ||
-                      (initialTitle ? `<p>${escapeHtml(initialTitle)}</p>` : "")
+                    ? initialDescription || initialTitle || ""
                     : ""
                 }
                 company={company}
@@ -1198,11 +1197,6 @@ async function taskTitle(input: {
     return safe;
   }
 }
-
-const escapeHtml = (text: string) =>
-  text.replace(/[&<>"]/g, (c) =>
-    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&quot;",
-  );
 
 /**
  * What a repetition will do, from today: when the first copy opens and its
