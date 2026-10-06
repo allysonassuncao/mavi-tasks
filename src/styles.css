@@ -22475,9 +22475,11 @@ button.copilot-chip:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  align-self: flex-end;
+  flex: 0 1 auto;
+  min-width: 0;
   width: fit-content;
-  margin: 0 0 -4px auto;
+  /* No cabeçalho do modal: encostado à direita, antes do fechar. */
+  margin: 0 0 0 auto;
   padding: 6px 11px;
   border: 1px solid color-mix(in srgb, var(--tone) 35%, #fff);
   border-radius: 999px;
@@ -22492,6 +22494,28 @@ button.copilot-chip:hover {
 }
 .copilot-badge:hover {
   filter: brightness(0.97);
+}
+.copilot-badge > svg {
+  flex-shrink: 0;
+}
+.copilot-badge-text,
+.copilot-badge-short {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.copilot-badge-short {
+  display: none;
+}
+/* O selo leva ao painel: o cabeçalho fixo do modal não cobre o topo dele. */
+.modal .copilot {
+  scroll-margin-top: 76px;
+}
+/* Com o selo, o minimizar fica colado nele (não divide o espaço). */
+.modal-head .copilot-badge + .modal-head-action {
+  margin-left: 0;
+}
+.modal-head:has(.copilot-badge) h2 {
+  flex-shrink: 0;
 }
 .copilot-badge.tone-ok {
   --tone: #2f8a5b;
@@ -22517,8 +22541,14 @@ button.copilot-chip:hover {
 }
 @media (max-width: 600px) {
   .copilot-badge {
-    width: 100%;
-    justify-content: center;
+    padding: 5px 9px;
+    font-size: 0.74rem;
+  }
+  .copilot-badge-text {
+    display: none;
+  }
+  .copilot-badge-short {
+    display: inline;
   }
 }
 @media (max-width: 860px) {

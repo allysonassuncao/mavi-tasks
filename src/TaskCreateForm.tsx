@@ -614,6 +614,7 @@ export function TaskCreateForm({
       onClose={close}
       busy={saving || editorUploading}
       className={copilotOn ? "with-copilot" : ""}
+      actions={copilotOn && <CopilotBadge state={copilot} />}
     >
       <div className="copilot-layout">
         <form
@@ -1108,7 +1109,6 @@ export function TaskCreateForm({
               {error}
             </p>
           )}
-          {copilotOn && <CopilotBadge state={copilot} />}
           <div className="form-footer quick-task-footer">
             {!uploads.current.taskId && (
               <label className="checkbox-label create-another">

@@ -1677,17 +1677,20 @@ export function TaskDetail({
       wide
       hidden={hidden}
       actions={
-        onMinimize && (
-          <button
-            type="button"
-            className="icon-btn modal-head-action"
-            onClick={onMinimize}
-            aria-label="Minimizar"
-            title="Minimizar: a tarefa fica no rodapé enquanto você navega pelo sistema"
-          >
-            <Minus size={20} />
-          </button>
-        )
+        <>
+          {copilotOn && <CopilotBadge state={copilot} />}
+          {onMinimize && (
+            <button
+              type="button"
+              className="icon-btn modal-head-action"
+              onClick={onMinimize}
+              aria-label="Minimizar"
+              title="Minimizar: a tarefa fica no rodapé enquanto você navega pelo sistema"
+            >
+              <Minus size={20} />
+            </button>
+          )}
+        </>
       }
     >
       <div
@@ -2143,7 +2146,6 @@ export function TaskDetail({
                     <small>{PRIORITY_RULE}</small>
                   )}
                 </label>
-                {copilotOn && <CopilotBadge state={copilot} />}
                 <div className="form-footer">
                   <Button
                     type="button"

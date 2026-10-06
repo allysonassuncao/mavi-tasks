@@ -538,8 +538,9 @@ function useFlash(key: string) {
 }
 
 /**
- * O selo ao lado do botão de criar/salvar: o que a MAVI achou, sem precisar
- * olhar o painel. Clicar leva ao painel (no celular ele fica embaixo).
+ * O selo no cabeçalho do formulário: o que a MAVI achou, à vista desde o
+ * topo, sem precisar olhar o painel. Clicar leva ao painel (no celular ele
+ * fica embaixo do formulário).
  */
 export function CopilotBadge({ state }: { state: CopilotState }) {
   const v = state.verdict;
@@ -557,6 +558,14 @@ export function CopilotBadge({ state }: { state: CopilotState }) {
       : tone === "attention"
         ? `MAVI: ${count} ${count === 1 ? "ponto" : "pontos"} para revisar`
         : "MAVI: nada a mudar";
+  // No celular, o cabeçalho é estreito: a versão curta.
+  const short = state.reviewing
+    ? "Conferindo…"
+    : tone === "ok"
+      ? "Completa"
+      : tone === "attention"
+        ? `${count} para revisar`
+        : "Nada a mudar";
   const Icon =
     tone === "working"
       ? Sparkles
@@ -571,18 +580,22 @@ export function CopilotBadge({ state }: { state: CopilotState }) {
       className={`copilot-badge tone-${tone}`}
       onClick={(e) =>
         e.currentTarget
-          .closest("form")
-          ?.parentElement?.querySelector(".copilot")
+          .closest("dialog")
+          ?.querySelector(".copilot")
           ?.scrollIntoView({ behavior: "smooth", block: "start" })
       }
-      title="Ver o Assistente MAVI"
+      title={`${label} · ver o Assistente MAVI`}
+      aria-label={label}
     >
       <Icon
         size={14}
         className={tone === "working" ? "copilot-sparkle" : undefined}
         aria-hidden="true"
       />
-      {label}
+      <span className="copilot-badge-text">{label}</span>
+      <span className="copilot-badge-short" aria-hidden="true">
+        {short}
+      </span>
     </button>
   );
 }
