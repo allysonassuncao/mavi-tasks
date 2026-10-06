@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Copy,
   Globe,
+  HeartPulse,
   LayoutDashboard,
   Link2,
   Lock,
@@ -83,6 +84,11 @@ import { loadTemperatureConfig } from "./temperature";
 import { loadThemeOptions } from "./radar";
 import { DashboardAssistant } from "./DashboardAssistant";
 import { applyProposal, type ProposalItem } from "./dashboard-mavi";
+import { createCsDashboard } from "./cs-dashboard";
+import { syncCsNow } from "./cs";
+
+// O painel de CS (motor + telas) só carrega quando um dashboard de CS abre.
+const CsDashboard = lazy(() => import("./CsDashboard").then((m) => ({ default: m.CsDashboard })));
 
 type Notify = (message: string) => void;
 
@@ -113,6 +119,23 @@ function demoList(company: string, user: string): Dashboard[] {
         variables: { range: { preset: "30d" }, filters: {} },
         link_access: "none",
         share_token: "demo",
+        has_password: false,
+        version: 1,
+        created_by: user,
+        updated_by: user,
+        created_at: now,
+        updated_at: now,
+      },
+      {
+        id: "demo-cs",
+        company_id: company,
+        name: "CS Make",
+        description: "Customer Success: faturamento, saúde, trial, churn, previsibilidade, recebimento e ranking dos squads.",
+        panels: [],
+        variables: {},
+        kind: "cs",
+        link_access: "none",
+        share_token: "demo-cs",
         has_password: false,
         version: 1,
         created_by: user,
@@ -375,7 +398,7 @@ function DashboardList({
                   onClick={() => onOpen(d.id)}
                 >
                   <span className="dash-card-icon" aria-hidden="true">
-                    <LayoutDashboard size={18} />
+                    {d.kind === "cs" ? <HeartPulse size={18} /> : <LayoutDashboard size={18} />}
                   </span>
                   <span className="dash-card-text">
                     <strong>{d.name}</strong>
@@ -395,8 +418,10 @@ function DashboardList({
                     </span>
                   )}
                   <small>
-                    {d.panels.length}{" "}
-                    {d.panels.length === 1 ? "painel" : "painéis"} · editado por{" "}
+                    {d.kind === "cs"
+                      ? "Customer Success"
+                      : `${d.panels.length} ${d.panels.length === 1 ? "painel" : "painéis"}`}{" "}
+                    · editado por{" "}
                     <span data-person={d.updated_by ?? d.created_by ?? undefined}>
                       {who(d.updated_by ?? d.created_by)}
                     </span>{" "}
@@ -405,6 +430,7 @@ function DashboardList({
                   </small>
                   {canEdit && (
                   <span className="dash-card-actions">
+                    {d.kind !== "cs" && (
                     <Button
                       className="icon-btn"
                       aria-label={`Duplicar ${d.name}`}
@@ -413,6 +439,7 @@ function DashboardList({
                     >
                       <Copy size={15} />
                     </Button>
+                    )}
                     {(isLeader || d.created_by === user) && (
                       <Button
                         className="icon-btn danger"
@@ -460,8 +487,17 @@ function DashboardList({
       {creating && (
         <CreateDashboard
           noNotices={!isLeader}
+          canCs={isLeader}
           onClose={() => setCreating(false)}
           onCreate={async (name, description, template) => {
+            if (template === "cs") {
+              const saved = demo
+                ? demoSave(company, user, { name, description, panels: [], variables: {}, kind: "cs" })
+                : ((await createCsDashboard(company, name, description)) as Dashboard);
+              notify("Painel de Customer Success criado.");
+              onOpen(saved.id);
+              return;
+            }
             const d = {
               name,
               description,
@@ -503,14 +539,18 @@ type Template =
   | "notices"
   | "temperature"
   | "radar"
+  | "cs"
   | null;
 function CreateDashboard({
   onClose,
   onCreate,
   noNotices = false,
+  canCs = false,
 }: {
   /** Collaborators: the Mural de avisos has no client, so no template. */
   noNotices?: boolean;
+  /** Administradores e gestores: o painel pronto de Customer Success. */
+  canCs?: boolean;
   onClose: () => void;
   onCreate: (
     name: string,
@@ -661,6 +701,22 @@ function CreateDashboard({
               mais itens em aberto.
             </small>
           </label>
+          {canCs && (
+          <label className={template === "cs" ? "selected" : ""}>
+            <input
+              type="radio"
+              name="template"
+              checked={template === "cs"}
+              onChange={() => setTemplate("cs")}
+            />
+            <strong>Painel pronto: Customer Success (CS Make)</strong>
+            <small>
+              O dash de CS completo: faturamento e meta por squad, saúde da
+              carteira, trial, churn, previsibilidade, recebimento do mês e
+              ranking dos squads, com os dados da planilha de CS.
+            </small>
+          </label>
+          )}
           <label className={template === null ? "selected" : ""}>
             <input
               type="radio"
@@ -986,6 +1042,57 @@ function DashboardView({
       </div>
     );
   if (!dash) return <Loading variant="chart" />;
+
+  // O painel pronto de Customer Success: a tela própria, com o
+  // compartilhamento de Dashboards.
+  if (dash.kind === "cs") {
+    const { label: csLinkLabel, Icon: CsLinkIcon } = linkBadge[dash.link_access];
+    return (
+      <>
+        <Suspense fallback={<Loading variant="chart" />}>
+          <CsDashboard
+            source={demo ? { kind: "demo" } : { kind: "app", dashboard: dash.id }}
+            onSync={isLeader && !demo ? async () => void (await syncCsNow(company)) : undefined}
+            head={
+              <div className="dash-view-head">
+                {onBack && (
+                  <Button className="icon-btn" aria-label="Voltar aos dashboards" title="Voltar" onClick={onBack}>
+                    <ArrowLeft size={18} />
+                  </Button>
+                )}
+                <div className="dash-view-title">
+                  <h2>{dash.name}</h2>
+                  {dash.description && <p>{dash.description}</p>}
+                </div>
+                {editor && (
+                  <div className="dash-view-actions">
+                    <span className={`visibility-badge ${dash.link_access === "public" ? "public" : ""}`}>
+                      <CsLinkIcon size={12} /> {csLinkLabel}
+                    </span>
+                    <Button className="btn secondary" onClick={() => setSharing(true)} disabled={!saved}>
+                      <Share2 size={15} /> Compartilhar
+                    </Button>
+                  </div>
+                )}
+              </div>
+            }
+          />
+        </Suspense>
+        {sharing && saved && (
+          <ShareDialog
+            dashboard={saved}
+            data={data}
+            demo={demo}
+            notify={notify}
+            internalUrl={internalUrl(saved.id)}
+            onClose={() => setSharing(false)}
+            onSaved={(d) => setSaved(d)}
+            onDeleted={onDeleted}
+          />
+        )}
+      </>
+    );
+  }
 
   const setPanels = (panels: Panel[]) =>
     setDraft((d) => (d ? { ...d, panels } : d));

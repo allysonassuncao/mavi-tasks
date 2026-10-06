@@ -155,6 +155,8 @@ export type Dashboard = {
   has_password: boolean;
   /** Migration 20270224090000: the link also shows each panel's records. */
   link_records?: boolean;
+  /** Migration 20270522090000: 'cs' = the ready Customer Success panel (no panels). */
+  kind?: "grid" | "cs";
   version: number;
   created_by: string;
   updated_by: string | null;

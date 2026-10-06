@@ -772,7 +772,7 @@ const db = () => {
   return supabase;
 };
 const DASHBOARD_COLUMNS =
-  "id,company_id,name,description,panels,variables,link_access,share_token,has_password,link_records,version,created_by,updated_by,created_at,updated_at";
+  "id,company_id,name,description,panels,variables,link_access,share_token,has_password,link_records,kind,version,created_by,updated_by,created_at,updated_at";
 
 export async function listDashboards(company: string): Promise<Dashboard[]> {
   const { data, error } = await db()
@@ -1052,6 +1052,8 @@ export type SharedDashboard =
       company: string;
       /** The link shows each panel's records. */
       records?: boolean;
+      /** 'cs': the Customer Success panel (migration 20270522090000). */
+      kind?: "grid" | "cs";
     };
 export async function sharedDashboard(
   token: string,

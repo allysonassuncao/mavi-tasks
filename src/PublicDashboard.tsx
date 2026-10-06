@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Lock, RefreshCw } from "lucide-react";
 import { Button, Input, Loading } from "./ui";
 import { DashboardCanvas, type PanelLoader } from "./DashboardCanvas";
@@ -15,6 +22,11 @@ import {
   type DashboardRange,
   type SharedDashboard,
 } from "./dashboards";
+
+// O painel pronto de Customer Success (tipo 'cs', migração 20270522090000).
+const CsDashboard = lazy(() =>
+  import("./CsDashboard").then((m) => ({ default: m.CsDashboard })),
+);
 
 /**
  * A dashboard opened by its share link (/painel/<token>), without the app
@@ -152,6 +164,26 @@ export function PublicDashboard({ token }: { token: string }) {
             Abrir dashboard
           </Button>
         </form>
+      </main>
+    );
+
+  if (state.kind === "cs")
+    return (
+      <main className="public-dashboard">
+        <Suspense fallback={<Loading variant="chart" />}>
+          <CsDashboard
+            source={{ kind: "link", token, password: accepted }}
+            head={
+              <header className="public-dashboard-head">
+                <div>
+                  <small>{state.company}</small>
+                  <h1>{state.name}</h1>
+                  {state.description && <p>{state.description}</p>}
+                </div>
+              </header>
+            }
+          />
+        </Suspense>
       </main>
     );
 
