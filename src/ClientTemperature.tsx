@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button, Checkbox, Loading, Select, SelectOption, Textarea } from "./ui";
 import { Empty } from "./components";
+import { TemperatureTimeline } from "./TemperatureTimeline";
 import {
   appPath,
   bandIndex,
@@ -47,8 +48,8 @@ import {
 /**
  * Drive › cliente › Termômetro: a temperatura da relação com o cliente, que
  * o Jev lê nas reuniões gravadas e nos grupos de WhatsApp — a nota de hoje
- * na escala da agência, a explicação da MAVI, os indicadores, o histórico e
- * as leituras que entraram no cálculo (cada uma abre a reunião ou a
+ * na escala da agência, a explicação da MAVI, os indicadores, o histórico, a
+ * linha do tempo (TemperatureTimeline) e as leituras que entraram no cálculo (cada uma abre a reunião ou a
  * conversa). Quem vê é quem vê o cliente no Drive. Líderes e supervisores
  * das equipes do cliente corrigem as leituras, retiram a que não conta e
  * tiram um sinal de alerta; a MAVI aprende com as correções.
@@ -262,6 +263,10 @@ export function ClientTemperature({
             </section>
           )}
         </>
+      )}
+
+      {(data.history?.length ?? 0) > 0 && (
+        <TemperatureTimeline company={company} client={client} data={data} />
       )}
 
       {data.signals.length > 0 && (

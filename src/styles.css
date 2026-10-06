@@ -25619,6 +25619,391 @@ label.drive-pick-file {
   margin-top: 2px;
 }
 
+/* Linha do tempo: o pulso do período, os meses e os dias que mexeram. */
+.thermo-tl-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.thermo-tl-stats > div,
+.thermo-tl-stats > button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid #edf0f0;
+  background: #fafbfb;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  min-width: 0;
+}
+.thermo-tl-stats > button {
+  cursor: pointer;
+}
+.thermo-tl-stats > button:hover {
+  border-color: #d5dcdc;
+  background: #fff;
+}
+.thermo-tl-stats span {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.thermo-tl-stats strong {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+.thermo-tl-stats small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+.thermo-tl-num.up {
+  color: #3f7b2c;
+}
+.thermo-tl-num.down {
+  color: #c0453f;
+}
+.thermo-tl-num.flat {
+  color: var(--muted);
+}
+.thermo-tl-pulse svg {
+  display: block;
+  width: 100%;
+  height: 72px;
+  cursor: pointer;
+}
+.thermo-tl-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  margin: 14px 0 10px;
+}
+.thermo-tl-tools .drive-view button small {
+  font-weight: 400;
+  opacity: 0.75;
+}
+.thermo-tl-order {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 0;
+  background: none;
+  color: #4c5a5b;
+  font: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.thermo-tl-order:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.thermo-tl-list,
+.thermo-tl-list ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.thermo-tl-month + .thermo-tl-month,
+.thermo-tl-mark + .thermo-tl-month {
+  margin-top: 6px;
+}
+.thermo-tl-month-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #edf0f0;
+  border-radius: 8px;
+  background: #fafbfb;
+  font: inherit;
+  font-size: 0.85rem;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.thermo-tl-month-head:hover {
+  background: #f3f6f6;
+}
+.thermo-tl-month-head small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.thermo-tl-month-mini {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+  height: 14px;
+  max-width: 45%;
+  overflow: hidden;
+}
+.thermo-tl-month-mini i {
+  display: block;
+  width: 4px;
+  height: 6px;
+  border-radius: 2px;
+  background: #c5cccc;
+  flex-shrink: 0;
+}
+.thermo-tl-month-mini i.up {
+  height: 14px;
+  background: #3f9a4a;
+}
+.thermo-tl-month-mini i.down {
+  height: 14px;
+  background: #d0504a;
+}
+.thermo-tl-month > ol {
+  padding: 6px 0 2px;
+}
+.thermo-tl-event,
+.thermo-tl-mark {
+  --band: #a3acab;
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px 0;
+}
+/* O trilho, da cor da faixa em que o dia terminou. */
+.thermo-tl-event::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--band) 45%, #e6eaea);
+}
+.thermo-tl-dot {
+  position: relative;
+  z-index: 1;
+  justify-self: center;
+  width: 12px;
+  height: 12px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--band);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--band) 60%, #fff);
+}
+.thermo-tl-event.big .thermo-tl-dot {
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+}
+.thermo-tl-mark {
+  font-size: 0.82rem;
+  color: #4c5a5b;
+}
+.thermo-tl-mark > div {
+  padding-top: 3px;
+}
+.thermo-tl-mark.start .thermo-tl-dot {
+  background: #fff;
+  box-shadow: 0 0 0 2px #a3acab;
+}
+.thermo-tl-band {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--band) 70%, #1f2c2d);
+  background: color-mix(in srgb, var(--band) 16%, #fff);
+}
+.thermo-tl-main {
+  min-width: 0;
+  padding: 2px 8px 4px;
+  margin-left: -8px;
+  border-radius: 8px;
+}
+.thermo-tl-event.flash .thermo-tl-main {
+  animation: thermo-tl-flash 1.8s ease-out;
+}
+@keyframes thermo-tl-flash {
+  0%,
+  35% {
+    background: #fff4d1;
+  }
+  100% {
+    background: transparent;
+  }
+}
+.thermo-tl-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 0.82rem;
+}
+.thermo-tl-line time {
+  color: #4c5a5b;
+  font-weight: 600;
+  min-width: 78px;
+  text-transform: capitalize;
+}
+.thermo-tl-delta {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  background: #f0f2f3;
+  color: var(--muted);
+}
+.thermo-tl-delta.up {
+  background: #e7f4e3;
+  color: #2f6e22;
+}
+.thermo-tl-delta.down {
+  background: #fcebea;
+  color: #b23b35;
+}
+.thermo-tl-delta.milestone {
+  background: #efeafb;
+  color: #5b45a6;
+}
+.thermo-tl-event.big .thermo-tl-delta {
+  font-size: 0.84rem;
+  padding: 3px 10px;
+}
+.thermo-tl-score {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.thermo-tl-score strong {
+  color: var(--ink);
+}
+.thermo-tl-highlight {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+}
+.thermo-tl-highlight.up {
+  color: #3f7b2c;
+}
+.thermo-tl-highlight.down {
+  color: #c0453f;
+}
+.thermo-tl-turn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--band) 16%, #fff);
+  color: color-mix(in srgb, var(--band) 70%, #1f2c2d);
+  border: 1px solid color-mix(in srgb, var(--band) 35%, #fff);
+}
+.thermo-tl-touch {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.thermo-tl-touch > li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.thermo-tl-touch .thermo-signal-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+.thermo-tl-touch-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 24px;
+  font-size: 0.82rem;
+}
+.thermo-tl-touch-head strong {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.thermo-tl-touch-head .thermo-open {
+  margin-top: 0;
+}
+.thermo-tl-excerpt {
+  margin: 4px 0 0;
+  padding-left: 8px;
+  border-left: 2px solid #e3e8e8;
+  color: #4c5a5b;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  font-style: italic;
+}
+.thermo-tl-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+.thermo-tl-note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.thermo-tl-moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 0.74rem;
+  color: #4c5a5b;
+}
+.thermo-tl-moves strong {
+  font-variant-numeric: tabular-nums;
+}
+.thermo-tl-moves .up strong {
+  color: #3f7b2c;
+}
+.thermo-tl-moves .down strong {
+  color: #c0453f;
+}
+.thermo-tl-moves .flat strong {
+  color: var(--muted);
+  font-weight: 500;
+}
+@media (max-width: 560px) {
+  .thermo-tl-month-mini {
+    display: none;
+  }
+  .thermo-tl-line time {
+    min-width: 0;
+  }
+}
+
 /* A carteira (/termometro). */
 .thermo-page {
   display: flex;

@@ -218,6 +218,35 @@ export type ClientTemperature = {
   /** Líderes e supervisores das equipes do cliente corrigem as leituras. */
   can_correct?: boolean;
 };
+/** Uma leitura na Linha do tempo (só os sinais que passaram do limite). */
+export type TimelineSignal = Pick<
+  TemperatureSignal,
+  "id" | "type" | "source_id" | "group_id" | "message_id" | "title" | "date" | "day" | "reason" | "excerpt" | "group"
+> & { flags: string[]; corrected: boolean };
+/**
+ * Um dia em que a temperatura mexeu (migration 20270518090000): a nota do
+ * dia, a do dia anterior, as leituras que entraram e as que saíram da janela.
+ */
+export type TimelineEvent = {
+  day: string;
+  score: number | null;
+  band: number | null;
+  prev: number | null;
+  prev_band: number | null;
+  /** O primeiro dia com leitura do cliente. */
+  first: boolean;
+  indicators: Record<string, number>;
+  prev_indicators: Record<string, number> | null;
+  flags_added: string[];
+  flags_removed: string[];
+  signals: TimelineSignal[];
+  expired: TimelineSignal[];
+};
+export type TemperatureTimeline = {
+  today: string;
+  window_days: number;
+  events: TimelineEvent[];
+};
 export type PortfolioClient = {
   client_id: string;
   name: string;
@@ -285,7 +314,9 @@ export function appPath(path: string) {
   return (company ? `/agencias/${company}` : "") + path;
 }
 /** Onde uma leitura abre: a reunião ou a primeira mensagem do cliente no dia. */
-export function signalPath(s: TemperatureSignal) {
+export function signalPath(
+  s: Pick<TemperatureSignal, "type" | "source_id" | "group_id" | "message_id">,
+) {
   if (s.type === "meeting") return `/drive?gravacao=${s.source_id}`;
   if (s.group_id)
     return `/drive?whatsapp=${s.group_id}${s.message_id ? `&msg=${s.message_id}` : ""}`;
@@ -293,7 +324,7 @@ export function signalPath(s: TemperatureSignal) {
 }
 /** O título da leitura sem o "Whatsapp · " e a data do fim, que o ícone e a
  * linha de baixo já mostram. */
-export function signalTitle(s: TemperatureSignal) {
+export function signalTitle(s: Pick<TemperatureSignal, "type" | "title" | "date">) {
   let title = (s.title ?? "").replace(/^whatsapp\s*·\s*/i, "").trim();
   const date = ` · ${dateBr(s.date)}`;
   if (title.endsWith(date)) title = title.slice(0, -date.length).trim();
@@ -321,6 +352,14 @@ export async function loadClientTemperature(company: string, client: string) {
     p_client: client,
     p_days: 180,
     p_signals: 40,
+  });
+}
+/** Do primeiro contato até hoje: os dias em que a temperatura mexeu. */
+export async function loadTemperatureTimeline(company: string, client: string) {
+  if (offline(company)) return demoTimeline();
+  return rpc<TemperatureTimeline>("client_temperature_timeline", {
+    p_company: company,
+    p_client: client,
   });
 }
 /** As mensagens do cliente num dia de grupo (a leitura do WhatsApp aberta). */
@@ -902,6 +941,71 @@ function buildDemoClient(): ClientTemperature {
     can_configure: true,
     can_correct: true,
   };
+}
+/**
+ * A linha do tempo da demonstração sobre a curva do Histórico: uma leitura a
+ * cada poucos dias, e o efeito de cada uma é o quanto a nota andou desde a
+ * anterior (a soma fecha com a nota de hoje).
+ */
+function demoTimeline(): TemperatureTimeline {
+  const data = (demoClientData ??= buildDemoClient());
+  const history = demoHistory();
+  const real = new Map(data.signals.map((s) => [s.day, s]));
+  const meetings = ["Kickoff do projeto", "Alinhamento mensal", "Apresentação de resultados", "Revisão de campanha"];
+  const quotes = [
+    ["Gostei muito da proposta, vamos com tudo.", "elogio"],
+    ["Os leads de ontem vieram bem qualificados.", "resultados"],
+    ["Conseguem adiantar a arte da promoção?", "prazos"],
+    ["O custo por lead subiu, o que aconteceu?", "financeiro"],
+    ["Vocês sempre respondem rápido, obrigado!", "atendimento"],
+    ["As vendas não acompanharam o volume de leads.", "resultados"],
+  ];
+  const events: TimelineEvent[] = [];
+  let prev: (typeof history)[number] | null = null;
+  history.forEach((h, i) => {
+    const signal = real.get(h.day);
+    if (!signal && i % 4 !== 0 && i !== 1 && i !== history.length - 1) return;
+    const meeting = signal ? signal.type === "meeting" : i % 12 === 0;
+    const [excerpt, reason] = quotes[(i / 4) % quotes.length | 0];
+    const s: TimelineSignal = signal
+      ? { ...signal, flags: Object.keys(signal.flags).filter((k) => signal.flags[k] >= 0.7), corrected: false }
+      : {
+          id: `demo-tl-${i}`,
+          type: meeting ? "meeting" : "whatsapp",
+          source_id: "demo",
+          group_id: null,
+          message_id: null,
+          title: meeting ? meetings[(i / 12) % meetings.length | 0] : "Whatsapp · 4282 - Tráfego",
+          date: `${h.day}T13:00:00Z`,
+          day: h.day,
+          reason,
+          excerpt,
+          group: meeting ? null : "4282 - Tráfego",
+          flags: [],
+          corrected: false,
+        };
+    const ind = (score: number) => ({
+      satisfacao: Math.round((score - 6) * 10) / 10,
+      permanencia: Math.round((score + 2) * 10) / 10,
+      relacao: Math.round((score + 12) * 10) / 10,
+    });
+    events.push({
+      day: h.day,
+      score: h.score,
+      band: h.band,
+      prev: prev?.score ?? null,
+      prev_band: prev?.band ?? null,
+      first: !prev,
+      indicators: ind(h.score),
+      prev_indicators: prev ? ind(prev.score) : null,
+      flags_added: h.flags.filter((f) => !prev?.flags.includes(f)),
+      flags_removed: (prev?.flags ?? []).filter((f) => !h.flags.includes(f)),
+      signals: [s],
+      expired: [],
+    });
+    prev = h;
+  });
+  return { today: history.at(-1)!.day, window_days: demoSettings.window_days, events };
 }
 function demoMessages(signal: string): SignalMessage[] {
   const at = (day: number, time: string) => `${isoDay(day)}T${time}:00-03:00`;
