@@ -22,6 +22,7 @@ import {
   templateFieldsFor,
 } from "./templateFields";
 import {
+  type CalendarDay,
   type RecurrenceFrequency,
   type Snapshot,
   priorities,
@@ -33,7 +34,7 @@ import {
   isPrioritized,
 } from "./task-priority";
 import { canCreateTaskIn, dateKey, dateLabel, nextRecurrence } from "./domain";
-import { suggestDue } from "./dueRules";
+import { addBusinessDays, businessDaysBetween, suggestDue } from "./dueRules";
 import { AbsenceNote, DueRuleHint, SmartDueHint } from "./DueRuleHint";
 import { useSmartDue } from "./smartDue";
 import { WhoDeliversFirst } from "./DueAssist";
@@ -1030,7 +1031,13 @@ export function TaskCreateForm({
                       </Select>
                     </label>
                   </div>
-                  {repeat && <RepeatHint frequency={repeat} due={due} />}
+                  {repeat && (
+                    <RepeatHint
+                      frequency={repeat}
+                      due={due}
+                      calendar={data.calendarDays}
+                    />
+                  )}
                 </section>
                 <section className="details-section" aria-label="Checklist">
                   <h4>Checklist</h4>
@@ -1204,28 +1211,22 @@ const escapeHtml = (text: string) =>
 function RepeatHint({
   frequency,
   due,
+  calendar,
 }: {
   frequency: RecurrenceFrequency;
   due: string;
+  calendar?: CalendarDay[];
 }) {
   const today = dateKey();
   const first = nextRecurrence(frequency, today, today);
-  const offset = Math.max(
-    0,
-    Math.round(
-      (new Date(`${due}T12:00:00Z`).getTime() -
-        new Date(`${today}T12:00:00Z`).getTime()) /
-        86_400_000,
-    ),
-  );
-  const firstDue = dateKey(
-    new Date(new Date(`${first}T12:00:00Z`).getTime() + offset * 86_400_000),
-  );
+  // As mavi_private.open_recurrence_copy: the same business days away.
+  const offset = Math.max(0, businessDaysBetween(calendar, today, due));
+  const firstDue = addBusinessDays(calendar, first, offset);
   return (
     <small className="repeat-hint" role="status">
       Uma cópia desta tarefa abre em {dateLabel(first)}
       {offset
-        ? `, com prazo em ${dateLabel(firstDue)}`
+        ? `, com prazo em ${dateLabel(firstDue)} (${offset} ${offset === 1 ? "dia útil" : "dias úteis"} depois)`
         : ", com prazo no mesmo dia"}
       , e assim por diante até alguém parar a repetição. Anexos e imagens da
       descrição não são copiados; o checklist é copiado sem as marcações.

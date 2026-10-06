@@ -5,6 +5,16 @@ import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
 const db = await createTestDatabase();
+// The copies' deadlines count business days (20270514090000), so the tests
+// pin "today" to the next Monday and leave out holidays: the expected dates
+// then hold whatever weekday the suite runs on.
+await db.exec(`create or replace function mavi_private.company_today(c uuid) returns date
+language sql stable security definer set search_path = '' as $$
+ select d + (8 - extract(isodow from d)::integer) % 7
+ from (select (now() at time zone 'America/Sao_Paulo')::date as d) x
+$$;
+create or replace function mavi_private.national_holiday(d date) returns text
+language sql immutable set search_path = '' as $$ select null::text $$;`);
 const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const [A, admin, ana, bia, caio, outsider] = [1, 10, 11, 12, 13, 14].map(uid);
 await db.query(`insert into auth.users select unnest($1::uuid[])`, [
@@ -366,7 +376,9 @@ await check(
     assert.equal(tasks.length, 3);
     assert.deepEqual(
       tasks.map((t) => t.due_date),
-      [await plus(3), await plus(4), await plus(5)],
+      // Thursday's deadline is 3 business days away: Tuesday's copy is due
+      // on Friday, Wednesday's on Monday.
+      [await plus(3), await plus(4), await plus(7)],
     );
     const copy = tasks.find((t) => t.id !== id);
     await as(bia);
@@ -560,6 +572,78 @@ await check(
     assert.equal(rule.active, true);
   },
 );
+
+await check("o prazo das cópias conta dias úteis", async () => {
+  const id = await create(ana, { repeat: "weekdays", due: await plus(2) });
+  const [r] = await sql(
+    "select r.id,r.due_business_days from task_recurrences r join tasks t on t.recurrence_id=r.id where t.id=$1",
+    [id],
+  );
+  assert.equal(r.due_business_days, 2);
+  // Thursday + 2 business days: Monday, not Saturday. Friday: Tuesday.
+  for (const [opens, due] of [
+    [3, 7],
+    [4, 8],
+  ]) {
+    await run(await plus(opens));
+    const [copy] = await sql(
+      "select due_date::text from tasks where recurrence_id=$1 order by created_at desc limit 1",
+      [r.id],
+    );
+    assert.equal(copy.due_date, await plus(due));
+  }
+  // The weekend opens nothing; Monday's copy is due on Wednesday.
+  for (const d of [5, 6, 7]) await run(await plus(d));
+  const copies = await sql(
+    "select due_date::text from tasks where recurrence_id=$1 and id<>$2 order by created_at",
+    [r.id, id],
+  );
+  assert.deepEqual(
+    copies.map((c) => c.due_date),
+    [await plus(7), await plus(8), await plus(9)],
+  );
+  await rpc("stop_task_recurrence", [id]);
+});
+
+await check("o início planejado também conta dias úteis", async () => {
+  await as(ana);
+  const id = await rpc("create_task", [
+    A,
+    contract,
+    "Com início",
+    ana,
+    await plus(4),
+    project,
+    null,
+    "Legenda",
+    "normal",
+    60,
+    false,
+    null,
+    await plus(1),
+    JSON.stringify({ [`${templateId}.rede`]: "Instagram" }),
+    "weekdays",
+  ]);
+  const [r] = await sql(
+    "select r.id,r.start_business_days,r.due_business_days from task_recurrences r join tasks t on t.recurrence_id=r.id where t.id=$1",
+    [id],
+  );
+  assert.deepEqual(
+    { start: r.start_business_days, due: r.due_business_days },
+    { start: 1, due: 4 },
+  );
+  // Friday's copy: starts Monday, due Thursday.
+  await run(await plus(4));
+  const [copy] = await sql(
+    "select start_date::text,due_date::text from tasks where recurrence_id=$1 and id<>$2",
+    [r.id, id],
+  );
+  assert.deepEqual(copy, {
+    start_date: await plus(7),
+    due_date: await plus(10),
+  });
+  await rpc("stop_task_recurrence", [id]);
+});
 
 await check("quem é de fora não vê a regra", async () => {
   await as(outsider);
