@@ -69,6 +69,8 @@ export type ResolvedRoute = {
   base_url: string | null;
   key_cipher: string;
   model: string;
+  /** O esforço da regra (só nas de pessoa, cliente, produto e projeto). */
+  effort?: string | null;
   price: ProviderModel | null;
 };
 
@@ -645,6 +647,18 @@ export function routeConfig(
     model: route.model,
     price: route.price,
   };
+}
+
+/**
+ * A regra de pessoa, cliente, produto ou projeto que escolheu o modelo pode
+ * ter o seu esforço: vale no lugar do da funcionalidade.
+ */
+export function withRouteEffort(
+  efforts: Record<string, string>,
+  route: { effort?: string | null } | null,
+  feature: string,
+): Record<string, string> {
+  return route?.effort ? { ...efforts, [feature]: route.effort } : efforts;
 }
 
 /**

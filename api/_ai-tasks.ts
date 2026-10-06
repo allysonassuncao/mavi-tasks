@@ -10,7 +10,7 @@ import {
   type AiSource,
   type ToolContext,
 } from "./_ai-tools.js";
-import { adapterFor, resolveRoute, routeConfig, type ProviderConfig } from "./_ai-providers.js";
+import { adapterFor, resolveRoute, routeConfig, withRouteEffort, type ProviderConfig } from "./_ai-providers.js";
 import { logCost, meterEntries, type CostTurn } from "./_ai-cost.js";
 import { addUsage, newMeter } from "./_social-leads.js";
 import { embeddingCost, type Embedder } from "./_ai-embeddings.js";
@@ -467,7 +467,7 @@ export async function runSlice(
       ? (deps.providerLlm ?? ((c: ProviderConfig) => adapterFor(c, deps.fetch)))(provider)
       : deps.llm;
     const model = provider?.model || env.model;
-    const effort = host.effort(efforts) ?? "medium";
+    const effort = host.effort(withRouteEffort(efforts, route, "mavi_page")) ?? "medium";
     const perStep = estimateTask({ steps: [task.steps[0]], closing: null }, model, provider?.price ?? null).perStep;
     const turn: CostTurn = { conversation: task.conversation, turn: task.turn, entries: [], pending: [] };
     const sub = tokenClaims(auth).sub;

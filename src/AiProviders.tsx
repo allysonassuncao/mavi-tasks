@@ -35,6 +35,7 @@ import {
   serverDefaults,
   setAiEffort,
   setAiRoute,
+  setAiRouteEffort,
   setProviderActive,
   testProvider,
   type AiLibrary,
@@ -91,6 +92,8 @@ export type LibraryApi = {
   ) => Promise<unknown>;
   /** O esforço de uma funcionalidade ou skill ("skill:<id>"); nulo: automático. */
   setEffort: (key: string, effort: string | null) => Promise<unknown>;
+  /** O esforço de uma regra de pessoa, cliente, produto ou projeto; nulo: o da funcionalidade. */
+  setRouteEffort: (type: RouteScope, id: string, effort: string | null) => Promise<unknown>;
   save: (draft: ProviderDraft) => Promise<{ id: string }>;
   models: (
     args: Parameters<typeof fetchProviderModels>[1],
@@ -141,6 +144,7 @@ export function useAiLibrary(company: string, demo = false) {
             setRoute: (type, id, provider, model) =>
               setAiRoute(company, type, id, provider, model),
             setEffort: (key, effort) => setAiEffort(company, key, effort),
+            setRouteEffort: (type, id, effort) => setAiRouteEffort(company, type, id, effort),
             save: (draft) => saveProvider(company, draft),
             models: (args) => fetchProviderModels(company, args),
             test: (args) => testProvider(company, args),
@@ -250,10 +254,21 @@ function demoApi(
         else delete efforts[key];
         return { ...l, efforts };
       }),
+    setRouteEffort: (type, id, effort) =>
+      change((l) => ({
+        ...l,
+        routes: l.routes.map((r) =>
+          r.type === type && r.scope_id === id ? { ...r, effort } : r,
+        ),
+      })),
     setRoute: (type, id, provider, model) =>
       change((l) => {
         const feature = type === "feature" ? (id as AiFeature) : null;
         const scope = type === "company" || type === "feature" ? null : id;
+        // Trocar o modelo mantém o esforço da regra.
+        const kept = l.routes.find(
+          (r) => r.type === type && r.scope_id === scope && (r.feature ?? null) === feature,
+        )?.effort;
         const others = l.routes.filter(
           (r) =>
             !(
@@ -274,6 +289,7 @@ function demoApi(
                   feature,
                   provider_id: provider,
                   model: model!,
+                  effort: kept,
                 },
               ]
             : others,
@@ -1300,6 +1316,16 @@ export function AiRoutesPanel({
       setProblem((e as Error).message);
     }
   }
+  async function setRouteEffort(type: RouteScope, id: string, effort: string | null) {
+    setProblem("");
+    try {
+      await api.setRouteEffort(type, id, effort);
+      notify(effort ? `Esforço salvo: ${effortName(effort)}.` : "Esforço: o da funcionalidade.");
+      await reload();
+    } catch (e) {
+      setProblem((e as Error).message);
+    }
+  }
 
   if (!library)
     return error ? (
@@ -1510,6 +1536,7 @@ export function AiRoutesPanel({
             <tr>
               <th>{SCOPES.find((s) => s.id === tab)!.one}</th>
               <th>Provedor e modelo</th>
+              <th>Esforço</th>
               <th aria-label="Ações" />
             </tr>
           </thead>
@@ -1535,12 +1562,20 @@ export function AiRoutesPanel({
                         {choices}
                       </Select>
                     </td>
+                    <td>
+                      <EffortSelect
+                        label={name}
+                        value={r.effort ?? undefined}
+                        auto="Automático · o da funcionalidade"
+                        onChange={(e) => void setRouteEffort(tab, r.scope_id ?? "", e)}
+                      />
+                    </td>
                     <td className="num ai-log-actions">
                       <FieldHistory
                         title={name}
                         area={tab}
                         subject={r.scope_id ?? ""}
-                        fields={["model"]}
+                        fields={["model", "effort"]}
                       />
                       <button
                         type="button"
@@ -1556,7 +1591,7 @@ export function AiRoutesPanel({
                 ))
             ) : (
               <tr>
-                <td colSpan={3} className="muted ai-empty-cell">
+                <td colSpan={4} className="muted ai-empty-cell">
                   Nenhuma regra para {SCOPES.find((s) => s.id === tab)!.label.toLowerCase()}:
                   vale a regra mais geral.
                 </td>
@@ -1573,7 +1608,11 @@ export function AiRoutesPanel({
           taken={new Set(shown.map((r) => r.scope_id ?? ""))}
           nameOf={nameOf}
           choices={choices}
-          onSave={(id, choice) => void set(tab, id, choice)}
+          onSave={(id, choice, effort) =>
+            void set(tab, id, choice).then(() =>
+              effort ? setRouteEffort(tab, id, effort) : undefined,
+            )
+          }
         />
       )}
       <RouteSimulator
@@ -1828,7 +1867,7 @@ function NewRoute({
   taken: Set<string>;
   nameOf: (type: RouteScope, id: string) => string;
   choices: ReactNode;
-  onSave: (id: string, choice: string) => void;
+  onSave: (id: string, choice: string, effort: string | null) => void;
 }) {
   const options = useMemo(
     () => scopeOptions(tab, data, nameOf).filter((o) => !taken.has(o.id)),
@@ -1836,15 +1875,17 @@ function NewRoute({
   );
   const [id, setId] = useState("");
   const [choice, setChoice] = useState("");
+  const [effort, setEffort] = useState<string | null>(null);
   return (
     <form
       className="ai-new-limit"
       onSubmit={(e) => {
         e.preventDefault();
         if (id && choice) {
-          onSave(id, choice);
+          onSave(id, choice, effort);
           setId("");
           setChoice("");
+          setEffort(null);
         }
       }}
     >
@@ -1869,6 +1910,12 @@ function NewRoute({
         <SelectOption value="none">Provedor e modelo…</SelectOption>
         {choices}
       </Select>
+      <EffortSelect
+        label="a nova regra"
+        value={effort ?? undefined}
+        auto="Esforço · o da funcionalidade"
+        onChange={setEffort}
+      />
       <Button className="btn primary" type="submit" disabled={!id || !choice}>
         Definir
       </Button>
@@ -2005,8 +2052,8 @@ function RouteSimulator({
         )}
       </div>
       <p className="ai-simulator-result" role="status">
-        Responde <strong>{hit ? choiceLabel(hit) : serverLabel(feature)}</strong>,{" "}
-        {why}.
+        Responde <strong>{hit ? choiceLabel(hit) : serverLabel(feature)}</strong>
+        {hit?.effort ? ` com esforço ${effortName(hit.effort)}` : ""}, {why}.
       </p>
       {!talk ? (
         <small className="muted">

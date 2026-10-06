@@ -590,6 +590,9 @@ export type AiLibrary = {
 /** O esforço de uma funcionalidade ou skill ("skill:<id>"); nulo volta ao automático. */
 export const setAiEffort = (company: string, key: string, effort: string | null) =>
   rpc("ai_set_effort", { p_company: company, p_key: key, p_effort: effort });
+/** O esforço de uma regra de pessoa, cliente, produto ou projeto; nulo: o da funcionalidade. */
+export const setAiRouteEffort = (company: string, type: string, id: string, effort: string | null) =>
+  rpc("ai_set_route_effort", { p_company: company, p_type: type, p_id: id, p_effort: effort });
 export const providerLibrary = (company: string) =>
   rpc<AiLibrary>("ai_provider_list", { p_company: company });
 export const setProviderActive = (

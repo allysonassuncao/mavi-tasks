@@ -42,6 +42,7 @@ import {
   routeConfig,
   type ProviderConfig,
   type ResolvedRoute,
+  withRouteEffort,
 } from "./_ai-providers.js";
 import { serverModel, embeddingModel } from "../src/ai-providers.js";
 import { ALERT_CHAT_RULES } from "./_campaign-alerts.js";
@@ -746,7 +747,7 @@ async function ask(
           ? "mavi_page"
           : "assistant";
   const noMcp: McpCatalog = { servers: [], missing: [] };
-  const [base, limits, history, route, powerList, catalog, mcpCatalog, efforts, learned, person] = await Promise.all([
+  const [base, limits, history, route, powerList, catalog, mcpCatalog, panelEfforts, learned, person] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
       env,
@@ -826,6 +827,7 @@ async function ask(
       .then((r) => (r.ok && r.data && typeof r.data === "object" ? r.data : null))
       .catch(() => null),
   ]);
+  const efforts = withRouteEffort(panelEfforts, route, feature);
   const powers = new Set(
     powerList.filter((p): p is Power =>
       ["visuals", "images", "actions", "skills", "canvas", "web", "mcp", "scrape", "attachments"].includes(p),

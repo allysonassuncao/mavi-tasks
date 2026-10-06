@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { runArtTool, resolveClient } from "./_ai-art";
 import { anthropicAdapter, outputText, type ToolOutput } from "./_ai-llm";
-import { openAiChatAdapter, type ProviderConfig } from "./_ai-providers";
+import { openAiChatAdapter, withRouteEffort, type ProviderConfig } from "./_ai-providers";
 import { runPowerTool, type PowerKit } from "./_ai-powers";
 import { turnEffort, effortOf } from "./_ai";
 import { artDocument, checkRenderInput } from "./_art-render";
@@ -291,5 +291,14 @@ describe("esforço escolhido no painel", () => {
     expect(turnEffort({ mavi_page: "xhigh" }, "mavi_page", [{ id: "s1" }])).toBe("xhigh");
     expect(turnEffort({ mavi_page: "xhigh", "skill:s1": "low" }, "mavi_page", [{ id: "s1" }])).toBe("low");
     expect(turnEffort({ "skill:s1": "low", "skill:s2": "max" }, "mavi_page", [{ id: "s1" }, { id: "s2" }])).toBe("max");
+  });
+  it("a regra de pessoa/cliente vale no lugar do esforço da funcionalidade", () => {
+    const panel = { assistant: "low", "skill:s1": "max" };
+    expect(withRouteEffort(panel, null, "mavi_page")).toBe(panel);
+    expect(withRouteEffort(panel, { effort: null }, "assistant")).toBe(panel);
+    expect(effortOf(withRouteEffort(panel, { effort: "high" }, "assistant"), "assistant")).toBe("high");
+    expect(effortOf(withRouteEffort(panel, { effort: "xhigh" }, "mavi_page"), "mavi_page")).toBe("xhigh");
+    // Com a skill carregada, continua o esforço dela.
+    expect(turnEffort(withRouteEffort(panel, { effort: "low" }, "assistant"), "assistant", [{ id: "s1" }])).toBe("max");
   });
 });

@@ -885,6 +885,8 @@ export type AiRoute = {
   feature?: AiFeature | null;
   provider_id: string;
   model: string;
+  /** O esforço da regra (só nas de pessoa, cliente, produto e projeto). */
+  effort?: string | null;
   updated_at?: string;
 };
 
