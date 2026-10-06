@@ -209,6 +209,36 @@ export function contractParts(data: Snapshot, contractId: string | null) {
       : "",
   };
 }
+/** Teams responsible for a product (product_teams), in the teams' order. */
+export function productTeamIds(data: Snapshot, productId: string) {
+  const ids = new Set(
+    (data.productTeams ?? [])
+      .filter((pt) => pt.product_id === productId)
+      .map((pt) => pt.team_id),
+  );
+  return data.teams.filter((t) => ids.has(t.id)).map((t) => t.id);
+}
+/**
+ * Teams a client's active products bring to it, each with where it comes
+ * from ("via Make Ads"); the database keeps them in client_teams
+ * (migration 20270517090000).
+ */
+export function clientProductTeams(data: Snapshot, clientId: string) {
+  const from = new Map<string, string[]>();
+  for (const k of data.contracts) {
+    if (k.client_id !== clientId || k.archived) continue;
+    const product = byId(data.products).get(k.product_id)?.name ?? "produto";
+    for (const team of productTeamIds(data, k.product_id))
+      from.set(team, [...new Set([...(from.get(team) ?? []), product])]);
+  }
+  return [...from].map(([team, products]) => ({
+    team,
+    from:
+      products.length === 1
+        ? `via ${products[0]}`
+        : `via ${products.length} produtos`,
+  }));
+}
 /** "Produto (identificação)" — how a contracted product reads under its client. */
 export function contractProductLabel(data: Snapshot, contractId: string) {
   const { product, detail } = contractParts(data, contractId);

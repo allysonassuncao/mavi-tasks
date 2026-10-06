@@ -13,7 +13,9 @@ import {
   type Company,
   type Member,
   type Client,
+  type ClientTeam,
   type Product,
+  type ProductTeam,
   type Contract,
   type Project,
   type Team,
@@ -96,7 +98,8 @@ export interface CompanyLookups {
     /** Validates the team's tasks in projects set to "Supervisor da equipe". */
     supervisor?: boolean;
   }[];
-  clientTeams: { company_id: string; client_id: string; team_id: string }[];
+  clientTeams: ClientTeam[];
+  productTeams?: ProductTeam[];
   taskTemplates: TaskTemplate[];
   checklistTemplates?: ChecklistTemplate[];
   suggestionSettings: SuggestionSettings[];
@@ -249,6 +252,7 @@ export async function companyLookups(
         teams: [],
         teamMembers: [],
         clientTeams: [],
+        productTeams: [],
         taskTemplates: [],
         checklistTemplates: [],
         suggestionSettings: [],
@@ -268,6 +272,7 @@ export async function companyLookups(
         ["teams", "teams", ["name", "id"]],
         ["teamMembers", "team_members", ["team_id", "user_id"]],
         ["clientTeams", "client_teams", ["client_id", "team_id"]],
+        ["productTeams", "product_teams", ["product_id", "team_id"]],
         ["taskTemplates", "task_templates", ["name", "id"]],
         ["checklistTemplates", "checklist_templates", ["name", "id"]],
         ["suggestionSettings", "suggestion_settings", ["company_id"]],
@@ -295,6 +300,7 @@ export async function companyLookups(
           // migrations run (or if they can't be read) the app works without them.
           (result[key] as unknown) =
             key === "taskTemplates" ||
+            key === "productTeams" ||
             key === "checklistTemplates" ||
             key === "suggestionSettings" ||
             key === "dueRules" ||
@@ -811,6 +817,7 @@ export async function snapshot(
     teams: lookups.teams,
     teamMembers: lookups.teamMembers,
     clientTeams: lookups.clientTeams,
+    productTeams: lookups.productTeams ?? [],
     taskTemplates: lookups.taskTemplates ?? [],
     checklistTemplates: lookups.checklistTemplates ?? [],
     suggestionSettings: lookups.suggestionSettings ?? [],
@@ -845,6 +852,7 @@ export function getCachedSnapshot(company: string): Snapshot | null {
     teams: lookups.teams,
     teamMembers: lookups.teamMembers,
     clientTeams: lookups.clientTeams,
+    productTeams: lookups.productTeams ?? [],
     taskTemplates: lookups.taskTemplates ?? [],
     checklistTemplates: lookups.checklistTemplates ?? [],
     suggestionSettings: lookups.suggestionSettings ?? [],

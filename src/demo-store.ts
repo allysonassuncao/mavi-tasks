@@ -438,16 +438,68 @@ export class DemoStore {
       });
     }
   }
-  private setClientTeams(clientId: string, teams: string[]) {
+  /**
+   * As in the database (migration 20270517090000): a client's teams are the
+   * ones its active products bring plus its extras (`extras`, or the current
+   * ones). A team a product brings stops being an extra.
+   */
+  private syncClientTeams(clientId: string, extras?: string[]) {
     const company_id = this.data.companies[0].id;
+    const fromProducts = new Set(
+      this.data.contracts
+        .filter((k) => k.client_id === clientId && !k.archived)
+        .flatMap((k) =>
+          (this.data.productTeams ?? [])
+            .filter((pt) => pt.product_id === k.product_id)
+            .map((pt) => pt.team_id),
+        ),
+    );
+    const kept =
+      extras ??
+      this.data.clientTeams
+        .filter((ct) => ct.client_id === clientId && ct.manual !== false)
+        .map((ct) => ct.team_id);
     this.data.clientTeams = [
       ...this.data.clientTeams.filter((ct) => ct.client_id !== clientId),
-      ...[...new Set(teams)].map((team_id) => ({
+      ...[...fromProducts].map((team_id) => ({
         company_id,
         client_id: clientId,
         team_id,
+        manual: false,
+        by_product: true,
+      })),
+      ...[...new Set(kept)]
+        .filter((team_id) => !fromProducts.has(team_id))
+        .map((team_id) => ({
+          company_id,
+          client_id: clientId,
+          team_id,
+          manual: true,
+          by_product: false,
+        })),
+    ];
+  }
+  private setClientTeams(clientId: string, teams: string[]) {
+    this.syncClientTeams(clientId, teams);
+  }
+  private setProductTeams(productId: string, teams: string[]) {
+    const company_id = this.data.companies[0].id;
+    this.data.productTeams = [
+      ...(this.data.productTeams ?? []).filter(
+        (pt) => pt.product_id !== productId,
+      ),
+      ...[...new Set(teams)].map((team_id) => ({
+        company_id,
+        product_id: productId,
+        team_id,
       })),
     ];
+    for (const client of new Set(
+      this.data.contracts
+        .filter((k) => k.product_id === productId)
+        .map((k) => k.client_id),
+    ))
+      this.syncClientTeams(client);
   }
   private setTeamPeople(
     teamId: string,
@@ -771,6 +823,8 @@ export class DemoStore {
         if (kind === "product" && a.p_color) changes.color = a.p_color;
         if (kind === "product" && a.p_task_project_field != null)
           changes.task_project_field = a.p_task_project_field;
+        if (kind === "product" && a.p_teams)
+          this.setProductTeams(entity.id, a.p_teams);
         if (kind === "project") {
           if (
             a.p_contract !== (entity as any).contract_id &&
@@ -789,7 +843,13 @@ export class DemoStore {
           changes.client_id = a.p_client;
           changes.product_id = a.p_product;
         }
+        const clientBefore = (entity as { client_id?: string }).client_id;
         Object.assign(entity, changes);
+        if (kind === "contract") {
+          this.syncClientTeams(a.p_client);
+          if (clientBefore && clientBefore !== a.p_client)
+            this.syncClientTeams(clientBefore);
+        }
         break;
       }
       case "set_company_logo": {
@@ -814,11 +874,13 @@ export class DemoStore {
         const history =
           this.data.projects.some((p) => p.contract_id === k) ||
           this.data.tasks.some((t) => t.contract_id === k);
+        const removed = this.data.contracts.find((x) => x.id === k)!;
         this.data.contracts = history
           ? this.data.contracts.map((x) =>
               x.id === k ? { ...x, archived: true } : x,
             )
           : this.data.contracts.filter((x) => x.id !== k);
+        this.syncClientTeams(removed.client_id);
         return history ? "archived" : "deleted";
       }
       case "set_client_archived": {
@@ -853,6 +915,7 @@ export class DemoStore {
           name: a.p_name,
           color: "#81a0be",
         });
+        this.setProductTeams(id, a.p_teams ?? []);
         break;
       case "create_contract":
         this.data.contracts.push({
@@ -863,13 +926,19 @@ export class DemoStore {
           name: a.p_name,
           archived: false,
         });
-        if (a.p_team)
-          this.setClientTeams(a.p_client, [
-            ...this.data.clientTeams
-              .filter((ct) => ct.client_id === a.p_client)
-              .map((ct) => ct.team_id),
-            a.p_team,
-          ]);
+        this.syncClientTeams(
+          a.p_client,
+          a.p_team
+            ? [
+                ...this.data.clientTeams
+                  .filter(
+                    (ct) => ct.client_id === a.p_client && ct.manual !== false,
+                  )
+                  .map((ct) => ct.team_id),
+                a.p_team,
+              ]
+            : undefined,
+        );
         break;
       case "create_project":
         this.data.projects.push({

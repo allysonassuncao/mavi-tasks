@@ -5195,6 +5195,11 @@ label .input-control .ui-input {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 14px;
 }
+.team-picker-from {
+  margin-left: 4px;
+  color: var(--muted);
+  font-weight: 400;
+}
 @media (max-width: 600px) {
   .team-picker-list {
     grid-template-columns: 1fr;
@@ -5224,6 +5229,11 @@ label .input-control .ui-input {
   justify-content: flex-end;
   gap: 8px;
   flex: 0 0 auto;
+}
+.catalog-row small.catalog-teams {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .catalog-clients {
   display: flex;

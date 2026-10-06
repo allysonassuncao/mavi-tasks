@@ -153,6 +153,7 @@ import {
   upsertById,
   initials,
   byId,
+  productTeamIds,
   type NameLookup,
 } from "./domain";
 import { useNow } from "./useClock";
@@ -3954,6 +3955,12 @@ export default function App() {
                               {contracts.length
                                 ? `Contratado por ${new Set(contracts.map((c) => c.client_id)).size} cliente(s)`
                                 : "Nenhum cliente contratou ainda"}
+                            </small>
+                            <small className="catalog-teams">
+                              <Users size={13} />{" "}
+                              {productTeamIds(data, p.id)
+                                .map((id) => byId(data.teams).get(id)?.name)
+                                .join(", ") || "Sem equipe responsável"}
                             </small>
                             {contracts.length > 0 && (
                               <div className="catalog-clients">

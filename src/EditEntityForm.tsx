@@ -7,7 +7,13 @@ import { ContractPicker } from "./ContractPicker";
 import { TeamPicker } from "./TeamPicker";
 import { ReviewSettings } from "./ReviewSettings";
 import { ColorField, PRODUCT_COLORS } from "./ColorMenu";
-import { contractDetail, defaultContractName, projectReview } from "./domain";
+import {
+  clientProductTeams,
+  contractDetail,
+  defaultContractName,
+  productTeamIds,
+  projectReview,
+} from "./domain";
 export type EntityEdit =
   | { kind: "client"; entity: Client }
   | { kind: "product"; entity: Product }
@@ -46,13 +52,42 @@ export function EditEntityForm({
   const [projectField, setProjectField] = useState(
     edit.kind === "product" ? edit.entity.task_project_field !== false : true,
   );
+  // Teams the client's products bring are locked; the picker edits extras.
+  const fixedTeams =
+    edit.kind === "client" ? clientProductTeams(data, edit.entity.id) : [];
   const [clientTeams, setClientTeams] = useState(() =>
     edit.kind === "client"
       ? data.clientTeams
-          .filter((ct) => ct.client_id === edit.entity.id)
+          .filter(
+            (ct) =>
+              ct.client_id === edit.entity.id &&
+              !fixedTeams.some((f) => f.team === ct.team_id),
+          )
           .map((ct) => ct.team_id)
       : [],
   );
+  const initialProductTeams =
+    edit.kind === "product" ? productTeamIds(data, edit.entity.id) : [];
+  const [productTeams, setProductTeams] = useState(initialProductTeams);
+  // Before a product has teams: who already serves its clients, as a hint.
+  const servingNow = (() => {
+    if (edit.kind !== "product" || initialProductTeams.length) return [];
+    const clients = new Set(
+      data.contracts
+        .filter((k) => k.product_id === edit.entity.id && !k.archived)
+        .map((k) => k.client_id),
+    );
+    return data.teams
+      .map((t) => ({
+        team: t,
+        count: data.clientTeams.filter(
+          (ct) => ct.team_id === t.id && clients.has(ct.client_id),
+        ).length,
+        of: clients.size,
+      }))
+      .filter((x) => x.count > 0)
+      .sort((a, b) => b.count - a.count);
+  })();
   const nameOf = (list: { id: string; name: string }[], id: string) =>
     list.find((x) => x.id === id)?.name ?? "";
   const labels = {
@@ -76,6 +111,12 @@ export function EditEntityForm({
     // the color parameter (migration 20260929140000).
     if (edit.kind === "product" && color !== edit.entity.color)
       args.p_color = color;
+    // Also only when changed (migration 20270517090000).
+    if (
+      edit.kind === "product" &&
+      [...productTeams].sort().join() !== [...initialProductTeams].sort().join()
+    )
+      args.p_teams = productTeams;
     // Also only when changed (migration 20261008090000).
     if (
       edit.kind === "product" &&
@@ -149,6 +190,14 @@ export function EditEntityForm({
               teams={data.teams}
               value={clientTeams}
               onChange={setClientTeams}
+              fixed={fixedTeams}
+              hint={
+                fixedTeams.length
+                  ? "As equipes travadas vêm dos produtos do cliente (mude em Produtos › Editar). Marque aqui só exceções. Os colaboradores de todas elas veem todos os produtos, projetos e tarefas deste cliente."
+                  : clientTeams.length
+                    ? "Os produtos deste cliente ainda não têm equipe responsável; estas atendem como exceção. Os colaboradores delas veem todos os produtos, projetos e tarefas deste cliente."
+                    : "As equipes vêm dos produtos do cliente (defina em Produtos › Editar). Sem equipe, só administradores e gestores veem este cliente."
+              }
             />
           </>
         )}
@@ -164,6 +213,25 @@ export function EditEntityForm({
               <span className="product-dot" style={{ background: color }} />É a
               cor que identifica o produto nas listas, no Drive e nos clientes.
             </small>
+            <TeamPicker
+              teams={data.teams}
+              value={productTeams}
+              onChange={setProductTeams}
+              hint={
+                productTeams.length
+                  ? "Essas equipes atendem todos os clientes com este produto e veem todos os produtos, projetos e tarefas deles. Mudar aqui vale para todos esses clientes."
+                  : "Sem equipe, os clientes com este produto ficam só com as equipes extras ou dos outros produtos deles."
+              }
+            />
+            {servingNow.length > 0 && (
+              <small className="form-hint" role="status">
+                Hoje atendem os clientes deste produto:{" "}
+                {servingNow
+                  .map((x) => `${x.team.name} (${x.count} de ${x.of})`)
+                  .join(", ")}
+                .
+              </small>
+            )}
             <label className="checkbox-label">
               <Checkbox
                 checked={projectField}

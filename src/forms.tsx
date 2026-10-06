@@ -84,6 +84,7 @@ import {
   duration,
   names,
   formatClock,
+  productTeamIds,
   projectReview,
   shortSpan,
   statusDurations,
@@ -235,6 +236,10 @@ export function CreateForm({
       !c.archived && c.client_id === linkClient && c.product_id === linkProduct,
   );
   const [clientTeams, setClientTeams] = useState<string[]>([]);
+  const [productTeams, setProductTeams] = useState<string[]>([]);
+  const linkTeams = productTeamIds(data, linkProduct)
+    .map((id) => data.teams.find((t) => t.id === id)?.name)
+    .filter(Boolean);
   const [requiresReview, setRequiresReview] = useState(true);
   const [approver, setApprover] = useState<ProjectApprover>("creator");
   const submitting = useRef(false);
@@ -279,6 +284,8 @@ export function CreateForm({
       case "product":
         fn = "create_product";
         a.p_name = s("name");
+        // Only when chosen: still works before migration 20270517090000.
+        if (productTeams.length) a.p_teams = productTeams;
         break;
       case "contract":
         fn = "create_contract";
@@ -360,8 +367,18 @@ export function CreateForm({
                 teams={data.teams}
                 value={clientTeams}
                 onChange={setClientTeams}
+                legend="Equipes extras (opcional)"
+                hint="As equipes vêm dos produtos que você adicionar ao cliente. Marque aqui só exceções: equipes que atendem este cliente sem ser por um produto."
               />
             </>
+          )}
+          {kind === "product" && (
+            <TeamPicker
+              teams={data.teams}
+              value={productTeams}
+              onChange={setProductTeams}
+              hint="Ao adicionar este produto a um cliente, essas equipes passam a atender o cliente: veem todos os produtos, projetos e tarefas dele."
+            />
           )}
           {kind === "project" &&
             (contract ? (
@@ -441,6 +458,13 @@ export function CreateForm({
                   </Select>
                 </label>
               </div>
+              {linkProduct && (
+                <small className="form-hint" role="status">
+                  {linkTeams.length
+                    ? `${linkTeams.join(", ")} ${linkTeams.length === 1 ? "passa" : "passam"} a atender ${clientName || "o cliente"} (${linkTeams.length === 1 ? "equipe" : "equipes"} de ${productName}).`
+                    : `${productName} ainda não tem equipe responsável. Defina em Produtos › Editar para que ela passe a atender o cliente.`}
+                </small>
+              )}
               {alreadyLinked && (
                 <small className="form-hint" role="status">
                   {clientName} já contrata {productName}. Se for um segundo

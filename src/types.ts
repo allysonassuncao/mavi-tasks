@@ -82,6 +82,23 @@ export interface Product {
    */
   task_project_field?: boolean;
 }
+/**
+ * A team serving a client: brought by one of its active products
+ * (by_product), or an extra chosen for that client (manual). Kept by the
+ * database (migration 20270517090000); both absent before it.
+ */
+export interface ClientTeam {
+  company_id: string;
+  client_id: string;
+  team_id: string;
+  manual?: boolean;
+  by_product?: boolean;
+}
+export interface ProductTeam {
+  company_id: string;
+  product_id: string;
+  team_id: string;
+}
 export interface Contract {
   id: string;
   company_id: string;
@@ -318,7 +335,9 @@ export interface Snapshot {
     /** Validates the team's tasks in projects set to "Supervisor da equipe". */
     supervisor?: boolean;
   }[];
-  clientTeams: { company_id: string; client_id: string; team_id: string }[];
+  clientTeams: ClientTeam[];
+  /** Teams responsible for each product; they serve every client with it. */
+  productTeams?: ProductTeam[];
   /** Custom fields for new tasks, by product and/or team (see TaskTemplate). */
   taskTemplates: TaskTemplate[];
   /** Ready-made checklists (see ChecklistTemplate). */
