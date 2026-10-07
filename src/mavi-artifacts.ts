@@ -352,7 +352,8 @@ export type AiArtifact =
   | TaskArtifact
   | SearchArtifact
   | TutorialArtifact
-  | MemoryArtifact;
+  | MemoryArtifact
+  | DossierCheckArtifact;
 
 // ------------------------------------------------------------ busca de tarefas
 /**
@@ -384,6 +385,24 @@ export type MemoryArtifact = Base & {
   /** No replace: o item e o texto que saíram (Desfazer traz de volta). */
   previous?: string;
   previous_id?: string;
+};
+
+/**
+ * O cartão "A MAVI notou… Confere?" (migração 20270613090000_mavi_memory_client):
+ * uma sugestão de risco alto do dossiê do cliente para quem trabalha com ele
+ * confirmar ou recusar.
+ */
+export type DossierCheckArtifact = Base & {
+  type: "dossier_check";
+  /** A sugestão (client_dossier_proposals). */
+  proposal: string;
+  client: string;
+  op: "add" | "update" | "remove";
+  kind: "prefers" | "avoids" | "rule" | "style" | "context" | "history";
+  text: string;
+  previous?: string;
+  reasons: string[];
+  sources: { type: string; title: string; date: string | null }[];
 };
 
 // ------------------------------------------------------------ tutoriais
@@ -418,6 +437,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ID = /^[A-Za-z0-9_-]{4,64}$/;
 const REF = /^[VIADQTB]\d{1,2}$/;
+const DOSSIER_KINDS = ["prefers", "avoids", "rule", "style", "context", "history"];
 
 const text = (v: unknown, max: number) =>
   typeof v === "string"
@@ -926,6 +946,35 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       ...(/^[0-9a-f-]{36}$/i.test(previousId) ? { previous_id: previousId } : {}),
     };
   }
+  if (a.type === "dossier_check") {
+    const proposal = text(a.proposal, 40);
+    const kind = text(a.kind, 20);
+    const body = text(a.text, 600);
+    if (!/^[0-9a-f-]{36}$/i.test(proposal) || !DOSSIER_KINDS.includes(kind) || !body) return null;
+    const previous = text(a.previous, 600);
+    return {
+      id,
+      ref,
+      type: "dossier_check",
+      proposal,
+      client: text(a.client, 120),
+      op: a.op === "update" || a.op === "remove" ? a.op : "add",
+      kind: kind as DossierCheckArtifact["kind"],
+      text: body,
+      ...(previous ? { previous } : {}),
+      reasons: (Array.isArray(a.reasons) ? a.reasons : [])
+        .filter((r): r is string => typeof r === "string")
+        .map((r) => text(r, 120))
+        .filter(Boolean)
+        .slice(0, 6),
+      sources: (Array.isArray(a.sources) ? a.sources : []).flatMap((x) => {
+        const o = obj(x);
+        return o && text(o.type, 40)
+          ? [{ type: text(o.type, 40), title: text(o.title, 200), date: text(o.date, 40) || null }]
+          : [];
+      }).slice(0, 5),
+    };
+  }
   if (a.type === "action") {
     const action = sanitizeAction(a.action);
     if (!action) return null;
@@ -988,6 +1037,8 @@ export function artifactSummary(a: AiArtifact): string {
     return `botão da Busca avançada com “${a.request}” (${a.total} tarefas)`;
   if (a.type === "tutorial")
     return `cartão que abre o tutorial “${a.title}”${a.section ? ` na seção “${a.section}”` : ""}`;
+  if (a.type === "dossier_check")
+    return `cartão para a pessoa confirmar uma sugestão do dossiê do cliente: “${a.text}”`;
   if (a.type === "memory")
     return `cartão da memória: ${a.op === "forget" ? "tirou" : "anotou"} “${a.text}” (a pessoa pode desfazer)`;
   if (a.type === "question")

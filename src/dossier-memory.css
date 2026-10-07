@@ -1,0 +1,108 @@
+/* Dossiê da MAVI · Fase 2 da memória por cliente (ClientDossier.tsx). */
+.dossier-review {
+  padding: 14px;
+  border: 1px solid #d9d2ef;
+  border-radius: var(--radius);
+  background: #faf8ff;
+}
+.dossier-review.contested {
+  border-color: #ecd9c8;
+  background: #fffaf5;
+}
+.dossier-review h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+}
+.dossier-review h3 small {
+  font-size: 0.74rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+.dossier-review ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dossier-review li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ece8f6;
+  border-radius: 10px;
+  background: #fff;
+}
+.dossier-review li > div {
+  min-width: 0;
+}
+.dossier-review li p {
+  margin: 2px 0 4px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.dossier-review li p.gone {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.dossier-review-op {
+  font-size: 0.72rem;
+  color: #4b3a8a;
+  font-weight: 600;
+}
+.dossier-review-why {
+  color: #7a4a1e;
+}
+.dossier-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.dossier-review-actions .btn {
+  min-height: 30px;
+  padding: 5px 10px;
+  gap: 5px;
+}
+.dossier-new {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #eaf5df;
+  color: #2f4f1a;
+  font-weight: 600;
+}
+.dossier-contest {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch !important;
+  gap: 6px;
+}
+.dossier-contest input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #dfe4e2;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 16px;
+}
+@media (min-width: 641px) {
+  .dossier-contest input {
+    font-size: 0.84rem;
+  }
+}
+.dossier-contest .dossier-review-actions {
+  justify-content: flex-end;
+}
+@media (max-width: 640px) {
+  .dossier-review li {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

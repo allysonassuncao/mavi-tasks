@@ -75,6 +75,8 @@ export type ChatEntry = {
   files?: { id: string; name: string; kind: string }[];
   /** Os itens da memória de quem perguntou que a resposta leu (ids). */
   memory?: string[];
+  /** Os itens do dossiê do cliente que a resposta leu (ids). */
+  dossier?: string[];
   streaming?: boolean;
 };
 
@@ -538,6 +540,7 @@ export function useAiTurns({
         ...(result.route ? { route: result.route } : {}),
         ...(result.message ? { id: result.message } : {}),
         ...(result.memory?.length ? { memory: result.memory } : {}),
+        ...(result.dossier?.length ? { dossier: result.dossier } : {}),
         streaming: false,
         thinking: "",
       }));
@@ -795,6 +798,7 @@ export function entriesFrom(
     steps?: { label: string; detail?: string }[];
     artifacts?: AiArtifact[];
     memory?: string[];
+    dossier?: string[];
   }[],
 ): ChatEntry[] {
   return messages.map((m) => ({
@@ -804,6 +808,7 @@ export function entriesFrom(
     sources: m.sources ?? [],
     artifacts: m.artifacts ?? [],
     ...(m.memory?.length ? { memory: m.memory } : {}),
+    ...(m.dossier?.length ? { dossier: m.dossier } : {}),
     steps: (m.steps ?? []).map((s, i) => ({
       id: `s${i}`,
       label: s.label,

@@ -149,3 +149,49 @@
   font-size: 0.76rem;
   color: var(--muted);
 }
+/* Fase 2: o cartão "Confere?" e contestar um item do dossiê. */
+.dossier-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.mavi-memory-undo.no {
+  border-color: #e3d2cf;
+  color: #7a3b2e;
+}
+.mavi-memory-pop > strong + ul {
+  margin-top: -2px;
+}
+.mavi-memory-contest {
+  flex-direction: column;
+  align-items: stretch !important;
+}
+.mavi-memory-contest input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #dfe4e2;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 16px;
+}
+@media (min-width: 641px) {
+  .mavi-memory-contest input {
+    font-size: 0.76rem;
+  }
+}
+.mavi-memory-contest > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.mavi-memory-pop li button.strong {
+  background: #f3f9ea;
+  color: #2f4f1a;
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  .mavi-memory-card {
+    flex-wrap: wrap;
+  }
+}

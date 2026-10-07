@@ -15,6 +15,7 @@ import {
   streamCopilot,
 } from "./_copilot.js";
 import { handleLearningWorker } from "./_copilot-learning.js";
+import { checkDossierOps } from "./_dossier-check.js";
 import { handleTemperatureWorker } from "./_temperature.js";
 import { handleRadarWorker } from "./_radar.js";
 import { handlePersonalRadarWorker } from "./_personal-radar.js";
@@ -403,7 +404,7 @@ export default async function handler(
         action === "ai-copilot"
           ? await copilotRelated(body, authorization, env, aiDeps(env))
           : action === "ai-dossier"
-            ? await handleDossierWorker(authorization, env, aiDeps(env))
+            ? await handleDossierWorker(authorization, env, aiDeps(env), checkDossierOps)
             : await handleLearningWorker(authorization, env, aiDeps(env), maviLearning());
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));

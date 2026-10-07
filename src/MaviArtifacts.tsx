@@ -33,7 +33,7 @@ import { CanvasCard } from "./MaviCanvas";
 import { QuestionCard } from "./MaviQuestions";
 import { TaskCard } from "./MaviTaskCard";
 import { SearchCard, TutorialCard } from "./MaviSearchCard";
-import { MemoryCard } from "./MaviMemory";
+import { DossierCheckCard, MemoryCard } from "./MaviMemory";
 import { runMcpAction } from "./mavi-mcp";
 import { CampaignAlertCard, StateChip } from "./MaviCampaignAlertCard";
 import { IdentityActionCard } from "./MaviIdentityCard";
@@ -133,6 +133,8 @@ export function ArtifactView({
     return <TutorialCard artifact={artifact} />;
   if (artifact.type === "memory")
     return <MemoryCard artifact={artifact} company={host.company} readOnly={host.readOnly} notify={host.notify} />;
+  if (artifact.type === "dossier_check")
+    return <DossierCheckCard artifact={artifact} company={host.company} readOnly={host.readOnly} notify={host.notify} />;
   if (artifact.action.kind === "mcp_call")
     return <McpActionCard artifact={artifact} host={host} />;
   if (artifact.action.kind === "campaign_alert")

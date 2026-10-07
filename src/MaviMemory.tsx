@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { Brain, RotateCcw, Undo2, X } from "lucide-react";
+import { BookMarked, Brain, Check, RotateCcw, Undo2, X } from "lucide-react";
 import { navigate, pageUrl, routeParts } from "./router";
-import type { MemoryArtifact } from "./mavi-artifacts";
+import type { DossierCheckArtifact, MemoryArtifact } from "./mavi-artifacts";
+import { contestItem, decideProposal, lookupDossier, proposalState, type DossierLookup } from "./dossier-memory";
 import { lookupTraits, setTrait, validityLabel, type TraitLookup } from "./mavi-person";
 import "./mavi-memory.css";
 
@@ -12,7 +13,10 @@ import "./mavi-memory.css";
  *   tirou da memória, com Desfazer;
  * - o chip "Memória" da resposta: os itens que ela leu, cada um com "Não vale
  *   mais". Só quem pode ver a base da pessoa vê os textos (na conversa
- *   compartilhada, os colegas não veem).
+ *   compartilhada, os colegas não veem). Com o dossiê do cliente (Fase 2,
+ *   20270613090000_mavi_memory_client): "Está errado" contesta o item;
+ * - o cartão "A MAVI notou… Confere?": uma sugestão do dossiê para quem
+ *   trabalha com o cliente confirmar.
  */
 
 const profileUrl = () =>
@@ -91,19 +95,25 @@ export function MemoryCard({
   );
 }
 
-/** O chip da resposta: os itens da memória que ela leu. */
+/** O chip da resposta: os itens da memória e do dossiê do cliente que ela leu. */
 export function MemoryChip({
   company,
   ids,
+  clientIds = [],
   notify,
 }: {
   company: string;
   ids: string[];
+  /** Os itens do dossiê do cliente (migração 20270613090000_mavi_memory_client). */
+  clientIds?: string[];
   notify: (message: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<TraitLookup[] | null>(null);
+  const [client, setClient] = useState<(DossierLookup & { contested?: boolean })[] | null>(null);
   const [busy, setBusy] = useState("");
+  // O item do dossiê que a pessoa está contestando (e o porquê).
+  const [contesting, setContesting] = useState<{ id: string; reason: string } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -111,6 +121,9 @@ export function MemoryChip({
     lookupTraits(company, ids)
       .then((list) => alive && setItems(list))
       .catch(() => alive && setItems([]));
+    lookupDossier(company, clientIds)
+      .then((list) => alive && setClient(list))
+      .catch(() => alive && setClient([]));
     const close = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
     };
@@ -119,7 +132,7 @@ export function MemoryChip({
       alive = false;
       document.removeEventListener("mousedown", close);
     };
-  }, [open, company, ids]);
+  }, [open, company, ids, clientIds]);
 
   async function toggle(t: TraitLookup) {
     setBusy(t.id);
@@ -133,50 +146,211 @@ export function MemoryChip({
       setBusy("");
     }
   }
+  async function contest() {
+    if (!contesting) return;
+    const c = contesting;
+    setBusy(c.id);
+    try {
+      await contestItem(company, c.id, c.reason.trim());
+      setClient((list) => (list ?? []).map((x) => (x.id === c.id ? { ...x, contested: true } : x)));
+      setContesting(null);
+      notify("Contestado: o item saiu do dossiê e foi para os líderes decidirem.");
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
 
+  const total = ids.length + clientIds.length;
+  const loading = (ids.length && items === null) || (clientIds.length && client === null);
   return (
     <div className="mavi-memory-chip" ref={box}>
       <button
         type="button"
         className="mavi-memory-chip-btn"
         aria-expanded={open}
-        title="O que a MAVI considerou sobre você nesta resposta"
+        title="O que a MAVI considerou sobre você e sobre o cliente nesta resposta"
         onClick={() => setOpen((v) => !v)}
       >
-        <Brain size={13} aria-hidden="true" /> Memória · {ids.length}
+        <Brain size={13} aria-hidden="true" /> Memória · {total}
       </button>
       {open && (
         <div className="mavi-memory-pop" role="dialog" aria-label="Memória usada nesta resposta">
-          <strong>O que considerei sobre você</strong>
-          {items === null ? (
+          {loading ? (
             <p className="mavi-memory-note">Carregando…</p>
-          ) : !items.length ? (
+          ) : !(items?.length || client?.length) ? (
             <p className="mavi-memory-note">Só quem fez a pergunta vê estes itens.</p>
           ) : (
-            <ul>
-              {items.map((t) => (
-                <li key={t.id} className={t.dismissed ? "gone" : undefined}>
-                  <span>
-                    {t.text}
-                    {validityLabel(t) && <small>{validityLabel(t)}</small>}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={busy === t.id}
-                    title={t.dismissed ? "Trazer de volta" : "Não vale mais (a MAVI não usa e não traz de volta)"}
-                    onClick={() => void toggle(t)}
-                  >
-                    {t.dismissed ? <RotateCcw size={12} aria-hidden="true" /> : <X size={12} aria-hidden="true" />}
-                    {t.dismissed ? "Trazer de volta" : "Não vale mais"}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              {!!items?.length && (
+                <>
+                  <strong>O que considerei sobre você</strong>
+                  <ul>
+                    {items.map((t) => (
+                      <li key={t.id} className={t.dismissed ? "gone" : undefined}>
+                        <span>
+                          {t.text}
+                          {validityLabel(t) && <small>{validityLabel(t)}</small>}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={busy === t.id}
+                          title={t.dismissed ? "Trazer de volta" : "Não vale mais (a MAVI não usa e não traz de volta)"}
+                          onClick={() => void toggle(t)}
+                        >
+                          {t.dismissed ? <RotateCcw size={12} aria-hidden="true" /> : <X size={12} aria-hidden="true" />}
+                          {t.dismissed ? "Trazer de volta" : "Não vale mais"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <a className="mavi-memory-link" href={profileUrl()} onClick={openProfile}>
+                    Ver e editar a memória
+                  </a>
+                </>
+              )}
+              {!!client?.length && (
+                <>
+                  <strong>O que considerei sobre o cliente</strong>
+                  <ul>
+                    {client.map((t) =>
+                      contesting?.id === t.id ? (
+                        <li key={t.id} className="mavi-memory-contest">
+                          <span>{t.text}</span>
+                          <input
+                            autoFocus
+                            maxLength={300}
+                            placeholder="O que está errado? (opcional)"
+                            aria-label="O que está errado"
+                            value={contesting.reason}
+                            onChange={(e) => setContesting({ ...contesting, reason: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void contest();
+                              if (e.key === "Escape") setContesting(null);
+                            }}
+                          />
+                          <div>
+                            <button type="button" onClick={() => setContesting(null)}>
+                              Cancelar
+                            </button>
+                            <button type="button" className="strong" disabled={busy === t.id} onClick={() => void contest()}>
+                              Contestar
+                            </button>
+                          </div>
+                        </li>
+                      ) : (
+                        <li key={t.id} className={t.contested || t.dismissed ? "gone" : undefined}>
+                          <span>
+                            {t.text}
+                            {t.contested && <small>Contestado: com os líderes</small>}
+                          </span>
+                          {!t.contested && !t.dismissed && (
+                            <button
+                              type="button"
+                              title="Está errado: sai do dossiê na hora e vai para os líderes"
+                              onClick={() => setContesting({ id: t.id, reason: "" })}
+                            >
+                              <X size={12} aria-hidden="true" /> Está errado
+                            </button>
+                          )}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </>
+              )}
+            </>
           )}
-          <a className="mavi-memory-link" href={profileUrl()} onClick={openProfile}>
-            Ver e editar a memória
-          </a>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** "A MAVI notou… Confere?": uma sugestão do dossiê para confirmar ou recusar. */
+export function DossierCheckCard({
+  artifact,
+  company,
+  readOnly,
+  notify,
+}: {
+  artifact: DossierCheckArtifact;
+  company: string;
+  readOnly: boolean;
+  notify: (message: string) => void;
+}) {
+  // null: ainda não sabe (ou quem vê não vê o dossiê do cliente).
+  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    proposalState(company, [artifact.proposal])
+      .then((list) => alive && setStatus(list[0]?.status ?? "hidden"))
+      .catch(() => alive && setStatus("hidden"));
+    return () => {
+      alive = false;
+    };
+  }, [company, artifact.proposal]);
+
+  async function decide(decision: "confirm" | "refuse") {
+    setBusy(true);
+    try {
+      const r = await decideProposal(company, artifact.proposal, decision);
+      setStatus(r.status);
+      notify(
+        r.status === "confirmed"
+          ? "Confirmado: entrou no dossiê do cliente."
+          : r.status === "refused"
+            ? "Recusado: a MAVI não propõe de novo."
+            : "Esta sugestão já não está aberta.",
+      );
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (status === "hidden") return null;
+  const done = status && status !== "suggested";
+  const what =
+    artifact.op === "remove" ? "deixou de valer" : artifact.op === "update" ? "mudou" : "é assim";
+  return (
+    <div className={`mavi-memory-card dossier-check${done ? " undone" : ""}`}>
+      <BookMarked size={16} aria-hidden="true" />
+      <span>
+        <strong>
+          {status === "confirmed"
+            ? "Confirmado no dossiê"
+            : status === "refused"
+              ? "Recusado"
+              : status === "expired"
+                ? "Sugestão vencida"
+                : `A MAVI notou sobre ${artifact.client || "o cliente"}: ${what}?`}
+        </strong>
+        <small className={artifact.op === "remove" ? "gone" : undefined}>“{artifact.text}”</small>
+        {artifact.previous && <small className="gone">antes: “{artifact.previous}”</small>}
+        {!done && (
+          <small>
+            {[
+              artifact.reasons.length ? `Pede confirmação: ${artifact.reasons.join(", ")}` : "",
+              artifact.sources.length ? `De: ${artifact.sources.map((s) => s.title).slice(0, 2).join(", ")}` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </small>
+        )}
+      </span>
+      {!readOnly && status === "suggested" && (
+        <span className="dossier-check-actions">
+          <button type="button" className="mavi-memory-undo" disabled={busy} onClick={() => void decide("confirm")}>
+            <Check size={13} aria-hidden="true" /> Está certo
+          </button>
+          <button type="button" className="mavi-memory-undo no" disabled={busy} onClick={() => void decide("refuse")}>
+            <X size={13} aria-hidden="true" /> Não está
+          </button>
+        </span>
       )}
     </div>
   );

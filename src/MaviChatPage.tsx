@@ -1484,9 +1484,14 @@ function ChatThread({
                           }
                         />
                       )}
-                      {/* Os itens da memória de quem perguntou que a resposta leu. */}
-                      {!readOnly && !!t.memory?.length && (
-                        <MemoryChip company={host.company} ids={t.memory} notify={host.notify} />
+                      {/* Os itens da memória de quem perguntou e do dossiê que a resposta leu. */}
+                      {!readOnly && !!(t.memory?.length || t.dossier?.length) && (
+                        <MemoryChip
+                          company={host.company}
+                          ids={t.memory ?? []}
+                          clientIds={t.dossier ?? []}
+                          notify={host.notify}
+                        />
                       )}
                       {(() => {
                         // O do banco tem tudo (anexos lidos e o resumo que a resposta disparou).

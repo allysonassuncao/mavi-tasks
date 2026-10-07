@@ -66,6 +66,7 @@
     "test:db:mavi-judge": "node scripts/test-mavi-judge.mjs",
     "test:db:mavi-person": "node scripts/test-mavi-person.mjs",
     "test:db:mavi-memory": "node scripts/test-mavi-memory.mjs",
+    "test:db:mavi-memory-client": "node scripts/test-mavi-memory-client.mjs",
     "test:db:whatsapp": "node scripts/test-whatsapp-groups.mjs",
     "test:db:client-notes": "node scripts/test-client-notes.mjs",
     "test:db:conversational-agents": "node scripts/test-conversational-agents.mjs",

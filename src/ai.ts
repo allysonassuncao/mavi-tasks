@@ -148,6 +148,8 @@ export type AiAnswer = {
   route?: AiRouteInfo;
   /** Os itens da memória de quem perguntou que esta resposta leu (ids). */
   memory?: string[];
+  /** Os itens do dossiê do cliente que esta resposta leu (ids). */
+  dossier?: string[];
 };
 /** O custo de uma conversa (ai_conversation_cost). */
 export type ConversationCost = {
@@ -290,6 +292,7 @@ export async function streamAnswer(
         ...(e.cost && typeof e.cost.cost === "number" ? { cost: e.cost as TurnCost } : {}),
         ...(typeof e.message === "number" ? { message: e.message } : {}),
         ...(memoryIds(e.memory).length ? { memory: memoryIds(e.memory) } : {}),
+        ...(memoryIds(e.dossier).length ? { dossier: memoryIds(e.dossier) } : {}),
       };
     else if (e.type === "error")
       throw Error(e.error ?? "Não foi possível responder.");
@@ -366,6 +369,8 @@ export type AiStoredMessage = {
   artifacts?: AiArtifact[];
   /** Os itens da memória de quem perguntou que a resposta leu (ids). */
   memory?: string[];
+  /** Os itens do dossiê do cliente que a resposta leu (ids). */
+  dossier?: string[];
 };
 
 /** Os ids da memória usada (o que vier fora do formato some). */
@@ -418,9 +423,12 @@ export async function conversationMessages(id: string) {
       .select(columns)
       .eq("conversation_id", id)
       .order("id");
-  let { data, error } = await read("id,role,content,sources,steps,artifacts,memory");
-  // Antes da migração 20270611090000_mavi_memory_person não há a memória usada;
-  // antes da 20261212090000_mavi_powers, nem os anexos.
+  let { data, error } = await read("id,role,content,sources,steps,artifacts,memory,dossier");
+  // Antes da migração 20270613090000_mavi_memory_client não há o dossiê usado;
+  // antes da 20270611090000_mavi_memory_person, nem a memória; antes da
+  // 20261212090000_mavi_powers, nem os anexos.
+  if (error?.code === "42703")
+    ({ data, error } = await read("id,role,content,sources,steps,artifacts,memory"));
   if (error?.code === "42703")
     ({ data, error } = await read("id,role,content,sources,steps,artifacts"));
   if (error?.code === "42703")
@@ -430,6 +438,7 @@ export async function conversationMessages(id: string) {
     ...m,
     artifacts: sanitizeArtifacts(m.artifacts),
     memory: memoryIds(m.memory),
+    dossier: memoryIds(m.dossier),
   }));
 }
 export async function conversationShares(id: string) {

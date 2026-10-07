@@ -74,6 +74,7 @@ import {
   sanitizeArtifacts,
   type AiArtifact,
   type CanvasArtifact,
+  type DossierCheckArtifact,
   type ImageArtifact,
   type MemoryArtifact,
   type Power,
@@ -488,7 +489,7 @@ export async function buildContext(
   now: number,
 ) {
   const userId = userIdFrom(auth);
-  const [members, clients, contracts, temperature, radar, media, notes, agents, insights] = await Promise.all([
+  const [members, clients, contracts, temperature, radar, media, notes, agents, insights, dossier] = await Promise.all([
     rest<{
       user_id: string;
       name: string;
@@ -587,6 +588,15 @@ export async function buildContext(
           .then((r) => (r.ok ? r.data : null))
           .catch(() => null)
       : Promise.resolve(null),
+    // E o dossiê do cliente (o que o time sabe; migração 20270613090000).
+    scope.client
+      ? callRpc<DossierContextItem[] | null>(env, deps.fetch, auth, "client_dossier_context", {
+          p_company: company,
+          p_client: scope.client,
+        })
+          .then((r) => (r.ok && Array.isArray(r.data) ? r.data : null))
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
   const open = contracts.filter((k) => !k.archived).map((k) => k.id);
   const projects = open.length
@@ -637,6 +647,7 @@ export async function buildContext(
       mediaLine(media),
       notesLine(notes),
       agentLine(agents),
+      dossierLine(dossier),
     );
   } else {
     lines.push(
@@ -663,6 +674,8 @@ export async function buildContext(
     today,
     /** Os módulos que um administrador escondeu de quem pergunta. */
     hidden: me.hidden_pages ?? [],
+    /** Os itens do dossiê que entraram no contexto (a resposta guarda quais leu). */
+    dossier: dossierItems(dossier).map((i) => i.id),
     /** Administrador ou gestor (vê por que cada resposta usou o seu modelo). */
     leader: me.role === "admin" || me.role === "manager",
     /** Quem pergunta usa Campanhas (os avisos de campanhas entram na conversa). */
@@ -672,6 +685,34 @@ export async function buildContext(
         me.role === "manager" ||
         (me.role === "member" && (me.shown_pages ?? []).includes("campaigns"))),
   };
+}
+
+export type DossierContextItem = { id: string; kind: string; text: string };
+const DOSSIER_KIND: Record<string, string> = {
+  prefers: "Prefere",
+  avoids: "Não gosta",
+  rule: "Regra",
+  style: "Tom e identidade",
+  context: "Contexto",
+  history: "Histórico",
+};
+/** O teto do dossiê no contexto (os fixados e os mais recentes primeiro, como vêm do banco). */
+export const DOSSIER_CONTEXT_CHARS = 3000;
+function dossierItems(items: DossierContextItem[] | null) {
+  let left = DOSSIER_CONTEXT_CHARS;
+  return (items ?? []).filter((i) => {
+    if (i.text.length > left) return false;
+    left -= i.text.length;
+    return true;
+  });
+}
+/** O dossiê do cliente no contexto da conversa, com [C#]. */
+export function dossierLine(items: DossierContextItem[] | null) {
+  const list = dossierItems(items);
+  if (!list.length) return "";
+  return `Dossiê do cliente (o que o time sabe para acertar de primeira; siga nas respostas e nas sugestões de entrega): ${list
+    .map((i, n) => `[C${n + 1}] ${DOSSIER_KIND[i.kind] ?? i.kind}: ${i.text}`)
+    .join(" · ")}. Se a pessoa disser que um item está errado, diga que ela pode contestar pelo botão Memória embaixo da resposta: o item sai na hora e vai para os líderes.`;
 }
 
 /** As anotações do cliente que existem (os títulos), para a MAVI saber onde ler. */
@@ -738,6 +779,8 @@ export type AiStreamEvent =
       route?: AiRouteInfo;
       /** Os itens da memória de quem perguntou que esta resposta leu (ids). */
       memory?: string[];
+      /** Os itens do dossiê do cliente que esta resposta leu (ids). */
+      dossier?: string[];
     }
   | { type: "error"; error: string; status: number };
 type Emit = (event: AiStreamEvent) => void;
@@ -1920,6 +1963,21 @@ async function ask(
     ? result.text
     : `${partial.trim() ? `${partial.trim()}\n\n` : ""}*(Resposta interrompida por você.)*`;
   const sources = citedSources(answer, ctx.sources);
+  // Uma sugestão do dossiê do cliente para quem trabalha com ele confirmar
+  // ("A MAVI notou… Confere?"), no fim da resposta (cada pessoa vê uma vez).
+  if (withPowers && scope.client && result && !kit.asked && !planned) {
+    const r = await callRpc<Omit<DossierCheckArtifact, "id" | "ref" | "type" | "proposal"> & { id: string } | null>(
+      env,
+      deps.fetch,
+      auth,
+      "client_dossier_ask",
+      { p_company: company, p_client: scope.client },
+    ).catch(() => null);
+    if (r?.ok && r.data?.id) {
+      const { id: proposal, ...card } = r.data;
+      add<DossierCheckArtifact>(kit, "B", { type: "dossier_check", proposal, ...card });
+    }
+  }
   // O link assinado da imagem vale uma hora: não é gravado.
   const artifacts = kit.artifacts;
   const stored = artifacts.map((a) =>
@@ -1984,6 +2042,10 @@ async function ask(
   const memoryUsed = [...memoryRefs.values()];
   if (messageId && memoryUsed.length)
     await callRpc(env, deps.fetch, auth, "mavi_person_used", { p_message: messageId, p_ids: memoryUsed }).catch(() => null);
+  // E os do dossiê do cliente.
+  const dossierUsed = base.dossier;
+  if (messageId && dossierUsed.length)
+    await callRpc(env, deps.fetch, auth, "mavi_dossier_used", { p_message: messageId, p_ids: dossierUsed }).catch(() => null);
   // Sinais de problema nesta resposta: a MAVI confere depois (autoavaliação).
   if (messageId && !cancelled) {
     const signals = answerSignals({
@@ -2082,6 +2144,7 @@ async function ask(
     cost: { ...turnCost(ctx.cost!.entries), detail },
     ...(messageId ? { message: messageId } : {}),
     ...(memoryUsed.length ? { memory: memoryUsed } : {}),
+    ...(dossierUsed.length ? { dossier: dossierUsed } : {}),
     // O porquê do modelo, só para líderes (como as decisões no Painel da MAVI).
     ...(base.leader ? { route: {
       model: usedModel,

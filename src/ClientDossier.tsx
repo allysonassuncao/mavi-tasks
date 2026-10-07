@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   BookMarked,
+  Check,
+  Flag,
   Pencil,
   Pin,
   PinOff,
@@ -10,11 +12,21 @@ import {
   Sparkles,
   Trash2,
   User,
+  X,
 } from "lucide-react";
 import { Button, Loading, Select, SelectOption, Textarea } from "./ui";
 import { Empty } from "./components";
 import { supabase } from "./supabase";
 import type { Snapshot } from "./types";
+import {
+  PROPOSAL_OP,
+  contestItem,
+  decideProposal,
+  isNew,
+  resolveContest,
+  type DossierProposal,
+} from "./dossier-memory";
+import "./dossier-memory.css";
 
 /**
  * Drive › cliente › Dossiê da MAVI: o que quem cria tarefas para o cliente
@@ -22,6 +34,12 @@ import type { Snapshot } from "./types";
  * mantém sozinha com o material novo do cliente; administradores e gestores
  * escrevem, corrigem, fixam (a MAVI não muda) e removem (a MAVI não traz de
  * volta). É o começo de toda análise do Assistente MAVI nas tarefas.
+ *
+ * Fase 2 da memória por cliente (migração 20270613090000_mavi_memory_client):
+ * o que a MAVI pôs sozinha fica com "Novo" por 7 dias; o de risco alto
+ * aparece em "Para confirmar" (quem vê o dossiê confirma ou recusa; vence em
+ * 14 dias); "Está errado" contesta um item (sai na hora) e os líderes
+ * restauram ou descartam em "Contestados".
  */
 
 export type DossierKind =
@@ -37,6 +55,7 @@ export type DossierItem = {
   seen_at: string | null;
   updated_at: string;
   updated_by: string | null;
+  created_at?: string | null;
 };
 export type Dossier = {
   items: DossierItem[];
@@ -45,6 +64,11 @@ export type Dossier = {
   pending: boolean;
   failed: boolean;
   can_edit: boolean;
+  /** Quem vê o dossiê confirma as sugestões (20270613090000). */
+  can_confirm?: boolean;
+  proposals?: DossierProposal[];
+  /** Só para líderes. */
+  contested?: DossierProposal[];
 };
 
 export const DOSSIER_KINDS: { id: DossierKind; label: string; hint: string }[] =
@@ -181,14 +205,17 @@ export function ClientDossier({
   clientName,
   data,
   notify,
+  initial = null,
 }: {
   company: string;
   client: string;
   clientName: string;
   data: Snapshot;
   notify: (text: string) => void;
+  /** O dossiê já carregado (testes): mostra sem buscar. */
+  initial?: Dossier | null;
 }) {
-  const [dossier, setDossier] = useState<Dossier | null>(null);
+  const [dossier, setDossier] = useState<Dossier | null>(initial);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [editing, setEditing] = useState<{
@@ -197,6 +224,8 @@ export function ClientDossier({
     text: string;
   } | null>(null);
   const [showRemoved, setShowRemoved] = useState(false);
+  // O item que a pessoa está contestando (e o porquê).
+  const [contesting, setContesting] = useState<{ id: string; reason: string } | null>(null);
 
   const load = useCallback(() => {
     setError("");
@@ -204,7 +233,9 @@ export function ClientDossier({
       .then(setDossier)
       .catch((e) => setError((e as Error).message));
   }, [company, client]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    if (!initial) load();
+  }, [load, initial]);
 
   async function run(key: string, fn: () => Promise<void>, done?: string) {
     setBusy(key);
@@ -344,6 +375,97 @@ export function ClientDossier({
       )}
       {editing && !editing.id && editor}
 
+      {!!dossier.proposals?.length && (
+        <section className="dossier-review" aria-label="Para confirmar">
+          <h3>
+            Para confirmar <small>A MAVI notou e quer conferir com quem trabalha com o cliente. Sem resposta em 14 dias, sai.</small>
+          </h3>
+          <ul>
+            {dossier.proposals.map((p) => (
+              <li key={p.id}>
+                <div>
+                  <small className="dossier-review-op">
+                    {PROPOSAL_OP[p.op] ?? p.op} · {DOSSIER_KINDS.find((k) => k.id === p.kind)?.label ?? p.kind}
+                  </small>
+                  <p className={p.op === "remove" ? "gone" : undefined}>{p.text}</p>
+                  {p.previous && <p className="gone">antes: {p.previous}</p>}
+                  <div className="dossier-item-meta">
+                    {p.reasons.length > 0 && <span>Pede confirmação: {p.reasons.join(", ")}</span>}
+                    {p.sources.slice(0, 3).map((s, n) => (
+                      <span key={n} className="dossier-source" title={s.title}>
+                        {SOURCE_LABELS[s.type] ?? s.type}
+                        {s.date ? ` ${dateLabel(s.date)}` : ""}
+                      </span>
+                    ))}
+                    {p.expires_at && <span>até {dateLabel(p.expires_at)}</span>}
+                  </div>
+                </div>
+                {dossier.can_confirm && (
+                  <span className="dossier-review-actions">
+                    <Button
+                      className="btn secondary"
+                      loading={busy === `c${p.id}`}
+                      onClick={() =>
+                        run(`c${p.id}`, async () => void (await decideProposal(company, p.id, "confirm")), "Confirmado: entrou no dossiê.")
+                      }
+                    >
+                      <Check size={14} /> Está certo
+                    </Button>
+                    <Button
+                      className="btn secondary"
+                      loading={busy === `r${p.id}`}
+                      onClick={() =>
+                        run(`r${p.id}`, async () => void (await decideProposal(company, p.id, "refuse")), "Recusado: a MAVI não propõe de novo.")
+                      }
+                    >
+                      <X size={14} /> Não está
+                    </Button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {dossier.can_edit && !!dossier.contested?.length && (
+        <section className="dossier-review contested" aria-label="Contestados">
+          <h3>
+            Contestados <small>Saíram do dossiê na hora; decida se voltam.</small>
+          </h3>
+          <ul>
+            {dossier.contested.map((p) => (
+              <li key={p.id}>
+                <div>
+                  <small className="dossier-review-op">
+                    {DOSSIER_KINDS.find((k) => k.id === p.kind)?.label ?? p.kind} · contestado por {who(p.created_by) ?? "alguém"} em{" "}
+                    {dateLabel(p.created_at)}
+                  </small>
+                  <p>{p.text}</p>
+                  {p.contest_reason && <p className="dossier-review-why">“{p.contest_reason}”</p>}
+                </div>
+                <span className="dossier-review-actions">
+                  <Button
+                    className="btn secondary"
+                    loading={busy === `v${p.id}`}
+                    onClick={() => run(`v${p.id}`, () => resolveContest(company, p.id, "restore"), "Item de volta ao dossiê.")}
+                  >
+                    <RotateCcw size={14} /> Restaurar
+                  </Button>
+                  <Button
+                    className="btn secondary"
+                    loading={busy === `x${p.id}`}
+                    onClick={() => run(`x${p.id}`, () => resolveContest(company, p.id, "discard"), "Descartado: a MAVI não traz de volta.")}
+                  >
+                    <Trash2 size={14} /> Descartar
+                  </Button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {!active.length && !editing ? (
         <Empty
           title="Dossiê vazio"
@@ -367,6 +489,39 @@ export function ClientDossier({
                   {list.map((i) =>
                     editing?.id === i.id ? (
                       <li key={i.id}>{editor}</li>
+                    ) : contesting?.id === i.id ? (
+                      <li key={i.id} className="dossier-item dossier-contest">
+                        <p>{i.text}</p>
+                        <input
+                          autoFocus
+                          maxLength={300}
+                          placeholder="O que está errado? (opcional)"
+                          aria-label="O que está errado"
+                          value={contesting.reason}
+                          onChange={(e) => setContesting({ ...contesting, reason: e.target.value })}
+                        />
+                        <span className="dossier-review-actions">
+                          <Button type="button" className="btn secondary" onClick={() => setContesting(null)}>
+                            Cancelar
+                          </Button>
+                          <Button
+                            className="btn primary"
+                            loading={busy === `k${i.id}`}
+                            onClick={() =>
+                              run(
+                                `k${i.id}`,
+                                async () => {
+                                  await contestItem(company, i.id, contesting.reason.trim());
+                                  setContesting(null);
+                                },
+                                "Contestado: o item saiu e foi para os líderes decidirem.",
+                              )
+                            }
+                          >
+                            Contestar
+                          </Button>
+                        </span>
+                      </li>
                     ) : (
                       <li key={i.id} className="dossier-item">
                         <p>{i.text}</p>
@@ -382,6 +537,7 @@ export function ClientDossier({
                               MAVI
                             </span>
                           )}
+                          {isNew(i) && <span className="dossier-new">Novo</span>}
                           {i.pinned && (
                             <span className="dossier-pinned">
                               <Pin size={12} aria-hidden="true" /> Fixado
@@ -399,6 +555,18 @@ export function ClientDossier({
                             </span>
                           ))}
                         </div>
+                        {!dossier.can_edit && dossier.can_confirm && (
+                          <div className="dossier-item-actions">
+                            <button
+                              type="button"
+                              onClick={() => setContesting({ id: i.id, reason: "" })}
+                              title="Está errado (sai do dossiê na hora e vai para os líderes)"
+                              aria-label="Está errado"
+                            >
+                              <Flag size={14} />
+                            </button>
+                          </div>
+                        )}
                         {dossier.can_edit && (
                           <div className="dossier-item-actions">
                             <button
