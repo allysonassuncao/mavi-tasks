@@ -27,8 +27,11 @@ const STATUS_LABELS: Record<string, string> = {
   restored: "restaurados",
   discarded: "descartados",
 };
-const money = (n: number | undefined) =>
-  `US$ ${(n ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+/** US$ com 2 casas; abaixo de 1 centavo, até 4 (para não virar "0,00"). */
+export const money = (n: number | undefined) => {
+  const v = n ?? 0;
+  return `US$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: v > 0 && v < 0.01 ? 4 : 2 })}`;
+};
 
 export function MaviMemoryPanel({
   company,
@@ -156,8 +159,8 @@ export function MemoryReport({
           </div>
           <strong>{money((stats.cost.dossier ?? 0) + (stats.cost.dossier_check ?? 0) + (stats.cost.profile ?? 0))}</strong>
           <footer>
-            conferência do Jev: {money(stats.cost.dossier_check)} · dossiês: {money(stats.cost.dossier)} · fichas:{" "}
-            {money(stats.cost.profile)}
+            leitura dos dossiês (a rotina que mantém o dossiê de cada cliente): {money(stats.cost.dossier)} · fichas das
+            pessoas: {money(stats.cost.profile)} · conferência do Jev: {money(stats.cost.dossier_check)}
           </footer>
         </article>
       </section>
@@ -257,74 +260,82 @@ export function MemoryReport({
       <section className="panel memory-section">
         <h2>Configuração</h2>
         <div className="memory-settings">
-          <label className="mavi-judge-toggle">
-            <input
-              type="checkbox"
-              checked={s.dossier_autonomy}
-              disabled={busy}
-              onChange={(e) =>
-                void save(
-                  { dossier_autonomy: e.target.checked },
-                  e.target.checked ? "Autonomia ligada." : "Autonomia desligada: tudo de risco alto pede confirmação.",
-                )
-              }
+          <fieldset>
+            <legend>Autonomia por tipo de item</legend>
+            <label className="memory-toggle">
+              <input
+                type="checkbox"
+                checked={s.dossier_autonomy}
+                disabled={busy}
+                onChange={(e) =>
+                  void save(
+                    { dossier_autonomy: e.target.checked },
+                    e.target.checked ? "Autonomia ligada." : "Autonomia desligada: tudo de risco alto pede confirmação.",
+                  )
+                }
+              />
+              {s.dossier_autonomy
+                ? "Ligada: o tipo que a MAVI vem acertando entra direto"
+                : "Desligada: tudo de risco alto pede confirmação"}
+            </label>
+            <NumberSetting
+              label="Entra direto com"
+              suffix={`% de acerto nas últimas ${s.autonomy_window} sugestões decididas`}
+              value={Math.round(s.autonomy_rate * 100)}
+              min={70}
+              max={100}
+              disabled={busy || !s.dossier_autonomy}
+              onSave={(n) => void save({ autonomy_rate: n / 100 }, "Acerto mínimo salvo.")}
             />
-            Autonomia por tipo {s.dossier_autonomy ? "ligada" : "desligada"}
-          </label>
-          <NumberSetting
-            label="Entra direto com"
-            suffix={`% de acerto nas últimas ${s.autonomy_window}`}
-            value={Math.round(s.autonomy_rate * 100)}
-            min={70}
-            max={100}
-            disabled={busy}
-            onSave={(n) => void save({ autonomy_rate: n / 100 }, "Acerto mínimo salvo.")}
-          />
-          <NumberSetting
-            label="Olha as últimas"
-            suffix="sugestões decididas de cada tipo"
-            value={s.autonomy_window}
-            min={10}
-            max={50}
-            disabled={busy}
-            onSave={(n) => void save({ autonomy_window: n }, "Janela salva.")}
-          />
-          <NumberSetting
-            label="Perde a autonomia com"
-            suffix="contestados em 30 dias"
-            value={s.contest_limit}
-            min={1}
-            max={20}
-            disabled={busy}
-            onSave={(n) => void save({ contest_limit: n }, "Limite de contestados salvo.")}
-          />
-          <NumberSetting
-            label="Pergunta “Ainda vale?” do histórico com"
-            suffix="dias sem evidência nova"
-            value={s.history_days}
-            min={30}
-            max={365}
-            disabled={busy}
-            onSave={(n) => void save({ history_days: n }, "Revisão do histórico salva.")}
-          />
-          <label className="mavi-judge-toggle">
-            <input
-              type="checkbox"
-              checked={s.summary_leaders}
-              disabled={busy}
-              onChange={(e) =>
-                void save(
-                  { summary_leaders: e.target.checked },
-                  e.target.checked ? "Líderes recebem os contestados no resumo." : "Resumo só para quem atende o cliente.",
-                )
-              }
+            <NumberSetting
+              label="Olha as últimas"
+              suffix="sugestões decididas de cada tipo"
+              value={s.autonomy_window}
+              min={10}
+              max={50}
+              disabled={busy || !s.dossier_autonomy}
+              onSave={(n) => void save({ autonomy_window: n }, "Janela salva.")}
             />
-            Administradores e gestores recebem os contestados no resumo da semana
-          </label>
-          <small>
-            Toda segunda, às 8h: a revisão das fichas grandes, o “Ainda vale?” do histórico antigo e o resumo da semana
-            na caixa de entrada de quem atende cada cliente.
-          </small>
+            <NumberSetting
+              label="Perde a autonomia com"
+              suffix="itens contestados em 30 dias"
+              value={s.contest_limit}
+              min={1}
+              max={20}
+              disabled={busy || !s.dossier_autonomy}
+              onSave={(n) => void save({ contest_limit: n }, "Limite de contestados salvo.")}
+            />
+          </fieldset>
+          <fieldset>
+            <legend>Revisão semanal</legend>
+            <NumberSetting
+              label="Pergunta “Ainda vale?” do histórico com"
+              suffix="dias sem evidência nova"
+              value={s.history_days}
+              min={30}
+              max={365}
+              disabled={busy}
+              onSave={(n) => void save({ history_days: n }, "Revisão do histórico salva.")}
+            />
+            <label className="memory-toggle">
+              <input
+                type="checkbox"
+                checked={s.summary_leaders}
+                disabled={busy}
+                onChange={(e) =>
+                  void save(
+                    { summary_leaders: e.target.checked },
+                    e.target.checked ? "Líderes recebem os contestados no resumo." : "Resumo só para quem atende o cliente.",
+                  )
+                }
+              />
+              Administradores e gestores recebem os contestados no resumo da semana
+            </label>
+            <small>
+              Toda segunda, às 8h: a revisão das fichas grandes, o “Ainda vale?” do histórico antigo e o resumo da semana
+              na caixa de entrada de quem atende cada cliente.
+            </small>
+          </fieldset>
         </div>
       </section>
     </div>
@@ -350,7 +361,7 @@ function NumberSetting({
 }) {
   return (
     <label className="memory-number">
-      {label}
+      <span>{label}</span>
       <input
         type="number"
         min={min}
@@ -364,7 +375,7 @@ function NumberSetting({
           if (Number.isInteger(n) && n >= min && n <= max && n !== value) onSave(n);
         }}
       />
-      {suffix}
+      <span>{suffix}</span>
     </label>
   );
 }

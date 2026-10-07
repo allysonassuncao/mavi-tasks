@@ -201,31 +201,80 @@
   font-size: 0.78rem;
   color: #3f6a24;
 }
+/* Os estilos globais de label (coluna) e de label input (100%) não valem aqui. */
 .memory-settings {
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+.memory-settings fieldset {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  font-size: 0.82rem;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #eef1f2;
+  border-radius: 10px;
+}
+.memory-settings legend {
+  padding: 0 6px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--ink);
 }
 .memory-settings small {
+  font-size: 0.74rem;
   color: var(--muted);
 }
-.memory-number {
+.memory-settings label.memory-toggle,
+.memory-settings label.memory-number {
   display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink);
 }
-.memory-number input {
-  width: 72px;
-  padding: 4px 8px;
+.memory-settings label.memory-toggle {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+.memory-settings label.memory-toggle input[type="checkbox"] {
+  margin-top: 1px !important;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #4f7d2d;
+}
+.memory-settings label.memory-number input:not([type="checkbox"]) {
+  width: 76px;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 8px;
   border: 1px solid #dfe4e2;
   border-radius: 8px;
   font: inherit;
   font-size: 16px;
+  color: var(--ink);
+  text-align: right;
+}
+.memory-settings label.memory-number input:disabled {
+  background: #f6f7f7;
+  color: var(--muted);
+}
+.memory-settings label.memory-number span:last-child {
+  color: #5d6a68;
 }
 @media (min-width: 641px) {
-  .memory-number input {
+  .memory-settings label.memory-number {
+    display: grid;
+    grid-template-columns: 280px 76px minmax(0, 1fr);
+  }
+  .memory-settings label.memory-number input:not([type="checkbox"]) {
     font-size: 0.82rem;
   }
 }

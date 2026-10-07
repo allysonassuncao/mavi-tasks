@@ -185,7 +185,16 @@ describe("memória · Fase 3", () => {
     expect(html).toContain("Pede confirmação");
     expect(html).toContain("Aprovação com a Bia.");
     expect(html).toContain("Bruno Equipe");
-    expect(html).toContain("Autonomia por tipo ligada");
     expect(html).toContain("US$ 0,62");
+    expect(html).toContain("leitura dos dossiês (a rotina que mantém o dossiê de cada cliente): US$ 0,50");
+    expect(html).toContain("Ligada: o tipo que a MAVI vem acertando entra direto");
+    expect(html).toContain("<legend>Revisão semanal</legend>");
+  });
+
+  it("o custo: 2 casas; abaixo de 1 centavo, até 4", async () => {
+    const { money } = await import("./MaviMemoryPanel");
+    expect(money(20.5297)).toBe("US$ 20,53");
+    expect(money(0.0008)).toBe("US$ 0,0008");
+    expect(money(0)).toBe("US$ 0,00");
   });
 });
