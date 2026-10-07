@@ -46,6 +46,7 @@
     "test:db:ai-eval-set": "node scripts/test-ai-eval-set.mjs",
     "test:db:ai-router-models": "node scripts/test-ai-router-models.mjs",
     "test:db:ai-source-excerpt": "node scripts/test-ai-source-excerpt.mjs",
+    "test:db:ai-route-observed": "node scripts/test-ai-route-observed.mjs",
     "test:db:ai-providers": "node scripts/test-ai-providers.mjs",
     "test:db:ai-settings-log": "node scripts/test-ai-settings-log.mjs",
     "test:db:mavi-powers": "node scripts/test-mavi-powers.mjs",

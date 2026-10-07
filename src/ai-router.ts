@@ -129,6 +129,8 @@ export type RouteStats = {
     agree: number;
     differ: number;
     locked: number;
+    /** A leitura do pedido ficou abaixo do que a resposta precisou. */
+    underestimated?: number;
     est_ratio: number | null;
     by_suggestion: { task_type: string; complexity: number; used_model: string; suggested_model: string | null; n: number }[];
   };
@@ -151,6 +153,9 @@ export type RouteRecent = {
   tools_failed: number;
   escalated: boolean;
   error: string | null;
+  /** A complexidade que a resposta mostrou (rodadas, ferramentas, entregáveis). */
+  observed_complexity?: number | null;
+  underestimated?: boolean;
 };
 
 async function rpc<T>(name: string, args: Record<string, unknown>) {
@@ -236,6 +241,7 @@ export function demoRouter(): RouterApi {
         agree: 120,
         differ: 270,
         locked: 22,
+        underestimated: 31,
         est_ratio: 0.38,
         by_suggestion: [
           { task_type: "consulta", complexity: 1, used_model: "claude-opus-5-5", suggested_model: "claude-haiku-4-5", n: 150 },

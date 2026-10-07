@@ -85,6 +85,11 @@ export type RouteSignals = {
   contextTokens: number;
   tools: boolean;
   latency: LatencyClass;
+  /**
+   * O pedido pede um entregável (apresentação, documento, planilha, post…) ou
+   * um trabalho com várias etapas: a MAVI vai orquestrar ferramentas e poderes.
+   */
+  deliverable?: boolean;
   /** O que pesou na classificação (para o painel e os testes). */
   why: string[];
 };
@@ -117,6 +122,17 @@ const PATTERNS: [TaskType, RegExp][] = [
     /\b(combinad\w*|falad\w*|decidid\w*|prometid\w*|reuniao|reunioes|gravac\w*|whatsapp|historico|conversas?|grupo|encontr\w*|procur\w*|busqu\w*|ache)\b/,
   ],
 ];
+/** Entregáveis: o que a MAVI cria (um documento, uma apresentação, uma arte). */
+const DELIVERABLE =
+  /\b(apresentac\w*|slides?|deck|documento|documentos|planilha\w*|relatorio\w*|proposta\w*|pdf|one.?pager|e-?book|ebook|post|posts|carrossel|carrosseis|roteiro\w*|briefing|apostila|manual|playbook|landing|pagina de vendas|cronograma|calendario|dossie)\b/;
+/** Os que são visuais (os outros são textos). */
+const VISUAL_DELIVERABLE = /\b(apresentac\w*|slides?|deck|post|posts|carrossel|carrosseis|landing|one.?pager|e-?book|ebook)\b/;
+/** Um trabalho com várias etapas: levantar, montar, consolidar, comparar… */
+const MULTI_STEP =
+  /\b(levant\w*|mont\w*|consolid\w*|compil\w*|prepar\w*|elabor\w*|gere|gerar|gera|crie|criar|cria|produz\w*|construa|construir|reuna|junte|cruze|cruzar)\b/;
+/** Pedir para criar: com um entregável, vira trabalho de produção ("escreva o relatório"). */
+const CREATE =
+  /\b(escrev\w*|redij\w*|redigir|faca|fazer|faz|produz\w*|desenvolv\w*|desenh\w*|transform\w*|atualiz\w*|refac\w*|refaz\w*|mande|envie|exporte|exportar)\b/;
 const GREETING = /^(oi|ola|opa|bom dia|boa tarde|boa noite|obrigad[ao]|valeu|ok|beleza|show|perfeito|top|certo|entendi|blz|vlw|tudo bem)\b/;
 const DEEP = /\b(detalhad\w*|aprofund\w*|minucios\w*|completo|completa|profund\w*|estrategic\w*|critic\w*|exaustiv\w*|cada um|todos os|todas as)\b/;
 /** A complexidade de partida de cada tipo. */
@@ -169,11 +185,29 @@ export function classify(input: RouteInput): RouteSignals {
     if (q.length < 60 && !DEEP.test(q) && (taskType === "consulta" || taskType === "busca") && matched.length <= 1)
       (c = Math.min(c, taskType === "busca" ? 2 : 1), why.push("pergunta curta"));
   }
+  // Entregável ou trabalho com várias etapas: nunca é uma consulta simples,
+  // mesmo numa frase curta ("monte a apresentação do cliente 4841").
+  let deliverable = false;
+  if (taskType !== "utilitario" && taskType !== "conversa") {
+    // O entregável conta quando é para criar ("qual o prazo do relatório?" é consulta).
+    const steps = MULTI_STEP.test(q) && q.length >= 20;
+    const makes = DELIVERABLE.test(q) && (steps || CREATE.test(q));
+    if (makes || steps) {
+      deliverable = true;
+      if (makes && (taskType === "consulta" || taskType === "busca")) {
+        const was = taskType;
+        taskType = VISUAL_DELIVERABLE.test(q) ? "visual" : "redacao";
+        why[0] = `tipo: ${taskType} (lido como ${was})`;
+      }
+      if (c < 2) c = 2;
+      why.push(makes ? "pede um entregável" : "trabalho com várias etapas");
+    }
+  }
   const complexity = Math.max(1, Math.min(3, c)) as Complexity;
   const contextTokens = tokensOf(input.question.length + (input.historyChars ?? 0) + (input.contextChars ?? 0));
   const tools = (input.toolCount ?? 0) > 0;
   const latency: LatencyClass = FAST_SURFACES.has(input.surface) ? "rapida" : "normal";
-  return { taskType, complexity, modalities, contextTokens, tools, latency, why };
+  return { taskType, complexity, modalities, contextTokens, tools, latency, why, ...(deliverable ? { deliverable } : {}) };
 }
 
 // ------------------------------------------------------------ modelos
@@ -187,6 +221,11 @@ export type ModelProfile = {
   speechOnly: boolean;
   /** O Jev: confere e audita respostas (Termômetro, autoavaliação), não responde. */
   validator: boolean;
+  /**
+   * Família conhecida (Claude, GPT, Gemini): a faixa pelo nome é confiável.
+   * As outras (DeepSeek, Llama, Qwen…) começam com nota menor até provar.
+   */
+  known: boolean;
 };
 
 /**
@@ -214,7 +253,8 @@ export function modelProfile(kind: string, id: string, price?: ProviderModel | n
     /claude|gemini|gpt-4o|gpt-4-1|gpt-5|^o3|grok-4|vision|pixtral|llama-4|qwen.*vl/.test(m);
   const tools = !/(reasoner|^o1-mini|r1\b)/.test(m);
   const contextK = /gemini|gpt-4-1|llama-4/.test(m) ? 1000 : /gpt-5/.test(m) ? 400 : /claude/.test(m) || kind === "anthropic" ? 200 : 128;
-  return { tier, vision, tools, contextK, speechOnly, validator };
+  const known = /(claude|^gpt-|^o\d|gemini)/.test(m);
+  return { tier, vision, tools, contextK, speechOnly, validator, known };
 }
 
 export type Candidate = {
@@ -314,6 +354,8 @@ const OUTPUT: Record<TaskType, number> = {
  * Equilibrado, um bônus pequeno desempata).
  */
 const PRIOR = 0.85;
+/** Família sem histórico conhecido: começa abaixo e sem bônus de faixa. */
+const PRIOR_UNKNOWN = 0.78;
 const TIER_BONUS: Record<CostLevel, number> = { economico: 0, equilibrado: 0.02, maxima: 0.08 };
 const PRIOR_BELOW = 0.25;
 const WEIGHTS: Record<CostLevel, { cost: number; wait: number }> = {
@@ -324,6 +366,9 @@ const WEIGHTS: Record<CostLevel, { cost: number; wait: number }> = {
 
 export function needTier(signals: RouteSignals, level: CostLevel): Tier {
   let need = NEED[level][signals.complexity - 1];
+  // Entregável ou várias etapas: a MAVI orquestra ferramentas e poderes (documentos,
+  // imagens, conexões), e os modelos pequenos erram a chamada, em qualquer nível.
+  if (signals.deliverable && need < 2) need = 2;
   // Muitas ferramentas (conexões, skills): os modelos pequenos erram a chamada.
   if (signals.tools && signals.taskType !== "conversa" && signals.complexity >= 2 && need < 2) need = 2;
   return need as Tier;
@@ -419,8 +464,10 @@ export function decide(input: {
       stat && stat.n >= MIN_STAT_SAMPLES
         ? stat.quality
         : p.tier >= need
-          ? PRIOR + TIER_BONUS[level] * (p.tier - need)
-          : PRIOR - PRIOR_BELOW * (need - p.tier);
+          ? p.known
+            ? PRIOR + TIER_BONUS[level] * (p.tier - need)
+            : PRIOR_UNKNOWN
+          : (p.known ? PRIOR : PRIOR_UNKNOWN) - PRIOR_BELOW * (need - p.tier);
     // Provou que dá conta deste tipo de pedido na empresa, mesmo abaixo da faixa.
     const learned = !!stat && stat.n >= MIN_STAT_SAMPLES && stat.quality >= LEARNED_FLOOR && p.tier < need;
     return { c, p, est, out, quality, stat, learned };
@@ -500,6 +547,8 @@ export type RouteContext = {
   approved?: { providerId: string | null; model: string }[];
   /** Os modelos que o roteador pode escolher ("provedor|modelo"; nulo: todos os de conversa). */
   routeModels?: string[] | null;
+  /** Tipos de pedido que costumam precisar de mais do que a leitura indica (30 dias). */
+  underestimatedTypes?: TaskType[];
 };
 
 const LEVELS: CostLevel[] = ["economico", "equilibrado", "maxima"];
@@ -531,6 +580,7 @@ export async function routeContext(
     gate?: boolean;
     approved?: { provider_id: string | null; model: string }[];
     route_models?: string[] | null;
+    underestimated_types?: string[];
   };
   const r = await callRpc<Row>(env, fetchImpl, auth, "ai_route_context", {
     p_company: company,
@@ -584,6 +634,9 @@ export async function routeContext(
     ),
     gate: !!d.gate,
     routeModels: Array.isArray(d.route_models) ? d.route_models : null,
+    underestimatedTypes: (Array.isArray(d.underestimated_types) ? d.underestimated_types : []).filter((t): t is TaskType =>
+      TASK_TYPES.includes(t as TaskType),
+    ),
     approved: (Array.isArray(d.approved) ? d.approved : []).map((a) => ({ providerId: a.provider_id ?? null, model: a.model })),
   };
 }
@@ -678,15 +731,16 @@ export function chooseRoute(input: {
   nativeImages?: boolean;
 }): RouteChoice {
   const { ctx, current } = input;
-  // A pessoa teve respostas ruins neste tipo de pedido há pouco: um degrau a mais.
-  const signals: RouteSignals =
-    ctx.personBad?.includes(input.signals.taskType) && input.signals.complexity < 3
-      ? {
-          ...input.signals,
-          complexity: (input.signals.complexity + 1) as Complexity,
-          why: [...input.signals.why, "respostas ruins recentes para esta pessoa"],
-        }
-      : input.signals;
+  // Um degrau a mais quando a pessoa teve respostas ruins neste tipo de pedido
+  // há pouco, ou quando pedidos assim costumam precisar de mais do que a
+  // leitura indica (a conferência depois das respostas, 30 dias).
+  let signals: RouteSignals = input.signals;
+  const bump = (why: string) => {
+    if (signals.complexity < 3)
+      signals = { ...signals, complexity: (signals.complexity + 1) as Complexity, why: [...signals.why, why] };
+  };
+  if (ctx.personBad?.includes(signals.taskType)) bump("respostas ruins recentes para esta pessoa");
+  if (ctx.underestimatedTypes?.includes(signals.taskType)) bump("pedidos assim costumam precisar de mais");
   // Só com lista de permitidos uma regra fica de fora (sem lista, vale todo provedor ativo).
   const blocked =
     ctx.restricted &&
@@ -754,8 +808,29 @@ export type RouteOutcome = {
   capped?: boolean;
   /** Uma segunda tentativa com um modelo mais forte. */
   escalated?: boolean;
+  /** Ferramentas chamadas e entregáveis criados (documentos, imagens, cards). */
+  toolCalls?: number;
+  artifacts?: number;
   error?: string | null;
 };
+
+/**
+ * A complexidade que a resposta mostrou que tinha: um entregável criado ou 4+
+ * rodadas é 3; 2+ rodadas ou 3+ ferramentas é 2; o resto, 1.
+ */
+export function observedComplexity(o: { rounds?: number; toolCalls?: number; artifacts?: number }): Complexity {
+  if ((o.artifacts ?? 0) > 0 || (o.rounds ?? 0) >= 4) return 3;
+  if ((o.rounds ?? 0) >= 2 || (o.toolCalls ?? 0) >= 3) return 2;
+  return 1;
+}
+
+/**
+ * A leitura ficou abaixo do que a resposta precisou e o modelo sugerido era
+ * de faixa abaixo da que ela pedia (no Equilibrado, a faixa é a complexidade).
+ */
+export function underestimated(signals: RouteSignals, decision: Pick<RouteDecision, "suggestedTier">, observed: Complexity) {
+  return observed > signals.complexity && (decision.suggestedTier ?? 3) < observed;
+}
 
 export type RouteWhere = {
   company: string;
@@ -827,7 +902,23 @@ export function logDecision(
       tools_failed: outcome.toolsFailed ?? 0,
       capped: !!outcome.capped,
       escalated: !!outcome.escalated,
-      eval_candidate: outcome.error ? null : evalCandidate(decision, { providerId: outcome.usedProviderId, model: outcome.usedModel }),
+      // O que a resposta precisou de fato (para conferir a leitura do pedido).
+      ...(outcome.error
+        ? {}
+        : (() => {
+            const seen = observedComplexity({
+              ...outcome,
+              toolCalls: outcome.toolCalls ?? (outcome.toolsOk ?? 0) + (outcome.toolsFailed ?? 0),
+            });
+            return { observed_complexity: seen, underestimated: underestimated(signals, decision, seen) };
+          })()),
+      artifacts: outcome.artifacts ?? 0,
+      // Teste fora do ar só sem entregável e com até 2 rodadas: o candidato
+      // responde sem ferramentas, e a comparação não seria justa.
+      eval_candidate:
+        outcome.error || (outcome.artifacts ?? 0) > 0 || (outcome.rounds ?? 0) > 2
+          ? null
+          : evalCandidate(decision, { providerId: outcome.usedProviderId, model: outcome.usedModel }),
       error: outcome.error ? outcome.error.slice(0, 300) : null,
     },
   }).catch(() => null);

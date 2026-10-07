@@ -1082,10 +1082,17 @@ function Performance({ api, data }: { api: RouterApi; data: Snapshot }) {
               <strong>{sh?.locked ?? 0}</strong>
               <small>travadas por regra</small>
             </div>
+            <div>
+              <strong>{sh?.underestimated ?? 0}</strong>
+              <small>leituras abaixo do que a resposta precisou</small>
+            </div>
           </div>
           <p className="cins-help">
             Qualidade é a fração de respostas sem sinal ruim: 👎, autoavaliação reprovada, ferramenta com erro, limite de
-            passos ou falha. A economia compara o custo estimado do modelo sugerido com o do que respondeu.
+            passos ou falha. A economia compara o custo estimado do modelo sugerido com o do que respondeu. Depois de
+            cada resposta, a leitura do pedido é conferida com o que ela precisou de fato (rodadas, ferramentas,
+            documentos e imagens criados): quando ficou abaixo, o modelo sugerido perde nota naquele tipo de pedido, e
+            tipos que costumam ficar abaixo sobem um degrau sozinhos.
           </p>
           {rows.length ? (
             <div className="drive-table-wrap">
@@ -1188,6 +1195,9 @@ function Performance({ api, data }: { api: RouterApi; data: Snapshot }) {
                       {r.escalated && " · 2ª tentativa"}
                       {r.mode !== "auto" && r.suggested_model && r.suggested_model !== r.used_model && (
                         <small className="muted"> (escolheria {r.suggested_model})</small>
+                      )}
+                      {r.underestimated && (
+                        <small className="rtr-under"> · leitura abaixo (precisou de {r.observed_complexity})</small>
                       )}
                     </td>
                     <td data-label="Por quê" className="rtr-reason">

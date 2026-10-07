@@ -1959,6 +1959,8 @@ async function ask(
         toolsFailed: calls.filter((c) => !c.ok).length,
         capped: result?.capped,
         escalated,
+        // Documentos, imagens e cards criados: a conferência da leitura do pedido.
+        artifacts: kit.artifacts.length,
         error: cancelled ? "interrompida" : null,
       },
     );
