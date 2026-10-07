@@ -10,8 +10,11 @@ import {
   HardDriveUpload,
   LayoutTemplate,
   Loader2,
+  Move,
+  PenLine,
+  Sparkles,
+  Check,
   Palette,
-  Pencil,
   Presentation,
   Printer,
   X,
@@ -19,6 +22,9 @@ import {
 import { formatValue } from "./dashboards";
 import { ShadowHtml } from "./ShadowHtml";
 import { DriveSaveDialog, type SaveFormat } from "./DriveSaveDialog";
+import { DesignEditor, type DesignEditorHandle, type EditImage } from "./CanvasDesignEditor";
+import { DocumentEditor, SheetEditor, SlidesEditor, type StructuredHandle } from "./CanvasEditors";
+import { editNote, editedArtifact, saveCanvasEdit } from "./canvas-edit";
 import type { DriveLocation } from "./types";
 import type { ArtifactHost } from "./MaviArtifacts";
 import { imageLink } from "./MaviArtifacts";
@@ -36,7 +42,7 @@ import {
 } from "./mavi-export";
 import { CANVAS_CSS, canvasPage, documentHtml, slideHtml, type HtmlOptions } from "./mavi-doc-html";
 import { canvasPages, canvasPdf, dataUrl, saveIdentity, useLookAssets } from "./identities";
-import { DESIGN_FORMATS, designPage, designTokens, type DesignFormat } from "./mavi-design";
+import { DESIGN_FORMATS, designPage, designTokens, toDesign, type DesignFormat } from "./mavi-design";
 import { builtinLook, legacyLook, logoFor, lookFiles, sanitizeTokens, type Look } from "./visual-identity";
 import type {
   Canvas,
@@ -44,6 +50,7 @@ import type {
   ImageArtifact,
   SheetTab,
 } from "./mavi-artifacts";
+import { sanitizeCanvas } from "./mavi-artifacts";
 
 /**
  * O canvas da MAVI (como os artefatos da Claude e o canvas do ChatGPT): o
@@ -102,7 +109,7 @@ export function CanvasCard({ artifact, onOpen }: { artifact: CanvasArtifact; onO
         <small>
           {KIND[c.kind].label} · {meta(c)}
           {look ? ` · ${look.name}` : ""}
-          {artifact.revision_of ? ` · ajuste de ${artifact.revision_of}` : ""}
+          {artifact.revision_of ? ` · ${artifact.edited ? "editado por você a partir" : "ajuste"} de ${artifact.revision_of}` : ""}
         </small>
       </span>
       <span className="canvas-card-open">Abrir</span>
@@ -190,6 +197,13 @@ export function CanvasPanel({
   const c = artifact.canvas;
   const Icon = KIND[c.kind].icon;
   const [busy, setBusy] = useState("");
+  // Edição direta: o tipo pode virar design livre ("Mover livre").
+  const [editing, setEditing] = useState(false);
+  const [editAs, setEditAs] = useState<Canvas | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const designEditor = useRef<DesignEditorHandle>(null);
+  const structured = useRef<StructuredHandle>(null);
   const [saved, setSaved] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const look = useMemo(() => lookOf(c), [c]);
@@ -202,7 +216,8 @@ export function CanvasPanel({
         : (design?.images ?? []),
     [c, design],
   );
-  const imageUrls = useImageLinks(host.company, images, refs);
+  // Editando, todas as imagens da conversa ficam à mão (para trocar e pôr).
+  const imageUrls = useImageLinks(host.company, images, editing ? [...new Set([...refs, ...images.keys()])] : refs);
   const screen: HtmlOptions = useMemo(
     () => ({
       url: (token) =>
@@ -311,6 +326,49 @@ export function CanvasPanel({
     const node = body.current?.querySelector(".canvas-printable");
     if (node && !printHtml(c.title, node.outerHTML)) host.notify("O navegador bloqueou a janela de impressão.");
   }
+  // As imagens que o editor oferece: as da conversa e os logos do tema.
+  const editImages: EditImage[] = [
+    ...[...images.keys()]
+      .filter((r) => imageUrls[r])
+      .map((r) => ({ token: `img:${r}`, url: imageUrls[r], label: `${r} · ${images.get(r)?.prompt.slice(0, 60) ?? ""}` })),
+    ...(look ? lookFiles(look) : [])
+      .filter((id) => fileUrls[id] && (look?.logo.light === id || look?.logo.dark === id))
+      .map((id) => ({ token: `file:${id}`, url: fileUrls[id], label: "Logo da identidade" })),
+  ];
+  function stopEditing() {
+    if (dirty && !window.confirm("Descartar as mudanças desta edição?")) return;
+    setEditing(false);
+    setEditAs(null);
+    setDirty(false);
+  }
+  async function saveEdit() {
+    if (!host.conversation || !host.onCanvasEdited || !host.nextDocRef) return;
+    const base = editAs ?? c;
+    const next =
+      base.kind === "design"
+        ? (() => {
+            const r = designEditor.current?.serialize();
+            return r ? { ...base, html: r.html, ...(r.look ? { look: r.look } : {}) } : base;
+          })()
+        : (structured.current?.serialize() ?? base);
+    const canvas = sanitizeCanvas(next);
+    if (!canvas) return host.notify("A versão editada ficou vazia: confira antes de salvar.");
+    setSavingEdit(true);
+    try {
+      const saved = editedArtifact(artifact, canvas, host.nextDocRef());
+      const note = editNote(artifact, saved);
+      await saveCanvasEdit(host.conversation, note, saved);
+      host.onCanvasEdited(saved, note);
+      host.notify(`Salvo como ${saved.ref}. A MAVI continua a partir desta versão.`);
+      setEditing(false);
+      setEditAs(null);
+      setDirty(false);
+    } catch (e) {
+      host.notify((e as Error).message || "Não foi possível salvar a versão.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
   async function saveLook() {
     if (!look) return;
     await run("Salvar", async () => {
@@ -330,6 +388,40 @@ export function CanvasPanel({
   }
   return (
     <aside className="canvas-pane" aria-label={`${KIND[c.kind].label}: ${c.title}`}>
+      {editing ? (
+        <header className="canvas-head canvas-head-editing">
+          <span className="canvas-card-icon small" aria-hidden="true">
+            <PenLine size={16} />
+          </span>
+          <span className="canvas-head-title">
+            <strong title={c.title}>Editando {artifact.ref}</strong>
+            <small>
+              {KIND[(editAs ?? c).kind].label}
+              {editAs ? " · em design livre" : ""} · {dirty ? "mudanças não salvas" : "sem mudanças"}
+            </small>
+          </span>
+          {!editAs && (c.kind === "slides" || c.kind === "document") && look && (
+            <button
+              type="button"
+              className="btn secondary canvas-free"
+              title="Abre como design livre: mover e redimensionar à vontade (o PowerPoint e o Word passam a sair como no design livre)"
+              onClick={() => {
+                const current = (structured.current?.serialize() ?? c) as Extract<Canvas, { kind: "slides" | "document" }>;
+                setEditAs(toDesign(current, current.look ?? look));
+                setDirty(true);
+              }}
+            >
+              <Move size={15} /> Mover livre
+            </button>
+          )}
+          <button type="button" className="btn secondary" disabled={savingEdit} onClick={stopEditing}>
+            Descartar
+          </button>
+          <button type="button" className="btn primary" disabled={savingEdit || !dirty} onClick={() => void saveEdit()}>
+            {savingEdit ? <Loader2 size={15} className="spin" /> : <Check size={15} />} Salvar versão
+          </button>
+        </header>
+      ) : (
       <header className="canvas-head">
         <span className="canvas-card-icon small" aria-hidden="true">
           <Icon size={16} />
@@ -338,7 +430,7 @@ export function CanvasPanel({
           <strong title={c.title}>{c.title}</strong>
           <small>
             {artifact.ref} · {KIND[c.kind].label} · {meta(c)}
-            {artifact.revision_of ? ` · ajuste de ${artifact.revision_of}` : ""}
+            {artifact.revision_of ? ` · ${artifact.edited ? "editado por você a partir" : "ajuste"} de ${artifact.revision_of}` : ""}
           </small>
         </span>
         {look && (
@@ -356,6 +448,11 @@ export function CanvasPanel({
             <BookmarkPlus size={16} />
           </button>
         )}
+        {!host.readOnly && host.onCanvasEdited && host.conversation && (
+          <button type="button" className="btn secondary canvas-edit-btn" title="Editar direto no canvas" onClick={() => { setEditing(true); setDirty(false); setEditAs(null); }}>
+            <PenLine size={15} /> Editar
+          </button>
+        )}
         {!host.readOnly && (
           <button
             type="button"
@@ -364,7 +461,7 @@ export function CanvasPanel({
             aria-label="Pedir um ajuste à MAVI"
             onClick={() => host.onDraft(`Ajuste o ${artifact.ref}: `)}
           >
-            <Pencil size={16} />
+            <Sparkles size={16} />
           </button>
         )}
         {!host.readOnly && look && (
@@ -420,6 +517,7 @@ export function CanvasPanel({
           <X size={17} />
         </button>
       </header>
+      )}
       {saving && host.drive && (
         <DriveSaveDialog
           company={host.company}
@@ -439,7 +537,30 @@ export function CanvasPanel({
         />
       )}
       <div className="canvas-body" ref={body}>
-        {c.kind === "document" && look ? (
+        {editing ? (
+          (() => {
+            const e = editAs ?? c;
+            const markDirty = () => setDirty(true);
+            if (e.kind === "design")
+              return (
+                <DesignEditor
+                  key={editAs ? "livre" : "design"}
+                  ref={designEditor}
+                  html={e.html}
+                  format={e.format}
+                  look={e.look ?? null}
+                  url={screen.url!}
+                  images={editImages}
+                  title={e.title}
+                  onDirty={markDirty}
+                />
+              );
+            if (e.kind === "slides" && look) return <SlidesEditor ref={structured} canvas={e} look={look} options={screen} images={editImages} onDirty={markDirty} />;
+            if (e.kind === "document" && look) return <DocumentEditor ref={structured} canvas={e} look={look} options={screen} onDirty={markDirty} />;
+            if (e.kind === "sheet") return <SheetEditor ref={structured} canvas={e} onDirty={markDirty} />;
+            return null;
+          })()
+        ) : c.kind === "document" && look ? (
           <ShadowHtml css={SCREEN_CSS.document} html={documentHtml(c.title, c.markdown, look, screen)} />
         ) : c.kind === "slides" && look ? (
           <SlidesView canvas={c} look={look} options={screen} />

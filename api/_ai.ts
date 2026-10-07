@@ -425,7 +425,7 @@ async function summarize(
     }).catch(() => null);
 }
 
-function conversation(question: unknown, history: unknown): ChatTurn[] {
+export function conversation(question: unknown, history: unknown): ChatTurn[] {
   const q = typeof question === "string" ? question.trim() : "";
   if (q.length < 2 || q.length > 2000)
     throw new AiError(400, "Escreva uma pergunta de até 2.000 caracteres.");
@@ -457,11 +457,17 @@ function conversation(question: unknown, history: unknown): ChatTurn[] {
   }
   turns.splice(0, turns.length, ...head, ...kept);
   while (turns.length && turns[0].role !== "user") turns.shift();
+  // Mensagens seguidas do mesmo lado (a versão que a pessoa editou no canvas
+  // e a pergunta depois) se juntam em vez de uma sumir.
   const clean: ChatTurn[] = [];
-  for (const t of turns)
-    if (!clean.length || clean[clean.length - 1].role !== t.role) clean.push(t);
-  if (clean.length && clean[clean.length - 1].role === "user") clean.pop();
-  return [...clean, { role: "user", content: q }];
+  for (const t of turns) {
+    const last = clean[clean.length - 1];
+    if (last && last.role === t.role) last.content = `${last.content}\n\n${t.content}`;
+    else clean.push({ ...t });
+  }
+  // A última da pessoa sem resposta (uma edição salva) vai junto com a pergunta.
+  const pending = clean.length && clean[clean.length - 1].role === "user" ? clean.pop()!.content : "";
+  return [...clean, { role: "user", content: pending ? `${pending}\n\n${q}` : q }];
 }
 
 /** O que o modelo precisa saber sobre quem pergunta e onde. */

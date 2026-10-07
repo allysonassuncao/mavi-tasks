@@ -22,7 +22,14 @@ import {
 
 export type HtmlOptions = {
   url?: (token: string) => string | null;
+  /**
+   * Marca cada campo que dá para editar (data-f="title", "bullets.0",
+   * "stats.1.value"; nos documentos, data-b="3", "3.0", "3.r.1.2"): só no
+   * editor do canvas.
+   */
+  marks?: boolean;
 };
+const mark = (o: HtmlOptions, attr: "f" | "b", path: string | number) => (o.marks ? ` data-${attr}="${path}"` : "");
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -114,28 +121,45 @@ const DOC_CSS = `
 .doc.decor-band .doc-foot{border-top:6px solid var(--primary);padding-top:16px}
 `;
 
-export function documentHtml(title: string, markdown: string, look: Look, o: HtmlOptions = {}, date?: string) {
-  const body: string[] = [];
+/** Os blocos do documento como aparecem (sem o primeiro título repetido). */
+export function docBlocks(title: string, markdown: string) {
   const blocks = markdownBlocks(markdown);
   // O primeiro título do Markdown igual ao do documento não se repete.
   const first = blocks[0];
   if (first?.kind === "heading" && clean(first.text).trim() === clean(title).trim()) blocks.shift();
-  for (const b of blocks) {
+  return blocks;
+}
+
+export function documentHtml(title: string, markdown: string, look: Look, o: HtmlOptions = {}, date?: string) {
+  return documentFromBlocks(title, docBlocks(title, markdown), look, o, date);
+}
+
+/** O documento a partir dos blocos (o editor desenha assim: um bloco vazio não some). */
+export function documentFromBlocks(
+  title: string,
+  blocks: ReturnType<typeof markdownBlocks>,
+  look: Look,
+  o: HtmlOptions = {},
+  date?: string,
+) {
+  const body: string[] = [];
+  for (const [n, b] of blocks.entries()) {
+    const at = mark(o, "b", n);
     if (b.kind === "heading") {
       // O título do documento é o h1: "#" e "##" viram as seções (h2).
       const level = Math.min(5, Math.max(2, b.level));
-      body.push(`<h${level}>${inline(b.text)}</h${level}>`);
-    } else if (b.kind === "paragraph") body.push(`<p>${inline(b.text)}</p>`);
-    else if (b.kind === "quote") body.push(`<blockquote>${inline(b.text)}</blockquote>`);
-    else if (b.kind === "code") body.push(`<pre>${esc(b.text)}</pre>`);
-    else if (b.kind === "rule") body.push("<hr>");
+      body.push(`<h${level}${at}>${inline(b.text)}</h${level}>`);
+    } else if (b.kind === "paragraph") body.push(`<p${at}>${inline(b.text)}</p>`);
+    else if (b.kind === "quote") body.push(`<blockquote${at}>${inline(b.text)}</blockquote>`);
+    else if (b.kind === "code") body.push(`<pre${at}>${esc(b.text)}</pre>`);
+    else if (b.kind === "rule") body.push(`<hr${at}>`);
     else if (b.kind === "list") {
       const tag = b.ordered ? "ol" : "ul";
-      body.push(`<${tag}>${b.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${tag}>`);
+      body.push(`<${tag}>${b.items.map((i, k) => `<li${mark(o, "b", `${n}.${k}`)}>${inline(i)}</li>`).join("")}</${tag}>`);
     } else if (b.kind === "table")
       body.push(
-        `<table><thead><tr>${b.head.map((h) => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${b.rows
-          .map((r) => `<tr>${b.head.map((_, k) => `<td>${inline(r[k] ?? "")}</td>`).join("")}</tr>`)
+        `<table${o.marks ? ` data-t="${n}"` : ""}><thead><tr>${b.head.map((h, k) => `<th${mark(o, "b", `${n}.h.${k}`)}>${inline(h)}</th>`).join("")}</tr></thead><tbody>${b.rows
+          .map((r, j) => `<tr>${b.head.map((_, k) => `<td${mark(o, "b", `${n}.r.${j}.${k}`)}>${inline(r[k] ?? "")}</td>`).join("")}</tr>`)
           .join("")}</tbody></table>`,
       );
   }
@@ -143,7 +167,7 @@ export function documentHtml(title: string, markdown: string, look: Look, o: Htm
   const logo = logoFor(look, coverBg);
   const footLogo = logoFor(look, look.colors.bg);
   return `<article class="doc decor-${look.decor}" style="${esc(lookVars(look))}">
-<header class="doc-cover cover-${look.cover} decor-${look.decor}">${logo ? `<img class="doc-logo" src="${src(`file:${logo}`, o)}" alt="">` : ""}<h1>${inline(title)}</h1>${date ? `<span class="doc-date">${esc(date)}</span>` : ""}</header>
+<header class="doc-cover cover-${look.cover} decor-${look.decor}">${logo ? `<img class="doc-logo" src="${src(`file:${logo}`, o)}" alt="">` : ""}<h1${mark(o, "f", "title")}>${inline(title)}</h1>${date ? `<span class="doc-date">${esc(date)}</span>` : ""}</header>
 <div class="doc-body">${body.join("\n")}</div>
 ${footLogo && footLogo !== logo ? `<footer class="doc-foot"><span>${inline(title)}</span><img src="${src(`file:${footLogo}`, o)}" alt=""></footer>` : look.decor === "band" ? `<footer class="doc-foot"><span>${inline(title)}</span></footer>` : ""}
 </article>`;
@@ -206,21 +230,23 @@ const SLIDE_CSS = `
 `;
 
 function slideInner(s: Slide, o: HtmlOptions) {
-  const list = (items?: string[]) => (items?.length ? `<ul>${items.map((b) => `<li>${inline(b)}</li>`).join("")}</ul>` : "");
-  const sub = s.subtitle ? `<p class="sub">${inline(s.subtitle)}</p>` : "";
-  if (s.layout === "section") return `<h2>${inline(s.title)}</h2>${sub}`;
+  const f = (path: string) => mark(o, "f", path);
+  const list = (key: "bullets" | "left" | "right", items?: string[]) =>
+    items?.length ? `<ul>${items.map((b, i) => `<li${f(`${key}.${i}`)}>${inline(b)}</li>`).join("")}</ul>` : "";
+  const sub = s.subtitle || o.marks ? `<p class="sub"${f("subtitle")}>${inline(s.subtitle ?? "")}</p>` : "";
+  if (s.layout === "section") return `<h2${f("title")}>${inline(s.title)}</h2>${sub}`;
   if (s.layout === "quote")
-    return `<figure class="quote"><blockquote>${inline(s.quote ?? s.title)}</blockquote>${s.author ? `<figcaption>— ${esc(s.author)}</figcaption>` : ""}</figure>`;
-  const head = `<h3>${inline(s.title)}</h3>`;
+    return `<figure class="quote"><blockquote${f("quote")}>${inline(s.quote ?? s.title)}</blockquote>${s.author || o.marks ? `<figcaption>— <span${f("author")}>${esc(s.author ?? "")}</span></figcaption>` : ""}</figure>`;
+  const head = `<h3${f("title")}>${inline(s.title)}</h3>`;
   if (s.layout === "two_columns")
-    return `${head}${sub}<div class="cols"><div>${s.left_title ? `<h4>${esc(s.left_title)}</h4>` : ""}${list(s.left)}</div><div>${s.right_title ? `<h4>${esc(s.right_title)}</h4>` : ""}${list(s.right)}</div></div>`;
+    return `${head}${sub}<div class="cols"><div>${s.left_title || o.marks ? `<h4${f("left_title")}>${esc(s.left_title ?? "")}</h4>` : ""}${list("left", s.left)}</div><div>${s.right_title || o.marks ? `<h4${f("right_title")}>${esc(s.right_title ?? "")}</h4>` : ""}${list("right", s.right)}</div></div>`;
   if (s.layout === "stats")
-    return `${head}<div class="stats">${(s.stats ?? []).map((st) => `<div><strong>${esc(st.value)}</strong><span>${inline(st.label)}</span></div>`).join("")}</div>${sub}`;
+    return `${head}<div class="stats">${(s.stats ?? []).map((st, i) => `<div><strong${f(`stats.${i}.value`)}>${esc(st.value)}</strong><span${f(`stats.${i}.label`)}>${inline(st.label)}</span></div>`).join("")}</div>${sub}`;
   if (s.layout === "image") {
     const url = s.image ? src(`img:${s.image}`, o) : "";
-    return `${head}<div class="img${s.bullets?.length ? " with-text" : ""}">${url ? `<img src="${url}" alt="">` : `<span class="empty">Imagem ${esc(s.image ?? "")}</span>`}${list(s.bullets)}</div>`;
+    return `${head}<div class="img${s.bullets?.length ? " with-text" : ""}">${url ? `<img src="${url}" alt="">` : `<span class="empty">Imagem ${esc(s.image ?? "")}</span>`}${list("bullets", s.bullets)}</div>`;
   }
-  return `${head}${sub}${list(s.bullets)}`;
+  return `${head}${sub}${list("bullets", s.bullets)}`;
 }
 
 /** Um slide (a moldura com o tamanho; as letras acompanham a largura). */
@@ -232,7 +258,7 @@ export function slideHtml(s: Slide, look: Look, index: number, o: HtmlOptions = 
   const logoImg = (cls: string) => (logo ? `<img class="${cls}" src="${src(`file:${logo}`, o)}" alt="">` : "");
   const vars = lookVars(look);
   if (cover) {
-    const inner = `${look.cover === "split" ? "" : logoImg("cover-logo")}<h2>${inline(s.title)}</h2>${s.subtitle ? `<p class="sub">${inline(s.subtitle)}</p>` : ""}`;
+    const inner = `${look.cover === "split" ? "" : logoImg("cover-logo")}<h2${mark(o, "f", "title")}>${inline(s.title)}</h2>${s.subtitle || o.marks ? `<p class="sub"${mark(o, "f", "subtitle")}>${inline(s.subtitle ?? "")}</p>` : ""}`;
     const decor = look.decor === "corner" && look.cover !== "split" ? `<span class="corner"></span>` : "";
     return `<div class="s-box"><div class="s cover cover-${look.cover} decor-${look.decor}" style="${esc(vars)}">${
       look.cover === "split" ? `<div class="split">${logoImg("")}</div>` : ""

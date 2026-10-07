@@ -125,3 +125,28 @@ describe("Gerar com a MAVI (ai-identity-draft)", () => {
     expect(calls).toContain("rpc/ai_log_usage");
   });
 });
+
+describe("histórico com a versão editada", () => {
+  it("duas mensagens seguidas da pessoa se juntam; a edição vai com a pergunta", async () => {
+    const { conversation } = await import("./_ai");
+    const turns = conversation("E agora?", [
+      { role: "user", content: "Faça a proposta" },
+      { role: "assistant", content: "Pronto: [[D1]]" },
+      { role: "user", content: "Editei o D1 direto no canvas e salvei como D2." },
+    ]);
+    expect(turns).toEqual([
+      { role: "user", content: "Faça a proposta" },
+      { role: "assistant", content: "Pronto: [[D1]]" },
+      { role: "user", content: "Editei o D1 direto no canvas e salvei como D2.\n\nE agora?" },
+    ]);
+    const middle = conversation("Mais um ajuste", [
+      { role: "user", content: "Faça" },
+      { role: "assistant", content: "[[D1]]" },
+      { role: "user", content: "Editei o D1 (D2)." },
+      { role: "user", content: "Deixa mais curto" },
+      { role: "assistant", content: "[[D3]]" },
+    ]);
+    expect(middle[2]).toEqual({ role: "user", content: "Editei o D1 (D2).\n\nDeixa mais curto" });
+    expect(middle).toHaveLength(5);
+  });
+});

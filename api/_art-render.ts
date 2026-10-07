@@ -369,7 +369,34 @@ const INSPECT_PAGES = `(function () {
       var out = r.right > box.right + 2 || r.left < box.left - 2 || (!flow && (r.bottom > box.bottom + 2 || r.top < box.top - 2));
       if (out) { seen++; notes.push("Página " + n + ": texto saindo da página: “" + short(el.textContent || "") + "”."); }
     });
+    // Texto coberto por outro elemento (uma forma, uma imagem) desenhado por cima.
+    window.scrollTo(0, box.top + window.scrollY);
+    var top = pg.getBoundingClientRect();
+    var covered = 0;
+    pg.querySelectorAll("*").forEach(function (el) {
+      if (covered > 3) return;
+      var own = Array.prototype.some.call(el.childNodes, function (c) { return c.nodeType === 3 && c.textContent.trim(); });
+      if (!own) return;
+      var range = document.createRange();
+      range.selectNodeContents(el);
+      var rects = Array.prototype.slice.call(range.getClientRects());
+      var hit = rects.some(function (r) {
+        if (r.width < 4 || r.height < 4) return false;
+        var pts = [0.04, 0.25, 0.5, 0.75, 0.96].map(function (k) { return [r.left + r.width * k, r.top + r.height / 2]; });
+        return pts.some(function (p) {
+          if (p[0] < top.left || p[0] > top.right || p[1] < 0 || p[1] > window.innerHeight) return false;
+          var at = document.elementFromPoint(p[0], p[1]);
+          if (!at || at === el || el.contains(at) || at.contains(el)) return false;
+          var st = getComputedStyle(at);
+          var bg = st.backgroundColor;
+          var solid = at.tagName === "IMG" || st.backgroundImage !== "none" || (bg && bg !== "transparent" && !/,\\s*0\\)$/.test(bg));
+          return solid && Number(st.opacity) >= 0.5;
+        });
+      });
+      if (hit) { covered++; notes.push("Página " + n + ": texto coberto por outro elemento (uma forma ou imagem por cima): “" + short(el.textContent || "") + "”. Afaste, diminua a forma ou mande-a para trás (z-index)."); }
+    });
   });
+  window.scrollTo(0, 0);
   document.querySelectorAll("img").forEach(function (img) {
     if (!img.complete || !img.naturalWidth) notes.push("Imagem que não carregou: " + (img.getAttribute("src") || "(vazia)").slice(0, 60) + " (use img:I1, logo:light/logo:dark ou marca:<arquivo>).");
   });

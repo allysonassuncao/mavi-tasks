@@ -1,0 +1,365 @@
+/* MAVI · edição direta no canvas */
+.cedit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.cedit-bar {
+  position: sticky;
+  top: -24px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  height: 46px;
+  padding: 0 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 14px #1c27280f;
+}
+.cedit-bar .icon-btn.on {
+  background: #eef4e5;
+  color: #2f6b1e;
+}
+.cedit-bar > * {
+  flex-shrink: 0;
+}
+.cedit-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--border);
+}
+.cedit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.76rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+.cedit-btn:hover:not(:disabled) {
+  background: #f3f6f1;
+}
+.cedit-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cedit .cedit-font {
+  height: 30px;
+  max-width: 150px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.76rem;
+}
+.cedit .cedit-size {
+  width: 58px;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.76rem;
+}
+.cedit .cedit-color,
+.cedit-pop .cedit-color {
+  flex-direction: row;
+}
+.cedit-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  color: #4f5c5c;
+  cursor: pointer;
+}
+.cedit .cedit-color input[type="color"],
+.cedit-pop .cedit-color input[type="color"] {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+.cedit .cedit-size,
+.cedit .cedit-font,
+.cedit-pop select {
+  min-height: 0;
+}
+.cedit-color.wide {
+  justify-content: space-between;
+}
+.cedit-danger:hover {
+  color: #b42318;
+}
+.cedit-hint {
+  color: var(--muted);
+  font-size: 0.74rem;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+.cedit-stage {
+  width: 100%;
+}
+.cedit-scaled {
+  margin: 0 auto;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #dfe4e1;
+}
+.cedit-box {
+  position: absolute;
+  pointer-events: none;
+}
+.cedit-grip {
+  position: absolute;
+  left: -2px;
+  top: -30px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: #4f7d2d;
+  color: #fff;
+  cursor: move;
+  pointer-events: auto;
+  box-shadow: 0 2px 8px #0003;
+}
+.cedit-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #4f7d2d;
+  border-radius: 3px;
+  background: #fff;
+  pointer-events: auto;
+}
+.cedit-handle.nw { left: -8px; top: -8px; cursor: nwse-resize; }
+.cedit-handle.n { left: calc(50% - 6px); top: -8px; cursor: ns-resize; }
+.cedit-handle.ne { right: -8px; top: -8px; cursor: nesw-resize; }
+.cedit-handle.e { right: -8px; top: calc(50% - 6px); cursor: ew-resize; }
+.cedit-handle.se { right: -8px; bottom: -8px; cursor: nwse-resize; }
+.cedit-handle.s { left: calc(50% - 6px); bottom: -8px; cursor: ns-resize; }
+.cedit-handle.sw { left: -8px; bottom: -8px; cursor: nesw-resize; }
+.cedit-handle.w { left: -8px; top: calc(50% - 6px); cursor: ew-resize; }
+.cedit-pop {
+  width: 300px;
+  padding: 10px;
+}
+.status-menu .cedit-pop-title,
+.cedit-pop-title {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #4f5c5c;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.cedit-images {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+.cedit-images button {
+  aspect-ratio: 1;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f6f8f5;
+  cursor: pointer;
+}
+.cedit-images img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.cedit-theme {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.cedit-theme-font {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  grid-column: 1 / -1;
+  font-size: 0.72rem;
+  color: #4f5c5c;
+}
+.cedit-theme-font select {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+.canvas-edit-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cedit .cedit-inline-select {
+  height: 24px;
+  min-height: 0;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  font-size: 0.76rem;
+  color: var(--ink);
+}
+.cedit-notes,
+.cedit-sheet-name {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #4f5c5c;
+}
+.cedit-notes textarea,
+.cedit-sheet-name input {
+  min-height: 0;
+  padding: 8px 10px;
+  border: 1px dashed #d5dcd9;
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--ink);
+  resize: vertical;
+}
+.cedit-sheet-name {
+  max-width: 260px;
+}
+.cedit-thumbs {
+  list-style: none;
+  margin: 0;
+  padding: 2px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+.cedit-thumbs button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.cedit-thumbs button > div {
+  border-radius: 6px;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+.cedit-thumbs button.current > div {
+  outline-color: #4f7d2d;
+}
+.cedit-thumbs small {
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+.cedit-sheet th,
+.cedit-sheet td {
+  padding: 0;
+}
+.cedit-sheet input,
+.cedit-sheet select {
+  width: 100%;
+  min-height: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.78rem;
+}
+.cedit-sheet td.num input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cedit-sheet input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+  background: #fff;
+}
+.cedit-sheet th input {
+  font-weight: 650;
+}
+.cedit-col-tools {
+  display: flex;
+  min-width: 120px;
+  align-items: center;
+  border-top: 1px solid var(--border);
+}
+.cedit-col-tools select {
+  flex: 1;
+  min-width: 70px;
+  height: 24px;
+  font-size: 0.7rem;
+  color: #6b7775;
+}
+.cedit-sheet .canvas-rownum {
+  position: relative;
+  padding: 0 6px;
+}
+.cedit-row-del {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.cedit-sheet tr:hover .cedit-row-del {
+  opacity: 1;
+  background: #fff;
+}
+/* O canvas no modo de edição e a versão editada na conversa. */
+.canvas-head-editing {
+  background: #f4f8ff;
+}
+.canvas-head-editing .canvas-card-icon {
+  background: #2563eb;
+  color: #fff;
+}
+.canvas-edit-btn,
+.canvas-free,
+.canvas-head-editing .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+.mavi-msg-edit {
+  margin-top: 8px;
+  min-width: min(320px, 100%);
+}
+.mavi-msg-edit .canvas-card {
+  background: #fff;
+}

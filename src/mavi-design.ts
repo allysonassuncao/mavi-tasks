@@ -1,4 +1,5 @@
-import { fontHead, lookVars } from "./mavi-doc-html.js";
+import { CANVAS_CSS, documentHtml, fontHead, lookVars, slideHtml } from "./mavi-doc-html.js";
+import type { Canvas } from "./mavi-artifacts.js";
 import type { Look } from "./visual-identity.js";
 
 /**
@@ -82,6 +83,20 @@ export const countPages = (html: string) =>
   (html.match(/<section\b[^>]*class\s*=\s*["'][^"']*\bpage\b[^"']*["']/gi) ?? []).length;
 
 /**
+ * Os estilos (os <style> e as folhas do Google Fonts) e o corpo (as páginas)
+ * do HTML da MAVI, já limpos. O editor do canvas troca só o corpo.
+ */
+export function designParts(html: string) {
+  const clean = cleanDesignHtml(html);
+  const styles = [...clean.matchAll(/<style\b[^>]*>[\s\S]*?<\/style\s*>|<link\b[^>]*>/gi)].map((m) => m[0]).join("\n");
+  const inner = clean.match(/<body\b[^>]*>([\s\S]*)<\/body\s*>/i)?.[1];
+  const body = (inner ?? clean.replace(/<\/?(html|head|body)\b[^>]*>/gi, ""))
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>|<link\b[^>]*>|<title\b[^>]*>[\s\S]*?<\/title\s*>/gi, "")
+    .trim();
+  return { styles, body };
+}
+
+/**
  * A página inteira: o tamanho de cada página, o tema (variáveis e fontes) e o
  * HTML da MAVI por cima (ela pode mudar tudo). O corpo vai como está; o
  * <head> que ela mandar fica depois da base.
@@ -101,8 +116,36 @@ ${look ? `:root{${lookVars(look)}}` : ""}
 img{max-width:100%}
 @media screen{html,body{background:#dfe4e1}body{padding:16px 0}.page{margin:0 auto 16px;box-shadow:0 6px 24px #0003}}`;
   const head = `<meta charset="utf-8"><meta name="viewport" content="width=${f.width}">${look ? fontHead(look, { url: url ?? undefined }) : ""}<style>${base}</style>`;
-  const clean = cleanDesignHtml(html);
-  const styles = [...clean.matchAll(/<style\b[^>]*>[\s\S]*?<\/style\s*>|<link\b[^>]*>/gi)].map((m) => m[0]).join("\n");
-  const body = clean.match(/<body\b[^>]*>([\s\S]*)<\/body\s*>/i)?.[1] ?? clean.replace(/<\/?(html|head|body)\b[^>]*>/gi, "").replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>|<link\b[^>]*>|<title\b[^>]*>[\s\S]*?<\/title\s*>/gi, "");
+  const { styles, body } = designParts(html);
   return resolve(`<!doctype html><html lang="pt-BR"><head>${head}${styles}</head><body>${body.trim()}</body></html>`);
+}
+
+/**
+ * Uma apresentação ou um documento como design livre (para mover e
+ * redimensionar à vontade no editor): cada slide vira uma página de
+ * 1280×720; o documento, uma página A4 que cresce. Mantém o desenho e o tema.
+ */
+const noVars = (html: string) => html.replace(/ style="--bg:[^"]*"/g, "");
+
+export function toDesign(c: Extract<Canvas, { kind: "slides" | "document" }>, look: Look): Extract<Canvas, { kind: "design" }> {
+  if (c.kind === "slides") {
+    // As cores do tema ficam na página (:root), não em cada slide: o Tema do editor muda tudo.
+    const pages = c.slides.map((s, i) => `<section class="page">${noVars(slideHtml(s, look, i))}</section>`).join("\n");
+    return {
+      kind: "design",
+      title: c.title,
+      format: "slides",
+      html: `<style>${CANVAS_CSS.slides}.page .s-box{width:1280px}</style>\n${pages}`,
+      pages: c.slides.length,
+      look,
+    };
+  }
+  return {
+    kind: "design",
+    title: c.title,
+    format: "a4",
+    html: `<style>${CANVAS_CSS.document}.page.flow .doc{min-height:1123px}</style>\n<section class="page flow">${noVars(documentHtml(c.title, c.markdown, look))}</section>`,
+    pages: 1,
+    look,
+  };
 }

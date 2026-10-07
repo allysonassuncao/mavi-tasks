@@ -34,6 +34,7 @@ import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
 import { AttachButton, AttachmentTray, FileChip, useAttachmentTray } from "./MaviAttachments";
 import { conversationAttachments, type Attachment } from "./mavi-attachments";
 import { CanvasPanel, type CanvasSaveRequest } from "./MaviCanvas";
+import { nextDocRef } from "./canvas-edit";
 import { AnswerCost, ConversationCostButton, messageCost } from "./MaviCost";
 import { AnswerFeedback } from "./MaviFeedback";
 import { myVotes, type MyVote } from "./mavi-feedback";
@@ -1133,6 +1134,14 @@ function ChatThread({
       setCanvas(a);
     },
     onReply: (text: string) => void submit(text),
+    // A versão editada no canvas: vira uma mensagem da pessoa e abre no canvas.
+    onCanvasEdited: (a: CanvasArtifact, note: string) => {
+      seen.current.add(a.id);
+      chat.append({ role: "user", content: note, artifacts: [a], sources: [], steps: [] });
+      setSaveRequest(null);
+      setCanvas(a);
+    },
+    nextDocRef: () => nextDocRef(turns.flatMap((t) => t.artifacts ?? [])),
     // A MAVI propôs salvar no Drive: o documento abre com a janela pronta.
     onSaveToDrive: host.drive
       ? (a: ActionArtifact, done: (file: string) => void) => {
@@ -1373,6 +1382,14 @@ function ChatThread({
                   </div>
                 )}
                 <p>{t.content}</p>
+                {/* A versão que a pessoa editou no canvas. */}
+                {t.artifacts
+                  ?.filter((a): a is CanvasArtifact => a.type === "canvas")
+                  .map((a) => (
+                    <div key={a.id} className="mavi-msg-edit">
+                      <ArtifactView artifact={a} host={{ ...artifactHost, streaming: false }} />
+                    </div>
+                  ))}
               </div>
             ) : (
               <div key={i} className="mavi-msg ai">

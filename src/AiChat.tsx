@@ -562,7 +562,9 @@ export function useAiTurns({
       setBusy(false);
     }
   }
-  return { turns, busy, error, submit, stop, stopping };
+  /** Uma mensagem gravada fora da pergunta (a versão editada no canvas). */
+  const append = (entry: ChatEntry) => setTurns((t) => [...t, entry]);
+  return { turns, busy, error, submit, stop, stopping, append };
 }
 
 /** As ações que a bolinha desenha: os avisos de campanhas. */

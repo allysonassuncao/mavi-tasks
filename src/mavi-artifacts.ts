@@ -311,6 +311,8 @@ export type CanvasArtifact = Base & {
   canvas: Canvas;
   /** A versão anterior (D1), quando é um ajuste. */
   revision_of?: string;
+  /** A pessoa editou direto no canvas (não foi a MAVI). */
+  edited?: boolean;
 };
 
 // ------------------------------------------------------------ perguntas
@@ -828,7 +830,14 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
     const canvas = sanitizeCanvas(a.canvas);
     const prev = text(a.revision_of, 4);
     return canvas
-      ? { id, ref, type: "canvas", canvas, ...(REF.test(prev) ? { revision_of: prev } : {}) }
+      ? {
+          id,
+          ref,
+          type: "canvas",
+          canvas,
+          ...(REF.test(prev) ? { revision_of: prev } : {}),
+          ...(a.edited === true ? { edited: true } : {}),
+        }
       : null;
   }
   if (a.type === "task") {
@@ -952,7 +961,7 @@ export function artifactSummary(a: AiArtifact): string {
           : c.kind === "design"
             ? `design livre (${c.pages} ${c.pages === 1 ? "página" : "páginas"}, ${c.format}; para ajustar, leia o HTML com read_canvas)`
             : `planilha (${c.sheets.map((x) => x.name).join(", ")})`;
-    return `${what} “${c.title}”${a.revision_of ? ` (ajuste de ${a.revision_of})` : ""}`;
+    return `${what} “${c.title}”${a.revision_of ? ` (${a.edited ? "edição da pessoa" : "ajuste"} de ${a.revision_of})` : ""}`;
   }
   const state = {
     pending: "aguardando a confirmação da pessoa",

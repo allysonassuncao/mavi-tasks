@@ -123,6 +123,23 @@ export function markdownBlocks(md: string): Block[] {
   return out;
 }
 
+/** Os blocos de volta em Markdown (o editor do canvas grava assim). */
+export type DocBlock = Block;
+export function blocksToMarkdown(blocks: Block[]) {
+  const cell = (t: string) => t.replace(/\|/g, "\\|").replace(/\n/g, " ");
+  return blocks
+    .map((b) => {
+      if (b.kind === "heading") return `${"#".repeat(Math.min(6, Math.max(1, b.level)))} ${b.text}`;
+      if (b.kind === "paragraph") return b.text;
+      if (b.kind === "quote") return `> ${b.text}`;
+      if (b.kind === "code") return `\`\`\`\n${b.text}\n\`\`\``;
+      if (b.kind === "rule") return "---";
+      if (b.kind === "list") return b.items.map((i, k) => `${b.ordered ? `${k + 1}.` : "-"} ${i}`).join("\n");
+      return [`| ${b.head.map(cell).join(" | ")} |`, `|${b.head.map(() => "---").join("|")}|`, ...b.rows.map((r) => `| ${b.head.map((_, k) => cell(r[k] ?? "")).join(" | ")} |`)].join("\n");
+    })
+    .join("\n\n");
+}
+
 // ------------------------------------------------------------ identidade
 /** Uma imagem pronta para o arquivo (PNG ou JPEG em data:, com o tamanho). */
 export type ExportImage = { data: string; width: number; height: number };
