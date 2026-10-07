@@ -1436,7 +1436,10 @@ export function AiRoutesPanel({
           funcionalidade. As regras de projeto, produto, cliente e pessoa
           valem nas conversas com a MAVI (assistente e gravações); nas outras
           funcionalidades, vale a da funcionalidade e depois a da empresa.
-          Provedores desligados são pulados.
+          Provedores desligados são pulados. Com o roteador ativo (aba{" "}
+          <a href="#roteamento">Roteamento</a>), a MAVI escolhe o modelo pelo
+          pedido quando não há regra que trave; a regra em Automático também
+          deixa a escolha com ela.
         </p>
         <ol aria-label="Ordem das regras">
           {[

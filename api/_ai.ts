@@ -94,7 +94,18 @@ import {
 import { MCP_RULES, handleMcpAction, mcpTurn, type McpCatalog } from "./_ai-mcp.js";
 import { ADS_RULES, adsTurn } from "./_ai-ads.js";
 import { logCost, meterEntries, newTurn, turnCost, turnDetail, whereOf, type TurnCost } from "./_ai-cost.js";
-import { candidates as routeCandidates, classify, decide, DEFAULT_LEVEL, logDecision, type Candidate } from "./_ai-router.js";
+import {
+  candidateConfig,
+  chooseRoute,
+  classify,
+  logDecision,
+  NO_PROVIDER,
+  openCandidate,
+  routeContext,
+  strongerThan,
+  type Candidate,
+  type RouteOpener,
+} from "./_ai-router.js";
 import type { Meter } from "./_social-leads.js";
 import { pageForMavi, scrapePage } from "./_ai-scrape.js";
 import {
@@ -633,6 +644,8 @@ export async function buildContext(
     today,
     /** Os módulos que um administrador escondeu de quem pergunta. */
     hidden: me.hidden_pages ?? [],
+    /** Administrador ou gestor (vê por que cada resposta usou o seu modelo). */
+    leader: me.role === "admin" || me.role === "manager",
     /** Quem pergunta usa Campanhas (os avisos de campanhas entram na conversa). */
     campaigns:
       !(me.hidden_pages ?? []).includes("campaigns") &&
@@ -665,6 +678,17 @@ export function citedSources(answer: string, sources: AiSource[]) {
     .filter((s): s is AiSource => !!s);
 }
 
+/** O porquê do modelo desta resposta. */
+export type AiRouteInfo = {
+  model: string;
+  reason: string;
+  /** auto: o roteador escolheu; locked: uma regra travou; shadow: só sugeriu. */
+  mode: "auto" | "locked" | "shadow";
+  /** O que o roteador escolheria (no modo sombra ou com a regra travada). */
+  suggested: string | null;
+  escalated: boolean;
+};
+
 /** O que a tela recebe enquanto a IA trabalha (uma linha JSON por evento). */
 export type AiStreamEvent =
   | {
@@ -691,6 +715,8 @@ export type AiStreamEvent =
       cost?: TurnCost;
       /** A mensagem salva desta resposta (o custo completo fica nela no banco). */
       message?: number;
+      /** Quem respondeu e por quê (o roteador; a tela mostra para líderes). */
+      route?: AiRouteInfo;
     }
   | { type: "error"; error: string; status: number };
 type Emit = (event: AiStreamEvent) => void;
@@ -759,9 +785,16 @@ async function ask(
           ? "mavi_page"
           : "assistant";
   const noMcp: McpCatalog = { servers: [], missing: [] };
-  // Os modelos que o roteador considera (biblioteca + Claude do servidor), sem esperar.
-  const routePool: Promise<Candidate[]> = routeCandidates(env, deps.fetch, auth, company, !!env.anthropicKey).catch(
-    () => [],
+  // A política do roteador e os modelos permitidos para quem pergunta, aqui (sem esperar).
+  const routeSurface = onPage ? "page" : withPowers ? "bubble" : (scope.module ?? "assistant");
+  const routeCtx = routeContext(
+    env,
+    deps.fetch,
+    auth,
+    company,
+    { client: scope.client, contract: scope.contract, project: scope.project },
+    routeSurface,
+    !!env.anthropicKey,
   );
   const [base, limits, history, route, powerList, catalog, mcpCatalog, panelEfforts, learned, person] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
@@ -934,13 +967,16 @@ async function ask(
   const summaryUpto = summary ? Number(convRow?.summary_upto) || 0 : 0;
   const past = history ? [...history[1]].reverse().filter((m) => !summaryUpto || Number(m.id) > summaryUpto) : [];
   // A pergunta nova diz algo da resposta anterior ("me mande o que pedi", o
-  // mesmo pedido de novo): a MAVI confere aquela resposta depois (autoavaliação).
+  // mesmo pedido de novo): a MAVI confere aquela resposta depois (autoavaliação)
+  // e o roteador sobe um degrau nesta vez.
+  let retried = false;
   {
     const lastAnswer = [...past].reverse().find((m) => m.role === "assistant" && typeof m.id === "number");
     const before = lastAnswer
       ? [...past].reverse().find((m) => m.role === "user" && Number(m.id) < Number(lastAnswer.id))
       : undefined;
     const said = lastAnswer ? followupSignals(question, before?.content ?? null) : [];
+    retried = said.includes("frustration") || said.includes("repeated");
     if (said.length)
       void callRpc(env, deps.fetch, auth, "mavi_answer_signal", {
         p_message: lastAnswer!.id,
@@ -1225,6 +1261,54 @@ async function ask(
     ...(withPowers ? [PLAN_TOOL] : []),
   ];
   const allowed = new Set(tools.map((t) => t.name));
+  // Roteador: lê o pedido (tipo, complexidade, tamanho, ferramentas, anexos)
+  // e, com a política da empresa, decide quem responde. Ativo e sem regra
+  // travada, troca o modelo; a regra fora dos provedores permitidos (cliente
+  // sigiloso, lista da pessoa) é trocada sempre.
+  const attachedNow = attachments.filter((a) => attachIds.includes(a.id));
+  const routeSignals = classify({
+    question,
+    surface: routeSurface,
+    feature,
+    historyChars: messages.slice(0, -1).reduce((n, m) => n + m.content.length, 0),
+    contextChars: INSTRUCTIONS.length + base.context.length + JSON.stringify(tools).length,
+    attachments: {
+      images: attachedNow.filter((a) => a.kind === "image").length,
+      documents: attachedNow.filter((a) => a.kind === "document").length,
+      audio: attachedNow.filter((a) => a.kind === "audio" || a.kind === "video").length,
+    },
+    toolCount: tools.length,
+    mcpTools: mcp?.tools.length ?? 0,
+    skills: picked.length,
+    retry: retried,
+  });
+  const policy = await routeCtx;
+  const routeChoice = chooseRoute({ signals: routeSignals, ctx: policy, current: turnRoute });
+  if (routeChoice.blocked && !routeChoice.pick) throw new AiError(403, NO_PROVIDER);
+  const opener: RouteOpener = {
+    providerKey: env.providerKey,
+    anthropicKey: env.anthropicKey,
+    make: makeLlm,
+    server: { model: env.model, llm: deps.llm },
+  };
+  /** Passa a responder com o candidato (escolha do roteador, reserva ou segunda tentativa). */
+  const switchTo = (c: Candidate) => {
+    llm = openCandidate(opener, c);
+    provider = c.providerId || c.model !== env.model ? candidateConfig(opener, c) : null;
+    turnRoute = c.providerId
+      ? {
+          scope: "router",
+          provider_id: c.providerId,
+          provider: c.provider,
+          kind: c.kind,
+          base_url: c.baseUrl ?? null,
+          key_cipher: c.keyCipher ?? "",
+          model: c.model,
+          price: c.price,
+        }
+      : null;
+  };
+  if (routeChoice.apply && routeChoice.pick) switchTo(routeChoice.pick);
   // Montou o plano de uma tarefa longa: nada mais roda nesta resposta.
   let planned = false;
   const planKit = {
@@ -1565,31 +1649,32 @@ async function ask(
     (ads?.context ?? "") +
     attachmentContext(attachments);
   const turnMessages = picked.length ? withSkills(messages, picked) : messages;
-  // Roteador (fase 1, sombra): lê o pedido antes de responder; a decisão fica
-  // registrada com o resultado, e quem responde continua sendo a regra.
-  const routeSurface = onPage ? "page" : withPowers ? "bubble" : (scope.module ?? "assistant");
-  const attachedNow = attachments.filter((a) => attachIds.includes(a.id));
-  const routeSignals = classify({
-    question,
-    surface: routeSurface,
-    feature,
-    historyChars: turnMessages.slice(0, -1).reduce((n, m) => n + m.content.length, 0),
-    contextChars: turnInstructions.length + turnContext.length,
-    attachments: {
-      images: attachedNow.filter((a) => a.kind === "image").length,
-      documents: attachedNow.filter((a) => a.kind === "document").length,
-      audio: attachedNow.filter((a) => a.kind === "audio" || a.kind === "video").length,
-    },
-    toolCount: tools.length,
-    mcpTools: mcp?.tools.length ?? 0,
-    skills: picked.length,
-  });
   // O passo a passo do custo: cada rodada do modelo (com as ferramentas que pediu).
   const rounds: RoundUsage[] = [];
   let result: Awaited<ReturnType<LlmAdapter>> | undefined;
   let partial = "";
-  try {
-    result = await llm({
+  // Cada modelo que respondeu nesta vez (reserva e segunda tentativa contam à parte).
+  const spent: { meter: Meter; providerId: string | null; model: string; name: string | null }[] = [];
+  const routeNotes: string[] = [];
+  let escalated = false;
+  const who = () => ({
+    providerId: turnRoute?.provider_id ?? null,
+    model: provider?.model || env.model,
+    name: turnRoute ? (provider?.name ?? null) : null,
+    kind: provider?.kind ?? "anthropic",
+  });
+  /** Recomeça a resposta com outro modelo: o texto que já chegou vira nota de trabalho. */
+  const restart = (label: string, detail: string) => {
+    partial = "";
+    emit({ type: "round_end" });
+    steps.push({ label, detail });
+    emit({ type: "step", id: `route-${steps.length}`, label, state: "done", detail });
+  };
+  // Só refaz o que não deixou nada para trás (imagens, cards, perguntas, plano).
+  const clean = () => !kit.artifacts.length && !kit.asked && !planned;
+  const callModel = async () => {
+    const by = who();
+    const r = await llm({
       instructions: turnInstructions,
       context: turnContext,
       messages: turnMessages,
@@ -1633,6 +1718,37 @@ async function ask(
       cacheConversation: true,
       cacheKey: `${company}:${userIdFrom(auth)}`,
     });
+    spent.push({ meter: r.meter, providerId: by.providerId, model: by.model, name: by.name });
+    return r;
+  };
+  try {
+    // O escolhido falhou (provedor fora do ar, limite): a reserva de outro provedor responde.
+    for (let i = 0; ; i++) {
+      try {
+        result = await callModel();
+        break;
+      } catch (e) {
+        const next = routeChoice.apply || policy.mode === "active" ? routeChoice.fallbacks[i] : undefined;
+        if (stop.signal.aborted || !next || !clean()) throw e;
+        routeNotes.push(`${who().model} falhou; respondeu ${next.model} (${next.provider})`);
+        restart("O modelo não respondeu: seguindo com outro", `${next.model}`);
+        switchTo(next);
+      }
+    }
+    // Resposta fraca (vazia, ou prometeu fazer e não fez): uma segunda tentativa
+    // com um modelo mais forte, até o teto da empresa.
+    if (result && policy.mode === "active" && policy.escalate && clean() && !stop.signal.aborted) {
+      const weak =
+        !result.text.trim() || answerSignals({ answer: result.text, failedTools: 0, found: 0, cited: 0 }).includes("announce");
+      const up = weak ? strongerThan(policy, routeSignals, who()) : null;
+      if (up) {
+        routeNotes.push(`resposta fraca com ${who().model}; refeita com ${up.model}`);
+        restart("Refazendo com um modelo mais forte", up.model);
+        switchTo(up);
+        escalated = true;
+        result = await callModel();
+      }
+    }
   } catch (e) {
     // Parou: o que já tinha chegado fica na conversa, marcado.
     if (!stop.signal.aborted) throw e;
@@ -1642,11 +1758,7 @@ async function ask(
     // O custo entra mesmo quando a resposta falha no meio: uma linha por
     // modelo que respondeu (o fallback da Claude conta à parte) e a busca nos
     // vetores com o modelo dela.
-    const m = result?.meter;
-    const providerName = turnRoute ? (provider?.name ?? null) : null;
-    const lines = m
-      ? meterEntries("ask", m, turnRoute?.provider_id ?? null, provider?.model || env.model, providerName)
-      : [];
+    const lines = spent.flatMap((s) => meterEntries("ask", s.meter, s.providerId, s.model, s.name));
     if (ctx.usage.embeddingTokens)
       lines.push({
         kind: "search",
@@ -1738,36 +1850,36 @@ async function ask(
       );
   }
   // A decisão do roteador, com a espera, o custo e as ferramentas desta resposta.
+  const routeReason = [routeChoice.decision.reason, ...routeNotes].join("; ");
+  const usedModel = result?.meter.model || who().model;
   {
-    const usedModel = result?.meter.model || provider?.model || env.model;
-    const work = routePool.then((pool) =>
-      logDecision(
-        env,
-        deps.fetch,
-        auth,
-        {
-          company,
-          surface: routeSurface,
-          feature,
-          client: scope.client ?? null,
-          conversation: saved?.ok && savedId && UUID.test(savedId) ? savedId : null,
-          message: messageId,
-        },
-        routeSignals,
-        decide({ signals: routeSignals, level: DEFAULT_LEVEL, candidates: pool, lockedScope: turnRoute?.scope ?? null }),
-        {
-          usedProviderId: turnRoute?.provider_id ?? null,
-          usedModel,
-          firstTokenMs,
-          totalMs: Date.now() - askedAt,
-          rounds: result?.rounds,
-          cost: turnCost(ctx.cost!.entries).cost,
-          toolsOk: calls.filter((c) => c.ok).length,
-          toolsFailed: calls.filter((c) => !c.ok).length,
-          capped: result?.capped,
-          error: cancelled ? "interrompida" : null,
-        },
-      ),
+    const work = logDecision(
+      env,
+      deps.fetch,
+      auth,
+      {
+        company,
+        surface: routeSurface,
+        feature,
+        client: scope.client ?? null,
+        conversation: saved?.ok && savedId && UUID.test(savedId) ? savedId : null,
+        message: messageId,
+      },
+      routeSignals,
+      { ...routeChoice.decision, reason: routeReason },
+      {
+        usedProviderId: turnRoute?.provider_id ?? null,
+        usedModel,
+        firstTokenMs,
+        totalMs: Date.now() - askedAt,
+        rounds: result?.rounds,
+        cost: turnCost(ctx.cost!.entries).cost,
+        toolsOk: calls.filter((c) => c.ok).length,
+        toolsFailed: calls.filter((c) => !c.ok).length,
+        capped: result?.capped,
+        escalated,
+        error: cancelled ? "interrompida" : null,
+      },
     );
     if (live?.later) live.later(work);
     else await work;
@@ -1813,6 +1925,14 @@ async function ask(
     conversation: savedId,
     cost: { ...turnCost(ctx.cost!.entries), detail },
     ...(messageId ? { message: messageId } : {}),
+    // O porquê do modelo, só para líderes (como as decisões no Painel da MAVI).
+    ...(base.leader ? { route: {
+      model: usedModel,
+      reason: routeReason,
+      mode: routeChoice.apply ? "auto" : routeChoice.decision.mode === "locked" ? "locked" : "shadow",
+      suggested: routeChoice.decision.suggested?.model ?? null,
+      escalated,
+    } satisfies AiRouteInfo } : {}),
   };
 }
 
@@ -2158,6 +2278,7 @@ export async function handleAi(
           conversation: done.conversation,
           cost: done.cost,
           message: done.message,
+          route: done.route,
         },
       };
     }

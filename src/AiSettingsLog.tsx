@@ -36,8 +36,9 @@ import {
 type LogContext = { company: string; names: LogNames };
 const Ctx = createContext<LogContext | null>(null);
 
-function useNames(data: Snapshot): LogNames {
+function useNames(data: Snapshot, providers?: { id: string; name: string }[]): LogNames {
   return useMemo(() => {
+    const library = new Map((providers ?? []).map((p) => [p.id, p.name]));
     const people = new Map(data.members.map((m) => [m.user_id, m.name]));
     const teams = new Map(data.teams.map((t) => [t.id, t.name]));
     return {
@@ -61,21 +62,25 @@ function useNames(data: Snapshot): LogNames {
       kind: (kind) => catalogEntry(kind)?.label,
       effort: (effort) =>
         EFFORT_OPTIONS.find((o) => o.id === effort)?.label.split(" · ")[0],
+      provider: (id) => library.get(id),
     };
-  }, [data]);
+  }, [data, providers]);
 }
 
 /** Liga os ícones de histórico (sem empresa, na demonstração: nada aparece). */
 export function SettingsLogProvider({
   company,
   data,
+  providers,
   children,
 }: {
   company?: string;
   data: Snapshot;
+  /** Os provedores da biblioteca (os nomes nas listas do roteador). */
+  providers?: { id: string; name: string }[];
   children: ReactNode;
 }) {
-  const names = useNames(data);
+  const names = useNames(data, providers);
   const value = useMemo(
     () => (company ? { company, names } : null),
     [company, names],

@@ -898,6 +898,8 @@ export type AiRoute = {
   model: string;
   /** O esforço da regra (só nas de pessoa, cliente, produto e projeto). */
   effort?: string | null;
+  /** "Automático": a regra não trava o modelo; o roteador escolhe (Painel › Roteamento). */
+  auto?: boolean;
   updated_at?: string;
 };
 

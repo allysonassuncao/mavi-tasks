@@ -474,11 +474,20 @@ export async function handleSkillCoach(
         fetch: deps.fetch,
         auth: authorization,
         where: { company, surface: "skill_coach", feature: "skill_coach" },
-        used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+        used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope, auto: provider?.auto },
         question: mode === "review"
           ? "Revise esta skill e aponte melhorias detalhadas"
           : ([...history].reverse().find((m) => m.role === "user")?.content ?? ""),
         hasServerKey: !!env.anthropicKey,
+        open: {
+          providerKey: env.providerKey ?? null,
+          anthropicKey: env.anthropicKey,
+          make: (c) => (deps.providerLlm ?? ((x) => adapterFor(x, deps.fetch)))(c),
+          server: { model: env.model, llm: deps.llm },
+        },
+        onUsed: (c, config) => {
+          provider = c.providerId ? { id: c.providerId, config, scope: "router" } : null;
+        },
       },
     );
     const result = await llm({

@@ -127,6 +127,15 @@ export type TurnCost = {
     cost: number;
   }[];
 };
+/** Quem respondeu e por quê (o roteador de modelos). */
+export type AiRouteInfo = {
+  model: string;
+  reason: string;
+  /** auto: o roteador escolheu; locked: uma regra travou; shadow: só sugeriu. */
+  mode: "auto" | "locked" | "shadow";
+  suggested: string | null;
+  escalated: boolean;
+};
 export type AiAnswer = {
   answer: string;
   sources: AiSource[];
@@ -135,6 +144,8 @@ export type AiAnswer = {
   cost?: TurnCost;
   /** A mensagem salva desta resposta. */
   message?: number;
+  /** Quem respondeu e por quê (a tela mostra para líderes). */
+  route?: AiRouteInfo;
 };
 /** O custo de uma conversa (ai_conversation_cost). */
 export type ConversationCost = {
@@ -177,6 +188,8 @@ export type ConversationCost = {
     }[];
     detail?: TurnDetail | null;
   }[];
+  /** Por que cada resposta usou o seu modelo (só líderes leem as decisões do roteador). */
+  routes?: Record<number, AiRouteInfo>;
 };
 /**
  * O custo da conversa por modelo (só quem começou e os gestores veem; antes
@@ -184,8 +197,34 @@ export type ConversationCost = {
  */
 export async function conversationCost(id: string): Promise<ConversationCost | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase.rpc("ai_conversation_cost", { p_conversation: id });
-  return error ? null : (data as ConversationCost);
+  const [{ data, error }, decisions] = await Promise.all([
+    supabase.rpc("ai_conversation_cost", { p_conversation: id }),
+    // As decisões do roteador: a leitura é só de líderes (para os outros, vazio).
+    supabase
+      .from("ai_route_decisions")
+      .select("message_id,used_model,reason,mode,suggested_model,escalated")
+      .eq("conversation_id", id)
+      .not("message_id", "is", null)
+      .then((r) => (r.error ? [] : (r.data ?? [])), () => []),
+  ]);
+  if (error) return null;
+  const routes: Record<number, AiRouteInfo> = {};
+  for (const d of decisions as {
+    message_id: number;
+    used_model: string;
+    reason: string;
+    mode: AiRouteInfo["mode"];
+    suggested_model: string | null;
+    escalated: boolean;
+  }[])
+    routes[Number(d.message_id)] = {
+      model: d.used_model,
+      reason: d.reason,
+      mode: d.mode,
+      suggested: d.suggested_model,
+      escalated: d.escalated,
+    };
+  return { ...(data as ConversationCost), routes };
 }
 
 async function token() {

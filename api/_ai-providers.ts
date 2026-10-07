@@ -71,6 +71,8 @@ export type ResolvedRoute = {
   model: string;
   /** O esforço da regra (só nas de pessoa, cliente, produto e projeto). */
   effort?: string | null;
+  /** "Automático": a regra não trava o modelo; o roteador escolhe (fase 2). */
+  auto?: boolean;
   price: ProviderModel | null;
 };
 
@@ -705,9 +707,11 @@ export async function featureProvider(
   company: string,
   feature: AiFeature,
   scope: { client?: string; contract?: string; project?: string } = {},
-): Promise<{ id: string; config: ProviderConfig; scope: string } | null> {
+): Promise<{ id: string; config: ProviderConfig; scope: string; auto?: boolean } | null> {
   const route = await resolveRoute(env, fetchImpl, auth, company, scope, feature);
-  return route ? { id: route.provider_id, config: routeConfig(env, route), scope: route.scope } : null;
+  return route
+    ? { id: route.provider_id, config: routeConfig(env, route), scope: route.scope, auto: route.auto }
+    : null;
 }
 
 // ------------------------------------------------------------ administração

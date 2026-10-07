@@ -1,7 +1,8 @@
 import { waitUntil } from "@vercel/functions";
 import { callRpc } from "./_drive.js";
-import { CATALOG, type ProviderModel } from "../src/ai-providers.js";
-import type { AgentRequest, LlmAdapter } from "./_ai-llm.js";
+import { CATALOG, providerBaseUrl, type ProviderModel } from "../src/ai-providers.js";
+import { routeConfig, type ProviderConfig, type ResolvedRoute } from "./_ai-providers.js";
+import { LlmError, type AgentRequest, type LlmAdapter } from "./_ai-llm.js";
 
 /**
  * MAVI · roteador de modelos (pedido de 06/10/2026).
@@ -68,6 +69,11 @@ export type RouteInput = {
   mcpTools?: number;
   /** Skills escolhidas na caixa de mensagem. */
   skills?: number;
+  /**
+   * A pessoa reclamou da resposta anterior ou repetiu o pedido (sinais da
+   * autoavaliação): esta vez sobe um degrau.
+   */
+  retry?: boolean;
   /** Resposta estruturada e curta (título, filtros, reordenação): um utilitário. */
   structured?: boolean;
 };
@@ -157,6 +163,7 @@ export function classify(input: RouteInput): RouteSignals {
     if (matched.length >= 3 || asks >= 3) (c++, why.push("vários pedidos juntos"));
     if (DEEP.test(q)) (c++, why.push("pede profundidade"));
     if ((input.skills ?? 0) > 0 && c < 2) (c = 2, why.push("skill escolhida"));
+    if (input.retry) (c++, why.push("insatisfeita com a resposta anterior"));
     if ((att.documents ?? 0) + (att.images ?? 0) > 0 && (taskType === "analise" || taskType === "planejamento"))
       (c++, why.push("anexos para analisar"));
     if (q.length < 60 && !DEEP.test(q) && (taskType === "consulta" || taskType === "busca") && matched.length <= 1)
@@ -212,6 +219,9 @@ export type Candidate = {
   kind: string;
   model: string;
   price: ProviderModel | null;
+  /** A chave selada e o endereço (para abrir o provedor escolhido). */
+  keyCipher?: string;
+  baseUrl?: string | null;
 };
 
 /** A Claude do servidor oferece os modelos de tabela da Anthropic. */
@@ -442,6 +452,195 @@ export function decide(input: {
   };
 }
 
+// ------------------------------------------------------------ política (fase 2)
+/** O id do Servidor (a Claude da Vercel) nas listas de provedores permitidos. */
+export const SERVER_PROVIDER = "00000000-0000-0000-0000-000000000000";
+
+/** A política que vale para quem pergunta, onde, e os provedores permitidos. */
+export type RouteContext = {
+  mode: "shadow" | "active";
+  level: CostLevel;
+  escalate: boolean;
+  /** Teto (US$) do que a segunda tentativa pode custar. */
+  escalateCap: number;
+  sigiloso: boolean;
+  /** Há lista de provedores permitidos (a regra fora dela não vale). */
+  restricted: boolean;
+  /** O Servidor está permitido. */
+  server: boolean;
+  /** Os permitidos: biblioteca (com a chave selada) + Claude do servidor. */
+  candidates: Candidate[];
+};
+
+const LEVELS: CostLevel[] = ["economico", "equilibrado", "maxima"];
+
+/**
+ * A política e os candidatos de uma vez (ai_route_context). Sem a migração
+ * da fase 2, vale a da fase 1: sombra, Equilibrado, todos os provedores.
+ */
+export async function routeContext(
+  env: { supabaseUrl: string; supabaseKey: string },
+  fetchImpl: typeof fetch,
+  auth: string,
+  company: string,
+  scope: { client?: string | null; contract?: string | null; project?: string | null },
+  surface: string,
+  hasServerKey: boolean,
+): Promise<RouteContext> {
+  type Row = {
+    mode: string;
+    level: string;
+    escalate: boolean;
+    escalate_cap: number | string;
+    sigiloso: boolean;
+    restricted: boolean;
+    server: boolean;
+    candidates: { provider_id: string; name: string; kind: string; base_url: string | null; key_cipher: string; models: ProviderModel[] }[];
+  };
+  const r = await callRpc<Row>(env, fetchImpl, auth, "ai_route_context", {
+    p_company: company,
+    p_client: scope.client ?? null,
+    p_contract: scope.contract ?? null,
+    p_project: scope.project ?? null,
+    p_surface: surface,
+  }).catch(() => null);
+  if (!r?.ok || !r.data || !Array.isArray(r.data.candidates))
+    return {
+      mode: "shadow",
+      level: DEFAULT_LEVEL,
+      escalate: false,
+      escalateCap: 0,
+      sigiloso: false,
+      restricted: false,
+      server: hasServerKey,
+      candidates: await candidates(env, fetchImpl, auth, company, hasServerKey),
+    };
+  const d = r.data;
+  const server = hasServerKey && d.server !== false;
+  return {
+    mode: d.mode === "active" ? "active" : "shadow",
+    level: LEVELS.includes(d.level as CostLevel) ? (d.level as CostLevel) : DEFAULT_LEVEL,
+    escalate: d.escalate !== false,
+    escalateCap: Math.max(0, Number(d.escalate_cap) || 0),
+    sigiloso: !!d.sigiloso,
+    restricted: !!d.restricted,
+    server,
+    candidates: [
+      ...d.candidates.flatMap((p) =>
+        (Array.isArray(p.models) ? p.models : []).map((m) => ({
+          providerId: p.provider_id,
+          provider: p.name,
+          kind: p.kind,
+          model: m.id,
+          price: m,
+          keyCipher: p.key_cipher,
+          baseUrl: p.base_url,
+        })),
+      ),
+      ...serverCandidates(server),
+    ],
+  };
+}
+
+/** A configuração para chamar o candidato (a chave aberta aqui, no servidor). */
+export function candidateConfig(
+  env: { providerKey: Buffer | null; anthropicKey: string },
+  c: Candidate,
+): ProviderConfig {
+  if (!c.providerId)
+    return {
+      kind: "anthropic",
+      name: "Servidor",
+      baseUrl: providerBaseUrl("anthropic", null),
+      apiKey: env.anthropicKey,
+      model: c.model,
+      price: c.price,
+    };
+  return routeConfig(env, {
+    scope: "router",
+    provider_id: c.providerId,
+    provider: c.provider,
+    kind: c.kind,
+    base_url: c.baseUrl ?? null,
+    key_cipher: c.keyCipher ?? "",
+    model: c.model,
+    price: c.price,
+  });
+}
+
+export type RouteChoice = {
+  decision: RouteDecision;
+  /** O roteador troca o modelo desta resposta (ativo e sem trava, ou a regra fora do permitido). */
+  apply: boolean;
+  /** Quem responde se aplicar. */
+  pick: Candidate | null;
+  /** Os próximos, se o escolhido falhar (outros provedores primeiro). */
+  fallbacks: Candidate[];
+  /** A regra que valeria está fora dos provedores permitidos aqui. */
+  blocked: boolean;
+};
+
+/**
+ * Decide com a política: a regra travada vale, a não ser que esteja fora
+ * dos provedores permitidos (privacidade vale até no modo sombra); a regra
+ * em "Automático" e a da empresa deixam o roteador escolher no modo ativo.
+ */
+export function chooseRoute(input: {
+  signals: RouteSignals;
+  ctx: RouteContext;
+  /** A regra de "Quem usa qual modelo" que vale (nula: o padrão do servidor). */
+  current: Pick<ResolvedRoute, "scope" | "provider_id" | "model" | "auto"> | null;
+  stats?: RouteStat[];
+  nativeImages?: boolean;
+}): RouteChoice {
+  const { signals, ctx, current } = input;
+  // Só com lista de permitidos uma regra fica de fora (sem lista, vale todo provedor ativo).
+  const blocked =
+    ctx.restricted &&
+    (current ? !ctx.candidates.some((c) => c.providerId === current.provider_id) : !ctx.server);
+  const lockedScope = current && !current.auto && !blocked ? current.scope : null;
+  const decision = decide({
+    signals,
+    level: ctx.level,
+    candidates: ctx.candidates,
+    lockedScope,
+    stats: input.stats,
+    nativeImages: input.nativeImages,
+  });
+  if (blocked)
+    decision.reason += current
+      ? `; a regra (${current.model}) não é permitida aqui${ctx.sigiloso ? " (cliente sigiloso)" : ""}`
+      : "; o padrão do servidor não é permitido aqui";
+  const apply = !!decision.suggested && (blocked || (ctx.mode === "active" && decision.mode === "auto"));
+  const pick = apply ? decision.suggested : null;
+  // Reserva: os que atendem a faixa, de outro provedor primeiro, pela nota.
+  const ok = new Set(decision.scored.filter((x) => !x.out).map((x) => `${x.providerId ?? ""}|${x.model}`));
+  const fallbacks = ctx.candidates
+    .filter((c) => ok.has(`${c.providerId ?? ""}|${c.model}`))
+    .filter((c) => !(pick && c.providerId === pick.providerId && c.model === pick.model))
+    .sort((a, b) => Number(a.providerId === pick?.providerId) - Number(b.providerId === pick?.providerId));
+  return { decision, apply, pick, fallbacks: fallbacks.slice(0, 2), blocked };
+}
+
+/**
+ * Para refazer uma resposta fraca: o melhor candidato de faixa acima da
+ * usada, cujo custo estimado cabe no teto (nulo: não há).
+ */
+export function strongerThan(
+  ctx: RouteContext,
+  signals: RouteSignals,
+  used: { providerId: string | null; model: string; kind: string },
+): Candidate | null {
+  const usedTier = modelProfile(used.kind, used.model).tier;
+  const list = ctx.candidates
+    .map((c) => ({ c, p: modelProfile(c.kind, c.model, c.price), est: estimateCost(c, signals) }))
+    .filter((x) => !x.p.speechOnly && x.p.tier > usedTier && (!signals.tools || x.p.tools))
+    .filter((x) => signals.contextTokens <= x.p.contextK * 1000 * 0.8)
+    .filter((x) => x.est <= ctx.escalateCap)
+    .sort((a, b) => b.p.tier - a.p.tier || a.est - b.est);
+  return list[0]?.c ?? null;
+}
+
 // ------------------------------------------------------------ registro
 /** O que aconteceu na resposta (fica junto da decisão). */
 export type RouteOutcome = {
@@ -454,6 +653,8 @@ export type RouteOutcome = {
   toolsOk?: number;
   toolsFailed?: number;
   capped?: boolean;
+  /** Uma segunda tentativa com um modelo mais forte. */
+  escalated?: boolean;
   error?: string | null;
 };
 
@@ -506,43 +707,91 @@ export function logDecision(
       tools_ok: outcome.toolsOk ?? 0,
       tools_failed: outcome.toolsFailed ?? 0,
       capped: !!outcome.capped,
+      escalated: !!outcome.escalated,
       error: outcome.error ? outcome.error.slice(0, 300) : null,
     },
   }).catch(() => null);
 }
 
-/** Quem conversa, onde, e o que responde (para o registro em sombra). */
+/** O roteador sem nenhum provedor permitido para quem pergunta, onde. */
+export const NO_PROVIDER =
+  "Nenhum provedor de IA está permitido para esta conversa (pessoa, cliente ou produto). Um administrador ajusta em Painel da MAVI › Roteamento.";
+
+/** Para abrir o modelo que o roteador escolher. */
+export type RouteOpener = {
+  providerKey: Buffer | null;
+  anthropicKey: string;
+  /** O adaptador de um provedor (biblioteca ou Claude do servidor). */
+  make: (config: ProviderConfig) => LlmAdapter;
+  /** A Claude do servidor no modelo padrão (o adaptador que a tela já usa). */
+  server?: { model: string; llm: LlmAdapter };
+};
+
+/** Abre o candidato escolhido. */
+export function openCandidate(opener: RouteOpener, c: Candidate): LlmAdapter {
+  if (!c.providerId && opener.server && c.model === opener.server.model) return opener.server.llm;
+  return opener.make(candidateConfig(opener, c));
+}
+
+/** Quem conversa, onde, e o que responde. */
 export type ProbeOptions = {
   env: { supabaseUrl: string; supabaseKey: string };
   fetch: typeof fetch;
   auth: string;
   where: Omit<RouteWhere, "message" | "conversation">;
-  /** O provedor e o modelo que respondem (a regra ou o servidor). */
-  used: { providerId: string | null; model: string; scope?: string | null };
+  /** A regra que responde (nulo o provedor: o servidor), com o escopo e o "Automático". */
+  used: { providerId: string | null; model: string; scope?: string | null; auto?: boolean };
+  /** O cliente, produto e projeto (a política vale para eles). */
+  scope?: { client?: string | null; contract?: string | null; project?: string | null };
   /** A pergunta da pessoa (sem as instruções da tela). */
   question: string;
   structured?: boolean;
-  level?: CostLevel;
   hasServerKey: boolean;
+  /** Sem ele, só registra (sombra); com ele, o roteador pode trocar o modelo. */
+  open?: RouteOpener;
+  /** O roteador trocou quem responde (para o consumo registrar o provedor certo). */
+  onUsed?: (c: Candidate, config: ProviderConfig) => void;
   /** Para os testes: sem registrar. */
   log?: typeof logDecision;
   /** O registro segue depois da resposta (na Vercel, waitUntil). */
   later?: (work: Promise<unknown>) => void;
 };
 
+export type RouteFinish = {
+  providerId?: string | null;
+  model?: string;
+  cost: number;
+  rounds?: number;
+  toolsOk?: number;
+  toolsFailed?: number;
+  capped?: boolean;
+  escalated?: boolean;
+  error?: string | null;
+  /** O que aconteceu além da escolha (reserva, segunda tentativa). */
+  note?: string;
+};
+
 /**
- * Uma resposta acompanhada pelo roteador (sombra), para quem chama o modelo
- * do seu jeito: classifica na hora, marca a primeira palavra e, no fim,
- * registra a decisão com a espera, o custo e o resultado.
+ * Uma resposta acompanhada pelo roteador: classifica na hora, decide com a
+ * política (choose), marca a primeira palavra e, no fim, registra a decisão
+ * com a espera, o custo e o resultado.
  */
 export function routeProbe(
   opts: ProbeOptions,
-  size: { historyChars?: number; contextChars?: number; toolCount?: number } = {},
+  size: { historyChars?: number; contextChars?: number; toolCount?: number; mcpTools?: number; skills?: number; retry?: boolean; attachments?: RouteInput["attachments"] } = {},
 ) {
   const started = Date.now();
   let first: number | null = null;
   const later = opts.later ?? ((work: Promise<unknown>) => waitUntil(work.catch(() => {})));
-  const pool = candidates(opts.env, opts.fetch, opts.auth, opts.where.company, opts.hasServerKey);
+  const ctx = routeContext(
+    opts.env,
+    opts.fetch,
+    opts.auth,
+    opts.where.company,
+    opts.scope ?? { client: opts.where.client ?? null },
+    opts.where.surface,
+    opts.hasServerKey,
+  );
   const signals = classify({
     question: opts.question,
     surface: opts.where.surface,
@@ -550,42 +799,49 @@ export function routeProbe(
     structured: opts.structured,
     ...size,
   });
+  let choice: Promise<RouteChoice> | null = null;
+  const choose = () =>
+    (choice ??= ctx.then((c) =>
+      chooseRoute({
+        signals,
+        ctx: c,
+        current: opts.used.providerId
+          ? { scope: opts.used.scope ?? "company", provider_id: opts.used.providerId, model: opts.used.model, auto: opts.used.auto }
+          : null,
+      }),
+    ));
   let done = false;
   return {
     signals,
+    ctx,
+    choose,
     /** Chegou um pedaço do texto da resposta. */
     text() {
       if (first === null) first = Date.now() - started;
     },
     /** Terminou (ou falhou): o registro segue em segundo plano. */
-    finish(outcome: { model?: string; cost: number; rounds?: number; toolsOk?: number; toolsFailed?: number; capped?: boolean; error?: string | null }) {
+    finish(outcome: RouteFinish) {
       if (done) return;
       done = true;
       const totalMs = Date.now() - started;
       const firstTokenMs = first;
       later(
-        pool.then((list) =>
-          (opts.log ?? logDecision)(
-            opts.env,
-            opts.fetch,
-            opts.auth,
-            opts.where,
-            signals,
-            decide({ signals, level: opts.level ?? DEFAULT_LEVEL, candidates: list, lockedScope: opts.used.scope ?? null }),
-            {
-              usedProviderId: opts.used.providerId,
-              usedModel: outcome.model || opts.used.model,
-              firstTokenMs,
-              totalMs,
-              rounds: outcome.rounds,
-              cost: outcome.cost,
-              toolsOk: outcome.toolsOk,
-              toolsFailed: outcome.toolsFailed,
-              capped: outcome.capped,
-              error: outcome.error ?? null,
-            },
-          ),
-        ),
+        choose().then((ch) => {
+          const decision = outcome.note ? { ...ch.decision, reason: `${ch.decision.reason}; ${outcome.note}` } : ch.decision;
+          return (opts.log ?? logDecision)(opts.env, opts.fetch, opts.auth, opts.where, signals, decision, {
+            usedProviderId: outcome.providerId === undefined ? opts.used.providerId : outcome.providerId,
+            usedModel: outcome.model || opts.used.model,
+            firstTokenMs,
+            totalMs,
+            rounds: outcome.rounds,
+            cost: outcome.cost,
+            toolsOk: outcome.toolsOk,
+            toolsFailed: outcome.toolsFailed,
+            capped: outcome.capped,
+            escalated: outcome.escalated,
+            error: outcome.error ?? null,
+          });
+        }),
       );
     },
   };
@@ -594,7 +850,9 @@ export function routeProbe(
 /**
  * Para as telas de uma chamada só (Busca avançada, Dashboards, Tutoriais…):
  * embrulha o adaptador, classifica o pedido, mede a espera e registra a
- * decisão em sombra. A resposta não muda.
+ * decisão. Com `open`, o roteador ativo troca o modelo (e a regra fora dos
+ * provedores permitidos é trocada sempre); se o escolhido falhar, tenta a
+ * reserva de outro provedor.
  */
 export function routedLlm(llm: LlmAdapter, opts: ProbeOptions): LlmAdapter {
   return async (request: AgentRequest) => {
@@ -603,19 +861,52 @@ export function routedLlm(llm: LlmAdapter, opts: ProbeOptions): LlmAdapter {
       contextChars: request.instructions.length + request.context.length,
       toolCount: request.tools.length,
     });
-    try {
-      const result = await llm({
-        ...request,
-        onEvent: (e) => {
-          if (e.type === "text") probe.text();
-          request.onEvent?.(e);
-        },
-      });
-      probe.finish({ model: result.meter.model, rounds: result.rounds, cost: result.meter.cost, capped: result.capped });
-      return result;
-    } catch (e) {
-      probe.finish({ cost: 0, error: (e as Error).message ?? "falhou" });
-      throw e;
+    let run = llm;
+    let used: { providerId: string | null; model: string } = { providerId: opts.used.providerId, model: opts.used.model };
+    let chain: Candidate[] = [];
+    if (opts.open) {
+      const [ch, ctx] = await Promise.all([probe.choose(), probe.ctx]);
+      if (ch.blocked && !ch.pick) {
+        probe.finish({ cost: 0, error: "nenhum provedor permitido" });
+        throw new LlmError(403, NO_PROVIDER);
+      }
+      if (ch.apply && ch.pick) {
+        run = openCandidate(opts.open, ch.pick);
+        used = { providerId: ch.pick.providerId, model: ch.pick.model };
+        opts.onUsed?.(ch.pick, candidateConfig(opts.open, ch.pick));
+      }
+      if (ch.apply || ctx.mode === "active") chain = ch.fallbacks;
+    }
+    const notes: string[] = [];
+    for (let i = 0; ; i++) {
+      try {
+        const result = await run({
+          ...request,
+          onEvent: (e) => {
+            if (e.type === "text") probe.text();
+            request.onEvent?.(e);
+          },
+        });
+        probe.finish({
+          ...used,
+          model: result.meter.model || used.model,
+          rounds: result.rounds,
+          cost: result.meter.cost,
+          capped: result.capped,
+          note: notes.join("; ") || undefined,
+        });
+        return result;
+      } catch (e) {
+        const next = chain[i];
+        if (!next || request.signal?.aborted || !opts.open) {
+          probe.finish({ ...used, cost: 0, error: (e as Error).message ?? "falhou", note: notes.join("; ") || undefined });
+          throw e;
+        }
+        notes.push(`${used.model} falhou; respondeu ${next.model} (${next.provider})`);
+        run = openCandidate(opts.open, next);
+        used = { providerId: next.providerId, model: next.model };
+        opts.onUsed?.(next, candidateConfig(opts.open, next));
+      }
     }
   };
 }

@@ -15,7 +15,7 @@ import {
   type ProviderConfig,
 } from "./_ai-providers.js";
 import { serverModel } from "../src/ai-providers.js";
-import { routeProbe } from "./_ai-router.js";
+import { candidateConfig, NO_PROVIDER, routeProbe } from "./_ai-router.js";
 
 /**
  * Drive › Gravações da MAVI, no servidor (ações "meeting-*" de /api/drive):
@@ -599,7 +599,12 @@ async function meetingAsk(
       fetch: deps.fetch,
       auth: authorization,
       where: { company: recording.company_id, surface: "meeting", feature: "meetings_ask", client: recording.client_id },
-      used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+      used: {
+        providerId: provider?.id ?? null,
+        model: provider?.config.model || env.model,
+        scope: provider?.scope,
+        auto: provider?.auto,
+      },
       question: messages[messages.length - 1].content,
       hasServerKey: !!env.anthropicKey,
     },
@@ -608,9 +613,25 @@ async function meetingAsk(
       contextChars: MEETING_SYSTEM.length + context.length,
     },
   );
+  // Roteador ativo (ou a regra fora dos provedores permitidos): outro modelo responde.
+  let askEnv: MeetingsEnv = { ...env, provider: provider?.config ?? null };
+  let usedProvider = provider?.id ?? null;
+  const choice = await probe.choose();
+  if (choice.blocked && !choice.pick) {
+    probe.finish({ cost: 0, error: "nenhum provedor permitido" });
+    throw new MeetingsError(403, NO_PROVIDER);
+  }
+  if (choice.apply && choice.pick) {
+    const pick = choice.pick;
+    usedProvider = pick.providerId;
+    askEnv = pick.providerId
+      ? { ...env, provider: candidateConfig({ providerKey: env.providerKey ?? null, anthropicKey: env.anthropicKey }, pick) }
+      : { ...env, provider: null, model: pick.model };
+    meter.model = pick.model;
+  }
   try {
     const answer = await deps.ask(
-      { ...env, provider: provider?.config ?? null },
+      askEnv,
       { system: MEETING_SYSTEM, context, messages },
       meter,
       (e) => {
@@ -618,10 +639,10 @@ async function meetingAsk(
         emit(e);
       },
     );
-    probe.finish({ model: meter.model, cost: meter.cost, rounds: 1 });
+    probe.finish({ providerId: usedProvider, model: meter.model, cost: meter.cost, rounds: 1 });
     return answer;
   } catch (err) {
-    probe.finish({ model: meter.model, cost: meter.cost, error: (err as Error).message ?? "falhou" });
+    probe.finish({ providerId: usedProvider, model: meter.model, cost: meter.cost, error: (err as Error).message ?? "falhou" });
     throw err;
   } finally {
     await logUsage(
@@ -634,7 +655,7 @@ async function meetingAsk(
         recording: recording.id,
       },
       meter,
-      provider?.id ?? null,
+      usedProvider,
     );
   }
 }

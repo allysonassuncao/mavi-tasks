@@ -17,7 +17,8 @@ export type LogArea =
   | "contract"
   | "project"
   | "animation"
-  | "provider";
+  | "provider"
+  | "router";
 export type LogField =
   | "model"
   | "effort"
@@ -29,7 +30,16 @@ export type LogField =
   | "key"
   | "models"
   | "knowledge"
-  | "access";
+  | "access"
+  | "auto"
+  | "mode"
+  | "level"
+  | "surface_levels"
+  | "escalate"
+  | "escalate_cap"
+  | "providers"
+  | "secret_providers"
+  | "sigiloso";
 export type LogChoice = {
   provider_id: string;
   /** O nome do provedor na hora. */
@@ -107,6 +117,7 @@ export const AREA_LABELS: Record<LogArea, string> = {
   project: "Projetos",
   animation: "Animações do Mural",
   provider: "Provedores e modelos",
+  router: "Roteamento",
 };
 const FIELD_LABELS: Record<LogField, string> = {
   model: "Provedor e modelo",
@@ -120,7 +131,37 @@ const FIELD_LABELS: Record<LogField, string> = {
   models: "Modelos e preços",
   knowledge: "Consulta à base de conhecimento",
   access: "Pessoas e equipes",
+  auto: "Automático (o roteador escolhe)",
+  mode: "Modo do roteador",
+  level: "Nível de custo",
+  surface_levels: "Nível por tela",
+  escalate: "Segunda tentativa",
+  escalate_cap: "Teto da segunda tentativa",
+  providers: "Provedores permitidos",
+  secret_providers: "Liberados para sigilosos",
+  sigiloso: "Sigiloso",
 };
+
+const LEVEL_NAMES: Record<string, string> = {
+  economico: "Econômico",
+  equilibrado: "Equilibrado",
+  maxima: "Máxima qualidade",
+};
+const SURFACE_NAMES: Record<string, string> = {
+  bubble: "Bolinha",
+  page: "Módulo MAVI",
+  campaigns: "Campanhas",
+  whatsapp: "WhatsApp",
+  meetings: "Reuniões",
+  meeting: "Gravação",
+  task_search: "Busca avançada",
+  copilot: "Copiloto",
+  dashboard: "Dashboards",
+  tutorials: "Tutoriais",
+  skill_coach: "Assistente de skills",
+  personal_radar: "Radar pessoal",
+};
+const SERVER_PROVIDER = "00000000-0000-0000-0000-000000000000";
 
 /** Os nomes de hoje (o nome da hora fica de reserva). */
 export type LogNames = {
@@ -131,6 +172,8 @@ export type LogNames = {
   scope: (area: LogArea, id: string) => string | undefined;
   kind: (kind: string) => string | undefined;
   effort: (effort: string) => string | undefined;
+  /** O nome de um provedor da biblioteca (o roteador guarda os ids). */
+  provider?: (id: string) => string | undefined;
 };
 
 export type LogLine = {
@@ -163,6 +206,8 @@ function subjectName(e: SettingsLogEntry, names: LogNames) {
       return e.subject ? e.subject_label : "Base de conhecimento";
     case "provider":
       return e.subject_label;
+    case "router":
+      return "Empresa toda";
     default:
       return names.scope(e.area, e.subject) ?? (e.subject_label || "Removido");
   }
@@ -319,5 +364,46 @@ export function describeEntry(e: SettingsLogEntry, names: LogNames): LogLine {
         from: accessText(e.old, names),
         to: accessText(e.new, names),
       });
+    default:
+      return routerLine(e, names, line);
   }
+}
+
+/** Os campos do roteador (cada valor vem como {campo: valor}). */
+function routerLine(
+  e: SettingsLogEntry,
+  names: LogNames,
+  line: (field: string, rest: Partial<LogLine>) => LogLine,
+): LogLine {
+  const raw = (x: unknown) => (x && typeof x === "object" ? (x as Record<string, unknown>)[e.field] : undefined);
+  const provider = (id: string) =>
+    id === SERVER_PROVIDER ? "Servidor" : (names.provider?.(id) ?? "Provedor removido");
+  const text = (v: unknown): string => {
+    switch (e.field) {
+      case "auto":
+      case "escalate":
+      case "sigiloso":
+        return v ? "Sim" : "Não";
+      case "mode":
+        return v === "active" ? "Ativo" : "Sombra";
+      case "level":
+        return v ? (LEVEL_NAMES[String(v)] ?? String(v)) : "O da tela ou da empresa";
+      case "escalate_cap":
+        return `US$ ${Number(v ?? 0).toLocaleString("pt-BR")}`;
+      case "surface_levels": {
+        const o = (v ?? {}) as Record<string, string>;
+        const parts = Object.entries(o).map(([k, l]) => `${SURFACE_NAMES[k] ?? k}: ${LEVEL_NAMES[l] ?? l}`);
+        return parts.length ? parts.join(", ") : "Todas as telas com o da empresa";
+      }
+      case "providers":
+      case "secret_providers":
+        return Array.isArray(v) ? v.map((id) => provider(String(id))).join(", ") : "Todos";
+      default:
+        return v === undefined || v === null ? "—" : String(v);
+    }
+  };
+  return line(FIELD_LABELS[e.field], {
+    from: e.action === "created" ? undefined : text(raw(e.old)),
+    to: e.action === "removed" ? text(undefined) : text(raw(e.new)),
+  });
 }

@@ -120,6 +120,7 @@ export const AI_TABS = [
   "poderes",
   "provedores",
   "regras",
+  "roteamento",
   "whatsapp",
   "avisos",
 ] as const;

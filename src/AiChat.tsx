@@ -43,6 +43,7 @@ import {
   cancelRun,
   sourceLabel,
   type AiAnswer,
+  type AiRouteInfo,
   type AiSource,
   type AiStep,
   type AiStreamHandlers,
@@ -62,6 +63,8 @@ export type ChatEntry = {
   content: string;
   /** O custo desta resposta, por modelo (a que acabou de chegar). */
   cost?: TurnCost;
+  /** Por que esta resposta usou o seu modelo (só líderes recebem). */
+  route?: AiRouteInfo;
   sources?: AiSource[];
   steps?: AiStep[];
   thinking?: string;
@@ -530,6 +533,7 @@ export function useAiTurns({
         sources: result.sources,
         artifacts: result.artifacts?.length ? result.artifacts : e.artifacts,
         ...(result.cost ? { cost: result.cost } : {}),
+        ...(result.route ? { route: result.route } : {}),
         ...(result.message ? { id: result.message } : {}),
         streaming: false,
         thinking: "",

@@ -29327,6 +29327,20 @@ main:has(> .mavi-chat) > .error-banner {
   color: var(--muted);
   font-size: 0.78rem;
 }
+/* O porquê do modelo (roteador), só para líderes. */
+.mavi-cost-route {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.mavi-cost-route p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
 .mavi-cost-table {
   width: 100%;
   border-collapse: collapse;

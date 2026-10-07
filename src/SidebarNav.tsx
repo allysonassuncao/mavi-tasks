@@ -475,6 +475,11 @@ export function SidebarNav({
               to: { page: "aiUsage" as const, hash: "regras" },
             },
             {
+              key: "ai-router",
+              label: "Roteamento",
+              to: { page: "aiUsage" as const, hash: "roteamento" },
+            },
+            {
               key: "ai-whatsapp",
               label: "Grupos do Whatsapp",
               to: { page: "aiUsage" as const, hash: "whatsapp" },

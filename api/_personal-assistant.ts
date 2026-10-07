@@ -558,10 +558,11 @@ export async function writeDraft(
     })
       .then((k) => (Array.isArray(k) ? k : []))
       .catch(() => []);
-    const [base, provider] = await Promise.all([
+    const [base, route] = await Promise.all([
       buildContext(env, deps, auth, company, { client, module: "personal_radar" }, now),
       featureProvider(env, deps.fetch, auth, company, "personal_assistant", { client }),
     ]);
+    let provider = route;
     const baseLlm = provider ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config) : deps.llm;
     const ctx: ToolContext = {
       supabaseUrl: env.supabaseUrl,
@@ -610,9 +611,19 @@ export async function writeDraft(
       fetch: deps.fetch,
       auth,
       where: { company, surface: "personal_radar", feature: "personal_assistant", client },
-      used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+      used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope, auto: provider?.auto },
       question: text,
       hasServerKey: !!env.anthropicKey,
+      scope: { client },
+      open: {
+        providerKey: env.providerKey ?? null,
+        anthropicKey: env.anthropicKey,
+        make: (c) => (deps.providerLlm ?? ((x) => adapterFor(x, deps.fetch)))(c),
+        server: { model: env.model, llm: deps.llm },
+      },
+      onUsed: (c, config) => {
+        provider = c.providerId ? { id: c.providerId, config, scope: "router" } : null;
+      },
     });
     let result;
     try {

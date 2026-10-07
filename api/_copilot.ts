@@ -1146,7 +1146,7 @@ async function review(
           { client, contract: ctx.contract },
           "task_copilot",
         ));
-  const provider = chosen
+  let provider: { id: string; config: ProviderConfig; scope: string } | null = chosen
     ? { id: chosen.provider_id, config: routeConfig(env, chosen), scope: chosen.scope }
     : null;
   const limits = await limitsOk;
@@ -1170,9 +1170,24 @@ async function review(
       fetch: deps.fetch,
       auth,
       where: { company: draft.company, surface: "copilot", feature: "task_copilot", client },
-      used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+      used: {
+        providerId: provider?.id ?? null,
+        model: provider?.config.model || env.model,
+        scope: provider?.scope,
+        auto: chosen?.auto,
+      },
+      scope: { client, contract: ctx.contract ?? null },
       question: [draft.title, draft.description, draft.audio].filter(Boolean).join("\n"),
       hasServerKey: !!env.anthropicKey,
+      open: {
+        providerKey: env.providerKey ?? null,
+        anthropicKey: env.anthropicKey,
+        make: (c) => (deps.providerLlm ?? ((x) => adapterFor(x, deps.fetch)))(c),
+        server: { model: env.model, llm: deps.llm },
+      },
+      onUsed: (c, config) => {
+        provider = c.providerId ? { id: c.providerId, config, scope: "router" } : null;
+      },
     },
   );
   const picked = withRouteEffort(efforts, chosen, "task_copilot").task_copilot;

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Coins } from "lucide-react";
-import type { ConversationCost, TurnCost, TurnDetail } from "./ai";
+import type { AiRouteInfo, ConversationCost, TurnCost, TurnDetail } from "./ai";
 
 /**
  * MAVI · o custo de cada resposta e da conversa inteira, por modelo
@@ -238,8 +238,8 @@ function ModelTable({ rows }: { rows: Row[] }) {
 const turnRows = (c: TurnCost): Row[] =>
   c.models.map((m) => ({ ...m, key: `${m.provider ?? ""}|${m.model}` }));
 
-/** O custo de uma resposta (no rodapé dela), com os modelos ao clicar. */
-export function AnswerCost({ cost }: { cost: TurnCost }) {
+/** O custo de uma resposta (no rodapé dela), com os modelos ao clicar e, para líderes, o porquê do modelo. */
+export function AnswerCost({ cost, route }: { cost: TurnCost; route?: AiRouteInfo }) {
   const [open, setOpen] = useState(false);
   const n = cost.models.length;
   return (
@@ -259,6 +259,7 @@ export function AnswerCost({ cost }: { cost: TurnCost }) {
       <Popover.Portal>
         <Popover.Content className="mavi-cost-pop" align="start" sideOffset={6}>
           <strong>Custo desta resposta</strong>
+          {route && <RouteWhy route={route} />}
           <ModelTable rows={turnRows(cost)} />
           {cost.detail && <Steps detail={cost.detail} kinds={kindsOf(cost)} />}
           <p className="mavi-cost-total">
@@ -267,6 +268,28 @@ export function AnswerCost({ cost }: { cost: TurnCost }) {
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
+  );
+}
+
+/** Por que esta resposta usou o seu modelo (o roteador; Painel da MAVI › Roteamento). */
+function RouteWhy({ route }: { route: AiRouteInfo }) {
+  const how =
+    route.mode === "auto"
+      ? "escolhido pela MAVI"
+      : route.mode === "locked"
+        ? "regra de Quem usa qual modelo"
+        : "regra ou padrão (roteador em sombra)";
+  return (
+    <div className="mavi-cost-route">
+      <p>
+        <strong>{route.model}</strong> · {how}
+        {route.escalated && " · segunda tentativa"}
+      </p>
+      {route.mode !== "auto" && route.suggested && route.suggested !== route.model && (
+        <p className="muted">O roteador escolheria {route.suggested}.</p>
+      )}
+      <p className="muted">{route.reason}</p>
+    </div>
   );
 }
 

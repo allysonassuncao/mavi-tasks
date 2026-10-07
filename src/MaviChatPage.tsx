@@ -1399,7 +1399,8 @@ function ChatThread({
                       {(() => {
                         // O do banco tem tudo (anexos lidos e o resumo que a resposta disparou).
                         const cost = messageCost(costs, t.id) ?? t.cost;
-                        return cost ? <AnswerCost cost={cost} /> : null;
+                        const route = t.route ?? (typeof t.id === "number" ? costs?.routes?.[t.id] : undefined);
+                        return cost ? <AnswerCost cost={cost} route={route} /> : null;
                       })()}
                     </div>
                   )}

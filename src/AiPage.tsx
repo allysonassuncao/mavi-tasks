@@ -9,6 +9,7 @@ import {
   MessageCircle,
   Radar,
   Route,
+  Shuffle,
   Thermometer,
   Zap,
 } from "lucide-react";
@@ -28,6 +29,8 @@ import { noticesApi } from "./notices";
 import { SettingsHistory, SettingsLogProvider } from "./AiSettingsLog";
 import { WhatsappGroupsPanel } from "./WhatsappGroups";
 import { JobAlertsPanel } from "./JobAlerts";
+import { RouterPanel } from "./AiRouter";
+import { demoRouter, serverRouter } from "./ai-router";
 
 const TABS: {
   id: AiTab;
@@ -49,6 +52,7 @@ const TABS: {
   { id: "poderes", label: "Poderes", icon: Zap, admin: false },
   { id: "provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
   { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: false },
+  { id: "roteamento", label: "Roteamento", icon: Shuffle, admin: false },
   {
     id: "whatsapp",
     label: "Grupos do Whatsapp",
@@ -64,7 +68,8 @@ const TABS: {
  * (#aprendizado), o Termômetro do cliente
  * (#termometro), os tópicos do Radar do cliente (#radar), os insights da
  * MAVI nas campanhas (#campanhas), os poderes do módulo MAVI (#poderes) e as regras de quem usa qual provedor e modelo (por
- * funcionalidade, pessoa, cliente, produto e projeto, #regras) e os grupos
+ * funcionalidade, pessoa, cliente, produto e projeto, #regras), o roteador
+ * de modelos (nível de custo, privacidade e desempenho, #roteamento) e os grupos
  * do WhatsApp lidos pela MAVI (#whatsapp; só administradores ajustam); para
  * administradores, também a biblioteca de provedores e API Keys
  * (#provedores) e os avisos de falhas das rotinas (#avisos). Cada aba tem o
@@ -202,9 +207,19 @@ function AdminTabs({
   // recarregam a biblioteca, que também conta).
   const [saved, setSaved] = useState(0);
   const version = useMemo(() => ({}), [library, saved]); // eslint-disable-line react-hooks/exhaustive-deps
+  const router = useMemo(() => (demo ? demoRouter() : serverRouter(company)), [demo, company]);
   return (
-    <SettingsLogProvider company={demo ? undefined : company} data={data}>
-      {tab === "provedores" ? (
+    <SettingsLogProvider company={demo ? undefined : company} data={data} providers={library?.providers}>
+      {tab === "roteamento" ? (
+        <RouterPanel
+          api={router}
+          company={demo ? undefined : company}
+          data={data}
+          library={library}
+          reloadLibrary={reload}
+          notify={notify}
+        />
+      ) : tab === "provedores" ? (
         <AiProvidersPanel
           api={api}
           library={library}

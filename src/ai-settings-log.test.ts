@@ -213,3 +213,39 @@ describe("histórico de Quem usa qual modelo", () => {
     expect(actorName(entry({ actor: "u9" }), names)).toBe("Pessoa removida");
   });
 });
+
+describe("histórico do Roteamento", () => {
+  const withProviders: LogNames = { ...names, provider: (id) => ({ p1: "OpenAI da agência" })[id] };
+  it("modo, nível, telas, provedores (com o Servidor) e o Automático em palavras", () => {
+    expect(
+      describeEntry(entry({ area: "router", subject: "", field: "mode", old: { mode: "shadow" }, new: { mode: "active" } }), withProviders),
+    ).toMatchObject({ where: "Roteamento › Empresa toda", field: "Modo do roteador", from: "Sombra", to: "Ativo" });
+    expect(
+      describeEntry(
+        entry({ area: "router", subject: "", field: "surface_levels", old: { surface_levels: {} }, new: { surface_levels: { copilot: "maxima" } } }),
+        withProviders,
+      ),
+    ).toMatchObject({ from: "Todas as telas com o da empresa", to: "Copiloto: Máxima qualidade" });
+    expect(
+      describeEntry(
+        entry({
+          area: "router",
+          subject: "",
+          field: "providers",
+          old: { providers: null },
+          new: { providers: ["00000000-0000-0000-0000-000000000000", "p1", "p9"] },
+        }),
+        withProviders,
+      ),
+    ).toMatchObject({ from: "Todos", to: "Servidor, OpenAI da agência, Provedor removido" });
+    expect(
+      describeEntry(entry({ area: "client", subject: "c1", field: "sigiloso", action: "created", new: { sigiloso: true } }), withProviders),
+    ).toMatchObject({ where: "Clientes › ACME", field: "Sigiloso", from: undefined, to: "Sim" });
+    expect(
+      describeEntry(entry({ field: "auto", old: { auto: false }, new: { auto: true } }), withProviders),
+    ).toMatchObject({ field: "Automático (o roteador escolhe)", from: "Não", to: "Sim" });
+    expect(
+      describeEntry(entry({ area: "user", subject: "u2", field: "level", action: "removed", old: { level: "economico" } }), withProviders),
+    ).toMatchObject({ from: "Econômico", to: "O da tela ou da empresa" });
+  });
+});
