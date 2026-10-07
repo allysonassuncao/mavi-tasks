@@ -1,5 +1,6 @@
 import { callRpc } from "./_drive.js";
 import { adapterFor, featureProvider } from "./_ai-providers.js";
+import { routedLlm } from "./_ai-router.js";
 import { buildContext, type AiDeps, type AiEnv } from "./_ai.js";
 import { TOOLS, runTool, type AiSource, type ToolContext } from "./_ai-tools.js";
 import { adsTurn, ADS_RULES } from "./_ai-ads.js";
@@ -561,7 +562,7 @@ export async function writeDraft(
       buildContext(env, deps, auth, company, { client, module: "personal_radar" }, now),
       featureProvider(env, deps.fetch, auth, company, "personal_assistant", { client }),
     ]);
-    const llm = provider ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config) : deps.llm;
+    const baseLlm = provider ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config) : deps.llm;
     const ctx: ToolContext = {
       supabaseUrl: env.supabaseUrl,
       supabaseKey: env.supabaseKey,
@@ -604,6 +605,15 @@ export async function writeDraft(
     };
     const origin = env.origin ?? appOrigin();
     const { text, refs } = draftMessage(m, origin);
+    const llm = routedLlm(baseLlm, {
+      env,
+      fetch: deps.fetch,
+      auth,
+      where: { company, surface: "personal_radar", feature: "personal_assistant", client },
+      used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+      question: text,
+      hasServerKey: !!env.anthropicKey,
+    });
     let result;
     try {
       result = await llm({

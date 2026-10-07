@@ -94,6 +94,7 @@ import {
 import { MCP_RULES, handleMcpAction, mcpTurn, type McpCatalog } from "./_ai-mcp.js";
 import { ADS_RULES, adsTurn } from "./_ai-ads.js";
 import { logCost, meterEntries, newTurn, turnCost, turnDetail, whereOf, type TurnCost } from "./_ai-cost.js";
+import { candidates as routeCandidates, classify, decide, DEFAULT_LEVEL, logDecision, type Candidate } from "./_ai-router.js";
 import type { Meter } from "./_social-leads.js";
 import { pageForMavi, scrapePage } from "./_ai-scrape.js";
 import {
@@ -715,6 +716,9 @@ async function ask(
   emit: Emit,
   live?: Live,
 ): Promise<Extract<AiStreamEvent, { type: "done" }>> {
+  // A espera de quem pergunta (até a primeira palavra e total), para o roteador.
+  const askedAt = Date.now();
+  let firstTokenMs: number | null = null;
   const company = String(body.company ?? "");
   if (!UUID.test(company)) throw new AiError(400, "Empresa inválida.");
   const raw = (body.scope ?? {}) as Row;
@@ -755,6 +759,10 @@ async function ask(
           ? "mavi_page"
           : "assistant";
   const noMcp: McpCatalog = { servers: [], missing: [] };
+  // Os modelos que o roteador considera (biblioteca + Claude do servidor), sem esperar.
+  const routePool: Promise<Candidate[]> = routeCandidates(env, deps.fetch, auth, company, !!env.anthropicKey).catch(
+    () => [],
+  );
   const [base, limits, history, route, powerList, catalog, mcpCatalog, panelEfforts, learned, person] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
@@ -1557,6 +1565,25 @@ async function ask(
     (ads?.context ?? "") +
     attachmentContext(attachments);
   const turnMessages = picked.length ? withSkills(messages, picked) : messages;
+  // Roteador (fase 1, sombra): lê o pedido antes de responder; a decisão fica
+  // registrada com o resultado, e quem responde continua sendo a regra.
+  const routeSurface = onPage ? "page" : withPowers ? "bubble" : (scope.module ?? "assistant");
+  const attachedNow = attachments.filter((a) => attachIds.includes(a.id));
+  const routeSignals = classify({
+    question,
+    surface: routeSurface,
+    feature,
+    historyChars: turnMessages.slice(0, -1).reduce((n, m) => n + m.content.length, 0),
+    contextChars: turnInstructions.length + turnContext.length,
+    attachments: {
+      images: attachedNow.filter((a) => a.kind === "image").length,
+      documents: attachedNow.filter((a) => a.kind === "document").length,
+      audio: attachedNow.filter((a) => a.kind === "audio" || a.kind === "video").length,
+    },
+    toolCount: tools.length,
+    mcpTools: mcp?.tools.length ?? 0,
+    skills: picked.length,
+  });
   // O passo a passo do custo: cada rodada do modelo (com as ferramentas que pediu).
   const rounds: RoundUsage[] = [];
   let result: Awaited<ReturnType<LlmAdapter>> | undefined;
@@ -1591,7 +1618,10 @@ async function ask(
           emit({ type: "round_end" });
         } else if (e.type === "server_tool") webStep(e.name, e.input);
         else {
-          if (e.type === "text") partial += e.text;
+          if (e.type === "text") {
+            partial += e.text;
+            if (firstTokenMs === null) firstTokenMs = Date.now() - askedAt;
+          }
           emit(e);
         }
       },
@@ -1706,6 +1736,41 @@ async function ask(
       await callRpc(env, deps.fetch, auth, "mavi_answer_signal", { p_message: messageId, p_signals: signals }).catch(
         () => null,
       );
+  }
+  // A decisão do roteador, com a espera, o custo e as ferramentas desta resposta.
+  {
+    const usedModel = result?.meter.model || provider?.model || env.model;
+    const work = routePool.then((pool) =>
+      logDecision(
+        env,
+        deps.fetch,
+        auth,
+        {
+          company,
+          surface: routeSurface,
+          feature,
+          client: scope.client ?? null,
+          conversation: saved?.ok && savedId && UUID.test(savedId) ? savedId : null,
+          message: messageId,
+        },
+        routeSignals,
+        decide({ signals: routeSignals, level: DEFAULT_LEVEL, candidates: pool, lockedScope: turnRoute?.scope ?? null }),
+        {
+          usedProviderId: turnRoute?.provider_id ?? null,
+          usedModel,
+          firstTokenMs,
+          totalMs: Date.now() - askedAt,
+          rounds: result?.rounds,
+          cost: turnCost(ctx.cost!.entries).cost,
+          toolsOk: calls.filter((c) => c.ok).length,
+          toolsFailed: calls.filter((c) => !c.ok).length,
+          capped: result?.capped,
+          error: cancelled ? "interrompida" : null,
+        },
+      ),
+    );
+    if (live?.later) live.later(work);
+    else await work;
   }
   if (calls.length)
     await callRpc(env, deps.fetch, auth, "ai_log_tool_calls", {

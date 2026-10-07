@@ -26,6 +26,7 @@ import {
   type ProviderConfig,
   type ResolvedRoute,
 } from "./_ai-providers.js";
+import { routedLlm } from "./_ai-router.js";
 import { CATALOG } from "../src/ai-providers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
@@ -1146,7 +1147,7 @@ async function review(
           "task_copilot",
         ));
   const provider = chosen
-    ? { id: chosen.provider_id, config: routeConfig(env, chosen) }
+    ? { id: chosen.provider_id, config: routeConfig(env, chosen), scope: chosen.scope }
     : null;
   const limits = await limitsOk;
   if (limits?.ok && limits.data.blocked)
@@ -1159,9 +1160,21 @@ async function review(
       503,
       "A MAVI não está configurada no servidor. Escolha um provedor para o Assistente MAVI das tarefas no Painel da MAVI.",
     );
-  const llm: LlmAdapter = provider
-    ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
-    : deps.llm;
+  // O roteador (sombra) registra o que escolheria para esta revisão.
+  const llm: LlmAdapter = routedLlm(
+    provider
+      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
+      : deps.llm,
+    {
+      env,
+      fetch: deps.fetch,
+      auth,
+      where: { company: draft.company, surface: "copilot", feature: "task_copilot", client },
+      used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+      question: [draft.title, draft.description, draft.audio].filter(Boolean).join("\n"),
+      hasServerKey: !!env.anthropicKey,
+    },
+  );
   const picked = withRouteEffort(efforts, chosen, "task_copilot").task_copilot;
   const effort: Effort = EFFORTS.includes(picked as Effort)
     ? (picked as Effort)

@@ -38,6 +38,7 @@
     "test:db:ai-assistant": "node scripts/test-ai-assistant.mjs",
     "test:db:ai-sources": "node scripts/test-ai-sources.mjs",
     "test:db:ai-mcp": "node scripts/test-ai-mcp.mjs",
+    "test:db:ai-router": "node scripts/test-ai-router.mjs",
     "test:db:ai-providers": "node scripts/test-ai-providers.mjs",
     "test:db:ai-settings-log": "node scripts/test-ai-settings-log.mjs",
     "test:db:mavi-powers": "node scripts/test-mavi-powers.mjs",

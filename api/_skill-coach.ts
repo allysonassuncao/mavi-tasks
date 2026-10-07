@@ -1,6 +1,7 @@
 import { callRpc } from "./_drive.js";
 import { llmFriendlyError, type LlmAdapter } from "./_ai-llm.js";
 import { adapterFor, featureProvider } from "./_ai-providers.js";
+import { routedLlm } from "./_ai-router.js";
 import { WEB_RESEARCH_TOOL, toolsFor } from "./_ai-powers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
@@ -464,9 +465,22 @@ export async function handleSkillCoach(
         503,
         "A MAVI não está configurada no servidor. Escolha um provedor para as skills no Painel da MAVI.",
       );
-    const llm: LlmAdapter = provider
-      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
-      : deps.llm;
+    const llm: LlmAdapter = routedLlm(
+      provider
+        ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
+        : deps.llm,
+      {
+        env,
+        fetch: deps.fetch,
+        auth: authorization,
+        where: { company, surface: "skill_coach", feature: "skill_coach" },
+        used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+        question: mode === "review"
+          ? "Revise esta skill e aponte melhorias detalhadas"
+          : ([...history].reverse().find((m) => m.role === "user")?.content ?? ""),
+        hasServerKey: !!env.anthropicKey,
+      },
+    );
     const result = await llm({
       instructions:
         mode === "review"

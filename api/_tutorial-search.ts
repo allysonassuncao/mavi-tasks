@@ -1,6 +1,7 @@
 import { callRpc } from "./_drive.js";
 import { llmFriendlyError, type LlmAdapter } from "./_ai-llm.js";
 import { adapterFor, featureProvider } from "./_ai-providers.js";
+import { routedLlm } from "./_ai-router.js";
 import { embeddingCost, vectorLiteral } from "./_ai-embeddings.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
@@ -179,9 +180,20 @@ export async function handleTutorialSearch(
       throw new SearchError(429, limits.data.message ?? "Limite de uso da MAVI atingido.");
     if (!provider && !env.anthropicKey)
       throw new SearchError(503, "A MAVI não está configurada no servidor. Escolha um provedor para a busca nos tutoriais no Painel da MAVI.");
-    const llm: LlmAdapter = provider
-      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
-      : deps.llm;
+    const llm: LlmAdapter = routedLlm(
+      provider
+        ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
+        : deps.llm,
+      {
+        env,
+        fetch: deps.fetch,
+        auth: authorization,
+        where: { company, surface: "tutorials", feature: "tutorial_search" },
+        used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+        question: query,
+        hasServerKey: !!env.anthropicKey,
+      },
+    );
     const result = await llm({
       instructions: ANSWER_INSTRUCTIONS,
       context: `Trechos dos tutoriais:\n\n${answerContext(hits)}`,

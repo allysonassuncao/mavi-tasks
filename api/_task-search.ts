@@ -1,6 +1,7 @@
 import { callRpc } from "./_drive.js";
 import { llmFriendlyError, type LlmAdapter } from "./_ai-llm.js";
 import { adapterFor, featureProvider } from "./_ai-providers.js";
+import { routedLlm } from "./_ai-router.js";
 import { embeddingCost, vectorLiteral } from "./_ai-embeddings.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
@@ -325,9 +326,21 @@ export async function handleTaskSearch(
         503,
         "A MAVI não está configurada no servidor. Escolha um provedor para a Busca avançada no Painel da MAVI.",
       );
-    const llm: LlmAdapter = provider
-      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
-      : deps.llm;
+    const llm: LlmAdapter = routedLlm(
+      provider
+        ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
+        : deps.llm,
+      {
+        env,
+        fetch: deps.fetch,
+        auth: authorization,
+        where: { company, surface: "task_search", feature: "task_search" },
+        used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+        question: query,
+        hasServerKey: !!env.anthropicKey,
+        structured: true,
+      },
+    );
     const keep = MAVI_FILTER_KEYS.map((k) => current[k] ?? "").filter((v) => UUID.test(v));
     const result = await llm({
       instructions: SEARCH_INSTRUCTIONS,

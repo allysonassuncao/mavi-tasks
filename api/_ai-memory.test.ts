@@ -192,8 +192,10 @@ describe("conversas longas", () => {
       llm,
       embed: vi.fn(),
     }, () => {}, live);
-    expect(later).toHaveLength(1);
+    // O registro do roteador e o resumo seguem depois da resposta.
+    expect(later).toHaveLength(2);
     await Promise.all(later);
+    expect(calls.some((c) => c.url.includes("ai_route_log"))).toBe(true);
     // 20 antigas: resume as 14 primeiras (até a resposta 7, id 14); as 6 últimas ficam.
     expect(prompts[0]).toContain("Pessoa: Pergunta 1");
     expect(prompts[0]).toContain("MAVI: Resposta 7");

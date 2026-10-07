@@ -1,6 +1,7 @@
 import { callRpc } from "./_drive.js";
 import { llmFriendlyError, outputText, type LlmAdapter, type ToolSpec } from "./_ai-llm.js";
 import { adapterFor, featureProvider } from "./_ai-providers.js";
+import { routedLlm } from "./_ai-router.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
 import {
@@ -640,9 +641,20 @@ export async function handleDashboardBuilder(
       month: "long",
       year: "numeric",
     }).format(new Date(deps.now?.() ?? Date.now()));
-    const llm: LlmAdapter = provider
-      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
-      : deps.llm;
+    const llm: LlmAdapter = routedLlm(
+      provider
+        ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
+        : deps.llm,
+      {
+        env,
+        fetch: deps.fetch,
+        auth: authorization,
+        where: { company, surface: "dashboard", feature: "dashboard_builder" },
+        used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+        question: [...history].reverse().find((m) => m.role === "user")?.content ?? "",
+        hasServerKey: !!env.anthropicKey,
+      },
+    );
     const result = await llm({
       instructions: BUILDER_INSTRUCTIONS.replace("{guide}", DASHBOARD_GUIDE.replace("{catalog}", catalogGuide(allowed))),
       context: `Quem conversa: ${String(me[0].name ?? "")}${leader ? " (administrador ou gestor)" : " (colaborador: o dashboard fica nos clientes das equipes dele)"}.`,

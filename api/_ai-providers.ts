@@ -705,9 +705,9 @@ export async function featureProvider(
   company: string,
   feature: AiFeature,
   scope: { client?: string; contract?: string; project?: string } = {},
-): Promise<{ id: string; config: ProviderConfig } | null> {
+): Promise<{ id: string; config: ProviderConfig; scope: string } | null> {
   const route = await resolveRoute(env, fetchImpl, auth, company, scope, feature);
-  return route ? { id: route.provider_id, config: routeConfig(env, route) } : null;
+  return route ? { id: route.provider_id, config: routeConfig(env, route), scope: route.scope } : null;
 }
 
 // ------------------------------------------------------------ administração
