@@ -1,7 +1,9 @@
 import { callRpc } from "./_drive.js";
 import { embeddingCost } from "./_ai-embeddings.js";
 import { buildContext, type AiDeps, type AiEnv } from "./_ai.js";
+import { CS_INSTRUCTIONS, CS_TOOL_NAMES } from "../src/cs-ai.js";
 import {
+  CS_MCP_TOOLS,
   TOOLS,
   runTool,
   type AiSource,
@@ -53,7 +55,7 @@ const workspaceField = {
 };
 
 /** As ferramentas da IA do MAVI, no formato do MCP (todas só de leitura). */
-export function mcpTools() {
+export function mcpTools(cs = false) {
   const title: Record<string, string> = {
     find_clients: "Achar cliente",
     search_knowledge: "Buscar na MAVI",
@@ -97,7 +99,27 @@ export function mcpTools() {
         annotations: { readOnlyHint: true, openWorldHint: false },
       };
     }),
+    // Customer Success (migração 20270524090000): os nomes do conector antigo,
+    // só para quem vê dados de CS em alguma empresa.
+    ...(cs
+      ? CS_MCP_TOOLS.map((t) => ({
+          name: t.name,
+          title: `Customer Success · ${t.name.slice(3).replace(/_/g, " ")}`,
+          description: t.description,
+          inputSchema: {
+            ...t.inputSchema,
+            properties: { ...(t.inputSchema.properties as Json), ...workspaceField },
+          },
+          annotations: { readOnlyHint: true, openWorldHint: false },
+        }))
+      : []),
   ];
+}
+
+/** Quem consulta dados de CS em alguma empresa (cs_ai_access). */
+async function hasCs(env: McpEnv, deps: AiDeps, authorization: string) {
+  const r = await callRpc<unknown[]>(env, deps.fetch, authorization, "cs_ai_access", {}).catch(() => null);
+  return !!r?.ok && Array.isArray(r.data) && r.data.length > 0;
 }
 
 /** O endereço (no MAVI) que abre uma fonte citada. */
@@ -209,7 +231,7 @@ async function callTool(
             .join("\n")
         : "Nenhuma empresa ativa.",
     );
-  if (!TOOLS.some((t) => t.name === name) || name === "report_missing_tutorial")
+  if ((!TOOLS.some((t) => t.name === name) && !CS_TOOL_NAMES.has(name)) || name === "report_missing_tutorial")
     return text(`Ferramenta desconhecida: ${name}.`, true);
   const picked = pickWorkspace(workspaces.data, args.workspace);
   if (!picked.workspace) return text(picked.error!, true);
@@ -358,7 +380,9 @@ export async function handleMcp(
             : MCP_VERSIONS[0],
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "mavi", title: "MAVI", version: "1.0.0" },
-          instructions: INSTRUCTIONS,
+          instructions: (await hasCs(env, deps, authorization))
+            ? `${INSTRUCTIONS}\n\n${CS_INSTRUCTIONS}`
+            : INSTRUCTIONS,
         },
       },
     };
@@ -368,7 +392,11 @@ export async function handleMcp(
   if (msg.method === "tools/list")
     return {
       status: 200,
-      body: { jsonrpc: "2.0", id: msg.id, result: { tools: mcpTools() } },
+      body: {
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: { tools: mcpTools(await hasCs(env, deps, authorization)) },
+      },
     };
   if (msg.method === "tools/call") {
     const name = String(params.name ?? "");

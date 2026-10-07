@@ -30,10 +30,18 @@ import {
   temperatureLine,
   radarLine,
   mediaLine,
+  CS_MAVI_TOOL,
   type AiScope,
   type AiSource,
   type ToolContext,
 } from "./_ai-tools.js";
+import { CS_INSTRUCTIONS } from "../src/cs-ai.js";
+
+/** Customer Success: as regras do conector antigo, para quem vê os dados de CS. */
+const CS_RULES = `
+
+${CS_INSTRUCTIONS}
+Na MAVI, todas essas consultas passam pela ferramenta customer_success (consulta = o nome, ex.: cs_meta_gap). Quem é de um squad só vê o squad dele: se pedirem outro, diga isso.`;
 import {
   adapterFor,
   handleProviders,
@@ -1186,6 +1194,10 @@ async function ask(
           { client: scope.client, campaign: scope.campaign },
         ).catch(() => null)
       : null;
+  // Customer Success (migração 20270524090000): só quem vê dados de CS.
+  const csAccess = await callRpc<{ company_id: string }[]>(env, deps.fetch, auth, "cs_ai_access", {})
+    .then((r) => r.ok && Array.isArray(r.data) && r.data.some((x) => x.company_id === company))
+    .catch(() => false);
   // Sem catálogo e sem skill escolhida, as ferramentas das skills não entram.
   const tools = [
     ...toolsFor(powers, { writer: !!kit.writer, webResearch: !!webRoute }).filter(
@@ -1199,6 +1211,8 @@ async function ask(
     // Os avisos de campanhas: para quem usa Campanhas, nas duas MAVIs.
     ...(base.campaigns ? CAMPAIGN_ALERT_TOOLS : []),
     ...(ads?.tools ?? []),
+    // Customer Success: administradores, gestores e quem está num squad.
+    ...(csAccess ? [CS_MAVI_TOOL] : []),
     // Tarefas longas: no módulo MAVI e na bolinha (a conversa fica salva e o card aparece).
     ...(withPowers ? [PLAN_TOOL] : []),
   ];
@@ -1532,6 +1546,7 @@ async function ask(
     (attachments.length ? ATTACH_RULES : "") +
     (base.campaigns ? ALERT_CHAT_RULES : "") +
     (ads ? ADS_RULES : "") +
+    (csAccess ? CS_RULES : "") +
     (withPowers ? TASK_RULES : "");
   const turnContext =
     base.context +

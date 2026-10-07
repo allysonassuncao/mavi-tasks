@@ -10,6 +10,7 @@ import {
   withoutFilterWords,
   type MaviSearchFilters,
 } from "../src/task-search-mavi.js";
+import { CS_TOOLS, CS_TOOL_NAMES, runCsTool, type CsAiData } from "../src/cs-ai.js";
 
 /**
  * IA do MAVI · ferramentas que o modelo usa para achar informação.
@@ -441,6 +442,60 @@ export const TOOLS: ToolSpec[] = [
   },
 ];
 
+/**
+ * Customer Success na MAVI do app (migração 20270524090000): as 20 consultas
+ * do conector antigo numa ferramenta só (o MCP do MAVI oferece as 20
+ * separadas, com os nomes de sempre). Só para quem vê dados de CS:
+ * administradores, gestores e quem está num squad (só o próprio squad).
+ */
+export const CS_MAVI_TOOL: ToolSpec = {
+  name: "customer_success",
+  description:
+    "Customer Success (o painel CS Make): faturamento com a regra M1, meta e quanto falta, planejado, pagantes, ativos, entradas e churns, Health Score, adimplência, trial, recebimento do mês por data de cobrança, ritmo vs o mesmo dia do mês passado, ranking e comparativo dos squads, anomalias, insights e o perfil de um cliente de CS. Escolha a consulta: cs_regras (as regras, leia antes de explicar números), cs_listar, cs_kpi, cs_drilldown (metrica), cs_cliente, cs_search, cs_gap_recebimento, cs_meta_gap, cs_funil_trial, cs_churns, cs_health_score, cs_adimplencia, cs_ativos, cs_pendentes, cs_ritmo, cs_squads, cs_anomalias, cs_semana, cs_recebimento (visao), cs_insights. Os números vêm prontos: não recalcule.",
+  parameters: {
+    type: "object",
+    properties: {
+      consulta: { type: "string", enum: CS_TOOLS.map((t) => t.name) },
+      mes: { type: "string", description: "Mês (AAAA-MM). Omita para o mês atual." },
+      mes_ini: { type: "string", description: "Início do período (AAAA-MM)." },
+      mes_fim: { type: "string", description: "Fim do período (AAAA-MM)." },
+      squad: { type: "string", description: "Squad pelo nome, apelido ou número antigo (1, 2, 3). Omita para o consolidado." },
+      dim: { type: "string", enum: ["tudo", "trial", "base"] },
+      metrica: { type: "string", description: "Para cs_drilldown (veja cs_listar o_que metricas)." },
+      faixa: { type: "string", enum: ["SATISFEITO", "ALERTA", "CRITICO"] },
+      categoria: { type: "string", enum: ["TRIAL", "BASE", "BASE_RA", "ACL"] },
+      dia: { type: "integer", minimum: 1, maximum: 31, description: "cs_ritmo: dia de corte." },
+      data: { type: "string", description: "cs_semana: qualquer dia da semana (AAAA-MM-DD)." },
+      visao: { type: "string", enum: ["distribuicao", "sugestoes", "replanejamentos"] },
+      o_que: { type: "string", enum: ["metricas", "squads", "tipos", "motivos_churn", "meses", "info", "regras"] },
+      id_externo: { type: "string", description: "cs_cliente: o código da planilha." },
+      nome: { type: "string", description: "cs_cliente: o nome (busca aproximada)." },
+      q: { type: "string", description: "cs_search: nome ou código." },
+      limit: { type: "integer", minimum: 1, maximum: 100 },
+    },
+    required: ["consulta"],
+    additionalProperties: false,
+  },
+};
+
+/** As consultas de CS: a base que a pessoa vê, baixada uma vez por pergunta. */
+async function customerSuccess(ctx: ToolContext, name: string, input: Record<string, unknown>) {
+  if (!CS_TOOL_NAMES.has(name)) return `Consulta de Customer Success desconhecida: ${name}.`;
+  ctx.csData ??= callRpc<CsAiData>(ctx, ctx.fetch, ctx.auth, "cs_ai_data", { p_company: ctx.company }).then((r) => {
+    if (!r.ok) throw new Error(r.error);
+    return r.data;
+  });
+  try {
+    return runCsTool(await ctx.csData, name, input);
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (/Sem acesso aos dados de Customer Success/i.test(msg))
+      return "Quem pergunta não vê os dados de Customer Success (só administradores, gestores e quem está num squad). Diga isso sem inventar números.";
+    throw e;
+  }
+}
+export const CS_MCP_TOOLS = CS_TOOLS;
+
 export type ToolContext = {
   supabaseUrl: string;
   supabaseKey: string;
@@ -465,6 +520,8 @@ export type ToolContext = {
   rerank?: (query: string, texts: string[], keep: number) => Promise<number[] | null>;
   /** O gasto desta resposta, ligado à conversa (custo da conversa por modelo). */
   cost?: CostTurn;
+  /** Customer Success: a base que a pessoa vê, baixada na primeira consulta. */
+  csData?: Promise<CsAiData>;
 };
 
 /** Os trechos na ordem da reordenação (o que ela não citou fica de fora). */
@@ -1298,6 +1355,18 @@ export function describeStep(ctx: ToolContext, name: string, raw: unknown) {
     return ctx.scope.client || client
       ? `Olhando o Radar${inClient || " do cliente"}`
       : "Olhando o Radar da carteira";
+  if (name === "customer_success" || CS_TOOL_NAMES.has(name)) {
+    const what = name === "customer_success" ? str(input.consulta) : name;
+    const label: Record<string, string> = {
+      cs_regras: "as regras", cs_listar: "o catálogo", cs_kpi: "os KPIs", cs_drilldown: `o detalhe de ${str(input.metrica) || "uma métrica"}`,
+      cs_cliente: `o cliente ${str(input.nome) || str(input.id_externo)}`.trim(), cs_search: "os clientes",
+      cs_gap_recebimento: "provável × recebido", cs_meta_gap: "a meta", cs_funil_trial: "o funil do trial", cs_churns: "os churns",
+      cs_health_score: "o Health Score", cs_adimplencia: "a adimplência", cs_ativos: "os ativos", cs_pendentes: "os pendentes",
+      cs_ritmo: "o ritmo do mês", cs_squads: "os squads", cs_anomalias: "as anomalias", cs_semana: "a semana",
+      cs_recebimento: "o recebimento", cs_insights: "os insights",
+    };
+    return `Consultando ${label[what] ?? "os dados"} de Customer Success${str(input.squad) ? ` (${str(input.squad)})` : ""}`;
+  }
   if (name === "media_account")
     return ctx.scope.client || client
       ? `Conferindo a conta de mídia${inClient || " do cliente"}${period}`
@@ -1356,6 +1425,8 @@ export function summarizeStep(name: string, output: string) {
     if (accounts) return `${accounts} ${accounts === 1 ? "conta" : "contas"}`;
     return entries ? `${entries} ${entries === 1 ? "entrada" : "entradas"}` : "nenhuma entrada";
   }
+  if (name === "customer_success" || CS_TOOL_NAMES.has(name))
+    return output.startsWith('{"erro"') ? "sem acesso ou consulta inválida" : output.includes("não vê os dados") ? "sem acesso" : "dados de CS lidos";
   return "";
 }
 
@@ -2101,5 +2172,7 @@ export async function runTool(ctx: ToolContext, name: string, raw: unknown) {
   if (name === "client_radar") return clientRadar(ctx, input);
   if (name === "media_account") return mediaAccount(ctx, input);
   if (name === "client_overview") return clientOverview(ctx, input);
+  if (name === "customer_success") return customerSuccess(ctx, str(input.consulta), input);
+  if (CS_TOOL_NAMES.has(name)) return customerSuccess(ctx, name, input);
   return `Ferramenta desconhecida: ${name}.`;
 }

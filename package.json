@@ -81,6 +81,7 @@
     "test:db:customer-success": "node scripts/test-customer-success.mjs",
     "test:db:cs-dashboard": "node scripts/test-cs-dashboard.mjs",
     "test:db:cs-rules": "node scripts/test-cs-rules.mjs",
+    "test:db:cs-ai": "node scripts/test-cs-ai.mjs",
     "test:db:bulk": "node scripts/test-task-bulk.mjs",
     "test:db:recurrence": "node scripts/test-task-recurrence.mjs",
     "test:db:task-audio": "node scripts/test-task-audio.mjs",

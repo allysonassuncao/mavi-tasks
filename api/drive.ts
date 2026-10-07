@@ -56,6 +56,7 @@ import { handleTaskSearch } from "./_task-search.js";
 import { handleRadarSuggest } from "./_radar-link.js";
 import { agentEnv, handleAgents } from "./_agents.js";
 import { handleCsSync } from "./_cs-sync.js";
+import { handleCsHsWorker } from "./_cs-hs.js";
 import {
   handleTaskAudioCleanup,
   taskAudioCleanupEnv,
@@ -411,6 +412,15 @@ export default async function handler(
         model: serverModel("client_temperature_text", process.env),
       };
       const result = await handleTemperatureWorker(authorization, env, aiDeps(env));
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+    // Customer Success: a sugestão de Health Score (o worker do pg_cron, com o
+    // modelo da funcionalidade 'cs_health_score'; migração 20270524090000).
+    if (action === "cs-hs") {
+      const env = { ...aiEnv(driveEnv()), model: serverModel("cs_health_score", process.env) };
+      const result = await handleCsHsWorker(authorization, env, aiDeps(env));
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

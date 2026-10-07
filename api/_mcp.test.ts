@@ -302,3 +302,38 @@ describe("servidor MCP", () => {
     );
   });
 });
+
+describe("Customer Success no MCP (migração 20270524090000)", async () => {
+  const { demoCsData } = await import("../src/cs-dashboard");
+  const csData = { ...demoCsData(), access: { scope: "all" } };
+  it("as 20 ferramentas do conector antigo aparecem só para quem vê CS", async () => {
+    const none = database({ ...base, "rpc/cs_ai_access": [] });
+    const list = await handleMcp(call("tools/list"), token, env, deps(none.fetchImpl));
+    const names = (list.body as any).result.tools.map((t: { name: string }) => t.name);
+    expect(names.some((n: string) => n.startsWith("cs_"))).toBe(false);
+    const db = database({ ...base, "rpc/cs_ai_access": [{ company_id: company, name: "Agência", scope: "all" }] });
+    const withCs = await handleMcp(call("tools/list"), token, env, deps(db.fetchImpl));
+    const csNames = (withCs.body as any).result.tools.map((t: { name: string }) => t.name).filter((n: string) => n.startsWith("cs_"));
+    expect(csNames).toHaveLength(20);
+    expect(csNames).toContain("cs_meta_gap");
+    const init = await handleMcp(call("initialize"), token, env, deps(db.fetchImpl));
+    expect((init.body as any).result.instructions).toContain("REGRA M1");
+  });
+  it("cs_kpi responde com os dados que a pessoa vê", async () => {
+    const db = database({ ...base, "rpc/mcp_workspaces": workspaces(), "rpc/cs_ai_data": csData });
+    const res = await handleMcp(call("tools/call", { name: "cs_kpi", arguments: {} }), token, env, deps(db.fetchImpl));
+    const text = (res.body as any).result.content[0].text as string;
+    const parsed = JSON.parse(text.split("\n\n")[0]);
+    expect(parsed.data.kpi.fat_mes).toBeTypeOf("number");
+    expect(parsed.contexto_dados.mes_corrente).toMatch(/EM ABERTO/);
+    expect(db.calls.find((c) => c.url.includes("rpc/cs_ai_data"))?.body).toEqual({ p_company: company });
+  });
+  it("sem acesso, a resposta diz isso sem inventar números", async () => {
+    const db = database({
+      ...base, "rpc/mcp_workspaces": workspaces(),
+      "rpc/cs_ai_data": new Response(JSON.stringify({ message: "Sem acesso aos dados de Customer Success: só administradores" }), { status: 403 }),
+    });
+    const res = await handleMcp(call("tools/call", { name: "cs_meta_gap", arguments: {} }), token, env, deps(db.fetchImpl));
+    expect((res.body as any).result.content[0].text).toMatch(/não vê os dados de Customer Success/);
+  });
+});

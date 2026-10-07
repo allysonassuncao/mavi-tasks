@@ -15,7 +15,7 @@ import {
   type CsDataCycle,
   type CsEngine,
   type CsKind,
-} from "./cs-engine";
+} from "./cs-engine.js";
 
 /**
  * Planejamento de Recebimento: quando o dinheiro do mês entra e o que

@@ -23,8 +23,8 @@ import {
   type CsEngine,
   type CsFilter,
   type CsKind,
-} from "./cs-engine";
-import { recPlanejamento } from "./cs-receiving";
+} from "./cs-engine.js";
+import { recPlanejamento } from "./cs-receiving.js";
 
 /**
  * Os blocos do painel de CS: cada função é a de mesmo nome em

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, type ReactNode } from "react";
 import type { CsEngine } from "./cs-engine";
 import type { DdParams } from "./cs-drilldowns";
+import type { HsSuggestions } from "./cs-dashboard";
 
 /** O que as telas do painel de CS compartilham (CsDashboard.tsx). */
 export type CsCtx = {
@@ -10,6 +11,10 @@ export type CsCtx = {
   /** Abre o perfil do cliente de CS. */
   profile: (client: string) => void;
   color: (squad: string | null | undefined) => string;
+  /** As sugestões de Health Score da MAVI no mês do painel (nulo: sem acesso, ou no link). */
+  hs: HsSuggestions | null;
+  /** "Pedir sugestões agora" (administradores e gestores). */
+  requestHs: (() => Promise<void>) | null;
 };
 export const CsContext = createContext<CsCtx | null>(null);
 export const useCs = () => useContext(CsContext)!;

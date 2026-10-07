@@ -17,7 +17,11 @@ import {
   type CsDim,
 } from "./cs-engine";
 import {
+  demoHsSuggestions,
   loadCsData,
+  loadHsSuggestions,
+  requestHsSuggestions,
+  type HsSuggestions,
   resolvePeriod,
   shiftPeriod,
   type CsLoaded,
@@ -27,6 +31,7 @@ import {
 } from "./cs-dashboard";
 import { CsContext, csPill, useCs, type CsCtx } from "./CsCommon";
 import { CsDrillModal, type CsDrill } from "./CsDrillModal";
+import { HsProfileSection } from "./CsHsSuggestions";
 import { CsPanelBlocks } from "./CsPanelBlocks";
 import { CsReceivingView } from "./CsReceivingView";
 import { CsRankingView } from "./CsRankingView";
@@ -44,8 +49,11 @@ export function CsDashboard({
   source,
   onSync,
   head,
+  hsCompany,
 }: {
   source: CsSource;
+  /** A empresa, para as sugestões de Health Score da MAVI (no app; "demo" na demonstração). */
+  hsCompany?: string;
   /** "Sincronizar agora" (administradores e gestores no app). */
   onSync?: () => Promise<void>;
   /** O título e as ações do dashboard, à esquerda do cabeçalho do painel. */
@@ -85,11 +93,14 @@ export function CsDashboard({
       </div>
     );
   if (!data) return <Loading variant="chart" />;
-  return <CsDashboardScreen key={data.today} data={data} onReload={() => setTick((v) => v + 1)} onSync={onSync} head={head} />;
+  return (
+    <CsDashboardScreen key={data.today} data={data} onReload={() => setTick((v) => v + 1)} onSync={onSync} head={head}
+      hsCompany={hsCompany} tick={tick} />
+  );
 }
 
-function CsDashboardScreen({ data, onReload, onSync, head }: {
-  data: CsLoaded; onReload: () => void; onSync?: () => Promise<void>; head?: ReactNode;
+function CsDashboardScreen({ data, onReload, onSync, head, hsCompany, tick }: {
+  data: CsLoaded; onReload: () => void; onSync?: () => Promise<void>; head?: ReactNode; hsCompany?: string; tick: number;
 }) {
   const e = useMemo(() => new CsEngine(data), [data]);
   const today = data.today;
@@ -105,13 +116,33 @@ function CsDashboardScreen({ data, onReload, onSync, head }: {
   const [syncError, setSyncError] = useState("");
   const p = useMemo(() => resolvePeriod(period, today), [period, today]);
   const mes = p.mes_ref;
+  // As sugestões de Health Score da MAVI no mês (fase 4b): só no app, para quem vê CS.
+  const [hs, setHs] = useState<HsSuggestions | null>(null);
+  useEffect(() => {
+    if (!hsCompany) return;
+    let current = true;
+    (hsCompany === "demo" ? Promise.resolve(demoHsSuggestions(data, mes)) : loadHsSuggestions(hsCompany, mes))
+      .then((r) => current && setHs(r))
+      .catch(() => current && setHs(null));
+    return () => {
+      current = false;
+    };
+  }, [hsCompany, mes, data, tick]);
 
   const ctx = useMemo<CsCtx>(() => ({
     e,
     drill: (metrica, params, title) => setDrill({ metrica, params, title }),
     profile: setProfile,
     color: (id) => e.squadOf(id ?? null)?.color || "#84908f",
-  }), [e]);
+    hs,
+    requestHs: hsCompany && hs?.can_request
+      ? async () => {
+          if (hsCompany === "demo") return;
+          await requestHsSuggestions(hsCompany, mes);
+          setHs(await loadHsSuggestions(hsCompany, mes));
+        }
+      : null,
+  }), [e, hs, hsCompany, mes]);
 
   // Squads nas abas: os ativos e os arquivados que têm ciclo no mês.
   const squadTabs = e.squads.filter((s) => !s.archived || e.cyclesOfMonth(mes).some((y) => e.cycleSquad(y) === s.id));
@@ -361,6 +392,7 @@ function CsClientProfile({ id, onClose }: { id: string; onClose: () => void }) {
         <div className="cs-tight"><small>Ciclos em PERDA</small><strong>{all.filter((y) => y.status === "PERDA").length}</strong></div>
       </div>
       {c.notes && <div className="cs-tight cs-gap"><small>Observações</small><p>{c.notes}</p></div>}
+      <HsProfileSection client={id} />
       <h4 className="cs-label">Últimos {cycles.length} ciclos</h4>
       <div className="cs-table-wrap">
         <table className="cs-table">

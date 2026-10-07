@@ -32,6 +32,7 @@ import {
   trialDataMensal,
 } from "./cs-blocks";
 import { Dd, Info, csPill, useCs, useProfileRow } from "./CsCommon";
+import { HsSuggestionsCard } from "./CsHsSuggestions";
 
 /**
  * Os blocos 1 a 8 do painel de CS (home.php do dash antigo), com os mesmos
@@ -483,6 +484,7 @@ export function CsPanelBlocks({ f, p, semana, onSemana, onReceiving, onYear }: {
                 </div>
               ) : <p className="cs-muted">Nenhuma conta com HS &lt; 70% nesse mês.</p>}
             </Card>
+            {p.is_single && <HsSuggestionsCard mes={f.mes_ref} />}
             {th && (
               <div className="cs-grid-2">
                 <Card>

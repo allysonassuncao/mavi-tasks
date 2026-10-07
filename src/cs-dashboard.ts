@@ -1,6 +1,7 @@
 import { rpc } from "./api";
 import type { DashboardFilters, PanelResult, PanelSpec } from "./dashboard-catalog";
 import type { PanelRecords, RecordSelection } from "./dashboards";
+import type { HsCriteria, HsKey } from "./cs-hs";
 import {
   CS_DEFAULT_RULES,
   addDays,
@@ -92,6 +93,53 @@ export async function csPanelRecords(
 ): Promise<PanelRecords> {
   const [data, { runCsRecords }] = await Promise.all([csDataCached(source, fresh), import("./cs-sources")]);
   return runCsRecords(data, spec, ref, range, filters, selection);
+}
+
+// ------------------------------------------------------------ sugestão de Health Score (fase 4b)
+export type HsItem = {
+  cs_client_id: string;
+  criteria: Partial<HsCriteria>;
+  score: number | null;
+  band: string | null;
+  done_at: string | null;
+  error: string | null;
+  model: string | null;
+  registered: { score: number; band: string; goal: boolean; perception: boolean; payment: boolean; meeting: boolean;
+    creatives: boolean } | null;
+};
+export type HsSuggestions = { month: string; can_request: boolean; pending: number; items: HsItem[] };
+/** As sugestões do mês (migração 20270524090000): quem vê CS; o squad, só as dele. */
+export async function loadHsSuggestions(company: string, month: string): Promise<HsSuggestions> {
+  return (await rpc("cs_hs_suggestions", { p_company: company, p_month: month })) as HsSuggestions;
+}
+export async function requestHsSuggestions(company: string, month: string): Promise<number> {
+  return (await rpc("cs_hs_request", { p_company: company, p_month: month })) as number;
+}
+/** Na demonstração: sugestões inventadas a partir da carteira de exemplo. */
+export function demoHsSuggestions(data: CsData, month: string): HsSuggestions {
+  const hs = new Map(data.hs.filter((h) => h.month === month).map((h) => [h.client, h]));
+  const items: HsItem[] = data.cycles.filter((y) => y.month === month).map((y, i) => {
+    const h = hs.get(y.client);
+    const flip = (v: boolean | undefined, k: number) => ((i + k) % 7 === 0 ? !v : !!v);
+    const c = (value: boolean | null, why: string) => ({ value, confidence: (value === null ? "baixa" : "media") as "baixa" | "media", why, evidence: [] });
+    const criteria: HsCriteria = {
+      payment: c(y.status === "PAGO" ? true : y.adimplencia === "ADIMPLENTE" ? null : false,
+        y.status === "PAGO" ? "Pagou o ciclo do mês." : y.adimplencia === "ADIMPLENTE" ? "A cobrança ainda não venceu." : "Ciclo em atraso."),
+      meeting: c(flip(h?.meeting, 1), "Reunião gravada no mês (demonstração)."),
+      goal: c(flip(h?.goal, 2), "Campanhas do mês com status Bom (demonstração)."),
+      perception: c(i % 9 === 0 ? null : flip(h?.perception, 3), "Termômetro do mês (demonstração)."),
+      creatives: c(flip(h?.creatives, 4), "Aprovações do Social Leads (demonstração)."),
+    };
+    const w = CS_DEFAULT_RULES.hs_weights;
+    const score = (Object.keys(w) as HsKey[]).reduce((t, k) => t + (criteria[k].value ? w[k] : 0), 0);
+    return {
+      cs_client_id: y.client, criteria, score, band: score >= 80 ? "SATISFEITO" : score >= 50 ? "ALERTA" : "CRITICO",
+      done_at: new Date().toISOString(), error: null, model: "demonstração",
+      registered: h ? { score: h.score, band: h.band, goal: h.goal, perception: h.perception, payment: h.payment, meeting: h.meeting,
+        creatives: h.creatives } : null,
+    };
+  });
+  return { month, can_request: true, pending: 0, items };
 }
 
 export async function createCsDashboard(company: string, name: string, description: string) {

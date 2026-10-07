@@ -22,7 +22,7 @@ import {
   type CsDim,
   type CsEngine,
   type CsFilter,
-} from "./cs-engine";
+} from "./cs-engine.js";
 import {
   detectorAnomalias,
   gerarInsights,
@@ -30,8 +30,8 @@ import {
   rankingSquadsData,
   squadsData,
   trocasSquadMes,
-} from "./cs-blocks";
-import { recPlanejamento, type RecHist } from "./cs-receiving";
+} from "./cs-blocks.js";
+import { recPlanejamento, type RecHist } from "./cs-receiving.js";
 
 /**
  * As janelas de detalhe ("ver", "explorar") do painel de CS. Porta de

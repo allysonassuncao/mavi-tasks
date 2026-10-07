@@ -499,6 +499,8 @@ export const REGISTRY: Record<string, ToolMeta> = {
   ),
   // O dossiê lê várias partes de até 3 clientes ao mesmo tempo.
   client_overview: { kind: "read", timeoutMs: 90_000 },
+  // Customer Success: só para quem vê dados de CS (entra em _ai.ts).
+  customer_success: { kind: "read", timeoutMs: 45_000 },
   // O plano da tarefa longa (módulo MAVI): só grava; a pessoa confirma no card.
   plan_long_task: { kind: "task", timeoutMs: 20_000 },
   show_chart: { kind: "visual", power: "visuals", timeoutMs: 5_000 },

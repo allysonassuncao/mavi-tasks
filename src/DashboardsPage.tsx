@@ -1090,6 +1090,7 @@ function DashboardView({
         <Suspense fallback={<Loading variant="chart" />}>
           <CsDashboard
             source={demo ? { kind: "demo" } : { kind: "app", dashboard: dash.id }}
+            hsCompany={demo ? "demo" : company}
             onSync={isLeader && !demo ? async () => void (await syncCsNow(company)) : undefined}
             head={
               <div className="dash-view-head">

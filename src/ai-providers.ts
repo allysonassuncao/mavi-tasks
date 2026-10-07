@@ -272,7 +272,8 @@ export type AiFeature =
   | "tutorial_transcribe"
   | "tutorial_writer"
   | "mavi_judge"
-  | "mavi_judge_check";
+  | "mavi_judge_check"
+  | "cs_health_score";
 
 export type FeatureInfo = {
   id: AiFeature;
@@ -603,6 +604,14 @@ export const FEATURES: FeatureInfo[] = [
     note: "Um parágrafo curto por cliente, só quando a temperatura muda: um modelo rápido basta.",
   },
   {
+    id: "cs_health_score",
+    group: "Customer Success",
+    label: "Sugestão de Health Score (Meta, Percepção de valor e Criativos)",
+    conversation: false,
+    env: "CS_HEALTH_SCORE_MODEL",
+    note: "Uma chamada por cliente no fim do mês, com o material já resumido: um modelo rápido basta.",
+  },
+  {
     id: "client_radar",
     group: "Radar do cliente",
     label: "Problemas, promessas e tópicos nas reuniões e no WhatsApp",
@@ -833,6 +842,8 @@ export function serverModel(
       return env.CLIENT_TEMPERATURE_TEXT_MODEL || env.AI_MODEL || fallback;
     case "client_radar":
       return env.CLIENT_RADAR_MODEL || env.AI_MODEL || fallback;
+    case "cs_health_score":
+      return env.CS_HEALTH_SCORE_MODEL || env.CLIENT_TEMPERATURE_TEXT_MODEL || env.AI_MODEL || fallback;
     case "client_radar_report":
       return env.CLIENT_RADAR_REPORT_MODEL || env.AI_MODEL || fallback;
     case "campaign_report":

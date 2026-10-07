@@ -29,7 +29,7 @@ export type CsProb = "ALTA" | "PROVAVEL" | "BAIXA";
 export type CsBand = "SATISFEITO" | "ALERTA" | "CRITICO";
 export type CsReason = "performance" | "financeiro" | "fechou" | "estrategia";
 
-export type CsDataSquad = { id: string; name: string; color: string; sort: number; archived: boolean };
+export type CsDataSquad = { id: string; name: string; color: string; sort: number; archived: boolean; aliases?: string[] };
 export type CsDataClient = {
   id: string;
   external_id: string;
