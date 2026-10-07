@@ -5,6 +5,7 @@ import {
   ExternalLink,
   Link2,
   RefreshCw,
+  Search,
   XCircle,
 } from "lucide-react";
 import { Modal } from "./components";
@@ -499,6 +500,8 @@ function ClientsCard({
         </div>
         <label className="cs-search">
           <Input
+            type="search"
+            icon={Search}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar por ID ou nome"
