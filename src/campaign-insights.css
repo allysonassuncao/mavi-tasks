@@ -1495,6 +1495,7 @@
 }
 .crm-goal-stage {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-height: 40px;
@@ -1507,27 +1508,27 @@
   background: #f7f9fe;
 }
 .crm-goal-stage label.cins-check {
-  flex: 1;
+  flex: 1 1 180px;
   flex-direction: row;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
-.crm-goal-stage input[type="number"] {
-  width: 150px;
+.crm-goal-stage label.cins-check > :first-child {
   flex: none;
+}
+/* O tamanho vai no invólucro do Input (ícone + campo), não no campo. Sem
+   espaço ao lado do nome da etapa (modal estreito), desce para a linha de baixo. */
+.crm-goal-stage .input-control {
+  flex: 1 0 190px;
+  width: auto;
+  padding-bottom: 4px;
 }
 .crm-goal-note {
   color: var(--muted);
   font-size: 0.74rem;
 }
 @media (max-width: 560px) {
-  .crm-goal-stage {
-    flex-wrap: wrap;
-  }
-  .crm-goal-stage input[type="number"] {
-    width: 100%;
-  }
   .crm-control {
     flex-wrap: wrap;
   }
