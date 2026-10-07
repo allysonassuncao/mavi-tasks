@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CloudUpload, FileText, Palette, Plus, Sparkles, Trash2, Type } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import { Empty } from "./components";
+import { ClientGuide } from "./IdentityEditor";
 import {
   BRAND_ACCEPT,
   FONT_FILE,
@@ -188,8 +189,8 @@ export function BrandKit({
             <Palette size={18} aria-hidden="true" /> Marca de {clientName}
           </h2>
           <p>
-            Logos, fontes, cores e regras que a MAVI usa para criar as artes deste cliente. Sem
-            marca, ela pergunta antes ou avisa o que faltou.
+            Logos, fontes, cores e regras que a MAVI usa para criar as artes, os documentos e as
+            apresentações deste cliente. Sem marca, ela pergunta antes ou avisa o que faltou.
           </p>
         </div>
         <div className="brand-head-actions">
@@ -408,6 +409,8 @@ export function BrandKit({
             </div>
           )}
         </section>
+
+        <ClientGuide company={company} client={client} clientName={clientName} brand={brand} notify={notify} />
       </div>
     </section>
   );

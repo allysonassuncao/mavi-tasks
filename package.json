@@ -56,6 +56,7 @@
     "test:db:mavi-attachments": "node scripts/test-mavi-attachments.mjs",
     "test:db:mavi-summary": "node scripts/test-mavi-summary.mjs",
     "test:db:mavi-art-brand": "node scripts/test-mavi-art-brand.mjs",
+    "test:db:visual-identities": "node scripts/test-visual-identities.mjs",
     "test:db:mavi-conversation-cost": "node scripts/test-mavi-conversation-cost.mjs",
     "test:db:mavi-long-tasks": "node scripts/test-mavi-long-tasks.mjs",
     "test:db:mavi-feedback": "node scripts/test-mavi-feedback.mjs",

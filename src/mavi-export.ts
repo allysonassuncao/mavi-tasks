@@ -2,9 +2,9 @@ import type {
   Canvas,
   SheetTab,
   Slide,
-  SlideTheme,
   TableColumn,
 } from "./mavi-artifacts";
+import { contrast, legacyLook, type Look } from "./visual-identity";
 
 /**
  * MAVI · o canvas em arquivo: documento em Word (.docx) e Markdown,
@@ -123,12 +123,70 @@ export function markdownBlocks(md: string): Block[] {
   return out;
 }
 
+// ------------------------------------------------------------ identidade
+/** Uma imagem pronta para o arquivo (PNG ou JPEG em data:, com o tamanho). */
+export type ExportImage = { data: string; width: number; height: number };
+/**
+ * O que os arquivos precisam além do texto: o logo que combina com um fundo
+ * (já em PNG) e, para a capa em degradê do PowerPoint, a imagem do degradê.
+ */
+export type ExportAssets = {
+  logo?: (background: string) => Promise<ExportImage | null>;
+  gradient?: (from: string, to: string) => string | null;
+};
+const bare = (h: string) => h.replace("#", "").toUpperCase();
+/** A cor dos títulos e a dos detalhes, como na tela (contraste com o fundo). */
+function tones(look: Look) {
+  const c = look.colors;
+  return {
+    heading: contrast(c.primary, c.bg) >= 3 ? c.primary : c.ink,
+    mark: contrast(c.accent, c.bg) >= 2 ? c.accent : c.primary,
+  };
+}
+/** Cabe a imagem na caixa, sem distorcer. */
+function fit(img: ExportImage, w: number, h: number) {
+  const k = Math.min(w / img.width, h / img.height);
+  return { w: img.width * k, h: img.height * k };
+}
+
 // ------------------------------------------------------------ Word
-export async function documentDocx(title: string, md: string) {
+export async function documentDocx(title: string, md: string, look?: Look, assets: ExportAssets = {}) {
   const d = await import("docx");
-  const children: (InstanceType<typeof d.Paragraph> | InstanceType<typeof d.Table>)[] = [
-    new d.Paragraph({ heading: d.HeadingLevel.TITLE, children: [new d.TextRun(clean(title))] }),
-  ];
+  const lk = look ?? legacyLook("claro");
+  const c = lk.colors;
+  const { heading, mark } = tones(lk);
+  const onPrimary = lk.cover === "primary" || lk.cover === "gradient";
+  const headFont = lk.heading.family;
+  const bodyFont = lk.body.family;
+  const children: (InstanceType<typeof d.Paragraph> | InstanceType<typeof d.Table>)[] = [];
+  const logo = await assets.logo?.(onPrimary ? c.primary : c.bg).catch(() => null);
+  if (logo) {
+    const size = fit(logo, 180, 60);
+    children.push(
+      new d.Paragraph({
+        spacing: { after: 240 },
+        ...(onPrimary ? { shading: { type: d.ShadingType.CLEAR, color: "auto", fill: bare(c.primary) } } : {}),
+        children: [
+          new d.ImageRun({
+            type: /^data:image\/jpe?g/.test(logo.data) ? "jpg" : "png",
+            data: Uint8Array.from(atob(logo.data.split(",")[1] ?? ""), (ch) => ch.charCodeAt(0)),
+            transformation: { width: Math.round(size.w), height: Math.round(size.h) },
+          }),
+        ],
+      }),
+    );
+  }
+  children.push(
+    new d.Paragraph({
+      heading: d.HeadingLevel.TITLE,
+      spacing: { after: 360 },
+      ...(onPrimary ? { shading: { type: d.ShadingType.CLEAR, color: "auto", fill: bare(c.primary) } } : {}),
+      ...(lk.cover === "solid" || lk.cover === "split"
+        ? { border: { bottom: { style: d.BorderStyle.SINGLE, size: 24, color: bare(mark), space: 8 } } }
+        : {}),
+      children: [new d.TextRun({ text: clean(title), color: bare(onPrimary ? c.on_primary : c.ink), font: headFont, bold: lk.heading.weight >= 600 })],
+    }),
+  );
   const text = (t: string) => runs(t).map((r) => new d.TextRun({ text: r.text, bold: r.bold, italics: r.italics }));
   const levels = [
     d.HeadingLevel.HEADING_1,
@@ -136,12 +194,21 @@ export async function documentDocx(title: string, md: string) {
     d.HeadingLevel.HEADING_3,
     d.HeadingLevel.HEADING_4,
   ];
-  for (const b of markdownBlocks(md)) {
+  const blocks = markdownBlocks(md);
+  if (blocks[0]?.kind === "heading" && clean(blocks[0].text).trim() === clean(title).trim()) blocks.shift();
+  for (const b of blocks) {
     if (b.kind === "heading")
       children.push(new d.Paragraph({ heading: levels[Math.min(3, b.level - 1)], children: text(b.text) }));
     else if (b.kind === "paragraph") children.push(new d.Paragraph({ children: text(b.text) }));
     else if (b.kind === "quote")
-      children.push(new d.Paragraph({ children: text(b.text), indent: { left: 480 }, style: "Quote" }));
+      children.push(
+        new d.Paragraph({
+          children: text(b.text),
+          indent: { left: 360 },
+          shading: { type: d.ShadingType.CLEAR, color: "auto", fill: bare(c.surface) },
+          border: { left: { style: d.BorderStyle.SINGLE, size: 24, color: bare(mark), space: 8 } },
+        }),
+      );
     else if (b.kind === "code")
       for (const l of b.text.split("\n"))
         children.push(new d.Paragraph({ children: [new d.TextRun({ text: l, font: "Courier New", size: 18 })] }));
@@ -150,21 +217,32 @@ export async function documentDocx(title: string, md: string) {
       b.items.forEach((it, n) =>
         children.push(
           b.ordered
-            ? new d.Paragraph({ children: [new d.TextRun(`${n + 1}. `), ...text(it)], indent: { left: 360 } })
+            ? new d.Paragraph({ children: [new d.TextRun({ text: `${n + 1}. `, color: bare(mark), bold: true }), ...text(it)], indent: { left: 360 } })
             : new d.Paragraph({ children: text(it), bullet: { level: 0 } }),
         ),
       );
     else if (b.kind === "table") {
-      const row = (cols: string[], head = false) =>
+      const row = (cols: string[], head = false, even = false) =>
         new d.TableRow({
           tableHeader: head,
           children: b.head.map(
-            (_, c) =>
+            (_, k) =>
               new d.TableCell({
+                ...(head
+                  ? { shading: { type: d.ShadingType.CLEAR, color: "auto", fill: bare(c.primary) } }
+                  : even
+                    ? { shading: { type: d.ShadingType.CLEAR, color: "auto", fill: bare(c.surface) } }
+                    : {}),
                 children: [
                   new d.Paragraph({
-                    children: runs(cols[c] ?? "").map(
-                      (r) => new d.TextRun({ text: r.text, bold: head || r.bold, italics: r.italics }),
+                    children: runs(cols[k] ?? "").map(
+                      (r) =>
+                        new d.TextRun({
+                          text: r.text,
+                          bold: head || r.bold,
+                          italics: r.italics,
+                          ...(head ? { color: bare(c.on_primary) } : {}),
+                        }),
                     ),
                   }),
                 ],
@@ -174,99 +252,148 @@ export async function documentDocx(title: string, md: string) {
       children.push(
         new d.Table({
           width: { size: 100, type: d.WidthType.PERCENTAGE },
-          rows: [row(b.head, true), ...b.rows.map((r) => row(r))],
+          rows: [row(b.head, true), ...b.rows.map((r, i) => row(r, false, i % 2 === 1))],
         }),
       );
       children.push(new d.Paragraph({ text: "" }));
     }
   }
+  const headingStyle = (id: string, size: number, color: string) => ({
+    id,
+    name: id,
+    basedOn: "Normal",
+    next: "Normal",
+    quickFormat: true,
+    run: { font: headFont, size, bold: lk.heading.weight >= 600, color: bare(color) },
+    paragraph: { spacing: { before: 320, after: 120 } },
+  });
   const doc = new d.Document({
     creator: "MAVI",
     title: clean(title),
-    styles: { default: { document: { run: { font: "Calibri", size: 22 } } } },
+    // A cor da página (o Word mostra no modo de impressão).
+    ...(bare(c.bg) !== "FFFFFF" ? { background: { color: bare(c.bg) } } : {}),
+    styles: {
+      default: {
+        document: { run: { font: bodyFont, size: 22, color: bare(c.ink) } },
+        title: { run: { font: headFont, size: 56, color: bare(onPrimary ? c.on_primary : c.ink) } },
+      },
+      paragraphStyles: [
+        headingStyle("Heading1", 36, heading),
+        headingStyle("Heading2", 30, c.ink),
+        headingStyle("Heading3", 26, heading),
+        headingStyle("Heading4", 24, c.ink),
+      ],
+    },
     sections: [{ children }],
   });
   return d.Packer.toBlob(doc);
 }
 
 // ------------------------------------------------------------ PowerPoint
-export const THEMES: Record<
-  SlideTheme,
-  { bg: string; ink: string; muted: string; accent: string; soft: string; font: string }
-> = {
-  claro: { bg: "FFFFFF", ink: "263334", muted: "6B7775", accent: "4F7D2D", soft: "EEF4E5", font: "Calibri" },
-  escuro: { bg: "1C2728", ink: "F3F6F1", muted: "A9B5B2", accent: "C8EC8E", soft: "263334", font: "Calibri" },
-  verde: { bg: "EEF4E5", ink: "1C2728", muted: "4F5C5C", accent: "2F6B1E", soft: "FFFFFF", font: "Calibri" },
-};
-
 /** As imagens da conversa (I1 → data URL), para pôr nos slides. */
 export type ImageSource = (ref: string) => Promise<string | null>;
 
-export async function slidesPptx(c: Extract<Canvas, { kind: "slides" }>, image: ImageSource) {
+export async function slidesPptx(
+  c: Extract<Canvas, { kind: "slides" }>,
+  image: ImageSource,
+  assets: ExportAssets = {},
+) {
   const { default: Pptx } = await import("pptxgenjs");
   const pptx = new Pptx();
   pptx.layout = "LAYOUT_WIDE";
   pptx.title = clean(c.title);
-  const t = THEMES[c.theme];
+  const lk = c.look ?? legacyLook(c.theme);
+  const col = lk.colors;
+  const { heading, mark } = tones(lk);
   const W = 13.333;
-  for (const s of c.slides) {
+  const H = 7.5;
+  const onPrimary = lk.cover === "primary" || lk.cover === "gradient";
+  // Cantos: o raio da tela (px num slide de 1280) em polegadas.
+  const radius = Math.min(0.5, (lk.radius / 1280) * W);
+  const gradient = lk.cover === "gradient" ? (assets.gradient?.(col.primary, col.accent) ?? null) : null;
+  const logos = new Map<string, ExportImage | null>();
+  const logoOn = async (bg: string) => {
+    if (!assets.logo) return null;
+    if (!logos.has(bg)) logos.set(bg, await assets.logo(bg).catch(() => null));
+    return logos.get(bg) ?? null;
+  };
+  for (const [index, s] of c.slides.entries()) {
     const slide = pptx.addSlide();
-    slide.background = { color: t.bg };
-    const base = { fontFace: t.font, color: t.ink, margin: 0 };
+    const cover = s.layout === "title" || s.layout === "closing";
+    const section = s.layout === "section";
+    const filled = (cover || section) && onPrimary;
+    const bg = filled ? col.primary : col.bg;
+    const ink = filled ? col.on_primary : col.ink;
+    const muted = filled ? col.on_primary : col.muted;
+    slide.background = gradient && filled ? { data: gradient } : { color: bare(bg) };
+    const base = { fontFace: lk.body.family, color: bare(col.ink), margin: 0 };
+    const head = { fontFace: lk.heading.family, bold: lk.heading.weight >= 600 };
     const bullets = (items: string[], x: number, y: number, w: number, h: number, size = 20) =>
       slide.addText(
-        items.map((b) => ({ text: plain(b), options: { bullet: { indent: 18 }, breakLine: true } })),
+        items.map((b) => ({ text: plain(b), options: { bullet: { indent: 18, color: bare(mark) } as never, breakLine: true } })),
         { ...base, x, y, w, h, fontSize: size, valign: "top", paraSpaceAfter: 10 },
       );
-    const title = (y = 0.6, size = 32) =>
-      slide.addText(plain(s.title), { ...base, x: 0.7, y, w: W - 1.4, h: 1, fontSize: size, bold: true });
-    if (s.layout === "title" || s.layout === "closing" || s.layout === "section") {
-      if (s.layout === "section")
-        slide.addShape(pptx.ShapeType.rect, { x: 0.7, y: 3.2, w: 0.12, h: 1.1, fill: { color: t.accent } });
-      slide.addText(plain(s.title), {
-        ...base,
-        x: s.layout === "section" ? 1.1 : 0.9,
-        y: s.layout === "section" ? 3.0 : 2.4,
-        w: W - 2,
-        h: 1.4,
-        fontSize: s.layout === "section" ? 36 : 44,
-        bold: true,
-        align: s.layout === "section" ? "left" : "center",
-      });
+    const title = (y = 0.6, size = 32) => {
+      if (lk.decor === "bar") slide.addShape(pptx.ShapeType.rect, { x: 0.7, y: y - 0.12, w: 0.75, h: 0.07, fill: { color: bare(mark) }, line: { type: "none" } });
+      slide.addText(plain(s.title), { ...base, ...head, color: bare(heading), x: 0.7, y, w: W - 1.4, h: 1, fontSize: size });
+    };
+    // Os detalhes do tema, atrás do conteúdo.
+    if (lk.decor === "corner" && !(cover && lk.cover === "split"))
+      slide.addShape(pptx.ShapeType.ellipse, { x: W - 2.2, y: -1.1, w: 3.3, h: 3.3, fill: { color: bare(col.accent), transparency: 84 }, line: { type: "none" } });
+    if (lk.decor === "band" && !filled && !cover)
+      slide.addShape(pptx.ShapeType.rect, { x: 0, y: H - 0.15, w: W, h: 0.15, fill: { color: bare(col.primary) }, line: { type: "none" } });
+    if (cover) {
+      const split = lk.cover === "split";
+      const x = split ? W * 0.4 + 0.6 : 1;
+      const w = split ? W * 0.6 - 1.2 : W - 2.6;
+      if (split) {
+        slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W * 0.4, h: H, fill: { color: bare(col.primary) }, line: { type: "none" } });
+        const logo = await logoOn(col.primary);
+        if (logo) {
+          const sz = fit(logo, W * 0.4 * 0.7, H * 0.35);
+          slide.addImage({ data: logo.data, x: (W * 0.4 - sz.w) / 2, y: (H - sz.h) / 2, w: sz.w, h: sz.h });
+        }
+      } else {
+        const logo = await logoOn(bg);
+        if (logo) {
+          const sz = fit(logo, 3.2, 0.75);
+          slide.addImage({ data: logo.data, x, y: 1.1, w: sz.w, h: sz.h });
+        }
+      }
+      slide.addText(plain(s.title), { ...base, ...head, color: bare(split ? col.ink : ink), x, y: 2.3, w, h: 1.9, fontSize: 44, valign: "bottom" });
+      if (lk.cover === "solid" || split)
+        slide.addShape(pptx.ShapeType.rect, { x, y: 4.4, w: 1.1, h: 0.1, fill: { color: bare(mark) }, line: { type: "none" } });
       if (s.subtitle)
-        slide.addText(plain(s.subtitle), {
-          ...base,
-          color: t.muted,
-          x: s.layout === "section" ? 1.1 : 0.9,
-          y: s.layout === "section" ? 4.2 : 3.9,
-          w: W - 2,
-          h: 0.9,
-          fontSize: 20,
-          align: s.layout === "section" ? "left" : "center",
-        });
+        slide.addText(plain(s.subtitle), { ...base, color: bare(split ? col.muted : muted), x, y: 4.7, w, h: 1, fontSize: 20, valign: "top" });
+    } else if (section) {
+      slide.addShape(pptx.ShapeType.rect, { x: 0.7, y: 3.0, w: 0.12, h: 1.4, fill: { color: bare(filled ? col.on_primary : mark) }, line: { type: "none" } });
+      slide.addText(plain(s.title), { ...base, ...head, color: bare(ink), x: 1.1, y: 2.9, w: W - 2, h: 1.2, fontSize: 36 });
+      if (s.subtitle) slide.addText(plain(s.subtitle), { ...base, color: bare(muted), x: 1.1, y: 4.1, w: W - 2, h: 0.9, fontSize: 20 });
     } else if (s.layout === "two_columns") {
       title();
-      const col = (head: string | undefined, items: string[] | undefined, x: number) => {
-        if (head) slide.addText(plain(head), { ...base, color: t.accent, x, y: 1.8, w: 5.6, h: 0.5, fontSize: 18, bold: true });
-        if (items?.length) bullets(items, x, head ? 2.4 : 1.9, 5.6, 4.4, 18);
+      const column = (h4: string | undefined, items: string[] | undefined, x: number) => {
+        slide.addShape(pptx.ShapeType.roundRect, { x, y: 1.75, w: 5.75, h: 5, fill: { color: bare(col.surface) }, line: { type: "none" }, rectRadius: radius });
+        if (h4) slide.addText(plain(h4), { ...base, ...head, color: bare(mark), x: x + 0.35, y: 1.95, w: 5.1, h: 0.5, fontSize: 18 });
+        if (items?.length) bullets(items, x + 0.35, h4 ? 2.55 : 2.05, 5.1, 4, 18);
       };
-      col(s.left_title, s.left, 0.7);
-      col(s.right_title, s.right, 7);
+      column(s.left_title, s.left, 0.7);
+      column(s.right_title, s.right, 6.9);
     } else if (s.layout === "stats" && s.stats?.length) {
       title();
       const n = s.stats.length;
       const w = (W - 1.4 - (n - 1) * 0.3) / n;
       s.stats.forEach((st, i) => {
         const x = 0.7 + i * (w + 0.3);
-        slide.addShape(pptx.ShapeType.roundRect, { x, y: 2.3, w, h: 2.8, fill: { color: t.soft }, rectRadius: 0.12 });
-        slide.addText(st.value, { ...base, color: t.accent, x, y: 2.6, w, h: 1.3, fontSize: 44, bold: true, align: "center" });
-        slide.addText(plain(st.label), { ...base, color: t.muted, x: x + 0.2, y: 3.9, w: w - 0.4, h: 1, fontSize: 16, align: "center" });
+        slide.addShape(pptx.ShapeType.roundRect, { x, y: 2.3, w, h: 2.8, fill: { color: bare(col.surface) }, line: { type: "none" }, rectRadius: radius });
+        slide.addText(st.value, { ...base, ...head, color: bare(mark), x, y: 2.6, w, h: 1.3, fontSize: 44, align: "center" });
+        slide.addText(plain(st.label), { ...base, color: bare(col.muted), x: x + 0.2, y: 3.9, w: w - 0.4, h: 1, fontSize: 16, align: "center" });
       });
       if (s.subtitle)
-        slide.addText(plain(s.subtitle), { ...base, color: t.muted, x: 0.7, y: 5.6, w: W - 1.4, h: 0.8, fontSize: 16 });
+        slide.addText(plain(s.subtitle), { ...base, color: bare(col.muted), x: 0.7, y: 5.6, w: W - 1.4, h: 0.8, fontSize: 16 });
     } else if (s.layout === "quote" && s.quote) {
-      slide.addText(`“${plain(s.quote)}”`, { ...base, x: 1.2, y: 1.6, w: W - 2.4, h: 3.2, fontSize: 30, italic: true, align: "center", valign: "middle" });
-      if (s.author) slide.addText(`— ${plain(s.author)}`, { ...base, color: t.muted, x: 1.2, y: 5, w: W - 2.4, h: 0.6, fontSize: 18, align: "center" });
+      slide.addText("“", { ...base, ...head, color: bare(mark), x: 1.2, y: 0.7, w: W - 2.4, h: 1.2, fontSize: 96, align: "center" });
+      slide.addText(plain(s.quote), { ...base, fontFace: lk.heading.family, x: 1.2, y: 1.8, w: W - 2.4, h: 3, fontSize: 30, italic: true, align: "center", valign: "middle" });
+      if (s.author) slide.addText(`— ${plain(s.author)}`, { ...base, color: bare(col.muted), x: 1.2, y: 5, w: W - 2.4, h: 0.6, fontSize: 18, align: "center" });
     } else if (s.layout === "image" && s.image) {
       title(0.5, 28);
       const data = await image(s.image).catch(() => null);
@@ -274,8 +401,18 @@ export async function slidesPptx(c: Extract<Canvas, { kind: "slides" }>, image: 
       if (s.bullets?.length) bullets(s.bullets, 8.1, 1.8, 4.6, 5, 18);
     } else {
       title();
-      if (s.subtitle) slide.addText(plain(s.subtitle), { ...base, color: t.muted, x: 0.7, y: 1.5, w: W - 1.4, h: 0.6, fontSize: 18 });
+      if (s.subtitle) slide.addText(plain(s.subtitle), { ...base, color: bare(col.muted), x: 0.7, y: 1.5, w: W - 1.4, h: 0.6, fontSize: 18 });
       if (s.bullets?.length) bullets(s.bullets, 0.7, s.subtitle ? 2.3 : 1.9, W - 1.4, 4.8);
+    }
+    // Rodapé dos slides de conteúdo: o número e o logo.
+    if (!cover && !filled) {
+      const y = lk.decor === "band" ? H - 0.62 : H - 0.55;
+      slide.addText(String(index + 1), { ...base, color: bare(col.muted), x: 0.7, y, w: 1, h: 0.3, fontSize: 11 });
+      const logo = await logoOn(col.bg);
+      if (logo) {
+        const sz = fit(logo, 1.9, 0.4);
+        slide.addImage({ data: logo.data, x: W - 0.5 - sz.w, y: y - 0.05, w: sz.w, h: sz.h });
+      }
     }
     if (s.notes) slide.addNotes(plain(s.notes));
   }

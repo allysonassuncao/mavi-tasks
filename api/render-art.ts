@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { checkRenderInput, renderArt, type RenderInput } from "./_art-render.js";
+import { checkPdfInput, checkRenderInput, renderArt, renderPdf, type PdfInput, type RenderInput } from "./_art-render.js";
 
 /**
  * MAVI · arte por código na Vercel: o Chromium fica só nesta função (é
@@ -9,6 +9,9 @@ import { checkRenderInput, renderArt, type RenderInput } from "./_art-render.js"
  * Supabase): manda o HTML, os links assinados dos arquivos e o link
  * assinado onde gravar o PNG no GCS. Devolve a prévia em JPEG (para a MAVI
  * conferir) e o que a conferência automática achou.
+ *
+ * Com mode "pdf", imprime um documento ou uma apresentação da MAVI (a página
+ * inteira, com o tamanho de página dela) e grava o PDF no link.
  */
 
 const GCS = /^https:\/\/storage\.googleapis\.com\//;
@@ -38,17 +41,32 @@ export default async function handler(
   let raw = "";
   if (typeof req.body === "object" && req.body !== null) raw = JSON.stringify(req.body);
   else for await (const chunk of req) raw += chunk;
-  let body: RenderInput & { put?: { url?: string } };
+  let body: RenderInput & PdfInput & { put?: { url?: string }; mode?: string };
   try {
     body = JSON.parse(raw || "{}");
   } catch {
     return reply(400, { error: "Pedido inválido." });
   }
   if (!(await signedIn(req.headers.authorization))) return reply(401, { error: "Entre de novo." });
-  const problem = checkRenderInput(body);
+  const pdf = body.mode === "pdf";
+  const problem = pdf ? checkPdfInput(body) : checkRenderInput(body);
   if (problem) return reply(400, { error: problem });
   const put = String(body.put?.url ?? "");
   if (!GCS.test(put)) return reply(400, { error: "Falta onde gravar a arte." });
+  if (pdf)
+    try {
+      const file = await renderPdf(body);
+      const saved = await fetch(put, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: new Uint8Array(file),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!saved.ok) return reply(502, { error: `Não foi possível guardar o PDF (${saved.status}).` });
+      return reply(200, { bytes: file.length });
+    } catch (e) {
+      return reply(500, { error: (e as Error).message?.slice(0, 300) || "Não foi possível gerar o PDF." });
+    }
   try {
     const r = await renderArt(body);
     const saved = await fetch(put, {

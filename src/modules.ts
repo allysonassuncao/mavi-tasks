@@ -55,6 +55,7 @@ export const MEMBER_PAGES: readonly Page[] = [
   "mavi",
   "skills",
   "connections",
+  "identities",
   "profile",
   "person",
   "inbox",
@@ -135,7 +136,7 @@ export const optInFor = (module: string, role: Role | undefined) =>
 export function moduleOf(page: Page): ModuleId | null {
   if (page === "search") return "tasks";
   if (page === "contracts") return "products";
-  if (page === "mavi" || page === "skills" || page === "connections") return "assistant";
+  if (page === "mavi" || page === "skills" || page === "connections" || page === "identities") return "assistant";
   return MODULES.some((m) => m.id === page) ? (page as ModuleId) : null;
 }
 

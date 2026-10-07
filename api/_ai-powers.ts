@@ -4,6 +4,14 @@ import type { Effort, LlmAdapter, ToolOutput, ToolSpec } from "./_ai-llm.js";
 import { TOOLS, type ToolContext } from "./_ai-tools.js";
 import { SKILL_TOOLS } from "./_ai-skills.js";
 import { ART_RULES, ART_TOOLS, runArtTool, summarizeArtStep } from "./_ai-art.js";
+import {
+  IDENTITY_PARAMS,
+  IDENTITY_RULES,
+  IDENTITY_TOOL,
+  lookForCanvas,
+  runIdentityTool,
+  summarizeIdentityStep,
+} from "./_ai-identity.js";
 import { logCost, meterEntries, whereOf } from "./_ai-cost.js";
 import type { RenderInput } from "./_art-render.js";
 import {
@@ -18,7 +26,6 @@ import {
   PRIORITIES,
   VISUAL_UNITS,
   SLIDE_LAYOUTS,
-  SLIDE_THEMES,
   artifactSummary,
   sanitizeCanvas,
   sanitizeQuestions,
@@ -249,6 +256,7 @@ export const POWER_TOOLS: ToolSpec[] = [
         title: { type: "string", description: "O título do documento." },
         markdown: { type: "string", description: "O documento inteiro, em Markdown." },
         revises: { type: "string", description: "Opcional: a referência do documento que esta versão ajusta (ex.: D1)." },
+        ...IDENTITY_PARAMS,
       },
       ["title", "markdown"],
     ),
@@ -260,7 +268,7 @@ export const POWER_TOOLS: ToolSpec[] = [
     parameters: obj(
       {
         title: { type: "string" },
-        theme: { type: "string", enum: SLIDE_THEMES, description: "claro (padrão), escuro ou verde." },
+        ...IDENTITY_PARAMS,
         slides: {
           type: "array",
           description: "De 1 a 40 slides, na ordem.",
@@ -522,6 +530,7 @@ export const REGISTRY: Record<string, ToolMeta> = {
   create_presentation: { kind: "canvas", power: "canvas", timeoutMs: 170_000 },
   create_spreadsheet: { kind: "canvas", power: "canvas", timeoutMs: 170_000 },
   read_canvas: { kind: "canvas", power: "canvas", timeoutMs: 5_000 },
+  visual_identities: { kind: "canvas", power: "canvas", timeoutMs: 20_000 },
   // A busca da Claude roda no servidor dela: só para o registro.
   web_search: { kind: "web", power: "web", timeoutMs: 0 },
   web_fetch: { kind: "web", power: "web", timeoutMs: 0 },
@@ -570,12 +579,13 @@ const briefTool = (name: string, what: string, extra: Record<string, unknown> = 
 export const WRITER_TOOLS: ToolSpec[] = [
   briefTool(
     "create_document",
-    "Escreve um documento no canvas ao lado da conversa (relatório, proposta, briefing, ata, plano, roteiro), que a pessoa baixa em Word ou PDF.",
+    "Escreve um documento no canvas ao lado da conversa (relatório, proposta, briefing, ata, plano, roteiro), que a pessoa baixa em Word, PDF ou HTML, com a identidade visual escolhida.",
+    IDENTITY_PARAMS,
   ),
   briefTool(
     "create_presentation",
-    "Monta uma apresentação no canvas, que a pessoa baixa em PowerPoint ou PDF.",
-    { theme: { type: "string", enum: SLIDE_THEMES, description: "claro (padrão), escuro ou verde." } },
+    "Monta uma apresentação no canvas, que a pessoa baixa em PowerPoint, PDF ou HTML, com a identidade visual escolhida.",
+    IDENTITY_PARAMS,
   ),
   briefTool(
     "create_spreadsheet",
@@ -596,7 +606,7 @@ export function toolsFor(
   return [
     ...TOOLS,
     ASK_TOOL,
-    ...[...POWER_TOOLS, ...ART_TOOLS, ...SKILL_TOOLS]
+    ...[...POWER_TOOLS, IDENTITY_TOOL, ...ART_TOOLS, ...SKILL_TOOLS]
       .filter((t) => {
         const power = REGISTRY[t.name]?.power;
         return !!power && powers.has(power);
@@ -644,6 +654,7 @@ export function powerInstructions(powers: ReadonlySet<Power>, onPage = false) {
   if (powers.has("canvas"))
     lines.push(
       "- Documentos, apresentações e planilhas (create_document, create_presentation, create_spreadsheet): quando pedirem um relatório, proposta, briefing, ata, plano, roteiro, apresentação, slides, deck, pitch, planilha ou tabela para editar, crie no canvas em vez de escrever tudo na conversa. Antes, busque os dados que o conteúdo precisa. Para ajustar um que já existe nesta conversa, leia com read_canvas e mande a versão inteira com revises. Na resposta, só [[D1]] e um resumo curto do que foi feito; não repita o conteúdo.",
+      IDENTITY_RULES,
     );
   if (powers.has("web"))
     lines.push(
@@ -1135,7 +1146,10 @@ async function createCanvas(kit: PowerKit, name: string, input: Record<string, u
   // Com escritor: o pedido e o material vão para ele; o conteúdo volta.
   const content = kit.writer && str(input.brief) ? await write(kit, kind, input, before) : input;
   if (!content) return "O escritor não devolveu o conteúdo no formato certo. Tente de novo com um pedido mais direto.";
-  const canvas = sanitizeCanvas({ ...content, kind });
+  // A identidade visual (documentos e apresentações; planilhas não têm).
+  const look = kind === "sheet" ? null : await lookForCanvas(kit, input, before);
+  if (typeof look === "string") return look;
+  const canvas = sanitizeCanvas({ ...content, kind, ...(look ? { look } : {}) });
   if (!canvas)
     return kind === "document"
       ? "Não deu para criar: mande o documento inteiro em markdown."
@@ -1156,7 +1170,8 @@ async function createCanvas(kit: PowerKit, name: string, input: Record<string, u
     canvas,
     ...(previous ? { revision_of: previous.ref } : {}),
   });
-  return `Pronto no canvas como ${a.ref} (${artifactSummary(a)}), aberto ao lado da conversa. Na resposta, escreva [[${a.ref}]] sozinho numa linha e um resumo curto (não repita o conteúdo).`;
+  const styled = canvas.kind !== "sheet" && canvas.look ? ` com a identidade “${canvas.look.name}”` : "";
+  return `Pronto no canvas como ${a.ref} (${artifactSummary(a)})${styled}, aberto ao lado da conversa. Na resposta, escreva [[${a.ref}]] sozinho numa linha e um resumo curto (não repita o conteúdo).`;
 }
 function readCanvas(kit: PowerKit, input: Record<string, unknown>) {
   const a = findCanvas(kit, str(input.ref));
@@ -1369,6 +1384,7 @@ export async function runPowerTool(kit: PowerKit, name: string, raw: unknown): P
   if (name === "read_canvas") return readCanvas(kit, input);
   if (name === "ask_user") return askUser(kit, input);
   if (name.startsWith("create_")) return createCanvas(kit, name, input);
+  if (name === "visual_identities") return runIdentityTool(kit, input);
   if (name === "generate_image") return generateImage(kit, input);
   if (name === "brand_kit" || name === "render_art" || name === "read_art") return runArtTool(kit, name, input);
   if (name === "propose_task") return proposeTask(kit, input);
@@ -1391,6 +1407,7 @@ export function describePowerStep(name: string, raw: unknown) {
   if (name === "create_presentation") return `Montando a apresentação${t ? ` “${t}”` : ""}`;
   if (name === "create_spreadsheet") return `Montando a planilha${t ? ` “${t}”` : ""}`;
   if (name === "read_canvas") return `Lendo ${str(input.ref).toUpperCase() || "o documento"}`;
+  if (name === "visual_identities") return str(input.id) ? "Lendo o Guia da marca" : "Vendo as identidades visuais";
   if (name === "ask_user") return "Preparando perguntas para você";
   if (name === "brand_kit") return "Lendo a marca do cliente";
   if (name === "render_art")
@@ -1407,6 +1424,7 @@ export function describePowerStep(name: string, raw: unknown) {
 }
 export function summarizePowerStep(name: string, output: string) {
   if (name === "brand_kit" || name === "render_art" || name === "read_art") return summarizeArtStep(name, output);
+  if (name === "visual_identities") return summarizeIdentityStep(output);
   if (/^As perguntas/.test(output)) return "esperando suas respostas";
   if (name === "campaign_alerts") return /^A pessoa ainda/.test(output) ? "nenhum aviso" : `${output.split("\n").length} avisos`;
   if (/^(Mostrado|Imagem pronta|Proposta pronta|Pronto no canvas)/.test(output))

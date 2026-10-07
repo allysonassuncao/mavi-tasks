@@ -11,6 +11,7 @@
 
 // Com .js: este arquivo também roda no servidor (api/), que não completa a extensão.
 import { ruleFromInput, type CampaignAlertRule } from "./campaign-alerts.js";
+import { sanitizeLook, type Look } from "./visual-identity.js";
 
 export type Power =
   | "visuals"
@@ -254,8 +255,8 @@ export type SheetTab = {
   rows: (string | number | null)[][];
 };
 export type Canvas =
-  | { kind: "document"; title: string; markdown: string }
-  | { kind: "slides"; title: string; theme: SlideTheme; slides: Slide[] }
+  | { kind: "document"; title: string; markdown: string; look?: Look }
+  | { kind: "slides"; title: string; theme: SlideTheme; slides: Slide[]; look?: Look }
   | { kind: "sheet"; title: string; sheets: SheetTab[] };
 export type CanvasArtifact = Base & {
   type: "canvas";
@@ -523,8 +524,9 @@ export function sanitizeCanvas(raw: unknown): Canvas | null {
       typeof v.markdown === "string"
         ? v.markdown.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, DOCUMENT_MAX)
         : "";
+    const look = sanitizeLook(v.look);
     return markdown.length >= 20
-      ? { kind: "document", title: title || "Documento", markdown }
+      ? { kind: "document", title: title || "Documento", markdown, ...(look ? { look } : {}) }
       : null;
   }
   if (v.kind === "slides") {
@@ -562,12 +564,14 @@ export function sanitizeCanvas(raw: unknown): Canvas | null {
         return slide.title || slide.bullets || slide.quote || slide.stats ? slide : null;
       })
       .filter((x): x is Slide => !!x);
+    const look = sanitizeLook(v.look);
     return slides.length
       ? {
           kind: "slides",
           title: title || "Apresentação",
           theme: pick(v.theme, SLIDE_THEMES, "claro"),
           slides,
+          ...(look ? { look } : {}),
         }
       : null;
   }

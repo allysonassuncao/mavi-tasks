@@ -279,3 +279,51 @@ export async function renderArt(
     await page.close().catch(() => {});
   }
 }
+
+// ------------------------------------------------------------ PDF
+/**
+ * Documentos e apresentações da MAVI em PDF (a página de canvasPage, com o
+ * tamanho de página dela): as mesmas regras da arte — sem scripts, sem
+ * internet além do Google Fonts, os arquivos trocados por data: antes.
+ */
+export type PdfInput = { html: string; assets: ArtAsset[] };
+export const PDF_HTML_MAX = 1_500_000;
+
+export function checkPdfInput(input: PdfInput) {
+  if (typeof input?.html !== "string" || input.html.trim().length < 20) return "Mande a página do documento.";
+  if (input.html.length > PDF_HTML_MAX) return "O documento passou de 1,5 milhão de caracteres.";
+  if (!Array.isArray(input.assets) || input.assets.length > 40) return "No máximo 40 arquivos por documento.";
+  if (input.assets.some((a) => !a || typeof a.token !== "string" || !GCS.test(String(a.url))))
+    return "Arquivo inválido.";
+  return null;
+}
+
+/** A página com a mesma política da arte (sem scripts nem internet). */
+export function pdfDocument(body: string) {
+  const csp =
+    "default-src 'none'; img-src data: blob:; font-src data: https://fonts.gstatic.com; style-src 'unsafe-inline' https://fonts.googleapis.com; script-src 'none'";
+  const head = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+  const clean = body
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/<meta[^>]+http-equiv[^>]*>/gi, "");
+  if (/<head[^>]*>/i.test(clean)) return clean.replace(/<head([^>]*)>/i, `<head$1>${head}`);
+  return `<!doctype html><html><head><meta charset="utf-8">${head}</head><body>${clean}</body></html>`;
+}
+
+export async function renderPdf(input: PdfInput, fetchImpl: typeof fetch = fetch): Promise<Buffer> {
+  const problem = checkPdfInput(input);
+  if (problem) throw new Error(problem);
+  const html = pdfDocument(await inline({ html: input.html, width: ART_MIN, height: ART_MIN, assets: input.assets }, fetchImpl));
+  const page = await newPage();
+  try {
+    await page.setRequestInterception(true);
+    page.on("request", (req) => void (ALLOWED.test(req.url()) ? req.continue() : req.abort()));
+    await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
+    await page.setContent(html, { waitUntil: "load", timeout: 40_000 });
+    await page.evaluate("document.fonts.ready");
+    const pdf = await page.pdf({ printBackground: true, preferCSSPageSize: true, timeout: 60_000 });
+    return Buffer.from(pdf);
+  } finally {
+    await page.close().catch(() => {});
+  }
+}

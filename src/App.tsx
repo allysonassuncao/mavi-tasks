@@ -53,6 +53,7 @@ import {
   Sparkles,
   Puzzle,
   Plug,
+  Palette,
   HardDrive,
   PanelsTopLeft,
   HeartHandshake,
@@ -276,6 +277,9 @@ const CsSettingsPanel = lazy(() =>
 const McpPage = lazy(() =>
   import("./McpPage").then((m) => ({ default: m.McpPage })),
 );
+const IdentitiesPage = lazy(() =>
+  import("./IdentitiesPage").then((m) => ({ default: m.IdentitiesPage })),
+);
 const SkillsPage = lazy(() =>
   import("./SkillsPage").then((m) => ({ default: m.SkillsPage })),
 );
@@ -332,6 +336,7 @@ const navigation = [
   { id: "mavi", label: "MAVI", icon: Sparkles },
   { id: "skills", label: "Skills da MAVI", icon: Puzzle },
   { id: "connections", label: "Conexões da MAVI", icon: Plug },
+  { id: "identities", label: "Identidades visuais", icon: Palette },
   { id: "notices", label: "Mural de avisos", icon: BellRing },
   { id: "tasks", label: "Tarefas", icon: CheckCheck },
   { id: "agenda", label: "Agenda", icon: CalendarDays },
@@ -3089,6 +3094,8 @@ export default function App() {
                         "Uma visão clara do trabalho. Mais espaço para criar.",
                       tasks: "Organize prioridades e acompanhe cada entrega.",
                       mavi: "Converse com a MAVI sobre os seus clientes.",
+                      identities:
+                        "As cores, fontes e logos que a MAVI usa nos documentos, apresentações e páginas que gera: a da empresa e os estilos da galeria. A de cada cliente fica em Drive › cliente › Marca.",
                       connections:
                         "Serviços externos que a MAVI usa pelo protocolo MCP: os da empresa e os seus. O que altera algo no serviço pede a sua confirmação.",
                       skills:
@@ -3187,6 +3194,7 @@ export default function App() {
                   page !== "aiUsage" &&
                   page !== "skills" &&
                   page !== "connections" &&
+                  page !== "identities" &&
                   page !== "dashboards" &&
                   page !== "customerSuccess" &&
                   page !== "tutorials" &&
@@ -4436,6 +4444,23 @@ export default function App() {
                       }
                       onChanged={() => setSkillsTick((v) => v + 1)}
                       powersHref={`${pageUrl("aiUsage", companyPath)}#poderes`}
+                      notify={notify}
+                    />
+                  </Suspense>
+                ))}
+              {page === "identities" &&
+                allowed("identities") &&
+                (demo ? (
+                  <Empty
+                    title="Identidades indisponíveis na demonstração"
+                    body="No ambiente demonstrativo não há identidades visuais. Entre na sua conta para usar."
+                  />
+                ) : (
+                  <Suspense fallback={<Loading variant="form" />}>
+                    <IdentitiesPage
+                      key={company}
+                      company={company}
+                      clients={catalogData.clients.map((c) => ({ id: c.id, name: c.name }))}
                       notify={notify}
                     />
                   </Suspense>

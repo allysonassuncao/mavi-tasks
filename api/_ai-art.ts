@@ -220,6 +220,21 @@ const cssString = (s: string) => s.replace(/["\\\n]/g, "");
 export const localRenderer = (path = "./_art-render.ts"): Promise<typeof import("./_art-render.js")> =>
   import(/* @vite-ignore */ path);
 
+/** Na produção, o endereço do app; nas prévias, o da própria implantação. */
+export const renderOrigin = () =>
+  process.env.ART_RENDER_ORIGIN?.replace(/\/+$/, "") ||
+  (process.env.VERCEL_ENV === "production" || !process.env.VERCEL_URL
+    ? appOrigin()
+    : `https://${process.env.VERCEL_URL}`);
+export function renderHeaders(auth: string): Record<string, string> {
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  return {
+    "Content-Type": "application/json",
+    Authorization: auth,
+    ...(bypass ? { "x-vercel-protection-bypass": bypass } : {}),
+  };
+}
+
 /** Onde desenhar: aqui mesmo (computador) ou a função /api/render-art (Vercel). */
 async function draw(
   kit: PowerKit,
@@ -240,20 +255,9 @@ async function draw(
     if (!saved.ok) throw new Error(`Não foi possível guardar a arte (${saved.status}).`);
     return { preview: r.preview.toString("base64"), report: r.report };
   }
-  // Na produção, o endereço do app; nas prévias, o da própria implantação.
-  const origin =
-    process.env.ART_RENDER_ORIGIN?.replace(/\/+$/, "") ||
-    (process.env.VERCEL_ENV === "production" || !process.env.VERCEL_URL
-      ? appOrigin()
-      : `https://${process.env.VERCEL_URL}`);
-  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
-  const res = await ctx.fetch(`${origin}/api/render-art`, {
+  const res = await ctx.fetch(`${renderOrigin()}/api/render-art`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: ctx.auth,
-      ...(bypass ? { "x-vercel-protection-bypass": bypass } : {}),
-    },
+    headers: renderHeaders(ctx.auth),
     body: JSON.stringify({ ...input, put: { url: put } }),
     signal: AbortSignal.timeout(85_000),
   });

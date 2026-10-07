@@ -29,6 +29,7 @@ export const pagePaths = {
   mavi: "/mavi/conversas",
   skills: "/mavi/skills",
   connections: "/mavi/conexoes",
+  identities: "/mavi/identidades",
   dashboards: "/dashboards",
   customerSuccess: "/customer-success",
   tutorials: "/tutoriais",

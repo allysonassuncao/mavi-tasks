@@ -1,0 +1,320 @@
+/* Identidades visuais: o editor (Marca do cliente e MAVI › Identidades) e a página. */
+.identity-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
+  gap: 20px;
+  align-items: start;
+}
+.identity-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.identity-side {
+  position: sticky;
+  top: 12px;
+  min-width: 0;
+}
+.identity-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.identity-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.identity-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #4f5c5c;
+}
+.identity-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid #e3e8e5;
+}
+.identity-block h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.identity-block > small {
+  color: #6b7775;
+  line-height: 1.45;
+}
+.identity-colors {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.identity-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.identity-color input[type="color"] {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid #d5dcd9;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+.identity-color > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 0.72rem;
+  color: #4f5c5c;
+}
+.identity-hex {
+  width: 100%;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid #d5dcd9;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  color: #263334;
+}
+.identity-hex:focus {
+  outline: 2px solid #a5c780;
+  outline-offset: 0;
+}
+.identity-brand-colors {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.74rem;
+  color: #6b7775;
+}
+.identity-brand-colors button {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #0000002a;
+  cursor: pointer;
+}
+.identity-warn {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff5e6;
+  color: #8a4b0b;
+  font-size: 0.76rem;
+}
+.identity-font {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 104px;
+  gap: 6px 8px;
+  align-items: center;
+}
+.identity-font .identity-label {
+  grid-column: 1 / -1;
+}
+.identity-logos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.identity-logo {
+  display: grid;
+  grid-template-columns: 1fr 56px;
+  grid-template-rows: auto auto;
+  gap: 4px 8px;
+  align-items: center;
+}
+.identity-logo .identity-label {
+  grid-column: 1 / -1;
+}
+.identity-logo-art {
+  display: grid;
+  place-items: center;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid #0000001a;
+  color: #a9b5b2;
+  overflow: hidden;
+}
+.identity-logo-art img {
+  max-width: 80%;
+  max-height: 70%;
+  object-fit: contain;
+}
+.identity-guide-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.identity-guide-actions small {
+  margin-left: auto;
+  color: #6b7775;
+  font-size: 0.7rem;
+}
+.identity-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+}
+.identity-actions .input,
+.identity-actions input {
+  flex: 1;
+}
+.identity-versions summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: #4f5c5c;
+}
+.identity-versions ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.76rem;
+}
+.identity-versions li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.identity-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.identity-preview-slides {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.identity-preview-slides > :nth-child(n + 2) {
+  display: inline-block;
+}
+@media (min-width: 900px) {
+  .identity-preview-slides {
+    grid-template-columns: 1fr 1fr;
+  }
+  .identity-preview-slides > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+.identity-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.identity-summary-art {
+  width: 220px;
+  flex: none;
+}
+.identity-summary strong {
+  display: block;
+  margin-bottom: 2px;
+}
+.identity-summary p {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+}
+
+/* MAVI › Identidades */
+.identities-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.identities-section h2 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+.identities-section > p {
+  margin: 0 0 12px;
+  color: #4f5c5c;
+  font-size: 0.82rem;
+  max-width: 70ch;
+}
+.identities-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+}
+.identity-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e3e8e5;
+  border-radius: 12px;
+  background: #fff;
+}
+.identity-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.identity-card-body strong {
+  font-size: 0.85rem;
+}
+.identity-card-body small {
+  color: #6b7775;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+.identity-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+.identity-new {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  min-height: 160px;
+  border: 1.5px dashed #c9d3cf;
+  border-radius: 12px;
+  background: #fafcf9;
+  color: #4f5c5c;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.identity-new:hover {
+  border-color: #4f7d2d;
+  color: #2f6b1e;
+}
+
+@media (max-width: 900px) {
+  .identity-editor {
+    grid-template-columns: 1fr;
+  }
+  .identity-side {
+    position: static;
+    order: -1;
+  }
+}

@@ -169,6 +169,7 @@ export function SidebarNav({
             { key: "mavi-chat", label: "Conversas", to: { page: "mavi" } },
             { key: "mavi-skills", label: "Skills", to: { page: "skills" } },
             { key: "mavi-connections", label: "Conexões", to: { page: "connections" } },
+            { key: "mavi-identities", label: "Identidades", to: { page: "identities" } },
           ],
         },
         {
