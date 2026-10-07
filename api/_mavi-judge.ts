@@ -25,6 +25,8 @@ export const SIGNALS = [
   "frustration",
   "repeated",
   "down_unexplained",
+  // Fase 4 do roteador: resposta sem sinal sorteada para medir a qualidade de verdade.
+  "sample",
 ] as const;
 export type Signal = (typeof SIGNALS)[number];
 export const SIGNAL_LABELS: Record<Signal, string> = {
@@ -35,6 +37,7 @@ export const SIGNAL_LABELS: Record<Signal, string> = {
   frustration: "a pessoa reclamou na pergunta seguinte",
   repeated: "a pessoa repetiu o pedido",
   down_unexplained: "👎 sem motivo",
+  sample: "sorteada para a amostra (sem sinal de problema)",
 };
 
 /** "Agora vou puxar…", "vou buscar os briefings…" no fim da resposta. */
@@ -172,7 +175,7 @@ export function jevVerdict(res: JevResponse | null): JevVerdict | null {
   };
 }
 
-export const JUDGE_RULES = `Você confere, depois do fato, uma resposta da MAVI (a inteligência de uma agência de marketing) que deu sinal de problema. Você recebe a pergunta da pessoa, a resposta, os passos que a MAVI fez, os trechos das fontes que ela citou, o dossiê do cliente (quando há), o que essa pessoa já reclamou antes e o jeito dela (a base de comportamento), os sinais automáticos e, quando há, as respostas do Jev (probabilidades de 0 a 1).
+export const JUDGE_RULES = `Você confere, depois do fato, uma resposta da MAVI (a inteligência de uma agência de marketing) que deu sinal de problema ou foi sorteada para a amostra de qualidade (nesse caso, sem suspeita: só confira se atendeu). Você recebe a pergunta da pessoa, a resposta, os passos que a MAVI fez, os trechos das fontes que ela citou, o dossiê do cliente (quando há), o que essa pessoa já reclamou antes e o jeito dela (a base de comportamento), os sinais automáticos e, quando há, as respostas do Jev (probabilidades de 0 a 1).
 
 Decida se a resposta atendeu o pedido. Seja justo: um sinal não prova problema (ex.: a MAVI pode ter perguntado algo necessário, ou montado uma tarefa longa com o plano no card — isso é bom). Conte como problema: parar no meio ou anunciar em vez de entregar; faltar parte do pedido; informação sem fonte ou contrária às fontes; não seguir o formato pedido, o que a pessoa já reclamou antes ou as preferências dela.
 
@@ -273,9 +276,9 @@ export function jevDecision(v: JevVerdict): Decision {
 
 type Usage = { model: string; input: number; output: number; cache_read?: number; cache_write?: number; cost: number; provider_id?: string; provider?: string };
 
-type CompanyKit = { llm: LlmAdapter | null; route: ResolvedRoute | null; model: string; jev: ProviderConfig | null; jevRoute: ResolvedRoute | null };
+export type CompanyKit = { llm: LlmAdapter | null; route: ResolvedRoute | null; model: string; jev: ProviderConfig | null; jevRoute: ResolvedRoute | null };
 
-async function companyKit(env: AiEnv, deps: AiDeps, company: string): Promise<CompanyKit> {
+export async function companyKit(env: AiEnv, deps: AiDeps, company: string): Promise<CompanyKit> {
   const [route, jevRoute] = await Promise.all([
     workerRpc<ResolvedRoute | null>(env, deps, "ai_worker_route", { p_company: company, p_feature: "mavi_judge" }).catch(
       () => null,

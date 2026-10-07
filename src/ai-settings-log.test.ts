@@ -247,5 +247,11 @@ describe("histórico do Roteamento", () => {
     expect(
       describeEntry(entry({ area: "user", subject: "u2", field: "level", action: "removed", old: { level: "economico" } }), withProviders),
     ).toMatchObject({ from: "Econômico", to: "O da tela ou da empresa" });
+    expect(
+      describeEntry(entry({ area: "router", subject: "", field: "judge_sample", old: { judge_sample: 0.1 }, new: { judge_sample: 0.25 } }), withProviders),
+    ).toMatchObject({ field: "Amostra para a autoavaliação", from: "10%", to: "25%" });
+    expect(
+      describeEntry(entry({ area: "router", subject: "", field: "eval_daily_cap", old: { eval_daily_cap: 0.5 }, new: { eval_daily_cap: 2 } }), withProviders),
+    ).toMatchObject({ field: "Teto por dia dos testes", from: "US$ 0,5", to: "US$ 2" });
   });
 });

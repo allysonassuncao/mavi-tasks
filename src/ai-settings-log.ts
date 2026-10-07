@@ -39,7 +39,11 @@ export type LogField =
   | "escalate_cap"
   | "providers"
   | "secret_providers"
-  | "sigiloso";
+  | "sigiloso"
+  | "judge_sample"
+  | "eval_enabled"
+  | "eval_rate"
+  | "eval_daily_cap";
 export type LogChoice = {
   provider_id: string;
   /** O nome do provedor na hora. */
@@ -140,6 +144,10 @@ const FIELD_LABELS: Record<LogField, string> = {
   providers: "Provedores permitidos",
   secret_providers: "Liberados para sigilosos",
   sigiloso: "Sigiloso",
+  judge_sample: "Amostra para a autoavaliação",
+  eval_enabled: "Testes fora do ar",
+  eval_rate: "Respostas testadas fora do ar",
+  eval_daily_cap: "Teto por dia dos testes",
 };
 
 const LEVEL_NAMES: Record<string, string> = {
@@ -383,12 +391,17 @@ function routerLine(
       case "auto":
       case "escalate":
       case "sigiloso":
+      case "eval_enabled":
         return v ? "Sim" : "Não";
+      case "judge_sample":
+      case "eval_rate":
+        return `${Math.round(Number(v ?? 0) * 100)}%`;
       case "mode":
         return v === "active" ? "Ativo" : "Sombra";
       case "level":
         return v ? (LEVEL_NAMES[String(v)] ?? String(v)) : "O da tela ou da empresa";
       case "escalate_cap":
+      case "eval_daily_cap":
         return `US$ ${Number(v ?? 0).toLocaleString("pt-BR")}`;
       case "surface_levels": {
         const o = (v ?? {}) as Record<string, string>;

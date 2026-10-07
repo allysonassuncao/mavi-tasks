@@ -94,6 +94,7 @@
   font-size: 0.85rem;
 }
 .rtr-recent .rtr-reason {
+  min-width: 220px;
   max-width: 380px;
   color: var(--muted);
   font-size: 0.76rem;
@@ -144,6 +145,7 @@
     min-width: 0;
   }
   .rtr-recent .rtr-reason {
+    min-width: 0;
     max-width: none;
   }
 }

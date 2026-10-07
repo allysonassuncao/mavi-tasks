@@ -69,8 +69,36 @@ export type RouterSettings = {
   providers: string[] | null;
   /** null: os mesmos permitidos. */
   secret_providers: string[] | null;
+  /** Fase 4: a parte das respostas sem sinal que vai para a autoavaliação. */
+  judge_sample: number;
+  /** Testes fora do ar: ligados, a parte das respostas testadas e o teto por dia. */
+  eval_enabled: boolean;
+  eval_rate: number;
+  eval_daily_cap: number;
   updated_at?: string | null;
   scopes: RouterScope[];
+};
+
+/** O ranking interno e os testes fora do ar (Painel da MAVI › Roteamento). */
+export type RouteLearning = {
+  refreshed_at: string | null;
+  rank: { task_type: string; model: string; live_n: number; live_good: number; eval_n: number; eval_ok: number; quality: number }[];
+  evals: {
+    id: number;
+    at: string;
+    task_type: string;
+    complexity: number;
+    base_model: string;
+    candidate_model: string;
+    status: "pending" | "done" | "error";
+    verdict: "better" | "same" | "worse" | null;
+    confidence: number | null;
+    explanation: string | null;
+    cost_usd: number;
+    question: string | null;
+  }[];
+  spent_today: number;
+  samples_today: number;
 };
 
 export type RouteStatRow = {
@@ -134,6 +162,9 @@ export type RouterApi = {
   saveScope: (type: RouterScopeType, id: string, level: CostLevel | null, providers: string[] | null, sigiloso: boolean) => Promise<unknown>;
   stats: (days: number) => Promise<RouteStats>;
   recent: (limit: number) => Promise<RouteRecent[]>;
+  learning: () => Promise<RouteLearning>;
+  /** Atualiza o ranking agora (sem esperar a hora cheia). */
+  rankNow: () => Promise<unknown>;
 };
 
 export const serverRouter = (company: string): RouterApi => ({
@@ -150,6 +181,8 @@ export const serverRouter = (company: string): RouterApi => ({
     }),
   stats: (days) => rpc<RouteStats>("ai_route_stats", { p_company: company, p_days: days }),
   recent: (limit) => rpc<RouteRecent[]>("ai_route_recent", { p_company: company, p_limit: limit }),
+  learning: () => rpc<RouteLearning>("ai_route_learning", { p_company: company }),
+  rankNow: () => rpc("ai_route_rank_now", { p_company: company }),
 });
 
 /** "Automático" numa regra de Quem usa qual modelo. */
@@ -166,6 +199,10 @@ export function demoRouter(): RouterApi {
     escalate_cap: 0.5,
     providers: null,
     secret_providers: null,
+    judge_sample: 0.1,
+    eval_enabled: true,
+    eval_rate: 0.2,
+    eval_daily_cap: 0.5,
     scopes: [],
   };
   return {
@@ -199,6 +236,34 @@ export function demoRouter(): RouterApi {
       },
     }),
     recent: async () => [],
+    learning: async () => ({
+      refreshed_at: new Date().toISOString(),
+      rank: [
+        { task_type: "consulta", model: "claude-haiku-4-5", live_n: 4, live_good: 4, eval_n: 26, eval_ok: 25, quality: 0.94 },
+        { task_type: "consulta", model: "claude-opus-5-5", live_n: 180, live_good: 169, eval_n: 0, eval_ok: 0, quality: 0.93 },
+        { task_type: "analise", model: "claude-opus-5-5", live_n: 96, live_good: 83, eval_n: 0, eval_ok: 0, quality: 0.86 },
+        { task_type: "analise", model: "claude-sonnet-5", live_n: 0, live_good: 0, eval_n: 12, eval_ok: 7, quality: 0.66 },
+      ],
+      evals: [
+        {
+          id: 2,
+          at: new Date().toISOString(),
+          task_type: "consulta",
+          complexity: 1,
+          base_model: "claude-opus-5-5",
+          candidate_model: "claude-haiku-4-5",
+          status: "done",
+          verdict: "same",
+          confidence: 0.8,
+          explanation: "As duas trazem o contato certo, com a fonte.",
+          cost_usd: 0.004,
+          question: "Qual o e-mail do financeiro da ACME?",
+        },
+      ],
+      spent_today: 0.12,
+      samples_today: 6,
+    }),
+    rankNow: async () => 4,
   };
 }
 

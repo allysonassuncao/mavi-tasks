@@ -116,6 +116,7 @@ export const SIGNAL_LABELS: Record<string, string> = {
   frustration: "A pessoa reclamou depois",
   repeated: "A pessoa repetiu o pedido",
   down_unexplained: "👎 sem motivo",
+  sample: "Sorteada para a amostra",
 };
 export type MaviLearningReport = {
   totals: { up: number; down: number; people: number; answers: number };

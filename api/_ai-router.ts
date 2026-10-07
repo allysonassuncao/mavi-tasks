@@ -278,6 +278,11 @@ export type RouteStat = {
 };
 /** Abaixo disso, vale a nota inicial da faixa. */
 export const MIN_STAT_SAMPLES = 20;
+/**
+ * Fase 4: um modelo de faixa abaixo da necessária entra na escolha quando
+ * provou, na empresa, que dá conta daquele tipo de pedido.
+ */
+export const LEARNED_FLOOR = 0.9;
 
 /** A faixa mínima: o nível de custo × a complexidade do pedido. */
 const NEED: Record<CostLevel, [Tier, Tier, Tier]> = {
@@ -410,7 +415,9 @@ export function decide(input: {
         : p.tier >= need
           ? PRIOR + TIER_BONUS[level] * (p.tier - need)
           : PRIOR - PRIOR_BELOW * (need - p.tier);
-    return { c, p, est, out, quality };
+    // Provou que dá conta deste tipo de pedido na empresa, mesmo abaixo da faixa.
+    const learned = !!stat && stat.n >= MIN_STAT_SAMPLES && stat.quality >= LEARNED_FLOOR && p.tier < need;
+    return { c, p, est, out, quality, stat, learned };
   });
   const fit = rows.filter((r) => !r.out);
   const maxEst = Math.max(1e-9, ...fit.map((r) => r.est));
@@ -419,7 +426,7 @@ export function decide(input: {
     w.cost * (r.est / maxEst) -
     // Espera: na tela rápida, os modelos maiores demoram mais para a primeira palavra.
     w.wait * (signals.latency === "rapida" ? r.p.tier - 1 : 0);
-  const meets = fit.filter((r) => r.p.tier >= need);
+  const meets = fit.filter((r) => r.p.tier >= need || r.learned);
   const ranked = (meets.length ? meets : fit).map((r) => ({ r, s: score(r) }));
   ranked.sort((a, b) => (meets.length ? b.s - a.s : b.r.p.tier - a.r.p.tier || b.s - a.s) || a.r.est - b.r.est);
   const best = ranked[0]?.r ?? null;
@@ -431,7 +438,7 @@ export function decide(input: {
       tier: r.p.tier,
       est: Math.round(r.est * 1e6) / 1e6,
       score: r.out ? -1 : Math.round(score(r) * 1000) / 1000,
-      ...(r.out ? { out: r.out } : r.p.tier < need ? { out: "faixa abaixo da necessária" } : {}),
+      ...(r.out ? { out: r.out } : r.p.tier < need && !r.learned ? { out: "faixa abaixo da necessária" } : {}),
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 12);
@@ -440,6 +447,11 @@ export function decide(input: {
   const reason = !best
     ? `${head}; nenhum modelo da biblioteca atende`
     : `${head}; ${best.c.model} (${best.c.provider}) ${meets.length ? "tem a melhor nota entre os que atendem" : "é o mais forte disponível"}, ~${usd(best.est)}` +
+      (best.learned && best.stat
+        ? `; aprendido: atendeu ${TYPE_LABEL[signals.taskType].toLowerCase()} com ${Math.round(best.stat.quality * 100)}% em ${best.stat.n} respostas`
+        : best.stat && best.stat.n >= MIN_STAT_SAMPLES
+          ? `; nota real ${Math.round(best.stat.quality * 100)}% em ${best.stat.n} respostas`
+          : "") +
       (lockedBy ? `; travado pela regra de ${SCOPE_LABEL[lockedBy]}` : "");
   return {
     mode: lockedBy ? "locked" : "auto",
@@ -470,6 +482,10 @@ export type RouteContext = {
   server: boolean;
   /** Os permitidos: biblioteca (com a chave selada) + Claude do servidor. */
   candidates: Candidate[];
+  /** O desempenho real na empresa, por tipo de pedido × modelo (fase 4). */
+  stats: RouteStat[];
+  /** Os tipos de pedido em que quem pergunta teve respostas ruins há pouco. */
+  personBad: TaskType[];
 };
 
 const LEVELS: CostLevel[] = ["economico", "equilibrado", "maxima"];
@@ -496,6 +512,8 @@ export async function routeContext(
     restricted: boolean;
     server: boolean;
     candidates: { provider_id: string; name: string; kind: string; base_url: string | null; key_cipher: string; models: ProviderModel[] }[];
+    stats?: { task_type: string; model: string; n: number; quality: number | string }[];
+    person_bad?: string[];
   };
   const r = await callRpc<Row>(env, fetchImpl, auth, "ai_route_context", {
     p_company: company,
@@ -514,6 +532,8 @@ export async function routeContext(
       restricted: false,
       server: hasServerKey,
       candidates: await candidates(env, fetchImpl, auth, company, hasServerKey),
+      stats: [],
+      personBad: [],
     };
   const d = r.data;
   const server = hasServerKey && d.server !== false;
@@ -539,6 +559,12 @@ export async function routeContext(
       ),
       ...serverCandidates(server),
     ],
+    stats: (Array.isArray(d.stats) ? d.stats : [])
+      .filter((x) => TASK_TYPES.includes(x.task_type as TaskType))
+      .map((x) => ({ model: x.model, taskType: x.task_type as TaskType, n: Number(x.n) || 0, quality: Number(x.quality) || 0 })),
+    personBad: (Array.isArray(d.person_bad) ? d.person_bad : []).filter((t): t is TaskType =>
+      TASK_TYPES.includes(t as TaskType),
+    ),
   };
 }
 
@@ -578,6 +604,8 @@ export type RouteChoice = {
   fallbacks: Candidate[];
   /** A regra que valeria está fora dos provedores permitidos aqui. */
   blocked: boolean;
+  /** A leitura do pedido usada (com o degrau a mais da pessoa, quando houve). */
+  signals: RouteSignals;
 };
 
 /**
@@ -593,7 +621,16 @@ export function chooseRoute(input: {
   stats?: RouteStat[];
   nativeImages?: boolean;
 }): RouteChoice {
-  const { signals, ctx, current } = input;
+  const { ctx, current } = input;
+  // A pessoa teve respostas ruins neste tipo de pedido há pouco: um degrau a mais.
+  const signals: RouteSignals =
+    ctx.personBad?.includes(input.signals.taskType) && input.signals.complexity < 3
+      ? {
+          ...input.signals,
+          complexity: (input.signals.complexity + 1) as Complexity,
+          why: [...input.signals.why, "respostas ruins recentes para esta pessoa"],
+        }
+      : input.signals;
   // Só com lista de permitidos uma regra fica de fora (sem lista, vale todo provedor ativo).
   const blocked =
     ctx.restricted &&
@@ -604,7 +641,7 @@ export function chooseRoute(input: {
     level: ctx.level,
     candidates: ctx.candidates,
     lockedScope,
-    stats: input.stats,
+    stats: input.stats ?? ctx.stats,
     nativeImages: input.nativeImages,
   });
   if (blocked)
@@ -619,7 +656,7 @@ export function chooseRoute(input: {
     .filter((c) => ok.has(`${c.providerId ?? ""}|${c.model}`))
     .filter((c) => !(pick && c.providerId === pick.providerId && c.model === pick.model))
     .sort((a, b) => Number(a.providerId === pick?.providerId) - Number(b.providerId === pick?.providerId));
-  return { decision, apply, pick, fallbacks: fallbacks.slice(0, 2), blocked };
+  return { decision, apply, pick, fallbacks: fallbacks.slice(0, 2), blocked, signals };
 }
 
 /**
@@ -670,6 +707,26 @@ export type RouteWhere = {
   message?: number | null;
 };
 
+/**
+ * O candidato do teste fora do ar (fase 4): o que o roteador escolheria, se
+ * for outro; senão, o melhor de uma faixa abaixo da usada e mais barato (para
+ * saber se um modelo mais barato daria conta). O banco sorteia se testa.
+ */
+export function evalCandidate(
+  decision: Pick<RouteDecision, "suggested" | "scored">,
+  used: { providerId: string | null; model: string },
+): { provider_id: string | null; model: string } | null {
+  const s = decision.suggested;
+  if (s && !(s.providerId === used.providerId && s.model === used.model))
+    return { provider_id: s.providerId, model: s.model };
+  const mine = decision.scored.find((x) => x.model === used.model && x.providerId === used.providerId);
+  if (!mine) return null;
+  const below = decision.scored
+    .filter((x) => (!x.out || x.out === "faixa abaixo da necessária") && x.tier === mine.tier - 1 && x.est < mine.est)
+    .sort((a, b) => b.score - a.score || a.est - b.est)[0];
+  return below ? { provider_id: below.providerId, model: below.model } : null;
+}
+
 /** O registro de uma decisão (nunca atrapalha a resposta). */
 export function logDecision(
   env: { supabaseUrl: string; supabaseKey: string },
@@ -711,6 +768,7 @@ export function logDecision(
       tools_failed: outcome.toolsFailed ?? 0,
       capped: !!outcome.capped,
       escalated: !!outcome.escalated,
+      eval_candidate: outcome.error ? null : evalCandidate(decision, { providerId: outcome.usedProviderId, model: outcome.usedModel }),
       error: outcome.error ? outcome.error.slice(0, 300) : null,
     },
   }).catch(() => null);
@@ -831,7 +889,7 @@ export function routeProbe(
       later(
         choose().then((ch) => {
           const decision = outcome.note ? { ...ch.decision, reason: `${ch.decision.reason}; ${outcome.note}` } : ch.decision;
-          return (opts.log ?? logDecision)(opts.env, opts.fetch, opts.auth, opts.where, signals, decision, {
+          return (opts.log ?? logDecision)(opts.env, opts.fetch, opts.auth, opts.where, ch.signals, decision, {
             usedProviderId: outcome.providerId === undefined ? opts.used.providerId : outcome.providerId,
             usedModel: outcome.model || opts.used.model,
             firstTokenMs,

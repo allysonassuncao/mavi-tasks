@@ -19,6 +19,7 @@ import {
   surfaceLabel,
   usd,
   type CostLevel,
+  type RouteLearning,
   type RouteRecent,
   type RouteStats,
   type RouterApi,
@@ -366,6 +367,8 @@ export function RouterPanel({
         </p>
       )}
 
+      <Learning api={api} s={s} saving={saving} save={save} />
+
       <Performance api={api} data={data} />
 
       {editing && (
@@ -658,6 +661,247 @@ function AutoRules({
         </div>
       ) : (
         <p className="cins-help">Nenhuma regra de conversa: o roteador escolhe sempre (no modo ativo).</p>
+      )}
+    </section>
+  );
+}
+
+const VERDICT: Record<string, string> = { better: "Melhor", same: "Igual", worse: "Pior" };
+
+/**
+ * O aprendizado (fase 4): a amostra para a autoavaliação, os testes fora do
+ * ar (um candidato responde com as mesmas fontes e o juiz compara às cegas)
+ * e o ranking interno que o roteador usa para escolher.
+ */
+function Learning({
+  api,
+  s,
+  saving,
+  save,
+}: {
+  api: RouterApi;
+  s: RouterSettings;
+  saving: boolean;
+  save: (patch: Parameters<RouterApi["save"]>[0], message?: string) => Promise<void>;
+}) {
+  const [data, setData] = useState<RouteLearning | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sample, setSample] = useState(String(Math.round(Number(s.judge_sample) * 100)));
+  const [rate, setRate] = useState(String(Math.round(Number(s.eval_rate) * 100)));
+  const [cap, setCap] = useState(String(s.eval_daily_cap));
+  useEffect(() => {
+    setSample(String(Math.round(Number(s.judge_sample) * 100)));
+    setRate(String(Math.round(Number(s.eval_rate) * 100)));
+    setCap(String(s.eval_daily_cap));
+  }, [s.judge_sample, s.eval_rate, s.eval_daily_cap]);
+  const load = useCallback(
+    () =>
+      api
+        .learning()
+        .then((d) => {
+          setData(d);
+          setError("");
+        })
+        .catch((e: Error) => setError(e.message)),
+    [api],
+  );
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const percent = (raw: string, max: number) => Math.min(Math.max(Math.round(Number(raw) || 0), 0), max) / 100;
+  return (
+    <section className="panel cins-block" aria-busy={busy || saving}>
+      <div className="rtr-head">
+        <h3>Aprendizado</h3>
+        <div className="rtr-head-actions">
+          <Button
+            className="btn"
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void api
+                .rankNow()
+                .then(load)
+                .catch((e: Error) => setError(e.message))
+                .finally(() => setBusy(false));
+            }}
+          >
+            <RefreshCw size={14} /> Atualizar ranking
+          </Button>
+        </div>
+      </div>
+      <p className="cins-help">
+        O roteador aprende com o desempenho real na empresa: respostas sem 👎, sem reprovação da autoavaliação, sem
+        ferramenta com erro e sem reclamação na pergunta seguinte contam a favor do modelo. Com nota de 90% ou mais em 20
+        respostas, um modelo mais barato passa a valer para aquele tipo de pedido, e quem teve respostas ruins num tipo
+        de pedido nos últimos 14 dias sobe um degrau nele. O ranking se atualiza a cada hora.
+      </p>
+      <div className="cins-row">
+        <label>
+          <span>Amostra para a autoavaliação (%)</span>
+          <span className="ai-log-field">
+            <Input
+              type="number"
+              min={0}
+              max={50}
+              step="1"
+              value={sample}
+              disabled={saving}
+              onChange={(e) => setSample(e.target.value)}
+              onBlur={() => {
+                const v = percent(sample, 50);
+                if (v !== Number(s.judge_sample)) void save({ judge_sample: v });
+              }}
+            />
+            <FieldHistory title="Amostra para a autoavaliação" area="router" fields={["judge_sample"]} />
+          </span>
+          <small>Das respostas sem sinal de problema, quantas a autoavaliação confere (até 30% do limite diário dela).</small>
+        </label>
+      </div>
+      <label className="cins-check">
+        <Checkbox checked={s.eval_enabled} disabled={saving} onCheckedChange={(v) => void save({ eval_enabled: v === true })} />
+        <span>
+          <strong>Testes fora do ar</strong>
+          <small>
+            Em segundo plano, outro modelo (o que o roteador escolheria, ou um mais barato) responde a mesma pergunta com as
+            mesmas fontes, e a autoavaliação compara as duas sem saber qual é qual. Ninguém recebe essa resposta: ela só
+            ensina o roteador.
+          </small>
+        </span>
+      </label>
+      <div className="cins-row" aria-disabled={!s.eval_enabled}>
+        <label>
+          <span>Respostas testadas (%)</span>
+          <span className="ai-log-field">
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              step="1"
+              value={rate}
+              disabled={saving || !s.eval_enabled}
+              onChange={(e) => setRate(e.target.value)}
+              onBlur={() => {
+                const v = percent(rate, 100);
+                if (v !== Number(s.eval_rate)) void save({ eval_rate: v });
+              }}
+            />
+            <FieldHistory title="Respostas testadas fora do ar" area="router" fields={["eval_rate"]} />
+          </span>
+          <small>Das respostas em que há um candidato diferente para comparar.</small>
+        </label>
+        <label>
+          <span>Teto por dia (US$)</span>
+          <span className="ai-log-field">
+            <Input
+              type="number"
+              min={0}
+              max={20}
+              step="0.05"
+              value={cap}
+              disabled={saving || !s.eval_enabled}
+              onChange={(e) => setCap(e.target.value)}
+              onBlur={() => {
+                const v = Math.min(Math.max(Number(cap) || 0, 0), 20);
+                if (v !== Number(s.eval_daily_cap)) void save({ eval_daily_cap: v });
+                else setCap(String(s.eval_daily_cap));
+              }}
+            />
+            <FieldHistory title="Teto por dia dos testes" area="router" fields={["eval_daily_cap"]} />
+          </span>
+          <small>Somando a resposta do candidato e a comparação. Passou do teto, os testes esperam o dia seguinte.</small>
+        </label>
+      </div>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      {data && (
+        <>
+          <p className="cins-help">
+            Hoje: {usd(data.spent_today)} em testes, {data.samples_today}{" "}
+            {data.samples_today === 1 ? "resposta sorteada" : "respostas sorteadas"} para a autoavaliação.
+            {data.refreshed_at &&
+              ` Ranking de ${new Date(data.refreshed_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}.`}
+          </p>
+          {data.rank.length ? (
+            <div className="drive-table-wrap">
+              <table className="drive-table ai-usage-table stack-mobile">
+                <thead>
+                  <tr>
+                    <th>Pedido</th>
+                    <th>Modelo</th>
+                    <th className="num" title="Respostas reais sem sinal ruim">Respostas boas</th>
+                    <th className="num" title="Testes fora do ar em que o modelo foi tão bom ou melhor">Testes ok</th>
+                    <th className="num">Nota</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rank.map((r) => (
+                    <tr key={`${r.task_type}|${r.model}`}>
+                      <td data-label="Pedido">{TASK_TYPES[r.task_type] ?? r.task_type}</td>
+                      <td data-label="Modelo" className="rtr-model">{r.model}</td>
+                      <td data-label="Respostas boas" className="num">
+                        {r.live_n ? `${r.live_good} de ${r.live_n}` : "—"}
+                      </td>
+                      <td data-label="Testes" className="num">
+                        {r.eval_n ? `${r.eval_ok} de ${r.eval_n}` : "—"}
+                      </td>
+                      <td data-label="Nota" className="num">
+                        <strong>{pct(r.quality)}</strong>
+                        {r.live_n + r.eval_n < 20 && <small className="muted"> · poucas</small>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="cins-help">O ranking aparece depois das primeiras respostas acompanhadas.</p>
+          )}
+          {!!data.evals.length && (
+            <>
+              <h4 className="rtr-sub">Últimos testes fora do ar</h4>
+              <div className="drive-table-wrap">
+                <table className="drive-table ai-usage-table stack-mobile rtr-recent">
+                  <thead>
+                    <tr>
+                      <th>Pergunta</th>
+                      <th>Respondeu → candidato</th>
+                      <th>Resultado</th>
+                      <th>Por quê</th>
+                      <th className="num">Custo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.evals.map((e) => (
+                      <tr key={e.id}>
+                        <td data-label="Pergunta" className="rtr-reason">
+                          {TASK_TYPES[e.task_type] ?? e.task_type} · {e.question ?? "—"}
+                        </td>
+                        <td data-label="Respondeu → candidato" className="rtr-model">
+                          {e.base_model} → {e.candidate_model}
+                        </td>
+                        <td data-label="Resultado">
+                          {e.status === "pending"
+                            ? "Na fila"
+                            : e.status === "error"
+                              ? "Não deu"
+                              : `${VERDICT[e.verdict ?? ""] ?? "—"}${e.confidence !== null ? ` · ${pct(e.confidence)}` : ""}`}
+                        </td>
+                        <td data-label="Por quê" className="rtr-reason">{e.explanation || "—"}</td>
+                        <td data-label="Custo" className="num">{usd(e.cost_usd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </>
       )}
     </section>
   );

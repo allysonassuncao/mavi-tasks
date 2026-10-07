@@ -1917,6 +1917,10 @@ async function ask(
       await callRpc(env, deps.fetch, auth, "mavi_answer_signal", { p_message: messageId, p_signals: signals }).catch(
         () => null,
       );
+    // Sem sinal: entra no sorteio da amostra que a autoavaliação confere
+    // (a qualidade medida não vê só os casos ruins).
+    else if (!kit.asked && !planned)
+      await callRpc(env, deps.fetch, auth, "mavi_answer_sample", { p_message: messageId }).catch(() => null);
   }
   // A decisão do roteador, com a espera, o custo e as ferramentas desta resposta.
   const routeReason = [routeChoice.decision.reason, ...routeNotes].join("; ");
@@ -1934,7 +1938,7 @@ async function ask(
         conversation: saved?.ok && savedId && UUID.test(savedId) ? savedId : null,
         message: messageId,
       },
-      routeSignals,
+      routeChoice.signals,
       { ...routeChoice.decision, reason: routeReason },
       {
         usedProviderId: turnRoute?.provider_id ?? null,

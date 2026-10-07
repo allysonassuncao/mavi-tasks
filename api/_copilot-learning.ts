@@ -12,6 +12,7 @@ import {
 } from "./_copilot.js";
 import { runMaviLearning } from "./_mavi-learning.js";
 import { runMaviJudge } from "./_mavi-judge.js";
+import { runRouteEvals } from "./_ai-route-evals.js";
 import { runMaviPerson } from "./_mavi-person.js";
 
 /**
@@ -318,9 +319,11 @@ export async function handleLearningWorker(
     if (!mavi.judge) return { status: 200, body: { ...copilot, mavi: answers } };
     const now = mavi.judge.deps.now ?? Date.now;
     const judged = await runMaviJudge(mavi.judge.env, mavi.judge.deps, now() + mavi.judge.budgetMs);
+    // Os testes fora do ar do roteador de modelos (até 1 minuto, com o teto do dia).
+    const routes = await runRouteEvals(mavi.judge.env, mavi.judge.deps, now() + 60_000);
     // Por último, a base de comportamento das pessoas (até 1 minuto).
     const people = await runMaviPerson(mavi.env, mavi.deps, now() + 60_000);
-    return { status: 200, body: { ...copilot, mavi: answers, judge: judged, people } };
+    return { status: 200, body: { ...copilot, mavi: answers, judge: judged, routes, people } };
   } catch (err) {
     const e = errorOf(err);
     return { status: e.status, body: { error: e.error } };
