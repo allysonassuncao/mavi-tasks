@@ -216,6 +216,8 @@ export interface AppNotification {
     | "radar_alert"
     /** Radar do cliente: a MAVI criou sozinha a tarefa de um item (link /radar?item=<id>; 24 h para desfazer). */
     | "radar_task_auto"
+    /** Memória da MAVI: o resumo da semana dos dossiês dos clientes da pessoa (link /drive/cliente/<id>/dossie). */
+    | "memory_week"
     /** Financeiro › Mídia: o saldo de uma conta ficou baixo ou negativo (link /financeiro/midia?contrato=<id>). */
     | "media_balance"
     /** Financeiro › Make Ads RQ: dia 1, os clientes do mês anterior para validar (link /financeiro/make-ads-rq?mes=AAAA-MM). */

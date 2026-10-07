@@ -353,7 +353,8 @@ export type AiArtifact =
   | SearchArtifact
   | TutorialArtifact
   | MemoryArtifact
-  | DossierCheckArtifact;
+  | DossierCheckArtifact
+  | MemoryReviewArtifact;
 
 // ------------------------------------------------------------ busca de tarefas
 /**
@@ -397,12 +398,25 @@ export type DossierCheckArtifact = Base & {
   /** A sugestão (client_dossier_proposals). */
   proposal: string;
   client: string;
-  op: "add" | "update" | "remove";
+  /** review: "Ainda vale?" de um item de histórico antigo (20270614090000). */
+  op: "add" | "update" | "remove" | "review";
   kind: "prefers" | "avoids" | "rule" | "style" | "context" | "history";
   text: string;
   previous?: string;
   reasons: string[];
   sources: { type: string; title: string; date: string | null }[];
+};
+
+/**
+ * "Isso ainda vale?" (migração 20270614090000_mavi_memory_review): um item de
+ * situação vencido da memória de quem perguntou, para renovar ou tirar.
+ */
+export type MemoryReviewArtifact = Base & {
+  type: "memory_review";
+  item: string;
+  kind: "preference" | "context" | "frustration";
+  text: string;
+  valid_until: string;
 };
 
 // ------------------------------------------------------------ tutoriais
@@ -946,6 +960,21 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       ...(/^[0-9a-f-]{36}$/i.test(previousId) ? { previous_id: previousId } : {}),
     };
   }
+  if (a.type === "memory_review") {
+    const item = text(a.item, 40);
+    const kind = text(a.kind, 20);
+    const body = text(a.text, 300);
+    if (!/^[0-9a-f-]{36}$/i.test(item) || !["preference", "context", "frustration"].includes(kind) || !body) return null;
+    return {
+      id,
+      ref,
+      type: "memory_review",
+      item,
+      kind: kind as MemoryReviewArtifact["kind"],
+      text: body,
+      valid_until: text(a.valid_until, 40),
+    };
+  }
   if (a.type === "dossier_check") {
     const proposal = text(a.proposal, 40);
     const kind = text(a.kind, 20);
@@ -958,7 +987,7 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       type: "dossier_check",
       proposal,
       client: text(a.client, 120),
-      op: a.op === "update" || a.op === "remove" ? a.op : "add",
+      op: a.op === "update" || a.op === "remove" || a.op === "review" ? a.op : "add",
       kind: kind as DossierCheckArtifact["kind"],
       text: body,
       ...(previous ? { previous } : {}),
@@ -1037,6 +1066,8 @@ export function artifactSummary(a: AiArtifact): string {
     return `botão da Busca avançada com “${a.request}” (${a.total} tarefas)`;
   if (a.type === "tutorial")
     return `cartão que abre o tutorial “${a.title}”${a.section ? ` na seção “${a.section}”` : ""}`;
+  if (a.type === "memory_review")
+    return `cartão perguntando à pessoa se “${a.text}” ainda vale (renovar ou tirar da memória)`;
   if (a.type === "dossier_check")
     return `cartão para a pessoa confirmar uma sugestão do dossiê do cliente: “${a.text}”`;
   if (a.type === "memory")

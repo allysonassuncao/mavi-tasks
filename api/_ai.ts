@@ -77,6 +77,7 @@ import {
   type DossierCheckArtifact,
   type ImageArtifact,
   type MemoryArtifact,
+  type MemoryReviewArtifact,
   type Power,
   type SearchArtifact,
   type TaskArtifact,
@@ -1977,6 +1978,25 @@ async function ask(
       const { id: proposal, ...card } = r.data;
       add<DossierCheckArtifact>(kit, "B", { type: "dossier_check", proposal, ...card });
     }
+  }
+  // Sem cartão do dossiê: um item de situação vencido da pessoa ("Isso ainda
+  // vale?"; migração 20270614090000). Um cartão por resposta, no máximo.
+  if (withPowers && result && !kit.asked && !planned && !kit.artifacts.some((a) => a.type === "dossier_check")) {
+    const r = await callRpc<{ id: string; kind: MemoryReviewArtifact["kind"]; text: string; valid_until: string } | null>(
+      env,
+      deps.fetch,
+      auth,
+      "mavi_person_review_next",
+      { p_company: company },
+    ).catch(() => null);
+    if (r?.ok && r.data?.id)
+      add<MemoryReviewArtifact>(kit, "B", {
+        type: "memory_review",
+        item: r.data.id,
+        kind: r.data.kind,
+        text: r.data.text,
+        valid_until: r.data.valid_until,
+      });
   }
   // O link assinado da imagem vale uma hora: não é gravado.
   const artifacts = kit.artifacts;

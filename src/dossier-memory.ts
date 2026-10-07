@@ -8,7 +8,7 @@ import { supabase } from "./supabase";
 
 export type DossierProposal = {
   id: string;
-  op: "add" | "update" | "remove" | "contest";
+  op: "add" | "update" | "remove" | "contest" | "review";
   item_id: string | null;
   kind: "prefers" | "avoids" | "rule" | "style" | "context" | "history";
   text: string;
@@ -64,4 +64,57 @@ export const PROPOSAL_OP: Record<string, string> = {
   add: "Novo item",
   update: "Mudar o item",
   remove: "Tirar o item",
+  review: "Ainda vale?",
 };
+
+// ------------------------------------------------------------ Fase 3
+/** Painel da MAVI › Memória (migração 20270614090000_mavi_memory_review). */
+export type MemorySettings = {
+  dossier_autonomy: boolean;
+  autonomy_window: number;
+  autonomy_rate: number;
+  contest_limit: number;
+  history_days: number;
+  summary_leaders: boolean;
+  updated_by: string | null;
+  updated_at: string | null;
+};
+export type AnswerSide = { answers: number; up: number; down: number; judged: number; judged_ok: number };
+export type KindAutonomy = {
+  kind: DossierProposal["kind"];
+  decided: number;
+  confirmed: number;
+  window: number;
+  rate: number | null;
+  contests: number;
+  auto: boolean;
+};
+export type MemoryStats = {
+  days: number;
+  answers: { with?: AnswerSide; without?: AnswerSide } | null;
+  person: { noted: number; undone: number; learned: number; expired: number; people: number };
+  proposals: Record<string, number>;
+  applied: number;
+  autonomy: KindAutonomy[];
+  contested: {
+    id: string;
+    client: string;
+    client_id: string;
+    kind: DossierProposal["kind"];
+    text: string;
+    reason: string | null;
+    status: string;
+    origin: string | null;
+    by: string | null;
+    at: string;
+  }[];
+  cost: Record<string, number>;
+  settings: MemorySettings;
+};
+export const memoryStats = (company: string, days: number) =>
+  rpc<MemoryStats>("mavi_memory_stats", { p_company: company, p_days: days });
+export const saveMemorySettings = (company: string, settings: Partial<MemorySettings>) =>
+  rpc<MemorySettings>("save_mavi_memory_settings", { p_company: company, p_settings: settings });
+
+/** "62%" (sem base: "—"). */
+export const share = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 100)}%` : "—");

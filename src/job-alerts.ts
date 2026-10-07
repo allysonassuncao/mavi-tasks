@@ -97,6 +97,8 @@ export const JOB_ABOUT: Record<string, string> = {
     "Abre as cópias das tarefas que se repetem. A falha é de uma repetição específica.",
   cs_sync:
     "Lê a planilha mestre de CS a cada 10 minutos (clientes, ciclos, Health Score, metas e eventos).",
+  memory:
+    "Toda segunda, às 8h: revisa as fichas grandes das pessoas, pergunta se o histórico antigo dos dossiês ainda vale e manda o resumo da semana dos dossiês.",
 };
 
 export type JobHealth = "ok" | "failing" | "stale" | "idle";

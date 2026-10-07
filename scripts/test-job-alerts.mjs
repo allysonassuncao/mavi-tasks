@@ -259,7 +259,8 @@ await check("só administradores leem e salvam a configuração", async () => {
   await as(admin);
   const jobs = await rpc("job_alerts", [A]);
   assert.equal(jobs[0].job, "whatsapp_sweep");
-  assert.equal(jobs.length, 13);
+  // 13 rotinas + a revisão semanal da memória (20270614090000).
+  assert.equal(jobs.length, 14);
   const w = jobs[0];
   assert.deepEqual(w.settings, {
     active: true,

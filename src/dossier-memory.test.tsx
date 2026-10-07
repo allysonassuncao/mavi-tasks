@@ -101,3 +101,91 @@ describe("memória por cliente · telas", () => {
     expect(isNew({ origin: "person", created_at: "2026-10-06T12:00:00Z" }, t)).toBe(false);
   });
 });
+
+describe("memória · Fase 3", () => {
+  it("o cartão “Isso ainda vale?” e o “Ainda vale?” do histórico", async () => {
+    const { MemoryReviewCard } = await import("./MaviMemory");
+    const card = sanitizeArtifact({
+      id: "abcd1234",
+      ref: "B3",
+      type: "memory_review",
+      item: "00000000-0000-4000-8000-0000000000a7",
+      kind: "context",
+      text: "Fecha o mês do 5022.",
+      valid_until: "2026-10-01T12:00:00Z",
+    });
+    expect(card).toMatchObject({ type: "memory_review", kind: "context" });
+    expect(sanitizeArtifact({ id: "abcd1234", ref: "B3", type: "memory_review", item: "x", kind: "context", text: "a" })).toBeNull();
+    if (card?.type !== "memory_review") throw Error("cartão");
+    const html = renderToStaticMarkup(<MemoryReviewCard artifact={card} company="c" readOnly={false} notify={() => {}} />);
+    expect(html).toContain("Isso ainda vale?");
+    expect(html).toContain("Venceu em 01/10");
+    const review = sanitizeArtifact({
+      id: "abcd1235",
+      ref: "B4",
+      type: "dossier_check",
+      proposal: "00000000-0000-4000-8000-0000000000b2",
+      client: "ACME",
+      op: "review",
+      kind: "history",
+      text: "Reclamou do atraso em março.",
+      reasons: ["histórico antigo: ainda vale?"],
+      sources: [],
+    });
+    if (review?.type !== "dossier_check") throw Error("cartão");
+    expect(renderToStaticMarkup(<DossierCheckCard artifact={review} company="c" readOnly={false} notify={() => {}} />)).toContain(
+      "A MAVI notou sobre ACME: ainda vale?",
+    );
+  });
+
+  it("o painel: com e sem memória, autonomia, contestados e configuração", async () => {
+    const { MemoryReport } = await import("./MaviMemoryPanel");
+    const html = renderToStaticMarkup(
+      <MemoryReport
+        company="c"
+        data={data}
+        notify={() => {}}
+        initial={{
+          days: 30,
+          answers: {
+            with: { answers: 40, up: 9, down: 1, judged: 10, judged_ok: 9 },
+            without: { answers: 60, up: 6, down: 4, judged: 10, judged_ok: 7 },
+          },
+          person: { noted: 5, undone: 1, learned: 8, expired: 2, people: 6 },
+          proposals: { confirmed: 18, refused: 2, auto: 4, suggested: 3 },
+          applied: 12,
+          autonomy: [
+            { kind: "style", decided: 20, confirmed: 19, window: 20, rate: 0.95, contests: 0, auto: true },
+            { kind: "rule", decided: 4, confirmed: 2, window: 20, rate: 0.5, contests: 1, auto: false },
+          ],
+          contested: [
+            { id: "p", client: "4282", client_id: "k", kind: "rule", text: "Aprovação com a Bia.", reason: "Agora é o Pedro", status: "contested", origin: "mavi", by: "u1", at: now },
+          ],
+          cost: { dossier: 0.5, dossier_check: 0.02, profile: 0.1 },
+          settings: {
+            dossier_autonomy: true,
+            autonomy_window: 20,
+            autonomy_rate: 0.9,
+            contest_limit: 3,
+            history_days: 120,
+            summary_leaders: false,
+            updated_by: null,
+            updated_at: null,
+          },
+        }}
+      />,
+    );
+    expect(html).toContain("👍 com memória");
+    expect(html).toContain("90%");
+    expect(html).toContain("sem memória: 60%");
+    expect(html).toContain("12 item(ns) entraram direto");
+    expect(html).toContain("90% confirmadas");
+    expect(html).toContain("4</strong> entraram sozinhas");
+    expect(html).toContain("Entra direto");
+    expect(html).toContain("Pede confirmação");
+    expect(html).toContain("Aprovação com a Bia.");
+    expect(html).toContain("Bruno Equipe");
+    expect(html).toContain("Autonomia por tipo ligada");
+    expect(html).toContain("US$ 0,62");
+  });
+});

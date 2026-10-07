@@ -409,7 +409,7 @@ export function ClientDossier({
                         run(`c${p.id}`, async () => void (await decideProposal(company, p.id, "confirm")), "Confirmado: entrou no dossiê.")
                       }
                     >
-                      <Check size={14} /> Está certo
+                      <Check size={14} /> {p.op === "review" ? "Ainda vale" : "Está certo"}
                     </Button>
                     <Button
                       className="btn secondary"
@@ -418,7 +418,7 @@ export function ClientDossier({
                         run(`r${p.id}`, async () => void (await decideProposal(company, p.id, "refuse")), "Recusado: a MAVI não propõe de novo.")
                       }
                     >
-                      <X size={14} /> Não está
+                      <X size={14} /> {p.op === "review" ? "Não vale mais" : "Não está"}
                     </Button>
                   </span>
                 )}

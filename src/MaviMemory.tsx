@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { BookMarked, Brain, Check, RotateCcw, Undo2, X } from "lucide-react";
 import { navigate, pageUrl, routeParts } from "./router";
-import type { DossierCheckArtifact, MemoryArtifact } from "./mavi-artifacts";
+import type { DossierCheckArtifact, MemoryArtifact, MemoryReviewArtifact } from "./mavi-artifacts";
 import { contestItem, decideProposal, lookupDossier, proposalState, type DossierLookup } from "./dossier-memory";
 import { lookupTraits, setTrait, validityLabel, type TraitLookup } from "./mavi-person";
 import "./mavi-memory.css";
@@ -315,7 +315,13 @@ export function DossierCheckCard({
   if (status === "hidden") return null;
   const done = status && status !== "suggested";
   const what =
-    artifact.op === "remove" ? "deixou de valer" : artifact.op === "update" ? "mudou" : "é assim";
+    artifact.op === "remove"
+      ? "deixou de valer"
+      : artifact.op === "update"
+        ? "mudou"
+        : artifact.op === "review"
+          ? "ainda vale"
+          : "é assim";
   return (
     <div className={`mavi-memory-card dossier-check${done ? " undone" : ""}`}>
       <BookMarked size={16} aria-hidden="true" />
@@ -345,10 +351,82 @@ export function DossierCheckCard({
       {!readOnly && status === "suggested" && (
         <span className="dossier-check-actions">
           <button type="button" className="mavi-memory-undo" disabled={busy} onClick={() => void decide("confirm")}>
-            <Check size={13} aria-hidden="true" /> Está certo
+            <Check size={13} aria-hidden="true" /> {artifact.op === "review" ? "Ainda vale" : "Está certo"}
           </button>
           <button type="button" className="mavi-memory-undo no" disabled={busy} onClick={() => void decide("refuse")}>
-            <X size={13} aria-hidden="true" /> Não está
+            <X size={13} aria-hidden="true" /> {artifact.op === "review" ? "Não vale mais" : "Não está"}
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** "Isso ainda vale?": um item de situação vencido da memória de quem perguntou. */
+export function MemoryReviewCard({
+  artifact,
+  company,
+  readOnly,
+  notify,
+}: {
+  artifact: MemoryReviewArtifact;
+  company: string;
+  readOnly: boolean;
+  notify: (message: string) => void;
+}) {
+  // renewed/gone: já decidido (aqui ou no perfil); null: ainda não sabe.
+  const [state, setState] = useState<"open" | "renewed" | "gone" | "hidden" | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    lookupTraits(company, [artifact.item])
+      .then((list) => {
+        if (!alive) return;
+        const t = list[0];
+        setState(!t ? "hidden" : t.dismissed ? "gone" : t.expired ? "open" : "renewed");
+      })
+      .catch(() => alive && setState("hidden"));
+    return () => {
+      alive = false;
+    };
+  }, [company, artifact.item]);
+
+  async function decide(action: "renew" | "dismiss") {
+    setBusy(true);
+    try {
+      await setTrait(company, artifact.item, action);
+      setState(action === "renew" ? "renewed" : "gone");
+      notify(action === "renew" ? "Renovado: vale mais 60 dias." : "Tirado da memória: a MAVI não usa mais.");
+    } catch (e) {
+      notify((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (state === "hidden") return null;
+  const until = artifact.valid_until
+    ? new Date(artifact.valid_until).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit" })
+    : "";
+  return (
+    <div className={`mavi-memory-card${state === "gone" ? " undone" : ""}`}>
+      <Brain size={16} aria-hidden="true" />
+      <span>
+        <strong>
+          {state === "renewed" ? "Renovado na sua memória" : state === "gone" ? "Tirado da sua memória" : "Isso ainda vale?"}
+        </strong>
+        <small>“{artifact.text}”</small>
+        {state !== "renewed" && state !== "gone" && until && (
+          <small>Venceu em {until}: a MAVI parou de usar até você dizer.</small>
+        )}
+      </span>
+      {!readOnly && state === "open" && (
+        <span className="dossier-check-actions">
+          <button type="button" className="mavi-memory-undo" disabled={busy} onClick={() => void decide("renew")}>
+            <Check size={13} aria-hidden="true" /> Ainda vale
+          </button>
+          <button type="button" className="mavi-memory-undo no" disabled={busy} onClick={() => void decide("dismiss")}>
+            <X size={13} aria-hidden="true" /> Não vale mais
           </button>
         </span>
       )}

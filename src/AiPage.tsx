@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import {
+  BookMarked,
   BarChart3,
   BellRing,
   Boxes,
@@ -23,6 +24,7 @@ import { AiUsagePage } from "./AiUsagePage";
 import { AiProvidersPanel, AiRoutesPanel, useAiLibrary } from "./AiProviders";
 import { CopilotLearning } from "./CopilotLearning";
 import { MaviLearning } from "./MaviLearning";
+import { MaviMemoryPanel } from "./MaviMemoryPanel";
 import { TemperatureSettings } from "./TemperatureSettings";
 import { RadarSettings } from "./RadarSettings";
 import { RadarTaskLearning } from "./RadarTaskLearning";
@@ -54,6 +56,7 @@ const SECTIONS: { label: string; items: Section[] }[] = [
     items: [
       { id: "copiloto", label: "Copiloto", icon: GraduationCap, admin: false },
       { id: "aprendizado", label: "Aprendizado da MAVI", icon: Brain, admin: false },
+      { id: "memoria", label: "Memória", icon: BookMarked, admin: false },
     ],
   },
   {
@@ -159,6 +162,8 @@ export function AiPage({
         </>
       ) : tab === "termometro" ? (
         <TemperatureSettings company={company} data={data} notify={notify} />
+      ) : tab === "memoria" ? (
+        <MaviMemoryPanel company={company} data={data} demo={demo} notify={notify} />
       ) : tab === "aprendizado" ? (
         <MaviLearning
           company={company}

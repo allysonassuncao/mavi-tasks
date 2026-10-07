@@ -74,6 +74,11 @@ describe("base de comportamento · leitura", () => {
     expect(m).toContain("contexto · situação até 05/12 · escrito pela pessoa: Monta o trimestral.");
   });
 
+  it("revisão semanal: o pedido avisa e as regras dizem como juntar e aposentar", () => {
+    expect(personMessage({ ...claim, review: true })).toMatch(/^Revisão semanal: a lista está grande/);
+    expect(personMessage(claim)).toMatch(/^Pessoa: /);
+  });
+
   it("as evidências citadas viram as fontes do item (as que não existem somem)", () => {
     const ops = parsePersonOps(
       '{"ops":[{"op":"add","kind":"preference","text":"Responda em tabela.","durability":"stable","from":["A1","R1","P2","P9","X1",3]},{"op":"update","id":"i1","text":"Novo.","durability":"situation"}]}',
@@ -342,6 +347,35 @@ describe("base de comportamento · na pergunta", () => {
     const used = calls.find((c) => c.url.endsWith("/rpc/mavi_person_used"))!;
     expect(used.body).toEqual({ p_message: 321, p_ids: [item] });
     expect(events.find((e) => e.type === "done")?.memory).toEqual([item]);
+  });
+
+  it("“Isso ainda vale?”: um item vencido vira cartão no fim da resposta (no módulo e na bolinha)", async () => {
+    const expired = "00000000-0000-4000-8000-0000000000a7";
+    const { fetchImpl, calls } = database({
+      "memberships?": [{ user_id: me, name: "Ana", email: "", role: "member", active: true }],
+      "rpc/ai_check_limits": { blocked: false, message: null, warnings: [] },
+      "rpc/ai_resolve_route": null,
+      "rpc/ai_my_powers": [],
+      "rpc/ai_run_start": { id: run, conversation, created: true },
+      "rpc/ai_save_turn": conversation,
+      "rpc/mavi_person_review_next": { id: expired, kind: "context", text: "Fecha o mês do 5022.", valid_until: "2026-10-01T12:00:00Z" },
+    });
+    const llm: LlmAdapter = async () => ({ text: "Pronto.", meter: newMeter("claude-opus-5-5"), rounds: 0 });
+    const events: any[] = [];
+    await streamAi(
+      { action: "ai-ask", company, question: "Oi", surface: "bubble" },
+      token,
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+      (e) => events.push(e),
+      { onClose: () => {} },
+    );
+    expect(events.find((e) => e.type === "artifact")?.artifact).toMatchObject({
+      type: "memory_review",
+      item: expired,
+      text: "Fecha o mês do 5022.",
+    });
+    expect(calls.find((c) => c.url.endsWith("/rpc/ai_save_turn"))!.body.p_artifacts[0].type).toBe("memory_review");
   });
 
   it("o banco recusa o cartão: a pergunta e a resposta ficam salvas sem ele", async () => {

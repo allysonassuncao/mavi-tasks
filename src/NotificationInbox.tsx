@@ -1,5 +1,6 @@
 import * as Popover from "@radix-ui/react-popover";
 import {
+  BookMarked,
   ArrowRight,
   AtSign,
   BellRing,
@@ -102,6 +103,10 @@ export function InboxList({
                 <span className="inbox-system temperature" aria-hidden="true">
                   <Radar size={15} />
                 </span>
+              ) : n.kind === "memory_week" ? (
+                <span className="inbox-system" aria-hidden="true">
+                  <BookMarked size={15} />
+                </span>
               ) : n.kind === "campaign_alert" ? (
                 <span className="inbox-system due-risk" aria-hidden="true">
                   <Megaphone size={15} />
@@ -160,6 +165,7 @@ export function InboxList({
                 n.kind === "radar_report" ||
                 n.kind === "radar_alert" ||
                 n.kind === "radar_task_auto" ||
+                n.kind === "memory_week" ||
                 n.kind === "media_balance" ||
                 n.kind === "rq_closing" ||
                 n.kind === "campaign_alert" ||

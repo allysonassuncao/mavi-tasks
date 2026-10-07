@@ -106,3 +106,136 @@
     align-items: stretch;
   }
 }
+/* Painel da MAVI › Memória (MaviMemoryPanel.tsx). */
+.memory-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+}
+.memory-section h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1rem;
+}
+.memory-lead {
+  margin: 0;
+  max-width: 760px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #3c4948;
+}
+.memory-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.memory-chips li {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #f3f6f7;
+  font-size: 0.76rem;
+  color: #3c4948;
+}
+.memory-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.memory-table th,
+.memory-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #eef1f2;
+  text-align: left;
+}
+.memory-table th {
+  font-weight: 600;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.memory-auto {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f3f6f7;
+  font-size: 0.74rem;
+  color: #5d6a68;
+}
+.memory-auto.on {
+  background: #eaf5df;
+  color: #2f4f1a;
+  font-weight: 600;
+}
+.memory-contested {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.memory-contested li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #f0e4d8;
+  border-radius: 10px;
+  background: #fffaf5;
+}
+.memory-contested li p {
+  margin: 2px 0;
+  font-size: 0.86rem;
+}
+.memory-contested li small {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.memory-contested a {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  color: #3f6a24;
+}
+.memory-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+.memory-settings small {
+  color: var(--muted);
+}
+.memory-number {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.memory-number input {
+  width: 72px;
+  padding: 4px 8px;
+  border: 1px solid #dfe4e2;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 16px;
+}
+@media (min-width: 641px) {
+  .memory-number input {
+    font-size: 0.82rem;
+  }
+}
+@media (max-width: 640px) {
+  .memory-table {
+    display: block;
+    overflow-x: auto;
+  }
+  .memory-contested li {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
