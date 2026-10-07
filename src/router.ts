@@ -117,6 +117,7 @@ export const AI_TABS = [
   "aprendizado",
   "termometro",
   "radar",
+  "tarefas-radar",
   "campanhas",
   "poderes",
   "provedores",

@@ -33,6 +33,7 @@ import {
   type RadarTask,
   type ThemeMove,
 } from "./radar";
+import { recordTaskCreated } from "./radar-task-learning";
 
 const NONE = "__none__";
 const AUTO = "__auto__";
@@ -164,12 +165,14 @@ export function RadarItemPanel({
     }
     const id = item.id;
     onClose();
+    // No banco, liga e guarda o que veio preenchido: a MAVI aprende com o
+    // que a pessoa escolheu e mudou (migration 20270605090000).
     onNewTask({
       ...preset,
       onCreated: (task) =>
-        void linkTask(company, id, task)
+        void (UUID.test(company) ? recordTaskCreated(company, id, task, preset) : linkTask(company, id, task))
           .then(() => {
-            notify?.("Tarefa criada e ligada ao item do Radar.");
+            notify?.("Tarefa criada e ligada ao item do Radar. A MAVI aprende com o que você escolheu.");
             onTaskLinked?.(id);
           })
           .catch((e) => notify?.(`A tarefa foi criada, mas não ficou ligada ao item: ${(e as Error).message}`)),

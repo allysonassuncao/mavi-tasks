@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   GraduationCap,
   Lightbulb,
+  ListChecks,
   MessageCircle,
   Radar,
   Route,
@@ -22,6 +23,7 @@ import { CopilotLearning } from "./CopilotLearning";
 import { MaviLearning } from "./MaviLearning";
 import { TemperatureSettings } from "./TemperatureSettings";
 import { RadarSettings } from "./RadarSettings";
+import { RadarTaskLearning } from "./RadarTaskLearning";
 import { CampaignInsightSettings } from "./CampaignInsightSettings";
 import { CampaignDailySettings } from "./CampaignDailySettings";
 import { AiPowersPanel } from "./AiPowersPanel";
@@ -51,6 +53,7 @@ const TABS: {
   },
   { id: "termometro", label: "Termômetro", icon: Thermometer, admin: false },
   { id: "radar", label: "Radar", icon: Radar, admin: false },
+  { id: "tarefas-radar", label: "Tarefas do Radar", icon: ListChecks, admin: false },
   { id: "campanhas", label: "Campanhas", icon: Lightbulb, admin: false },
   { id: "poderes", label: "Poderes", icon: Zap, admin: false },
   { id: "provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
@@ -70,7 +73,8 @@ const TABS: {
  * Painel de IA (líderes): o consumo e os limites de gasto, o aprendizado
  * do Assistente MAVI nas tarefas (#copiloto), o das respostas da MAVI
  * (#aprendizado), o Termômetro do cliente
- * (#termometro), os tópicos do Radar do cliente (#radar), os insights da
+ * (#termometro), os tópicos do Radar do cliente (#radar), o que a MAVI
+ * aprende com as tarefas abertas a partir do Radar (#tarefas-radar), os insights da
  * MAVI nas campanhas (#campanhas), os poderes do módulo MAVI (#poderes) e as regras de quem usa qual provedor e modelo (por
  * funcionalidade, pessoa, cliente, produto e projeto, #regras), o roteador
  * de modelos (nível de custo, privacidade e desempenho, #roteamento), o
@@ -145,6 +149,8 @@ export function AiPage({
         />
       ) : tab === "radar" ? (
         <RadarSettings company={company} data={data} notify={notify} />
+      ) : tab === "tarefas-radar" ? (
+        <RadarTaskLearning company={company} data={data} />
       ) : tab === "campanhas" ? (
         <>
           <CampaignInsightSettings company={company} data={data} notify={notify} />
