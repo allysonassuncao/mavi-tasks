@@ -1,5 +1,5 @@
-import type { Canvas, Slide } from "./mavi-artifacts";
-import { clean, markdownBlocks, runs } from "./mavi-export";
+import type { Canvas, Slide } from "./mavi-artifacts.js";
+import { clean, markdownBlocks, runs } from "./mavi-export.js";
 import {
   brandFontFaces,
   contrast,
@@ -7,7 +7,7 @@ import {
   googleFontsHref,
   logoFor,
   type Look,
-} from "./visual-identity";
+} from "./visual-identity.js";
 
 /**
  * MAVI · o documento e a apresentação em HTML, com a identidade visual. É o

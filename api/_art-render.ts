@@ -327,3 +327,113 @@ export async function renderPdf(input: PdfInput, fetchImpl: typeof fetch = fetch
     await page.close().catch(() => {});
   }
 }
+
+// ------------------------------------------------------------ design livre
+/**
+ * As páginas do design livre (as <section class="page">) desenhadas uma a
+ * uma, com a conferência do que dá para medir. `pick` escolhe quais páginas
+ * viram imagem (as prévias para a MAVI conferir, ou todas para o
+ * PowerPoint).
+ */
+export type PagesInput = PdfInput & {
+  width: number;
+  height: number;
+  /** Escala da imagem (0,5 = metade: prévia leve). */
+  scale: number;
+  type: "jpeg" | "png";
+  /** Quais páginas (começando em 0); sem: todas. */
+  pick?: number[];
+};
+export type PagesResult = { pages: number; images: { page: number; data: Buffer }[]; report: string[] };
+
+const INSPECT_PAGES = `(function () {
+  var notes = [];
+  function short(s) { var t = s.replace(/\\s+/g, " ").trim(); return t.length > 40 ? t.slice(0, 40) + "…" : t; }
+  var pages = Array.prototype.slice.call(document.querySelectorAll("section.page"));
+  if (!pages.length) notes.push("Nenhuma página: cada página precisa ser um <section class=\\"page\\">.");
+  pages.forEach(function (pg, i) {
+    var n = i + 1;
+    var flow = pg.classList.contains("flow");
+    var box = pg.getBoundingClientRect();
+    if (!flow && pg.scrollHeight > pg.clientHeight + 4)
+      notes.push("Página " + n + ": o conteúdo passa da altura da página e foi cortado (encurte, divida em mais páginas ou use class=\\"page flow\\").");
+    var seen = 0;
+    pg.querySelectorAll("*").forEach(function (el) {
+      if (seen > 3) return;
+      var own = Array.prototype.some.call(el.childNodes, function (c) { return c.nodeType === 3 && c.textContent.trim(); });
+      if (!own) return;
+      var st = getComputedStyle(el);
+      if (st.visibility === "hidden" || st.display === "none") return;
+      var r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      var out = r.right > box.right + 2 || r.left < box.left - 2 || (!flow && (r.bottom > box.bottom + 2 || r.top < box.top - 2));
+      if (out) { seen++; notes.push("Página " + n + ": texto saindo da página: “" + short(el.textContent || "") + "”."); }
+    });
+  });
+  document.querySelectorAll("img").forEach(function (img) {
+    if (!img.complete || !img.naturalWidth) notes.push("Imagem que não carregou: " + (img.getAttribute("src") || "(vazia)").slice(0, 60) + " (use img:I1, logo:light/logo:dark ou marca:<arquivo>).");
+  });
+  var declared = {};
+  document.fonts.forEach(function (f) {
+    var family = f.family.replace(/["']/g, "").trim();
+    declared[family.toLowerCase()] = true;
+    if (f.status === "error") notes.push("A fonte “" + family + "” não carregou.");
+  });
+  var generic = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-sans-serif|ui-serif|ui-monospace|arial|helvetica|georgia|times new roman|inherit|initial)$/;
+  var missing = {};
+  document.querySelectorAll("section.page *").forEach(function (el) {
+    var first = (getComputedStyle(el).fontFamily.split(",")[0] || "").replace(/["']/g, "").trim();
+    if (first && !generic.test(first.toLowerCase()) && !declared[first.toLowerCase()]) missing[first] = true;
+  });
+  Object.keys(missing).slice(0, 4).forEach(function (f) {
+    notes.push("A fonte “" + f + "” não está carregada (sem Google Fonts nem a da marca): saiu na fonte padrão.");
+  });
+  return { pages: pages.length, notes: notes.filter(function (x, k) { return notes.indexOf(x) === k; }).slice(0, 24) };
+})()`;
+
+export async function renderPages(input: PagesInput, fetchImpl: typeof fetch = fetch): Promise<PagesResult> {
+  const problem = checkPdfInput(input);
+  if (problem) throw new Error(problem);
+  const html = pdfDocument(await inline({ html: input.html, width: ART_MIN, height: ART_MIN, assets: input.assets }, fetchImpl));
+  const page = await newPage();
+  const blocked = new Set<string>();
+  try {
+    await page.setRequestInterception(true);
+    page.on("request", (req) => {
+      const url = req.url();
+      if (ALLOWED.test(url)) void req.continue();
+      else {
+        blocked.add(url.slice(0, 80));
+        void req.abort();
+      }
+    });
+    const scale = Math.max(0.25, Math.min(2, input.scale));
+    await page.setViewport({ width: input.width, height: input.height, deviceScaleFactor: scale });
+    // Na tela a página tem margem e sombra; aqui, sem nada em volta.
+    await page.emulateMediaType("print");
+    await page.setContent(html, { waitUntil: "load", timeout: 40_000 });
+    await page.evaluate("document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))");
+    const inspected = (await page.evaluate(INSPECT_PAGES)) as { pages: number; notes: string[] };
+    for (const url of blocked) inspected.notes.push(`Bloqueado (o design não abre a internet): ${url}.`);
+    const boxes = (await page.evaluate(
+      `Array.prototype.map.call(document.querySelectorAll("section.page"), function (p) { var r = p.getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }; })`,
+    )) as { x: number; y: number; w: number; h: number }[];
+    const want = (input.pick ?? boxes.map((_, i) => i)).filter((i) => i >= 0 && i < boxes.length).slice(0, 40);
+    const images: PagesResult["images"] = [];
+    for (const i of want) {
+      const b = boxes[i];
+      // A página que cresce (flow) vai até 3 alturas na imagem.
+      const clip = { x: b.x, y: b.y, width: b.w, height: Math.min(b.h, input.height * 3) };
+      const data = await page.screenshot({
+        type: input.type,
+        ...(input.type === "jpeg" ? { quality: 82 } : {}),
+        clip,
+        captureBeyondViewport: true,
+      });
+      images.push({ page: i, data: Buffer.from(data) });
+    }
+    return { pages: inspected.pages, images, report: inspected.notes };
+  } finally {
+    await page.close().catch(() => {});
+  }
+}

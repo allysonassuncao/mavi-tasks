@@ -12,6 +12,7 @@ import {
   runIdentityTool,
   summarizeIdentityStep,
 } from "./_ai-identity.js";
+import { DESIGN_RULES, DESIGN_TOOL, runDesignTool, summarizeDesignStep } from "./_ai-design.js";
 import { logCost, meterEntries, whereOf } from "./_ai-cost.js";
 import type { RenderInput } from "./_art-render.js";
 import {
@@ -531,6 +532,8 @@ export const REGISTRY: Record<string, ToolMeta> = {
   create_spreadsheet: { kind: "canvas", power: "canvas", timeoutMs: 170_000 },
   read_canvas: { kind: "canvas", power: "canvas", timeoutMs: 5_000 },
   visual_identities: { kind: "canvas", power: "canvas", timeoutMs: 20_000 },
+  // Design livre: o Chromium desenha as prévias (como a arte por código).
+  design_document: { kind: "canvas", power: "canvas", timeoutMs: 150_000 },
   // A busca da Claude roda no servidor dela: só para o registro.
   web_search: { kind: "web", power: "web", timeoutMs: 0 },
   web_fetch: { kind: "web", power: "web", timeoutMs: 0 },
@@ -606,7 +609,7 @@ export function toolsFor(
   return [
     ...TOOLS,
     ASK_TOOL,
-    ...[...POWER_TOOLS, IDENTITY_TOOL, ...ART_TOOLS, ...SKILL_TOOLS]
+    ...[...POWER_TOOLS, IDENTITY_TOOL, DESIGN_TOOL, ...ART_TOOLS, ...SKILL_TOOLS]
       .filter((t) => {
         const power = REGISTRY[t.name]?.power;
         return !!power && powers.has(power);
@@ -655,6 +658,7 @@ export function powerInstructions(powers: ReadonlySet<Power>, onPage = false) {
     lines.push(
       "- Documentos, apresentações e planilhas (create_document, create_presentation, create_spreadsheet): quando pedirem um relatório, proposta, briefing, ata, plano, roteiro, apresentação, slides, deck, pitch, planilha ou tabela para editar, crie no canvas em vez de escrever tudo na conversa. Antes, busque os dados que o conteúdo precisa. Para ajustar um que já existe nesta conversa, leia com read_canvas e mande a versão inteira com revises. Na resposta, só [[D1]] e um resumo curto do que foi feito; não repita o conteúdo.",
       IDENTITY_RULES,
+      DESIGN_RULES,
     );
   if (powers.has("web"))
     lines.push(
@@ -686,6 +690,8 @@ export type ImageEnv = {
   bucket?: string;
   /** Desenha a arte e grava no link (trocado nos testes). */
   renderArt?: (input: RenderInput, put: string) => Promise<{ preview: string; report: string[] }>;
+  /** Desenha as páginas do design livre (trocado nos testes). */
+  renderPages?: (input: Record<string, unknown>) => Promise<{ pages: number; report: string[]; images: { page: number; data: string }[] }>;
 };
 export type PowerKit = {
   ctx: ToolContext;
@@ -1176,6 +1182,9 @@ async function createCanvas(kit: PowerKit, name: string, input: Record<string, u
 function readCanvas(kit: PowerKit, input: Record<string, unknown>) {
   const a = findCanvas(kit, str(input.ref));
   if (!a) return `Não há ${str(input.ref) || "esse documento"} nesta conversa.`;
+  // O design livre volta como HTML (para ajustar e mandar com design_document).
+  if (a.canvas.kind === "design")
+    return `${artifactSummary(a)} (${a.ref}), formato ${a.canvas.format}${a.canvas.look ? `, identidade “${a.canvas.look.name}” (id ${a.canvas.look.id})` : ""}. Os logos aparecem como file:<id> (pode manter). HTML:\n<html_design>\n${a.canvas.html}\n</html_design>\nPara ajustar, mande a versão inteira com design_document e revises: "${a.ref}".`;
   return `${artifactSummary(a)} (${a.ref}), no formato em que foi criado:\n${JSON.stringify(a.canvas).slice(0, 80_000)}`;
 }
 
@@ -1385,6 +1394,7 @@ export async function runPowerTool(kit: PowerKit, name: string, raw: unknown): P
   if (name === "ask_user") return askUser(kit, input);
   if (name.startsWith("create_")) return createCanvas(kit, name, input);
   if (name === "visual_identities") return runIdentityTool(kit, input);
+  if (name === "design_document") return runDesignTool(kit, input);
   if (name === "generate_image") return generateImage(kit, input);
   if (name === "brand_kit" || name === "render_art" || name === "read_art") return runArtTool(kit, name, input);
   if (name === "propose_task") return proposeTask(kit, input);
@@ -1408,6 +1418,8 @@ export function describePowerStep(name: string, raw: unknown) {
   if (name === "create_spreadsheet") return `Montando a planilha${t ? ` “${t}”` : ""}`;
   if (name === "read_canvas") return `Lendo ${str(input.ref).toUpperCase() || "o documento"}`;
   if (name === "visual_identities") return str(input.id) ? "Lendo o Guia da marca" : "Vendo as identidades visuais";
+  if (name === "design_document")
+    return str(input.revises) ? `Corrigindo o design ${str(input.revises).toUpperCase()}` : `Desenhando${t ? ` “${t}”` : " o documento"}`;
   if (name === "ask_user") return "Preparando perguntas para você";
   if (name === "brand_kit") return "Lendo a marca do cliente";
   if (name === "render_art")
@@ -1425,6 +1437,7 @@ export function describePowerStep(name: string, raw: unknown) {
 export function summarizePowerStep(name: string, output: string) {
   if (name === "brand_kit" || name === "render_art" || name === "read_art") return summarizeArtStep(name, output);
   if (name === "visual_identities") return summarizeIdentityStep(output);
+  if (name === "design_document") return summarizeDesignStep(output);
   if (/^As perguntas/.test(output)) return "esperando suas respostas";
   if (name === "campaign_alerts") return /^A pessoa ainda/.test(output) ? "nenhum aviso" : `${output.split("\n").length} avisos`;
   if (/^(Mostrado|Imagem pronta|Proposta pronta|Pronto no canvas)/.test(output))

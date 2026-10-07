@@ -2,9 +2,10 @@ import crypto from "node:crypto";
 import { callRpc, signGcsUrl, type GcsCredentials } from "./_drive.js";
 import type { ToolSpec } from "./_ai-llm.js";
 import type { PowerKit } from "./_ai-powers.js";
-import { localRenderer, renderHeaders, renderOrigin, resolveClient } from "./_ai-art.js";
+import { localRenderer, renderHeaders, renderOrigin, resolveClient } from "./_ai-render.js";
 import type { ArtAsset } from "./_art-render.js";
 import type { CanvasArtifact } from "../src/mavi-artifacts.js";
+import { DESIGN_FORMATS, DESIGN_FORMAT_KEYS, DESIGN_PAGES_MAX, countPages, type DesignFormat } from "../src/mavi-design.js";
 import {
   BUILTIN_LOOKS,
   BUILTIN_PREFIX,
@@ -278,40 +279,9 @@ export async function canvasPdf(
   auth: string,
   body: Record<string, unknown>,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
-  const company = str(body.company);
-  if (!UUID.test(company)) return { status: 400, body: { error: "Empresa inválida." } };
-  if (!env.credentials || !env.bucket) return { status: 500, body: { error: "Credenciais do GCS não configuradas." } };
-  const html = typeof body.html === "string" ? body.html : "";
-  if (html.length < 20) return { status: 400, body: { error: "Mande a página do documento." } };
-  const creds = env.credentials;
-  const bucket = env.bucket;
-  const sign = (path: string) => signGcsUrl(creds, bucket, path, "GET", { expiresInSeconds: 900 });
-  const assets: ArtAsset[] = [];
-  const files = [...new Set((Array.isArray(body.files) ? body.files : []).filter((f): f is string => typeof f === "string" && UUID.test(f)))].slice(0, 30);
-  if (files.length) {
-    const r = await callRpc<{ id: string; path: string }[]>(env, fetchImpl, auth, "identity_file_targets", {
-      p_company: company,
-      p_files: files,
-    });
-    if (!r.ok) return { status: r.status, body: { error: r.error } };
-    for (const f of r.data ?? []) assets.push({ token: `file:${f.id}`, url: sign(f.path) });
-  }
-  const images = body.images && typeof body.images === "object" ? (body.images as Record<string, unknown>) : {};
-  const pattern = IMAGE_PATH(company);
-  for (const [ref, path] of Object.entries(images).slice(0, 40)) {
-    if (!/^I\d{1,2}$/.test(ref) || typeof path !== "string" || !pattern.test(path)) continue;
-    // A imagem é de uma conversa que a pessoa vê (como em ai-image-urls).
-    const filter = encodeURIComponent(JSON.stringify([{ path }]));
-    const res = await fetchImpl(
-      `${env.supabaseUrl}/rest/v1/ai_messages?select=id&company_id=eq.${company}&artifacts=cs.${filter}&limit=1`,
-      { headers: { apikey: env.supabaseKey, Authorization: auth } },
-    );
-    const rows = res.ok ? ((await res.json()) as unknown[]) : [];
-    if (rows.length) assets.push({ token: `img:${ref}`, url: sign(path) });
-  }
-  // Referências que não foram liberadas somem (o desenho segue sem elas).
-  const allowed = new Set(assets.map((a) => a.token));
-  const page = html.replace(/(?:file:[0-9a-f-]{36}|img:I\d{1,2})(?=["')])/gi, (t) => (allowed.has(t) ? t : ""));
+  const prep = await prepareRender(env, fetchImpl, auth, body);
+  if ("error" in prep) return { status: prep.status, body: { error: prep.error } };
+  const { company, page, assets, creds, bucket } = prep;
   const path = `ai-exports/${company}/${crypto.randomUUID()}.pdf`;
   const put = signGcsUrl(creds, bucket, path, "PUT", { contentType: "application/pdf" });
   try {
@@ -325,20 +295,135 @@ export async function canvasPdf(
         signal: AbortSignal.timeout(60_000),
       });
       if (!saved.ok) throw new Error(`Não foi possível guardar o PDF (${saved.status}).`);
-    } else {
-      const res = await fetchImpl(`${renderOrigin()}/api/render-art`, {
-        method: "POST",
-        headers: renderHeaders(auth),
-        body: JSON.stringify({ mode: "pdf", html: page, assets, put: { url: put } }),
-        signal: AbortSignal.timeout(85_000),
-      });
-      const out = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(out.error ?? `O PDF falhou (${res.status}).`);
-    }
+    } else await renderRemote(fetchImpl, auth, { mode: "pdf", html: page, assets, put: { url: put } });
   } catch (e) {
     return { status: 502, body: { error: (e as Error).message.slice(0, 300) } };
   }
-  return { status: 200, body: { url: sign(path) } };
+  return { status: 200, body: { url: signGcsUrl(creds, bucket, path, "GET", { expiresInSeconds: 900 }) } };
+}
+
+/**
+ * As páginas do design livre em imagem (para o PowerPoint, um slide por
+ * página): ficam no GCS por um link de 15 minutos.
+ */
+export async function canvasPages(
+  env: PdfEnv,
+  fetchImpl: typeof fetch,
+  auth: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const prep = await prepareRender(env, fetchImpl, auth, body);
+  if ("error" in prep) return { status: prep.status, body: { error: prep.error } };
+  const { company, page, assets, creds, bucket } = prep;
+  const format = DESIGN_FORMATS[(DESIGN_FORMAT_KEYS as string[]).includes(str(body.format)) ? (str(body.format) as DesignFormat) : "slides"];
+  const count = Math.max(1, Math.min(DESIGN_PAGES_MAX, countPages(page)));
+  const folder = `ai-exports/${company}/${crypto.randomUUID()}`;
+  const paths = Array.from({ length: count }, (_, i) => `${folder}/p${i + 1}.jpg`);
+  const input = { html: page, assets, width: format.width, height: format.height, scale: 1.5, type: "jpeg" as const };
+  try {
+    if (!process.env.VERCEL) {
+      const { renderPages } = await localRenderer();
+      const r = await renderPages(input, fetchImpl);
+      for (const [k, img] of r.images.entries()) {
+        const saved = await fetchImpl(signGcsUrl(creds, bucket, paths[k], "PUT", { contentType: "image/jpeg" }), {
+          method: "PUT",
+          headers: { "Content-Type": "image/jpeg" },
+          body: new Uint8Array(img.data),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!saved.ok) throw new Error(`Não foi possível guardar a página ${k + 1} (${saved.status}).`);
+      }
+    } else
+      await renderRemote(fetchImpl, auth, {
+        mode: "pages",
+        ...input,
+        puts: paths.map((p) => signGcsUrl(creds, bucket, p, "PUT", { contentType: "image/jpeg" })),
+      });
+  } catch (e) {
+    return { status: 502, body: { error: (e as Error).message.slice(0, 300) } };
+  }
+  return {
+    status: 200,
+    body: { urls: paths.map((p) => signGcsUrl(creds, bucket, p, "GET", { expiresInSeconds: 900 })), width: format.width, height: format.height },
+  };
+}
+
+/** Chama o Chromium da Vercel (/api/render-art). */
+export async function renderRemote<T = Record<string, unknown>>(fetchImpl: typeof fetch, auth: string, payload: Record<string, unknown>) {
+  const res = await fetchImpl(`${renderOrigin()}/api/render-art`, {
+    method: "POST",
+    headers: renderHeaders(auth),
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(85_000),
+  });
+  const out = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(out.error ?? `O desenho falhou (${res.status}).`);
+  return out;
+}
+
+/**
+ * Os arquivos que a página usa, conferidos: logos e fontes da Marca (de um
+ * cliente que a pessoa atende, ou da identidade da empresa/galeria) e
+ * imagens de uma conversa da empresa. `trusted` (a ferramenta da MAVI, com
+ * as imagens desta conversa) pula a conferência das imagens.
+ */
+export async function renderAssets(
+  env: PdfEnv,
+  fetchImpl: typeof fetch,
+  auth: string,
+  company: string,
+  files: string[],
+  images: Record<string, unknown>,
+  trusted = false,
+): Promise<ArtAsset[] | { status: number; error: string }> {
+  if (!env.credentials || !env.bucket) return { status: 500, error: "Credenciais do GCS não configuradas." };
+  const creds = env.credentials;
+  const bucket = env.bucket;
+  const sign = (path: string) => signGcsUrl(creds, bucket, path, "GET", { expiresInSeconds: 900 });
+  const assets: ArtAsset[] = [];
+  const ids = [...new Set(files.filter((f) => UUID.test(f)))].slice(0, 30);
+  if (ids.length) {
+    const r = await callRpc<{ id: string; path: string }[]>(env, fetchImpl, auth, "identity_file_targets", {
+      p_company: company,
+      p_files: ids,
+    });
+    if (!r.ok) return { status: r.status, error: r.error };
+    for (const f of r.data ?? []) assets.push({ token: `file:${f.id}`, url: sign(f.path) });
+  }
+  const pattern = IMAGE_PATH(company);
+  for (const [ref, path] of Object.entries(images).slice(0, 40)) {
+    if (!/^I\d{1,2}$/.test(ref) || typeof path !== "string" || !pattern.test(path)) continue;
+    if (!trusted) {
+      // A imagem é de uma conversa que a pessoa vê (como em ai-image-urls).
+      const filter = encodeURIComponent(JSON.stringify([{ path }]));
+      const res = await fetchImpl(
+        `${env.supabaseUrl}/rest/v1/ai_messages?select=id&company_id=eq.${company}&artifacts=cs.${filter}&limit=1`,
+        { headers: { apikey: env.supabaseKey, Authorization: auth } },
+      );
+      const rows = res.ok ? ((await res.json()) as unknown[]) : [];
+      if (!rows.length) continue;
+    }
+    assets.push({ token: `img:${ref}`, url: sign(path) });
+  }
+  return assets;
+}
+/** Referências que não foram liberadas somem (o desenho segue sem elas). */
+export const keepAllowed = (html: string, assets: ArtAsset[]) => {
+  const allowed = new Set(assets.map((a) => a.token));
+  return html.replace(/(?:file:[0-9a-f-]{36}|img:I\d{1,2})(?=["')\s])/gi, (t) => (allowed.has(t) ? t : ""));
+};
+
+async function prepareRender(env: PdfEnv, fetchImpl: typeof fetch, auth: string, body: Record<string, unknown>) {
+  const company = str(body.company);
+  if (!UUID.test(company)) return { status: 400, error: "Empresa inválida." };
+  if (!env.credentials || !env.bucket) return { status: 500, error: "Credenciais do GCS não configuradas." };
+  const html = typeof body.html === "string" ? body.html : "";
+  if (html.length < 20) return { status: 400, error: "Mande a página do documento." };
+  const files = (Array.isArray(body.files) ? body.files : []).filter((f): f is string => typeof f === "string");
+  const images = body.images && typeof body.images === "object" ? (body.images as Record<string, unknown>) : {};
+  const assets = await renderAssets(env, fetchImpl, auth, company, files, images);
+  if (!Array.isArray(assets)) return assets;
+  return { company, page: keepAllowed(html, assets), assets, creds: env.credentials, bucket: env.bucket };
 }
 
 /** Os links (15 min) dos logos e fontes que um documento usa, para a tela. */

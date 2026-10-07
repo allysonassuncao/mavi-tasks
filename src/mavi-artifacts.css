@@ -1176,3 +1176,10 @@
     display: none;
   }
 }
+.canvas-design {
+  width: 100%;
+}
+.canvas-design iframe {
+  background: #e9ecea;
+  border-radius: 10px;
+}

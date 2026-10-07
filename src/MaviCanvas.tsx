@@ -7,6 +7,7 @@ import {
   Download,
   FileSpreadsheet,
   FileText,
+  LayoutTemplate,
   Loader2,
   Palette,
   Pencil,
@@ -27,10 +28,12 @@ import {
   sheetCsv,
   sheetXlsx,
   slidesPptx,
+  imagesPptx,
   type ExportImage,
 } from "./mavi-export";
 import { CANVAS_CSS, canvasPage, documentHtml, slideHtml, type HtmlOptions } from "./mavi-doc-html";
-import { canvasPdf, dataUrl, saveIdentity, useLookAssets } from "./identities";
+import { canvasPages, canvasPdf, dataUrl, saveIdentity, useLookAssets } from "./identities";
+import { DESIGN_FORMATS, designPage, designTokens, type DesignFormat } from "./mavi-design";
 import { builtinLook, legacyLook, logoFor, lookFiles, sanitizeTokens, type Look } from "./visual-identity";
 import type {
   Canvas,
@@ -51,6 +54,7 @@ const KIND = {
   document: { icon: FileText, label: "Documento" },
   slides: { icon: Presentation, label: "Apresentação" },
   sheet: { icon: FileSpreadsheet, label: "Planilha" },
+  design: { icon: LayoutTemplate, label: "Design" },
 };
 function meta(c: Canvas) {
   if (c.kind === "document") {
@@ -58,6 +62,7 @@ function meta(c: Canvas) {
     return `${words.toLocaleString("pt-BR")} palavras`;
   }
   if (c.kind === "slides") return `${c.slides.length} ${c.slides.length === 1 ? "slide" : "slides"}`;
+  if (c.kind === "design") return `${c.pages} ${c.pages === 1 ? "página" : "páginas"} · ${DESIGN_FORMATS[c.format].label}`;
   const rows = c.sheets.reduce((n, s) => n + s.rows.length, 0);
   return `${c.sheets.length} ${c.sheets.length === 1 ? "aba" : "abas"} · ${rows.toLocaleString("pt-BR")} linhas`;
 }
@@ -70,6 +75,8 @@ const fontNote = (families: string[]) =>
 /** O tema do documento (o antigo das apresentações, ou o claro). */
 export function lookOf(c: Canvas): Look | null {
   if (c.kind === "sheet") return null;
+  // O design livre traz o próprio CSS: sem identidade, nada por cima.
+  if (c.kind === "design") return c.look ?? null;
   return c.look ?? (c.kind === "slides" ? legacyLook(c.theme) : DOC_LOOK);
 }
 
@@ -178,10 +185,14 @@ export function CanvasPanel({
   const [saved, setSaved] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const look = useMemo(() => lookOf(c), [c]);
-  const fileUrls = useLookAssets(host.company, look);
+  const design = useMemo(() => (c.kind === "design" ? designTokens(c.html) : null), [c]);
+  const fileUrls = useLookAssets(host.company, look, design?.files ?? []);
   const refs = useMemo(
-    () => (c.kind === "slides" ? [...new Set(c.slides.map((s) => s.image).filter((r): r is string => !!r))] : []),
-    [c],
+    () =>
+      c.kind === "slides"
+        ? [...new Set(c.slides.map((s) => s.image).filter((r): r is string => !!r))]
+        : (design?.images ?? []),
+    [c, design],
   );
   const imageUrls = useImageLinks(host.company, images, refs);
   const screen: HtmlOptions = useMemo(
@@ -213,10 +224,15 @@ export function CanvasPanel({
     },
     gradient: gradientImage,
   };
+  type Paged = Extract<Canvas, { kind: "document" | "slides" | "design" }>;
+  /** A página inteira (o que vai para o PDF e o .html). */
+  const pageOf = (doc: Paged, lk: Look | null, url?: (t: string) => string | null) =>
+    doc.kind === "design" ? designPage(doc.html, doc.format, lk, url) : canvasPage(doc, lk ?? DOC_LOOK, { url });
+  const filesOf = (lk: Look | null) => [...new Set([...(lk ? lookFiles(lk) : []), ...(design?.files ?? [])])];
   /** A página com tudo dentro (logos, fontes e imagens em data:). */
-  async function selfContained(doc: Extract<Canvas, { kind: "document" | "slides" }>, lk: Look) {
+  async function selfContained(doc: Paged, lk: Look | null) {
     const tokens: [string, string | undefined][] = [
-      ...lookFiles(lk).map((id): [string, string | undefined] => [`file:${id}`, fileUrls[id]]),
+      ...filesOf(lk).map((id): [string, string | undefined] => [`file:${id}`, fileUrls[id]]),
       ...refs.map((r): [string, string | undefined] => [`img:${r}`, imageUrls[r]]),
     ];
     const data = new Map<string, string>(
@@ -224,15 +240,20 @@ export function CanvasPanel({
         tokens.filter((t): t is [string, string] => !!t[1]).map(async ([t, u]): Promise<[string, string]> => [t, await dataUrl(u).catch(() => "")]),
       ),
     );
-    return canvasPage(doc, lk, { url: (t) => data.get(t) || null });
+    return pageOf(doc, lk, (t) => data.get(t) || null);
   }
-  async function pdf(doc: Extract<Canvas, { kind: "document" | "slides" }>, lk: Look) {
-    const paths = Object.fromEntries(
-      refs.map((r) => [r, images.get(r)?.path]).filter((p): p is [string, string] => !!p[1]),
-    );
-    const url = await canvasPdf(host.company, canvasPage(doc, lk), lookFiles(lk), paths);
+  const imagePaths = () =>
+    Object.fromEntries(refs.map((r) => [r, images.get(r)?.path]).filter((p): p is [string, string] => !!p[1]));
+  async function pdf(doc: Paged, lk: Look | null) {
+    const url = await canvasPdf(host.company, pageOf(doc, lk), filesOf(lk), imagePaths());
     const blob = await (await fetch(url)).blob();
     saveBlob(fileName(doc.title, "pdf"), blob);
+  }
+  /** O design livre no PowerPoint: cada página como imagem. */
+  async function designPptx(doc: Extract<Canvas, { kind: "design" }>, lk: Look | null) {
+    const r = await canvasPages(host.company, pageOf(doc, lk), filesOf(lk), imagePaths(), doc.format);
+    const pics = await Promise.all(r.urls.map((u) => dataUrl(u)));
+    saveBlob(fileName(doc.title, "pptx"), await imagesPptx(doc.title, pics, r.width, r.height));
   }
   const exports: { label: string; run: () => Promise<void> }[] =
     c.kind === "document" && look
@@ -258,6 +279,17 @@ export function CanvasPanel({
               run: async () => saveBlob(fileName(c.title, "html"), new Blob([await selfContained(c, look)], { type: "text/html" })),
             },
           ]
+        : c.kind === "design"
+          ? [
+              { label: "PDF", run: () => pdf(c, look) },
+              {
+                label: "Página (.html)",
+                run: async () => saveBlob(fileName(c.title, "html"), new Blob([await selfContained(c, look)], { type: "text/html" })),
+              },
+              ...(c.format === "slides" || c.format === "square"
+                ? [{ label: "PowerPoint (páginas como imagem)", run: () => designPptx(c, look) }]
+                : []),
+            ]
         : c.kind === "sheet"
           ? [
               { label: "Excel (.xlsx)", run: async () => saveBlob(fileName(c.title, "xlsx"), await sheetXlsx(c.sheets)) },
@@ -356,7 +388,7 @@ export function CanvasPanel({
                   {e.label}
                 </button>
               ))}
-              {look && (look.heading.source !== "system" || look.body.source !== "system") && (
+              {look && c.kind !== "design" && (look.heading.source !== "system" || look.body.source !== "system") && (
                 <p className="canvas-menu-note">
                   {fontNote([...new Set([look.heading, look.body].filter((f) => f.source !== "system").map((f) => f.family))])}
                 </p>
@@ -373,11 +405,57 @@ export function CanvasPanel({
           <ShadowHtml css={SCREEN_CSS.document} html={documentHtml(c.title, c.markdown, look, screen)} />
         ) : c.kind === "slides" && look ? (
           <SlidesView canvas={c} look={look} options={screen} />
+        ) : c.kind === "design" ? (
+          <DesignView page={designPage(c.html, c.format, look, screen.url)} format={c.format} title={c.title} />
         ) : c.kind === "sheet" ? (
           <SheetView sheets={c.sheets} />
         ) : null}
       </div>
     </aside>
+  );
+}
+
+// ------------------------------------------------------------ design livre
+/**
+ * As páginas do design livre num iframe sem scripts (sandbox só com a mesma
+ * origem, para medir a altura), na largura do painel.
+ */
+function DesignView({ page, format, title }: { page: string; format: DesignFormat; title: string }) {
+  const f = DESIGN_FORMATS[format];
+  const box = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [width, setWidth] = useState(0);
+  const [height, setHeight] = useState(f.height + 32);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el);
+    setWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  function measure() {
+    const doc = frame.current?.contentDocument;
+    if (!doc) return;
+    const fit = () => setHeight(Math.max(f.height, doc.documentElement.scrollHeight));
+    fit();
+    void doc.fonts?.ready.then(fit);
+  }
+  const frameWidth = f.width + 32;
+  const scale = width ? Math.min(1, width / frameWidth) : 1;
+  return (
+    <div className="canvas-design" ref={box}>
+      <div style={{ height: height * scale, width: frameWidth * scale, margin: "0 auto" }}>
+        <iframe
+          ref={frame}
+          title={title}
+          sandbox="allow-same-origin"
+          srcDoc={page}
+          onLoad={measure}
+          style={{ width: frameWidth, height, transform: `scale(${scale})`, transformOrigin: "0 0", border: 0, display: "block" }}
+        />
+      </div>
+    </div>
   );
 }
 

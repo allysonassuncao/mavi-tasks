@@ -3,8 +3,8 @@ import type {
   SheetTab,
   Slide,
   TableColumn,
-} from "./mavi-artifacts";
-import { contrast, legacyLook, type Look } from "./visual-identity";
+} from "./mavi-artifacts.js";
+import { contrast, legacyLook, type Look } from "./visual-identity.js";
 
 /**
  * MAVI · o canvas em arquivo: documento em Word (.docx) e Markdown,
@@ -416,6 +416,19 @@ export async function slidesPptx(
     }
     if (s.notes) slide.addNotes(plain(s.notes));
   }
+  return (await pptx.write({ outputType: "blob" })) as Blob;
+}
+
+/** Um PowerPoint com uma imagem por slide (o design livre, que não é editável). */
+export async function imagesPptx(title: string, images: string[], width: number, height: number) {
+  const { default: Pptx } = await import("pptxgenjs");
+  const pptx = new Pptx();
+  const w = 13.333;
+  const h = (w * height) / width;
+  pptx.defineLayout({ name: "MAVI", width: w, height: h });
+  pptx.layout = "MAVI";
+  pptx.title = clean(title);
+  for (const data of images) pptx.addSlide().addImage({ data, x: 0, y: 0, w, h });
   return (await pptx.write({ outputType: "blob" })) as Blob;
 }
 

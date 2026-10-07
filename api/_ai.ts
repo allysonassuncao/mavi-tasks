@@ -2,7 +2,7 @@ import { insightsContextLine, type InsightsContext } from "./_campaign-insights.
 import crypto from "node:crypto";
 import { callRpc, signGcsUrl, type GcsCredentials } from "./_drive.js";
 import { extractFileText } from "./_ai-extract.js";
-import { canvasPdf, identityFileUrls } from "./_ai-identity.js";
+import { canvasPages, canvasPdf, identityFileUrls } from "./_ai-identity.js";
 import {
   EmbeddingError,
   embeddingCost,
@@ -2335,6 +2335,11 @@ export async function handleAi(
       if (!authorization?.startsWith("Bearer "))
         return { status: 401, body: { error: "Entre na sua conta." } };
       return canvasPdf(env, deps.fetch, authorization, req);
+    }
+    if (req.action === "ai-canvas-pages") {
+      if (!authorization?.startsWith("Bearer "))
+        return { status: 401, body: { error: "Entre na sua conta." } };
+      return canvasPages(env, deps.fetch, authorization, req);
     }
     if (req.action === "ai-identity-files") {
       if (!authorization?.startsWith("Bearer "))

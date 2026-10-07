@@ -1,5 +1,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { checkPdfInput, checkRenderInput, renderArt, renderPdf, type PdfInput, type RenderInput } from "./_art-render.js";
+import {
+  checkPdfInput,
+  checkRenderInput,
+  renderArt,
+  renderPages,
+  renderPdf,
+  type PagesInput,
+  type PdfInput,
+  type RenderInput,
+} from "./_art-render.js";
 
 /**
  * MAVI · arte por código na Vercel: o Chromium fica só nesta função (é
@@ -11,7 +20,9 @@ import { checkPdfInput, checkRenderInput, renderArt, renderPdf, type PdfInput, t
  * conferir) e o que a conferência automática achou.
  *
  * Com mode "pdf", imprime um documento ou uma apresentação da MAVI (a página
- * inteira, com o tamanho de página dela) e grava o PDF no link.
+ * inteira, com o tamanho de página dela) e grava o PDF no link. Com mode
+ * "pages", desenha as páginas do design livre: devolve as prévias (em
+ * base64) e a conferência, ou grava cada página num dos links de `puts`.
  */
 
 const GCS = /^https:\/\/storage\.googleapis\.com\//;
@@ -41,13 +52,51 @@ export default async function handler(
   let raw = "";
   if (typeof req.body === "object" && req.body !== null) raw = JSON.stringify(req.body);
   else for await (const chunk of req) raw += chunk;
-  let body: RenderInput & PdfInput & { put?: { url?: string }; mode?: string };
+  let body: RenderInput & PagesInput & { put?: { url?: string }; puts?: string[]; mode?: string };
   try {
     body = JSON.parse(raw || "{}");
   } catch {
     return reply(400, { error: "Pedido inválido." });
   }
   if (!(await signedIn(req.headers.authorization))) return reply(401, { error: "Entre de novo." });
+  if (body.mode === "pages") {
+    const problem = checkPdfInput(body);
+    if (problem) return reply(400, { error: problem });
+    const puts = Array.isArray(body.puts) ? body.puts.map(String) : null;
+    if (puts && (puts.length > 40 || puts.some((u) => !GCS.test(u)))) return reply(400, { error: "Links inválidos." });
+    try {
+      const r = await renderPages({
+        html: body.html,
+        assets: body.assets,
+        width: Math.min(2400, Math.max(200, Number(body.width) || 1280)),
+        height: Math.min(2400, Math.max(200, Number(body.height) || 720)),
+        scale: Number(body.scale) || 1,
+        type: body.type === "png" ? "png" : "jpeg",
+        ...(Array.isArray(body.pick) ? { pick: body.pick.map(Number).filter(Number.isInteger) } : {}),
+      });
+      if (!puts)
+        return reply(200, {
+          pages: r.pages,
+          report: r.report,
+          images: r.images.map((i) => ({ page: i.page, data: i.data.toString("base64") })),
+        });
+      let saved = 0;
+      for (const [k, img] of r.images.entries()) {
+        if (!puts[k]) break;
+        const res = await fetch(puts[k], {
+          method: "PUT",
+          headers: { "Content-Type": body.type === "png" ? "image/png" : "image/jpeg" },
+          body: new Uint8Array(img.data),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!res.ok) return reply(502, { error: `Não foi possível guardar a página ${k + 1} (${res.status}).` });
+        saved++;
+      }
+      return reply(200, { pages: r.pages, report: r.report, saved });
+    } catch (e) {
+      return reply(500, { error: (e as Error).message?.slice(0, 300) || "Não foi possível desenhar as páginas." });
+    }
+  }
   const pdf = body.mode === "pdf";
   const problem = pdf ? checkPdfInput(body) : checkRenderInput(body);
   if (problem) return reply(400, { error: problem });

@@ -76,6 +76,17 @@ export const identityFileUrls = (company: string, files: string[]) =>
       )
     : Promise.resolve({} as Record<string, string>);
 
+/** As páginas do design livre em imagem, para o PowerPoint (links de 15 min). */
+export const canvasPages = (company: string, html: string, files: string[], images: Record<string, string>, format: string) =>
+  providerAction<{ urls: string[]; width: number; height: number }>({
+    action: "ai-canvas-pages",
+    company,
+    html,
+    files,
+    images,
+    format,
+  });
+
 /** O PDF do documento, gerado no servidor (link de 15 min). */
 export const canvasPdf = (company: string, html: string, files: string[], images: Record<string, string>) =>
   providerAction<{ url: string }>({ action: "ai-canvas-pdf", company, html, files, images }).then((r) => r.url);
@@ -109,8 +120,12 @@ function brandFonts(look: Pick<Look, "faces">, urls: Record<string, string>) {
  * Os links dos arquivos do tema e as fontes carregadas na página. Devolve a
  * troca das referências (file:<id>) para o desenho da tela.
  */
-export function useLookAssets(company: string, look: Look | null | undefined) {
-  const files = useMemo(() => (look ? lookFiles(look) : []), [look]);
+export function useLookAssets(company: string, look: Look | null | undefined, extra: string[] = []) {
+  const extraKey = extra.join(",");
+  const files = useMemo(
+    () => [...new Set([...(look ? lookFiles(look) : []), ...(extraKey ? extraKey.split(",") : [])])],
+    [look, extraKey],
+  );
   const key = files.join(",");
   const [urls, setUrls] = useState<Record<string, string>>({});
   useEffect(() => {

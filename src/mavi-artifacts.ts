@@ -12,6 +12,7 @@
 // Com .js: este arquivo também roda no servidor (api/), que não completa a extensão.
 import { ruleFromInput, type CampaignAlertRule } from "./campaign-alerts.js";
 import { sanitizeLook, type Look } from "./visual-identity.js";
+import { DESIGN_FORMAT_KEYS, cleanDesignHtml, countPages, type DesignFormat } from "./mavi-design.js";
 
 export type Power =
   | "visuals"
@@ -257,6 +258,8 @@ export type SheetTab = {
 export type Canvas =
   | { kind: "document"; title: string; markdown: string; look?: Look }
   | { kind: "slides"; title: string; theme: SlideTheme; slides: Slide[]; look?: Look }
+  /** Design livre: as páginas em HTML e CSS da MAVI (mavi-design). */
+  | { kind: "design"; title: string; format: DesignFormat; html: string; pages: number; look?: Look }
   | { kind: "sheet"; title: string; sheets: SheetTab[] };
 export type CanvasArtifact = Base & {
   type: "canvas";
@@ -575,6 +578,21 @@ export function sanitizeCanvas(raw: unknown): Canvas | null {
         }
       : null;
   }
+  if (v.kind === "design") {
+    const html = typeof v.html === "string" ? cleanDesignHtml(v.html) : "";
+    const pages = countPages(html);
+    const look = sanitizeLook(v.look);
+    return html.length >= 30 && pages
+      ? {
+          kind: "design",
+          title: title || "Documento",
+          format: pick(v.format, DESIGN_FORMAT_KEYS, "a4"),
+          html,
+          pages,
+          ...(look ? { look } : {}),
+        }
+      : null;
+  }
   if (v.kind === "sheet") {
     const sheets = list(v.sheets, 5)
       .map((x, i): SheetTab | null => {
@@ -843,7 +861,9 @@ export function artifactSummary(a: AiArtifact): string {
         ? "documento"
         : c.kind === "slides"
           ? `apresentação de ${c.slides.length} slides`
-          : `planilha (${c.sheets.map((x) => x.name).join(", ")})`;
+          : c.kind === "design"
+            ? `design livre (${c.pages} ${c.pages === 1 ? "página" : "páginas"}, ${c.format}; para ajustar, leia o HTML com read_canvas)`
+            : `planilha (${c.sheets.map((x) => x.name).join(", ")})`;
     return `${what} “${c.title}”${a.revision_of ? ` (ajuste de ${a.revision_of})` : ""}`;
   }
   const state = {
