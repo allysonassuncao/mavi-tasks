@@ -12,10 +12,15 @@ export function getGcsPublicUrl(path: string): string {
 
 /**
  * A record prepared for upload (prepare_attachment / prepare_inline_image /
- * prepare_task_audio / prepare_media_receipt).
+ * prepare_task_audio / prepare_media_receipt / prepare_skill_review_file).
  */
 export type UploadTarget = {
-  kind: "attachment" | "inline-image" | "audio" | "media-receipt";
+  kind:
+    | "attachment"
+    | "inline-image"
+    | "audio"
+    | "media-receipt"
+    | "skill-review-file";
   id: string;
 };
 

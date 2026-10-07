@@ -100,6 +100,27 @@ describe("handleUpload", () => {
       `/public-bucket/c/media/k/${id}`,
     );
   });
+  it("anexo da devolução de skill: pelo registro preparado, com a regra dos anexos", async () => {
+    const fetchMock = reply([
+      { path: `c/skills/s/2/${id}`, name: "ajuste.pdf", size_bytes: 50 },
+    ]);
+    const res = await handleUpload(
+      { kind: "skill-review-file", id },
+      "Bearer user-token",
+      env,
+      fetchMock,
+    );
+    expect(res.status).toBe(200);
+    const [url, init] = (fetchMock as any).mock.calls[0];
+    expect(url).toBe(
+      "https://db.example.com/rest/v1/rpc/skill_review_file_upload_target",
+    );
+    expect(JSON.parse(init.body)).toEqual({ p_file: id });
+    expect(res.body.headers).toEqual({
+      "Content-Type": "application/pdf",
+      "x-goog-content-length-range": "0,50",
+    });
+  });
   it("imagem da descrição: só JPG, PNG ou WebP", async () => {
     const rows = [{ path: `c/u/${id}`, name: "print", size_bytes: 10 }];
     const svg = await handleUpload(

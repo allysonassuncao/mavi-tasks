@@ -14,7 +14,8 @@ import {
  *
  * Recorded audio (task descriptions and comments) goes the same way: the
  * draft prepared by prepare_task_audio, with the audio type it declared.
- * So do the receipts of Financeiro › Mídia (prepare_media_receipt), with the
+ * So do the receipts of Financeiro › Mídia (prepare_media_receipt) and the
+ * files of a returned skill (prepare_skill_review_file), with the
  * attachments' rule for file types.
  *
  * It also deletes task attachments permanently (Armazenamento page): the
@@ -25,7 +26,12 @@ import {
  */
 export type UploadRequest =
   | {
-      kind: "attachment" | "inline-image" | "audio" | "media-receipt";
+      kind:
+        | "attachment"
+        | "inline-image"
+        | "audio"
+        | "media-receipt"
+        | "skill-review-file";
       id: string;
       contentType?: string;
     }
@@ -62,7 +68,8 @@ export async function handleUpload(
     );
     if (!removed.ok) return fail(removed.status, removed.error);
     // Another copy of the task still plays this audio.
-    if (!removed.data) return { status: 200, body: { deleted: true, storage: true } };
+    if (!removed.data)
+      return { status: 200, body: { deleted: true, storage: true } };
     // The record is gone either way; a failed object removal only leaves an
     // object that no record points to.
     const res = await fetchImpl(
@@ -78,7 +85,8 @@ export async function handleUpload(
     req.kind !== "attachment" &&
     req.kind !== "inline-image" &&
     req.kind !== "audio" &&
-    req.kind !== "media-receipt"
+    req.kind !== "media-receipt" &&
+    req.kind !== "skill-review-file"
   )
     return fail(400, "Tipo de envio inválido.");
   if (typeof req.id !== "string" || !/^[0-9a-f-]{36}$/i.test(req.id))
@@ -94,22 +102,28 @@ export async function handleUpload(
       ? "attachment_upload_target"
       : req.kind === "media-receipt"
         ? "media_receipt_upload_target"
-        : req.kind === "audio"
-          ? "task_audio_upload_target"
-          : "inline_image_upload_target",
+        : req.kind === "skill-review-file"
+          ? "skill_review_file_upload_target"
+          : req.kind === "audio"
+            ? "task_audio_upload_target"
+            : "inline_image_upload_target",
     req.kind === "attachment"
       ? { p_attachment: req.id }
       : req.kind === "media-receipt"
         ? { p_receipt: req.id }
-        : req.kind === "audio"
-          ? { p_audio: req.id }
-          : { p_image: req.id },
+        : req.kind === "skill-review-file"
+          ? { p_file: req.id }
+          : req.kind === "audio"
+            ? { p_audio: req.id }
+            : { p_image: req.id },
   );
   const record = target.ok ? target.data[0] : undefined;
   if (!record) return fail(403, "Envio não autorizado ou expirado.");
 
   const contentType =
-    req.kind === "attachment" || req.kind === "media-receipt"
+    req.kind === "attachment" ||
+    req.kind === "media-receipt" ||
+    req.kind === "skill-review-file"
       ? attachmentType(record.name ?? "")
       : req.kind === "audio"
         ? recordedAudioTypes.find((t) => t === record.mime)

@@ -1,4 +1,6 @@
 import { supabase } from "./supabase";
+import { uploadToGcs } from "./gcs";
+import { validateAttachment } from "./attachments";
 
 /**
  * MAVI · skills na tela (migração 20261214090000_mavi_skills): o catálogo, o
@@ -120,8 +122,49 @@ export const saveSkill = (
       p_submit: submit,
     },
   );
-export const reviewSkill = (id: string, version: number, approve: boolean, note: string) =>
-  rpc("ai_skill_review", { p_skill: id, p_version: version, p_approve: approve, p_note: note });
+/**
+ * Aprovar ou devolver. Na devolução, note é o texto rico (serializado), plain
+ * o texto puro (vai no aviso) e files os anexos já enviados (uploadReviewFile).
+ */
+export const reviewSkill = (
+  id: string,
+  version: number,
+  approve: boolean,
+  note: string,
+  plain = note,
+  files: string[] = [],
+) =>
+  rpc("ai_skill_review", {
+    p_skill: id,
+    p_version: version,
+    p_approve: approve,
+    p_note: note,
+    p_plain: plain,
+    p_files: files,
+  });
+
+/** Um anexo da devolução (migração 20270607090000_skill_review_files). */
+export type SkillReviewFile = { id: string; name: string; path: string; size_bytes: number };
+/** Envia um anexo para a devolução da versão que espera aprovação; devolve o id. */
+export async function uploadReviewFile(id: string, version: number, file: File) {
+  const contentType = validateAttachment(file);
+  const fileId = await rpc<string>("prepare_skill_review_file", {
+    p_skill: id,
+    p_version: version,
+    p_name: file.name,
+    p_size: file.size,
+  });
+  try {
+    await uploadToGcs({ kind: "skill-review-file", id: fileId }, file, contentType);
+  } catch (error) {
+    await rpc("discard_skill_review_file", { p_file: fileId }).catch(() => {});
+    throw error;
+  }
+  await rpc("confirm_skill_review_file", { p_file: fileId });
+  return fileId;
+}
+export const reviewFiles = (id: string, version: number) =>
+  rpc<SkillReviewFile[]>("skill_review_files", { p_skill: id, p_version: version });
 export const restoreSkill = (id: string, version: number) =>
   rpc<number>("ai_skill_restore", { p_skill: id, p_version: version });
 export const setSkillAudience = (

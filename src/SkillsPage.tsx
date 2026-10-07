@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -9,6 +9,7 @@ import {
   FlaskConical,
   History,
   MessageSquare,
+  Paperclip,
   Pencil,
   Plus,
   Puzzle,
@@ -25,6 +26,11 @@ import { fold } from "./task-search";
 import type { Snapshot } from "./types";
 import { AudienceFields, type Audience } from "./AiPowersPanel";
 import { myPowers } from "./ai";
+import { RichTextContent } from "./RichTextContent";
+import { richTextPlain } from "./rich-text";
+import { validateAttachment } from "./attachments";
+import { getGcsPublicUrl } from "./gcs";
+import { DropOverlay, useFileDrop } from "./useFileDrop";
 import {
   LIMITS,
   STATE_LABELS,
@@ -39,23 +45,28 @@ import {
   listSkills,
   readReference,
   restoreSkill,
+  reviewFiles,
   reviewSkill,
   saveSkill,
   setSkillAudience,
   skillMd,
   slugify,
   undoCheck,
+  uploadReviewFile,
   validSlug,
   type CheckItem,
   type CheckUndo,
   type SkillCheck,
   type SkillDetail,
   type SkillDraft,
+  type SkillReviewFile,
   type SkillState,
   type SkillSummary,
 } from "./mavi-skills";
 import { SkillAssistant, SkillCheckPanel } from "./SkillCoach";
 import "./mavi-skills.css";
+
+const RichTextEditor = lazy(() => import("./RichTextEditor"));
 
 type Tab = "available" | "mine" | "review" | "all";
 type Editing = { id: string | null; draft: SkillDraft; skipped?: string[]; imported?: boolean };
@@ -420,6 +431,7 @@ function SkillView({
   const [busy, setBusy] = useState(false);
   const [file, setFile] = useState<{ name: string; content: string } | null>(null);
   const [returning, setReturning] = useState(false);
+  const [returnedFiles, setReturnedFiles] = useState<SkillReviewFile[]>([]);
   const [audience, setAudience] = useState<Audience | null>(null);
   // A revisão da MAVI para quem aprova (só leitura: ajustar é com quem escreveu).
   const [check, setCheck] = useState<SkillCheck | null>(null);
@@ -455,6 +467,21 @@ function SkillView({
     setShowCheck(false);
     setCheck(null);
   }, [version]);
+  // Os anexos da devolução (só numa versão devolvida, para quem edita).
+  const returnedKey =
+    detail?.version.state === "rejected" && detail.editable ? `${detail.id}:${detail.version.version}` : "";
+  useEffect(() => {
+    setReturnedFiles([]);
+    if (!returnedKey || !detail) return;
+    let alive = true;
+    reviewFiles(detail.id, detail.version.version)
+      .then((list) => alive && setReturnedFiles(list ?? []))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnedKey]);
   useEffect(() => {
     setError("");
     getSkill(id, version)
@@ -625,11 +652,19 @@ function SkillView({
           </small>
           {returning ? (
             <ReturnForm
+              company={company}
+              skill={detail.id}
+              version={v.version}
               busy={busy}
               onCancel={() => setReturning(false)}
-              onSend={(note) =>
-                void act(() => reviewSkill(detail.id, v.version, false, note), "Skill devolvida para ajustes.", () =>
-                  setVersion(undefined),
+              onSend={(note, plain, files) =>
+                void act(
+                  () => reviewSkill(detail.id, v.version, false, note, plain, files),
+                  "Skill devolvida para ajustes.",
+                  () => {
+                    setReturning(false);
+                    setVersion(undefined);
+                  },
                 )
               }
             />
@@ -679,10 +714,24 @@ function SkillView({
           readOnly
         />
       )}
-      {v.state === "rejected" && v.review_note && (
-        <p className="panel skill-note">
-          <strong>Devolvida por {who(v.reviewed_by)}:</strong> {v.review_note}
-        </p>
+      {v.state === "rejected" && (v.review_note || returnedFiles.length > 0) && (
+        <section className="panel skill-note skill-returned">
+          <strong>Devolvida por {who(v.reviewed_by)}:</strong>
+          {v.review_note && <RichTextContent value={v.review_note} />}
+          {returnedFiles.length > 0 && (
+            <ul className="skill-returned-files">
+              {returnedFiles.map((f) => (
+                <li key={f.id}>
+                  <a href={getGcsPublicUrl(f.path)} target="_blank" rel="noreferrer">
+                    <Paperclip size={14} aria-hidden="true" />
+                    <span>{f.name}</span>
+                    <small>{kb(f.size_bytes)}</small>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
       {v.state === "pending" && !isLeader && (
         <p className="panel skill-note">
@@ -783,7 +832,7 @@ function SkillView({
                       {Number(x.uses) ? ` · ${Number(x.uses)} ${Number(x.uses) === 1 ? "uso" : "usos"}` : ""}
                     </small>
                     {x.note && <small>{x.note}</small>}
-                    {x.review_note && <small>Revisão: {x.review_note}</small>}
+                    {x.review_note && <small>Revisão: {richTextPlain(x.review_note)}</small>}
                     {isLeader &&
                       (x.state === "superseded" || x.state === "approved") &&
                       x.version !== detail.published && (
@@ -817,38 +866,139 @@ function SkillView({
   );
 }
 
+/**
+ * Devolver: o "O que precisa mudar?" no editor de texto das tarefas (com
+ * imagens no texto) e anexos de até 100 MB, enviados antes da devolução.
+ * Um envio que falhou guarda os anexos que já subiram (tentar de novo não
+ * os manda outra vez).
+ */
 function ReturnForm({
+  company,
+  skill,
+  version,
   busy,
   onCancel,
   onSend,
 }: {
+  company: string;
+  skill: string;
+  version: number;
   busy: boolean;
   onCancel: () => void;
-  onSend: (note: string) => void;
+  onSend: (note: string, plain: string, files: string[]) => void;
 }) {
   const [note, setNote] = useState("");
+  const [plain, setPlain] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
+  const sent = useRef(new Map<File, string>());
+  const locked = busy || sending;
+  function add(list: FileList | File[] | null) {
+    const errors: string[] = [];
+    const next = [...files];
+    for (const file of Array.from(list ?? [])) {
+      try {
+        validateAttachment(file);
+        if (next.length >= 10) {
+          errors.push("Uma devolução tem até 10 anexos.");
+          break;
+        }
+        if (
+          !next.some(
+            (f) => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified,
+          )
+        )
+          next.push(file);
+      } catch (e) {
+        errors.push((e as Error).message);
+      }
+    }
+    setError(errors.join(" "));
+    setFiles(next);
+  }
+  const drop = useFileDrop(add, !locked);
+  async function send() {
+    setSending(true);
+    setError("");
+    try {
+      const ids: string[] = [];
+      for (const file of files) {
+        let id = sent.current.get(file);
+        if (!id) {
+          id = await uploadReviewFile(skill, version, file);
+          sent.current.set(file, id);
+        }
+        ids.push(id);
+      }
+      onSend(note, plain.trim(), ids);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
   return (
-    <div className="skill-return">
-      <Textarea
-        rows={2}
-        maxLength={500}
-        autoFocus
-        placeholder="O que precisa mudar?"
-        aria-label="O que precisa mudar"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
+    <div className="skill-return" {...drop.handlers}>
+      {drop.active && <DropOverlay label="Solte para anexar à devolução" hint="Qualquer arquivo de até 100 MB" />}
+      <Suspense fallback={<Loading variant="editor" />}>
+        <RichTextEditor
+          name="review_note"
+          label="O que precisa mudar?"
+          company={company}
+          disabled={locked}
+          onUploading={setImageUploading}
+          onChange={setNote}
+          onTextChange={setPlain}
+        />
+      </Suspense>
+      <label className={`upload-zone creation-upload skill-return-upload ${locked ? "disabled" : ""}`}>
+        <Paperclip size={16} /> Adicionar anexos <span className="upload-zone-hint">ou arraste para cá</span>
+        <Input
+          type="file"
+          multiple
+          disabled={locked}
+          onChange={(e) => {
+            add(e.target.files);
+            e.target.value = "";
+          }}
+        />
+      </label>
+      {files.map((file) => (
+        <div className="pending-file" key={`${file.name}-${file.size}-${file.lastModified}`}>
+          <Paperclip size={15} />
+          <span>
+            {file.name}
+            <small>{kb(file.size)}</small>
+          </span>
+          <Button
+            type="button"
+            className="icon-btn"
+            aria-label={`Remover ${file.name}`}
+            disabled={locked}
+            onClick={() => setFiles(files.filter((f) => f !== file))}
+          >
+            <X size={16} />
+          </Button>
+        </div>
+      ))}
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
       <span className="skill-review-actions">
-        <Button className="btn secondary" onClick={onCancel} disabled={busy}>
+        <Button className="btn secondary" onClick={onCancel} disabled={locked}>
           Cancelar
         </Button>
         <Button
           className="btn primary"
-          loading={busy}
-          disabled={note.trim().length < 3}
-          onClick={() => onSend(note.trim())}
+          loading={locked}
+          disabled={imageUploading || (plain.trim().length < 3 && !files.length)}
+          onClick={() => void send()}
         >
-          Devolver
+          {sending ? "Enviando anexos…" : "Devolver"}
         </Button>
       </span>
     </div>
