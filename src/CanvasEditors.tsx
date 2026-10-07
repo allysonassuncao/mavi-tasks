@@ -1,10 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import * as Popover from "@radix-ui/react-popover";
 import {
   ArrowDown,
   ArrowUp,
   Copy,
-  ImagePlus,
   LayoutTemplate,
   ListPlus,
   Plus,
@@ -16,7 +14,7 @@ import {
 } from "lucide-react";
 import { CANVAS_CSS, docBlocks, documentFromBlocks, slideHtml, type HtmlOptions } from "./mavi-doc-html";
 import { blocksToMarkdown, type DocBlock } from "./mavi-export";
-import { ThemePicker, type EditImage } from "./CanvasDesignEditor";
+import { ImagePicker, ThemePicker, type EditImage, type ImageUpload } from "./CanvasDesignEditor";
 import { SLIDE_LAYOUTS, type Canvas, type SheetTab, type Slide, type SlideLayout, type TableColumn } from "./mavi-artifacts";
 import type { Look } from "./visual-identity";
 import "./canvas-edit.css";
@@ -230,9 +228,10 @@ export const SlidesEditor = forwardRef<
     look: Look;
     options: HtmlOptions;
     images: EditImage[];
+    onUpload?: ImageUpload;
     onDirty: () => void;
   }
->(function SlidesEditor({ canvas, look: initialLook, options, images, onDirty }, ref) {
+>(function SlidesEditor({ canvas, look: initialLook, options, images, onUpload, onDirty }, ref) {
   const hist = useHistory({ slides: canvas.slides, look: initialLook });
   const { slides, look } = hist.state;
   // O texto que está sendo digitado (sem redesenhar).
@@ -292,7 +291,7 @@ export const SlidesEditor = forwardRef<
   const listKey: "bullets" | "left" | null = s.layout === "two_columns" ? "left" : ["bullets", "image"].includes(s.layout) ? "bullets" : null;
   return (
     <div className="cedit">
-      <div className="cedit-bar" role="toolbar" aria-label="Edição da apresentação">
+      <div className="cedit-bar wrap" role="toolbar" aria-label="Edição da apresentação">
         <UndoButtons canUndo={hist.canUndo} canRedo={hist.canRedo} go={(st) => { const v = hist.go(st); if (v) { live.current = v; setFocus(null); onDirty(); } }} />
         <span className="cedit-sep" />
         <label className="cedit-color">
@@ -344,7 +343,13 @@ export const SlidesEditor = forwardRef<
             <Trash2 size={14} /> Número
           </button>
         )}
-        {s.layout === "image" && <SimpleImagePicker images={images.filter((m) => m.token.startsWith("img:"))} onPick={(m) => editSlide(i, (x) => ({ ...x, image: m.token.slice(4) }))} />}
+        <ImagePicker
+          images={images.filter((m) => m.token.startsWith("img:"))}
+          label={s.layout === "image" ? "Trocar imagem" : "Imagem"}
+          onUpload={onUpload}
+          // Num slide sem imagem, a imagem muda o layout para "Imagem" (com os tópicos ao lado).
+          onPick={(m) => editSlide(i, (x) => ({ ...x, layout: "image", image: m.token.slice(4) }))}
+        />
         <ThemePicker look={look} onChange={(next) => change({ ...live.current, look: next })} />
         <span className="cedit-sep" />
         <button type="button" className="icon-btn" title="Slide para trás" aria-label="Slide para trás" disabled={i === 0} onClick={() => { const list = [...live.current.slides]; [list[i - 1], list[i]] = [list[i], list[i - 1]]; change({ ...live.current, slides: list }); setAt(i - 1); }}>
@@ -404,32 +409,6 @@ function ThumbShadow({ html }: { html: string }) {
     root.innerHTML = `<style>:host{display:block;pointer-events:none}${CANVAS_CSS.slides}.s{border-radius:4px}</style>${html}`;
   }, [html]);
   return <div ref={host} />;
-}
-
-function SimpleImagePicker({ images, onPick }: { images: EditImage[]; onPick: (i: EditImage) => void }) {
-  return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
-        <button type="button" className="cedit-btn" disabled={!images.length} title={images.length ? undefined : "Sem imagens nesta conversa"}>
-          <ImagePlus size={15} /> Imagem
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content className="status-menu cedit-pop" align="start" sideOffset={6}>
-          <p className="cedit-pop-title">Imagens desta conversa</p>
-          <div className="cedit-images">
-            {images.map((m) => (
-              <Popover.Close asChild key={m.token}>
-                <button type="button" title={m.label} onClick={() => onPick(m)}>
-                  <img src={m.url} alt={m.label} />
-                </button>
-              </Popover.Close>
-            ))}
-          </div>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
-  );
 }
 
 // ------------------------------------------------------------ documento
@@ -563,7 +542,7 @@ export const DocumentEditor = forwardRef<
   const curKind = cur ? kindOf(cur) : null;
   return (
     <div className="cedit">
-      <div className="cedit-bar" role="toolbar" aria-label="Edição do documento">
+      <div className="cedit-bar wrap" role="toolbar" aria-label="Edição do documento">
         <UndoButtons canUndo={hist.canUndo} canRedo={hist.canRedo} go={(st) => { const v = hist.go(st); if (v) { live.current = v; setFocus(null); onDirty(); } }} />
         <span className="cedit-sep" />
         <label className="cedit-color">
@@ -608,19 +587,16 @@ export const DocumentEditor = forwardRef<
         >
           <Rows3 size={15} /> Tabela
         </button>
-        {cur?.kind === "table" && (
-          <>
-            <button type="button" className="cedit-btn" onClick={() => editBlocks((bs) => { const t = bs[current!] as Extract<DocBlock, { kind: "table" }>; t.rows.push(t.head.map(() => "")); return bs; })}>
-              <Plus size={14} /> Linha
-            </button>
-            <button type="button" className="cedit-btn" onClick={() => editBlocks((bs) => { const t = bs[current!] as Extract<DocBlock, { kind: "table" }>; t.head.push("Coluna"); t.rows = t.rows.map((r) => [...r, ""]); return bs; })}>
-              <Columns3 size={14} /> Coluna
-            </button>
-            <button type="button" className="cedit-btn" disabled={cur.rows.length <= 1} onClick={() => editBlocks((bs) => { (bs[current!] as Extract<DocBlock, { kind: "table" }>).rows.pop(); return bs; })}>
-              <Trash2 size={13} /> Linha
-            </button>
-          </>
-        )}
+        {/* Sempre na barra (desligados fora de uma tabela): a altura não muda ao clicar. */}
+        <button type="button" className="cedit-btn" disabled={cur?.kind !== "table"} title="Linha na tabela" onClick={() => editBlocks((bs) => { const t = bs[current!] as Extract<DocBlock, { kind: "table" }>; t.rows.push(t.head.map(() => "")); return bs; })}>
+          <Plus size={14} /> Linha
+        </button>
+        <button type="button" className="cedit-btn" disabled={cur?.kind !== "table"} title="Coluna na tabela" onClick={() => editBlocks((bs) => { const t = bs[current!] as Extract<DocBlock, { kind: "table" }>; t.head.push("Coluna"); t.rows = t.rows.map((r) => [...r, ""]); return bs; })}>
+          <Columns3 size={14} /> Coluna
+        </button>
+        <button type="button" className="cedit-btn" disabled={cur?.kind !== "table" || cur.rows.length <= 1} title="Tirar a última linha da tabela" onClick={() => editBlocks((bs) => { (bs[current!] as Extract<DocBlock, { kind: "table" }>).rows.pop(); return bs; })}>
+          <Trash2 size={13} /> Linha
+        </button>
         <button
           type="button"
           className="icon-btn cedit-danger"
@@ -678,7 +654,7 @@ export const SheetEditor = forwardRef<StructuredHandle, { canvas: Extract<Canvas
     };
     return (
       <div className="cedit">
-        <div className="cedit-bar" role="toolbar" aria-label="Edição da planilha">
+        <div className="cedit-bar wrap" role="toolbar" aria-label="Edição da planilha">
           <UndoButtons canUndo={hist.canUndo} canRedo={hist.canRedo} go={(st) => { hist.go(st); onDirty(); }} />
           <span className="cedit-sep" />
           <button type="button" className="cedit-btn" onClick={() => change((s) => ({ ...s, rows: [...s.rows, s.columns.map(() => null)] }))}>

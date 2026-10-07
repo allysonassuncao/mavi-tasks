@@ -60,13 +60,30 @@ await check("quem começou a conversa salva a versão editada como mensagem dela
 });
 
 await check("sem repetir referência, só documento válido, só a dona da conversa", async () => {
-  await assert.rejects(() => q(ana, "select public.ai_canvas_edit($1,'x',$2::jsonb)", [conv, JSON.stringify(doc("D1", "x"))]), /já tem um D1/);
+  await assert.rejects(() => q(ana, "select public.ai_canvas_edit($1,'x',$2::jsonb)", [conv, JSON.stringify(doc("D1", "x"))]), /já tem essa referência/);
   await assert.rejects(
     () => q(ana, "select public.ai_canvas_edit($1,'x',$2::jsonb)", [conv, JSON.stringify({ id: "img-1", ref: "I1", type: "image", path: "x" })]),
     /Documento inválido/,
   );
   await assert.rejects(() => q(ana, "select public.ai_canvas_edit($1,'x',$2::jsonb)", [conv, JSON.stringify(doc("X9", "x"))]), /Referência inválida/);
   await assert.rejects(() => q(bia, "select public.ai_canvas_edit($1,'x',$2::jsonb)", [conv, JSON.stringify(doc("D3", "x"))]), /Só quem começou/);
+});
+
+await check("as imagens enviadas no editor entram como anexos da versão", async () => {
+  const img = (ref, path) => ({ id: `img-${ref}`, ref, type: "image", path, prompt: "foto.png", size: "square", model: "enviada pela pessoa" });
+  const ok = `ai-images/${A}/00000000-0000-4000-8000-0000000000aa.png`;
+  await q(ana, "select public.ai_canvas_edit($1,'Editei',$2::jsonb,$3::jsonb)", [conv, JSON.stringify(doc("D5", "x")), JSON.stringify([img("I1", ok)])]);
+  const last = (await q(ana, "select artifacts from ai_messages where conversation_id = $1 order by id desc limit 1", [conv]))[0];
+  assert.deepEqual(last.artifacts.map((a) => a.ref), ["D5", "I1"]);
+  // Caminho de outra empresa, ou referência repetida: não.
+  await assert.rejects(
+    () => q(ana, "select public.ai_canvas_edit($1,'x',$2::jsonb,$3::jsonb)", [conv, JSON.stringify(doc("D6", "x")), JSON.stringify([img("I2", `ai-images/${uid(99)}/00000000-0000-4000-8000-0000000000ab.png`)])]),
+    /Documento inválido/,
+  );
+  await assert.rejects(
+    () => q(ana, "select public.ai_canvas_edit($1,'x',$2::jsonb,$3::jsonb)", [conv, JSON.stringify(doc("D6", "x")), JSON.stringify([img("I1", ok)])]),
+    /já tem essa referência/,
+  );
 });
 
 console.log(`\n${passed} verificações passaram.`);

@@ -362,3 +362,102 @@
 .mavi-msg-edit .canvas-card {
   background: #fff;
 }
+
+/* A barra em várias linhas: os controles ficam sempre (desligados quando não
+   servem), então a altura só muda com a largura do painel. */
+.cedit-bar.wrap {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 46px;
+  padding: 6px 8px;
+  overflow: visible;
+  row-gap: 6px;
+}
+.cedit-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-right: 6px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border);
+}
+.cedit-group:last-child {
+  border-right: 0;
+}
+.cedit-bar .icon-btn:disabled,
+.cedit-bar select:disabled,
+.cedit-bar input:disabled,
+.cedit-color.off {
+  opacity: 0.4;
+  cursor: default;
+}
+.cedit > .cedit-hint {
+  margin: -4px 2px 0;
+}
+.cedit-upload {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1.5px dashed #c9d3cf;
+  border-radius: 10px;
+  background: #fafcf9;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.cedit-upload:hover:not(:disabled) {
+  border-color: #4f7d2d;
+}
+.cedit-upload small {
+  grid-column: 2;
+  font-weight: 400;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.cedit-pop.wide {
+  width: 340px;
+}
+.cedit-swatches {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.cedit-swatch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: #4f5c5c;
+  cursor: pointer;
+}
+.cedit-pop .cedit-swatch input[type="color"] {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+/* Tela cheia do canvas */
+.canvas-pane.full {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  width: auto;
+  max-width: none;
+  border-radius: 0;
+}

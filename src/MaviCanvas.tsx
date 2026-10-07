@@ -10,6 +10,8 @@ import {
   HardDriveUpload,
   LayoutTemplate,
   Loader2,
+  Maximize2,
+  Minimize2,
   Move,
   PenLine,
   Sparkles,
@@ -22,9 +24,17 @@ import {
 import { formatValue } from "./dashboards";
 import { ShadowHtml } from "./ShadowHtml";
 import { DriveSaveDialog, type SaveFormat } from "./DriveSaveDialog";
-import { DesignEditor, type DesignEditorHandle, type EditImage } from "./CanvasDesignEditor";
+import { DesignEditor, type DesignEditorHandle, type EditImage, type ImageUpload } from "./CanvasDesignEditor";
 import { DocumentEditor, SheetEditor, SlidesEditor, type StructuredHandle } from "./CanvasEditors";
-import { editNote, editedArtifact, saveCanvasEdit } from "./canvas-edit";
+import {
+  editNote,
+  editedArtifact,
+  saveCanvasEdit,
+  uploadCanvasImage,
+  uploadedArtifact,
+  usedUploads,
+  type UploadedImage,
+} from "./canvas-edit";
 import type { DriveLocation } from "./types";
 import type { ArtifactHost } from "./MaviArtifacts";
 import { imageLink } from "./MaviArtifacts";
@@ -203,6 +213,18 @@ export function CanvasPanel({
   const [dirty, setDirty] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const designEditor = useRef<DesignEditorHandle>(null);
+  // As imagens enviadas do computador nesta edição (viram anexos se a versão usar).
+  const [uploads, setUploads] = useState<UploadedImage[]>([]);
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key === "Escape" && !(t?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t?.tagName ?? ""))) setFull(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
   const structured = useRef<StructuredHandle>(null);
   const [saved, setSaved] = useState(false);
   const body = useRef<HTMLDivElement>(null);
@@ -221,9 +243,11 @@ export function CanvasPanel({
   const screen: HtmlOptions = useMemo(
     () => ({
       url: (token) =>
-        token.startsWith("file:") ? (fileUrls[token.slice(5)] ?? null) : (imageUrls[token.slice(4)] ?? null),
+        token.startsWith("file:")
+          ? (fileUrls[token.slice(5)] ?? null)
+          : (imageUrls[token.slice(4)] ?? uploads.find((u) => `img:${u.ref}` === token)?.url ?? null),
     }),
-    [fileUrls, imageUrls],
+    [fileUrls, imageUrls, uploads],
   );
   async function run(label: string, work: () => Promise<void>) {
     setBusy(label);
@@ -328,6 +352,7 @@ export function CanvasPanel({
   }
   // As imagens que o editor oferece: as da conversa e os logos do tema.
   const editImages: EditImage[] = [
+    ...uploads.map((u) => ({ token: `img:${u.ref}`, url: u.url, label: `${u.ref} · ${u.name}` })),
     ...[...images.keys()]
       .filter((r) => imageUrls[r])
       .map((r) => ({ token: `img:${r}`, url: imageUrls[r], label: `${r} · ${images.get(r)?.prompt.slice(0, 60) ?? ""}` })),
@@ -335,6 +360,17 @@ export function CanvasPanel({
       .filter((id) => fileUrls[id] && (look?.logo.light === id || look?.logo.dark === id))
       .map((id) => ({ token: `file:${id}`, url: fileUrls[id], label: "Logo da identidade" })),
   ];
+  const onUpload: ImageUpload | undefined =
+    host.nextImageRef && host.conversation
+      ? async (file) => {
+          const r = await uploadCanvasImage(host.company, file);
+          const ref = host.nextImageRef!(uploads.map((u) => u.ref));
+          const u = { ref, path: r.path, url: r.url, name: file.name };
+          setUploads((list) => [...list, u]);
+          setDirty(true);
+          return { token: `img:${ref}`, url: r.url, label: `${ref} · ${file.name}` };
+        }
+      : undefined;
   function stopEditing() {
     if (dirty && !window.confirm("Descartar as mudanças desta edição?")) return;
     setEditing(false);
@@ -357,8 +393,10 @@ export function CanvasPanel({
     try {
       const saved = editedArtifact(artifact, canvas, host.nextDocRef());
       const note = editNote(artifact, saved);
-      await saveCanvasEdit(host.conversation, note, saved);
-      host.onCanvasEdited(saved, note);
+      const pics = usedUploads(canvas, uploads).map(uploadedArtifact);
+      await saveCanvasEdit(host.conversation, note, saved, pics);
+      host.onCanvasEdited(saved, note, pics);
+      setUploads([]);
       host.notify(`Salvo como ${saved.ref}. A MAVI continua a partir desta versão.`);
       setEditing(false);
       setEditAs(null);
@@ -387,7 +425,7 @@ export function CanvasPanel({
     });
   }
   return (
-    <aside className="canvas-pane" aria-label={`${KIND[c.kind].label}: ${c.title}`}>
+    <aside className={`canvas-pane${full ? " full" : ""}`} aria-label={`${KIND[c.kind].label}: ${c.title}`}>
       {editing ? (
         <header className="canvas-head canvas-head-editing">
           <span className="canvas-card-icon small" aria-hidden="true">
@@ -414,6 +452,16 @@ export function CanvasPanel({
               <Move size={15} /> Mover livre
             </button>
           )}
+          <button
+            type="button"
+            className={editing ? "btn secondary" : "icon-btn"}
+            title={full ? "Sair da tela cheia (Esc)" : "Tela cheia"}
+            aria-label={full ? "Sair da tela cheia" : "Tela cheia"}
+            onClick={() => setFull((x) => !x)}
+          >
+            {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            {editing ? (full ? " Sair da tela cheia" : " Tela cheia") : null}
+          </button>
           <button type="button" className="btn secondary" disabled={savingEdit} onClick={stopEditing}>
             Descartar
           </button>
@@ -513,6 +561,16 @@ export function CanvasPanel({
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
+        <button
+            type="button"
+            className={editing ? "btn secondary" : "icon-btn"}
+            title={full ? "Sair da tela cheia (Esc)" : "Tela cheia"}
+            aria-label={full ? "Sair da tela cheia" : "Tela cheia"}
+            onClick={() => setFull((x) => !x)}
+          >
+            {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            {editing ? (full ? " Sair da tela cheia" : " Tela cheia") : null}
+          </button>
         <button type="button" className="icon-btn" aria-label="Fechar o canvas" onClick={onClose}>
           <X size={17} />
         </button>
@@ -551,11 +609,12 @@ export function CanvasPanel({
                   look={e.look ?? null}
                   url={screen.url!}
                   images={editImages}
+                  onUpload={onUpload}
                   title={e.title}
                   onDirty={markDirty}
                 />
               );
-            if (e.kind === "slides" && look) return <SlidesEditor ref={structured} canvas={e} look={look} options={screen} images={editImages} onDirty={markDirty} />;
+            if (e.kind === "slides" && look) return <SlidesEditor ref={structured} canvas={e} look={look} options={screen} images={editImages} onUpload={onUpload} onDirty={markDirty} />;
             if (e.kind === "document" && look) return <DocumentEditor ref={structured} canvas={e} look={look} options={screen} onDirty={markDirty} />;
             if (e.kind === "sheet") return <SheetEditor ref={structured} canvas={e} onDirty={markDirty} />;
             return null;

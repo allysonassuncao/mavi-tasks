@@ -34,7 +34,7 @@ import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
 import { AttachButton, AttachmentTray, FileChip, useAttachmentTray } from "./MaviAttachments";
 import { conversationAttachments, type Attachment } from "./mavi-attachments";
 import { CanvasPanel, type CanvasSaveRequest } from "./MaviCanvas";
-import { nextDocRef } from "./canvas-edit";
+import { nextDocRef, nextRef } from "./canvas-edit";
 import { AnswerCost, ConversationCostButton, messageCost } from "./MaviCost";
 import { AnswerFeedback } from "./MaviFeedback";
 import { myVotes, type MyVote } from "./mavi-feedback";
@@ -1135,13 +1135,14 @@ function ChatThread({
     },
     onReply: (text: string) => void submit(text),
     // A versão editada no canvas: vira uma mensagem da pessoa e abre no canvas.
-    onCanvasEdited: (a: CanvasArtifact, note: string) => {
+    onCanvasEdited: (a: CanvasArtifact, note: string, pics: ImageArtifact[]) => {
       seen.current.add(a.id);
-      chat.append({ role: "user", content: note, artifacts: [a], sources: [], steps: [] });
+      chat.append({ role: "user", content: note, artifacts: [a, ...pics], sources: [], steps: [] });
       setSaveRequest(null);
       setCanvas(a);
     },
     nextDocRef: () => nextDocRef(turns.flatMap((t) => t.artifacts ?? [])),
+    nextImageRef: (taken: string[]) => nextRef([...turns.flatMap((t) => t.artifacts ?? []), ...taken.map((ref) => ({ ref }))], "I"),
     // A MAVI propôs salvar no Drive: o documento abre com a janela pronta.
     onSaveToDrive: host.drive
       ? (a: ActionArtifact, done: (file: string) => void) => {

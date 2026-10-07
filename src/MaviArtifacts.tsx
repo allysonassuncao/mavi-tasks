@@ -87,9 +87,11 @@ export type ArtifactHost = {
    */
   onSaveToDrive?: (artifact: ActionArtifact, done: (file: string) => void) => boolean;
   /** A pessoa salvou uma versão editada no canvas (já gravada na conversa). */
-  onCanvasEdited?: (artifact: CanvasArtifact, note: string) => void;
+  onCanvasEdited?: (artifact: CanvasArtifact, note: string, images: ImageArtifact[]) => void;
   /** A próxima referência de documento da conversa (D3). */
   nextDocRef?: () => string;
+  /** A próxima referência de imagem (I7), sem as já reservadas nesta edição. */
+  nextImageRef?: (taken: string[]) => string;
   /** A conversa já seguiu depois desta resposta. */
   answered?: boolean;
   /**

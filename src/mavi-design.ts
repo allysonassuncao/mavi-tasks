@@ -110,7 +110,7 @@ html,body{margin:0;padding:0}
 *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{background:${look?.colors.bg ?? "#ffffff"};color:${look?.colors.ink ?? "#1c2728"};font-family:${look ? "var(--font-body)" : "Arial, sans-serif"}}
 ${look ? `:root{${lookVars(look)}}` : ""}
-.page{position:relative;width:${f.width}px;height:${f.height}px;overflow:hidden;break-after:page;margin:0 auto;background:${look?.colors.bg ?? "#ffffff"}}
+.page{position:relative;width:${f.width}px;height:${f.height}px;overflow:hidden;break-after:page;margin:0 auto;background:${look?.colors.bg ?? "#ffffff"};isolation:isolate}
 .page:last-of-type{break-after:auto}
 .page.flow{height:auto;min-height:${f.height}px;overflow:visible;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 img{max-width:100%}

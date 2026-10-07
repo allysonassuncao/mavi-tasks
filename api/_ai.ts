@@ -2042,6 +2042,46 @@ function scrapeHosts(raw: unknown) {
  * Links (1 hora) das imagens que a MAVI gerou, só para quem vê a conversa
  * em que elas aparecem (o banco confere: a resposta tem que ser visível).
  */
+/**
+ * Uma imagem enviada do computador no editor do canvas: o link para gravar
+ * no GCS (ai-images/<empresa>/<uuid>), só PNG, JPG ou WebP até 10 MB. Ela
+ * vira anexo (I#) da versão que a pessoa salvar (ai_canvas_edit).
+ */
+const UPLOAD_TYPES: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+const UPLOAD_MAX = 10 * 1024 * 1024;
+async function imageUpload(body: Row, auth: string, env: AiEnv, deps: AiDeps) {
+  const company = String(body.company ?? "");
+  if (!UUID.test(company)) return { status: 400, body: { error: "Empresa inválida." } };
+  if (!env.credentials || !env.bucket) return { status: 500, body: { error: "Credenciais do GCS não configuradas." } };
+  const type = String(body.content_type ?? "").toLowerCase();
+  const ext = UPLOAD_TYPES[type];
+  if (!ext) return { status: 400, body: { error: "Envie uma imagem PNG, JPG ou WebP." } };
+  const size = Number(body.size);
+  if (!Number.isInteger(size) || size <= 0 || size > UPLOAD_MAX)
+    return { status: 400, body: { error: "A imagem precisa ter até 10 MB." } };
+  const me = await rest<{ active: boolean }>(
+    env,
+    deps,
+    auth,
+    `memberships?select=active&company_id=eq.${company}&user_id=eq.${userIdFrom(auth)}`,
+  );
+  if (!me[0]?.active) return { status: 403, body: { error: "Sem acesso a esta empresa." } };
+  const path = `ai-images/${company}/${crypto.randomUUID()}.${ext}`;
+  const range = `0,${size}`;
+  return {
+    status: 200,
+    body: {
+      path,
+      put: signGcsUrl(env.credentials, env.bucket, path, "PUT", {
+        contentType: type,
+        headers: { "x-goog-content-length-range": range },
+      }),
+      headers: { "Content-Type": type, "x-goog-content-length-range": range },
+      url: signGcsUrl(env.credentials, env.bucket, path, "GET", { expiresInSeconds: 3600 }),
+    },
+  };
+}
+
 async function imageUrls(body: Row, auth: string, env: AiEnv, deps: AiDeps) {
   const company = String(body.company ?? "");
   if (!UUID.test(company)) throw new AiError(400, "Empresa inválida.");
@@ -2359,6 +2399,11 @@ export async function handleAi(
       if (!authorization?.startsWith("Bearer "))
         return { status: 401, body: { error: "Entre na sua conta." } };
       return identityFileUrls(env, deps.fetch, authorization, req);
+    }
+    if (req.action === "ai-image-upload") {
+      if (!authorization?.startsWith("Bearer "))
+        return { status: 401, body: { error: "Entre na sua conta." } };
+      return imageUpload(req, authorization, env, deps);
     }
     if (req.action === "ai-image-urls") {
       if (!authorization?.startsWith("Bearer "))
