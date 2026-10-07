@@ -207,6 +207,7 @@ export function MaviChatPage({
   const [loadingThread, setLoadingThread] = useState(false);
   const [client, setClient] = useState("");
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"mine" | "shared">("mine");
   const [error, setError] = useState("");
   const [sharing, setSharing] = useState<AiConversation | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -270,13 +271,18 @@ export function MaviChatPage({
   }, [startSkill?.slug, startSkill?.version]);
 
   useEffect(() => {
-    listConversations(company, 300)
-      .then(setList)
+    // Cada aba vem do banco com o seu limite: as compartilhadas não somem
+    // atrás de muitas conversas da pessoa.
+    Promise.all([
+      listConversations(company, 300, { user, side: "mine" }),
+      listConversations(company, 300, { user, side: "shared" }),
+    ])
+      .then(([mine, shared]) => setList([...mine, ...shared]))
       .catch((e) => {
         setList([]);
         setError((e as Error).message);
       });
-  }, [company, reload]);
+  }, [company, user, reload]);
   useEffect(() => {
     activeRuns(company)
       .then((l) => setRuns(l.filter((r) => !ownRuns.current.has(r.id))))
@@ -327,6 +333,8 @@ export function MaviChatPage({
         if (!alive) return;
         if (!c) throw Error("Conversa não encontrada ou sem acesso.");
         onScreen.current = c.id;
+        // Uma compartilhada aberta pelo endereço aparece na aba dela.
+        if (c.owner_id !== user) setTab("shared");
         setClient(c.scope?.client ?? "");
         setThread((t) => ({
           conversation: c,
@@ -398,6 +406,7 @@ export function MaviChatPage({
     setClient("");
     setError("");
     setDrawer(false);
+    setTab("mine");
     setThread((t) => ({ conversation: null, entries: [], key: t.key + 1 }));
     if (go) onOpen(null);
   }
@@ -474,12 +483,8 @@ export function MaviChatPage({
   const found = (list ?? []).filter((c) => !q || fold(c.title).includes(q));
   const mine = found.filter((c) => c.owner_id === user);
   const shared = found.filter((c) => c.owner_id !== user);
-  const groups = [
-    ...groupByDate(mine),
-    ...(shared.length
-      ? [{ label: "Compartilhadas com você", items: shared }]
-      : []),
-  ];
+  const groups = groupByDate(tab === "mine" ? mine : shared);
+  const sharedTotal = (list ?? []).filter((c) => c.owner_id !== user).length;
 
   const item = (c: AiConversation) => {
     const active = conv?.id === c.id;
@@ -588,14 +593,38 @@ export function MaviChatPage({
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <nav className="mavi-list" aria-label="Conversas">
+        <div className="mavi-tabs" role="tablist" aria-label="Conversas">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "mine"}
+            onClick={() => setTab("mine")}
+          >
+            Minhas
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "shared"}
+            onClick={() => setTab("shared")}
+          >
+            Compartilhadas
+            {sharedTotal > 0 && <span className="mavi-tab-count">{sharedTotal}</span>}
+          </button>
+        </div>
+        <nav
+          className="mavi-list"
+          aria-label={tab === "mine" ? "Minhas conversas" : "Conversas compartilhadas"}
+        >
           {list === null ? (
             <Loading compact />
           ) : !groups.length ? (
             <p className="mavi-list-empty">
               {q
                 ? "Nenhuma conversa com esse nome."
-                : "Suas conversas com a MAVI aparecem aqui."}
+                : tab === "mine"
+                  ? "Suas conversas com a MAVI aparecem aqui."
+                  : "As conversas que compartilharem com você aparecem aqui."}
             </p>
           ) : (
             groups.map((g) => (

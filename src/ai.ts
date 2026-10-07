@@ -364,12 +364,23 @@ export type AiStoredMessage = {
 };
 
 /** As conversas que a pessoa vê (as dela e as compartilhadas com ela). */
-export async function listConversations(company: string, limit = 100) {
+export async function listConversations(
+  company: string,
+  limit = 100,
+  /** Só as da pessoa (mine) ou só as compartilhadas com ela (shared). */
+  owner?: { user: string; side: "mine" | "shared" },
+) {
   if (!supabase) return [];
-  const { data, error } = await supabase
+  let query = supabase
     .from("ai_conversations")
     .select("id,owner_id,title,scope,module,updated_at")
-    .eq("company_id", company)
+    .eq("company_id", company);
+  if (owner)
+    query =
+      owner.side === "mine"
+        ? query.eq("owner_id", owner.user)
+        : query.neq("owner_id", owner.user);
+  const { data, error } = await query
     .order("updated_at", { ascending: false })
     .limit(limit);
   if (error) throw error;

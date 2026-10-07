@@ -28228,6 +28228,47 @@ main:has(> .mavi-chat) > .error-banner {
 .mavi-search input:focus {
   outline: none;
 }
+.mavi-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 12px 4px;
+  padding: 3px;
+  border-radius: 9px;
+  background: #eceeec;
+}
+.mavi-tabs button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mavi-tabs button:hover {
+  color: var(--ink);
+}
+.mavi-tabs button[aria-selected="true"] {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 2px #152c201a;
+}
+.mavi-tab-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #e3ebd8;
+  color: #3c5a24;
+  font-size: 0.66rem;
+  line-height: 16px;
+}
 .mavi-list {
   flex: 1;
   min-height: 0;
