@@ -150,7 +150,7 @@ export function AiPage({
       ) : tab === "radar" ? (
         <RadarSettings company={company} data={data} notify={notify} />
       ) : tab === "tarefas-radar" ? (
-        <RadarTaskLearning company={company} data={data} />
+        <RadarTaskLearning company={company} data={data} notify={notify} />
       ) : tab === "campanhas" ? (
         <>
           <CampaignInsightSettings company={company} data={data} notify={notify} />

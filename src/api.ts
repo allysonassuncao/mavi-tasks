@@ -1395,6 +1395,8 @@ export type LiveChange =
     }
   /** Radar pessoal: as situações destas pessoas mudaram (a MAVI leu ou alguém agiu). */
   | { kind: "personal_radar"; people: string[] }
+  /** Painel da MAVI › Tarefas do Radar: a MAVI propôs regras ou o Jev conferiu. */
+  | { kind: "radar_task_rules" }
   /** Customer Success: squads, planilha, leitura ou ligação de clientes. */
   | { kind: "cs"; scope: "squads" | "settings" | "sync" | "clients" };
 

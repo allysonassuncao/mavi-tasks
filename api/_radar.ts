@@ -5,6 +5,7 @@ import { askJev, scorePercent, type JevQuestion, type JevResponse } from "./_tem
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { LlmAdapter } from "./_ai-llm.js";
 import { checkWithAgents, knowledgeQuery, type AgentCase, type AgentKnowledge } from "./_agent-knowledge.js";
+import { runTaskRules } from "./_radar-task-rules.js";
 
 /**
  * Radar do cliente · o worker (ação "ai-radar" de /api/ai, só o pg_cron com
@@ -1168,7 +1169,12 @@ async function groupThemes(env: RadarEnv, deps: AiDeps, g: ThemeGroup) {
   });
 }
 
-export type RadarEnv = AiEnv & { radarBudgetMs?: number; themesModel?: string; reportModel?: string };
+export type RadarEnv = AiEnv & {
+  radarBudgetMs?: number;
+  themesModel?: string;
+  reportModel?: string;
+  tasksModel?: string;
+};
 
 /**
  * Lê as leituras pendentes (algumas ao mesmo tempo) e depois agrupa os itens
@@ -1177,7 +1183,7 @@ export type RadarEnv = AiEnv & { radarBudgetMs?: number; themesModel?: string; r
 export async function runRadar(env: RadarEnv, deps: AiDeps) {
   const now = deps.now ?? Date.now;
   const deadline = now() + (env.radarBudgetMs ?? env.workerBudgetMs);
-  const stats = { signals: 0, items: 0, skipped: 0, failed: 0, themed: 0, reports: 0 };
+  const stats = { signals: 0, items: 0, skipped: 0, failed: 0, themed: 0, reports: 0, rules: 0, checked: 0 };
   // Primeiro os relatórios pedidos (alguém espera) e os agendados que venceram.
   while (now() < deadline - 90_000) {
     const reports = await workerRpc<ClaimedReport[]>(env, deps, "ai_radar_report_claim", {
@@ -1247,6 +1253,16 @@ export async function runRadar(env: RadarEnv, deps: AiDeps) {
         }
       }),
     );
+  }
+  // As regras das tarefas: poucas rodadas por vez e as conferências do Jev.
+  // Sem a migração 20270606090000, segue sem elas.
+  try {
+    const r = await runTaskRules(env, deps, deadline);
+    stats.rules += r.rules;
+    stats.checked += r.checked;
+    stats.failed += r.failed;
+  } catch (e) {
+    console.error("radar · regras das tarefas", (e as Error).message);
   }
   return stats;
 }

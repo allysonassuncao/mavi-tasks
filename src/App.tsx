@@ -1673,6 +1673,11 @@ export default function App() {
           window.dispatchEvent(new CustomEvent("mavi:radar", { detail: change }));
           return;
         }
+        // Painel da MAVI › Tarefas do Radar: regras novas ou conferidas.
+        if (change.kind === "radar_task_rules") {
+          window.dispatchEvent(new CustomEvent("mavi:radar-task-rules"));
+          return;
+        }
         // Radar pessoal: a lista de quem mudou se recarrega sozinha.
         if (change.kind === "personal_radar") {
           window.dispatchEvent(

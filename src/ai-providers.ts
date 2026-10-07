@@ -257,6 +257,7 @@ export type AiFeature =
   | "client_radar_check"
   | "client_radar_themes"
   | "client_radar_report"
+  | "client_radar_tasks"
   | "personal_radar"
   | "personal_assistant"
   | "personal_radar_check"
@@ -644,6 +645,14 @@ export const FEATURES: FeatureInfo[] = [
     note: "Poucas chamadas, texto para a gestão decidir: vale um modelo forte.",
   },
   {
+    id: "client_radar_tasks",
+    group: "Radar do cliente",
+    label: "Regras das tarefas: quando abrir tarefa e para quem",
+    conversation: false,
+    env: "CLIENT_RADAR_TASKS_MODEL",
+    note: "Lê o que o time fez nos itens (tarefa criada, vinculada ou fechado sem tarefa) e propõe regras; poucas chamadas por dia, vale um modelo bom de raciocínio.",
+  },
+  {
     id: "personal_radar",
     group: "Radar pessoal",
     label: "MAVI Assistente Pessoal: situações dos grupos para cada pessoa",
@@ -863,6 +872,8 @@ export function serverModel(
       return env.WHATSAPP_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
     case "client_radar_themes":
       return env.CLIENT_RADAR_THEMES_MODEL || env.AI_MODEL || fallback;
+    case "client_radar_tasks":
+      return env.CLIENT_RADAR_TASKS_MODEL || env.CLIENT_RADAR_REPORT_MODEL || env.AI_MODEL || fallback;
     case "personal_radar":
       return env.PERSONAL_RADAR_MODEL || env.CLIENT_RADAR_MODEL || env.AI_MODEL || fallback;
     case "personal_assistant":

@@ -146,3 +146,108 @@
     flex: 1 1 140px;
   }
 }
+
+/* As regras das tarefas. */
+.rtl-learning {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafbfb;
+}
+.rtl-learning > svg {
+  margin-top: 2px;
+  color: var(--muted);
+}
+.rtl-learning.on {
+  border-color: #d5e6c2;
+  background: #f6faf1;
+}
+.rtl-learning.on > svg {
+  color: #56793a;
+}
+.rtl-learning > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.86rem;
+}
+.rtl-learning small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.rtl-learning small.rtl-estimate {
+  color: var(--ink);
+  font-weight: 600;
+}
+.rtl-learning small.rtl-error {
+  color: #b23b3b;
+}
+.rtl-learning-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.rtl-rule {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.rtl-rule.suggested {
+  border-color: #e4def5;
+  background: #faf8ff;
+}
+.rtl-rule.refused,
+.rtl-rule.dismissed,
+.rtl-rule.paused {
+  opacity: 0.75;
+}
+.rtl-rule p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+.rtl-rule-when > span,
+.rtl-rule-then > span {
+  color: var(--muted);
+  font-weight: 600;
+  margin-right: 4px;
+}
+.rtl-rule-then {
+  font-weight: 600;
+}
+.rtl-rule-then.no_task {
+  color: #6b7473;
+}
+.rtl-rule em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--muted);
+}
+.rtl-rule-why {
+  color: var(--muted);
+  font-size: 0.8rem !important;
+}
+.rtl-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  .rtl-learning {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+  .rtl-learning > button,
+  .rtl-learning-actions {
+    grid-column: 2;
+  }
+}

@@ -17,6 +17,7 @@ import {
   type LearningSignal,
   type TaskLearning,
 } from "./radar-task-learning";
+import { RadarTaskRules } from "./RadarTaskRules";
 import "./radar-task-learning.css";
 
 const PERIODS = [
@@ -35,9 +36,18 @@ const days = (n: number) => (n === 1 ? "1 dia útil" : `${n} dias úteis`);
  * MAVI está aprendendo com as tarefas abertas a partir dos itens do Radar do
  * cliente — quais tipos de item viram tarefa e quais fecham sem, para qual
  * equipe ou pessoa, com que prazo e prioridade, e o que as pessoas mudam no
- * formulário que veio preenchido.
+ * formulário que veio preenchido. No topo, as regras que a MAVI propõe com
+ * esse material (src/RadarTaskRules.tsx).
  */
-export function RadarTaskLearning({ company, data }: { company: string; data: Snapshot }) {
+export function RadarTaskLearning({
+  company,
+  data,
+  notify,
+}: {
+  company: string;
+  data: Snapshot;
+  notify: (message: string) => void;
+}) {
   const [period, setPeriod] = useState(180);
   const [topic, setTopic] = useState("");
   const [product, setProduct] = useState("");
@@ -88,10 +98,12 @@ export function RadarTaskLearning({ company, data }: { company: string; data: Sn
           Cada tarefa criada ou vinculada a partir de um item do Radar › Cliente, e cada item fechado sem tarefa,
           vira material para a MAVI entender <strong>quando</strong> um item pede tarefa, <strong>para quem</strong>{" "}
           e <strong>com que prazo</strong>. No “Criar tarefa” ela também guarda o que vocês mudaram no que veio
-          preenchido. O próximo passo é a MAVI propor regras para vocês aprovarem, depois sugerir a tarefa no item
-          e, quando acertar bastante, ser liberada para abrir sozinha.
+          preenchido. Com isso ela propõe regras para vocês aprovarem; depois vai sugerir a tarefa no item e, quando
+          acertar bastante, poderá ser liberada para abrir sozinha.
         </p>
       </section>
+
+      <RadarTaskRules company={company} data={data} notify={notify} />
 
       <div className="ai-usage-toolbar rtl-filters">
         <Select aria-label="Período" value={String(period)} onValueChange={(v) => setPeriod(Number(v))}>
