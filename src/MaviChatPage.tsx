@@ -33,7 +33,7 @@ import { Loading, Select, SelectOption } from "./ui";
 import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
 import { AttachButton, AttachmentTray, FileChip, useAttachmentTray } from "./MaviAttachments";
 import { conversationAttachments, type Attachment } from "./mavi-attachments";
-import { CanvasPanel } from "./MaviCanvas";
+import { CanvasPanel, type CanvasSaveRequest } from "./MaviCanvas";
 import { AnswerCost, ConversationCostButton, messageCost } from "./MaviCost";
 import { AnswerFeedback } from "./MaviFeedback";
 import { myVotes, type MyVote } from "./mavi-feedback";
@@ -768,6 +768,12 @@ export function MaviChatPage({
               onComment,
               taskHref,
               notify,
+              drive: {
+                data,
+                user,
+                isLeader: ["admin", "manager"].includes(data.members.find((m) => m.user_id === user)?.role ?? ""),
+                ...(client ? { start: { client } } : {}),
+              },
             }}
           />
         )}
@@ -1104,6 +1110,7 @@ function ChatThread({
   }
   // O canvas: abre sozinho quando a MAVI cria ou ajusta um documento.
   const [canvas, setCanvas] = useState<CanvasArtifact | null>(null);
+  const [saveRequest, setSaveRequest] = useState<CanvasSaveRequest | null>(null);
   const seen = useRef(
     new Set(initial.flatMap((t) => (t.artifacts ?? []).map((a) => a.id))),
   );
@@ -1121,8 +1128,37 @@ function ChatThread({
   const artifactHost = {
     ...host,
     readOnly,
-    onOpenCanvas: (a: CanvasArtifact) => setCanvas(a),
+    onOpenCanvas: (a: CanvasArtifact) => {
+      setSaveRequest(null);
+      setCanvas(a);
+    },
     onReply: (text: string) => void submit(text),
+    // A MAVI propôs salvar no Drive: o documento abre com a janela pronta.
+    onSaveToDrive: host.drive
+      ? (a: ActionArtifact, done: (file: string) => void) => {
+          if (a.action.kind !== "drive_save") return false;
+          const p = a.action;
+          const doc = [...turns]
+            .reverse()
+            .flatMap((t) => [...(t.artifacts ?? [])].reverse())
+            .find((x): x is CanvasArtifact => x.type === "canvas" && x.ref === p.ref);
+          if (!doc) return false;
+          setSaveRequest({
+            format: p.format,
+            name: p.file_name,
+            start: p.folder_id
+              ? { client: p.client_id, contract: p.contract_id, folder: p.folder_id }
+              : p.contract_id
+                ? { client: p.client_id, contract: p.contract_id }
+                : p.client_id
+                  ? { client: p.client_id }
+                  : {},
+            onSaved: done,
+          });
+          setCanvas(doc);
+          return true;
+        }
+      : undefined,
     // Confirmou a ação de uma conexão: a MAVI roda e continua (nova resposta).
     onConfirmMcp: (a: ActionArtifact) => {
       if (busy || readOnly || a.action.kind !== "mcp_call") return Promise.resolve(false);
@@ -1450,11 +1486,15 @@ function ChatThread({
       </div>
       {canvas && (
         <CanvasPanel
-          key={canvas.id}
+          key={`${canvas.id}-${saveRequest ? "salvar" : ""}`}
           artifact={canvas}
           host={{ ...artifactHost, streaming: false }}
           images={images}
-          onClose={() => setCanvas(null)}
+          saveRequest={saveRequest}
+          onClose={() => {
+            setCanvas(null);
+            setSaveRequest(null);
+          }}
         />
       )}
     </div>

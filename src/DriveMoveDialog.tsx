@@ -1,22 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
-  Building2,
-  ChevronRight,
-  Folder,
   FolderInput,
   Globe,
-  HardDrive,
   Lock,
-  Package,
   Sparkles,
   Unlink,
   Users,
 } from "lucide-react";
 import { Modal } from "./components";
 import { Button, Loading } from "./ui";
-import { canCreateTaskIn, contractProductLabel } from "./domain";
+import { canCreateTaskIn } from "./domain";
 import { moveDriveItems, previewDriveMove, type DriveMoveItems } from "./drive";
+import { DriveFolderPicker, pickedPlace, placeLabel } from "./DriveFolderPicker";
 import type {
   DriveFolder,
   DriveLocation,
@@ -24,9 +20,6 @@ import type {
   Snapshot,
 } from "./types";
 
-// A mesma ordem do Drive (Z → A).
-const byNameDesc = (a: { name: string }, b: { name: string }) =>
-  b.name.localeCompare(a.name, "pt-BR", { numeric: true, sensitivity: "base" });
 const plural = (n: number, one: string, many: string) =>
   `${n} ${n === 1 ? one : many}`;
 
@@ -150,13 +143,8 @@ export function DriveMoveDialog({
 
   const all = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
   const moving = useMemo(() => new Set(items.folders), [items.folders]);
-  const current = at.folder ? all.get(at.folder) : undefined;
-  const client = current ? current.client_id : at.client;
-  const contract = current ? current.contract_id : at.contract;
+  const { client, contract } = pickedPlace(at, all);
   const writable = canWriteAt(data, user, isLeader, contract);
-  const clientName = (id?: string | null) =>
-    data.clients.find((c) => c.id === id)?.name ?? "Cliente";
-
   // A cada destino, o banco confere (permissão, ciclo, links, cliente).
   useEffect(() => {
     if (fixed) return;
@@ -175,52 +163,6 @@ export function DriveMoveDialog({
     };
   }, [company, items, at.client, at.contract, at.folder, writable, fixed]);
 
-  const crumbs: { label: string; to: DriveLocation }[] = [
-    { label: "Drive", to: {} },
-  ];
-  const chain: DriveFolder[] = [];
-  for (let f = current; f; f = f.parent_id ? all.get(f.parent_id) : undefined)
-    chain.unshift(f);
-  if (client) crumbs.push({ label: clientName(client), to: { client } });
-  if (contract)
-    crumbs.push({
-      label: contractProductLabel(data, contract),
-      to: { client: client ?? undefined, contract },
-    });
-  for (const f of chain)
-    crumbs.push({
-      label: f.name,
-      to: {
-        client: f.client_id ?? undefined,
-        contract: f.contract_id ?? undefined,
-        folder: f.id,
-      },
-    });
-
-  const atRoot = !at.client && !at.contract && !at.folder;
-  const clients = atRoot
-    ? data.clients.filter((c) => !c.archived).sort(byNameDesc)
-    : [];
-  const products =
-    at.client && !at.contract && !at.folder
-      ? data.contracts
-          .filter((k) => k.client_id === at.client && !k.archived)
-          .map((k) => ({ id: k.id, name: contractProductLabel(data, k.id) }))
-          .sort(byNameDesc)
-      : [];
-  // As pastas que estão sendo movidas não são destino (nem o que há nelas).
-  const subfolders = folders
-    .filter(
-      (f) =>
-        !moving.has(f.id) &&
-        (at.folder
-          ? f.parent_id === at.folder
-          : !f.parent_id &&
-            (f.client_id ?? undefined) === at.client &&
-            (f.contract_id ?? undefined) === at.contract),
-    )
-    .sort(byNameDesc);
-
   async function confirm() {
     setBusy(true);
     setError("");
@@ -232,26 +174,8 @@ export function DriveMoveDialog({
     }
   }
 
-  const row = (
-    key: string,
-    name: string,
-    Icon: typeof Folder,
-    to: DriveLocation,
-    note?: string,
-  ) => (
-    <li key={key}>
-      <button type="button" className="drive-pick-folder" onClick={() => setAt(to)}>
-        <Icon size={17} aria-hidden="true" />
-        <span>
-          {name}
-          {note && <small>{note}</small>}
-        </span>
-        <ChevronRight size={15} aria-hidden="true" />
-      </button>
-    </li>
-  );
   const warnings = preview ? moveWarnings(data, preview) : [];
-  const here = crumbs[crumbs.length - 1].label;
+  const here = placeLabel(data, at, all);
 
   return (
     <Modal
@@ -269,51 +193,14 @@ export function DriveMoveDialog({
             </span>
           </p>
         ) : (
-          <>
-            <nav className="drive-pick-crumbs" aria-label="Destino">
-              {crumbs.map((c, i) => (
-                <span key={i}>
-                  {i > 0 && <ChevronRight size={13} aria-hidden="true" />}
-                  {i === crumbs.length - 1 ? (
-                    <strong>
-                      {i === 0 && <HardDrive size={14} aria-hidden="true" />}
-                      {c.label}
-                    </strong>
-                  ) : (
-                    <button type="button" onClick={() => setAt(c.to)}>
-                      {i === 0 && <HardDrive size={14} aria-hidden="true" />}
-                      {c.label}
-                    </button>
-                  )}
-                </span>
-              ))}
-            </nav>
-            <div className="drive-pick-list">
-              <ul>
-                {clients.map((c) =>
-                  row(`c-${c.id}`, c.name, Building2, { client: c.id }),
-                )}
-                {products.map((p) =>
-                  row(`p-${p.id}`, p.name, Package, {
-                    client: at.client,
-                    contract: p.id,
-                  }),
-                )}
-                {subfolders.map((f) =>
-                  row(`f-${f.id}`, f.name, Folder, {
-                    client: f.client_id ?? undefined,
-                    contract: f.contract_id ?? undefined,
-                    folder: f.id,
-                  }),
-                )}
-                {!clients.length && !products.length && !subfolders.length && (
-                  <li className="drive-pick-empty">
-                    Sem pastas aqui. Você pode mover para “{here}”.
-                  </li>
-                )}
-              </ul>
-            </div>
-          </>
+          <DriveFolderPicker
+            data={data}
+            folders={all}
+            at={at}
+            onPick={setAt}
+            exclude={moving}
+            emptyText={(h) => `Sem pastas aqui. Você pode mover para “${h}”.`}
+          />
         )}
         <div className="drive-move-check" aria-live="polite">
           {!writable ? (

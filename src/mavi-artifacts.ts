@@ -180,6 +180,22 @@ export type ActionProposal =
       reason: string;
     }
   | {
+      /**
+       * Salvar no Drive um documento desta conversa (D#), no formato e na
+       * pasta que a MAVI achou; a pessoa confirma na janela do Drive.
+       */
+      kind: "drive_save";
+      ref: string;
+      format: DriveSaveFormat;
+      file_name: string;
+      client_id?: string;
+      client_name?: string;
+      contract_id?: string;
+      contract_name?: string;
+      folder_id?: string;
+      folder_name?: string;
+    }
+  | {
       /** Uma ferramenta de uma conexão (MCP) que altera algo no serviço. */
       kind: "mcp_call";
       server_id: string;
@@ -189,6 +205,8 @@ export type ActionProposal =
       arguments: Record<string, unknown>;
     };
 export type ActionState = "pending" | "confirmed" | "cancelled" | "failed";
+export const DRIVE_SAVE_FORMATS = ["pdf", "docx", "pptx", "html", "md", "xlsx", "csv"] as const;
+export type DriveSaveFormat = (typeof DRIVE_SAVE_FORMATS)[number];
 
 type Base = {
   /** Único (a ação é decidida por ele). */
@@ -225,6 +243,8 @@ export type ActionArtifact = Base & {
     comment_id?: string;
     /** O aviso de campanha criado ou mudado. */
     rule_id?: string;
+    /** O arquivo salvo no Drive. */
+    file_id?: string;
     /** A identidade salva e a versão. */
     identity_id?: string;
     version?: number;
@@ -701,6 +721,19 @@ export function sanitizeAction(raw: unknown): ActionProposal | null {
     if (op !== "delete" && error) return null;
     return { kind: "campaign_alert", op, rule };
   }
+  if (a.kind === "drive_save") {
+    const ref = text(a.ref, 4).toUpperCase();
+    if (!/^D\d{1,2}$/.test(ref)) return null;
+    const ids = (["client_id", "contract_id", "folder_id"] as const).filter((k) => UUID.test(text(a[k], 40)));
+    const names: Record<string, string> = { client_id: "client_name", contract_id: "contract_name", folder_id: "folder_name" };
+    return {
+      kind: "drive_save",
+      ref,
+      format: pick(a.format, DRIVE_SAVE_FORMATS, "pdf"),
+      file_name: text(a.file_name, 150).replace(/[\\/:*?"<>|]/g, " ").trim() || "Documento",
+      ...Object.fromEntries(ids.flatMap((k) => [[k, text(a[k], 40)], [names[k], text(a[names[k]], 160)]])),
+    };
+  }
   if (a.kind === "identity") {
     const op = pick(a.op, ["save", "guide_add"] as const, "guide_add");
     const scope = pick(a.scope, ["company", "client", "gallery"] as const, "client");
@@ -853,6 +886,7 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
           ...(text(r.comment_id, 40) ? { comment_id: text(r.comment_id, 40) } : {}),
           ...(UUID.test(text(r.rule_id, 40)) ? { rule_id: text(r.rule_id, 40) } : {}),
           ...(UUID.test(text(r.identity_id, 40)) ? { identity_id: text(r.identity_id, 40) } : {}),
+          ...(UUID.test(text(r.file_id, 40)) ? { file_id: text(r.file_id, 40) } : {}),
           ...(num(r.version) !== null ? { version: num(r.version)! } : {}),
           ...(text(r.error, 300) ? { error: text(r.error, 300) } : {}),
           ...(text(r.text, 1600) ? { text: text(r.text, 1600) } : {}),
@@ -933,6 +967,8 @@ export function artifactSummary(a: AiArtifact): string {
         ? `${a.action.server_name} › ${a.action.tool_title || a.action.tool}`
         : a.action.kind === "campaign_alert"
           ? `${{ create: "criar", update: "mudar", delete: "excluir" }[a.action.op]} o aviso de campanha “${a.action.rule.name}”`
+          : a.action.kind === "drive_save"
+            ? `salvar ${a.action.ref} (${a.action.format}) no Drive${a.action.client_name ? ` em ${[a.action.client_name, a.action.contract_name, a.action.folder_name].filter(Boolean).join(" › ")}` : ""}`
           : a.action.kind === "identity"
             ? a.action.op === "save"
               ? `salvar a identidade visual “${a.action.identity_name}”`

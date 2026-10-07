@@ -27,7 +27,7 @@ import {
 } from "./dashboards";
 import { Modal } from "./components";
 import { imageUrls, setActionState } from "./ai";
-import { priorities } from "./types";
+import { priorities, type DriveLocation, type Snapshot } from "./types";
 import type { FormPreset } from "./forms";
 import { CanvasCard } from "./MaviCanvas";
 import { QuestionCard } from "./MaviQuestions";
@@ -36,6 +36,7 @@ import { SearchCard, TutorialCard } from "./MaviSearchCard";
 import { runMcpAction } from "./mavi-mcp";
 import { CampaignAlertCard, StateChip } from "./MaviCampaignAlertCard";
 import { IdentityActionCard } from "./MaviIdentityCard";
+import { DriveSaveCard } from "./MaviDriveSaveCard";
 import type {
   ActionArtifact,
   ActionProposal,
@@ -74,6 +75,17 @@ export type ArtifactHost = {
   onOpenCanvas: (artifact: CanvasArtifact) => void;
   /** Responde às perguntas da MAVI (vira a próxima mensagem). */
   onReply: (text: string) => void;
+  /**
+   * Salvar no Drive (módulo MAVI): os clientes e produtos que a pessoa vê,
+   * quem ela é e onde a janela abre (o cliente da conversa).
+   */
+  drive?: { data: Snapshot; user: string; isLeader: boolean; start?: DriveLocation };
+  /**
+   * A MAVI propôs salvar um documento no Drive: abre o documento com a
+   * janela já no lugar; `done` quando salvar. false: o documento não está
+   * nesta conversa.
+   */
+  onSaveToDrive?: (artifact: ActionArtifact, done: (file: string) => void) => boolean;
   /** A conversa já seguiu depois desta resposta. */
   answered?: boolean;
   /**
@@ -118,6 +130,8 @@ export function ArtifactView({
     return <CampaignAlertCard artifact={artifact} host={host} />;
   if (artifact.action.kind === "identity")
     return <IdentityActionCard artifact={artifact} host={host} />;
+  if (artifact.action.kind === "drive_save")
+    return <DriveSaveCard artifact={artifact} host={host} />;
   return <ActionCard artifact={artifact} host={host} />;
 }
 
@@ -577,7 +591,7 @@ function ActionCard({ artifact, host }: { artifact: ActionArtifact; host: Artifa
   const [error, setError] = useState("");
   // "Criar e continuar" no formulário: só a primeira tarefa responde à proposta.
   const decided = useRef(false);
-  const a = artifact.action as Exclude<ActionProposal, { kind: "mcp_call" | "campaign_alert" | "identity" }>;
+  const a = artifact.action as Exclude<ActionProposal, { kind: "mcp_call" | "campaign_alert" | "identity" | "drive_save" }>;
   const waiting = host.streaming || !host.conversation;
   const decide = async (
     next: "confirmed" | "cancelled",

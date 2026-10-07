@@ -102,10 +102,10 @@ describe("registro de ferramentas", () => {
       "show_timeline",
     ]);
     // 4 visualizações, 4 de imagem (gerar e as 3 da arte por código), 2 ações; o canvas tem as suas 4
-    // e as identidades visuais, o design livre e a proposta de identidade.
+    // e as identidades visuais, o design livre, a proposta de identidade e salvar no Drive.
     expect(toolsFor(new Set(["visuals", "images", "actions"]))).toHaveLength(TOOLS.length + 11);
     expect(toolsFor(new Set(["visuals", "images", "actions", "canvas"]))).toHaveLength(
-      TOOLS.length + POWER_TOOLS.length + 1 + 3 + 3,
+      TOOLS.length + POWER_TOOLS.length + 1 + 3 + 4,
     );
     expect(powerInstructions(new Set())).toBe("");
     expect(powerInstructions(new Set(["actions"]))).toContain("Nunca diga que a tarefa foi criada");

@@ -402,3 +402,28 @@
   margin: 6px 0 0;
   padding-left: 18px;
 }
+
+/* Salvar no Drive (canvas da MAVI) */
+.drive-save-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.drive-save-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.drive-save-name-row > :first-child {
+  flex: 1;
+}
+.drive-save-name-row small {
+  color: #6b7775;
+  font-size: 0.78rem;
+}
+@media (max-width: 640px) {
+  .drive-save-fields {
+    grid-template-columns: 1fr;
+  }
+}

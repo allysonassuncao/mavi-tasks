@@ -15,6 +15,7 @@ import {
 import { DESIGN_RULES, DESIGN_TOOL, runDesignTool, summarizeDesignStep } from "./_ai-design.js";
 // Só dentro das funções (import circular: ver scripts/test-api-imports.mjs).
 import { GUIDE_RULES, PROPOSE_IDENTITY_TOOL, SITE_STYLE_TOOL, proposeIdentity, runSiteStyle } from "./_ai-identity-tools.js";
+import { DRIVE_SAVE_RULES, DRIVE_SAVE_TOOL, proposeDriveSave } from "./_ai-drive-save.js";
 import { logCost, meterEntries, whereOf } from "./_ai-cost.js";
 import type { RenderInput } from "./_art-render.js";
 import {
@@ -539,6 +540,8 @@ export const REGISTRY: Record<string, ToolMeta> = {
   // O Guia da marca vivo: a pessoa confirma no card; o site é leitura da internet.
   propose_identity: { kind: "action", power: "canvas", timeoutMs: 30_000 },
   site_style: { kind: "web", power: "scrape", timeoutMs: 60_000 },
+  // Salvar no Drive: a pessoa confirma na janela do Drive.
+  save_to_drive: { kind: "action", power: "canvas", timeoutMs: 20_000 },
   // A busca da Claude roda no servidor dela: só para o registro.
   web_search: { kind: "web", power: "web", timeoutMs: 0 },
   web_fetch: { kind: "web", power: "web", timeoutMs: 0 },
@@ -614,7 +617,7 @@ export function toolsFor(
   return [
     ...TOOLS,
     ASK_TOOL,
-    ...[...POWER_TOOLS, IDENTITY_TOOL, DESIGN_TOOL, PROPOSE_IDENTITY_TOOL, SITE_STYLE_TOOL, ...ART_TOOLS, ...SKILL_TOOLS]
+    ...[...POWER_TOOLS, IDENTITY_TOOL, DESIGN_TOOL, PROPOSE_IDENTITY_TOOL, SITE_STYLE_TOOL, DRIVE_SAVE_TOOL, ...ART_TOOLS, ...SKILL_TOOLS]
       .filter((t) => {
         const power = REGISTRY[t.name]?.power;
         return !!power && powers.has(power);
@@ -665,6 +668,7 @@ export function powerInstructions(powers: ReadonlySet<Power>, onPage = false) {
       IDENTITY_RULES,
       DESIGN_RULES,
       GUIDE_RULES,
+      DRIVE_SAVE_RULES,
     );
   if (powers.has("web"))
     lines.push(
@@ -1403,6 +1407,7 @@ export async function runPowerTool(kit: PowerKit, name: string, raw: unknown): P
   if (name === "design_document") return runDesignTool(kit, input);
   if (name === "propose_identity") return proposeIdentity(kit, input);
   if (name === "site_style") return runSiteStyle(kit, input);
+  if (name === "save_to_drive") return proposeDriveSave(kit, input);
   if (name === "generate_image") return generateImage(kit, input);
   if (name === "brand_kit" || name === "render_art" || name === "read_art") return runArtTool(kit, name, input);
   if (name === "propose_task") return proposeTask(kit, input);
@@ -1428,6 +1433,7 @@ export function describePowerStep(name: string, raw: unknown) {
   if (name === "visual_identities") return str(input.id) ? "Lendo o Guia da marca" : "Vendo as identidades visuais";
   if (name === "propose_identity")
     return input.op === "save" ? "Preparando a identidade para você confirmar" : "Preparando o que entra no Guia da marca";
+  if (name === "save_to_drive") return `Preparando para salvar ${str(input.ref).toUpperCase()} no Drive`;
   if (name === "site_style") return `Lendo o estilo de ${str(input.url).replace(/^https?:\/\//, "").slice(0, 60) || "o site"}`;
   if (name === "design_document")
     return str(input.revises) ? `Corrigindo o design ${str(input.revises).toUpperCase()}` : `Desenhando${t ? ` “${t}”` : " o documento"}`;
@@ -1450,6 +1456,7 @@ export function summarizePowerStep(name: string, output: string) {
   if (name === "visual_identities") return summarizeIdentityStep(output);
   if (name === "design_document") return summarizeDesignStep(output);
   if (name === "site_style") return /^Estilo de/.test(output) ? "estilo lido" : "não deu";
+  if (name === "save_to_drive") return /^Proposta pronta/.test(output) ? "aguardando sua confirmação" : "não deu";
   if (/^As perguntas/.test(output)) return "esperando suas respostas";
   if (name === "campaign_alerts") return /^A pessoa ainda/.test(output) ? "nenhum aviso" : `${output.split("\n").length} avisos`;
   if (/^(Mostrado|Imagem pronta|Proposta pronta|Pronto no canvas)/.test(output))

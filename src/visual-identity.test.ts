@@ -193,3 +193,14 @@ describe("Guia da marca vivo", () => {
     expect(save).toMatchObject({ op: "save", scope: "gallery", tokens: { mode: "dark", colors: { bg: "#0B1020" } }, guide: "## Tom\nCurto." });
   });
 });
+
+describe("salvar no Drive", () => {
+  it("a proposta no formato fechado", async () => {
+    const { sanitizeAction } = await import("./mavi-artifacts");
+    const id = "00000000-0000-4000-8000-000000000002";
+    expect(sanitizeAction({ kind: "drive_save", ref: "d1", format: "exe", file_name: "a/b:c", client_id: id, client_name: "Clínica", folder_id: "x" })).toEqual({
+      kind: "drive_save", ref: "D1", format: "pdf", file_name: "a b c", client_id: id, client_name: "Clínica",
+    });
+    expect(sanitizeAction({ kind: "drive_save", ref: "V1", format: "pdf" })).toBeNull();
+  });
+});

@@ -7,6 +7,7 @@ import {
   Download,
   FileSpreadsheet,
   FileText,
+  HardDriveUpload,
   LayoutTemplate,
   Loader2,
   Palette,
@@ -17,6 +18,8 @@ import {
 } from "lucide-react";
 import { formatValue } from "./dashboards";
 import { ShadowHtml } from "./ShadowHtml";
+import { DriveSaveDialog, type SaveFormat } from "./DriveSaveDialog";
+import type { DriveLocation } from "./types";
 import type { ArtifactHost } from "./MaviArtifacts";
 import { imageLink } from "./MaviArtifacts";
 import {
@@ -167,14 +170,19 @@ const SCREEN_CSS = {
   thumb: `${CANVAS_CSS.slides}.s{border-radius:4px}`,
 };
 
+/** Um pedido de salvar no Drive (do cartão da MAVI): abre a janela já pronta. */
+export type CanvasSaveRequest = { format: string; start: DriveLocation; name: string; onSaved: (file: string) => void };
+
 export function CanvasPanel({
   artifact,
   host,
   images,
   onClose,
+  saveRequest,
 }: {
   artifact: CanvasArtifact;
   host: ArtifactHost;
+  saveRequest?: CanvasSaveRequest | null;
   /** As imagens desta conversa (para os slides). */
   images: Map<string, ImageArtifact>;
   onClose: () => void;
@@ -246,59 +254,59 @@ export function CanvasPanel({
     Object.fromEntries(refs.map((r) => [r, images.get(r)?.path]).filter((p): p is [string, string] => !!p[1]));
   async function pdf(doc: Paged, lk: Look | null) {
     const url = await canvasPdf(host.company, pageOf(doc, lk), filesOf(lk), imagePaths());
-    const blob = await (await fetch(url)).blob();
-    saveBlob(fileName(doc.title, "pdf"), blob);
+    return (await fetch(url)).blob();
   }
   /** O design livre no PowerPoint: cada página como imagem. */
   async function designPptx(doc: Extract<Canvas, { kind: "design" }>, lk: Look | null) {
     const r = await canvasPages(host.company, pageOf(doc, lk), filesOf(lk), imagePaths(), doc.format);
     const pics = await Promise.all(r.urls.map((u) => dataUrl(u)));
-    saveBlob(fileName(doc.title, "pptx"), await imagesPptx(doc.title, pics, r.width, r.height));
+    return imagesPptx(doc.title, pics, r.width, r.height);
   }
-  const exports: { label: string; run: () => Promise<void> }[] =
+  const html = async (doc: Paged, lk: Look | null) => new Blob([await selfContained(doc, lk)], { type: "text/html" });
+  // Os formatos de cada tipo: o mesmo arquivo serve para baixar e para o Drive.
+  const formats: SaveFormat[] =
     c.kind === "document" && look
       ? [
-          { label: "PDF", run: () => pdf(c, look) },
-          { label: "Word (.docx)", run: async () => saveBlob(fileName(c.title, "docx"), await documentDocx(c.title, c.markdown, look, assets)) },
+          { key: "pdf", label: "PDF", ext: "pdf", make: () => pdf(c, look) },
+          { key: "docx", label: "Word (.docx)", ext: "docx", make: () => documentDocx(c.title, c.markdown, look, assets) },
+          { key: "html", label: "Página (.html)", ext: "html", make: () => html(c, look) },
           {
-            label: "Página (.html)",
-            run: async () => saveBlob(fileName(c.title, "html"), new Blob([await selfContained(c, look)], { type: "text/html" })),
-          },
-          {
+            key: "md",
             label: "Markdown (.md)",
-            run: async () =>
-              saveBlob(fileName(c.title, "md"), new Blob([`# ${c.title}\n\n${clean(c.markdown)}\n`], { type: "text/markdown" })),
+            ext: "md",
+            make: async () => new Blob([`# ${c.title}\n\n${clean(c.markdown)}\n`], { type: "text/markdown" }),
           },
         ]
       : c.kind === "slides" && look
         ? [
-            { label: "PDF", run: () => pdf(c, look) },
-            { label: "PowerPoint (.pptx)", run: async () => saveBlob(fileName(c.title, "pptx"), await slidesPptx(c, imageData, assets)) },
-            {
-              label: "Página (.html)",
-              run: async () => saveBlob(fileName(c.title, "html"), new Blob([await selfContained(c, look)], { type: "text/html" })),
-            },
+            { key: "pdf", label: "PDF", ext: "pdf", make: () => pdf(c, look) },
+            { key: "pptx", label: "PowerPoint (.pptx)", ext: "pptx", make: () => slidesPptx(c, imageData, assets) },
+            { key: "html", label: "Página (.html)", ext: "html", make: () => html(c, look) },
           ]
         : c.kind === "design"
           ? [
-              { label: "PDF", run: () => pdf(c, look) },
-              {
-                label: "Página (.html)",
-                run: async () => saveBlob(fileName(c.title, "html"), new Blob([await selfContained(c, look)], { type: "text/html" })),
-              },
+              { key: "pdf", label: "PDF", ext: "pdf", make: () => pdf(c, look) },
+              { key: "html", label: "Página (.html)", ext: "html", make: () => html(c, look) },
               ...(c.format === "slides" || c.format === "square"
-                ? [{ label: "PowerPoint (páginas como imagem)", run: () => designPptx(c, look) }]
+                ? [{ key: "pptx", label: "PowerPoint (páginas como imagem)", ext: "pptx", make: () => designPptx(c, look) }]
                 : []),
             ]
-        : c.kind === "sheet"
-          ? [
-              { label: "Excel (.xlsx)", run: async () => saveBlob(fileName(c.title, "xlsx"), await sheetXlsx(c.sheets)) },
-              ...c.sheets.map((t) => ({
-                label: `CSV · ${t.name}`,
-                run: async () => saveBlob(fileName(`${c.title}-${t.name}`, "csv"), new Blob([sheetCsv(t)], { type: "text/csv" })),
-              })),
-            ]
-          : [];
+          : c.kind === "sheet"
+            ? [
+                { key: "xlsx", label: "Excel (.xlsx)", ext: "xlsx", make: () => sheetXlsx(c.sheets) },
+                ...c.sheets.map((t, i) => ({
+                  key: `csv-${i}`,
+                  label: `CSV · ${t.name}`,
+                  ext: "csv",
+                  make: async () => new Blob([sheetCsv(t)], { type: "text/csv" }),
+                })),
+              ]
+            : [];
+  const exports = formats.map((f) => ({
+    label: f.label,
+    run: async () => saveBlob(fileName(f.key.startsWith("csv-") ? `${c.title}-${f.label.slice(6)}` : c.title, f.ext), await f.make()),
+  }));
+  const [saving, setSaving] = useState(!!saveRequest);
   function print() {
     const node = body.current?.querySelector(".canvas-printable");
     if (node && !printHtml(c.title, node.outerHTML)) host.notify("O navegador bloqueou a janela de impressão.");
@@ -375,6 +383,18 @@ export function CanvasPanel({
             <Printer size={16} />
           </button>
         )}
+        {host.drive && !host.readOnly && formats.length > 0 && (
+          <button
+            type="button"
+            className="icon-btn"
+            title="Salvar no Drive"
+            aria-label="Salvar no Drive"
+            disabled={!!busy}
+            onClick={() => setSaving(true)}
+          >
+            <HardDriveUpload size={16} />
+          </button>
+        )}
         <Popover.Root>
           <Popover.Trigger asChild>
             <button type="button" className="btn secondary canvas-download" disabled={!!busy}>
@@ -400,6 +420,24 @@ export function CanvasPanel({
           <X size={17} />
         </button>
       </header>
+      {saving && host.drive && (
+        <DriveSaveDialog
+          company={host.company}
+          data={host.drive.data}
+          user={host.drive.user}
+          isLeader={host.drive.isLeader}
+          start={saveRequest?.start ?? host.drive.start ?? (look?.client ? { client: look.client } : {})}
+          title={saveRequest?.name ?? c.title}
+          initialFormat={saveRequest?.format === "csv" ? "csv-0" : saveRequest?.format}
+          formats={formats}
+          onClose={() => setSaving(false)}
+          onSaved={(file, where) => {
+            setSaving(false);
+            saveRequest?.onSaved(file);
+            host.notify(`Salvo no Drive, em “${where}”.`);
+          }}
+        />
+      )}
       <div className="canvas-body" ref={body}>
         {c.kind === "document" && look ? (
           <ShadowHtml css={SCREEN_CSS.document} html={documentHtml(c.title, c.markdown, look, screen)} />
