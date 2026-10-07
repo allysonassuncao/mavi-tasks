@@ -214,5 +214,21 @@ await check("o histórico: tarefas já ligadas e itens já fechados sem tarefa e
   assert.deepEqual([s.kind, s.backfill, s.user_id], ["created", true, admin]);
 });
 
+await check("registros novos ou mudados avisam a empresa pelo Realtime (uma vez por comando)", async () => {
+  const live = async () =>
+    (await sql(`select count(*)::int as n from realtime.messages where topic = $1 and payload->>'kind' = 'radar_task_signals'`,
+      [`mavi:company:${A}`]))[0].n;
+  const before = await live();
+  const item = await newItem("Aviso ao vivo");
+  const task = await newTask("Tarefa do aviso", member);
+  await as(manager);
+  await rpc("radar_task_created", [A, item, task, JSON.stringify({ title: "Aviso ao vivo", contract })]);
+  assert.ok((await live()) > before, "criar avisa");
+  const mid = await live();
+  await as(manager);
+  await rpc("unlink_radar_task", [A, item, task]);
+  assert.equal((await live()) - mid, 1, "desvincular avisa uma vez");
+});
+
 console.log(`\n${passed} checks passed`);
 await db.close?.();

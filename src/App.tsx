@@ -1683,6 +1683,11 @@ export default function App() {
           window.dispatchEvent(new CustomEvent("mavi:radar-task-rules"));
           return;
         }
+        // Painel da MAVI › Tarefas do Radar: "Últimos registros" ao vivo.
+        if (change.kind === "radar_task_signals") {
+          window.dispatchEvent(new CustomEvent("mavi:radar-task-signals"));
+          return;
+        }
         // Radar do cliente: a tarefa sugerida no item (o cartão e o selo da lista).
         if (change.kind === "radar_task_suggestion") {
           window.dispatchEvent(new CustomEvent("mavi:radar-task-suggestion", { detail: { item: change.item } }));

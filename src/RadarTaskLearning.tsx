@@ -57,6 +57,20 @@ export function RadarTaskLearning({
   const [error, setError] = useState("");
   // Os tópicos já vistos (o filtro não some quando um tópico é escolhido).
   const [topics, setTopics] = useState<Map<string, string>>(new Map());
+  // Registros novos ou mudados (Realtime, sem consultas periódicas): recarrega.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const on = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setTick((n) => n + 1), 800);
+    };
+    window.addEventListener("mavi:radar-task-signals", on);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("mavi:radar-task-signals", on);
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -79,7 +93,7 @@ export function RadarTaskLearning({
     return () => {
       alive = false;
     };
-  }, [company, period, topic, product]);
+  }, [company, period, topic, product, tick]);
 
   const products = useMemo(
     () => [...data.products].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),

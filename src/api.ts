@@ -1399,6 +1399,8 @@ export type LiveChange =
   | { kind: "radar_task_rules" }
   /** Radar do cliente: a tarefa sugerida no item mudou (a MAVI decidiu ou alguém agiu). */
   | { kind: "radar_task_suggestion"; item: string }
+  /** Painel da MAVI › Tarefas do Radar: registros novos ou mudados (tarefa criada/vinculada, item fechado, recusa). */
+  | { kind: "radar_task_signals" }
   /** Customer Success: squads, planilha, leitura ou ligação de clientes. */
   | { kind: "cs"; scope: "squads" | "settings" | "sync" | "clients" };
 
