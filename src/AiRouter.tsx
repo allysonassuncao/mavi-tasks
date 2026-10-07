@@ -155,6 +155,11 @@ export function RouterPanel({
           <a href="#regras">Quem usa qual modelo</a> travam o modelo, a não ser que estejam em Automático (abaixo); a
           da empresa é só o ponto de partida. As restrições de provedor valem sempre, até no modo sombra.
         </p>
+        <p className="cins-help">
+          Em toda pergunta, a MAVI leva só as ferramentas das conexões (MCP) e das contas de anúncio que combinam com o
+          pedido ou que a conversa usou há pouco; as outras ela procura quando precisa. Imagens anexadas vão direto para
+          o modelo quando ele enxerga (com o roteador ativo, ele escolhe um que enxergue).
+        </p>
         <div className="cins-row">
           <label>
             <span>Modo</span>

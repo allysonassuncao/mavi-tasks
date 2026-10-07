@@ -14,7 +14,7 @@ import {
 import { transcribe } from "./_whatsapp.js";
 import { addUsage, newMeter } from "./_social-leads.js";
 import { transcribePerMinute } from "../src/ai-providers.js";
-import type { ToolSpec } from "./_ai-llm.js";
+import type { ToolImage, ToolSpec } from "./_ai-llm.js";
 import { cite, reranked, type ToolContext } from "./_ai-tools.js";
 
 /**
@@ -128,6 +128,52 @@ async function download(env: AttachEnv, fetchImpl: Fetch, path: string) {
 }
 
 type Cost = { usd: number; model: string; input: number; output: number; provider: string | null; kind: string };
+
+/** O teto de cada imagem para o modelo ver (o base64 cresce ~4/3; a API recusa acima de 5 MB). */
+const NATIVE_MAX_BYTES = 3_400_000;
+const NATIVE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+/**
+ * As imagens anexadas nesta pergunta, para o modelo ver direto (roteador,
+ * fase 3): até 4, prontas e da própria pessoa (o banco confere). Grandes ou
+ * em outro formato (GIF, HEIC) viram JPEG de até 1568 px. A que não abre
+ * fica de fora: a descrição em texto continua na pergunta.
+ */
+export async function attachmentImages(
+  env: Pick<AttachEnv, "supabaseUrl" | "supabaseKey" | "credentials" | "bucket">,
+  fetchImpl: Fetch,
+  auth: string,
+  ids: string[],
+): Promise<ToolImage[]> {
+  const uuid = /^[0-9a-f-]{36}$/i;
+  const list = ids.filter((id) => uuid.test(id)).slice(0, 4);
+  if (!list.length || !env.credentials || !env.bucket) return [];
+  const res = await fetchImpl(
+    `${env.supabaseUrl}/rest/v1/ai_attachments?select=id,path,mime&kind=eq.image&status=eq.ready&id=in.(${list.join(",")})`,
+    { headers: { apikey: env.supabaseKey, Authorization: auth } },
+  ).catch(() => null);
+  if (!res?.ok) return [];
+  const rows = (await res.json()) as { id: string; path: string; mime: string }[];
+  const out: ToolImage[] = [];
+  for (const r of rows) {
+    try {
+      let bytes = await download(env as AttachEnv, fetchImpl, r.path);
+      let mime = r.mime;
+      if (!NATIVE_TYPES.has(mime) || bytes.byteLength > NATIVE_MAX_BYTES) {
+        const { default: sharp } = await import("sharp");
+        bytes = new Uint8Array(
+          await sharp(bytes).rotate().resize({ width: 1568, height: 1568, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer(),
+        );
+        mime = "image/jpeg";
+      }
+      if (bytes.byteLength > NATIVE_MAX_BYTES) continue;
+      out.push({ mediaType: mime as ToolImage["mediaType"], data: Buffer.from(bytes).toString("base64") });
+    } catch {
+      // Sem a imagem, a MAVI segue com a descrição.
+    }
+  }
+  return out;
+}
 
 /** A descrição e o texto da imagem, pelo modelo do módulo (ou a Claude do servidor). */
 export async function describeImage(

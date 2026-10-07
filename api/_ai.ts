@@ -103,15 +103,18 @@ import {
   openCandidate,
   routeContext,
   strongerThan,
+  modelProfile,
   type Candidate,
   type RouteOpener,
 } from "./_ai-router.js";
+import { byRelevance, FIND_TOOLS, findTools, selectTools, TOOLSET_RULES, USE_TOOL } from "./_ai-toolset.js";
 import type { Meter } from "./_social-leads.js";
 import { pageForMavi, scrapePage } from "./_ai-scrape.js";
 import {
   ATTACH_RULES,
   ATTACH_TOOLS,
   attachmentContext,
+  attachmentImages,
   handleAttachments,
   inlineAttachments,
   runAttachmentTool,
@@ -796,6 +799,12 @@ async function ask(
     routeSurface,
     !!env.anthropicKey,
   );
+  // As ferramentas que esta conversa usou há pouco (vão sempre, mesmo com muitas conexões).
+  const recentTools: Promise<string[]> = conversationId
+    ? callRpc<string[]>(env, deps.fetch, auth, "ai_recent_tools", { p_conversation: conversationId })
+        .then((r) => (r.ok && Array.isArray(r.data) ? r.data : []))
+        .catch(() => [])
+    : Promise.resolve([]);
   const [base, limits, history, route, powerList, catalog, mcpCatalog, panelEfforts, learned, person] = await Promise.all([
     buildContext(env, deps, auth, company, scope, now),
     callRpc<{ blocked: boolean; message: string | null; warnings: string[] }>(
@@ -1243,7 +1252,7 @@ async function ask(
     .then((r) => r.ok && Array.isArray(r.data) && r.data.some((x) => x.company_id === company))
     .catch(() => false);
   // Sem catálogo e sem skill escolhida, as ferramentas das skills não entram.
-  const tools = [
+  const allTools = [
     ...toolsFor(powers, { writer: !!kit.writer, webResearch: !!webRoute }).filter(
       (t) =>
         REGISTRY[t.name]?.kind !== "skill" ||
@@ -1260,7 +1269,29 @@ async function ask(
     // Tarefas longas: no módulo MAVI e na bolinha (a conversa fica salva e o card aparece).
     ...(withPowers ? [PLAN_TOOL] : []),
   ];
-  const allowed = new Set(tools.map((t) => t.name));
+  // Ferramentas por intenção: as das conexões e das contas de anúncio vão
+  // quando combinam com o pedido ou foram usadas há pouco; as outras, pelo
+  // find_tools / use_tool.
+  const usedBefore = new Set(await recentTools);
+  const recent = new Set(
+    allTools
+      .map((t) => t.name)
+      .filter((name) => {
+        const m = mcp?.meta.get(name);
+        return m ? usedBefore.has(`mcp:${m.server.slug}/${m.tool.name}`) : usedBefore.has(name);
+      }),
+  );
+  const toolChoice = selectTools({
+    tools: allTools,
+    deferrable: (name) => !!mcp?.meta.has(name) || !!ads?.has(name),
+    text: [
+      ...past.filter((m) => m.role === "user").slice(-2).map((m) => m.content),
+      question,
+    ].join("\n"),
+    recent,
+  });
+  const tools = [...toolChoice.offered, ...(toolChoice.deferred.length ? [FIND_TOOLS, USE_TOOL] : [])];
+  const allowed = new Set([...allTools, ...tools].map((t) => t.name));
   // Roteador: lê o pedido (tipo, complexidade, tamanho, ferramentas, anexos)
   // e, com a política da empresa, decide quem responde. Ativo e sem regra
   // travada, troca o modelo; a regra fora dos provedores permitidos (cliente
@@ -1282,8 +1313,16 @@ async function ask(
     skills: picked.length,
     retry: retried,
   });
+  if (toolChoice.why) routeSignals.why.push(toolChoice.why);
+  // Imagens anexadas agora: o modelo que responde precisa enxergar (as vê direto).
+  const imageIds = attachedNow.filter((a) => a.kind === "image" && a.status === "ready").map((a) => a.id);
   const policy = await routeCtx;
-  const routeChoice = chooseRoute({ signals: routeSignals, ctx: policy, current: turnRoute });
+  const routeChoice = chooseRoute({
+    signals: routeSignals,
+    ctx: policy,
+    current: turnRoute,
+    nativeImages: imageIds.length > 0,
+  });
   if (routeChoice.blocked && !routeChoice.pick) throw new AiError(403, NO_PROVIDER);
   const opener: RouteOpener = {
     providerKey: env.providerKey,
@@ -1309,6 +1348,13 @@ async function ask(
       : null;
   };
   if (routeChoice.apply && routeChoice.pick) switchTo(routeChoice.pick);
+  const sees = () => modelProfile(provider?.kind ?? "anthropic", provider?.model || env.model).vision;
+  const nativeImages = imageIds.length && sees() ? await attachmentImages(env, deps.fetch, auth, imageIds) : [];
+  if (nativeImages.length) {
+    const label = nativeImages.length === 1 ? "Vendo a imagem anexada" : `Vendo as ${nativeImages.length} imagens anexadas`;
+    steps.push({ label });
+    emit({ type: "step", id: "images", label, state: "done" });
+  }
   // Montou o plano de uma tarefa longa: nada mais roda nesta resposta.
   let planned = false;
   const planKit = {
@@ -1333,6 +1379,22 @@ async function ask(
       return "Você fez perguntas à pessoa: espere as respostas antes de seguir. Escreva só uma frase curta e pare.";
     if (planned)
       return "O plano da tarefa longa já está no card: a pessoa confere e confirma. Escreva só uma frase curta e pare.";
+    // As ferramentas sob demanda: procurar e chamar.
+    if (name === "find_tools") {
+      const q = String((input as Row)?.query ?? "").trim().slice(0, 300);
+      const label = `Procurando ferramentas para “${q.slice(0, 80)}”`;
+      emit({ type: "step", id: `t${++n}`, label, state: "done" });
+      steps.push({ label });
+      calls.push({ tool: "find_tools", label, power: null, ok: true, ms: 0, cost: 0 });
+      return findTools(q, toolChoice.deferred, [...skills.catalog.values()]);
+    }
+    if (name === "use_tool") {
+      const i = (input && typeof input === "object" ? input : {}) as Row;
+      const inner = String(i.name ?? "");
+      if (!inner || inner === "use_tool" || inner === "find_tools")
+        return "Diga o nome exato de uma ferramenta que find_tools encontrou.";
+      return execute(inner, i.input && typeof i.input === "object" ? i.input : {});
+    }
     const stepId = `t${++n}`;
     const mcpTool = mcp?.meta.get(name);
     const adsTool = !mcpTool && !!ads?.has(name);
@@ -1639,12 +1701,17 @@ async function ask(
     (base.campaigns ? ALERT_CHAT_RULES : "") +
     (ads ? ADS_RULES : "") +
     (csAccess ? CS_RULES : "") +
-    (withPowers ? TASK_RULES : "");
+    (withPowers ? TASK_RULES : "") +
+    (toolChoice.deferred.length ? TOOLSET_RULES : "");
   const turnContext =
     base.context +
     personContext(person) +
     learningContext(learned) +
-    catalogContext([...skills.catalog.values()], picked) +
+    // As skills que combinam com o pedido primeiro (o catálogo tem teto).
+    catalogContext(
+      byRelevance([...skills.catalog.values()], question, (k) => `${k.slug} ${k.name} ${k.description}`),
+      picked,
+    ) +
     (mcp?.context ?? "") +
     (ads?.context ?? "") +
     attachmentContext(attachments);
@@ -1674,10 +1741,12 @@ async function ask(
   const clean = () => !kit.artifacts.length && !kit.asked && !planned;
   const callModel = async () => {
     const by = who();
+    // As imagens vão direto só para o modelo que enxerga (a descrição em texto já está na pergunta).
+    const seen = nativeImages.length > 0 && modelProfile(by.kind, by.model).vision;
     const r = await llm({
       instructions: turnInstructions,
       context: turnContext,
-      messages: turnMessages,
+      messages: seen ? [...turnMessages.slice(0, -1), { ...turnMessages[turnMessages.length - 1], images: nativeImages }] : turnMessages,
       tools,
       onRound: (r) => rounds.push(r),
       execute,
@@ -1740,7 +1809,7 @@ async function ask(
     if (result && policy.mode === "active" && policy.escalate && clean() && !stop.signal.aborted) {
       const weak =
         !result.text.trim() || answerSignals({ answer: result.text, failedTools: 0, found: 0, cited: 0 }).includes("announce");
-      const up = weak ? strongerThan(policy, routeSignals, who()) : null;
+      const up = weak ? strongerThan(policy, routeSignals, who(), { vision: nativeImages.length > 0 }) : null;
       if (up) {
         routeNotes.push(`resposta fraca com ${who().model}; refeita com ${up.model}`);
         restart("Refazendo com um modelo mais forte", up.model);

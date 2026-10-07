@@ -283,7 +283,20 @@ export function openAiChatAdapter(
             role: "system",
             content: `${request.instructions}\n\n${request.context}`,
           },
-      ...request.messages.map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
+      ...request.messages.map((m) =>
+        m.role === "user" && m.images?.length
+          ? ({
+              role: "user",
+              content: [
+                ...usableImages(m.images).map((i) => ({
+                  type: "image_url" as const,
+                  image_url: { url: `data:${i.mediaType};base64,${i.data}` },
+                })),
+                { type: "text" as const, text: m.content },
+              ],
+            } as ChatMessage)
+          : ({ role: m.role, content: m.content } as ChatMessage),
+      ),
     ];
     const maxRounds = request.maxRounds ?? 6;
     let nudged = false;

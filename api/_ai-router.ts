@@ -630,11 +630,14 @@ export function strongerThan(
   ctx: RouteContext,
   signals: RouteSignals,
   used: { providerId: string | null; model: string; kind: string },
+  /** vision: a pergunta tem imagens que o modelo vê direto. */
+  opts: { vision?: boolean } = {},
 ): Candidate | null {
   const usedTier = modelProfile(used.kind, used.model).tier;
   const list = ctx.candidates
     .map((c) => ({ c, p: modelProfile(c.kind, c.model, c.price), est: estimateCost(c, signals) }))
     .filter((x) => !x.p.speechOnly && x.p.tier > usedTier && (!signals.tools || x.p.tools))
+    .filter((x) => !opts.vision || x.p.vision)
     .filter((x) => signals.contextTokens <= x.p.contextK * 1000 * 0.8)
     .filter((x) => x.est <= ctx.escalateCap)
     .sort((a, b) => b.p.tier - a.p.tier || a.est - b.est);

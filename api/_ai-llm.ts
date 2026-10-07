@@ -18,9 +18,13 @@ export type ToolSpec = {
   /** JSON Schema do objeto de entrada. */
   parameters: Record<string, unknown>;
 };
-export type ChatTurn = { role: "user" | "assistant"; content: string };
 /** Uma imagem que a ferramenta devolve para o modelo ver (base64, até ~4 MB). */
 export type ToolImage = { mediaType: "image/png" | "image/jpeg" | "image/webp"; data: string };
+/**
+ * Uma mensagem da conversa. A da pessoa pode levar imagens anexadas, que o
+ * modelo vê direto (só os que enxergam; o roteador escolhe um assim).
+ */
+export type ChatTurn = { role: "user" | "assistant"; content: string; images?: ToolImage[] };
 /** O resultado de uma ferramenta: texto e, quando ela produz imagens, as imagens. */
 export type ToolOutput = string | { text: string; images: ToolImage[] };
 /** O texto do resultado (para o registro e a tela). */
@@ -266,8 +270,19 @@ export function anthropicAdapter(
         : []),
     ];
     let webSearches = 0;
-    const messages: Anthropic.Beta.BetaMessageParam[] = request.messages.map(
-      (m) => ({ role: m.role, content: m.content }),
+    const messages: Anthropic.Beta.BetaMessageParam[] = request.messages.map((m) =>
+      m.role === "user" && m.images?.length
+        ? {
+            role: "user",
+            content: [
+              ...usableImages(m.images).map((i) => ({
+                type: "image" as const,
+                source: { type: "base64" as const, media_type: i.mediaType, data: i.data },
+              })),
+              { type: "text" as const, text: m.content },
+            ],
+          }
+        : { role: m.role, content: m.content },
     );
     const maxRounds = request.maxRounds ?? 6;
     // Uma resposta sem texto ganha uma segunda chance (uma só).
