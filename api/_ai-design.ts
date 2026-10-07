@@ -1,7 +1,7 @@
 import { callRpc } from "./_drive.js";
 import type { ToolOutput, ToolSpec } from "./_ai-llm.js";
 import { add, type PowerKit } from "./_ai-powers.js";
-import { localRenderer, resolveClient } from "./_ai-art.js";
+import { localRenderer, resolveClient } from "./_ai-render.js";
 import { IDENTITY_PARAMS, keepAllowed, lookForCanvas, renderAssets, renderRemote } from "./_ai-identity.js";
 import type { CanvasArtifact, ImageArtifact } from "../src/mavi-artifacts.js";
 import { sanitizeCanvas } from "../src/mavi-artifacts.js";
