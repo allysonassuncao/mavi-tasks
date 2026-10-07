@@ -43,7 +43,9 @@ export type LogField =
   | "judge_sample"
   | "eval_enabled"
   | "eval_rate"
-  | "eval_daily_cap";
+  | "eval_daily_cap"
+  | "gate_enabled"
+  | "gate_min";
 export type LogChoice = {
   provider_id: string;
   /** O nome do provedor na hora. */
@@ -148,6 +150,8 @@ const FIELD_LABELS: Record<LogField, string> = {
   eval_enabled: "Testes fora do ar",
   eval_rate: "Respostas testadas fora do ar",
   eval_daily_cap: "Teto por dia dos testes",
+  gate_enabled: "Só modelos aprovados no conjunto de avaliação",
+  gate_min: "Nota mínima para aprovar",
 };
 
 const LEVEL_NAMES: Record<string, string> = {
@@ -392,9 +396,11 @@ function routerLine(
       case "escalate":
       case "sigiloso":
       case "eval_enabled":
+      case "gate_enabled":
         return v ? "Sim" : "Não";
       case "judge_sample":
       case "eval_rate":
+      case "gate_min":
         return `${Math.round(Number(v ?? 0) * 100)}%`;
       case "mode":
         return v === "active" ? "Ativo" : "Sombra";

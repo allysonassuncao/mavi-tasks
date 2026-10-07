@@ -486,6 +486,12 @@ export type RouteContext = {
   stats: RouteStat[];
   /** Os tipos de pedido em que quem pergunta teve respostas ruins há pouco. */
   personBad: TaskType[];
+  /**
+   * Fase 5: com a liberação ligada, o roteador (no automático) só usa os
+   * modelos aprovados no conjunto de avaliação.
+   */
+  gate?: boolean;
+  approved?: { providerId: string | null; model: string }[];
 };
 
 const LEVELS: CostLevel[] = ["economico", "equilibrado", "maxima"];
@@ -514,6 +520,8 @@ export async function routeContext(
     candidates: { provider_id: string; name: string; kind: string; base_url: string | null; key_cipher: string; models: ProviderModel[] }[];
     stats?: { task_type: string; model: string; n: number; quality: number | string }[];
     person_bad?: string[];
+    gate?: boolean;
+    approved?: { provider_id: string | null; model: string }[];
   };
   const r = await callRpc<Row>(env, fetchImpl, auth, "ai_route_context", {
     p_company: company,
@@ -565,7 +573,23 @@ export async function routeContext(
     personBad: (Array.isArray(d.person_bad) ? d.person_bad : []).filter((t): t is TaskType =>
       TASK_TYPES.includes(t as TaskType),
     ),
+    gate: !!d.gate,
+    approved: (Array.isArray(d.approved) ? d.approved : []).map((a) => ({ providerId: a.provider_id ?? null, model: a.model })),
   };
+}
+
+/**
+ * Os candidatos que o roteador pode escolher sozinho: com a liberação, só
+ * os aprovados no conjunto de avaliação (sem nenhum aprovado, todos, para
+ * não deixar a MAVI sem resposta).
+ */
+export function releasedCandidates(ctx: RouteContext): { list: Candidate[]; note: string | null } {
+  if (!ctx.gate) return { list: ctx.candidates, note: null };
+  const ok = new Set((ctx.approved ?? []).map((a) => `${a.providerId ?? ""}|${a.model}`));
+  const list = ctx.candidates.filter((c) => ok.has(`${c.providerId ?? ""}|${c.model}`));
+  return list.length
+    ? { list, note: null }
+    : { list: ctx.candidates, note: "nenhum modelo aprovado no conjunto de avaliação: valeram todos" };
 }
 
 /** A configuração para chamar o candidato (a chave aberta aqui, no servidor). */
@@ -636,14 +660,16 @@ export function chooseRoute(input: {
     ctx.restricted &&
     (current ? !ctx.candidates.some((c) => c.providerId === current.provider_id) : !ctx.server);
   const lockedScope = current && !current.auto && !blocked ? current.scope : null;
+  const released = releasedCandidates(ctx);
   const decision = decide({
     signals,
     level: ctx.level,
-    candidates: ctx.candidates,
+    candidates: released.list,
     lockedScope,
     stats: input.stats ?? ctx.stats,
     nativeImages: input.nativeImages,
   });
+  if (ctx.gate) decision.reason += released.note ? `; ${released.note}` : "; só modelos aprovados no conjunto de avaliação";
   if (blocked)
     decision.reason += current
       ? `; a regra (${current.model}) não é permitida aqui${ctx.sigiloso ? " (cliente sigiloso)" : ""}`
@@ -652,7 +678,7 @@ export function chooseRoute(input: {
   const pick = apply ? decision.suggested : null;
   // Reserva: os que atendem a faixa, de outro provedor primeiro, pela nota.
   const ok = new Set(decision.scored.filter((x) => !x.out).map((x) => `${x.providerId ?? ""}|${x.model}`));
-  const fallbacks = ctx.candidates
+  const fallbacks = released.list
     .filter((c) => ok.has(`${c.providerId ?? ""}|${c.model}`))
     .filter((c) => !(pick && c.providerId === pick.providerId && c.model === pick.model))
     .sort((a, b) => Number(a.providerId === pick?.providerId) - Number(b.providerId === pick?.providerId));
@@ -671,7 +697,7 @@ export function strongerThan(
   opts: { vision?: boolean } = {},
 ): Candidate | null {
   const usedTier = modelProfile(used.kind, used.model).tier;
-  const list = ctx.candidates
+  const list = releasedCandidates(ctx).list
     .map((c) => ({ c, p: modelProfile(c.kind, c.model, c.price), est: estimateCost(c, signals) }))
     .filter((x) => !x.p.speechOnly && x.p.tier > usedTier && (!signals.tools || x.p.tools))
     .filter((x) => !opts.vision || x.p.vision)

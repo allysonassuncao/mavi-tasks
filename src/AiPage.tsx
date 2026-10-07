@@ -4,6 +4,7 @@ import {
   BellRing,
   Boxes,
   Brain,
+  ClipboardCheck,
   GraduationCap,
   Lightbulb,
   MessageCircle,
@@ -31,6 +32,8 @@ import { WhatsappGroupsPanel } from "./WhatsappGroups";
 import { JobAlertsPanel } from "./JobAlerts";
 import { RouterPanel } from "./AiRouter";
 import { demoRouter, serverRouter } from "./ai-router";
+import { EvalSetPanel } from "./AiEvalSet";
+import { demoEval, serverEval } from "./ai-eval-set";
 
 const TABS: {
   id: AiTab;
@@ -53,6 +56,7 @@ const TABS: {
   { id: "provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
   { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: false },
   { id: "roteamento", label: "Roteamento", icon: Shuffle, admin: false },
+  { id: "avaliacao", label: "Avaliação", icon: ClipboardCheck, admin: false },
   {
     id: "whatsapp",
     label: "Grupos do Whatsapp",
@@ -69,7 +73,8 @@ const TABS: {
  * (#termometro), os tópicos do Radar do cliente (#radar), os insights da
  * MAVI nas campanhas (#campanhas), os poderes do módulo MAVI (#poderes) e as regras de quem usa qual provedor e modelo (por
  * funcionalidade, pessoa, cliente, produto e projeto, #regras), o roteador
- * de modelos (nível de custo, privacidade e desempenho, #roteamento) e os grupos
+ * de modelos (nível de custo, privacidade e desempenho, #roteamento), o
+ * conjunto de avaliação (#avaliacao) e os grupos
  * do WhatsApp lidos pela MAVI (#whatsapp; só administradores ajustam); para
  * administradores, também a biblioteca de provedores e API Keys
  * (#provedores) e os avisos de falhas das rotinas (#avisos). Cada aba tem o
@@ -208,9 +213,19 @@ function AdminTabs({
   const [saved, setSaved] = useState(0);
   const version = useMemo(() => ({}), [library, saved]); // eslint-disable-line react-hooks/exhaustive-deps
   const router = useMemo(() => (demo ? demoRouter() : serverRouter(company)), [demo, company]);
+  const evalSet = useMemo(() => (demo ? demoEval() : serverEval(company)), [demo, company]);
   return (
     <SettingsLogProvider company={demo ? undefined : company} data={data} providers={library?.providers}>
-      {tab === "roteamento" ? (
+      {tab === "avaliacao" ? (
+        <EvalSetPanel
+          api={evalSet}
+          router={router}
+          data={data}
+          library={library}
+          defaults={defaults}
+          notify={notify}
+        />
+      ) : tab === "roteamento" ? (
         <RouterPanel
           api={router}
           company={demo ? undefined : company}

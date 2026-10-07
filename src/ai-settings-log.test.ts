@@ -253,5 +253,8 @@ describe("histórico do Roteamento", () => {
     expect(
       describeEntry(entry({ area: "router", subject: "", field: "eval_daily_cap", old: { eval_daily_cap: 0.5 }, new: { eval_daily_cap: 2 } }), withProviders),
     ).toMatchObject({ field: "Teto por dia dos testes", from: "US$ 0,5", to: "US$ 2" });
+    expect(
+      describeEntry(entry({ area: "router", subject: "", field: "gate_min", old: { gate_min: 0.8 }, new: { gate_min: 0.85 } }), withProviders),
+    ).toMatchObject({ field: "Nota mínima para aprovar", from: "80%", to: "85%" });
   });
 });

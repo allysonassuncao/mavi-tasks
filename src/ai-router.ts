@@ -75,6 +75,9 @@ export type RouterSettings = {
   eval_enabled: boolean;
   eval_rate: number;
   eval_daily_cap: number;
+  /** Fase 5: no automático, só modelos aprovados no conjunto de avaliação (nota mínima de 0 a 1). */
+  gate_enabled: boolean;
+  gate_min: number;
   updated_at?: string | null;
   scopes: RouterScope[];
 };
@@ -203,6 +206,8 @@ export function demoRouter(): RouterApi {
     eval_enabled: true,
     eval_rate: 0.2,
     eval_daily_cap: 0.5,
+    gate_enabled: false,
+    gate_min: 0.8,
     scopes: [],
   };
   return {

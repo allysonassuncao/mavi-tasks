@@ -480,6 +480,11 @@ export function SidebarNav({
               to: { page: "aiUsage" as const, hash: "roteamento" },
             },
             {
+              key: "ai-eval-set",
+              label: "Avaliação",
+              to: { page: "aiUsage" as const, hash: "avaliacao" },
+            },
+            {
               key: "ai-whatsapp",
               label: "Grupos do Whatsapp",
               to: { page: "aiUsage" as const, hash: "whatsapp" },

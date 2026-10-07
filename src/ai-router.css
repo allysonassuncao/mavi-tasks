@@ -149,3 +149,109 @@
     max-width: none;
   }
 }
+
+/* ------------------------------------------------------------ Painel da MAVI › Avaliação */
+.evs-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.evs-suggestions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.evs-suggestions li > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 0.82rem;
+}
+.evs-suggestions small {
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.evs-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+.evs-detail article {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #fff;
+  white-space: normal;
+}
+.evs-detail article.ok {
+  border-left-color: #4f9d69;
+}
+.evs-detail article.bad {
+  border-left-color: #c0573f;
+}
+.evs-detail header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+.evs-detail header > span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.evs-why {
+  margin: 0;
+  font-size: 0.8rem;
+}
+.evs-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.evs-compare small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.evs-compare p {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow: auto;
+}
+.rtr-editor > label:not(.cins-check) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+}
+.rtr-editor > label:not(.cins-check) > span {
+  font-weight: 600;
+}
+@media (max-width: 600px) {
+  .evs-compare {
+    grid-template-columns: 1fr;
+  }
+  .evs-suggestions li {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

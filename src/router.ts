@@ -121,6 +121,7 @@ export const AI_TABS = [
   "provedores",
   "regras",
   "roteamento",
+  "avaliacao",
   "whatsapp",
   "avisos",
 ] as const;

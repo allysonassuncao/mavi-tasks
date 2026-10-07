@@ -95,8 +95,8 @@ export function verdictFor(p: Pairwise, candidateIsA: boolean): "better" | "same
   return (p.winner === "A") === candidateIsA ? "better" : "worse";
 }
 
-type Usage = { model: string; input: number; output: number; cache_read?: number; cache_write?: number; cost: number; provider_id?: string; provider?: string };
-const usageOf = (meter: { model: string; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number }, fallback: string, provider?: { id: string; name: string } | null): Usage => ({
+export type Usage = { model: string; input: number; output: number; cache_read?: number; cache_write?: number; cost: number; provider_id?: string; provider?: string };
+export const usageOf = (meter: { model: string; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number }, fallback: string, provider?: { id: string; name: string } | null): Usage => ({
   model: meter.model || fallback,
   input: meter.input,
   output: meter.output,
@@ -106,24 +106,30 @@ const usageOf = (meter: { model: string; input: number; output: number; cacheRea
   ...(provider ? { provider_id: provider.id, provider: provider.name } : {}),
 });
 
-/** O adaptador do candidato (a Claude do servidor no modelo padrão usa o da MAVI). */
-function candidateLlm(env: AiEnv, deps: AiDeps, item: EvalItem): LlmAdapter {
-  if (!item.candidate && item.candidate_model === env.model) return deps.llm;
-  const c: Candidate = item.candidate
+/** O provedor que o banco devolve para o worker (nulo: a Claude do servidor). */
+export type WorkerProvider = EvalItem["candidate"];
+
+/**
+ * O adaptador de um modelo para o worker (a Claude do servidor no modelo
+ * padrão usa o da MAVI). Também serve ao conjunto de avaliação.
+ */
+export function workerModel(env: AiEnv, deps: AiDeps, model: string, provider: WorkerProvider): LlmAdapter {
+  if (!provider && model === env.model) return deps.llm;
+  const c: Candidate = provider
     ? {
-        providerId: item.candidate.provider_id,
-        provider: item.candidate.provider,
-        kind: item.candidate.kind,
-        model: item.candidate_model,
-        price: item.candidate.price,
-        keyCipher: item.candidate.key_cipher,
-        baseUrl: item.candidate.base_url,
+        providerId: provider.provider_id,
+        provider: provider.provider,
+        kind: provider.kind,
+        model,
+        price: provider.price,
+        keyCipher: provider.key_cipher,
+        baseUrl: provider.base_url,
       }
-    : (serverCandidates(true).find((x) => x.model === item.candidate_model) ?? {
+    : (serverCandidates(true).find((x) => x.model === model) ?? {
         providerId: null,
         provider: "Servidor",
         kind: "anthropic",
-        model: item.candidate_model,
+        model,
         price: null,
       });
   if (!c.providerId && !env.anthropicKey) throw new Error("Sem a Claude do servidor para o candidato.");
@@ -137,7 +143,7 @@ export async function evalItem(env: AiEnv, deps: AiDeps, kit: CompanyKit, item: 
   if (!kit.llm) throw new Error("Sem modelo para comparar as respostas.");
   const usage: Usage[] = [];
   const material = materialText(item.material);
-  const out = await candidateLlm(env, deps, item)({
+  const out = await workerModel(env, deps, item.candidate_model, item.candidate)({
     instructions: EVAL_ANSWER_RULES,
     context: material,
     messages: [{ role: "user", content: item.material.question }],
