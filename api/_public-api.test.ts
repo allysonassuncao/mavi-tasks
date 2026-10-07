@@ -117,4 +117,50 @@ describe("handlePublicApi", () => {
       body: { error: "Já existe", existing_client_id: CLIENT },
     });
   });
+
+  it("POST /clients/{id}/meetings normaliza a transcrição e responde 201", async () => {
+    const { result, fetchMock } = call("POST", `clients/${CLIENT}/meetings`, {
+      body: {
+        external_id: 42,
+        title: "Kickoff",
+        recorded_at: "2026-10-07T14:00:00-03:00",
+        transcript: "[00:00:05] Ana: Bom dia.\n[00:00:09] Bruno: Bom dia!",
+        summary: "Alinhamos o escopo.",
+      },
+    });
+    expect((await result).status).toBe(201);
+    const { url, args } = sent(fetchMock);
+    expect(url).toBe("https://db.example.com/rest/v1/rpc/api_create_meeting");
+    expect(args.p_client).toBe(CLIENT);
+    expect(args.p_meeting).toMatchObject({
+      external_id: "42",
+      duration_seconds: 9,
+      summary: { overview: "Alinhamos o escopo." },
+      transcript: {
+        speakers: ["Ana", "Bruno"],
+        segments: [
+          [5, 9, 0, "Bom dia."],
+          [9, 9, 1, "Bom dia!"],
+        ],
+      },
+    });
+  });
+
+  it("POST /clients/{id}/meetings recusa link de vídeo interno antes do banco", async () => {
+    const { result, fetchMock } = call("POST", `clients/${CLIENT}/meetings`, {
+      body: { recorded_at: "2026-10-07T14:00:00Z", video_url: "https://169.254.169.254/x.mp4" },
+    });
+    expect(await result).toMatchObject({ status: 422 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reunião repetida: 409 com o id da que já existe", async () => {
+    const dup = await call(
+      "POST",
+      `clients/${CLIENT}/meetings`,
+      { body: { recorded_at: "2026-10-07T14:00:00Z", summary: "x" } },
+      new Response(JSON.stringify({ code: "23505", message: "Já existe", details: CLIENT }), { status: 409 }),
+    ).result;
+    expect(dup).toEqual({ status: 409, body: { error: "Já existe", existing_meeting_id: CLIENT } });
+  });
 });

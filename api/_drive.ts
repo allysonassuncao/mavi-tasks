@@ -32,12 +32,12 @@ const rfc3986 = (value: string) =>
     (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
   );
 
-/** GCS V4 signed URL for PUT (upload), GET (download) or DELETE. */
+/** GCS V4 signed URL for PUT (upload), GET (download), DELETE or POST (start of a resumable upload). */
 export function signGcsUrl(
   creds: GcsCredentials,
   bucket: string,
   objectPath: string,
-  method: "PUT" | "GET" | "DELETE",
+  method: "PUT" | "GET" | "DELETE" | "POST",
   options: {
     contentType?: string;
     /** Extra signed headers the client must send, e.g. x-goog-content-length-range. */

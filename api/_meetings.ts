@@ -43,7 +43,7 @@ export type MeetingsEnv = {
   anthropicKey: string;
   model: string;
   credentials: GcsCredentials | null;
-  /** Buckets que o gravador usa (nenhum outro é assinado). */
+  /** Buckets que o gravador e a API pública usam (nenhum outro é assinado). */
   buckets: string[];
   /** Abre as API Keys da biblioteca de provedores (AI_PROVIDER_KEY). */
   providerKey?: Buffer | null;
@@ -51,7 +51,10 @@ export type MeetingsEnv = {
   provider?: ProviderConfig | null;
 };
 export function meetingsEnv(
-  base: Pick<MeetingsEnv, "supabaseUrl" | "supabaseKey" | "credentials">,
+  base: Pick<MeetingsEnv, "supabaseUrl" | "supabaseKey" | "credentials"> & {
+    /** O bucket do Drive: os vídeos das reuniões enviadas pela API pública. */
+    bucket?: string;
+  },
   env: Record<string, string | undefined> = process.env,
 ): MeetingsEnv {
   return {
@@ -59,10 +62,13 @@ export function meetingsEnv(
     anthropicKey: env.ANTHROPIC_API_KEY ?? "",
     model: serverModel("meetings_ask", env),
     providerKey: providerKeyFrom(env.AI_PROVIDER_KEY),
-    buckets: (env.MEETING_BUCKETS || "meet_recording,makecrm_meet")
-      .split(",")
-      .map((b) => b.trim())
-      .filter(Boolean),
+    buckets: [
+      ...new Set(
+        [...(env.MEETING_BUCKETS || "meet_recording,makecrm_meet").split(","), base.bucket ?? ""]
+          .map((b) => b.trim())
+          .filter(Boolean),
+      ),
+    ],
   };
 }
 

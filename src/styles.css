@@ -27189,6 +27189,15 @@ label.drive-pick-file {
 .api-docs-table td:first-child {
   white-space: nowrap;
 }
+.api-docs-table td ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.api-docs-table td li {
+  margin-bottom: 4px;
+  font-size: inherit;
+  line-height: inherit;
+}
 .api-docs-required {
   display: block;
   margin-top: 3px;

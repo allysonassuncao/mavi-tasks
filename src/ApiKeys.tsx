@@ -22,8 +22,9 @@ const date = (iso: string) =>
 
 /**
  * Equipe e configurações › Chaves de API: o administrador cria chaves para
- * sistemas externos (CRM, checkout, n8n…) cadastrarem clientes e vincularem
- * produtos pela API pública (/api/v1, docs/API.md). A chave aparece uma vez só.
+ * sistemas externos (CRM, checkout, n8n…) cadastrarem clientes, vincularem
+ * produtos e registrarem reuniões pela API pública (/api/v1, docs/API.md). A
+ * chave aparece uma vez só.
  */
 export function ApiKeysPanel(props: {
   company: string;
@@ -133,8 +134,9 @@ function Keys({
             <KeyRound size={18} /> Chaves de API
           </h2>
           <p>
-            Sistemas externos (CRM, checkout, automações) usam uma chave para
-            cadastrar clientes e vincular produtos neste espaço. Crie uma chave
+            Sistemas externos (CRM, checkout, gravadores de reunião,
+            automações) usam uma chave para cadastrar clientes, vincular
+            produtos e registrar reuniões neste espaço. Crie uma chave
             por sistema, para poder revogar só aquela quando precisar.
           </p>
         </div>

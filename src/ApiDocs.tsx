@@ -254,6 +254,203 @@ const ENDPOINTS: Endpoint[] = [
     ),
   },
   {
+    id: "registrar-reuniao",
+    method: "POST",
+    path: `/clients/{id}/meetings`,
+    title: "Registrar uma reunião do cliente",
+    about: (
+      <>
+        <p>
+          Registra uma reunião <strong>já feita</strong>, gravada fora da MAVI
+          (Zoom, Fireflies, tl;dv, outro gravador), no Drive do cliente, em{" "}
+          <strong>Gravações da MAVI</strong>, com a transcrição, o resumo e o
+          vídeo. Em seguida, sem outra chamada, a reunião passa a valer na busca
+          e nas respostas da MAVI, no Termômetro e no Radar do cliente.
+        </p>
+        <p>
+          Envie ao menos a <code>transcript</code>, o <code>summary</code> ou
+          o <code>video_url</code>. A MAVI <strong>não gera</strong> o resumo:
+          aparece o que você enviar.
+        </p>
+      </>
+    ),
+    params: {
+      title: "Corpo (JSON)",
+      fields: [
+        {
+          name: "recorded_at",
+          type: "data e hora",
+          required: true,
+          about: (
+            <>
+              Início da reunião em ISO 8601, com fuso (
+              <code>2026-10-07T14:00:00-03:00</code>).
+            </>
+          ),
+        },
+        {
+          name: "external_id",
+          type: "texto",
+          about:
+            "O id da reunião no seu sistema (até 100 caracteres). Recomendado: um segundo envio com o mesmo id não duplica a reunião (veja o 409 abaixo).",
+        },
+        { name: "title", type: "texto", about: "Título da reunião, até 300 caracteres." },
+        {
+          name: "duration_seconds",
+          type: "número",
+          about: "Duração em segundos. Sem ela, vale o fim do último trecho da transcrição.",
+        },
+        {
+          name: "attendees",
+          type: "lista",
+          about: (
+            <>
+              Participantes: e-mails ou nomes, ou objetos{" "}
+              <code>{"{ name, email }"}</code>. Até 200.
+            </>
+          ),
+        },
+        {
+          name: "recorded_by_email",
+          type: "texto",
+          about: "E-mail de quem gravou ou conduziu a reunião.",
+        },
+        {
+          name: "meet_link",
+          type: "texto",
+          about: "Link da sala (Meet, Zoom…). A Agenda usa esse link para mostrar a gravação no evento.",
+        },
+        {
+          name: "transcript",
+          type: "texto, lista ou objeto",
+          about: (
+            <>
+              A transcrição, em um destes formatos:
+              <ul>
+                <li>
+                  <strong>texto corrido</strong>, uma fala por linha, com o
+                  falante opcional (<code>Ana: bom dia</code>) e o tempo
+                  opcional (<code>[00:01:23] Ana: bom dia</code>). Também
+                  aceita arquivos WebVTT e SRT, como a transcrição do Zoom;
+                </li>
+                <li>
+                  <strong>trechos com tempo</strong>:{" "}
+                  <code>{'[{ "start": 0, "end": 4.2, "speaker": "Ana", "text": "…" }]'}</code>,
+                  com o tempo em segundos ou em <code>"00:01:23"</code>;
+                </li>
+                <li>
+                  <strong>o JSON do provedor</strong>, sem alterar: Deepgram
+                  (utterances ou paragraphs), AssemblyAI (utterances), Whisper
+                  (segments) ou Recall (words).
+                </li>
+              </ul>
+              Com tempos, a busca leva ao momento exato no vídeo. São até 20
+              mil trechos.
+            </>
+          ),
+        },
+        {
+          name: "summary",
+          type: "objeto ou texto",
+          about: (
+            <>
+              O resumo. Um texto vira a visão geral. Num objeto, os campos são{" "}
+              <code>title</code>, <code>overview</code>, <code>notes</code> (
+              <code>{"[{ title, description }]"}</code>),{" "}
+              <code>action_items</code> (
+              <code>{"[{ owner, description, deadline }]"}</code>),{" "}
+              <code>keywords</code> e <code>tone</code>. Os itens das listas
+              também podem ser textos.
+            </>
+          ),
+        },
+        {
+          name: "video_url",
+          type: "texto",
+          about: (
+            <>
+              Link <strong>https direto</strong> para o arquivo de vídeo ou
+              áudio, de até 2 GB. Uma página de compartilhamento, como a do
+              Google Drive, não funciona. O link precisa valer por pelo menos
+              uma hora. Veja abaixo como o vídeo é baixado.
+            </>
+          ),
+        },
+      ],
+    },
+    body: {
+      external_id: "zoom-87412365",
+      title: "Kickoff · Aurora Studio",
+      recorded_at: "2026-10-07T14:00:00-03:00",
+      attendees: ["contato@aurora.com.br", "Ana Lima"],
+      recorded_by_email: "ana@suaagencia.com.br",
+      transcript: [
+        { start: 0, end: 6.4, speaker: "Ana Lima", text: "Bom dia! Vamos alinhar a campanha de novembro." },
+        { start: 6.4, end: 11, speaker: "Carla (Aurora)", text: "Perfeito, a verba aprovada é de 8 mil." },
+      ],
+      summary: {
+        overview: "Alinhamento da campanha de novembro; verba de R$ 8 mil aprovada.",
+        action_items: [{ owner: "Ana Lima", description: "Enviar o plano de mídia", deadline: "2026-10-10" }],
+      },
+      video_url: "https://files.exemplo.com/gravacoes/87412365.mp4",
+    },
+    status: "201 Created",
+    response: {
+      meeting: {
+        id: "4f0c9a7e-…",
+        client_id: CLIENT_ID,
+        external_id: "zoom-87412365",
+        title: "Kickoff · Aurora Studio",
+        recorded_at: "2026-10-07T17:00:00+00:00",
+        duration_seconds: 11,
+        recorded_by_email: "ana@suaagencia.com.br",
+        attendees: ["contato@aurora.com.br", "Ana Lima"],
+        meet_link: null,
+        speakers: ["Ana Lima", "Carla (Aurora)"],
+        segments: 2,
+        timed: true,
+        summary: { overview: "…", action_items: ["…"] },
+        video: "pending",
+      },
+    },
+    notes: (
+      <>
+        <p>
+          O <strong>vídeo</strong> é baixado em segundo plano (
+          <code>"video": "pending"</code>) e aparece na gravação quando
+          termina. Até lá, a reunião já está no Drive só com o texto. Se o link
+          falhar por instabilidade, há mais duas tentativas (15 e 60 minutos
+          depois). Não há nova tentativa para um link que não é de vídeo, que
+          passa de 2 GB ou que aponta para um endereço interno.
+        </p>
+        <div className="api-docs-callout">
+          <strong>Reunião já registrada · 409</strong>
+          <p>
+            Se já houver uma reunião com o mesmo <code>external_id</code>, nada
+            é criado e a resposta traz o id dela. Assim, uma nova tentativa da
+            integração não duplica a reunião. Sem <code>external_id</code>,
+            cada envio cria uma reunião nova.
+          </p>
+          <pre>
+            {JSON.stringify(
+              {
+                error: "Já existe uma reunião com este external_id",
+                existing_meeting_id: "4f0c9a7e-…",
+              },
+              null,
+              2,
+            )}
+          </pre>
+        </div>
+        <p>
+          O corpo da requisição pode ter até cerca de 4 MB. Uma transcrição
+          maior cabe se for enviada sem as palavras soltas (por exemplo, só as
+          utterances do Deepgram) ou como texto corrido.
+        </p>
+      </>
+    ),
+  },
+  {
     id: "consultar-cliente",
     method: "GET",
     path: `/clients/{id}`,
@@ -312,14 +509,17 @@ const ERRORS: [string, string][] = [
   ["401", "Chave ausente, inválida ou revogada."],
   ["404", "Rota inexistente, ou cliente que não existe neste espaço."],
   ["405", "Método não aceito na rota. O cabeçalho Allow mostra os aceitos."],
-  ["409", "Já existe um cliente ativo com o mesmo e-mail (existing_client_id na resposta)."],
+  [
+    "409",
+    "Já existe um cliente ativo com o mesmo e-mail (existing_client_id na resposta) ou uma reunião com o mesmo external_id (existing_meeting_id).",
+  ],
   [
     "422",
-    "Dados inválidos: nome curto, e-mail mal formado, produto ou equipe inexistente, nome de produto repetido no catálogo (use o id), cliente arquivado, mais de 50 produtos.",
+    "Dados inválidos: nome curto, e-mail mal formado, produto ou equipe inexistente, nome de produto repetido no catálogo (use o id), cliente arquivado, mais de 50 produtos; na reunião, recorded_at ausente ou mal formado, transcrição que não pôde ser lida, video_url sem https ou interno.",
   ],
   [
     "5xx",
-    "Falha temporária. Pode tentar de novo: com e-mail, o cadastro não duplica, e vincular produtos já é seguro para repetir.",
+    "Falha temporária. Pode tentar de novo: com e-mail, o cadastro não duplica; com external_id, a reunião também não; e vincular produtos já é seguro para repetir.",
   ],
 ];
 
@@ -561,11 +761,11 @@ export function ApiDocs() {
         <main className="api-docs-content">
           <section className="api-docs-section" id="introducao">
             <span className="api-docs-kicker">Documentação para desenvolvedores</span>
-            <h1>API de clientes e produtos</h1>
+            <h1>API de clientes, produtos e reuniões</h1>
             <p className="api-docs-lead">
-              Cadastre clientes e vincule produtos a eles a partir de outros
-              sistemas (CRM, checkout, n8n, Make, Zapier), sem ninguém precisar
-              abrir o Workspace.
+              Cadastre clientes, vincule produtos e registre as reuniões deles a
+              partir de outros sistemas (CRM, checkout, gravador de reuniões,
+              n8n, Make, Zapier), sem ninguém precisar abrir o Workspace.
             </p>
             <dl className="api-docs-facts">
               <div>
@@ -640,6 +840,13 @@ export function ApiDocs() {
                   e horas.
                 </p>
               </div>
+              <div>
+                <strong>Reunião</strong>
+                <p>
+                  Uma conversa gravada com o cliente: transcrição, resumo e
+                  vídeo. Fica no Drive do cliente, em Gravações da MAVI.
+                </p>
+              </div>
             </div>
           </section>
 
@@ -700,10 +907,16 @@ export function ApiDocs() {
                 Guarde o <code>client.id</code> no seu sistema para as próximas
                 vendas desse cliente.
               </li>
+              <li>
+                Depois de cada reunião, chame{" "}
+                <a href="#registrar-reuniao">POST /clients/{"{id}"}/meetings</a>{" "}
+                com o <code>external_id</code> do seu gravador.
+              </li>
             </ol>
             <p className="api-docs-muted">
               Quem estiver com o Workspace aberto vê o cliente novo em até 10
-              minutos, ou na hora ao recarregar a página. A API não altera nem
+              minutos, ou na hora ao recarregar a página. Uma reunião nova
+              aparece na hora no Drive. A API não altera nem
               arquiva clientes e não remove produtos: isso continua sendo feito
               no Workspace.
             </p>

@@ -36,6 +36,11 @@ import {
   tutorialTranscribeAllowed,
   tutorialTranscribeEnv,
 } from "./_tutorial-transcribe.js";
+import {
+  handleMeetingVideoImport,
+  meetingVideoAllowed,
+  meetingVideoEnv,
+} from "./_api-meetings.js";
 import { providerKeyFrom } from "./_ai-providers.js";
 import { handleNotices } from "./_notices.js";
 import { handleNoticeWriter } from "./_notice-writer.js";
@@ -654,7 +659,21 @@ export default async function handler(
       });
     } else if (action.startsWith("notice-"))
       result = await handleNotices(body, authorization, driveEnv(), fetch);
-    else if (action.startsWith("meeting-"))
+    // Reuniões enviadas pela API pública: o vídeo do link vai para o GCS
+    // (o worker, acordado pelo banco com o segredo). Responde na hora.
+    else if (action === "meeting-video-import") {
+      const env = meetingVideoEnv(driveEnv());
+      if (!meetingVideoAllowed(authorization, env))
+        result = { status: 401, body: { error: "Não autorizado." } };
+      else {
+        waitUntil(
+          handleMeetingVideoImport(env, { fetch }).catch((e) =>
+            console.error("meeting-video-import", e),
+          ),
+        );
+        result = { status: 202, body: { started: true } };
+      }
+    } else if (action.startsWith("meeting-"))
       result = await handleMeetings(
         body,
         authorization,

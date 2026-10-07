@@ -1,4 +1,5 @@
 import type { DriveEnv } from "./_drive.js";
+import { meetingPayload } from "./_api-meetings.js";
 
 type Env = Pick<DriveEnv, "supabaseUrl" | "supabaseKey">;
 export type PublicApiResponse = {
@@ -15,7 +16,7 @@ const STATUS: Record<string, number> = {
   "22023": 422, // dados inválidos (produto/equipe inexistente, nome…)
   "22P02": 422, // JSON ou id malformado
   P0002: 404,
-  "23505": 409, // cliente com o mesmo e-mail
+  "23505": 409, // cliente com o mesmo e-mail, reunião com o mesmo external_id
 };
 
 /** The key from `Authorization: Bearer workspace_…` or `X-Api-Key: workspace_…`. */
@@ -33,6 +34,8 @@ async function rpc(
   name: string,
   args: Record<string, unknown>,
   created = false,
+  /** Onde vai o id do registro que já existe, num 409. */
+  existing = "existing_client_id",
 ): Promise<PublicApiResponse> {
   const res = await fetchImpl(`${env.supabaseUrl}/rest/v1/rpc/${name}`, {
     method: "POST",
@@ -56,13 +59,13 @@ async function rpc(
     error: body?.message ?? "Não foi possível concluir a requisição.",
   };
   if (body?.code === "23505" && UUID.test(body?.details ?? ""))
-    error.existing_client_id = body.details;
+    error[existing] = body.details;
   return { status, body: error };
 }
 
 /**
- * API pública v1 (/api/v1/…): cadastro de clientes e vínculo de produtos por
- * sistemas externos, com a chave de API do espaço. `path` é o que vem depois
+ * API pública v1 (/api/v1/…): cadastro de clientes, vínculo de produtos e
+ * reuniões já feitas (Gravações) por sistemas externos, com a chave de API do espaço. `path` é o que vem depois
  * de /api/v1/. Quem valida a chave e isola a empresa é o banco (api_*).
  */
 export async function handlePublicApi(
@@ -89,6 +92,7 @@ export async function handlePublicApi(
     clients: "GET, POST",
     "clients/:id": "GET",
     "clients/:id/products": "POST",
+    "clients/:id/meetings": "POST",
   };
   if (!allowed[route]) return fail(404, "Rota não encontrada.");
   if (!allowed[route].split(", ").includes(req.method))
@@ -124,6 +128,19 @@ export async function handlePublicApi(
         { p_key: key, p_client: body },
         true,
       );
+    case "POST clients/:id/meetings": {
+      if (!body) return fail(400, "Envie um objeto JSON no corpo.");
+      const meeting = meetingPayload(body);
+      if (!meeting.ok) return fail(422, meeting.error);
+      return rpc(
+        env,
+        fetchImpl,
+        "api_create_meeting",
+        { p_key: key, p_client: id, p_meeting: meeting.payload },
+        true,
+        "existing_meeting_id",
+      );
+    }
     default: // POST clients/:id/products
       if (!body || !Array.isArray(body.products))
         return fail(400, 'Envie {"products": [...]} no corpo.');

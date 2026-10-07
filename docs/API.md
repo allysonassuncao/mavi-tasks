@@ -2,7 +2,7 @@
 
 > A mesma documentação, com exemplos em cURL, JavaScript e Python, fica aberta (sem login) em **`/docs/api`** no próprio Workspace, com link na tela de Chaves de API.
 
-Serve para sistemas externos (CRM, checkout, n8n, Make, Zapier…) **cadastrarem clientes e vincularem produtos** a eles, sem ninguém abrir a MAVI.
+Serve para sistemas externos (CRM, checkout, gravador de reuniões, n8n, Make, Zapier…) **cadastrarem clientes, vincularem produtos e registrarem reuniões** deles, sem ninguém abrir a MAVI.
 
 - **Endereço base:** `https://SEU-DOMINIO/api/v1` (aparece pronto para copiar em **Equipe e configurações › Chaves de API**).
 - **Formato:** JSON (`Content-Type: application/json`), UTF-8.
@@ -31,6 +31,7 @@ Revogar a chave na mesma tela corta o acesso na hora. A lista mostra quem criou 
 | **Cliente** | `client`: nome, e-mail de contato e as equipes que atendem o cliente. |
 | **Produto** | Serviço do catálogo do espaço (ex.: "Gestão de tráfego"). A API **não cria** produtos: eles são cadastrados na MAVI, em Produtos. |
 | **Produto contratado** | O vínculo de um produto com um cliente (`contract_id`). É nele que as tarefas, os projetos e as horas ficam. |
+| **Reunião** | Uma conversa gravada com o cliente (transcrição, resumo e vídeo). Fica no Drive do cliente, em **Gravações da MAVI**. |
 
 Produtos e equipes podem ser informados **pelo id ou pelo nome**. O nome não diferencia maiúsculas de minúsculas, mas precisa ser exato (acentos inclusive). Se dois produtos tiverem o mesmo nome, use o id.
 
@@ -42,6 +43,7 @@ Produtos e equipes podem ser informados **pelo id ou pelo nome**. O nome não di
 | `GET` | `/teams` | Lista as equipes |
 | `POST` | `/clients` | Cadastra um cliente e já vincula os produtos |
 | `POST` | `/clients/{id}/products` | Vincula mais produtos a um cliente existente |
+| `POST` | `/clients/{id}/meetings` | Registra uma reunião já feita (transcrição, resumo, vídeo) |
 | `GET` | `/clients/{id}` | Consulta um cliente e os produtos dele |
 | `GET` | `/clients?email=…` ou `?search=…` | Procura clientes pelo e-mail ou por parte do nome |
 
@@ -169,6 +171,81 @@ Clientes arquivados não recebem produtos (`422`). Desarquive-o na MAVI antes.
 
 ---
 
+### `POST /clients/{id}/meetings` — registrar uma reunião do cliente
+
+Registra uma reunião **já feita**, gravada fora da MAVI (Zoom, Fireflies, tl;dv, outro gravador), no Drive do cliente, em **Gravações da MAVI**. Em seguida, sem outra chamada, a reunião passa a valer na busca e nas respostas da MAVI, no Termômetro e no Radar do cliente. A MAVI **não gera** o resumo: aparece o que for enviado.
+
+```bash
+curl -X POST https://SEU-DOMINIO/api/v1/clients/0b6d…/meetings \
+  -H "Authorization: Bearer $MAVI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_id": "zoom-87412365",
+    "title": "Kickoff · Aurora Studio",
+    "recorded_at": "2026-10-07T14:00:00-03:00",
+    "attendees": ["contato@aurora.com.br", "Ana Lima"],
+    "transcript": [
+      { "start": 0, "end": 6.4, "speaker": "Ana Lima", "text": "Bom dia! Vamos alinhar a campanha de novembro." },
+      { "start": 6.4, "end": 11, "speaker": "Carla (Aurora)", "text": "Perfeito, a verba aprovada é de 8 mil." }
+    ],
+    "summary": { "overview": "Alinhamento da campanha de novembro; verba de R$ 8 mil aprovada." },
+    "video_url": "https://files.exemplo.com/gravacoes/87412365.mp4"
+  }'
+```
+
+| Campo | Tipo | |
+|---|---|---|
+| `recorded_at` | data e hora | **Obrigatório.** Início da reunião em ISO 8601, com fuso. |
+| `external_id` | texto | O id da reunião no seu sistema (até 100 caracteres). Recomendado: um segundo envio com o mesmo id não duplica a reunião (`409`). |
+| `title` | texto | Até 300 caracteres. |
+| `duration_seconds` | número | Sem ele, vale o fim do último trecho da transcrição. |
+| `attendees` | lista | E-mails ou nomes, ou objetos `{ name, email }`. Até 200. |
+| `recorded_by_email` | texto | Quem gravou ou conduziu a reunião. |
+| `meet_link` | texto | Link da sala; a Agenda usa para mostrar a gravação no evento. |
+| `transcript` | texto, lista ou objeto | Veja os formatos abaixo. Até 20 mil trechos. |
+| `summary` | objeto ou texto | `title`, `overview`, `notes` (`[{ title, description }]`), `action_items` (`[{ owner, description, deadline }]`), `keywords`, `tone`. Um texto vira a visão geral; os itens das listas também podem ser textos. |
+| `video_url` | texto | Link **https direto** para o arquivo de vídeo ou áudio (até 2 GB). Uma página de compartilhamento, como a do Google Drive, não funciona. |
+
+Envie ao menos a `transcript`, o `summary` ou o `video_url`.
+
+**Formatos da transcrição** (detectados sozinhos):
+
+- **Texto corrido**: uma fala por linha, com o falante opcional (`Ana: bom dia`) e o tempo opcional (`[00:01:23] Ana: bom dia`). Arquivos **WebVTT** e **SRT** (como a transcrição do Zoom) também são aceitos.
+- **Trechos com tempo**: `[{ "start": 0, "end": 4.2, "speaker": "Ana", "text": "…" }]`, com o tempo em segundos ou em `"00:01:23"`.
+- **O JSON do provedor**, sem alterar: Deepgram (`results.utterances` ou `paragraphs`), AssemblyAI (`utterances`, em milissegundos), Whisper (`segments`) ou Recall (`words`).
+
+Com tempos, a busca leva ao momento exato no vídeo. O corpo pode ter até cerca de 4 MB; uma transcrição maior cabe sem as palavras soltas (só as utterances) ou como texto corrido.
+
+**Resposta `201`:**
+
+```json
+{
+  "meeting": {
+    "id": "4f0c9a7e-…",
+    "client_id": "0b6d…",
+    "external_id": "zoom-87412365",
+    "title": "Kickoff · Aurora Studio",
+    "recorded_at": "2026-10-07T17:00:00+00:00",
+    "duration_seconds": 11,
+    "speakers": ["Ana Lima", "Carla (Aurora)"],
+    "segments": 2,
+    "timed": true,
+    "summary": { "overview": "…" },
+    "video": "pending"
+  }
+}
+```
+
+**O vídeo** é baixado em segundo plano (`"video": "pending"`; sem `video_url`, `"none"`) e aparece na gravação quando termina; até lá a reunião já está no Drive com o texto. O link precisa valer por pelo menos uma hora: se falhar por instabilidade, há mais duas tentativas (15 e 60 minutos depois). Links que não devolvem vídeo/áudio, que passam de 2 GB ou que apontam para endereços internos falham sem nova tentativa.
+
+**Reunião já registrada (`409`).** Com o mesmo `external_id`, nada é criado e a resposta traz o id da reunião existente:
+
+```json
+{ "error": "Já existe uma reunião com este external_id", "existing_meeting_id": "4f0c9a7e-…" }
+```
+
+---
+
 ### `GET /clients/{id}`
 
 Devolve o objeto `client` (o mesmo de `POST /clients`), com equipes e produtos ativos.
@@ -191,9 +268,9 @@ Toda resposta de erro tem o formato `{ "error": "mensagem em português" }`.
 | `401` | Chave ausente, inválida ou revogada. |
 | `404` | Rota inexistente, ou cliente que não existe neste espaço. |
 | `405` | Método não aceito na rota (o cabeçalho `Allow` mostra os aceitos). |
-| `409` | Já existe um cliente ativo com o mesmo e-mail (`existing_client_id` na resposta). |
-| `422` | Dados inválidos: nome curto, e-mail mal formado, produto ou equipe inexistente, nome de produto ambíguo, cliente arquivado, mais de 50 produtos. |
-| `5xx` | Falha temporária. Pode tentar de novo: com e-mail, o cadastro não duplica, e vincular produtos já é seguro para repetir. |
+| `409` | Já existe um cliente ativo com o mesmo e-mail (`existing_client_id` na resposta) ou uma reunião com o mesmo `external_id` (`existing_meeting_id`). |
+| `422` | Dados inválidos: nome curto, e-mail mal formado, produto ou equipe inexistente, nome de produto ambíguo, cliente arquivado, mais de 50 produtos; na reunião, `recorded_at` ausente ou mal formado, transcrição que não pôde ser lida, `video_url` sem https ou interno. |
+| `5xx` | Falha temporária. Pode tentar de novo: com e-mail, o cadastro não duplica; com `external_id`, a reunião também não; vincular produtos já é seguro para repetir. |
 
 ## Fluxo recomendado para uma integração
 
@@ -201,9 +278,10 @@ Toda resposta de erro tem o formato `{ "error": "mensagem em português" }`.
 2. Na venda: `POST /clients` com `email` e `products`.
 3. Se vier `409`, chame `POST /clients/{existing_client_id}/products` com os mesmos produtos.
 4. Guarde o `client.id` no seu sistema para as próximas vendas desse cliente (`POST /clients/{id}/products`).
+5. Depois de cada reunião: `POST /clients/{id}/meetings` com o `external_id` do seu gravador.
 
 ## Observações
 
 - Quem estiver com a MAVI aberta vê o cliente novo em até 10 minutos (o catálogo fica em cache) ou na hora, ao recarregar a página.
 - A API não altera nem arquiva clientes e não remove produtos. Isso continua sendo feito na MAVI.
-- Implementação: rota `/api/v1/*` → `api/_public-api.ts`; as regras ficam no banco, nas funções `api_*` das migrações `20261115090000_public_api.sql` e `20261116090000_api_key_workspace_prefix.sql` (a chave é validada e o espaço isolado ali).
+- Implementação: rota `/api/v1/*` → `api/_public-api.ts`; as regras ficam no banco, nas funções `api_*` das migrações `20261115090000_public_api.sql` e `20261116090000_api_key_workspace_prefix.sql` (a chave é validada e o espaço isolado ali). Reuniões: `api/_api-meetings.ts` (formatos da transcrição e o worker do vídeo) e `20270603090000_api_meetings.sql`.

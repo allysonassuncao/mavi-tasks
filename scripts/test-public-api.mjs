@@ -1,6 +1,8 @@
 // API pública (migration 20261115090000_public_api): chaves de API do espaço
 // (só administradores; guardadas como hash) e as funções api_* que o
 // servidor chama sem sessão para cadastrar clientes e vincular produtos.
+// Reuniões já feitas (20270603090000_api_meetings): api_create_meeting e a
+// fila do vídeo por link.
 import assert from "node:assert/strict";
 import { createTestDatabase } from "./database-fixture.mjs";
 
@@ -247,6 +249,134 @@ await check("busca por e-mail e por nome", async () => {
   await assert.rejects(api("api_find_clients", [key, null, "a"]), /Informe/);
   const got = await api("api_get_client", [key, client]);
   assert.equal(got.name, "Aurora Studio");
+});
+
+const SECRET = "s".repeat(40);
+const meeting = (extra = {}) => ({
+  external_id: "zoom-1",
+  title: "Kickoff",
+  recorded_at: "2026-10-07T14:00:00-03:00",
+  attendees: ["ana@x.com", "Bruno"],
+  summary: { overview: "Alinhamos o escopo." },
+  transcript: { speakers: ["Ana", "Bruno"], segments: [[0, 4, 0, "Bom dia, vamos falar do orçamento."], [4, 9, 1, "Certo."]] },
+  ...extra,
+});
+
+let recording;
+await check("reunião: grava, transcreve e entra na fila da MAVI", async () => {
+  const r = await api("api_create_meeting", [key, client, meeting()]);
+  recording = r.meeting.id;
+  assert.equal(r.meeting.external_id, "zoom-1");
+  assert.equal(r.meeting.segments, 2);
+  assert.equal(r.meeting.timed, true);
+  assert.equal(r.meeting.video, "none");
+  await db.exec("reset role");
+  const row = await one("select * from meeting_recordings where id=$1", [recording]);
+  assert.equal(row.company_id, A);
+  assert.equal(row.client_id, client);
+  assert.equal(row.source_id, "api:zoom-1");
+  assert.deepEqual(row.speakers, ["Ana", "Bruno"]);
+  assert.deepEqual(row.attendees, ["ana@x.com", "Bruno"]);
+  assert.equal(row.summary.overview, "Alinhamos o escopo.");
+  const t = await one("select timed, search @@ to_tsquery('portuguese','orçamento') hit from meeting_transcripts where recording_id=$1", [recording]);
+  assert.deepEqual(t, { timed: true, hit: true });
+  assert.ok(await one("select 1 from mavi_private.ai_queue where source_type='meeting' and source_id=$1", [recording]));
+  assert.ok(await one("select 1 from realtime.messages where payload->>'table'='meeting_recordings'"));
+  // Quem vê o cliente no Drive vê a reunião.
+  await as(admin);
+  assert.ok(await one("select 1 from meeting_recordings where id=$1", [recording]));
+});
+
+await check("reunião repetida (mesmo external_id): 23505 com o id", async () => {
+  await assert.rejects(api("api_create_meeting", [key, client, meeting()]), (e) => {
+    assert.equal(e.code, "23505");
+    assert.equal(e.detail, recording);
+    return true;
+  });
+  // Sem external_id: cada envio é uma reunião nova.
+  const { external_id, ...rest } = meeting();
+  const r = await api("api_create_meeting", [key, client, rest]);
+  assert.equal(r.meeting.external_id, null);
+  await db.exec("reset role");
+  assert.match((await one("select source_id from meeting_recordings where id=$1", [r.meeting.id])).source_id, /^api:[0-9a-f-]{36}$/);
+});
+
+await check("reunião: cliente de outra empresa não existe para a chave", async () => {
+  await assert.rejects(api("api_create_meeting", [keyB, client, meeting({ external_id: "b" })]), (e) => e.code === "P0002");
+});
+
+await check("reunião: validação dos campos", async () => {
+  const bad = async (extra, pattern) =>
+    assert.rejects(api("api_create_meeting", [key, client, meeting({ external_id: null, ...extra })]), (e) => {
+      assert.equal(e.code, "22023");
+      assert.match(e.message, pattern);
+      return true;
+    });
+  await bad({ recorded_at: null }, /recorded_at/);
+  await bad({ recorded_at: "ontem" }, /recorded_at inválido/);
+  await bad({ recorded_at: "2099-01-01T00:00:00Z" }, /fora do intervalo/);
+  await bad({ duration_seconds: -1 }, /duration_seconds/);
+  await bad({ recorded_by_email: "nada" }, /recorded_by_email/);
+  await bad({ video_url: "http://x.com/a.mp4" }, /video_url/);
+  await bad({ attendees: [1] }, /attendees/);
+  await bad({ transcript: { speakers: [], segments: [[0, 1, 0]] } }, /transcript/);
+  await bad({ transcript: null, summary: {} }, /ao menos/);
+  await bad({ external_id: "x".repeat(101) }, /external_id/);
+});
+
+await check("vídeo por link: fila, worker com o segredo e novas tentativas", async () => {
+  await db.exec("reset role");
+  await db.query("insert into mavi_private.ai_config(url, secret) values('https://app.example.com/api/ai', $1)", [SECRET]);
+  const r = await api("api_create_meeting", [key, client, meeting({ external_id: "zoom-video", video_url: "https://files.example.com/a.mp4" })]);
+  assert.equal(r.meeting.video, "pending");
+  const id = r.meeting.id;
+  await db.exec("reset role");
+  assert.ok(await one("select 1 from net.requests where body->>'action'='meeting-video-import'"));
+  await as(null);
+  await assert.rejects(db.query("select * from public.meeting_video_claim('errado')"), /Sem permissão/);
+  let [job] = (await db.query("select * from public.meeting_video_claim($1)", [SECRET])).rows;
+  assert.equal(job.recording_id, id);
+  assert.equal(job.url, "https://files.example.com/a.mp4");
+  assert.equal(job.attempts, 1);
+  // Já pego: não sai de novo.
+  assert.equal((await db.query("select * from public.meeting_video_claim($1)", [SECRET])).rows.length, 0);
+  // Falha passageira: volta para a fila mais tarde.
+  await db.query("select public.meeting_video_save($1,$2,null,null,null,null,'503',true)", [SECRET, id]);
+  await db.exec("reset role");
+  let q = await one("select status, next_at > now() later from mavi_private.meeting_video_imports where recording_id=$1", [id]);
+  assert.deepEqual(q, { status: "pending", later: true });
+  await db.query("update mavi_private.meeting_video_imports set next_at = now() - interval '1 minute' where recording_id=$1", [id]);
+  await as(null);
+  [job] = (await db.query("select * from public.meeting_video_claim($1)", [SECRET])).rows;
+  assert.equal(job.attempts, 2);
+  await db.query("select public.meeting_video_save($1,$2,'drive','meetings/a/b.mp4','video/mp4',1234,null,false)", [SECRET, id]);
+  await db.exec("reset role");
+  const rec = await one("select video_bucket, video_path, video_type, video_bytes from meeting_recordings where id=$1", [id]);
+  assert.deepEqual(rec, { video_bucket: "drive", video_path: "meetings/a/b.mp4", video_type: "video/mp4", video_bytes: 1234 });
+  assert.equal((await one("select status from mavi_private.meeting_video_imports where recording_id=$1", [id])).status, "done");
+});
+
+await check("vídeo: depois de 3 tentativas fica como falha", async () => {
+  const r = await api("api_create_meeting", [key, client, meeting({ external_id: "zoom-falha", video_url: "https://files.example.com/b.mp4" })]);
+  const id = r.meeting.id;
+  for (let i = 0; i < 3; i++) {
+    await db.exec("reset role");
+    await db.query("update mavi_private.meeting_video_imports set next_at = now() - interval '1 minute' where recording_id=$1", [id]);
+    await as(null);
+    await db.query("select * from public.meeting_video_claim($1)", [SECRET]);
+    await db.query("select public.meeting_video_save($1,$2,null,null,null,null,'timeout',true)", [SECRET, id]);
+  }
+  await db.exec("reset role");
+  const q = await one("select status, attempts, error from mavi_private.meeting_video_imports where recording_id=$1", [id]);
+  assert.deepEqual(q, { status: "failed", attempts: 3, error: "timeout" });
+  // Parado no meio três vezes: o próximo pedido marca como falha.
+  await db.query("update mavi_private.meeting_video_imports set status='working', claimed_at=now()-interval '11 minutes' where recording_id=$1", [id]);
+  await as(null);
+  assert.equal((await db.query("select * from public.meeting_video_claim($1)", [SECRET])).rows.length, 0);
+  await db.exec("reset role");
+  assert.equal((await one("select status from mavi_private.meeting_video_imports where recording_id=$1", [id])).status, "failed");
+  await as(admin);
+  await assert.rejects(db.query("select * from mavi_private.meeting_video_imports"), /permission denied/);
 });
 
 await check("chave revogada deixa de funcionar", async () => {
