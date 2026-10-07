@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, CalendarPlus, History, Maximize2, Minimize2, Plus, Sparkles, Trash2, Wallet } from "lucide-react";
+import {
+  ChevronLeft, ChevronRight, CalendarPlus, CalendarRange, HeartPulse, History, Maximize2, Minimize2, Plus, Sparkles, Target, Trash2,
+  Users, Wallet, type LucideIcon,
+} from "lucide-react";
 import { Modal } from "./components";
+import { SectionLayout } from "./SectionNav";
 import { Button, Input, Loading, Textarea } from "./ui";
 import { addMonths, fmtMoney, labelMesFull, monthStart, numberFormat, type CsDataClient } from "./cs-engine";
 import { HS_CRITERIA } from "./cs-hs";
@@ -40,12 +44,12 @@ import "./cs-entry.css";
  */
 
 type Tab = "cycles" | "hs" | "clients" | "goals" | "log";
-const TABS: { id: Tab; label: string }[] = [
-  { id: "cycles", label: "Ciclos" },
-  { id: "hs", label: "Health Score" },
-  { id: "clients", label: "Clientes" },
-  { id: "goals", label: "Metas" },
-  { id: "log", label: "Histórico" },
+const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
+  { id: "cycles", label: "Ciclos", icon: CalendarRange },
+  { id: "hs", label: "Health Score", icon: HeartPulse },
+  { id: "clients", label: "Clientes", icon: Users },
+  { id: "goals", label: "Metas", icon: Target },
+  { id: "log", label: "Histórico", icon: History },
 ];
 const PROB = ["ALTA", "PROVAVEL", "BAIXA"] as const;
 const PROB_LABEL: Record<string, string> = { ALTA: "Alta", PROVAVEL: "Provável", BAIXA: "Baixa" };
@@ -135,8 +139,17 @@ export function CustomerSuccessPage({
     };
   }, [load]);
 
-  if (error && !data) return <section className="panel"><p className="cs-error">{error}</p></section>;
-  if (!data) return <Loading variant="grid" />;
+  // As seções ficam no menu lateral (Metas só para líderes); na tela cheia,
+  // que cobre o menu, uma faixa de abas dentro da sobreposição troca a seção.
+  const tabs = TABS.filter((t) => t.id !== "goals" || data?.access.is_leader);
+  const shell = (children: ReactNode) => (
+    <SectionLayout title="Customer Success" label="Seções de Customer Success" groups={[{ items: tabs }]} current={tab}
+      storageKey="customer-success" onSelect={(id) => setTab(id as Tab)}>
+      {children}
+    </SectionLayout>
+  );
+  if (error && !data) return shell(<section className="panel"><p className="cs-error">{error}</p></section>);
+  if (!data) return shell(<Loading variant="grid" />);
   const access = data.access;
   const isMavi = access.source === "mavi";
   const shownMonth = data.month;
@@ -149,7 +162,7 @@ export function CustomerSuccessPage({
     api, company, data, access, notify, squadName,
     patch: (fn) => setData((d) => (d ? fn(structuredClone(d)) : d)),
   };
-  return (
+  return shell(
     <div className={`cs-entry ${full ? "full" : ""}`}>
       <SourceBanner access={access} onSwitch={() => setDialog("switch")} />
       <div className="cs-entry-bar">
@@ -190,14 +203,16 @@ export function CustomerSuccessPage({
           </Button>
         </div>
       </div>
-      <div className="cs-entry-tabs" role="tablist">
-        {TABS.filter((t) => t.id !== "goals" || access.is_leader).map((t) => (
-          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? "active" : ""}
-            onClick={() => setTab(t.id)}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {full && (
+        <div className="cs-entry-tabs" role="tablist" aria-label="Seções de Customer Success">
+          {tabs.map((t) => (
+            <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? "active" : ""}
+              onClick={() => setTab(t.id)}>
+              <t.icon size={15} aria-hidden="true" /> {t.label}
+            </button>
+          ))}
+        </div>
+      )}
       {tab === "cycles" && <CyclesGrid ctx={ctx} rows={rows} />}
       {tab === "hs" && <HsGrid ctx={ctx} rows={rows} demo={demo} />}
       {tab === "clients" && <ClientsGrid ctx={ctx} squad={squad} query={query} />}

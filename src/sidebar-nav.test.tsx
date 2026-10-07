@@ -67,9 +67,10 @@ describe("SidebarNav", () => {
     expect(html).toContain("Clientes");
     expect(html).toContain("Controle de horas");
   });
-  it("atalhos da configuração abrem na página de configurações", () => {
+  it("configurações é um link só (as seções ficam no menu da página)", () => {
     const html = render(true, "settings");
-    expect(html).toContain("Templates de tarefa");
+    expect(html).toMatch(/href="\/settings" class="active"/);
+    expect(html).not.toContain("Templates de tarefa");
   });
   it("submenus ficam fechados fora da sua página", () => {
     const html = render(true, "overview");

@@ -8,12 +8,19 @@ import {
 } from "react";
 import {
   CalendarClock,
+  CalendarDays,
+  ChartLine,
   ExternalLink,
+  FileText,
+  History,
+  Lightbulb,
   ListChecks,
   Megaphone,
+  Monitor,
   Pencil,
   RefreshCw,
   TriangleAlert,
+  type LucideIcon,
 } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { multiplierError, sameMultiplier } from "./campaign-multiplier";
@@ -21,7 +28,8 @@ import { MultiplierReason } from "./CampaignMultiplier";
 import { Modal } from "./components";
 import { PanelChart } from "./DashboardCharts";
 import type { Display, PanelSpec, Unit } from "./dashboards";
-import { useUrlState } from "./router";
+import { useAddress, useUrlState } from "./router";
+import { SectionLayout } from "./SectionNav";
 import { contractParts } from "./domain";
 import type { Snapshot } from "./types";
 import {
@@ -101,6 +109,15 @@ export function useWithM(): [boolean, (v: boolean) => void] {
 
 type Tab = "dia" | "linha" | "ciclos" | "relatorios" | "plataforma" | "insights";
 
+const TAB_ITEMS: { id: Tab; label: string; icon: LucideIcon }[] = [
+  { id: "dia", label: "Dia a Dia", icon: CalendarDays },
+  { id: "linha", label: "Linha do tempo", icon: ChartLine },
+  { id: "ciclos", label: "Ciclos e histórico", icon: History },
+  { id: "relatorios", label: "Relatórios", icon: FileText },
+  { id: "plataforma", label: "Plataforma", icon: Monitor },
+  { id: "insights", label: "Insights", icon: Lightbulb },
+];
+
 export function CampaignDayToDay({
   campaign,
   cycles,
@@ -122,6 +139,7 @@ export function CampaignDayToDay({
   insightsTab,
   insightsCount = 0,
   aside,
+  back,
   onRecordEdited,
   onConversions,
   metricsTick = 0,
@@ -154,6 +172,8 @@ export function CampaignDayToDay({
   insightsCount?: number;
   /** Ao lado das abas, em qualquer uma: o painel dos insights da MAVI. */
   aside?: ReactNode;
+  /** No topo do corpo, acima do resumo: o "Todas as campanhas". */
+  back?: ReactNode;
   /** A record was edited: the history (events) changed too. */
   onRecordEdited: () => void;
   /** Google: opens "Conversões do Google que contam" for the cycle. */
@@ -207,6 +227,26 @@ export function CampaignDayToDay({
       : null;
   const running =
     !!cycle && cycle.start_date <= today && today <= cycle.end_date;
+  // As visões no menu lateral da página (SectionLayout), com o endereço de
+  // cada uma para Ctrl/Cmd+clique.
+  const address = useAddress();
+  const tabHref = (id: Tab) => {
+    const url = new URL(address || "/", "http://x");
+    if (id === "dia") url.searchParams.delete("aba");
+    else url.searchParams.set("aba", id);
+    return url.pathname + url.search;
+  };
+  const items = TAB_ITEMS.filter(
+    ({ id }) =>
+      (cycle || id === "ciclos") &&
+      (id !== "relatorios" || !!reportsTab) &&
+      (id !== "plataforma" || !!platformTab) &&
+      (id !== "insights" || !!insightsTab),
+  ).map((t) => ({
+    ...t,
+    href: tabHref(t.id),
+    badge: t.id === "insights" && insightsCount > 0 ? insightsCount : undefined,
+  }));
 
   const sync = async () => {
     setSyncing(true);
@@ -229,105 +269,89 @@ export function CampaignDayToDay({
 
   return (
     <>
-      <CampaignSummary
-        campaign={campaign}
-        cycles={cycles}
-        cycle={cycle}
-        current={current}
-        data={data}
-        metrics={metrics}
-        error={error}
-        k={k}
-        withM={withM}
-        onWithM={setWithM}
-        onCycle={setCycleId}
-        syncing={syncing}
-        onSync={readOnly ? undefined : () => void sync()}
-        tags={tags}
-        actions={actions}
-        connection={connection}
-        onConversions={onConversions}
-      />
-      {banner}
-      {k?.overPace && running && (
-        <div className="campaign-alert danger" role="status">
-          <TriangleAlert size={18} />
-          <span>
-            Gastamos mais do que o esperado: {money(k.overPace.spent)} até
-            ontem, quando deveríamos ter gasto {money(k.overPace.expected)}.
-            Verifique a integração ou o orçamento na plataforma.
-          </span>
-        </div>
-      )}
-      <div className="campaign-workspace">
-        <section className="panel campaign-tabs-panel">
-          <div className="scope-tabs" role="tablist" aria-label="Visões">
-            {(
-              [
-                ["dia", "Dia a Dia"],
-                ["linha", "Linha do tempo"],
-                ["ciclos", "Ciclos e histórico"],
-                ...(reportsTab ? [["relatorios", "Relatórios"]] : []),
-                ...(platformTab ? [["plataforma", "Plataforma"]] : []),
-                ...(insightsTab ? [["insights", "Insights"]] : []),
-              ] as [Tab, string][]
-            )
-              .filter(([id]) => cycle || id === "ciclos")
-              .map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active === id}
-                  className={active === id ? "selected" : ""}
-                  onClick={() => setTab(id)}
-                >
-                  {label}
-                  {id === "insights" && insightsCount > 0 && <span>{insightsCount}</span>}
-                </button>
-              ))}
+      <SectionLayout
+        title={campaign.name}
+        label="Seções da campanha"
+        groups={[{ items }]}
+        current={active}
+        storageKey="campanha"
+        onSelect={setTab}
+      >
+        {back}
+        <CampaignSummary
+          campaign={campaign}
+          cycles={cycles}
+          cycle={cycle}
+          current={current}
+          data={data}
+          metrics={metrics}
+          error={error}
+          k={k}
+          withM={withM}
+          onWithM={setWithM}
+          onCycle={setCycleId}
+          syncing={syncing}
+          onSync={readOnly ? undefined : () => void sync()}
+          tags={tags}
+          actions={actions}
+          connection={connection}
+          onConversions={onConversions}
+        />
+        {banner}
+        {k?.overPace && running && (
+          <div className="campaign-alert danger" role="status">
+            <TriangleAlert size={18} />
+            <span>
+              Gastamos mais do que o esperado: {money(k.overPace.spent)} até
+              ontem, quando deveríamos ter gasto {money(k.overPace.expected)}.
+              Verifique a integração ou o orçamento na plataforma.
+            </span>
           </div>
-          {active === "ciclos" ? (
-            <div className="campaign-tab-body flush">{cyclesTab}</div>
-          ) : active === "relatorios" ? (
-            <div className="campaign-tab-body flush">{reportsTab}</div>
-          ) : active === "plataforma" ? (
-            <div className="campaign-tab-body flush">{platformTab}</div>
-          ) : active === "insights" ? (
-            insightsTab
-          ) : !metrics ? (
-            error ? (
-              <p className="form-error campaign-tab-body" role="alert">
-                Não foi possível carregar os números: {error}
-              </p>
-            ) : (
-              <Loading variant="chart" />
-            )
-          ) : active === "dia" && cycle ? (
-            <DayToDay
-              cycles={cycles}
-              cycle={cycle}
-              metrics={metrics}
-              objective={cycle.objective}
-              today={today}
-              withM={withM}
-            />
-          ) : cycle ? (
-            <Timeline
-              campaign={campaign}
-              cycles={cycles}
-              cycle={cycle}
-              metrics={metrics}
-              today={today}
-              withM={withM}
-              events={events}
-              describeEvent={describeEvent}
-              onEdit={readOnly ? undefined : setEditing}
-            />
-          ) : null}
-        </section>
-        {aside}
-      </div>
+        )}
+        <div className="campaign-workspace">
+          <section className="panel campaign-tabs-panel">
+            {active === "ciclos" ? (
+              <div className="campaign-tab-body flush">{cyclesTab}</div>
+            ) : active === "relatorios" ? (
+              <div className="campaign-tab-body flush">{reportsTab}</div>
+            ) : active === "plataforma" ? (
+              <div className="campaign-tab-body flush">{platformTab}</div>
+            ) : active === "insights" ? (
+              insightsTab
+            ) : !metrics ? (
+              error ? (
+                <p className="form-error campaign-tab-body" role="alert">
+                  Não foi possível carregar os números: {error}
+                </p>
+              ) : (
+                <Loading variant="chart" />
+              )
+            ) : active === "dia" && cycle ? (
+              <DayToDay
+                cycles={cycles}
+                cycle={cycle}
+                metrics={metrics}
+                objective={cycle.objective}
+                today={today}
+                withM={withM}
+              />
+            ) : cycle ? (
+              <Timeline
+                campaign={campaign}
+                cycles={cycles}
+                cycle={cycle}
+                metrics={metrics}
+                today={today}
+                withM={withM}
+                events={events}
+                describeEvent={describeEvent}
+                onEdit={readOnly ? undefined : setEditing}
+              />
+            ) : null}
+          </section>
+          {aside}
+        </div>
+      </SectionLayout>
       {editing && cycle && (
         <RecordEditor
           target={editing}

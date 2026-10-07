@@ -14,13 +14,13 @@
 /* O nome da página fica no topo da coluna; no cabeçalho sobra a descrição
    (com a faixa das telas menores, o nome volta ao cabeçalho). */
 @media (min-width: 1101px) {
-  .page-heading.has-section-nav {
+  .main-shell:has(.section-layout) .page-heading {
     margin-bottom: 22px;
   }
-  .page-heading.has-section-nav :is(.eyebrow, h1) {
+  .main-shell:has(.section-layout) .page-heading :is(.eyebrow, h1) {
     display: none;
   }
-  .page-heading.has-section-nav p {
+  .main-shell:has(.section-layout) .page-heading p {
     margin: 0;
   }
 }
@@ -91,7 +91,7 @@
   color: #9aa5a4;
   white-space: nowrap;
 }
-.section-nav a,
+.section-nav-item,
 .section-nav-collapse {
   display: flex;
   align-items: center;
@@ -104,22 +104,43 @@
   text-decoration: none;
   white-space: nowrap;
 }
-.section-nav a svg,
+.section-nav-item svg,
 .section-nav-collapse svg {
   flex-shrink: 0;
   color: #8a9796;
 }
-.section-nav a:hover {
+.section-nav-item:hover {
   background: #f2f4f4;
   color: var(--ink);
 }
-.section-nav a.active {
+.section-nav-item.active {
   background: #eef1f0;
   color: var(--ink);
   font-weight: 650;
 }
-.section-nav a.active svg {
+.section-nav-item.active svg {
   color: #4f7a1f;
+}
+button.section-nav-item {
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.section-nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e7f5d0;
+  color: #2d3e27;
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-align: center;
+}
+.section-layout.collapsed .section-nav-badge {
+  display: none;
 }
 .section-nav-text {
   min-width: 0;
@@ -156,7 +177,7 @@
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
-.section-layout.collapsed .section-nav a,
+.section-layout.collapsed .section-nav-item,
 .section-layout.collapsed .section-nav-collapse {
   justify-content: center;
   padding-inline: 0;
@@ -203,10 +224,31 @@
   .section-nav-collapse {
     display: none;
   }
-  .section-layout.collapsed .section-nav-text {
+  .section-layout.collapsed button.section-nav-item {
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.section-nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e7f5d0;
+  color: #2d3e27;
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-align: center;
+}
+.section-layout.collapsed .section-nav-badge {
+  display: none;
+}
+.section-nav-text {
     display: inline;
   }
-  .section-layout.collapsed .section-nav a {
+  .section-layout.collapsed .section-nav-item {
     padding-inline: 10px;
   }
 }

@@ -51,11 +51,19 @@ import {
   type NoticeTemplate,
   type SentNotice,
 } from "./notices";
-import { useUrlState } from "./router";
+import { useAddress, useUrlState } from "./router";
+import { SectionLayout, type SectionNavItem } from "./SectionNav";
 import { fold } from "./domain";
 import type { Snapshot } from "./types";
 
 const PAGE = 20;
+
+// Seções do mural (só líderes); "Para mim" é o endereço sem ?aba=.
+const SECTIONS: (Omit<SectionNavItem, "href"> & { aba: string })[] = [
+  { id: "para-mim", aba: "", label: "Para mim", icon: Inbox },
+  { id: "enviados", aba: "enviados", label: "Enviados", icon: Send },
+  { id: "modelos", aba: "modelos", label: "Modelos", icon: FileStack },
+];
 
 /**
  * Mural de avisos: o que a pessoa recebeu ("Para mim", fixados no ar
@@ -97,6 +105,23 @@ export function NoticesPage({
   const sending = isLeader && tab === "enviados";
   const templatesTab = isLeader && tab === "modelos";
   const request = useRef(0);
+  const address = useAddress();
+  const tabHref = (aba: string) => {
+    const url = new URL(address || "/", "http://x");
+    if (aba) url.searchParams.set("aba", aba);
+    else url.searchParams.delete("aba");
+    return url.pathname + url.search;
+  };
+  const groups = isLeader
+    ? [
+        {
+          items: SECTIONS.map(({ aba, ...item }) => ({
+            ...item,
+            href: tabHref(aba),
+          })),
+        },
+      ]
+    : [];
 
   useEffect(() => {
     const t = setTimeout(() => setTerm(typed.trim()), 280);
@@ -164,180 +189,168 @@ export function NoticesPage({
   const rows = sending ? sent : feed;
 
   return (
-    <div className="notices-page">
-      <section className="cases-top">
-        <label className="cases-search">
-          <Search size={20} aria-hidden="true" />
-          <input
-            type="search"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            placeholder="Busque nos avisos…"
-            aria-label="Buscar avisos"
-          />
-          {typed && (
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Limpar busca"
-              onClick={() => setTyped("")}
-            >
-              <X size={16} />
-            </button>
-          )}
-        </label>
-        {isLeader && (
-          <Button
-            className="btn primary"
-            onClick={() => setForm({ detail: null })}
-          >
-            <Plus size={17} /> Novo aviso
-          </Button>
-        )}
-      </section>
-
-      {isLeader && (
-        <nav className="cases-tabs" aria-label="Mural">
-          <button
-            type="button"
-            className={!sending && !templatesTab ? "active" : ""}
-            aria-current={!sending && !templatesTab ? "page" : undefined}
-            onClick={() => setTab("")}
-          >
-            <Inbox size={16} /> Para mim
-          </button>
-          <button
-            type="button"
-            className={sending ? "active" : ""}
-            aria-current={sending ? "page" : undefined}
-            onClick={() => setTab("enviados")}
-          >
-            <Send size={16} /> Enviados
-          </button>
-          <button
-            type="button"
-            className={templatesTab ? "active" : ""}
-            aria-current={templatesTab ? "page" : undefined}
-            onClick={() => setTab("modelos")}
-          >
-            <FileStack size={16} /> Modelos
-          </button>
-        </nav>
-      )}
-
-      {error && <p className="form-error">{error}</p>}
-      {templatesTab ? (
-        <TemplateList
-          api={api}
-          company={company}
-          query={term}
-          notify={notify}
-          onUse={(template) =>
-            setForm({
-              detail: null,
-              preset: fromTemplate(template.content),
-              template,
-            })
-          }
-        />
-      ) : rows === null && !error ? (
-        <Loading compact />
-      ) : rows && rows.length ? (
-        <>
-          <ul className="notice-list">
-            {sending
-              ? sent!.map((n) => (
-                  <SentRow key={n.id} row={n} onOpen={() => setOpenId(n.id)} />
-                ))
-              : feed!.map((n) => (
-                  <FeedRow key={n.id} row={n} onOpen={() => setOpenId(n.id)} />
-                ))}
-          </ul>
-          {more && (
-            <div className="cases-more">
-              <Button
-                className="btn secondary"
-                onClick={() => load(rows.length)}
+    <SectionLayout
+      title="Mural"
+      label="Seções do Mural"
+      groups={groups}
+      current={sending ? "enviados" : templatesTab ? "modelos" : "para-mim"}
+      storageKey="mural"
+      onSelect={(id) => setTab(SECTIONS.find((t) => t.id === id)?.aba ?? "")}
+    >
+      <div className="notices-page">
+        <section className="cases-top">
+          <label className="cases-search">
+            <Search size={20} aria-hidden="true" />
+            <input
+              type="search"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder="Busque nos avisos…"
+              aria-label="Buscar avisos"
+            />
+            {typed && (
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Limpar busca"
+                onClick={() => setTyped("")}
               >
-                Carregar mais
-              </Button>
-            </div>
+                <X size={16} />
+              </button>
+            )}
+          </label>
+          {isLeader && (
+            <Button
+              className="btn primary"
+              onClick={() => setForm({ detail: null })}
+            >
+              <Plus size={17} /> Novo aviso
+            </Button>
           )}
-        </>
-      ) : rows ? (
-        <div className="panel">
-          {term ? (
-            <Empty
-              title="Nenhum aviso encontrado"
-              body="Tente outras palavras."
-            />
-          ) : sending ? (
-            <Empty
-              title="Você ainda não enviou avisos"
-              body="Avise pessoas, equipes, clientes ou projetos por popup, caixa de entrada, push ou uma faixa no topo."
-              action={
-                <Button
-                  className="btn primary"
-                  onClick={() => setForm({ detail: null })}
-                >
-                  <Plus size={16} /> Novo aviso
-                </Button>
-              }
-            />
-          ) : (
-            <Empty
-              title="Nenhum aviso por aqui"
-              body="Os comunicados da agência para você aparecem aqui e ficam guardados."
-            />
-          )}
-        </div>
-      ) : null}
+        </section>
 
-      {openId && !form && (
-        <NoticeView
-          key={openId}
-          api={api}
-          company={company}
-          id={openId}
-          demo={demo}
-          notify={notify}
-          studio={studioParam === "1"}
-          onStudio={(open) => setStudioParam(open ? "1" : "")}
-          onClose={() => {
-            setStudioParam("");
-            setOpenId("");
-          }}
-          onEdit={(detail) => setForm({ detail })}
-          onDuplicate={(detail) =>
-            setForm({
-              detail: null,
-              preset: {
-                ...contentOf(detail),
-                title: `${detail.title} (cópia)`.slice(0, 160),
-                publish_at: "",
-                expires_at: "",
-              },
-            })
-          }
-          onChanged={refresh}
-        />
-      )}
-      {form && (
-        <NoticeForm
-          api={api}
-          company={company}
-          data={data}
-          user={user}
-          demo={demo}
-          detail={form.detail}
-          preset={form.preset}
-          template={form.template}
-          notify={notify}
-          onClose={() => setForm(null)}
-          onSaved={saved}
-        />
-      )}
-    </div>
+        {error && <p className="form-error">{error}</p>}
+        {templatesTab ? (
+          <TemplateList
+            api={api}
+            company={company}
+            query={term}
+            notify={notify}
+            onUse={(template) =>
+              setForm({
+                detail: null,
+                preset: fromTemplate(template.content),
+                template,
+              })
+            }
+          />
+        ) : rows === null && !error ? (
+          <Loading compact />
+        ) : rows && rows.length ? (
+          <>
+            <ul className="notice-list">
+              {sending
+                ? sent!.map((n) => (
+                    <SentRow
+                      key={n.id}
+                      row={n}
+                      onOpen={() => setOpenId(n.id)}
+                    />
+                  ))
+                : feed!.map((n) => (
+                    <FeedRow
+                      key={n.id}
+                      row={n}
+                      onOpen={() => setOpenId(n.id)}
+                    />
+                  ))}
+            </ul>
+            {more && (
+              <div className="cases-more">
+                <Button
+                  className="btn secondary"
+                  onClick={() => load(rows.length)}
+                >
+                  Carregar mais
+                </Button>
+              </div>
+            )}
+          </>
+        ) : rows ? (
+          <div className="panel">
+            {term ? (
+              <Empty
+                title="Nenhum aviso encontrado"
+                body="Tente outras palavras."
+              />
+            ) : sending ? (
+              <Empty
+                title="Você ainda não enviou avisos"
+                body="Avise pessoas, equipes, clientes ou projetos por popup, caixa de entrada, push ou uma faixa no topo."
+                action={
+                  <Button
+                    className="btn primary"
+                    onClick={() => setForm({ detail: null })}
+                  >
+                    <Plus size={16} /> Novo aviso
+                  </Button>
+                }
+              />
+            ) : (
+              <Empty
+                title="Nenhum aviso por aqui"
+                body="Os comunicados da agência para você aparecem aqui e ficam guardados."
+              />
+            )}
+          </div>
+        ) : null}
+
+        {openId && !form && (
+          <NoticeView
+            key={openId}
+            api={api}
+            company={company}
+            id={openId}
+            demo={demo}
+            notify={notify}
+            studio={studioParam === "1"}
+            onStudio={(open) => setStudioParam(open ? "1" : "")}
+            onClose={() => {
+              setStudioParam("");
+              setOpenId("");
+            }}
+            onEdit={(detail) => setForm({ detail })}
+            onDuplicate={(detail) =>
+              setForm({
+                detail: null,
+                preset: {
+                  ...contentOf(detail),
+                  title: `${detail.title} (cópia)`.slice(0, 160),
+                  publish_at: "",
+                  expires_at: "",
+                },
+              })
+            }
+            onChanged={refresh}
+          />
+        )}
+        {form && (
+          <NoticeForm
+            api={api}
+            company={company}
+            data={data}
+            user={user}
+            demo={demo}
+            detail={form.detail}
+            preset={form.preset}
+            template={form.template}
+            notify={notify}
+            onClose={() => setForm(null)}
+            onSaved={saved}
+          />
+        )}
+      </div>
+    </SectionLayout>
   );
 }
 

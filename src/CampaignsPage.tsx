@@ -1965,10 +1965,12 @@ function CampaignDetail({
           onClose={() => onMavi(false)}
         />
       )}
-      <Button className="text-btn campaign-back" onClick={onBack}>
-        <ArrowLeft size={16} /> Todas as campanhas
-      </Button>
       <CampaignDayToDay
+        back={
+          <Button className="text-btn campaign-back" onClick={onBack}>
+            <ArrowLeft size={16} /> Todas as campanhas
+          </Button>
+        }
         campaign={campaign}
         cycles={cycles}
         current={current}

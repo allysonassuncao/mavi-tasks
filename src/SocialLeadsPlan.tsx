@@ -124,6 +124,11 @@ const appPath = (path: string) => {
 /** Why the plan was opened from the portfolio. */
 export type PlanIntent =
   "share" | "next-month" | "release" | "campaign" | "schedule" | null;
+/** The parts of a month's plan (the client's section menu, `?secao=`). */
+export type PlanPart =
+  "posts" | "agendamento" | "estrategia" | "campanha" | "alertas" | "versoes";
+/** The counters of the parts (the open plan's), for the section menu. */
+export type PlanCounts = Partial<Record<PlanPart, number>>;
 /** Who produces the arts and in how many days (the module's settings). */
 export type Production = {
   /** The creative team (or the squad): the default receiver of the arts. */
@@ -172,6 +177,9 @@ export function PlanView({
   onOpenBriefing,
   onChanged,
   onMonth,
+  section,
+  onSection,
+  onCounts,
   notify,
 }: {
   item: PortfolioItem;
@@ -193,17 +201,16 @@ export function PlanView({
   onOpenBriefing: () => void;
   onChanged: () => void;
   onMonth: (n: number) => void;
+  /** The part on screen: the page keeps it (the section menu, `?secao=`). */
+  section: PlanPart;
+  onSection: (s: PlanPart) => void;
+  onCounts?: (c: PlanCounts) => void;
   notify: (m: string) => void;
 }) {
   const mod = useSlModule();
   const [bundle, setBundle] = useState<PlanBundle | null>(null);
   const [error, setError] = useState("");
-  const [section, setSection] = useState<
-    "posts" | "agendamento" | "estrategia" | "campanha" | "alertas" | "versoes"
-  >("posts");
   const media = mod.id === "social_media";
-  // ?secao=agendamento (the notice "hora de publicar") opens that part once.
-  const [linkedSection, setLinkedSection] = useUrlState<string>("secao", "");
   const [schedulePost, setSchedulePost] = useState(0);
   const [openPost, setOpenPost] = useState<number | null>(null);
   // ?post=N (the "Abrir o post no plano" of an art task) opens that post once.
@@ -262,28 +269,22 @@ export function PlanView({
   useLiveSocialLeads(item.contract_id, load);
   useEffect(() => {
     if (!linkedPost || !bundle || bundle.plan.id !== plan?.id) return;
-    if (linkedSection === "agendamento" && media) {
-      setSection("agendamento");
-      setSchedulePost(linkedPost);
-      setLinkedSection("");
-    } else if (bundle.posts.some((p) => p.number === linkedPost)) {
-      setSection("posts");
+    // ?secao=agendamento&post=N (the notice "hora de publicar"): that post's
+    // schedule.
+    if (section === "agendamento" && media) setSchedulePost(linkedPost);
+    else if (bundle.posts.some((p) => p.number === linkedPost)) {
+      onSection("posts");
       setOpenPost(linkedPost);
     }
     setLinkedPost(0);
   }, [linkedPost, bundle, plan?.id, setLinkedPost]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (linkedSection !== "agendamento" || linkedPost) return;
-    if (media) setSection("agendamento");
-    setLinkedSection("");
-  }, [linkedSection, linkedPost, media, setLinkedSection]);
 
   useEffect(() => {
     if (!intent) return;
     if (intent === "share" && plan) setModal("share");
     if (intent === "next-month") setModal("next-month");
     if (intent === "release" && plan) setModal("release");
-    if (intent === "schedule" && plan && media) setSection("agendamento");
+    if (intent === "schedule" && plan && media) onSection("agendamento");
     if (intent === "campaign" && plan) {
       if (item.campaign?.id)
         navigate(appPath(`/campanhas/${item.campaign.id}`));
@@ -303,6 +304,26 @@ export function PlanView({
     return () => clearTimeout(t);
   }, [job?.id, job?.status, stale]); // eslint-disable-line react-hooks/exhaustive-deps
   const running = job?.status === "running" && !stale;
+
+  // The counters of the section menu (the page draws it).
+  const counts = useMemo<PlanCounts | null>(() => {
+    if (!bundle || bundle.plan.id !== plan?.id) return null;
+    const content = fullContent(bundle.plan, bundle.posts);
+    const reads = bundle.alertReads ?? [];
+    const unread = (text: string) => !reads.some((r) => r.alert_text === text);
+    return {
+      posts: bundle.posts.length,
+      agendamento: (bundle.schedules ?? []).length,
+      alertas:
+        content.alertas.filter(unread).length +
+        complianceFlags(content.posts).filter((f) => unread(flagText(f)))
+          .length,
+      versoes: bundle.revisions.length,
+    };
+  }, [bundle, plan?.id]);
+  useEffect(() => {
+    if (counts) onCounts?.(counts);
+  }, [counts]); // eslint-disable-line react-hooks/exhaustive-deps
   const failed = stale
     ? { ...job, error: STUCK_JOB_ERROR }
     : job?.status === "failed" &&
@@ -541,7 +562,7 @@ export function PlanView({
             {media && toSchedule > 0 && section !== "agendamento" && (
               <Button
                 className={`btn ${toRelease > 0 ? "secondary" : "primary"}`}
-                onClick={() => setSection("agendamento")}
+                onClick={() => onSection("agendamento")}
               >
                 <CalendarClock size={16} /> Agendar ({toSchedule})
               </Button>
@@ -650,42 +671,6 @@ export function PlanView({
             </Button>
           </div>
         )}
-      </div>
-
-      <div className="scope-tabs" role="tablist" aria-label="Partes do plano">
-        {(
-          [
-            ["posts", "Posts", total],
-            ...(media
-              ? ([["agendamento", "Agendamento", schedules.length]] as const)
-              : []),
-            ["estrategia", "Estratégia", null],
-            ["campanha", "Campanha", null],
-            [
-              "alertas",
-              "Alertas",
-              content.alertas.filter(
-                (a) => !reads.some((r) => r.alert_text === a),
-              ).length +
-                flags.filter(
-                  (f) => !reads.some((r) => r.alert_text === flagText(f)),
-                ).length,
-            ],
-            ["versoes", "Versões", bundle.revisions.length],
-          ] as const
-        ).map(([id, label, n]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={section === id}
-            className={section === id ? "selected" : ""}
-            onClick={() => setSection(id)}
-          >
-            {label}
-            {n !== null && <span>{n}</span>}
-          </button>
-        ))}
       </div>
 
       {section === "posts" && (

@@ -8,15 +8,23 @@ import {
   Plus,
   ClipboardList,
   Clock3,
+  CalendarClock,
+  History,
+  LayoutGrid,
+  Megaphone,
   Rocket,
   Search,
   Send,
   Sparkles,
+  Target,
+  TriangleAlert,
   Users,
+  type LucideIcon,
 } from "lucide-react";
 import { Avatar, Empty, Modal } from "./components";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
-import { navigate, pagePaths, useUrlState } from "./router";
+import { navigate, pagePaths, useAddress, useUrlState } from "./router";
+import { SectionLayout, type SectionNavItem } from "./SectionNav";
 import type { Snapshot } from "./types";
 import {
   demoSocialLeads,
@@ -37,7 +45,13 @@ import {
   type PortfolioItem,
 } from "./social-leads";
 import { BriefingWizard } from "./SocialLeadsBriefing";
-import { PlanView, type PlanIntent, type Production } from "./SocialLeadsPlan";
+import {
+  PlanView,
+  type PlanCounts,
+  type PlanIntent,
+  type PlanPart,
+  type Production,
+} from "./SocialLeadsPlan";
 import {
   SL_MODULES,
   SlModuleContext,
@@ -51,8 +65,8 @@ import "./social-leads-onboarding.css";
  * Planejamento › Social Leads, and Social Media (the same module with its
  * own product, `module`). The portfolio (clients with the module's
  * product, the next action of each) and, for one client, the briefing and
- * the plan of each month. The URL keeps the client (contrato), the tab (aba)
- * and the month (mes). Changes arrive live: App relays the company's
+ * the plan of each month. The URL keeps the client (contrato), the tab (aba:
+ * plano or briefing), the part of the plan (secao) and the month (mes). Changes arrive live: App relays the company's
  * "social_leads" notices as the "mavi:social-leads" window event.
  */
 export function SocialLeadsPage({
@@ -91,6 +105,7 @@ function ModulePage({
   const [error, setError] = useState("");
   const [contract, setContract] = useUrlState<string>("contrato", "");
   const [tab, setTab] = useUrlState<string>("aba", "plano");
+  const [section, setSection] = useUrlState<string>("secao", "posts");
   const [intent, setIntent] = useState<PlanIntent>(null);
   const [adding, setAdding] = useState(false);
   const mod = useSlModule();
@@ -188,11 +203,14 @@ function ModulePage({
         demo={demo}
         tab={tab === "briefing" ? "briefing" : "plano"}
         setTab={(t) => setTab(t)}
+        section={section}
+        setSection={(s) => setSection(s)}
         intent={intent}
         clearIntent={() => setIntent(null)}
         onBack={() => {
           setContract("");
           setTab("plano");
+          setSection("posts");
         }}
         onChanged={load}
         notify={notify}
@@ -1064,6 +1082,8 @@ function ClientView({
   demo,
   tab,
   setTab,
+  section,
+  setSection,
   intent,
   clearIntent,
   onBack,
@@ -1081,6 +1101,9 @@ function ClientView({
   demo: boolean;
   tab: "plano" | "briefing";
   setTab: (t: "plano" | "briefing") => void;
+  /** The part of the plan (`?secao=`); unknown values open the posts. */
+  section: string;
+  setSection: (s: PlanPart) => void;
   intent: PlanIntent;
   clearIntent: () => void;
   onBack: () => void;
@@ -1127,117 +1150,171 @@ function ClientView({
     plans.find((p) => p.month_number === month) ?? plans.at(-1) ?? null;
   const job = bundle?.job ?? null;
 
+  // One section menu: the parts of the month's plan and the briefing.
+  const mod = useSlModule();
+  const media = mod.id === "social_media";
+  const [counts, setCounts] = useState<PlanCounts>({});
+  const address = useAddress();
+  const parts = PLAN_PARTS.filter((p) => media || p.id !== "agendamento");
+  const empty = !!bundle && plans.length === 0;
+  const part: PlanPart = empty
+    ? "posts"
+    : (parts.find((p) => p.id === section)?.id ?? "posts");
+  const hrefOf = (aba: string, secao: string | null) => {
+    const url = new URL(address || "/", "http://x");
+    if (aba === "plano") url.searchParams.delete("aba");
+    else url.searchParams.set("aba", aba);
+    if (secao === "posts") url.searchParams.delete("secao");
+    else if (secao) url.searchParams.set("secao", secao);
+    return url.pathname + url.search;
+  };
+  const briefingItem: SectionNavItem = {
+    id: "briefing",
+    label: "Briefing",
+    icon: ClipboardList,
+    href: hrefOf("briefing", null),
+  };
+  // Without a plan yet the parts would all show the same empty state.
+  const groups = empty
+    ? [
+        {
+          items: [
+            {
+              id: "posts",
+              label: "Plano do mês",
+              icon: Rocket,
+              href: hrefOf("plano", "posts"),
+            },
+            briefingItem,
+          ],
+        },
+      ]
+    : [
+        {
+          label: "Plano do mês",
+          items: parts.map((p) => ({
+            ...p,
+            href: hrefOf("plano", p.id),
+            badge: counts[p.id] || undefined,
+          })),
+        },
+        { label: "Cliente", items: [briefingItem] },
+      ];
+  const select = (id: string) => {
+    if (id === "briefing") return setTab("briefing");
+    setTab("plano");
+    setSection(id as PlanPart);
+  };
+
   return (
-    <div className="sl-client-view">
-      <div className="sl-client-head">
-        <Button className="btn secondary sl-back" onClick={onBack}>
-          <ArrowLeft size={16} /> Carteira
-        </Button>
-        <div className="sl-client-title">
-          <h2>{name}</h2>
-          <p>
-            {[item.briefing?.fields.segment, item.contract_name]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        </div>
-        {plans.length > 0 && (
-          <div className="sl-months" role="tablist" aria-label="Mês do plano">
-            {plans.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="tab"
-                aria-selected={plan?.id === p.id && tab === "plano"}
-                className={
-                  plan?.id === p.id && tab === "plano" ? "selected" : ""
-                }
-                onClick={() => {
-                  setMonth(
-                    p.month_number === plans.at(-1)?.month_number
-                      ? 0
-                      : p.month_number,
-                  );
-                  setTab("plano");
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
+    <SectionLayout
+      title={name}
+      label="Seções do cliente"
+      groups={groups}
+      current={tab === "briefing" ? "briefing" : part}
+      storageKey="social-leads-cliente"
+      onSelect={select}
+    >
+      <div className="sl-client-view">
+        <div className="sl-client-head">
+          <Button className="btn secondary sl-back" onClick={onBack}>
+            <ArrowLeft size={16} /> Carteira
+          </Button>
+          <div className="sl-client-title">
+            <h2>{name}</h2>
+            <p>
+              {[item.briefing?.fields.segment, item.contract_name]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
           </div>
+          {plans.length > 0 && (
+            <div className="sl-months" role="tablist" aria-label="Mês do plano">
+              {plans.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={plan?.id === p.id && tab === "plano"}
+                  className={
+                    plan?.id === p.id && tab === "plano" ? "selected" : ""
+                  }
+                  onClick={() => {
+                    setMonth(
+                      p.month_number === plans.at(-1)?.month_number
+                        ? 0
+                        : p.month_number,
+                    );
+                    setTab("plano");
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {error && !bundle ? (
+          <Empty title="Não foi possível abrir o cliente" body={error} />
+        ) : !bundle ? (
+          <Loading variant="detail" />
+        ) : tab === "briefing" ? (
+          <BriefingWizard
+            item={item}
+            briefing={bundle.briefing}
+            people={people}
+            company={company}
+            backend={backend}
+            hasPlan={plans.length > 0}
+            job={job}
+            canWrite={item.can_write}
+            onSaved={load}
+            onGenerated={() => {
+              load();
+              setTab("plano");
+            }}
+            notify={notify}
+          />
+        ) : (
+          <PlanView
+            item={item}
+            isLeader={isLeader}
+            production={production}
+            clientName={name}
+            briefing={bundle.briefing}
+            plans={plans}
+            plan={plan}
+            job={job}
+            company={company}
+            user={user}
+            data={data}
+            backend={backend}
+            demo={demo}
+            intent={intent}
+            clearIntent={clearIntent}
+            onOpenBriefing={() => setTab("briefing")}
+            onChanged={load}
+            onMonth={(n) => setMonth(n)}
+            section={part}
+            onSection={select}
+            onCounts={setCounts}
+            notify={notify}
+          />
         )}
       </div>
-      <div
-        className="scope-tabs sl-tabs"
-        role="tablist"
-        aria-label="Seções do cliente"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "plano"}
-          className={tab === "plano" ? "selected" : ""}
-          onClick={() => setTab("plano")}
-        >
-          <Rocket size={15} /> Plano do mês
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "briefing"}
-          className={tab === "briefing" ? "selected" : ""}
-          onClick={() => setTab("briefing")}
-        >
-          <ClipboardList size={15} /> Briefing
-        </button>
-      </div>
-      {error && !bundle ? (
-        <Empty title="Não foi possível abrir o cliente" body={error} />
-      ) : !bundle ? (
-        <Loading variant="detail" />
-      ) : tab === "briefing" ? (
-        <BriefingWizard
-          item={item}
-          briefing={bundle.briefing}
-          people={people}
-          company={company}
-          backend={backend}
-          hasPlan={plans.length > 0}
-          job={job}
-          canWrite={item.can_write}
-          onSaved={load}
-          onGenerated={() => {
-            load();
-            setTab("plano");
-          }}
-          notify={notify}
-        />
-      ) : (
-        <PlanView
-          item={item}
-          isLeader={isLeader}
-          production={production}
-          clientName={name}
-          briefing={bundle.briefing}
-          plans={plans}
-          plan={plan}
-          job={job}
-          company={company}
-          user={user}
-          data={data}
-          backend={backend}
-          demo={demo}
-          intent={intent}
-          clearIntent={clearIntent}
-          onOpenBriefing={() => setTab("briefing")}
-          onChanged={load}
-          onMonth={(n) => setMonth(n)}
-          notify={notify}
-        />
-      )}
-    </div>
+    </SectionLayout>
   );
 }
+
+/** The parts of the month's plan in the client's section menu. */
+const PLAN_PARTS: { id: PlanPart; label: string; icon: LucideIcon }[] = [
+  { id: "posts", label: "Posts", icon: LayoutGrid },
+  { id: "agendamento", label: "Agendamento", icon: CalendarClock },
+  { id: "estrategia", label: "Estratégia", icon: Target },
+  { id: "campanha", label: "Campanha", icon: Megaphone },
+  { id: "alertas", label: "Alertas", icon: TriangleAlert },
+  { id: "versoes", label: "Versões", icon: History },
+];
 
 /**
  * Taking a client out of the portfolio: archiving keeps everything (the

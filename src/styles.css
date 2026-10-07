@@ -14619,10 +14619,6 @@ tr:hover .campaign-edit-record,
   color: #fff;
   font-weight: 600;
 }
-.sl-tabs {
-  padding: 0;
-}
-
 /* Briefing */
 .sl-wizard {
   display: grid;
@@ -16123,11 +16119,7 @@ tr:hover .campaign-edit-record,
     margin-left: auto;
   }
 }
-/* Equipe e configurações: uma seção por aba. */
-.settings-tabs {
-  margin: 0 0 20px;
-  padding: 0;
-}
+/* Equipe e configurações: uma seção por item do menu lateral. */
 .settings-tab-body > .panel {
   min-width: 0;
 }

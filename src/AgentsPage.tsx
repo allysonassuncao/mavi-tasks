@@ -20,6 +20,7 @@ import { Modal } from "./components";
 import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import { contractProductLabel } from "./domain";
 import type { Snapshot } from "./types";
+import { SectionLayout, type SectionNavItem } from "./SectionNav";
 import {
   AgentServerError,
   ROLE_LABEL,
@@ -1256,82 +1257,84 @@ export function AgentsPage({
     if ((tab === "unlinked" && !linker) || (tab === "instances" && !leader))
       setTab("agents");
   }, [status, tab, linker, leader]);
-  const tabs: { id: Tab; label: string; show: boolean }[] = status?.linker
+  // Sem poder ligar fluxos só existe Agentes: fica sem o menu lateral.
+  const items: SectionNavItem[] = status?.linker
     ? [
-        { id: "agents", label: "Agentes", show: true },
+        { id: "agents", label: "Agentes", icon: BotMessageSquare },
         {
           id: "unlinked",
-          label: `Sem cliente${status.unlinked ? ` (${status.unlinked})` : ""}`,
-          show: true,
+          label: "Sem cliente",
+          icon: Link2,
+          badge: status.unlinked || undefined,
         },
-        { id: "instances", label: `VPS do n8n${status.errors ? " ⚠" : ""}`, show: leader },
+        ...(leader
+          ? [
+              {
+                id: "instances",
+                label: "VPS do n8n",
+                icon: Server,
+                badge: status.errors ? "⚠" : undefined,
+              },
+            ]
+          : []),
       ]
     : [];
 
   return (
-    <div className="agents-page">
-      {status?.linker && (
-        <div className="agent-top">
-          <div className="drive-view agent-tabs" role="tablist">
-            {tabs
-              .filter((t) => t.show)
-              .map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === t.id}
-                  className={tab === t.id ? "selected" : ""}
-                  onClick={() => setTab(t.id)}
-                >
-                  {t.label}
-                </button>
-              ))}
-          </div>
-          {leader && (
+    <SectionLayout
+      title="Agente Conversacional"
+      label="Seções de Agente Conversacional"
+      groups={[{ items }]}
+      current={tab}
+      storageKey="agentes"
+      onSelect={(id) => setTab(id as Tab)}
+    >
+      <div className="agents-page">
+        {status?.linker && leader && (
+          <div className="agent-top">
             <span className="muted agent-last-sync">
               {status.instances
                 ? `Última leitura do n8n: ${when(status.last_sync_at)}`
                 : "Nenhuma VPS cadastrada ainda"}
             </span>
-          )}
-        </div>
-      )}
-      {tab === "agents" && (
-        <>
-          <div className="agent-search">
-            <Input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar no texto dos prompts, nos fluxos ou nos clientes (ex.: agendamento, preço)"
-              aria-label="Buscar nos prompts"
-            />
           </div>
-          <AgentList
-            company={company}
-            query={query}
-            data={data}
-            canLink={linker}
-            leader={leader}
-            user={user}
-            onOpen={setOpen}
-            emptyHint={
-              leader && status?.linker && !status.instances
-                ? admin
-                  ? "Cadastre as VPS do n8n na aba VPS do n8n para trazer os agentes."
-                  : "Um administrador precisa cadastrar as VPS do n8n."
-                : undefined
-            }
-          />
-        </>
-      )}
-      {tab === "unlinked" && linker && (
-        <Unlinked company={company} data={data} leader={leader} user={user} />
-      )}
-      {tab === "instances" && leader && <Instances company={company} admin={admin} notify={notify} />}
-      {open && <AgentPromptSheet promptId={open} onClose={() => setOpen(null)} notify={notify} />}
-    </div>
+        )}
+        {tab === "agents" && (
+          <>
+            <div className="agent-search">
+              <Input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar no texto dos prompts, nos fluxos ou nos clientes (ex.: agendamento, preço)"
+                aria-label="Buscar nos prompts"
+              />
+            </div>
+            <AgentList
+              company={company}
+              query={query}
+              data={data}
+              canLink={linker}
+              leader={leader}
+              user={user}
+              onOpen={setOpen}
+              emptyHint={
+                leader && status?.linker && !status.instances
+                  ? admin
+                    ? "Cadastre as VPS do n8n na seção VPS do n8n para trazer os agentes."
+                    : "Um administrador precisa cadastrar as VPS do n8n."
+                  : undefined
+              }
+            />
+          </>
+        )}
+        {tab === "unlinked" && linker && (
+          <Unlinked company={company} data={data} leader={leader} user={user} />
+        )}
+        {tab === "instances" && leader && <Instances company={company} admin={admin} notify={notify} />}
+        {open && <AgentPromptSheet promptId={open} onClose={() => setOpen(null)} notify={notify} />}
+      </div>
+    </SectionLayout>
   );
 }
 

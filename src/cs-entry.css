@@ -77,6 +77,8 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+/* As seções ficam no menu lateral (SectionLayout); esta faixa só aparece na
+   tela cheia, que cobre o menu. */
 .cs-entry-tabs {
   display: flex;
   gap: 4px;
@@ -84,6 +86,9 @@
   overflow-x: auto;
 }
 .cs-entry-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   background: none;
   padding: 9px 14px;
@@ -98,6 +103,9 @@
   color: var(--ink);
   font-weight: 600;
   border-bottom-color: var(--cs-orange);
+}
+.cs-entry-tabs button.active svg {
+  color: var(--cs-orange);
 }
 .cs-entry-empty {
   display: flex;

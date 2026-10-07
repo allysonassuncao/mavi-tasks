@@ -379,44 +379,8 @@ export function SidebarNav({
           key: "settings",
           label: "Equipe e configurações",
           icon: Settings2,
+          // As seções ficam no menu lateral da própria página (SectionLayout).
           to: { page: "settings" },
-          children: [
-            {
-              key: "settings-people",
-              label: "Pessoas",
-              to: { page: "settings", hash: "config-pessoas" },
-            },
-            {
-              key: "settings-teams",
-              label: "Equipes",
-              to: { page: "settings", hash: "config-equipes" },
-            },
-            {
-              key: "settings-squads",
-              label: "Squads",
-              to: { page: "settings", hash: "config-squads" },
-            },
-            {
-              key: "settings-cs",
-              label: "Customer Success",
-              to: { page: "settings", hash: "config-cs" },
-            },
-            {
-              key: "settings-templates",
-              label: "Templates de tarefa",
-              to: { page: "settings", hash: "config-templates" },
-            },
-            {
-              key: "settings-due",
-              label: "Prazos e jornada",
-              to: { page: "settings", hash: "config-prazos" },
-            },
-            {
-              key: "settings-suggestions",
-              label: "Sugestões",
-              to: { page: "settings", hash: "config-sugestoes" },
-            },
-          ],
         },
         {
           key: "storage",

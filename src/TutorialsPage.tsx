@@ -28,8 +28,10 @@ import {
   ThumbsUp,
   Users,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { Empty } from "./components";
+import { SectionLayout } from "./SectionNav";
 import { Button, Loading, Select, SelectOption } from "./ui";
 import { MultiPick } from "./MultiPick";
 import { RichTextContent } from "./RichTextContent";
@@ -370,7 +372,59 @@ export function TutorialsPage({
       />
     );
 
+  // As seções no menu lateral; "Tutoriais" é a aba sem ?aba= (id próprio no menu).
+  const section = trailsTab
+    ? "trilhas"
+    : scope === "admin"
+      ? "admin"
+      : gapsTab
+        ? "duvidas"
+        : metricsTab
+          ? "metricas"
+          : "biblioteca";
+  const tabParam = (id: string) => (id === "biblioteca" ? "" : id);
+  // O endereço de cada seção, mantendo os outros parâmetros (busca, filtros).
+  const tabHref = (id: string) => {
+    const url = new URL(window.location.href);
+    const value = tabParam(id);
+    if (value) url.searchParams.set("aba", value);
+    else url.searchParams.delete("aba");
+    return url.pathname + url.search;
+  };
+  const item = (id: string, label: string, icon: LucideIcon, count = 0) => ({
+    id,
+    label,
+    icon,
+    href: tabHref(id),
+    badge: count > 0 ? count : undefined,
+  });
+  const learn = [
+    item("biblioteca", "Tutoriais", BookOpen),
+    item("trilhas", "Trilhas", Route, pendingTrails),
+  ];
+  const groups = isLeader
+    ? [
+        { label: "Aprender", items: learn },
+        {
+          label: "Gestão",
+          items: [
+            item("admin", "Administração", Settings2),
+            item("metricas", "Métricas", BarChart3),
+            item("duvidas", "Dúvidas sem tutorial", CircleHelp, gapCount),
+          ],
+        },
+      ]
+    : [{ items: learn }];
+
   return (
+    <SectionLayout
+      title="Tutoriais"
+      label="Seções de Tutoriais"
+      groups={groups}
+      current={section}
+      storageKey="tutoriais"
+      onSelect={(id) => setTab(tabParam(id))}
+    >
     <div className="tutorials-page">
       <form
         className="cases-top"
@@ -418,40 +472,6 @@ export function TutorialsPage({
           </Button>
         )}
       </form>
-
-      <nav className="cases-tabs" aria-label="Tutoriais">
-        {[
-          { param: "", label: "Tutoriais", icon: BookOpen, count: 0 },
-          { param: "trilhas", label: "Trilhas", icon: Route, count: pendingTrails },
-          ...(isLeader
-            ? [
-                { param: "admin", label: "Administração", icon: Settings2, count: 0 },
-                { param: "metricas", label: "Métricas", icon: BarChart3, count: 0 },
-                { param: "duvidas", label: "Dúvidas sem tutorial", icon: CircleHelp, count: gapCount },
-              ]
-            : []),
-        ].map((t) => {
-          const on =
-            (t.param === "trilhas" && trailsTab) ||
-            (t.param === "admin" && scope === "admin") ||
-            (t.param === "duvidas" && gapsTab) ||
-            (t.param === "metricas" && metricsTab) ||
-            (!t.param && !trailsTab && scope !== "admin" && !gapsTab && !metricsTab);
-          return (
-            <button
-              type="button"
-              key={t.param}
-              className={on ? "active" : ""}
-              aria-current={on ? "page" : undefined}
-              onClick={() => setTab(t.param)}
-            >
-              <t.icon size={16} />
-              {t.label}
-              {t.count > 0 && <span className="nav-count">{t.count}</span>}
-            </button>
-          );
-        })}
-      </nav>
 
       {metricsTab ? (
         <TutorialMetrics
@@ -658,6 +678,7 @@ export function TutorialsPage({
       </>
       )}
     </div>
+    </SectionLayout>
   );
 }
 

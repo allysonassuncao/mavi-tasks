@@ -30,6 +30,7 @@ import {
   type Page,
 } from "./router";
 import { Input, Select, SelectOption, Button } from "./ui";
+import { SectionLayout } from "./SectionNav";
 import {
   lazy,
   Suspense,
@@ -68,6 +69,10 @@ import {
   Wallet,
   Lightbulb,
   Settings2,
+  UsersRound,
+  Blocks,
+  LayoutTemplate,
+  CalendarClock,
   Search,
   Plus,
   ArrowUpRight,
@@ -435,9 +440,6 @@ export default function App() {
     setCompanyRef(next ? companySlug(next, data.companies) : "");
   }
   const page = usePage();
-  // Páginas com segundo menu lateral (SectionLayout): o nome fica no topo da
-  // coluna e o cabeçalho mostra só a descrição (section-nav.css).
-  const sectionNavPage = page === "aiUsage";
   // Grupos do Whatsapp e Avisos de falhas saíram das configurações para o
   // Painel da MAVI: os endereços antigos levam para lá.
   useEffect(() => {
@@ -3077,9 +3079,7 @@ export default function App() {
           {/* The Agenda uses the whole page, like Google Agenda, and the MAVI
               like ChatGPT: no heading. */}
           {page !== "agenda" && page !== "mavi" && (
-            <div
-              className={`page-heading ${sectionNavPage ? "has-section-nav" : ""}`}
-            >
+            <div className="page-heading">
               <div>
                 <div className="eyebrow">
                   {new Date().toLocaleDateString("pt-BR", {
@@ -4616,54 +4616,51 @@ export default function App() {
                 />
               )}
               {page === "settings" && isLeader && (
-                <>
-                  <div
-                    className="scope-tabs settings-tabs"
-                    role="tablist"
-                    aria-label="Seções de Equipe e configurações"
-                  >
-                    {(
-                      [
-                        ["config-pessoas", "Pessoas", data.members.length],
-                        ["config-equipes", "Equipes", data.teams.length],
-                        [
-                          "config-templates",
-                          "Templates de tarefa",
-                          data.taskTemplates?.length ?? 0,
-                        ],
-                        [
-                          "config-prazos",
-                          "Prazos e jornada",
-                          data.dueRules?.length ?? 0,
-                        ],
-                        ["config-sugestoes", "Sugestões", null],
-                        ["config-squads", "Squads", null],
-                        ["config-cs", "Customer Success", null],
+                <SectionLayout
+                  title="Equipe e configurações"
+                  label="Seções de Equipe e configurações"
+                  storageKey="configuracoes"
+                  current={settingsView}
+                  groups={[
+                    {
+                      label: "Pessoas",
+                      items: [
+                        { id: "config-pessoas", label: "Pessoas", icon: Users },
+                        { id: "config-equipes", label: "Equipes", icon: UsersRound },
+                        { id: "config-squads", label: "Squads", icon: Blocks },
+                      ],
+                    },
+                    {
+                      label: "Tarefas",
+                      items: [
+                        {
+                          id: "config-templates",
+                          label: "Templates de tarefa",
+                          icon: LayoutTemplate,
+                        },
+                        {
+                          id: "config-prazos",
+                          label: "Prazos e jornada",
+                          icon: CalendarClock,
+                        },
+                        { id: "config-sugestoes", label: "Sugestões", icon: Lightbulb },
+                      ],
+                    },
+                    {
+                      label: "Módulos e integrações",
+                      items: [
+                        {
+                          id: "config-cs",
+                          label: "Customer Success",
+                          icon: HeartHandshake,
+                        },
                         ...(isAdmin
-                          ? [["config-api", "Chaves de API", null]]
+                          ? [{ id: "config-api", label: "Chaves de API", icon: KeyRound }]
                           : []),
-                      ] as [SettingsTab, string, number | null][]
-                    ).map(([id, label, n]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        role="tab"
-                        aria-selected={settingsView === id}
-                        className={settingsView === id ? "selected" : ""}
-                        onClick={() =>
-                          navigate(
-                            window.location.pathname +
-                              window.location.search +
-                              `#${id}`,
-                            true,
-                          )
-                        }
-                      >
-                        {label}
-                        {n !== null && <span>{n}</span>}
-                      </button>
-                    ))}
-                  </div>
+                      ],
+                    },
+                  ]}
+                >
                   <div className="settings-tab-body" role="tabpanel">
                     {settingsView === "config-pessoas" && (
                       <section className="panel" id="config-pessoas">
@@ -5020,7 +5017,7 @@ export default function App() {
                       />
                     )}
                   </div>
-                </>
+                </SectionLayout>
               )}
             </>
           )}
