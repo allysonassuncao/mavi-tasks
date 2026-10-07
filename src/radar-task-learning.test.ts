@@ -10,6 +10,9 @@ import {
   ruleScope,
   rulesCost,
   taskRate,
+  suggestionHitRate,
+  autonomyLine,
+  undoUntil,
 } from "./radar-task-learning";
 
 describe("Tarefas do Radar (o que a MAVI aprende)", () => {
@@ -61,5 +64,23 @@ describe("Tarefas do Radar (o que a MAVI aprende)", () => {
     const measured = rulesCost({ ...base, avg_cost: 0.05, samples: 4 });
     expect(measured.measured).toBe(true);
     expect(measured.high).toBeCloseTo(2 * 0.05 * 1.1 * 1.3, 5);
+  });
+  it("autonomia: o acerto conta as criadas sozinhas e as desfeitas; a frase do grupo", () => {
+    const base = { as_is: 6, accepted: 8, dismissed: 1, replaced: 1, expired: 0 };
+    expect(suggestionHitRate(base)).toBe(60);
+    expect(suggestionHitRate({ ...base, auto: 4, undone: 1 })).toBe(67);
+    const settings = { suggest: true, autonomy_rate: 90, autonomy_min: 10, mavi_name: "MAVI" };
+    const g = { autonomy: { enabled: true, decided: 4, hits: 4, rate: 100, active: false } } as Parameters<typeof autonomyLine>[0];
+    expect(autonomyLine(g, settings)).toBe("Liberada · faltam decisões (4 de 10)");
+    expect(autonomyLine({ ...g, autonomy: { ...g.autonomy!, decided: 20, rate: 80 } }, settings)).toBe(
+      "Liberada · acerto 80% (precisa de 90%)",
+    );
+    expect(autonomyLine({ ...g, autonomy: { ...g.autonomy!, decided: 20, rate: 95, active: true } }, settings)).toBe(
+      "Abre sozinha · acerto 95%",
+    );
+    expect(autonomyLine({ ...g, autonomy: { ...g.autonomy!, enabled: false } }, settings)).toBe("Só sugere");
+    expect(autonomyLine(g, { suggest: true })).toBe("Liberada, mas a MAVI não está na empresa");
+    expect(undoUntil()).toBe("");
+    expect(undoUntil("2026-10-08T17:30:00Z")).toMatch(/^até \d{2}\/\d{2} \d{2}:\d{2}$/);
   });
 });

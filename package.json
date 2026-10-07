@@ -86,6 +86,7 @@
     "test:db:radar-task-learning": "node scripts/test-radar-task-learning.mjs",
     "test:db:radar-task-rules": "node scripts/test-radar-task-rules.mjs",
     "test:db:radar-task-suggestions": "node scripts/test-radar-task-suggestions.mjs",
+    "test:db:radar-task-autonomy": "node scripts/test-radar-task-autonomy.mjs",
     "test:db:personal-radar-next-step": "node scripts/test-personal-radar-next-step.mjs",
     "test:db:templates": "node scripts/test-task-templates.mjs",
     "test:db:assign-team": "node scripts/test-assign-to-team.mjs",

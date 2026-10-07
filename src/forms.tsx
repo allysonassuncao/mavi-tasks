@@ -157,6 +157,7 @@ import { TaskDueEdit } from "./DueRuleHint";
 import { DueRiskNote, ReplanModal } from "./DueAssist";
 import { TaskDueValue } from "./TaskDueChange";
 import { TaskPriorityValue } from "./TaskPriority";
+import { RadarTaskOriginRow } from "./RadarTaskOrigin";
 import {
   PRIORITY_RULE,
   mayPrioritize,
@@ -1915,6 +1916,7 @@ export function TaskDetail({
                   </span>
                 </div>
               </div>
+              <RadarTaskOriginRow company={task.company_id} task={task.id} onUndone={onClose} notify={notify} />
               <div className="property-row">
                 <span className="property-label">
                   <Users size={15} /> Participantes

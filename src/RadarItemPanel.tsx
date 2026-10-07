@@ -514,12 +514,18 @@ export function RadarItemPanel({
                 </Button>
               </div>
             ))}
-          {edit && !item.tasks.length && (
+          {edit && (
             <RadarTaskSuggestionCard
               company={company}
               item={item.id}
               onCreate={onNewTask ? (sg) => createTask(sg) : undefined}
               onLink={(task) => linkExisting([task])}
+              onUndone={() =>
+                void loadItem(company, item.id).then((next) => {
+                  setItem(next);
+                  onTaskLinked?.(item.id);
+                })
+              }
               notify={notify}
             />
           )}

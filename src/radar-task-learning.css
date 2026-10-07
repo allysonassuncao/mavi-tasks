@@ -338,3 +338,39 @@
 .rtl-signal.dismissed > svg {
   color: #b23b3b;
 }
+.radar-suggestion.auto {
+  border-color: #d5e6c2;
+  background: #f6faf1;
+}
+.radar-suggestion.auto .radar-suggestion-head {
+  color: #3f6b22;
+}
+.radar-origin {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.radar-origin > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.rtl-limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+.rtl-limits label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.rtl-groups small.rtl-ok {
+  color: #3f6b22;
+  font-weight: 600;
+}

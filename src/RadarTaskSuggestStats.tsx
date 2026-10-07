@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Lightbulb } from "lucide-react";
-import { Button, Loading } from "./ui";
+import { Bot, Lightbulb } from "lucide-react";
+import { Button, Input, Loading } from "./ui";
 import {
   SUGGESTION_REASONS,
+  autonomyLine,
   estimateSuggest,
+  saveAutonomySettings,
+  setAutonomy,
   loadSuggestionStats,
   setSuggest,
   suggestCost,
@@ -36,6 +39,8 @@ export function RadarTaskSuggestStats({
   const [error, setError] = useState("");
   const [estimate, setEstimate] = useState<SuggestEstimate | null>(null);
   const [busy, setBusy] = useState("");
+  // Os limites da autonomia em edição (null: fechado).
+  const [limits, setLimits] = useState<{ rate: string; min: string; days: string; cap: string } | null>(null);
 
   const reload = useCallback(
     () =>
@@ -75,6 +80,20 @@ export function RadarTaskSuggestStats({
     setError("");
     try {
       setEstimate(await estimateSuggest(company));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function act(key: string, fn: () => Promise<unknown>, message: string) {
+    setBusy(key);
+    setError("");
+    try {
+      await fn();
+      await reload();
+      notify(message);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -158,6 +177,94 @@ export function RadarTaskSuggestStats({
         )}
       </div>
 
+      <div className={`rtl-learning rtl-autonomy${s.mavi_name ? " on" : ""}`}>
+        <Bot size={16} aria-hidden="true" />
+        <div>
+          <strong>A MAVI abrindo sozinha</strong>
+          <small>
+            Libere por tópico × produto na tabela. Com a autonomia liberada, a sugestão vira tarefa na hora,{" "}
+            {s.mavi_name ? (
+              <>
+                criada por <b>{s.mavi_name}</b>
+              </>
+            ) : (
+              "criada pela MAVI"
+            )}
+            , enquanto o acerto dos últimos {s.autonomy_days ?? 30} dias for de pelo menos {s.autonomy_rate ?? 90}% (com{" "}
+            {s.autonomy_min ?? 10} sugestões decididas ou mais), até {s.autonomy_cap ?? 3} por cliente por dia. O
+            responsável do item é avisado e pode desfazer em 24 h.
+          </small>
+          {!s.mavi_name && (
+            <small className="rtl-error">
+              A MAVI ainda não é membro ativo da empresa: convide o e-mail mcc@makevendas.com.br para ela poder criar
+              tarefas.
+            </small>
+          )}
+          {limits && (
+            <div className="rtl-limits">
+              <label>
+                Acerto mínimo (%)
+                <Input type="number" min={50} max={100} value={limits.rate} onChange={(e) => setLimits({ ...limits, rate: e.target.value })} />
+              </label>
+              <label>
+                Mínimo de sugestões decididas
+                <Input type="number" min={3} max={200} value={limits.min} onChange={(e) => setLimits({ ...limits, min: e.target.value })} />
+              </label>
+              <label>
+                Janela (dias)
+                <Input type="number" min={7} max={180} value={limits.days} onChange={(e) => setLimits({ ...limits, days: e.target.value })} />
+              </label>
+              <label>
+                Teto por cliente por dia
+                <Input type="number" min={1} max={50} value={limits.cap} onChange={(e) => setLimits({ ...limits, cap: e.target.value })} />
+              </label>
+            </div>
+          )}
+        </div>
+        {limits ? (
+          <span className="rtl-learning-actions">
+            <Button className="btn secondary" onClick={() => setLimits(null)}>
+              Cancelar
+            </Button>
+            <Button
+              className="btn primary"
+              loading={busy === "limits"}
+              onClick={() =>
+                act(
+                  "limits",
+                  async () => {
+                    await saveAutonomySettings(company, {
+                      rate: Number(limits.rate),
+                      min: Number(limits.min),
+                      days: Number(limits.days),
+                      cap: Number(limits.cap),
+                    });
+                    setLimits(null);
+                  },
+                  "Limites da autonomia salvos.",
+                )
+              }
+            >
+              Salvar
+            </Button>
+          </span>
+        ) : (
+          <Button
+            className="btn secondary"
+            onClick={() =>
+              setLimits({
+                rate: String(s.autonomy_rate ?? 90),
+                min: String(s.autonomy_min ?? 10),
+                days: String(s.autonomy_days ?? 30),
+                cap: String(s.autonomy_cap ?? 3),
+              })
+            }
+          >
+            Limites
+          </Button>
+        )}
+      </div>
+
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -175,6 +282,8 @@ export function RadarTaskSuggestStats({
                 <th>Recusadas</th>
                 <th title="Tarefa por outro caminho, ou o item fechou com a sugestão em aberto">Ignoradas</th>
                 <th title="Itens em que nenhuma regra se aplicava">Ficou quieta</th>
+                <th title="Tarefas que a MAVI criou sozinha e as que foram desfeitas">Sozinha</th>
+                <th>Autonomia</th>
               </tr>
             </thead>
             <tbody>
@@ -217,6 +326,28 @@ export function RadarTaskSuggestStats({
                       )}
                     </td>
                     <td data-label="Ficou quieta">{g.quiet}</td>
+                    <td data-label="Sozinha">
+                      {g.auto ?? 0}
+                      {(g.undone ?? 0) > 0 && <small>{g.undone} desfeita(s)</small>}
+                    </td>
+                    <td data-label="Autonomia">
+                      <Button
+                        className={`btn compact ${g.autonomy?.enabled ? "secondary" : "primary"}`}
+                        loading={busy === `a${g.topic_id}:${g.product_id ?? ""}`}
+                        onClick={() =>
+                          act(
+                            `a${g.topic_id}:${g.product_id ?? ""}`,
+                            () => setAutonomy(company, g.topic_id, g.product_id, !g.autonomy?.enabled),
+                            g.autonomy?.enabled
+                              ? "Autonomia desligada: a MAVI volta a só sugerir neste grupo."
+                              : "Autonomia liberada: a MAVI abre sozinha enquanto o acerto estiver no limite.",
+                          )
+                        }
+                      >
+                        {g.autonomy?.enabled ? "Desligar" : "Liberar"}
+                      </Button>
+                      <small className={g.autonomy?.active ? "rtl-ok" : undefined}>{autonomyLine(g, s)}</small>
+                    </td>
                   </tr>
                 );
               })}

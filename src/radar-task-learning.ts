@@ -608,7 +608,7 @@ export const SUGGESTION_REASONS: { value: SuggestionReason; label: string }[] = 
 ];
 export type TaskSuggestion = {
   item_id: string;
-  status: "pending" | "open" | "none" | "created" | "replaced" | "dismissed" | "expired" | "failed";
+  status: "pending" | "open" | "none" | "created" | "replaced" | "dismissed" | "expired" | "failed" | "auto" | "undone";
   decision?: "task" | "link" | "no_task" | "unsure";
   rule_id?: string;
   rule_condition?: string;
@@ -630,6 +630,13 @@ export type TaskSuggestion = {
   decided_by_name?: string;
   decided_at?: string;
   updated_at: string;
+  /** Criada sozinha pela MAVI (Fase 4): a tarefa e até quando dá para desfazer. */
+  task_id?: string;
+  task_title?: string;
+  task_assignee_name?: string;
+  undo_until?: string;
+  /** Por que a MAVI não criou sozinha (com a autonomia liberada no grupo). */
+  auto_note?: string;
 };
 export type SuggestionGroup = {
   topic_id: string;
@@ -645,9 +652,31 @@ export type SuggestionGroup = {
   expired: number;
   quiet: number;
   reasons: Partial<Record<SuggestionReason, number>>;
+  /** Fase 4: criadas sozinhas, desfeitas e a autonomia do grupo. */
+  auto?: number;
+  undone?: number;
+  autonomy?: {
+    enabled: boolean;
+    enabled_at?: string;
+    enabled_by_name?: string;
+    decided: number;
+    hits: number;
+    rate?: number;
+    active: boolean;
+  };
 };
 export type SuggestionStats = {
-  settings: { suggest: boolean; suggest_at?: string; suggest_by_name?: string };
+  settings: {
+    suggest: boolean;
+    suggest_at?: string;
+    suggest_by_name?: string;
+    autonomy_rate?: number;
+    autonomy_min?: number;
+    autonomy_days?: number;
+    autonomy_cap?: number;
+    /** O membro da empresa que é a MAVI (e-mail mcc@makevendas.com.br). */
+    mavi_name?: string;
+  };
   pending: number;
   groups: SuggestionGroup[];
 };
@@ -676,9 +705,30 @@ export function suggestionLine(s: TaskSuggestion) {
     .join(" · ");
 }
 /** Das sugestões decididas, quantas foram aceitas como vieram ("—" sem nenhuma). */
-export function suggestionHitRate(g: Pick<SuggestionGroup, "as_is" | "accepted" | "dismissed" | "replaced" | "expired">) {
-  const decided = g.accepted + g.dismissed + g.replaced + g.expired;
-  return decided ? Math.round((g.as_is / decided) * 100) : null;
+export function suggestionHitRate(
+  g: Pick<SuggestionGroup, "as_is" | "accepted" | "dismissed" | "replaced" | "expired" | "auto" | "undone">,
+) {
+  // As criadas sozinhas que ficaram contam como acerto; as desfeitas, como erro.
+  const decided = g.accepted + g.dismissed + g.replaced + g.expired + (g.auto ?? 0) + (g.undone ?? 0);
+  return decided ? Math.round(((g.as_is + (g.auto ?? 0)) / decided) * 100) : null;
+}
+/** Como está a autonomia do grupo, em uma frase. */
+export function autonomyLine(g: SuggestionGroup, s: SuggestionStats["settings"]) {
+  const a = g.autonomy;
+  if (!a?.enabled) return "Só sugere";
+  if (!s.mavi_name) return "Liberada, mas a MAVI não está na empresa";
+  if (a.active) return `Abre sozinha · acerto ${a.rate ?? 0}%`;
+  if (a.decided < (s.autonomy_min ?? 10)) return `Liberada · faltam decisões (${a.decided} de ${s.autonomy_min ?? 10})`;
+  return `Liberada · acerto ${a.rate ?? 0}% (precisa de ${s.autonomy_rate ?? 90}%)`;
+}
+/** "até 08/10 14:30" (o prazo para desfazer). */
+export function undoUntil(iso?: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `até ${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} ${d.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 /** Custo de ligar: os itens que entram agora e um mês de itens novos. */
 export function suggestCost(e: SuggestEstimate, fallback = { input: 4, output: 20 }) {
@@ -750,8 +800,33 @@ const demoSuggestions = new Map<string, TaskSuggestion>([
     },
   ],
 ]);
+// O item demo-2: a MAVI criou a tarefa sozinha há 2 horas (dá para desfazer).
+demoSuggestions.set("demo-2", {
+  item_id: "demo-2",
+  status: "auto",
+  decision: "task",
+  rule_id: "demo-rule-3",
+  rule_condition: "Arte com a marca antiga ou fora do guia da marca",
+  title: "Refazer as artes com o logo novo — Norte Coffee",
+  task_id: "demo-auto-task",
+  task_title: "Refazer as artes com o logo novo — Norte Coffee",
+  task_assignee_name: "Júlia Santos",
+  why: "A cliente reclamou que as artes saíram com o logo antigo.",
+  decided_at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+  undo_until: new Date(Date.now() + 22 * 3_600_000).toISOString(),
+  updated_at: new Date().toISOString(),
+});
 let demoSuggestionStats: SuggestionStats = {
-  settings: { suggest: true, suggest_at: demoAt(5), suggest_by_name: "Ana" },
+  settings: {
+    suggest: true,
+    suggest_at: demoAt(5),
+    suggest_by_name: "Ana",
+    autonomy_rate: 90,
+    autonomy_min: 10,
+    autonomy_days: 30,
+    autonomy_cap: 3,
+    mavi_name: "MAVI",
+  },
   pending: 2,
   groups: [
     {
@@ -768,6 +843,68 @@ let demoSuggestionStats: SuggestionStats = {
       expired: 0,
       quiet: 6,
       reasons: { wrong_due: 1, not_needed: 1 },
+      auto: 0,
+      undone: 0,
+      autonomy: { enabled: false, decided: 12, hits: 7, rate: 58, active: false },
     },
   ],
 };
+
+// ------------------------------------------------------------ a autonomia (Fase 4)
+export type TaskOrigin = {
+  item_id: string;
+  item_title: string;
+  topic_name?: string;
+  auto?: boolean;
+  status?: "auto" | "undone";
+  rule_condition?: string;
+  undo_until?: string;
+  can_undo?: boolean;
+};
+/** De onde a tarefa veio no Radar (e se a MAVI criou sozinha). */
+export async function taskOrigin(company: string, task: string): Promise<TaskOrigin | null> {
+  if (offline(company)) return demoOrigins.get(task) ?? null;
+  return call<TaskOrigin | null>("radar_task_origin", { p_company: company, p_task: task });
+}
+/** Desfaz a tarefa criada sozinha (até 24 h): arquiva e conta como erro. */
+export async function undoAutoTask(company: string, item: string, reason: SuggestionReason, note: string) {
+  if (offline(company)) {
+    const s = demoSuggestions.get(item);
+    if (s) Object.assign(s, { status: "undone", reason, note, undo_until: undefined });
+    for (const [k, o] of demoOrigins) if (o.item_id === item) demoOrigins.set(k, { ...o, status: "undone", can_undo: false });
+    return s ?? null;
+  }
+  return call<TaskSuggestion>("radar_task_auto_undo", { p_company: company, p_item: item, p_reason: reason, p_note: note });
+}
+export async function setAutonomy(company: string, topic: string, product: string | null, on: boolean) {
+  if (offline(company)) {
+    const g = demoSuggestionStats.groups.find((x) => x.topic_id === topic && x.product_id === product);
+    if (g?.autonomy) g.autonomy = { ...g.autonomy, enabled: on, active: on && (g.autonomy.rate ?? 0) >= 75, enabled_by_name: "Você" };
+    return { enabled: on };
+  }
+  return call<{ enabled: boolean }>("set_radar_task_autonomy", {
+    p_company: company,
+    p_topic: topic,
+    p_product: product,
+    p_on: on,
+  });
+}
+export async function saveAutonomySettings(company: string, v: { rate: number; min: number; days: number; cap: number }) {
+  if (offline(company)) {
+    Object.assign(demoSuggestionStats.settings, {
+      autonomy_rate: v.rate,
+      autonomy_min: v.min,
+      autonomy_days: v.days,
+      autonomy_cap: v.cap,
+    });
+    return;
+  }
+  await call("save_radar_task_autonomy_settings", {
+    p_company: company,
+    p_rate: v.rate,
+    p_min: v.min,
+    p_days: v.days,
+    p_cap: v.cap,
+  });
+}
+const demoOrigins = new Map<string, TaskOrigin>();

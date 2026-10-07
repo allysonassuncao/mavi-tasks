@@ -18,7 +18,7 @@ export const INBOX_KINDS: { id: string; label: string; kinds: AppNotification["k
   { id: "due_risk", label: "Prazos em risco", kinds: ["due_risk"] },
   { id: "notice", label: "Mural de avisos", kinds: ["notice"] },
   { id: "temperature", label: "Termômetro", kinds: ["temperature"] },
-  { id: "radar", label: "Radar do cliente", kinds: ["radar_report", "radar_alert"] },
+  { id: "radar", label: "Radar do cliente", kinds: ["radar_report", "radar_alert", "radar_task_auto"] },
   { id: "campaign_alert", label: "Avisos de campanhas", kinds: ["campaign_alert"] },
   { id: "campaign_insight", label: "Insights das campanhas", kinds: ["campaign_insight"] },
   { id: "media_balance", label: "Financeiro › Mídia", kinds: ["media_balance"] },

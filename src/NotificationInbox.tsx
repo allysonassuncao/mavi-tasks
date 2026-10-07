@@ -98,7 +98,7 @@ export function InboxList({
                 <span className="inbox-system due-risk" aria-hidden="true">
                   <Flag size={15} />
                 </span>
-              ) : n.kind === "radar_report" || n.kind === "radar_alert" ? (
+              ) : n.kind === "radar_report" || n.kind === "radar_alert" || n.kind === "radar_task_auto" ? (
                 <span className="inbox-system temperature" aria-hidden="true">
                   <Radar size={15} />
                 </span>
@@ -159,6 +159,7 @@ export function InboxList({
                 n.kind === "temperature" ||
                 n.kind === "radar_report" ||
                 n.kind === "radar_alert" ||
+                n.kind === "radar_task_auto" ||
                 n.kind === "media_balance" ||
                 n.kind === "rq_closing" ||
                 n.kind === "campaign_alert" ||
