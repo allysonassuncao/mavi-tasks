@@ -6,6 +6,7 @@ import type { TaskSort, TaskViewConfig } from "./task-grouping";
 import {
   emptySnapshot,
   type Snapshot,
+  type Status,
   type Task,
   type Comment,
   type Attachment,
@@ -671,6 +672,29 @@ export async function myOpenTaskCount(
     },
     { ttlMs: CACHE_TTL.TASKS, forceRefresh },
   );
+}
+
+/**
+ * What is still in the person's queue: tasks not delivered they are the
+ * assignee and/or creator of, and repeats.
+ */
+export interface MemberOpenWork {
+  tasks: number;
+  as_assignee: number;
+  as_creator: number;
+  by_status: Partial<Record<Status, number>>;
+  recurrences: number;
+}
+
+/** Asked before deactivating someone: their queue needs a new assignee. */
+export async function memberOpenWork(
+  company: string,
+  user: string,
+): Promise<MemberOpenWork> {
+  return (await rpc("member_open_work", {
+    p_company: company,
+    p_user: user,
+  })) as MemberOpenWork;
 }
 
 export const HOURS_PAGE_SIZE = 25;

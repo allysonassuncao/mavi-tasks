@@ -627,6 +627,8 @@ function eventLabel(e: TaskEvent) {
   if (to === "done" && from !== "done") return "Tarefa entregue";
   if (e.action === "move")
     return from === to ? "Responsável alterado" : `Status: ${statusLabel(to)}`;
+  // Usuário desativado: quem o substituiu passou a ser o criador.
+  if (e.action === "creator_changed") return "Criador alterado";
   if (e.action === "reopen") return `Tarefa reaberta · ${statusLabel(to)}`;
   if (e.action === "attachment_deleted")
     return `Anexo excluído · ${String(e.detail.name ?? "")}`;
@@ -2663,6 +2665,18 @@ export function TaskDetail({
                               </span>
                             </span>
                           )}
+                        {e.action === "creator_changed" && (
+                          <span className="event-assignee">
+                            Criador:{" "}
+                            <span data-person={String(e.detail.creator_from)}>
+                              {memberName(String(e.detail.creator_from))}
+                            </span>{" "}
+                            →{" "}
+                            <span data-person={String(e.detail.creator_to)}>
+                              {memberName(String(e.detail.creator_to))}
+                            </span>
+                          </span>
+                        )}
                         <small>
                           {new Date(e.created_at).toLocaleString("pt-BR")}
                         </small>

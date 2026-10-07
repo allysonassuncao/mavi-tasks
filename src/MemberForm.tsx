@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Check } from "lucide-react";
 import { Modal } from "./components";
 import { Button, Checkbox, Input, Select, SelectOption } from "./ui";
-import type { Member, Role, Snapshot } from "./types";
+import { statuses, type Member, type Role, type Snapshot, type Status } from "./types";
+import type { MemberOpenWork } from "./api";
 import {
   ADMIN_PAGES,
   MEMBER_OPT_IN,
@@ -33,6 +34,9 @@ const roles: { id: Role; label: string }[] = [
  * and managers (who open the Painel
  * da MAVI), the inbox notices of the Copiloto's and the MAVI's new learnings
  * (set_member_lesson_alerts).
+ * Deactivating someone who is the assignee and/or creator of tasks not
+ * delivered (or of repeats) asks who takes their place in each role
+ * (update_member's p_handover); the status of each task stays as it is.
  */
 export function MemberForm({
   member,
@@ -43,6 +47,7 @@ export function MemberForm({
   busy,
   mutate,
   syncAccess,
+  openWork,
   onClose,
 }: {
   member: Member;
@@ -54,6 +59,8 @@ export function MemberForm({
   mutate: (name: string, args: Record<string, unknown>) => Promise<unknown>;
   /** Blocks or restores the person's sign-in to match their new status. */
   syncAccess?: (userId: string) => Promise<unknown>;
+  /** The person's queue, checked before deactivating them. */
+  openWork: (userId: string) => Promise<MemberOpenWork>;
   onClose: () => void;
 }) {
   const self = member.user_id === currentUser;
@@ -98,6 +105,29 @@ export function MemberForm({
       })
       .catch(() => {});
   }, [company, member.user_id]);
+  // Desativando: quem assume as tarefas não entregues e as repetições.
+  const deactivating = member.active && !active;
+  const [work, setWork] = useState<MemberOpenWork | null>(null);
+  const [workError, setWorkError] = useState("");
+  const [handover, setHandover] = useState("");
+  const loadWork = useRef(openWork);
+  loadWork.current = openWork;
+  useEffect(() => {
+    if (!deactivating || work) return;
+    let live = true;
+    setWorkError("");
+    loadWork.current(member.user_id)
+      .then((w) => live && setWork(w))
+      .catch((err) => live && setWorkError((err as Error).message));
+    return () => {
+      live = false;
+    };
+  }, [deactivating, work, member.user_id]);
+  const needsHandover =
+    deactivating && !!work && work.tasks + work.recurrences > 0;
+  const heirs = data.members
+    .filter((m) => m.active && m.user_id !== member.user_id)
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   // Survives a failed sync, when `member` already reflects the saved status.
@@ -111,6 +141,18 @@ export function MemberForm({
     e.preventDefault();
     if (saving) return;
     setError("");
+    if (deactivating && !work) {
+      setError(
+        workError
+          ? `Não foi possível conferir as tarefas de ${member.name}: ${workError}`
+          : `Aguarde: conferindo as tarefas de ${member.name}.`,
+      );
+      return;
+    }
+    if (needsHandover && !handover) {
+      setError(`Escolha quem assume as tarefas de ${member.name}.`);
+      return;
+    }
     setSaving(true);
     if (active !== member.active) needsSync.current = true;
     try {
@@ -121,6 +163,7 @@ export function MemberForm({
         p_role: role,
         p_active: active,
         p_teams: teams,
+        p_handover: needsHandover ? handover : null,
       });
       if (multiTimer !== !!member.multi_timer)
         await mutate("set_member_multi_timer", {
@@ -425,6 +468,39 @@ export function MemberForm({
                 ? "Usuários ativos acessam o espaço conforme o perfil e as equipes."
                 : "Usuários inativos perdem o acesso ao espaço; o histórico é mantido."}
           </small>
+          {deactivating &&
+            (work ? (
+              needsHandover && (
+                <div className="member-handover">
+                  <p>
+                    {member.name} tem {openWorkText(work)}. Escolha quem
+                    assume: fica no lugar de {member.name} como responsável e
+                    como criador, e o status de cada tarefa continua o mesmo.
+                  </p>
+                  <label>
+                    Novo responsável
+                    <Select
+                      value={handover}
+                      onValueChange={setHandover}
+                      required
+                    >
+                      <SelectOption value="">Escolha o usuário</SelectOption>
+                      {heirs.map((m) => (
+                        <SelectOption key={m.user_id} value={m.user_id}>
+                          {m.name}
+                        </SelectOption>
+                      ))}
+                    </Select>
+                  </label>
+                </div>
+              )
+            ) : (
+              <small className="form-hint" role="status">
+                {workError
+                  ? `Não foi possível conferir as tarefas de ${member.name}: ${workError}`
+                  : `Conferindo as tarefas de ${member.name}…`}
+              </small>
+            ))}
         </fieldset>
         {error && (
           <p className="form-error" role="alert">
@@ -447,4 +523,32 @@ export function MemberForm({
       </form>
     </Modal>
   );
+}
+
+/**
+ * "3 tarefas não entregues (2 como responsável · 2 como criador; 2 Em
+ * andamento · 1 Em validação) e 1 repetição".
+ */
+function openWorkText(work: MemberOpenWork) {
+  const parts: string[] = [];
+  if (work.tasks > 0) {
+    const detail = (Object.keys(statuses) as Status[])
+      .filter((s) => work.by_status[s])
+      .map((s) => `${work.by_status[s]} ${statuses[s].label}`)
+      .join(" · ");
+    const roles = [
+      work.as_assignee && `${work.as_assignee} como responsável`,
+      work.as_creator && `${work.as_creator} como criador`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    parts.push(
+      `${work.tasks} ${work.tasks === 1 ? "tarefa não entregue" : "tarefas não entregues"} (${roles}; ${detail})`,
+    );
+  }
+  if (work.recurrences > 0)
+    parts.push(
+      `${work.recurrences} ${work.recurrences === 1 ? "repetição" : "repetições"}`,
+    );
+  return parts.join(" e ");
 }

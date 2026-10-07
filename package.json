@@ -130,6 +130,7 @@
     "test:db:import-maso": "node scripts/test-import-maso.mjs",
     "test:db:import-maso-tasks": "node --experimental-strip-types --no-warnings scripts/test-import-maso-tasks.mjs",
     "test:db:member-modules": "node scripts/test-member-modules.mjs",
+    "test:db:deactivate-handover": "node scripts/test-deactivate-handover.mjs",
     "test:db:access-logs": "node scripts/test-access-logs.mjs",
     "test:db:public-api": "node scripts/test-public-api.mjs",
     "test:db:product-project": "node scripts/test-product-project-field.mjs",

@@ -5137,6 +5137,25 @@ export default function App() {
           syncAccess={
             demo ? undefined : (id) => api.syncUserAccess(company, id)
           }
+          openWork={async (id) => {
+            if (!demo) return api.memberOpenWork(company, id);
+            const open = data.tasks.filter(
+              (t) =>
+                (t.assignee_id === id || t.creator_id === id) &&
+                t.status !== "done" &&
+                !t.archived,
+            );
+            const by_status: api.MemberOpenWork["by_status"] = {};
+            for (const t of open)
+              by_status[t.status] = (by_status[t.status] ?? 0) + 1;
+            return {
+              tasks: open.length,
+              as_assignee: open.filter((t) => t.assignee_id === id).length,
+              as_creator: open.filter((t) => t.creator_id === id).length,
+              by_status,
+              recurrences: 0,
+            };
+          }}
           onClose={() => setEditMember(null)}
         />
       )}

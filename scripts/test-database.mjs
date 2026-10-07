@@ -796,6 +796,14 @@ await check(
   "gestor edita colaborador: nome, perfil, equipes e status",
   async () => {
     await as(manager);
+    // Com tarefas não entregues, desativar pede quem assume (20270616090000).
+    await assert.rejects(
+      rpc("update_member", [A, member, "Membro Editado", "member", false, []]),
+      /escolha quem assume antes de desativar/,
+    );
+    // Desfeito no fim: as próximas verificações contam com as tarefas do membro.
+    await db.exec("begin");
+    await as(manager);
     await rpc("update_member", [
       A,
       member,
@@ -803,6 +811,7 @@ await check(
       "member",
       false,
       [],
+      manager,
     ]);
     assert.deepEqual(await memberRow(member), {
       name: "Membro Editado",
@@ -816,6 +825,7 @@ await check(
       role: "member",
       active: true,
     });
+    await db.exec("rollback");
   },
 );
 await check(

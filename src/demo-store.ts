@@ -1003,6 +1003,36 @@ export class DemoStore {
           throw Error(
             "Você não pode alterar o próprio perfil de acesso nem se desativar.",
           );
+        // Desativar passa a fila não entregue (responsável e/ou criador)
+        // para quem assume (p_handover).
+        const queue =
+          target.active && !a.p_active
+            ? this.data.tasks.filter(
+                (t) =>
+                  (t.assignee_id === target.user_id ||
+                    t.creator_id === target.user_id) &&
+                  t.status !== "done" &&
+                  !t.archived,
+              )
+            : [];
+        if (queue.length) {
+          const heir = this.data.members.find(
+            (m) =>
+              m.user_id === a.p_handover &&
+              m.active &&
+              m.user_id !== target.user_id,
+          );
+          if (!a.p_handover)
+            throw Error(
+              `${target.name} tem tarefas não entregues na fila: escolha quem assume antes de desativar.`,
+            );
+          if (!heir) throw Error("Escolha um usuário ativo para assumir as tarefas.");
+          for (const t of queue) {
+            if (t.assignee_id === target.user_id) t.assignee_id = heir.user_id;
+            if (t.creator_id === target.user_id) t.creator_id = heir.user_id;
+            t.version += 1;
+          }
+        }
         Object.assign(target, {
           name: String(a.p_name).trim(),
           role: a.p_role,

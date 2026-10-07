@@ -7619,6 +7619,20 @@ label .input-control .ui-input {
   font-weight: 600 !important;
   color: var(--ink) !important;
 }
+/* Desativar: quem assume a fila */
+.member-handover {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #f1e3c8;
+  border-radius: 8px;
+  background: #fff8ec;
+}
+.member-handover p {
+  margin: 0;
+  color: #8a6a3a;
+  line-height: 1.5;
+}
 
 /* Drive audit trail */
 .drive-tabs {
