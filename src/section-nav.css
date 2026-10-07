@@ -1,0 +1,212 @@
+/* Segundo menu lateral das páginas com várias seções (SectionNav.tsx): uma
+   coluna de altura toda colada ao menu principal; a barra do topo e o
+   conteúdo da página começam depois dela. */
+.main-shell:has(.section-layout) {
+  --section-nav-w: 232px;
+  padding-left: var(--section-nav-w);
+  transition:
+    margin-left 0.18s ease,
+    padding-left 0.18s ease;
+}
+.main-shell:has(.section-layout.collapsed) {
+  --section-nav-w: 60px;
+}
+/* O nome da página fica no topo da coluna; no cabeçalho sobra a descrição
+   (com a faixa das telas menores, o nome volta ao cabeçalho). */
+@media (min-width: 1101px) {
+  .page-heading.has-section-nav {
+    margin-bottom: 22px;
+  }
+  .page-heading.has-section-nav :is(.eyebrow, h1) {
+    display: none;
+  }
+  .page-heading.has-section-nav p {
+    margin: 0;
+  }
+}
+.section-layout,
+.section-layout-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.section-nav {
+  position: fixed;
+  inset: 0 auto 0 248px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: var(--section-nav-w);
+  background: #fff;
+  border-right: 1px solid var(--border);
+  transition:
+    left 0.18s ease,
+    width 0.18s ease;
+}
+/* Acompanha a largura do menu principal (styles.css). */
+@media (max-width: 1200px) {
+  .section-nav {
+    left: 220px;
+  }
+}
+@media (min-width: 901px) {
+  .sidebar-collapsed .section-nav {
+    left: 76px;
+  }
+}
+.section-nav-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: 72px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.section-nav-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  padding: 18px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.section-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.section-nav-heading {
+  padding: 0 10px 6px;
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: #9aa5a4;
+  white-space: nowrap;
+}
+.section-nav a,
+.section-nav-collapse {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #5d6b6a;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.section-nav a svg,
+.section-nav-collapse svg {
+  flex-shrink: 0;
+  color: #8a9796;
+}
+.section-nav a:hover {
+  background: #f2f4f4;
+  color: var(--ink);
+}
+.section-nav a.active {
+  background: #eef1f0;
+  color: var(--ink);
+  font-weight: 650;
+}
+.section-nav a.active svg {
+  color: #4f7a1f;
+}
+.section-nav-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.section-nav-collapse {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 14px 22px;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  font-size: 0.78rem;
+  color: #8a9796;
+  text-align: left;
+}
+.section-nav-collapse:hover {
+  color: var(--ink);
+  background: #f7f8f8;
+}
+
+/* Recolhido: só os ícones (o nome aparece no title). */
+.section-layout.collapsed .section-nav-text,
+.section-layout.collapsed .section-nav-heading {
+  display: none;
+}
+.section-layout.collapsed .section-nav-list {
+  padding-inline: 8px;
+}
+.section-layout.collapsed .section-nav-group + .section-nav-group {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.section-layout.collapsed .section-nav a,
+.section-layout.collapsed .section-nav-collapse {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* Telas médias e celular: o menu vira uma faixa que rola de lado acima do
+   conteúdo. */
+@media (max-width: 1100px) {
+  .main-shell:has(.section-layout) {
+    padding-left: 0;
+  }
+  .section-nav,
+  .sidebar-collapsed .section-nav {
+    position: static;
+    width: auto;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .section-nav-list,
+  .section-layout.collapsed .section-nav-list {
+    flex-direction: row;
+    gap: 2px;
+    padding: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .section-nav-list::-webkit-scrollbar {
+    display: none;
+  }
+  .section-nav-group {
+    flex-direction: row;
+  }
+  .section-nav-group + .section-nav-group,
+  .section-layout.collapsed .section-nav-group + .section-nav-group {
+    padding: 0 0 0 4px;
+    margin-left: 2px;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+  .section-nav-head,
+  .section-nav-heading,
+  .section-nav-collapse {
+    display: none;
+  }
+  .section-layout.collapsed .section-nav-text {
+    display: inline;
+  }
+  .section-layout.collapsed .section-nav a {
+    padding-inline: 10px;
+  }
+}

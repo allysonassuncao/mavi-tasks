@@ -428,78 +428,8 @@ export function SidebarNav({
           key: "aiUsage",
           label: "Painel da MAVI",
           icon: Sparkles,
+          // As seções ficam no menu lateral da própria página (SectionLayout).
           to: { page: "aiUsage" },
-          // Gestores veem tudo menos Provedores e modelos (as API Keys).
-          children: [
-            {
-              key: "ai-usage",
-              label: "Consumo e limites",
-              to: { page: "aiUsage", hash: "consumo" },
-            },
-            {
-              key: "ai-copilot",
-              label: "Copiloto",
-              to: { page: "aiUsage", hash: "copiloto" },
-            },
-            {
-              key: "ai-learning",
-              label: "Aprendizado da MAVI",
-              to: { page: "aiUsage", hash: "aprendizado" },
-            },
-            {
-              key: "ai-temperature",
-              label: "Termômetro",
-              to: { page: "aiUsage", hash: "termometro" },
-            },
-            {
-              key: "ai-radar",
-              label: "Radar",
-              to: { page: "aiUsage", hash: "radar" },
-            },
-            {
-              key: "ai-powers",
-              label: "Poderes",
-              to: { page: "aiUsage", hash: "poderes" },
-            },
-            ...(isAdmin
-              ? [
-                  {
-                    key: "ai-providers",
-                    label: "Provedores e modelos",
-                    to: { page: "aiUsage" as const, hash: "provedores" },
-                  },
-                ]
-              : []),
-            {
-              key: "ai-routes",
-              label: "Quem usa qual modelo",
-              to: { page: "aiUsage" as const, hash: "regras" },
-            },
-            {
-              key: "ai-router",
-              label: "Roteamento",
-              to: { page: "aiUsage" as const, hash: "roteamento" },
-            },
-            {
-              key: "ai-eval-set",
-              label: "Avaliação",
-              to: { page: "aiUsage" as const, hash: "avaliacao" },
-            },
-            {
-              key: "ai-whatsapp",
-              label: "Grupos do Whatsapp",
-              to: { page: "aiUsage" as const, hash: "whatsapp" },
-            },
-            ...(isAdmin
-              ? [
-                  {
-                    key: "ai-job-alerts",
-                    label: "Avisos de falhas",
-                    to: { page: "aiUsage" as const, hash: "avisos" },
-                  },
-                ]
-              : []),
-          ],
         },
       ],
     },

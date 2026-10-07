@@ -18824,36 +18824,7 @@ label .sl-money .ui-input,
   }
 }
 
-/* Inteligência artificial: abas, biblioteca de provedores e regras. */
-.ai-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.ai-page-tabs {
-  align-self: flex-start;
-  flex-wrap: wrap;
-  max-width: 100%;
-}
-.ai-page-tabs a {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 12px;
-  border-radius: 7px;
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: #6f7c77;
-  text-decoration: none;
-}
-.ai-page-tabs a:hover {
-  color: var(--ink);
-}
-.ai-page-tabs a.selected {
-  background: #e7f5d0;
-  color: #2d3e27;
-  font-weight: 600;
-}
+/* Inteligência artificial: biblioteca de provedores e regras. */
 .ai-admin {
   display: flex;
   flex-direction: column;

@@ -435,6 +435,9 @@ export default function App() {
     setCompanyRef(next ? companySlug(next, data.companies) : "");
   }
   const page = usePage();
+  // Páginas com segundo menu lateral (SectionLayout): o nome fica no topo da
+  // coluna e o cabeçalho mostra só a descrição (section-nav.css).
+  const sectionNavPage = page === "aiUsage";
   // Grupos do Whatsapp e Avisos de falhas saíram das configurações para o
   // Painel da MAVI: os endereços antigos levam para lá.
   useEffect(() => {
@@ -3069,7 +3072,9 @@ export default function App() {
           {/* The Agenda uses the whole page, like Google Agenda, and the MAVI
               like ChatGPT: no heading. */}
           {page !== "agenda" && page !== "mavi" && (
-            <div className="page-heading">
+            <div
+              className={`page-heading ${sectionNavPage ? "has-section-nav" : ""}`}
+            >
               <div>
                 <div className="eyebrow">
                   {new Date().toLocaleDateString("pt-BR", {

@@ -14,8 +14,10 @@ import {
   Shuffle,
   Thermometer,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import { aiTab, useHash, type AiTab } from "./router";
+import { SectionLayout } from "./SectionNav";
 import type { Snapshot } from "./types";
 import { AiUsagePage } from "./AiUsagePage";
 import { AiProvidersPanel, AiRoutesPanel, useAiLibrary } from "./AiProviders";
@@ -37,37 +39,45 @@ import { demoRouter, serverRouter } from "./ai-router";
 import { EvalSetPanel } from "./AiEvalSet";
 import { demoEval, serverEval } from "./ai-eval-set";
 
-const TABS: {
-  id: AiTab;
-  label: string;
-  icon: typeof BarChart3;
-  admin: boolean;
-}[] = [
-  { id: "consumo", label: "Consumo e limites", icon: BarChart3, admin: false },
-  { id: "copiloto", label: "Copiloto", icon: GraduationCap, admin: false },
+type Section = { id: AiTab; label: string; icon: LucideIcon; admin: boolean };
+
+const SECTIONS: { label: string; items: Section[] }[] = [
   {
-    id: "aprendizado",
-    label: "Aprendizado da MAVI",
-    icon: Brain,
-    admin: false,
+    label: "Uso",
+    items: [
+      { id: "consumo", label: "Consumo e limites", icon: BarChart3, admin: false },
+      { id: "avisos", label: "Avisos de falhas", icon: BellRing, admin: true },
+    ],
   },
-  { id: "termometro", label: "Termômetro", icon: Thermometer, admin: false },
-  { id: "radar", label: "Radar", icon: Radar, admin: false },
-  { id: "tarefas-radar", label: "Tarefas do Radar", icon: ListChecks, admin: false },
-  { id: "campanhas", label: "Campanhas", icon: Lightbulb, admin: false },
-  { id: "poderes", label: "Poderes", icon: Zap, admin: false },
-  { id: "provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
-  { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: false },
-  { id: "roteamento", label: "Roteamento", icon: Shuffle, admin: false },
-  { id: "avaliacao", label: "Avaliação", icon: ClipboardCheck, admin: false },
   {
-    id: "whatsapp",
-    label: "Grupos do Whatsapp",
-    icon: MessageCircle,
-    admin: false,
+    label: "Aprendizado",
+    items: [
+      { id: "copiloto", label: "Copiloto", icon: GraduationCap, admin: false },
+      { id: "aprendizado", label: "Aprendizado da MAVI", icon: Brain, admin: false },
+    ],
   },
-  { id: "avisos", label: "Avisos de falhas", icon: BellRing, admin: true },
+  {
+    label: "Funcionalidades",
+    items: [
+      { id: "termometro", label: "Termômetro", icon: Thermometer, admin: false },
+      { id: "radar", label: "Radar", icon: Radar, admin: false },
+      { id: "tarefas-radar", label: "Tarefas do Radar", icon: ListChecks, admin: false },
+      { id: "campanhas", label: "Campanhas", icon: Lightbulb, admin: false },
+      { id: "whatsapp", label: "Grupos do Whatsapp", icon: MessageCircle, admin: false },
+      { id: "poderes", label: "Poderes", icon: Zap, admin: false },
+    ],
+  },
+  {
+    label: "Modelos",
+    items: [
+      { id: "provedores", label: "Provedores e modelos", icon: Boxes, admin: true },
+      { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: false },
+      { id: "roteamento", label: "Roteamento", icon: Shuffle, admin: false },
+      { id: "avaliacao", label: "Avaliação", icon: ClipboardCheck, admin: false },
+    ],
+  },
 ];
+const TABS = SECTIONS.flatMap((g) => g.items);
 
 /**
  * Painel de IA (líderes): o consumo e os limites de gasto, o aprendizado
@@ -81,8 +91,8 @@ const TABS: {
  * conjunto de avaliação (#avaliacao) e os grupos
  * do WhatsApp lidos pela MAVI (#whatsapp; só administradores ajustam); para
  * administradores, também a biblioteca de provedores e API Keys
- * (#provedores) e os avisos de falhas das rotinas (#avisos). Cada aba tem o
- * seu endereço.
+ * (#provedores) e os avisos de falhas das rotinas (#avisos). Cada seção tem
+ * o seu endereço e fica no menu lateral da página (SectionLayout).
  */
 export function AiPage({
   company,
@@ -103,27 +113,18 @@ export function AiPage({
   // avisos de falhas.
   const tab =
     isAdmin || !TABS.find((t) => t.id === hash)?.admin ? hash : "consumo";
-  const tabs = TABS.filter((t) => isAdmin || !t.admin);
+  const groups = SECTIONS.map((g) => ({
+    ...g,
+    items: g.items.filter((t) => isAdmin || !t.admin),
+  }));
   return (
-    <div className="ai-page">
-      {tabs.length > 1 && (
-        <nav
-          className="drive-view ai-page-tabs"
-          aria-label="Seções do Painel da MAVI"
-        >
-          {tabs.map((t) => (
-            <a
-              key={t.id}
-              href={`#${t.id}`}
-              className={tab === t.id ? "selected" : ""}
-              aria-current={tab === t.id ? "page" : undefined}
-            >
-              <t.icon size={15} aria-hidden="true" />
-              {t.label}
-            </a>
-          ))}
-        </nav>
-      )}
+    <SectionLayout
+      title="Painel da MAVI"
+      label="Seções do Painel da MAVI"
+      groups={groups}
+      current={tab}
+      storageKey="painel-mavi"
+    >
       {tab === "whatsapp" ? (
         <WhatsappGroupsPanel
           data={data}
@@ -177,7 +178,7 @@ export function AiPage({
         demo ? (
           <p className="panel ai-route-empty">
             No ambiente demonstrativo não há consumo da MAVI para mostrar. Veja
-            as abas de provedores e de regras.
+            as seções de provedores e de regras.
           </p>
         ) : (
           <AiUsagePage company={company} data={data} notify={notify} />
@@ -192,7 +193,7 @@ export function AiPage({
           notify={notify}
         />
       )}
-    </div>
+    </SectionLayout>
   );
 }
 
