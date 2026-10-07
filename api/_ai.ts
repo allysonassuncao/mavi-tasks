@@ -75,6 +75,7 @@ import {
   type AiArtifact,
   type CanvasArtifact,
   type ImageArtifact,
+  type MemoryArtifact,
   type Power,
   type SearchArtifact,
   type TaskArtifact,
@@ -126,7 +127,14 @@ import { appOrigin } from "./_origin.js";
 import { PLAN_TOOL, TASK_RULES, handleTaskAction, planLongTask, type TaskHost } from "./_ai-tasks.js";
 import { learningContext, type LearningContext } from "./_mavi-learning.js";
 import { answerSignals, followupSignals } from "./_mavi-judge.js";
-import { personContext, type PersonContext } from "./_mavi-person.js";
+import {
+  MEMORY_RULES,
+  MEMORY_TOOL,
+  memoryNote,
+  personContext,
+  personRefs,
+  type PersonContext,
+} from "./_mavi-person.js";
 
 /**
  * IA do MAVI (ações "ai-*" de /api/ai, que é a função api/drive.ts):
@@ -728,6 +736,8 @@ export type AiStreamEvent =
       message?: number;
       /** Quem respondeu e por quê (o roteador; a tela mostra para líderes). */
       route?: AiRouteInfo;
+      /** Os itens da memória de quem perguntou que esta resposta leu (ids). */
+      memory?: string[];
     }
   | { type: "error"; error: string; status: number };
 type Emit = (event: AiStreamEvent) => void;
@@ -1276,6 +1286,8 @@ async function ask(
     ...(csAccess ? [CS_MAVI_TOOL] : []),
     // Tarefas longas: no módulo MAVI e na bolinha (a conversa fica salva e o card aparece).
     ...(withPowers ? [PLAN_TOOL] : []),
+    // A memória de quem pergunta: o que ela disse com todas as letras.
+    MEMORY_TOOL,
   ];
   // Ferramentas por intenção: as das conexões e das contas de anúncio vão
   // quando combinam com o pedido ou foram usadas há pouco; as outras, pelo
@@ -1378,6 +1390,46 @@ async function ask(
     price: provider?.price ?? null,
     addCard: (card: Omit<TaskArtifact, "id" | "ref">) => add<TaskArtifact>(kit, "T", card),
   };
+  // A memória de quem pergunta (migração 20270611090000): os [M#] que ela
+  // leu, e a anotação do que ela disse com todas as letras (o cartão tem Desfazer).
+  const memoryRefs = personRefs(person);
+  const rememberAboutMe = async (input: unknown): Promise<string> => {
+    const note = memoryNote((input && typeof input === "object" ? input : {}) as Row, memoryRefs);
+    if (typeof note === "string") return note;
+    const r = await callRpc<{
+      op: MemoryArtifact["op"];
+      id: string;
+      kind: MemoryArtifact["kind"];
+      text: string;
+      durability: MemoryArtifact["durability"];
+      previous?: string | null;
+      previous_id?: string | null;
+    }>(env, deps.fetch, auth, "mavi_person_note", {
+      p_company: company,
+      p_op: note.op,
+      p_id: note.id,
+      p_kind: note.kind,
+      p_text: note.text,
+      p_durability: note.durability,
+      p_conversation: live?.run?.conversation ?? conversationId,
+      p_said: question.trim().slice(0, 300),
+    });
+    if (!r.ok || !r.data) return `Não deu para anotar (${r.ok ? "sem resposta" : r.error}). Diga isso à pessoa numa frase e siga o pedido.`;
+    const d = r.data;
+    add<MemoryArtifact>(kit, "B", {
+      type: "memory",
+      op: d.op,
+      item: d.id,
+      kind: d.kind,
+      text: d.text,
+      durability: d.durability,
+      ...(d.previous ? { previous: d.previous } : {}),
+      ...(d.previous_id ? { previous_id: d.previous_id } : {}),
+    });
+    return d.op === "forget"
+      ? `Tirado da memória dela: “${d.text}”. Diga numa frase curta que não vai mais seguir isso; o cartão com Desfazer aparece abaixo.`
+      : `Anotado na memória dela${d.previous ? ` (no lugar de “${d.previous}”)` : ""}: “${d.text}”. Diga numa frase curta o que anotou; o cartão com Desfazer aparece abaixo.`;
+  };
   let n = 0;
   const execute = async (name: string, input: unknown): Promise<ToolOutput> => {
     await checkStop();
@@ -1430,6 +1482,8 @@ async function ask(
         ? `Pesquisando na internet “${String((input as Record<string, unknown>)?.question ?? "").slice(0, 80)}”`
       : name === "plan_long_task"
         ? "Montando o plano da tarefa longa"
+      : name === "remember_about_me"
+        ? "Anotando na sua memória"
         : kind === "read"
           ? describeStep(ctx, name, input)
           : describePowerStep(name, input);
@@ -1458,6 +1512,8 @@ async function ask(
               if (out.startsWith("Plano montado")) planned = true;
               return out;
             })
+          : name === "remember_about_me"
+            ? rememberAboutMe(input)
           : name === "find_tasks"
             ? // A busca de tarefas: o botão da Busca avançada com a mesma busca.
               findTasks(ctx, input as Record<string, unknown>, (card) =>
@@ -1506,6 +1562,8 @@ async function ask(
           ? `${new Set(out.match(/\[S\d+\]/g) ?? []).size} páginas`
         : name === "plan_long_task"
           ? out.startsWith("Plano montado") ? "plano no card para você confirmar" : "faltou algo no plano"
+        : name === "remember_about_me"
+          ? out.startsWith("Anotado") ? "anotado" : out.startsWith("Tirado") ? "tirado da memória" : "não anotado"
           : kind === "read"
             ? summarizeStep(name, out)
             : summarizePowerStep(name, out);
@@ -1710,6 +1768,7 @@ async function ask(
     (ads ? ADS_RULES : "") +
     (csAccess ? CS_RULES : "") +
     (withPowers ? TASK_RULES : "") +
+    MEMORY_RULES +
     (toolChoice.deferred.length ? TOOLSET_RULES : "");
   const turnContext =
     base.context +
@@ -1911,6 +1970,10 @@ async function ask(
         }).catch(() => null)
       : null;
   const messageId = closed?.ok && typeof closed.data === "number" ? closed.data : null;
+  // Os itens da memória de quem perguntou que a resposta leu (o chip "Memória").
+  const memoryUsed = [...memoryRefs.values()];
+  if (messageId && memoryUsed.length)
+    await callRpc(env, deps.fetch, auth, "mavi_person_used", { p_message: messageId, p_ids: memoryUsed }).catch(() => null);
   // Sinais de problema nesta resposta: a MAVI confere depois (autoavaliação).
   if (messageId && !cancelled) {
     const signals = answerSignals({
@@ -2008,6 +2071,7 @@ async function ask(
     conversation: savedId,
     cost: { ...turnCost(ctx.cost!.entries), detail },
     ...(messageId ? { message: messageId } : {}),
+    ...(memoryUsed.length ? { memory: memoryUsed } : {}),
     // O porquê do modelo, só para líderes (como as decisões no Painel da MAVI).
     ...(base.leader ? { route: {
       model: usedModel,

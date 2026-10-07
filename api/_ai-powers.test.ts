@@ -214,12 +214,14 @@ describe("poderes no módulo MAVI", () => {
     const { fetchImpl, calls } = world(base(["visuals"]));
     let failed = "";
     const llm: LlmAdapter = async (r) => {
-      // Sem poderes; os avisos de campanhas entram para quem usa Campanhas (sem poder).
+      // Sem poderes; os avisos de campanhas entram para quem usa Campanhas (sem
+      // poder), e a memória de quem pergunta vai sempre.
       expect(r.tools.map((t) => t.name)).toEqual([
         ...TOOLS.map((t) => t.name),
         "ask_user",
         "campaign_alerts",
         "propose_campaign_alert",
+        "remember_about_me",
       ]);
       await r.execute("show_chart", {}).catch((e) => (failed = e.message));
       return answer("Ok.");

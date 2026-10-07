@@ -146,6 +146,8 @@ export type AiAnswer = {
   message?: number;
   /** Quem respondeu e por quê (a tela mostra para líderes). */
   route?: AiRouteInfo;
+  /** Os itens da memória de quem perguntou que esta resposta leu (ids). */
+  memory?: string[];
 };
 /** O custo de uma conversa (ai_conversation_cost). */
 export type ConversationCost = {
@@ -287,6 +289,7 @@ export async function streamAnswer(
         conversation: e.conversation ?? null,
         ...(e.cost && typeof e.cost.cost === "number" ? { cost: e.cost as TurnCost } : {}),
         ...(typeof e.message === "number" ? { message: e.message } : {}),
+        ...(memoryIds(e.memory).length ? { memory: memoryIds(e.memory) } : {}),
       };
     else if (e.type === "error")
       throw Error(e.error ?? "Não foi possível responder.");
@@ -361,7 +364,16 @@ export type AiStoredMessage = {
   sources: AiSource[];
   steps: { label: string; detail?: string }[];
   artifacts?: AiArtifact[];
+  /** Os itens da memória de quem perguntou que a resposta leu (ids). */
+  memory?: string[];
 };
+
+/** Os ids da memória usada (o que vier fora do formato some). */
+export function memoryIds(raw: unknown): string[] {
+  return Array.isArray(raw)
+    ? raw.filter((x): x is string => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)).slice(0, 30)
+    : [];
+}
 
 /** As conversas que a pessoa vê (as dela e as compartilhadas com ela). */
 export async function listConversations(
@@ -406,14 +418,18 @@ export async function conversationMessages(id: string) {
       .select(columns)
       .eq("conversation_id", id)
       .order("id");
-  let { data, error } = await read("id,role,content,sources,steps,artifacts");
-  // Antes da migração 20261212090000_mavi_powers não há anexos.
+  let { data, error } = await read("id,role,content,sources,steps,artifacts,memory");
+  // Antes da migração 20270611090000_mavi_memory_person não há a memória usada;
+  // antes da 20261212090000_mavi_powers, nem os anexos.
+  if (error?.code === "42703")
+    ({ data, error } = await read("id,role,content,sources,steps,artifacts"));
   if (error?.code === "42703")
     ({ data, error } = await read("id,role,content,sources,steps"));
   if (error) throw error;
   return ((data ?? []) as unknown as AiStoredMessage[]).map((m) => ({
     ...m,
     artifacts: sanitizeArtifacts(m.artifacts),
+    memory: memoryIds(m.memory),
   }));
 }
 export async function conversationShares(id: string) {

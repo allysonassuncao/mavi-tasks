@@ -73,6 +73,8 @@ export type ChatEntry = {
   artifacts?: AiArtifact[];
   /** Os arquivos anexados nesta pergunta (módulo MAVI; só para mostrar). */
   files?: { id: string; name: string; kind: string }[];
+  /** Os itens da memória de quem perguntou que a resposta leu (ids). */
+  memory?: string[];
   streaming?: boolean;
 };
 
@@ -535,6 +537,7 @@ export function useAiTurns({
         ...(result.cost ? { cost: result.cost } : {}),
         ...(result.route ? { route: result.route } : {}),
         ...(result.message ? { id: result.message } : {}),
+        ...(result.memory?.length ? { memory: result.memory } : {}),
         streaming: false,
         thinking: "",
       }));
@@ -791,6 +794,7 @@ export function entriesFrom(
     sources?: AiSource[];
     steps?: { label: string; detail?: string }[];
     artifacts?: AiArtifact[];
+    memory?: string[];
   }[],
 ): ChatEntry[] {
   return messages.map((m) => ({
@@ -799,6 +803,7 @@ export function entriesFrom(
     content: m.content,
     sources: m.sources ?? [],
     artifacts: m.artifacts ?? [],
+    ...(m.memory?.length ? { memory: m.memory } : {}),
     steps: (m.steps ?? []).map((s, i) => ({
       id: `s${i}`,
       label: s.label,

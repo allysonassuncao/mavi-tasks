@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { Loading, Select, SelectOption } from "./ui";
 import { ArtifactView, type ArtifactHost } from "./MaviArtifacts";
+import { MemoryChip } from "./MaviMemory";
 import { AttachButton, AttachmentTray, FileChip, useAttachmentTray } from "./MaviAttachments";
 import { conversationAttachments, type Attachment } from "./mavi-attachments";
 import { CanvasPanel, type CanvasSaveRequest } from "./MaviCanvas";
@@ -1478,6 +1479,10 @@ function ChatThread({
                             })
                           }
                         />
+                      )}
+                      {/* Os itens da memória de quem perguntou que a resposta leu. */}
+                      {!readOnly && !!t.memory?.length && (
+                        <MemoryChip company={host.company} ids={t.memory} notify={host.notify} />
                       )}
                       {(() => {
                         // O do banco tem tudo (anexos lidos e o resumo que a resposta disparou).

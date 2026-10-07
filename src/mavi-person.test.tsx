@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MaviPersonProfile } from "./MaviPersonProfile";
-import { TRAIT_KINDS, type PersonProfile } from "./mavi-person";
+import { MaviPersonProfile, logLine } from "./MaviPersonProfile";
+import { MemoryCard, MemoryChip } from "./MaviMemory";
+import { sanitizeArtifact } from "./mavi-artifacts";
+import { TRAIT_KINDS, sourcesLabel, validityLabel, type PersonProfile } from "./mavi-person";
 import type { Snapshot } from "./types";
 
 const now = "2026-09-30T15:00:00Z";
@@ -51,5 +53,102 @@ describe("o que a MAVI sabe sobre a pessoa", () => {
     );
     expect(html).toContain("O que a MAVI sabe sobre Ana Equipe");
     expect(html).toContain("Escrito por Ana Equipe");
+  });
+});
+
+describe("memória por pessoa · Fase 1", () => {
+  it("situação com validade, vencida apagada, de onde veio e o histórico", () => {
+    const html = renderToStaticMarkup(
+      <MaviPersonProfile
+        company="c"
+        user={null}
+        data={data}
+        notify={() => {}}
+        initial={{
+          ...profile,
+          valid_days: 60,
+          items: [
+            ...profile.items,
+            {
+              id: "e",
+              kind: "context",
+              text: "Fecha o mês do 5022.",
+              origin: "person",
+              pinned: true,
+              dismissed: false,
+              updated_at: now,
+              updated_by: "u1",
+              durability: "situation",
+              valid_until: "2026-12-05T12:00:00Z",
+              expired: false,
+              sources: [{ type: "chat", said: "estou fechando o mês do 5022" }],
+            },
+            {
+              id: "f",
+              kind: "context",
+              text: "Monta o trimestral.",
+              origin: "mavi",
+              pinned: false,
+              dismissed: false,
+              updated_at: now,
+              updated_by: null,
+              durability: "situation",
+              valid_until: "2026-09-01T12:00:00Z",
+              expired: true,
+              sources: [{ type: "feedback", id: 1 }, { type: "feedback", id: 2 }, { type: "question", message: 3 }],
+            },
+          ],
+          log: [{ action: "edit", kind: "preference", before: "Seja breve.", after: "Seja direta.", actor: "person", by: "u1", at: now }],
+        }}
+      />,
+    );
+    expect(html).toContain("Anotado pela MAVI na conversa");
+    expect(html).toContain("Situação · vale até 05/12");
+    expect(html).toContain("Situação vencida");
+    expect(html).toContain("(a MAVI não usa mais)");
+    expect(html).toContain('class="expired"');
+    expect(html).toContain("De: 2 avaliações, 1 pergunta");
+    expect(html.match(/aria-label="Renovar"/g)?.length).toBe(2);
+    expect(html).toContain("Ver o histórico de mudanças");
+  });
+
+  it("os rótulos", () => {
+    expect(validityLabel({ durability: "stable" })).toBe("");
+    expect(sourcesLabel({ sources: [{ type: "chat" }, { type: "check", message: 1 }] })).toBe("De: dito na conversa, 1 reclamação");
+    const name = (id: string | null) => (id === "u2" ? "Gil Gestor" : "alguém");
+    expect(logLine({ action: "edit", kind: "preference", before: "A.", after: "B.", actor: "person", by: "u1", at: now }, true, name)).toBe(
+      "Você corrigiu “B.” (era “A.”)",
+    );
+    expect(logLine({ action: "add", kind: "context", before: null, after: "C.", actor: "mavi", by: "u1", at: now }, true, name)).toBe(
+      "A MAVI adicionou “C.”",
+    );
+    expect(logLine({ action: "dismiss", kind: "context", before: "D.", after: "D.", actor: "leader", by: "u2", at: now }, false, name)).toBe(
+      "Gil Gestor removeu “D.”",
+    );
+  });
+
+  it("o cartão “Anotei” e o chip da memória usada", () => {
+    const card = sanitizeArtifact({
+      id: "abcd1234",
+      ref: "B1",
+      type: "memory",
+      op: "replace",
+      item: "00000000-0000-4000-8000-0000000000a9",
+      kind: "preference",
+      text: "Responda em tabela.",
+      durability: "situation",
+      previous: "Responda em tópicos.",
+      previous_id: "00000000-0000-4000-8000-0000000000a1",
+    });
+    expect(card).toMatchObject({ type: "memory", op: "replace", previous_id: "00000000-0000-4000-8000-0000000000a1" });
+    expect(sanitizeArtifact({ id: "abcd1234", ref: "B1", type: "memory", item: "x", kind: "preference", text: "a" })).toBeNull();
+    if (card?.type !== "memory") throw Error("cartão");
+    const html = renderToStaticMarkup(<MemoryCard artifact={card} company="c" readOnly={false} notify={() => {}} />);
+    expect(html).toContain("Corrigi na sua memória");
+    expect(html).toContain("“Responda em tabela.”");
+    expect(html).toContain("antes: “Responda em tópicos.”");
+    expect(html).toContain("Passageiro: vale 60 dias.");
+    const chip = renderToStaticMarkup(<MemoryChip company="c" ids={["a", "b"]} notify={() => {}} />);
+    expect(chip).toContain("Memória · 2");
   });
 });

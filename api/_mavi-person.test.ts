@@ -2,7 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { streamAi, type AiEnv } from "./_ai";
 import type { AgentRequest, LlmAdapter } from "./_ai-llm";
 import { handleLearningWorker, type LearningEnv } from "./_copilot-learning";
-import { parsePersonOps, personContext, personMessage, type PersonClaim } from "./_mavi-person";
+import {
+  memoryNote,
+  parsePersonOps,
+  personContext,
+  personMessage,
+  personRefs,
+  PERSON_CONTEXT_CHARS,
+  withSources,
+  type PersonClaim,
+} from "./_mavi-person";
 import { judgeMessage } from "./_mavi-judge";
 import { newMeter } from "./_social-leads";
 
@@ -48,7 +57,88 @@ describe("base de comportamento · leitura", () => {
     expect(m).toContain("frustração · removido: Removido.");
     expect(m).toContain("👎 formato ruim — “Sempre quero em tabela” · pergunta: Quais clientes estão frios?");
     expect(m).toContain("ela disse: “Me mande o que te pedi” · conferência da MAVI: Parou no meio.");
-    expect(m).toContain("- Faça a passagem dos 17 clientes");
+    expect(m).toContain("- [P2] Faça a passagem dos 17 clientes");
+    expect(m).toContain("- [A1] 👎");
+    expect(m).toContain("- [R1] depois da resposta");
+  });
+
+  it("situação: a validade aparece para a MAVI renovar ou aposentar", () => {
+    const m = personMessage({
+      ...claim,
+      items: [
+        { ...claim.items[0], id: "s1", kind: "context", text: "Fecha o mês do 5022.", durability: "situation", expired: true },
+        { ...claim.items[0], id: "s2", kind: "context", text: "Monta o trimestral.", durability: "situation", valid_until: "2026-12-05T12:00:00Z" },
+      ],
+    });
+    expect(m).toContain("contexto · situação vencida · escrito pela pessoa: Fecha o mês do 5022.");
+    expect(m).toContain("contexto · situação até 05/12 · escrito pela pessoa: Monta o trimestral.");
+  });
+
+  it("as evidências citadas viram as fontes do item (as que não existem somem)", () => {
+    const ops = parsePersonOps(
+      '{"ops":[{"op":"add","kind":"preference","text":"Responda em tabela.","durability":"stable","from":["A1","R1","P2","P9","X1",3]},{"op":"update","id":"i1","text":"Novo.","durability":"situation"}]}',
+    );
+    expect(ops[0].from).toEqual(["A1", "R1", "P2", "P9"]);
+    expect(ops[1]).toEqual({ op: "update", id: "i1", text: "Novo.", durability: "situation" });
+    const c = {
+      ...claim,
+      feedback: [{ ...claim.feedback[0], id: 41 }],
+      frustrations: [{ ...claim.frustrations[0], message: 77 }],
+      question_ids: [90, 91],
+    };
+    expect(withSources(ops, c)).toEqual([
+      {
+        op: "add",
+        kind: "preference",
+        text: "Responda em tabela.",
+        durability: "stable",
+        sources: [
+          { type: "feedback", id: 41 },
+          { type: "check", message: 77 },
+          { type: "question", message: 91 },
+        ],
+      },
+      { op: "update", id: "i1", text: "Novo.", durability: "situation" },
+    ]);
+  });
+
+  it("na pergunta: os itens com id ganham [M#]; o que passa do teto fica de fora", () => {
+    const p = {
+      items: [
+        { id: "a", kind: "preference" as const, text: "Responda em tabela." },
+        { id: "b", kind: "context" as const, text: "Fecha o mês do 5022.", durability: "situation" as const },
+        { id: "c", kind: "frustration" as const, text: "x".repeat(PERSON_CONTEXT_CHARS) },
+      ],
+      facts: { role: "member", teams: [], clients: [] },
+    };
+    const text = personContext(p);
+    expect(text).toContain("- Como prefere as respostas: [M1] Responda em tabela.");
+    expect(text).toContain("- Onde trabalha: [M2] Fecha o mês do 5022. (por enquanto)");
+    expect(text).not.toContain("xxxx");
+    expect([...personRefs(p)]).toEqual([
+      ["M1", "a"],
+      ["M2", "b"],
+    ]);
+  });
+
+  it("anotar na conversa: confere o pedido e troca o [M#] pelo id", () => {
+    const refs = new Map([["M2", "id-2"]]);
+    expect(memoryNote({ op: "add", kind: "preference", text: "  Responda   em tabela. " }, refs)).toEqual({
+      op: "add",
+      id: null,
+      kind: "preference",
+      text: "Responda em tabela.",
+      durability: "stable",
+    });
+    expect(memoryNote({ op: "replace", ref: "[m2]", kind: "context", text: "Atua no 5022.", durability: "situation" }, refs)).toMatchObject({
+      op: "replace",
+      id: "id-2",
+      durability: "situation",
+    });
+    expect(memoryNote({ op: "forget", ref: "M2" }, refs)).toMatchObject({ op: "forget", id: "id-2", text: null });
+    expect(memoryNote({ op: "forget", ref: "M7" }, refs)).toMatch(/não está na memória/);
+    expect(memoryNote({ op: "add", kind: "humor", text: "Algo" }, refs)).toMatch(/kind e o text/);
+    expect(memoryNote({ op: "apagar" }, refs)).toMatch(/add, replace ou forget/);
   });
 
   it("as mudanças: só os tipos conhecidos, com texto", () => {
@@ -185,5 +275,72 @@ describe("base de comportamento · na pergunta", () => {
     );
     expect(request!.context).toContain("Sobre quem pergunta");
     expect(request!.context).toContain("- Como prefere as respostas: Responda listas de clientes em tabela.");
+  });
+
+  it("a MAVI anota o que a pessoa disse (cartão com Desfazer) e a resposta guarda a memória que leu", async () => {
+    const item = "00000000-0000-4000-8000-0000000000a1";
+    const noted = "00000000-0000-4000-8000-0000000000a9";
+    const { fetchImpl, calls } = database({
+      "memberships?": [{ user_id: me, name: "Ana", email: "", role: "member", active: true }],
+      "rpc/ai_check_limits": { blocked: false, message: null, warnings: [] },
+      "rpc/ai_resolve_route": null,
+      "rpc/ai_my_powers": [],
+      "rpc/ai_run_start": { id: run, conversation, created: true },
+      "rpc/ai_save_turn": conversation,
+      "rpc/ai_usage_close_turn": 321,
+      "rpc/mavi_person_context": {
+        items: [{ id: item, kind: "preference", text: "Responda em tópicos." }],
+        facts: { role: "member", teams: [], clients: [] },
+      },
+      "rpc/mavi_person_note": (b: any) => ({
+        op: b.p_op,
+        id: noted,
+        kind: b.p_kind,
+        text: b.p_text,
+        durability: b.p_durability,
+        previous: "Responda em tópicos.",
+        previous_id: item,
+      }),
+      "rpc/mavi_person_used": null,
+    });
+    let round = 0;
+    let tools: string[] = [];
+    let instructions = "";
+    const llm: LlmAdapter = async (r) => {
+      tools = r.tools.map((t) => t.name);
+      instructions = r.instructions;
+      const out = await r.execute("remember_about_me", { op: "replace", ref: "M1", kind: "preference", text: "Responda em tabela." });
+      expect(out).toContain("Anotado na memória dela (no lugar de “Responda em tópicos.”)");
+      round++;
+      return { text: "Anotado: daqui pra frente, em tabela.", meter: newMeter("claude-opus-5-5"), rounds: 1 };
+    };
+    const events: any[] = [];
+    await streamAi(
+      { action: "ai-ask", company, question: "Daqui pra frente, sempre em tabela, não em tópicos", surface: "page" },
+      token,
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+      (e) => events.push(e),
+      { onClose: () => {} },
+    );
+    expect(round).toBe(1);
+    expect(tools).toContain("remember_about_me");
+    expect(instructions).toContain("Memória de quem pergunta");
+    const note = calls.find((c) => c.url.endsWith("/rpc/mavi_person_note"))!;
+    expect(note.body).toMatchObject({
+      p_company: company,
+      p_op: "replace",
+      p_id: item,
+      p_kind: "preference",
+      p_text: "Responda em tabela.",
+      p_durability: "stable",
+      p_conversation: conversation,
+      p_said: "Daqui pra frente, sempre em tabela, não em tópicos",
+    });
+    const card = events.find((e) => e.type === "artifact")?.artifact;
+    expect(card).toMatchObject({ type: "memory", op: "replace", item: noted, previous_id: item, ref: "B1" });
+    const used = calls.find((c) => c.url.endsWith("/rpc/mavi_person_used"))!;
+    expect(used.body).toEqual({ p_message: 321, p_ids: [item] });
+    expect(events.find((e) => e.type === "done")?.memory).toEqual([item]);
   });
 });

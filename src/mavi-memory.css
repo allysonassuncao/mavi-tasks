@@ -1,0 +1,151 @@
+/* MAVI · memória de quem pergunta na conversa (MaviMemory.tsx). */
+.mavi-memory-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 480px;
+  padding: 10px 14px;
+  border: 1px solid #d5e2c6;
+  border-radius: 12px;
+  background: #fbfdf8;
+  color: #3f6a24;
+}
+.mavi-memory-card.undone {
+  border-style: dashed;
+  background: #fafafa;
+  color: var(--muted);
+}
+.mavi-memory-card > svg {
+  flex-shrink: 0;
+}
+.mavi-memory-card > span {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.mavi-memory-card strong {
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+.mavi-memory-card small {
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: #3c4948;
+}
+.mavi-memory-card small.gone,
+.mavi-memory-card.undone small {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.mavi-memory-undo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid #c3d6ad;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #2f4f1a;
+}
+.mavi-memory-undo:disabled {
+  opacity: 0.5;
+}
+.mavi-memory-link {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: #5d6a68;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mavi-memory-chip {
+  position: relative;
+}
+.mavi-memory-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.mavi-memory-chip-btn:hover,
+.mavi-memory-chip-btn[aria-expanded="true"] {
+  background: #f0f3f1;
+  color: var(--ink);
+}
+.mavi-memory-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(20, 35, 30, 0.14);
+}
+.mavi-memory-pop > strong {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.mavi-memory-pop ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.mavi-memory-pop li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #3c4948;
+}
+.mavi-memory-pop li > span {
+  display: flex;
+  flex-direction: column;
+}
+.mavi-memory-pop li small {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.mavi-memory-pop li.gone > span {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.mavi-memory-pop li button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  color: #5d6a68;
+}
+.mavi-memory-pop li button:hover:not(:disabled) {
+  background: #f0f3f1;
+  color: var(--ink);
+}
+.mavi-memory-note {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+}

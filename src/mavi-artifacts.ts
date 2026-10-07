@@ -351,7 +351,8 @@ export type AiArtifact =
   | QuestionArtifact
   | TaskArtifact
   | SearchArtifact
-  | TutorialArtifact;
+  | TutorialArtifact
+  | MemoryArtifact;
 
 // ------------------------------------------------------------ busca de tarefas
 /**
@@ -365,6 +366,24 @@ export type SearchArtifact = Base & {
   /** O pedido, como aparece no campo da Busca. */
   request: string;
   total: number;
+};
+
+// ------------------------------------------------------------ memória
+/**
+ * O cartão "Anotei" da ferramenta remember_about_me: o item da memória de
+ * quem perguntou (migração 20270611090000_mavi_memory_person), com Desfazer.
+ */
+export type MemoryArtifact = Base & {
+  type: "memory";
+  op: "add" | "replace" | "forget";
+  /** O item (mavi_person_traits). */
+  item: string;
+  kind: "preference" | "context" | "frustration";
+  text: string;
+  durability: "stable" | "situation";
+  /** No replace: o item e o texto que saíram (Desfazer traz de volta). */
+  previous?: string;
+  previous_id?: string;
 };
 
 // ------------------------------------------------------------ tutoriais
@@ -885,6 +904,28 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
       summary: text(a.summary, 200),
     };
   }
+  if (a.type === "memory") {
+    const item = text(a.item, 40);
+    const kind = text(a.kind, 20);
+    const body = text(a.text, 300);
+    if (!/^[0-9a-f-]{36}$/i.test(item) || !["preference", "context", "frustration"].includes(kind) || !body)
+      return null;
+    const op = a.op === "replace" || a.op === "forget" ? a.op : "add";
+    const previous = text(a.previous, 300);
+    const previousId = text(a.previous_id, 40);
+    return {
+      id,
+      ref,
+      type: "memory",
+      op,
+      item,
+      kind: kind as MemoryArtifact["kind"],
+      text: body,
+      durability: a.durability === "situation" ? "situation" : "stable",
+      ...(previous ? { previous } : {}),
+      ...(/^[0-9a-f-]{36}$/i.test(previousId) ? { previous_id: previousId } : {}),
+    };
+  }
   if (a.type === "action") {
     const action = sanitizeAction(a.action);
     if (!action) return null;
@@ -947,6 +988,8 @@ export function artifactSummary(a: AiArtifact): string {
     return `botão da Busca avançada com “${a.request}” (${a.total} tarefas)`;
   if (a.type === "tutorial")
     return `cartão que abre o tutorial “${a.title}”${a.section ? ` na seção “${a.section}”` : ""}`;
+  if (a.type === "memory")
+    return `cartão da memória: ${a.op === "forget" ? "tirou" : "anotou"} “${a.text}” (a pessoa pode desfazer)`;
   if (a.type === "question")
     return `perguntas para a pessoa: ${a.questions.map((q) => `“${q.question}”`).join("; ")}`;
   if (a.type === "task")

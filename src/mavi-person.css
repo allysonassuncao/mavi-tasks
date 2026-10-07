@@ -231,3 +231,43 @@
   font-size: 0.78rem;
   color: #3c4948;
 }
+/* Memória por pessoa, Fase 1: situação (validade), de onde veio e histórico. */
+.mavi-person-group li.expired {
+  border-style: dashed;
+  background: #fafafa;
+}
+.mavi-person-group li.expired p {
+  color: var(--muted);
+}
+.mavi-person-validity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0 0 4px;
+  font-size: 0.7rem;
+  color: #5d6a68;
+}
+.mavi-person-validity > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.mavi-person-situation {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: #3c4948;
+}
+.mavi-person-log li {
+  display: flex;
+  justify-content: flex-start;
+  gap: 8px;
+  text-decoration: none;
+  color: #3c4948;
+}
+.mavi-person-log time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}

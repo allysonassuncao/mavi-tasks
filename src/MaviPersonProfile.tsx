@@ -1,15 +1,36 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Brain, Check, Pencil, Pin, PinOff, Plus, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, Trash2, User, X } from "lucide-react";
+import {
+  Brain,
+  CalendarClock,
+  Check,
+  MessageSquare,
+  Pencil,
+  Pin,
+  PinOff,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
+  User,
+  X,
+} from "lucide-react";
 import { Button, Loading } from "./ui";
 import { MAVI_REASON_LABELS } from "./mavi-feedback";
 import {
   TRAIT_KINDS,
+  fromChat,
   personProfile,
   saveTrait,
   setTrait,
+  sourcesLabel,
+  validityLabel,
   type PersonProfile,
   type Trait,
+  type TraitDurability,
   type TraitKind,
+  type TraitLog,
 } from "./mavi-person";
 import type { Snapshot } from "./types";
 import "./mavi-person.css";
@@ -21,6 +42,8 @@ import "./mavi-person.css";
  * sem modelo (equipes, clientes mais consultados) e o histórico das
  * avaliações dela. Em Meu perfil (a própria pessoa) e no Painel da MAVI (os
  * líderes). Escrever ou fixar um item: a MAVI não muda; remover: não volta.
+ * Situação (algo passageiro) vale 60 dias e pode ser renovada; o histórico
+ * mostra quem mudou o quê (migração 20270611090000_mavi_memory_person).
  */
 export function MaviPersonProfile({
   company,
@@ -40,8 +63,14 @@ export function MaviPersonProfile({
   const [profile, setProfile] = useState<PersonProfile | null>(initial);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
-  const [editing, setEditing] = useState<{ id: string | null; kind: TraitKind; text: string } | null>(null);
+  const [editing, setEditing] = useState<{
+    id: string | null;
+    kind: TraitKind;
+    text: string;
+    durability: TraitDurability;
+  } | null>(null);
   const [showRemoved, setShowRemoved] = useState(false);
+  const [showLog, setShowLog] = useState(false);
 
   const load = useCallback(() => {
     setError("");
@@ -77,7 +106,7 @@ export function MaviPersonProfile({
     void run(
       "save",
       async () => {
-        await saveTrait(company, user, ed.id, ed.kind, ed.text.trim());
+        await saveTrait(company, user, ed.id, ed.kind, ed.text.trim(), ed.durability);
         setEditing(null);
       },
       ed.id ? "Item corrigido: a MAVI não muda mais." : "Item salvo: a MAVI passa a seguir.",
@@ -101,10 +130,13 @@ export function MaviPersonProfile({
   const active = profile.items.filter((i) => !i.dismissed);
   const removed = profile.items.filter((i) => i.dismissed);
   const h = profile.history;
+  const days = profile.valid_days ?? 60;
   const origin = (t: Trait) =>
     t.origin === "mavi"
       ? { icon: <Sparkles size={12} aria-hidden="true" />, label: t.pinned ? "Aprendido pela MAVI · fixado" : "Aprendido pela MAVI" }
-      : t.origin === "person"
+      : fromChat(t)
+        ? { icon: <MessageSquare size={12} aria-hidden="true" />, label: "Anotado pela MAVI na conversa" }
+        : t.origin === "person"
         ? { icon: <User size={12} aria-hidden="true" />, label: profile.self ? "Escrito por você" : `Escrito por ${name(profile.user)}` }
         : { icon: <User size={12} aria-hidden="true" />, label: `Escrito por ${name(t.updated_by)} (gestão)` };
 
@@ -120,6 +152,14 @@ export function MaviPersonProfile({
           aria-label="O que a MAVI deve saber"
           onChange={(e) => setEditing({ ...editing, text: e.target.value })}
         />
+        <label className="mavi-person-situation">
+          <input
+            type="checkbox"
+            checked={editing.durability === "situation"}
+            onChange={(e) => setEditing({ ...editing, durability: e.target.checked ? "situation" : "stable" })}
+          />
+          É passageiro (um projeto, uma fase): vale {days} dias
+        </label>
         <div>
           <Button type="button" className="btn secondary" onClick={() => setEditing(null)}>
             <X size={14} /> Cancelar
@@ -169,7 +209,7 @@ export function MaviPersonProfile({
                   type="button"
                   className="mavi-person-add"
                   disabled={!!editing}
-                  onClick={() => setEditing({ id: null, kind: k.id, text: "" })}
+                  onClick={() => setEditing({ id: null, kind: k.id, text: "", durability: "stable" })}
                 >
                   <Plus size={13} /> Adicionar
                 </button>
@@ -183,8 +223,19 @@ export function MaviPersonProfile({
                   editing?.id === t.id ? (
                     <li key={t.id}>{editor(k.id)}</li>
                   ) : (
-                    <li key={t.id} className={t.pinned ? "pinned" : ""}>
+                    <li key={t.id} className={[t.pinned ? "pinned" : "", t.expired ? "expired" : ""].join(" ").trim() || undefined}>
                       <p>{t.text}</p>
+                      {(validityLabel(t) || sourcesLabel(t)) && (
+                        <small className="mavi-person-validity">
+                          {validityLabel(t) && (
+                            <span>
+                              <CalendarClock size={11} aria-hidden="true" /> {validityLabel(t)}
+                              {t.expired ? " (a MAVI não usa mais)" : ""}
+                            </span>
+                          )}
+                          {sourcesLabel(t) && <span>{sourcesLabel(t)}</span>}
+                        </small>
+                      )}
                       <div className="mavi-person-meta">
                         <span>
                           {origin(t).icon} {origin(t).label}
@@ -194,10 +245,25 @@ export function MaviPersonProfile({
                             type="button"
                             title="Corrigir"
                             aria-label="Corrigir"
-                            onClick={() => setEditing({ id: t.id, kind: t.kind, text: t.text })}
+                            onClick={() =>
+                              setEditing({ id: t.id, kind: t.kind, text: t.text, durability: t.durability ?? "stable" })
+                            }
                           >
                             <Pencil size={13} />
                           </button>
+                          {t.durability === "situation" && (
+                            <button
+                              type="button"
+                              title={`Renovar (vale mais ${days} dias)`}
+                              aria-label="Renovar"
+                              disabled={busy === `n${t.id}`}
+                              onClick={() =>
+                                void run(`n${t.id}`, () => setTrait(company, t.id, "renew"), `Item renovado por mais ${days} dias.`)
+                              }
+                            >
+                              <CalendarClock size={13} />
+                            </button>
+                          )}
                           {t.origin === "mavi" && (
                             <button
                               type="button"
@@ -265,6 +331,32 @@ export function MaviPersonProfile({
         </div>
       </div>
 
+      {(profile.log?.length ?? 0) > 0 && (
+        <div className="mavi-person-removed">
+          <button type="button" onClick={() => setShowLog((v) => !v)}>
+            {showLog ? "Esconder" : "Ver"} o histórico de mudanças
+          </button>
+          {showLog && (
+            <ul className="mavi-person-log">
+              {profile.log!.map((l, i) => (
+                <li key={i}>
+                  <time>
+                    {new Date(l.at).toLocaleString("pt-BR", {
+                      timeZone: "America/Sao_Paulo",
+                      day: "2-digit",
+                      month: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </time>
+                  <span>{logLine(l, profile.self, name)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {removed.length > 0 && (
         <div className="mavi-person-removed">
           <button type="button" onClick={() => setShowRemoved((v) => !v)}>
@@ -290,4 +382,22 @@ export function MaviPersonProfile({
       )}
     </section>
   );
+}
+
+const LOG_ACTION: Record<TraitLog["action"], string> = {
+  add: "adicionou",
+  edit: "corrigiu",
+  retire: "aposentou",
+  dismiss: "removeu",
+  restore: "trouxe de volta",
+  pin: "fixou",
+  unpin: "soltou",
+  renew: "renovou",
+};
+/** "A MAVI anotou “…”" / "Você corrigiu “…” (era “…”)". */
+export function logLine(l: TraitLog, self: boolean, name: (id: string | null) => string) {
+  const who = l.actor === "mavi" ? "A MAVI" : l.actor === "person" && self ? "Você" : name(l.by);
+  const text = l.after ?? l.before ?? "";
+  const was = l.action === "edit" && l.before && l.before !== l.after ? ` (era “${l.before}”)` : "";
+  return `${who} ${LOG_ACTION[l.action] ?? l.action} “${text}”${was}`;
 }
