@@ -1397,6 +1397,8 @@ export type LiveChange =
   | { kind: "personal_radar"; people: string[] }
   /** Painel da MAVI › Tarefas do Radar: a MAVI propôs regras ou o Jev conferiu. */
   | { kind: "radar_task_rules" }
+  /** Radar do cliente: a tarefa sugerida no item mudou (a MAVI decidiu ou alguém agiu). */
+  | { kind: "radar_task_suggestion"; item: string }
   /** Customer Success: squads, planilha, leitura ou ligação de clientes. */
   | { kind: "cs"; scope: "squads" | "settings" | "sync" | "clients" };
 

@@ -8,7 +8,7 @@ import { supabase } from "./supabase";
  * sugerir — e, liberada, abrir sozinha — as tarefas do Radar.
  */
 
-export type SignalKind = "created" | "linked" | "no_task";
+export type SignalKind = "created" | "linked" | "no_task" | "dismissed";
 /** O que a pessoa pode mudar no formulário preenchido. */
 export type ChangedField = "title" | "description" | "product" | "due" | "assignee" | "team" | "priority";
 export const CHANGED_LABELS: Record<ChangedField, string> = {
@@ -78,12 +78,27 @@ export type LearningSignal = {
   status_label?: string;
   backfill?: boolean;
   removed_reason?: "unlinked" | "task_later";
+  /** Veio da tarefa sugerida pela MAVI (Fase 3). */
+  from_suggestion?: boolean;
+  /** Sugestão recusada: o motivo, o comentário e o título sugerido. */
+  reason?: string;
+  note?: string;
+  suggested_title?: string;
   reopened?: boolean;
 };
 export type TaskLearning = {
   since: string;
   days: number;
-  totals: { created: number; linked: number; no_task: number; with_preset: number; as_preset: number };
+  totals: {
+    created: number;
+    linked: number;
+    no_task: number;
+    with_preset: number;
+    as_preset: number;
+    /** Desde a migração 20270608090000. */
+    dismissed?: number;
+    from_suggestion?: number;
+  };
   groups: LearningGroup[];
   recent: LearningSignal[];
 };
@@ -126,6 +141,8 @@ export async function recordTaskCreated(
   item: string,
   task: string,
   preset: Record<string, unknown>,
+  /** Criada pela tarefa sugerida da MAVI (Fase 3). */
+  fromSuggestion = false,
 ) {
   if (offline(company)) return;
   const fields = Object.fromEntries(
@@ -137,7 +154,7 @@ export async function recordTaskCreated(
     p_company: company,
     p_item: item,
     p_task: task,
-    p_preset: fields,
+    p_preset: fromSuggestion ? { ...fields, suggestion: "1" } : fields,
   });
   if (error) throw Error(error.message);
 }
@@ -238,6 +255,23 @@ function demoLearning(filters: LearningFilters): TaskLearning {
       severity: 0,
       user_name: "Ana",
       status_label: "Descartado",
+    },
+    {
+      id: "rs-4",
+      kind: "dismissed",
+      created_at: ago(2),
+      item_id: "ri-4",
+      item_title: "Página lenta no celular",
+      client_name: "Norte Coffee",
+      topic_name: "Problemas/reclamações",
+      topic_color: "#d64545",
+      product_name: "Make Ads",
+      severity: 1,
+      user_name: "Gabi",
+      from_suggestion: true,
+      reason: "wrong_due",
+      note: "Depende do fornecedor do site; 5 dias úteis.",
+      suggested_title: "Acelerar a landing — Norte Coffee",
     },
     {
       id: "rs-3",
@@ -554,6 +588,186 @@ let demoRules: RulesData = {
       approved_at: demoAt(10),
       created_at: demoAt(10),
       updated_at: demoAt(10),
+    },
+  ],
+};
+
+// ------------------------------------------------------------ a tarefa sugerida (Fase 3)
+/**
+ * A tarefa sugerida no item (migration 20270608090000_radar_task_suggestions):
+ * com as regras em uso, a MAVI sugere a tarefa (ou vincular uma aberta do
+ * cliente). A pessoa cria pelo formulário preenchido ou recusa com um motivo.
+ */
+export type SuggestionReason = "not_needed" | "exists" | "wrong_person" | "wrong_due" | "other";
+export const SUGGESTION_REASONS: { value: SuggestionReason; label: string }[] = [
+  { value: "not_needed", label: "Não precisa de tarefa" },
+  { value: "exists", label: "Já existe tarefa para isso" },
+  { value: "wrong_person", label: "Equipe ou pessoa errada" },
+  { value: "wrong_due", label: "Prazo errado" },
+  { value: "other", label: "Outro motivo" },
+];
+export type TaskSuggestion = {
+  item_id: string;
+  status: "pending" | "open" | "none" | "created" | "replaced" | "dismissed" | "expired" | "failed";
+  decision?: "task" | "link" | "no_task" | "unsure";
+  rule_id?: string;
+  rule_condition?: string;
+  title?: string;
+  description?: string;
+  team_id?: string;
+  team_name?: string;
+  assignee_id?: string;
+  assignee_name?: string;
+  due_days?: number;
+  due_date?: string;
+  priority?: string;
+  why?: string;
+  link_task_id?: string;
+  link_task_title?: string;
+  link_task_status?: string;
+  reason?: SuggestionReason;
+  note?: string;
+  decided_by_name?: string;
+  decided_at?: string;
+  updated_at: string;
+};
+export type SuggestionGroup = {
+  topic_id: string;
+  topic_name: string;
+  topic_color: string;
+  product_id: string | null;
+  product_name: string | null;
+  open: number;
+  accepted: number;
+  as_is: number;
+  dismissed: number;
+  replaced: number;
+  expired: number;
+  quiet: number;
+  reasons: Partial<Record<SuggestionReason, number>>;
+};
+export type SuggestionStats = {
+  settings: { suggest: boolean; suggest_at?: string; suggest_by_name?: string };
+  pending: number;
+  groups: SuggestionGroup[];
+};
+export type SuggestEstimate = {
+  items: number;
+  per_month: number;
+  avg_cost: number | null;
+  samples: number;
+  price: { input?: number; output?: number } | null;
+};
+
+/** "Para a equipe Tráfego (Bruno) · prazo 09/10 (2 dias úteis) · prioridade Alta". */
+export function suggestionLine(s: TaskSuggestion) {
+  const who = s.assignee_name
+    ? `Para ${s.assignee_name}${s.team_name ? ` (equipe ${s.team_name})` : ""}`
+    : s.team_name
+      ? `Para a equipe ${s.team_name}, quem tiver menos tarefas`
+      : "Para quem atende o cliente";
+  const due = s.due_date
+    ? `prazo ${s.due_date.slice(8, 10)}/${s.due_date.slice(5, 7)}${
+        s.due_days !== undefined ? ` (${s.due_days === 1 ? "1 dia útil" : `${s.due_days} dias úteis`})` : ""
+      }`
+    : "";
+  return [who, due, s.priority && s.priority !== "normal" ? `prioridade ${PRIORITY_LABELS[s.priority] ?? s.priority}` : ""]
+    .filter(Boolean)
+    .join(" · ");
+}
+/** Das sugestões decididas, quantas foram aceitas como vieram ("—" sem nenhuma). */
+export function suggestionHitRate(g: Pick<SuggestionGroup, "as_is" | "accepted" | "dismissed" | "replaced" | "expired">) {
+  const decided = g.accepted + g.dismissed + g.replaced + g.expired;
+  return decided ? Math.round((g.as_is / decided) * 100) : null;
+}
+/** Custo de ligar: os itens que entram agora e um mês de itens novos. */
+export function suggestCost(e: SuggestEstimate, fallback = { input: 4, output: 20 }) {
+  const measured = e.samples >= 5 && e.avg_cost !== null && e.avg_cost !== undefined;
+  const each = measured
+    ? Number(e.avg_cost)
+    : (4500 / 1e6) * (e.price?.input ?? fallback.input) + (400 / 1e6) * (e.price?.output ?? fallback.output);
+  return { now: e.items * each, month: e.per_month * each, each, measured };
+}
+
+export async function loadSuggestion(company: string, item: string): Promise<TaskSuggestion | null> {
+  if (offline(company)) return demoSuggestions.get(item) ?? null;
+  return call<TaskSuggestion | null>("radar_task_suggestion", { p_company: company, p_item: item });
+}
+export async function dismissSuggestion(company: string, item: string, reason: SuggestionReason, note: string) {
+  if (offline(company)) {
+    const s = demoSuggestions.get(item);
+    if (s) Object.assign(s, { status: "dismissed", reason, note, decided_by_name: "Você" });
+    return s ?? null;
+  }
+  return call<TaskSuggestion>("radar_task_suggestion_dismiss", {
+    p_company: company,
+    p_item: item,
+    p_reason: reason,
+    p_note: note,
+  });
+}
+/** Os itens com sugestão em aberto (o selo na lista do Radar). */
+export async function suggestionItems(company: string): Promise<string[]> {
+  if (offline(company)) return [...demoSuggestions.values()].filter((s) => s.status === "open").map((s) => s.item_id);
+  return (await call<string[] | null>("radar_task_suggestion_items", { p_company: company })) ?? [];
+}
+export async function loadSuggestionStats(company: string, days: number): Promise<SuggestionStats> {
+  if (offline(company)) return structuredClone(demoSuggestionStats);
+  return call<SuggestionStats>("radar_task_suggestion_stats", { p_company: company, p_filters: { days } });
+}
+export async function estimateSuggest(company: string): Promise<SuggestEstimate> {
+  if (offline(company)) return { items: 14, per_month: 60, avg_cost: null, samples: 0, price: null };
+  return call<SuggestEstimate>("radar_task_suggest_estimate", { p_company: company });
+}
+export async function setSuggest(company: string, on: boolean): Promise<{ suggest: boolean; queued: number }> {
+  if (offline(company)) {
+    demoSuggestionStats.settings = { suggest: on, suggest_at: new Date().toISOString(), suggest_by_name: "Você" };
+    return { suggest: on, queued: on ? 14 : 0 };
+  }
+  return call("set_radar_task_suggest", { p_company: company, p_on: on });
+}
+
+// Demonstração: o item demo-1 do Radar de exemplo tem uma sugestão em aberto.
+const demoSuggestions = new Map<string, TaskSuggestion>([
+  [
+    "demo-1",
+    {
+      item_id: "demo-1",
+      status: "open",
+      decision: "task",
+      rule_id: "demo-rule-1",
+      rule_condition: "Problema que trava a entrada de leads: formulário, pixel ou página fora do ar",
+      title: "Revisar a captação de leads — Aurora Studio",
+      description:
+        "Os leads caíram em setembro e a cliente cobrou na reunião.\nConferir formulário, pixel e públicos das campanhas ativas.\nPronto quando a causa estiver achada e corrigida, com o volume voltando ao de agosto.",
+      team_id: "team-1",
+      team_name: "Estratégia & Performance",
+      due_days: 2,
+      due_date: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      priority: "high",
+      why: "A cliente disse que os leads caíram desde setembro: é um problema que trava a captação.",
+      updated_at: new Date().toISOString(),
+    },
+  ],
+]);
+let demoSuggestionStats: SuggestionStats = {
+  settings: { suggest: true, suggest_at: demoAt(5), suggest_by_name: "Ana" },
+  pending: 2,
+  groups: [
+    {
+      topic_id: "rt-1",
+      topic_name: "Problemas/reclamações",
+      topic_color: "#d64545",
+      product_id: "pd-1",
+      product_name: "Make Ads",
+      open: 1,
+      accepted: 9,
+      as_is: 7,
+      dismissed: 2,
+      replaced: 1,
+      expired: 0,
+      quiet: 6,
+      reasons: { wrong_due: 1, not_needed: 1 },
     },
   ],
 };

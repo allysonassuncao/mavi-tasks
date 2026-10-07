@@ -33,7 +33,8 @@ import {
   type RadarTask,
   type ThemeMove,
 } from "./radar";
-import { recordTaskCreated } from "./radar-task-learning";
+import { recordTaskCreated, type TaskSuggestion } from "./radar-task-learning";
+import { RadarTaskSuggestionCard } from "./RadarTaskSuggestion";
 
 const NONE = "__none__";
 const AUTO = "__auto__";
@@ -156,13 +157,27 @@ export function RadarItemPanel({
     await apply(() => setItemTheme(company, item.id, to));
     setNewTheme(null);
   }
-  function createTask() {
+  /** Criar tarefa; com a sugestão da MAVI, o formulário vem com ela (Fase 3). */
+  function createTask(suggestion?: TaskSuggestion) {
     if (!item || !data || !user || !onNewTask) return;
-    const preset = radarTaskPreset(item, data, user);
-    if (!preset) {
+    const base = radarTaskPreset(item, data, user, suggestion?.description);
+    if (!base) {
       notify?.("Para criar a tarefa, você precisa ter acesso a um produto contratado deste cliente.");
       return;
     }
+    const preset: FormPreset = suggestion
+      ? {
+          ...base,
+          title: suggestion.title?.slice(0, 240) || base.title,
+          ...(suggestion.due_date ? { due: suggestion.due_date } : {}),
+          ...(suggestion.assignee_id
+            ? { assignee: suggestion.assignee_id }
+            : suggestion.team_id
+              ? { team: suggestion.team_id }
+              : {}),
+          ...(suggestion.priority ? { priority: suggestion.priority as FormPreset["priority"] } : {}),
+        }
+      : base;
     const id = item.id;
     onClose();
     // No banco, liga e guarda o que veio preenchido: a MAVI aprende com o
@@ -170,7 +185,9 @@ export function RadarItemPanel({
     onNewTask({
       ...preset,
       onCreated: (task) =>
-        void (UUID.test(company) ? recordTaskCreated(company, id, task, preset) : linkTask(company, id, task))
+        void (UUID.test(company)
+          ? recordTaskCreated(company, id, task, preset, !!suggestion)
+          : linkTask(company, id, task))
           .then(() => {
             notify?.("Tarefa criada e ligada ao item do Radar. A MAVI aprende com o que você escolheu.");
             onTaskLinked?.(id);
@@ -497,6 +514,15 @@ export function RadarItemPanel({
                 </Button>
               </div>
             ))}
+          {edit && !item.tasks.length && (
+            <RadarTaskSuggestionCard
+              company={company}
+              item={item.id}
+              onCreate={onNewTask ? (sg) => createTask(sg) : undefined}
+              onLink={(task) => linkExisting([task])}
+              notify={notify}
+            />
+          )}
           {(item.tasks.length > 0 || edit) && (
             <div className="radar-tasks">
               <div className="radar-tasks-head">
@@ -513,7 +539,7 @@ export function RadarItemPanel({
                       </Button>
                     )}
                     {onNewTask && (
-                      <Button className="btn secondary" onClick={createTask}>
+                      <Button className="btn secondary" onClick={() => createTask()}>
                         <Plus size={14} aria-hidden="true" /> Criar tarefa
                       </Button>
                     )}

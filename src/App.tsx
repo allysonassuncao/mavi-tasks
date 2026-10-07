@@ -1681,6 +1681,11 @@ export default function App() {
           window.dispatchEvent(new CustomEvent("mavi:radar-task-rules"));
           return;
         }
+        // Radar do cliente: a tarefa sugerida no item (o cartão e o selo da lista).
+        if (change.kind === "radar_task_suggestion") {
+          window.dispatchEvent(new CustomEvent("mavi:radar-task-suggestion", { detail: { item: change.item } }));
+          return;
+        }
         // Radar pessoal: a lista de quem mudou se recarrega sozinha.
         if (change.kind === "personal_radar") {
           window.dispatchEvent(

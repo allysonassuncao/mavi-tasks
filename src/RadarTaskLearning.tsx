@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CircleSlash, Link2, ListChecks, Plus, Radar, Sparkles } from "lucide-react";
+import { CircleSlash, Link2, ListChecks, Plus, Radar, Sparkles, X } from "lucide-react";
 import { Loading, Select, SelectOption } from "./ui";
 import { routeParts, taskUrl } from "./router";
 import { statuses, type Snapshot, type Status } from "./types";
@@ -8,6 +8,7 @@ import {
   CHANGED_LABELS,
   PRIORITY_LABELS,
   SEVERITY_LABELS,
+  SUGGESTION_REASONS,
   changedLine,
   loadTaskLearning,
   mainPriority,
@@ -18,6 +19,7 @@ import {
   type TaskLearning,
 } from "./radar-task-learning";
 import { RadarTaskRules } from "./RadarTaskRules";
+import { RadarTaskSuggestStats } from "./RadarTaskSuggestStats";
 import "./radar-task-learning.css";
 
 const PERIODS = [
@@ -98,12 +100,13 @@ export function RadarTaskLearning({
           Cada tarefa criada ou vinculada a partir de um item do Radar › Cliente, e cada item fechado sem tarefa,
           vira material para a MAVI entender <strong>quando</strong> um item pede tarefa, <strong>para quem</strong>{" "}
           e <strong>com que prazo</strong>. No “Criar tarefa” ela também guarda o que vocês mudaram no que veio
-          preenchido. Com isso ela propõe regras para vocês aprovarem; depois vai sugerir a tarefa no item e, quando
-          acertar bastante, poderá ser liberada para abrir sozinha.
+          preenchido. Com isso ela propõe regras para vocês aprovarem e, com as regras em uso, sugere a tarefa no
+          item; quando acertar bastante, poderá ser liberada para abrir sozinha.
         </p>
       </section>
 
       <RadarTaskRules company={company} data={data} notify={notify} />
+      <RadarTaskSuggestStats company={company} days={period} notify={notify} />
 
       <div className="ai-usage-toolbar rtl-filters">
         <Select aria-label="Período" value={String(period)} onValueChange={(v) => setPeriod(Number(v))}>
@@ -290,7 +293,7 @@ function SignalRow({ s }: { s: LearningSignal }) {
   const who = s.by_team && s.team_name
     ? `equipe ${s.team_name}${s.assignee_name ? ` (${s.assignee_name})` : ""}`
     : [s.assignee_name, s.team_name && `equipe ${s.team_name}`].filter(Boolean).join(", ");
-  const Icon = s.kind === "no_task" ? CircleSlash : s.kind === "linked" ? Link2 : Plus;
+  const Icon = s.kind === "no_task" ? CircleSlash : s.kind === "dismissed" ? X : s.kind === "linked" ? Link2 : Plus;
   const status = s.task_status ? statuses[s.task_status as Status] : null;
   return (
     <li className={`rtl-signal ${s.kind}${s.removed_reason ? " removed" : ""}`}>
@@ -314,6 +317,13 @@ function SignalRow({ s }: { s: LearningSignal }) {
           {s.kind === "no_task" ? (
             <>
               {s.user_name ?? "A MAVI"} fechou como <b>{s.status_label ?? "fechado"}</b> sem tarefa
+            </>
+          ) : s.kind === "dismissed" ? (
+            <>
+              {s.user_name ?? "Alguém"} recusou a tarefa sugerida
+              {s.suggested_title ? <> “{s.suggested_title}”</> : null}:{" "}
+              <b>{SUGGESTION_REASONS.find((r) => r.value === s.reason)?.label.toLowerCase() ?? s.reason}</b>
+              {s.note && <> — {s.note}</>}
             </>
           ) : (
             <>
@@ -342,6 +352,7 @@ function SignalRow({ s }: { s: LearningSignal }) {
           )}
         </p>
         <span className="rtl-tags">
+          {s.from_suggestion && s.kind !== "dismissed" && <span className="ok">pela sugestão da MAVI</span>}
           {s.suggested &&
             (s.changed?.length ? (
               <span>mudou {s.changed.map((c) => CHANGED_LABELS[c] ?? c).join(", ")}</span>

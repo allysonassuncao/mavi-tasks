@@ -291,7 +291,7 @@ describe("worker do Radar", () => {
         now: () => (t += 60_000),
       },
     );
-    expect(stats).toEqual({ signals: 2, items: 2, skipped: 0, failed: 0, themed: 0, reports: 0, rules: 0, checked: 0 });
+    expect(stats).toEqual({ signals: 2, items: 2, skipped: 0, failed: 0, themed: 0, reports: 0, rules: 0, checked: 0, suggested: 0 });
     const stores = calls.filter((c) => c.url.includes("rpc/ai_radar_store"));
     expect(stores).toHaveLength(2);
     const [first, second] = stores.map((s) => s.body.p_result);

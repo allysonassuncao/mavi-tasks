@@ -593,6 +593,8 @@ export function radarTaskPreset(
   item: RadarItemDetail,
   data: Snapshot,
   user: string,
+  /** Texto que vem antes do resto (a descrição da tarefa sugerida pela MAVI). */
+  lead?: string,
 ): FormPreset | null {
   const open = data.contracts.filter(
     (k) => k.client_id === item.client_id && !k.archived && canCreateTaskIn(data, k.id, user),
@@ -608,6 +610,7 @@ export function radarTaskPreset(
   const link = (href: string) => [{ type: "link", attrs: { href } }] as RichNode["marks"];
   const paragraph = (...content: RichNode[]): RichNode => ({ type: "paragraph", content });
   const content: RichNode[] = [];
+  for (const line of (lead ?? "").split("\n").map((l) => l.trim()).filter(Boolean)) content.push(paragraph(text(line)));
   if (item.summary) content.push(paragraph(text(item.summary)));
   if (item.occurrences.length)
     content.push(paragraph(text("Onde apareceu", bold)), {

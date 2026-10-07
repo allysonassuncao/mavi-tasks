@@ -251,3 +251,90 @@
     grid-column: 2;
   }
 }
+
+/* A tarefa sugerida no item do Radar. */
+.radar-suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid #e4def5;
+  border-radius: 10px;
+  background: #faf8ff;
+}
+.radar-suggestion-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #4b3a8a;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.radar-suggestion-title {
+  font-size: 0.95rem;
+}
+.radar-suggestion p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+.radar-suggestion-line {
+  color: var(--ink);
+  font-weight: 600;
+}
+.radar-suggestion-text {
+  white-space: pre-line;
+}
+.radar-suggestion p.radar-suggestion-why {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.radar-suggestion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+.radar-suggestion-refuse {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.radar-suggestion-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.radar-suggestion-reasons button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.radar-suggestion-reasons button.selected {
+  border-color: #4b3a8a;
+  background: #4b3a8a;
+  color: #fff;
+}
+.radar-suggest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #efeafc;
+  color: #4b3a8a;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rtl-signal.dismissed > svg {
+  color: #b23b3b;
+}

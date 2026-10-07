@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { AlertTriangle, BellRing, CalendarClock, ChevronDown, ChevronUp, FileText, Info, Layers, List, RefreshCw, Settings2, X } from "lucide-react";
+import { AlertTriangle, BellRing, CalendarClock, ChevronDown, ChevronUp, FileText, Info, Layers, List, RefreshCw, Settings2, Sparkles, X } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { Empty } from "./components";
 import { statuses, type Snapshot, type Status } from "./types";
@@ -10,6 +10,8 @@ import { RadarReports } from "./RadarReports";
 import { RadarAlerts } from "./RadarAlerts";
 import { navigate, useLocation } from "./router";
 import type { FormPreset } from "./forms";
+import { suggestionItems } from "./radar-task-learning";
+import "./radar-task-learning.css";
 import {
   dateBr,
   loadItem,
@@ -96,6 +98,21 @@ export function RadarPage({
   const [reportLink, setReportLink] = useState<string | null>(null);
   const [view, setView] = useState<View>(initial.view ?? "items");
   const [alertsOpen, setAlertsOpen] = useState(false);
+  // Itens com tarefa sugerida pela MAVI em aberto (o selo na coluna Tarefas).
+  const [suggested, setSuggested] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      void suggestionItems(company)
+        .then((ids) => alive && setSuggested(new Set(ids)))
+        .catch(() => {});
+    load();
+    window.addEventListener("mavi:radar-task-suggestion", load);
+    return () => {
+      alive = false;
+      window.removeEventListener("mavi:radar-task-suggestion", load);
+    };
+  }, [company]);
   // A explicação de como o Radar lê: aberta até a pessoa fechar.
   const infoKey = `mavi:radar-info:${company}:${user}`;
   const [infoOpen, setInfoOpen] = useState(() => {
@@ -554,7 +571,7 @@ export function RadarPage({
                         </span>
                       </td>
                       <td data-label="Tarefas">
-                        <RadarItemTasks tasks={i.tasks ?? []} />
+                        <RadarItemTasks tasks={i.tasks ?? []} suggested={suggested.has(i.id)} />
                       </td>
                       <td className="num" data-label="Vezes">{i.mentions}</td>
                       <td data-label="Última vez">{dateBr(i.last_seen_at)}</td>
@@ -619,8 +636,15 @@ export function RadarPage({
  * As tarefas criadas a partir do item, cada uma pelo status (o título no
  * balão); até duas e o resto contado. Clicar abre a tarefa.
  */
-function RadarItemTasks({ tasks }: { tasks: NonNullable<RadarItem["tasks"]> }) {
-  if (!tasks.length) return <span className="muted">—</span>;
+function RadarItemTasks({ tasks, suggested }: { tasks: NonNullable<RadarItem["tasks"]>; suggested?: boolean }) {
+  if (!tasks.length)
+    return suggested ? (
+      <span className="radar-suggest-chip" title="A MAVI sugeriu uma tarefa: abra o item para criar ou recusar">
+        <Sparkles size={11} aria-hidden="true" /> Sugestão
+      </span>
+    ) : (
+      <span className="muted">—</span>
+    );
   const shown = tasks.slice(0, 2);
   return (
     <span className="radar-row-tasks">

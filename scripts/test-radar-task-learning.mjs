@@ -178,7 +178,7 @@ await check("a leitura do Painel: só líderes; por tópico × produto, equipes,
   await as(manager);
   const r = await rpc("radar_task_learning", [A, JSON.stringify({ days: 90 })]);
   assert.equal(r.days, 90);
-  assert.deepEqual(r.totals, { created: 4, linked: 1, no_task: 1, with_preset: 2, as_preset: 1 });
+  assert.deepEqual(r.totals, { created: 4, linked: 1, no_task: 1, with_preset: 2, as_preset: 1, dismissed: 0, from_suggestion: 0 });
   assert.equal(r.groups.length, 1);
   const g = r.groups[0];
   assert.equal(g.product_name, "Make Ads");

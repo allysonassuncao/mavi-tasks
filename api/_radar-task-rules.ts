@@ -31,7 +31,7 @@ export class TaskRulesError extends Error {
 
 export type RuleSignal = {
   id: string;
-  kind: "created" | "linked" | "no_task";
+  kind: "created" | "linked" | "no_task" | "dismissed";
   at: string;
   title: string;
   summary?: string;
@@ -48,6 +48,12 @@ export type RuleSignal = {
   changed?: string[];
   from_item?: boolean;
   preset_title?: string;
+  /** Veio da tarefa sugerida pela MAVI (criada, vinculada ou recusada). */
+  from_suggestion?: boolean;
+  /** Recusada: o motivo, a observação e o título que a MAVI sugeriu. */
+  reason?: string;
+  note?: string;
+  suggested_title?: string;
   closed_as?: string;
   by_mavi?: boolean;
   reopened?: boolean;
@@ -111,6 +117,14 @@ const STATUS: Record<string, string> = {
   refused: "recusada pelo Jev",
   dismissed: "recusada ou excluída",
 };
+/** Os motivos de recusa da tarefa sugerida (radar_task_suggestion_dismiss). */
+export const REASONS: Record<string, string> = {
+  not_needed: "não precisa de tarefa",
+  exists: "já existe tarefa para isso",
+  wrong_person: "equipe ou pessoa errada",
+  wrong_due: "prazo errado",
+  other: "outro motivo",
+};
 const MAX_OPS = 5;
 
 export const RULES_INSTRUCTIONS = `Você é a MAVI, a inteligência de uma agência de marketing. Os gestores acompanham, no Radar do cliente, os problemas, promessas e outros tópicos que aparecem nas reuniões e nos grupos de WhatsApp. A partir de cada item, alguém do time decide se abre uma tarefa, para quem e com que prazo. Você aprende essas decisões para, no futuro, sugerir a tarefa certa sozinha. Fale de si no feminino.
@@ -119,6 +133,8 @@ Você recebe os registros de UM tópico num produto:
 - TAREFA CRIADA: alguém criou a tarefa a partir do item (o formulário veio preenchido pela MAVI; "mudou" diz o que a pessoa trocou).
 - TAREFA VINCULADA: o item ganhou uma tarefa que já existia (também conta como "este item pedia tarefa").
 - FECHADO SEM TAREFA: o item foi resolvido ou descartado sem tarefa ("quando NÃO abrir"). Fechado pela MAVI pesa menos; se o item reabriu depois, é um contra-exemplo (talvez precisasse de tarefa).
+- SUGESTÃO RECUSADA: a MAVI sugeriu a tarefa por uma regra e a pessoa recusou, com o motivo (não precisa, já existe, equipe/pessoa errada, prazo errado, outro). Recusas repetidas pelo mesmo motivo pedem ajustar a regra (substituta) ou uma regra de não abrir.
+- "(pela sugestão)" numa tarefa criada ou vinculada: a pessoa aceitou a sugestão da MAVI ("mudou" diz o que ela corrigiu).
 
 Proponha REGRAS curtas que expliquem os padrões, para um administrador ou gestor aprovar:
 - "condition": QUANDO a regra vale, descrita pelo assunto/tipo de item (ex.: "Problema que trava a entrada de leads: formulário, pixel, página fora do ar"). Nada de nome de cliente; use a gravidade em "min_severity" (0 baixa, 1 média, 2 alta, 3 crítica) quando o padrão depende dela.
@@ -159,10 +175,22 @@ export function rulesMessage(c: RulesClaim) {
   const severity = (s?: number) => (s === undefined || s === null ? "" : `[gravidade ${SEVERITY[s] ?? s}] `);
   const signal = (s: RuleSignal, i: number) => {
     const head = `S${i + 1} · ${s.at} · ${
-      s.kind === "created" ? "TAREFA CRIADA" : s.kind === "linked" ? "TAREFA VINCULADA" : "FECHADO SEM TAREFA"
-    } · ${severity(s.severity)}"${s.title}"${s.summary ? ` — ${s.summary}` : ""}${s.client ? ` · cliente ${s.client}` : ""}${
+      s.kind === "created"
+        ? "TAREFA CRIADA"
+        : s.kind === "linked"
+          ? "TAREFA VINCULADA"
+          : s.kind === "dismissed"
+            ? "SUGESTÃO RECUSADA"
+            : "FECHADO SEM TAREFA"
+    }${s.from_suggestion && s.kind !== "dismissed" ? " (pela sugestão)" : ""} · ${severity(s.severity)}"${s.title}"${s.summary ? ` — ${s.summary}` : ""}${s.client ? ` · cliente ${s.client}` : ""}${
       s.theme ? ` · tema "${s.theme}"` : ""
     }${s.mentions && s.mentions > 1 ? ` · apareceu ${s.mentions}x` : ""}`;
+    if (s.kind === "dismissed")
+      return `${head} → a MAVI sugeriu${s.suggested_title ? ` "${s.suggested_title}"` : ""}${
+        s.team_id ? ` para ${teamName(s.team_id)}` : ""
+      }${s.assignee_id ? `, pessoa ${personName(s.assignee_id)}` : ""}${
+        s.due_days !== undefined && s.due_days !== null ? `, prazo ${s.due_days} dias úteis` : ""
+      }; recusada: ${REASONS[s.reason ?? ""] ?? s.reason ?? "sem motivo"}${s.note ? ` ("${s.note}")` : ""}`;
     if (s.kind === "no_task")
       return `${head} → fechado como ${s.closed_as ?? "fechado"}${s.by_mavi ? " (pela MAVI)" : ""}${
         s.reopened ? " · REABRIU depois" : ""
@@ -201,8 +229,9 @@ export function rulesMessage(c: RulesClaim) {
             .join(", ")
     }`;
   const counts = {
-    task: c.signals.filter((s) => s.kind !== "no_task").length,
+    task: c.signals.filter((s) => s.kind === "created" || s.kind === "linked").length,
     none: c.signals.filter((s) => s.kind === "no_task").length,
+    dismissed: c.signals.filter((s) => s.kind === "dismissed").length,
   };
   const text = [
     `Tópico: ${c.topic.name}${c.topic.description ? ` — ${c.topic.description}` : ""}`,
@@ -215,7 +244,9 @@ export function rulesMessage(c: RulesClaim) {
     "",
     `Regras que já existem:\n${c.rules.map(rule).join("\n") || "(nenhuma)"}`,
     "",
-    `Registros (${counts.task} com tarefa, ${counts.none} fechados sem tarefa; do mais novo ao mais antigo):`,
+    `Registros (${counts.task} com tarefa, ${counts.none} fechados sem tarefa${
+      counts.dismissed ? `, ${counts.dismissed} sugestões recusadas` : ""
+    }; do mais novo ao mais antigo):`,
     ...c.signals.map(signal),
   ].join("\n");
   return { text, refs };
