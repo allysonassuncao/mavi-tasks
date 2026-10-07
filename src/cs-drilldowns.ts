@@ -939,7 +939,7 @@ function ddMeta(c: Ctx): Partial<DdResult> {
         false, { key: "status_pagamento", value: "PENDENTE" }),
       stat("Em aberto — Melhor (R$)", pendMelhor, "money", "Cap otimista do que ainda pode entrar (inclui resto dos parciais)"),
       stat("Forecast HS-ponderado", cenHs, "money",
-        `${f1(pct(cenHs))}% da meta — taxa de REALIZAÇÃO DE VALOR (R$ pago ÷ R$ provável) por faixa de HS, últimos 3 meses. ${hint}`, true),
+        `${f1(pct(cenHs))}% da meta · ${hint}. Taxa de realização de valor por faixa de HS, últimos 3 meses.`, true),
       stat("Sem HS (na taxa média)", valSem, "money", nSem > 0
         ? `${nSem} pendente(s) sem HS — entram pela taxa média global (${f0(rates.global * 100)}%). Preencher o HS refina a previsão.`
         : "Todos pendentes têm HS preenchido ✓"),

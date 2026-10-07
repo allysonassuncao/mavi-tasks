@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Search, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Modal } from "./components";
 import { Input, Select, SelectOption } from "./ui";
 import { fmtDateBr, fmtMoney, labelMes, numberFormat, type CsEngine } from "./cs-engine";
@@ -141,8 +141,9 @@ export function CsDrillModal({ engine, drill, onClose }: { engine: CsEngine; dri
       {r.breakdown.length > 0 && (
         <div className="cs-dd-breakdowns">
           {r.breakdown.map((b, i) => (
-            <div key={i} className="cs-dd-bk">
+            <div key={i} className={`cs-dd-bk ${b.columns.length > 3 ? "wide" : ""}`}>
               <span className="cs-dd-bk-title">{b.title}</span>
+              <div className="cs-dd-bk-scroll">
               <table>
                 <thead>
                   <tr>{b.columns.map((c) => <th key={c.key} className={`al-${c.align}`}>{c.label}</th>)}</tr>
@@ -153,13 +154,13 @@ export function CsDrillModal({ engine, drill, onClose }: { engine: CsEngine; dri
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           ))}
         </div>
       )}
       <div className="cs-dd-toolbar">
         <label className="cs-dd-search">
-          <Search size={15} aria-hidden="true" />
           <Input type="search" placeholder="Filtrar por nome, ID…" value={search} aria-label="Filtrar a lista"
             onChange={(ev) => setSearch(ev.target.value)} />
         </label>
@@ -181,7 +182,7 @@ export function CsDrillModal({ engine, drill, onClose }: { engine: CsEngine; dri
         <table>
           <thead>
             <tr>
-              {r.simulador && <th title="Calculadora de fechamento: marque os clientes e escolha o valor">Simular</th>}
+              {r.simulador && <th className="cs-sim-th" title="Calculadora de fechamento: marque os clientes e escolha o valor">Simular</th>}
               {r.columns.map((c) => (
                 <th key={c.key} className={`al-${c.align}`} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}>
                   <button type="button" onClick={() => setSort((s) => (s?.key === c.key ? { key: c.key, dir: s.dir === 1 ? -1 : 1 } : { key: c.key, dir: 1 }))}>

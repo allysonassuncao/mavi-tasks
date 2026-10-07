@@ -1107,12 +1107,16 @@
 }
 .cs-dd-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
 }
+/* Rótulo, valor e dica alinhados entre os cartões da mesma linha. */
 .cs-dd-stat {
   display: grid;
-  gap: 3px;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
+  align-content: start;
+  row-gap: 3px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1132,7 +1136,7 @@
 }
 .cs-dd-stat-label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 4px;
   font-size: 0.66rem;
@@ -1144,6 +1148,7 @@
 .cs-dd-stat strong {
   font-size: 1rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .cs-dd-stat small {
   color: var(--muted);
@@ -1222,15 +1227,29 @@
   background: var(--cs-bad);
 }
 .cs-dd-breakdowns {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 10px;
 }
 .cs-dd-bk {
+  flex: 1 1 280px;
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   font-size: 0.74rem;
+}
+/* Quebra com muitas colunas ocupa a linha inteira. */
+.cs-dd-bk.wide {
+  flex-basis: 100%;
+}
+.cs-dd-bk.wide th:first-child,
+.cs-dd-bk.wide td:first-child {
+  width: 100%;
+}
+.cs-dd-bk-scroll {
+  overflow-x: auto;
 }
 .cs-dd-bk-title {
   display: block;
@@ -1241,13 +1260,23 @@
 .cs-dd-bk table {
   width: 100%;
   border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
 }
 .cs-dd-bk th,
 .cs-dd-bk td {
-  padding: 3px 4px;
-}
-.cs-dd-bk td.al-right {
+  padding: 4px 8px;
   white-space: nowrap;
+}
+.cs-dd-bk th:first-child,
+.cs-dd-bk td:first-child {
+  padding-left: 0;
+}
+.cs-dd-bk th:last-child,
+.cs-dd-bk td:last-child {
+  padding-right: 0;
+}
+.cs-dd-bk tbody tr + tr td {
+  border-top: 1px solid #f0f2f1;
 }
 .cs-dd-bk th {
   color: var(--muted);
@@ -1267,11 +1296,7 @@
   flex-wrap: wrap;
 }
 .cs-dd-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   flex: 1 1 220px;
-  color: var(--muted);
 }
 .cs-dd-filter {
   display: grid;
@@ -1282,6 +1307,7 @@
   text-transform: uppercase;
 }
 .cs-dd-count {
+  align-self: center;
   margin-left: auto;
   font-size: 0.72rem;
   color: var(--muted);
@@ -1308,6 +1334,14 @@
   text-align: left;
   white-space: nowrap;
 }
+.cs-dd-table th.cs-sim-th {
+  padding: 8px 9px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6c7a77;
+}
 .cs-dd-table th button {
   width: 100%;
   padding: 8px 9px;
@@ -1320,6 +1354,7 @@
 }
 .cs-dd-table td {
   padding: 6px 9px;
+  white-space: nowrap;
   border-bottom: 1px solid #f0f2f1;
 }
 .cs-dd-table td.ok {
