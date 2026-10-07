@@ -343,4 +343,53 @@ describe("base de comportamento · na pergunta", () => {
     expect(used.body).toEqual({ p_message: 321, p_ids: [item] });
     expect(events.find((e) => e.type === "done")?.memory).toEqual([item]);
   });
+
+  it("o banco recusa o cartão: a pergunta e a resposta ficam salvas sem ele", async () => {
+    const { fetchImpl, calls } = database({
+      "memberships?": [{ user_id: me, name: "Ana", email: "", role: "member", active: true }],
+      "rpc/ai_check_limits": { blocked: false, message: null, warnings: [] },
+      "rpc/ai_resolve_route": null,
+      "rpc/ai_my_powers": [],
+      "rpc/ai_run_start": { id: run, conversation, created: true },
+      // Antes da migração 20270613180000, o tipo "memory" derrubava a vez inteira.
+      "rpc/ai_save_turn": (b: any) => {
+        if (b.p_artifacts) throw Error("Anexos da resposta inválidos.");
+        return conversation;
+      },
+      "rpc/ai_usage_close_turn": 321,
+      "rpc/mavi_person_context": { items: [], facts: { role: "member", teams: [], clients: [] } },
+      "rpc/mavi_person_note": (b: any) => ({
+        op: b.p_op,
+        id: "00000000-0000-4000-8000-0000000000a9",
+        kind: b.p_kind,
+        text: b.p_text,
+        durability: b.p_durability,
+      }),
+    });
+    const llm: LlmAdapter = async (r) => {
+      await r.execute("remember_about_me", { op: "add", kind: "preference", text: "Responda em tabela." });
+      return { text: "Anotado. Tarefa criada.", meter: newMeter("claude-opus-5-5"), rounds: 1 };
+    };
+    const events: any[] = [];
+    await streamAi(
+      { action: "ai-ask", company, question: "Crie a tarefa e responda sempre em tabela", surface: "page" },
+      token,
+      env,
+      { fetch: fetchImpl, llm, embed: vi.fn() },
+      (e) => events.push(e),
+      { onClose: () => {} },
+    );
+    const saves = calls.filter((c) => c.url.endsWith("/rpc/ai_save_turn"));
+    expect(saves).toHaveLength(2);
+    expect(saves[0].body.p_artifacts).toHaveLength(1);
+    expect(saves[1].body).toMatchObject({
+      p_conversation: conversation,
+      p_question: "Crie a tarefa e responda sempre em tabela",
+      p_answer: "Anotado. Tarefa criada.",
+    });
+    expect(saves[1].body.p_artifacts).toBeUndefined();
+    const warnings = events.filter((e) => e.type === "warning").map((e) => e.text);
+    expect(warnings).toEqual(["Os cartões desta resposta não foram salvos; o texto ficou na conversa."]);
+    expect(events.find((e) => e.type === "done")?.conversation).toBe(conversation);
+  });
 });

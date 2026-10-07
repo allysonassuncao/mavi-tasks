@@ -1926,22 +1926,32 @@ async function ask(
     a.type === "image" ? { ...a, url: undefined } : a,
   );
   // A conversa fica salva; se não der, a resposta chega mesmo assim.
-  const saved = await callRpc<string>(env, deps.fetch, auth, "ai_save_turn", {
-    p_company: company,
-    // A conversa nova nasceu com a execução.
-    p_conversation: live?.run?.conversation ?? conversationId,
-    p_scope: {
-      ...(scope.client ? { client: scope.client } : {}),
-      ...(scope.contract ? { contract: scope.contract } : {}),
-      ...(scope.project ? { project: scope.project } : {}),
-    },
-    p_module: scope.module ?? "assistant",
-    p_question: question.trim(),
-    p_answer: answer,
-    p_sources: sources,
-    p_steps: steps,
-    ...(stored.length ? { p_artifacts: stored } : {}),
-  }).catch(() => null);
+  const saveTurn = (cards: typeof stored) =>
+    callRpc<string>(env, deps.fetch, auth, "ai_save_turn", {
+      p_company: company,
+      // A conversa nova nasceu com a execução.
+      p_conversation: live?.run?.conversation ?? conversationId,
+      p_scope: {
+        ...(scope.client ? { client: scope.client } : {}),
+        ...(scope.contract ? { contract: scope.contract } : {}),
+        ...(scope.project ? { project: scope.project } : {}),
+      },
+      p_module: scope.module ?? "assistant",
+      p_question: question.trim(),
+      p_answer: answer,
+      p_sources: sources,
+      p_steps: steps,
+      ...(cards.length ? { p_artifacts: cards } : {}),
+    }).catch(() => null);
+  let saved = await saveTurn(stored);
+  // Um cartão recusado pelo banco (um tipo novo antes da migração, cartões
+  // demais) não pode levar a pergunta e a resposta junto: sem o texto
+  // gravado, a conversa nova some e a antiga perde a vez ao recarregar.
+  if (!saved?.ok && stored.length) {
+    saved = await saveTurn([]);
+    if (saved?.ok)
+      emit({ type: "warning", text: "Os cartões desta resposta não foram salvos; o texto ficou na conversa." });
+  }
   if (!saved?.ok)
     emit({ type: "warning", text: "Não foi possível salvar esta conversa." });
   const savedId = saved?.ok ? saved.data : (live?.run?.conversation ?? conversationId);

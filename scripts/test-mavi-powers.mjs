@@ -128,21 +128,48 @@ await check("a resposta guarda os anexos; a imagem só da própria empresa", asy
   );
   const [row] = await q(ana, "select artifacts from ai_messages where conversation_id = $1 and role = 'assistant' order by id desc limit 1", [conversation]);
   assert.equal(row.artifacts.length, 3);
+  // Um cartão inválido sai sozinho: a pergunta, a resposta e os outros
+  // cartões ficam (cada caso numa conversa à parte).
   for (const bad of [
-    [{ ...good[1], path: `ai-images/${B}/11111111-1111-4111-8111-111111111111.png` }],
-    [{ ...good[1], path: "drive/arquivo.png" }],
-    [{ ...good[0], type: "script" }],
-    [{ ...good[0], id: "x" }],
-  ])
-    await assert.rejects(
-      () =>
-        q(ana, "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','Q','R','[]'::jsonb,'[]'::jsonb,$3::jsonb)", [
-          A,
-          conversation,
-          JSON.stringify(bad),
-        ]),
-      /Anexos da resposta inválidos/,
+    { ...good[1], path: `ai-images/${B}/11111111-1111-4111-8111-111111111111.png` },
+    { ...good[1], path: "drive/arquivo.png" },
+    { ...good[0], type: "script" },
+    { ...good[0], id: "x" },
+  ]) {
+    const other = await one(
+      ana,
+      "select public.ai_save_turn($1,null,'{}'::jsonb,'assistant','Q','R','[]'::jsonb,'[]'::jsonb,$2::jsonb)",
+      [A, JSON.stringify([good[2], bad])],
     );
+    const rows = await q(ana, "select role, content, artifacts from ai_messages where conversation_id = $1 order by id", [other]);
+    assert.deepEqual(rows.map((r) => [r.role, r.content]), [["user", "Q"], ["assistant", "R"]]);
+    assert.deepEqual(rows[1].artifacts.map((a) => a.id), ["action-0001"]);
+  }
+});
+
+await check("o cartão Anotei (memória) e muitos cartões não derrubam a vez", async () => {
+  const memory = {
+    id: "memory-0001",
+    ref: "B1",
+    type: "memory",
+    op: "add",
+    item: uid(70),
+    kind: "preference",
+    text: "Responda em tabela.",
+    durability: "stable",
+  };
+  const many = Array.from({ length: 20 }, (_, i) => ({ ...good[0], id: `visual-${String(i).padStart(4, "0")}` }));
+  const other = await one(
+    ana,
+    "select public.ai_save_turn($1,null,'{}'::jsonb,'assistant','Crie a tarefa','Feito','[]'::jsonb,'[]'::jsonb,$2::jsonb)",
+    [A, JSON.stringify([memory, { ...memory, id: "memory-0002", item: "x" }, ...many])],
+  );
+  const [row] = await q(ana, "select content, artifacts from ai_messages where conversation_id = $1 and role = 'assistant'", [other]);
+  assert.equal(row.content, "Feito");
+  // O item da memória é um uuid; os 12 primeiros válidos, na ordem em que vieram.
+  assert.equal(row.artifacts.length, 12);
+  assert.equal(row.artifacts[11].id, "visual-0010");
+  assert.deepEqual(row.artifacts[0], memory);
 });
 
 await check("a ação é decidida uma vez, só por quem começou a conversa", async () => {
@@ -193,15 +220,14 @@ await check("os cartões da Busca avançada e do tutorial ficam gravados", async
   );
   const [saved] = await q(ana, "select artifacts from ai_messages where conversation_id = $1 and role = 'assistant' order by id desc limit 1", [conversation]);
   assert.deepEqual(saved.artifacts.map((a) => a.type), ["search", "tutorial"]);
-  await assert.rejects(
-    () =>
-      q(ana, "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','Q','R','[]'::jsonb,'[]'::jsonb,$3::jsonb)", [
-        A,
-        conversation,
-        JSON.stringify([{ ...cards[1], tutorial: "x" }]),
-      ]),
-    /Anexos da resposta inválidos/,
+  const other = await one(
+    ana,
+    "select public.ai_save_turn($1,null,'{}'::jsonb,'assistant','Q','R','[]'::jsonb,'[]'::jsonb,$2::jsonb)",
+    [A, JSON.stringify([{ ...cards[1], tutorial: "x" }])],
   );
+  const [bad] = await q(ana, "select content, artifacts from ai_messages where conversation_id = $1 and role = 'assistant'", [other]);
+  assert.equal(bad.content, "R");
+  assert.deepEqual(bad.artifacts, []);
 });
 
 await check("cada chamada de ferramenta entra no Consumo (só líderes veem)", async () => {

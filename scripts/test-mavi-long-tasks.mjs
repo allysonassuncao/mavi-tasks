@@ -202,12 +202,19 @@ await check("o card da tarefa vale nas respostas salvas", async () => {
     conv,
     JSON.stringify(card),
   ]);
-  await fails(
+  // O card inválido sai; a pergunta e a resposta ficam.
+  await q(admin, "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','Pergunta','Plano','[]'::jsonb,'[]'::jsonb,$3::jsonb)", [
+    A,
+    conv,
+    JSON.stringify([{ id: "task-card-2", ref: "T2", type: "task", task: "nope" }]),
+  ]);
+  const [last] = await q(
     admin,
-    "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','Pergunta','Plano','[]'::jsonb,'[]'::jsonb,$3::jsonb)",
-    [A, conv, JSON.stringify([{ id: "task-card-2", ref: "T2", type: "task", task: "nope" }])],
-    /inválidos/,
+    "select content, artifacts from ai_messages where conversation_id = $1 and role = 'assistant' order by id desc limit 1",
+    [conv],
   );
+  assert.equal(last.content, "Plano");
+  assert.deepEqual(last.artifacts, []);
 });
 
 await check("um plano novo substitui o que esperava confirmação; no máximo 3 rodando", async () => {
