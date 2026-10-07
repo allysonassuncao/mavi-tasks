@@ -66,6 +66,11 @@
   width: 220px;
   max-width: 100%;
 }
+/* O Input põe a classe no <input>; o invólucro é que ocupa a linha. */
+.cs-entry-bar > .input-control {
+  width: 240px;
+  max-width: 100%;
+}
 .cs-entry-actions {
   margin-left: auto;
   display: flex;
@@ -377,7 +382,8 @@
     flex-direction: column;
     align-items: flex-start;
   }
-  .cs-entry-search {
+  .cs-entry-search,
+  .cs-entry-bar > .input-control {
     width: 100%;
   }
   .cs-entry-actions {
@@ -392,5 +398,49 @@
   }
   .cs-entry-filter {
     font-size: 16px;
+  }
+}
+
+/* Tela cheia: a página cobre a janela (acima do menu e da bolinha da MAVI,
+   abaixo dos avisos), e a grade estica até o rodapé com a rolagem só nela. */
+.cs-entry.full {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 20px 12px;
+  background: #f6f7f8;
+  overflow: hidden;
+}
+.cs-entry.full > * {
+  flex: none;
+}
+.cs-entry.full > .cs-entry-grid-wrap,
+.cs-entry.full > .cs-entry-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.cs-entry.full > .cs-entry-help {
+  margin: 0;
+}
+html.cs-entry-full-open,
+html.cs-entry-full-open body {
+  overflow: hidden;
+}
+/* No celular os filtros empilham: a tela cheia rola e a grade fica quase da altura da tela. */
+@media (max-width: 720px) {
+  .cs-entry.full {
+    padding: 10px 16px;
+    overflow: auto;
+  }
+  .cs-entry.full > .cs-entry-grid-wrap,
+  .cs-entry.full > .cs-entry-log {
+    flex: none;
+    height: calc(100dvh - 70px);
   }
 }

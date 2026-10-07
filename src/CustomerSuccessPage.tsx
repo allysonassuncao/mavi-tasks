@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, CalendarPlus, History, Plus, Sparkles, Trash2, Wallet } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarPlus, History, Maximize2, Minimize2, Plus, Sparkles, Trash2, Wallet } from "lucide-react";
 import { Modal } from "./components";
 import { Button, Input, Loading, Textarea } from "./ui";
 import { addMonths, fmtMoney, labelMesFull, monthStart, numberFormat, type CsDataClient } from "./cs-engine";
@@ -95,6 +95,24 @@ export function CustomerSuccessPage({
   const [data, setData] = useState<EntryMonth | null>(null);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<null | "open" | "switch" | "client">(null);
+  // Tela cheia: a grade ocupa a janela toda (sem o menu); Esc sai, a não ser
+  // que esteja editando uma célula ou com uma janela aberta.
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector("dialog[open]")) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("input, select, textarea, [contenteditable='true']")) return;
+      setFull(false);
+    };
+    document.documentElement.classList.add("cs-entry-full-open");
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.documentElement.classList.remove("cs-entry-full-open");
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [full]);
   const load = useCallback(() => {
     api.month(company, month)
       .then((d) => {
@@ -132,7 +150,7 @@ export function CustomerSuccessPage({
     patch: (fn) => setData((d) => (d ? fn(structuredClone(d)) : d)),
   };
   return (
-    <div className="cs-entry">
+    <div className={`cs-entry ${full ? "full" : ""}`}>
       <SourceBanner access={access} onSwitch={() => setDialog("switch")} />
       <div className="cs-entry-bar">
         <div className="cs-entry-month" role="group" aria-label="Mês">
@@ -166,6 +184,10 @@ export function CustomerSuccessPage({
               <CalendarPlus size={16} /> Abrir {labelMesFull(shownMonth)}
             </Button>
           )}
+          <Button className="btn secondary" aria-pressed={full} onClick={() => setFull((v) => !v)}
+            title={full ? "Voltar ao tamanho normal (Esc)" : "Ampliar a tabela para a tela inteira"}>
+            {full ? <><Minimize2 size={16} /> Sair da tela cheia</> : <><Maximize2 size={16} /> Tela cheia</>}
+          </Button>
         </div>
       </div>
       <div className="cs-entry-tabs" role="tablist">
