@@ -29,12 +29,15 @@ import { DocumentEditor, SheetEditor, SlidesEditor, type StructuredHandle } from
 import {
   editNote,
   editedArtifact,
+  lookNote,
   saveCanvasEdit,
   uploadCanvasImage,
   uploadedArtifact,
   usedUploads,
+  withLook,
   type UploadedImage,
 } from "./canvas-edit";
+import { IdentityMenu } from "./CanvasIdentityMenu";
 import type { DriveLocation } from "./types";
 import type { ArtifactHost } from "./MaviArtifacts";
 import { imageLink } from "./MaviArtifacts";
@@ -407,6 +410,22 @@ export function CanvasPanel({
       setSavingEdit(false);
     }
   }
+  const canSave = !!(host.conversation && host.onCanvasEdited && host.nextDocRef);
+  /** Aplica uma identidade salva: vira uma versão nova, como a edição. */
+  async function applyLook(to: Look) {
+    if (!host.conversation || !host.onCanvasEdited || !host.nextDocRef) return;
+    const canvas = sanitizeCanvas(withLook(c, look, to));
+    if (!canvas) return host.notify("Não foi possível aplicar a identidade neste arquivo.");
+    try {
+      const saved = editedArtifact(artifact, canvas, host.nextDocRef());
+      const note = lookNote(artifact, saved, to);
+      await saveCanvasEdit(host.conversation, note, saved);
+      host.onCanvasEdited(saved, note, []);
+      host.notify(`“${to.name}” aplicada: salvo como ${saved.ref}. O ${artifact.ref} continua no histórico.`);
+    } catch (e) {
+      host.notify((e as Error).message || "Não foi possível aplicar a identidade.");
+    }
+  }
   async function saveLook() {
     if (!look) return;
     await run("Salvar", async () => {
@@ -512,16 +531,35 @@ export function CanvasPanel({
             <Sparkles size={16} />
           </button>
         )}
-        {!host.readOnly && look && (
-          <button
-            type="button"
-            className="icon-btn"
-            title="Trocar a identidade visual"
-            aria-label="Trocar a identidade visual"
-            onClick={() => host.onDraft(`Refaça o ${artifact.ref} com outra identidade visual: `)}
-          >
-            <Palette size={16} />
-          </button>
+        {!host.readOnly && c.kind !== "sheet" && canSave ? (
+          <IdentityMenu
+            company={host.company}
+            client={host.drive?.start?.client ?? look?.client ?? null}
+            current={look}
+            design={c.kind === "design"}
+            disabled={!!busy}
+            onApply={applyLook}
+            onAsk={() =>
+              host.onDraft(
+                c.kind === "design"
+                  ? `Refaça o desenho do ${artifact.ref} com outra identidade visual: `
+                  : `Refaça o ${artifact.ref} com outra identidade visual: `,
+              )
+            }
+          />
+        ) : (
+          !host.readOnly &&
+          look && (
+            <button
+              type="button"
+              className="icon-btn"
+              title="Trocar a identidade visual"
+              aria-label="Trocar a identidade visual"
+              onClick={() => host.onDraft(`Refaça o ${artifact.ref} com outra identidade visual: `)}
+            >
+              <Palette size={16} />
+            </button>
+          )
         )}
         {c.kind === "sheet" && (
           <button type="button" className="icon-btn" title="Imprimir ou salvar em PDF" aria-label="Imprimir ou salvar em PDF" onClick={print}>

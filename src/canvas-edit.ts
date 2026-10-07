@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { providerAction } from "./ai";
 import { artifactSummary, type AiArtifact, type Canvas, type CanvasArtifact, type ImageArtifact } from "./mavi-artifacts";
+import type { Look } from "./visual-identity";
 
 /**
  * MAVI · edição direta no canvas (migração 20270610090000_canvas_edits): a
@@ -77,3 +78,50 @@ export async function saveCanvasEdit(conversation: string, note: string, artifac
   if (error) throw Error(error.message);
   return Number(data);
 }
+
+/**
+ * O design livre com outra identidade: o tema (variáveis e fontes) vem do
+ * look; as cores e fontes que o desenho escreveu direto (as do tema
+ * anterior) e o logo trocam junto. Uma passada só, para uma cor nova não
+ * virar outra.
+ */
+export function restyleDesign(html: string, from: Look | null | undefined, to: Look) {
+  if (!from) return html;
+  const colors = new Map<string, string>();
+  // Duas cores iguais no tema anterior: vale a de cima (fundo, texto, marca…).
+  for (const k of ["bg", "ink", "primary", "accent", "surface", "muted", "on_primary"] as const) {
+    const a = from.colors[k].toLowerCase();
+    if (!colors.has(a)) colors.set(a, to.colors[k]);
+  }
+  const fonts = new Map<string, string>();
+  for (const k of ["heading", "body"] as const) if (!fonts.has(from[k].family)) fonts.set(from[k].family, to[k].family);
+  const logos = new Map<string, string>();
+  for (const k of ["light", "dark"] as const) {
+    const a = from.logo[k];
+    const b = to.logo[k] ?? to.logo.light ?? to.logo.dark;
+    if (a && b && !logos.has(a)) logos.set(a, b);
+  }
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let out = html.replace(/#[0-9a-f]{6}\b/gi, (h) => colors.get(h.toLowerCase()) ?? h);
+  const fam = [...fonts].filter(([a, b]) => a !== b).map(([a]) => a);
+  if (fam.length) {
+    const re = new RegExp(`(^|['",\\s]|&quot;)(${fam.map(esc).join("|")})(?=['",\\s]|&quot;|$)`, "g");
+    out = out.replace(/(font-family\s*:\s*)((?:&quot;|[^;}"<])+)/gi, (_m, p: string, v: string) => p + v.replace(re, (_x, b: string, f: string) => b + fonts.get(f)!));
+  }
+  if (logos.size) out = out.replace(/file:([0-9a-f-]{36})/gi, (t, id: string) => (logos.has(id.toLowerCase()) ? `file:${logos.get(id.toLowerCase())}` : t));
+  return out;
+}
+
+/** O documento com a identidade escolhida no canvas. */
+export function withLook(c: Canvas, from: Look | null, to: Look): Canvas | null {
+  if (c.kind === "sheet") return null;
+  if (c.kind === "design") return { ...c, html: restyleDesign(c.html, from, to), look: to };
+  return { ...c, look: to };
+}
+
+/** Como a MAVI chama a identidade (o parâmetro identity). */
+export const identityParam = (l: Look) =>
+  l.source === "company" ? "empresa" : l.source === "client" ? "cliente" : l.id;
+
+export const lookNote = (from: CanvasArtifact, to: CanvasArtifact, look: Look) =>
+  `Apliquei a identidade visual “${look.name}” no ${from.ref} pelo canvas e salvei como ${to.ref} (${artifactSummary(to)}). Daqui para a frente, use o ${to.ref} e essa identidade (identity: ${identityParam(look)}).`;

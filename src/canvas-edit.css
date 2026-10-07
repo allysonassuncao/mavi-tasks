@@ -461,3 +461,92 @@
   max-width: none;
   border-radius: 0;
 }
+
+/* Aplicar identidade (canvas) */
+.canvas-identity-menu {
+  width: 280px;
+  max-height: min(70vh, 520px);
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+}
+.canvas-identity-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+.canvas-identity-list section + section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e3e8e5;
+}
+.status-menu .canvas-identity-list h4,
+.canvas-identity-list h4 {
+  margin: 4px 6px 2px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #6b7676;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.canvas-menu .canvas-identity-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+}
+.canvas-menu .canvas-identity-list button.on {
+  background: #eef4ea;
+  color: inherit;
+  opacity: 1;
+  cursor: default;
+}
+.canvas-menu .canvas-identity-list button:disabled:not(.on) {
+  opacity: 0.6;
+}
+.canvas-identity-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-menu .canvas-identity-hint,
+.canvas-identity-hint {
+  margin: 0 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.4;
+  color: #5b6666;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.canvas-identity-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 2px;
+  font-size: 0.78rem;
+  color: #5b6666;
+}
+.canvas-menu button.canvas-identity-ask {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 9px;
+  border-top: 1px solid #e3e8e5;
+  border-radius: 0 0 7px 7px;
+  color: #3d6a22;
+}
+/* O rótulo some quando o canvas está estreito (o título não espreme). */
+.canvas-head {
+  container-type: inline-size;
+}
+@container (max-width: 760px) {
+  .canvas-btn-label {
+    display: none;
+  }
+}

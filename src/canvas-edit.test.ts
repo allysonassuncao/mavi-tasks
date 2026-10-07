@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { inlineFrom } from "./CanvasEditors";
 import { blocksToMarkdown, markdownBlocks } from "./mavi-export";
 import { toDesign, countPages } from "./mavi-design";
-import { editNote, editedArtifact, nextDocRef } from "./canvas-edit";
+import { editNote, editedArtifact, identityParam, lookNote, nextDocRef, restyleDesign, withLook } from "./canvas-edit";
 import { sanitizeArtifact, sanitizeCanvas, type CanvasArtifact } from "./mavi-artifacts";
 import { builtinLook } from "./visual-identity";
 import { documentHtml, slideHtml } from "./mavi-doc-html";
@@ -58,5 +58,37 @@ describe("edição direta no canvas", () => {
     const to = editedArtifact(from, from.canvas, "D2");
     expect(sanitizeArtifact(to)).toMatchObject({ ref: "D2", revision_of: "D1", edited: true });
     expect(editNote(from, to)).toBe('Editei o D1 direto no canvas e salvei como D2 (documento “Proposta” (edição da pessoa de D1)). Daqui para a frente, use o D2.');
+  });
+});
+
+describe("aplicar identidade no canvas", () => {
+  const to = builtinLook("escuro")!;
+  it("design livre: cores, fontes e logo do tema anterior trocam numa passada", () => {
+    const from = { ...look, logo: { light: "11111111-1111-1111-1111-111111111111" } };
+    const dest = { ...to, logo: { dark: "22222222-2222-2222-2222-222222222222" } };
+    const html = `<style>h1{color:${from.colors.accent.toLowerCase()};font-family:'${from.heading.family}',serif}</style>
+<section class="page" style="background:${from.colors.bg};font-family:&quot;${from.body.family}&quot;"><img src="file:11111111-1111-1111-1111-111111111111"><p>${from.heading.family} no texto</p><b style="color:#123456">x</b></section>`;
+    const out = restyleDesign(html, from, dest);
+    expect(out).toContain(`color:${dest.colors.accent}`);
+    expect(out).toContain(`background:${dest.colors.bg}`);
+    expect(out).toContain(`'${dest.heading.family}',serif`);
+    expect(out).toContain(`&quot;${dest.body.family}&quot;`);
+    expect(out).toContain("file:22222222-2222-2222-2222-222222222222");
+    // Cor que não é do tema e o texto da página ficam.
+    expect(out).toContain("#123456");
+    expect(out).toContain(`<p>${from.heading.family} no texto</p>`);
+  });
+
+  it("documento e apresentação levam só o tema; planilha não tem", () => {
+    const doc = { kind: "document" as const, title: "T", markdown: "Oi", look };
+    expect(withLook(doc, look, to)).toEqual({ ...doc, look: to });
+    expect(withLook({ kind: "sheet", title: "P", sheets: [] } as never, null, to)).toBeNull();
+  });
+
+  it("a nota diz à MAVI qual identidade seguir", () => {
+    const from = { id: "canvas-1", ref: "D1", type: "canvas", canvas: { kind: "document", title: "T", markdown: "Oi", look } } as CanvasArtifact;
+    const saved = editedArtifact(from, { kind: "document", title: "T", markdown: "Oi", look: to }, "D2");
+    expect(lookNote(from, saved, to)).toMatch(/“.+” no D1 .* como D2 .*identity: builtin:escuro/);
+    expect(identityParam({ ...to, source: "company" })).toBe("empresa");
   });
 });
