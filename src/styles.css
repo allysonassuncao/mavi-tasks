@@ -20734,11 +20734,6 @@ td.ai-log-actions {
   color: #22332a;
   border-bottom-color: #8fc255;
 }
-.cases-tabs .nav-count {
-  margin-left: 2px;
-  background: #f3d9a4;
-  color: #6b4d12;
-}
 .cases-filters {
   display: flex;
   gap: 12px;
@@ -29976,12 +29971,6 @@ a.radar-task-chip:hover {
 }
 
 /* Radar · Fase 2: temas e tarefas */
-.radar-view {
-  align-self: flex-start;
-}
-.radar-view button {
-  cursor: pointer;
-}
 .radar-chip {
   display: inline-flex;
   align-items: center;
@@ -30601,7 +30590,7 @@ a.radar-task-chip:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
 }
 .radar-alert-list {

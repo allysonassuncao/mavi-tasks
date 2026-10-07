@@ -3,10 +3,9 @@
    conteúdo da página começam depois dela. */
 .main-shell:has(.section-layout) {
   --section-nav-w: 232px;
+  /* Sem animar o recuo: ao abrir a página, a coluna e o conteúdo chegam
+     juntos (só acompanha o menu principal ao recolher). */
   padding-left: var(--section-nav-w);
-  transition:
-    margin-left 0.18s ease,
-    padding-left 0.18s ease;
 }
 .main-shell:has(.section-layout.collapsed) {
   --section-nav-w: 60px;
@@ -40,9 +39,7 @@
   width: var(--section-nav-w);
   background: #fff;
   border-right: 1px solid var(--border);
-  transition:
-    left 0.18s ease,
-    width 0.18s ease;
+  transition: left 0.18s ease;
 }
 /* Acompanha a largura do menu principal (styles.css). */
 @media (max-width: 1200px) {

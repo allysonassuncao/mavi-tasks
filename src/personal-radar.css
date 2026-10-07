@@ -122,14 +122,7 @@
   line-height: 1.4;
 }
 
-/* Abas e filtros */
-.pradar-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
+/* Abas (do modal de Aprendizado) */
 .pradar-tabs {
   display: inline-flex;
   gap: 4px;
@@ -152,19 +145,6 @@
 }
 .pradar-tabs button.selected {
   background: #263334;
-  color: #fff;
-}
-.pradar-count {
-  min-width: 20px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: #eef1f0;
-  color: #57645f;
-  font-size: 0.7rem;
-  text-align: center;
-}
-.pradar-tabs button.selected .pradar-count {
-  background: #ffffff2b;
   color: #fff;
 }
 .pradar-status {
@@ -825,9 +805,6 @@
 }
 
 @media (max-width: 720px) {
-  .pradar-head {
-    align-items: stretch;
-  }
   .pradar-dates {
     width: 100%;
   }
@@ -846,10 +823,6 @@
     padding: 7px 6px;
     font-size: 0.74rem;
     white-space: nowrap;
-  }
-  .pradar-count {
-    min-width: 16px;
-    padding: 1px 4px;
   }
   .pradar-item {
     padding: 14px 14px 12px 16px;

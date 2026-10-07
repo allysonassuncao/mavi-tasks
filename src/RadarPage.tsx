@@ -9,6 +9,7 @@ import { RadarThemes } from "./RadarThemes";
 import { RadarReports } from "./RadarReports";
 import { RadarAlerts } from "./RadarAlerts";
 import { navigate, useLocation } from "./router";
+import { SectionLayout, type SectionNavItem } from "./SectionNav";
 import type { FormPreset } from "./forms";
 import { suggestionItems } from "./radar-task-learning";
 import "./radar-task-learning.css";
@@ -259,7 +260,24 @@ export function RadarPage({
     load(0);
   };
 
+  // Itens, temas e relatórios no segundo menu lateral (só com o módulo).
+  const views: SectionNavItem[] = full
+    ? [
+        { id: "items", label: "Itens", icon: List },
+        { id: "themes", label: "Temas", icon: Layers },
+        { id: "reports", label: "Relatórios", icon: FileText },
+      ]
+    : [];
+
   return (
+    <SectionLayout
+      title="Radar do cliente"
+      label="Seções do Radar do cliente"
+      groups={[{ items: views }]}
+      current={full ? view : "items"}
+      storageKey="radar"
+      onSelect={(id) => setView(id as View)}
+    >
     <div className="radar-page">
       <RadarInfo overview={overview} open={infoOpen} onToggle={toggleInfo} />
       <section className="radar-topics" aria-label="Tópicos">
@@ -295,37 +313,11 @@ export function RadarPage({
       </section>
 
       {full && (
-      <div className="radar-view-row">
-      <nav className="drive-view radar-view" aria-label="Como ver">
-        <button
-          type="button"
-          className={view === "items" ? "selected" : ""}
-          aria-pressed={view === "items"}
-          onClick={() => setView("items")}
-        >
-          <List size={15} aria-hidden="true" /> Itens
-        </button>
-        <button
-          type="button"
-          className={view === "themes" ? "selected" : ""}
-          aria-pressed={view === "themes"}
-          onClick={() => setView("themes")}
-        >
-          <Layers size={15} aria-hidden="true" /> Temas
-        </button>
-        <button
-          type="button"
-          className={view === "reports" ? "selected" : ""}
-          aria-pressed={view === "reports"}
-          onClick={() => setView("reports")}
-        >
-          <FileText size={15} aria-hidden="true" /> Relatórios
-        </button>
-      </nav>
-        <Button className="btn secondary" onClick={() => setAlertsOpen(true)}>
-          <BellRing size={15} aria-hidden="true" /> Meus avisos
-        </Button>
-      </div>
+        <div className="radar-view-row">
+          <Button className="btn secondary" onClick={() => setAlertsOpen(true)}>
+            <BellRing size={15} aria-hidden="true" /> Meus avisos
+          </Button>
+        </div>
       )}
 
       {view === "reports" && full ? (
@@ -629,6 +621,7 @@ export function RadarPage({
         />
       )}
     </div>
+    </SectionLayout>
   );
 }
 

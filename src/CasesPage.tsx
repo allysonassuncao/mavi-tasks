@@ -32,11 +32,13 @@ import {
   type SaveResult,
 } from "./cases";
 import { fold } from "./domain";
-import { pageUrl, routeParts, useUrlState } from "./router";
+import { pageUrl, routeParts, useAddress, useUrlState } from "./router";
+import { SectionLayout } from "./SectionNav";
 import type { Snapshot } from "./types";
 
 const PAGE = 24;
 const TOP_NICHES = 10;
+// Seções da página; a Biblioteca é o endereço sem ?aba=.
 const TABS: {
   scope: CaseScope;
   param: string;
@@ -115,6 +117,25 @@ export function CasesPage({
     [nicheParam],
   );
   const request = useRef(0);
+  const address = useAddress();
+  const tabHref = (aba: string) => {
+    const url = new URL(address || "/", "http://x");
+    if (aba) url.searchParams.set("aba", aba);
+    else url.searchParams.delete("aba");
+    return url.pathname + url.search;
+  };
+  const groups = [
+    {
+      items: TABS.filter((t) => t.scope !== "review" || isLeader).map((t) => ({
+        id: t.scope,
+        label: t.label,
+        icon: t.icon,
+        href: tabHref(t.param),
+        badge:
+          t.scope === "review" && pendingCount > 0 ? pendingCount : undefined,
+      })),
+    },
+  ];
 
   // Digitar não refaz a busca a cada letra.
   useEffect(() => {
@@ -247,229 +268,220 @@ export function CasesPage({
     `${window.location.origin}${pageUrl("cases", companyPath)}?${caseQueryParam}=${id}`;
 
   return (
-    <div className="cases-page">
-      <section className="cases-top">
-        <label className="cases-search">
-          <Search size={20} aria-hidden="true" />
-          <input
-            type="search"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            placeholder="Busque por cliente, nicho ou resultado…"
-            aria-label="Buscar cases"
-          />
-          {typed && (
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Limpar busca"
-              onClick={() => setTyped("")}
-            >
-              <X size={16} />
-            </button>
-          )}
-        </label>
-        <Button className="btn primary" onClick={() => openForm(null)}>
-          <Plus size={17} /> Cadastrar case
-        </Button>
-      </section>
-
-      <nav className="cases-tabs" aria-label="Cases">
-        {TABS.filter((t) => t.scope !== "review" || isLeader).map((t) => (
-          <button
-            type="button"
-            key={t.scope}
-            className={scope === t.scope ? "active" : ""}
-            aria-current={scope === t.scope ? "page" : undefined}
-            onClick={() => setTab(t.param)}
-          >
-            <t.icon size={16} />
-            {t.label}
-            {t.scope === "review" && pendingCount > 0 && (
-              <span className="nav-count">{pendingCount}</span>
-            )}
-          </button>
-        ))}
-      </nav>
-
-      <div className="cases-filters">
-        <div
-          className="cases-niche-row"
-          role="group"
-          aria-label="Filtrar por nicho"
-        >
-          {topNiches.map((n) => {
-            const on = pickedNiches.some((x) => fold(x) === fold(n.niche));
-            return (
+    <SectionLayout
+      title="Cases de Sucesso"
+      label="Seções de Cases de Sucesso"
+      groups={groups}
+      current={scope}
+      storageKey="cases"
+      onSelect={(id) => setTab(TABS.find((t) => t.scope === id)?.param ?? "")}
+    >
+      <div className="cases-page">
+        <section className="cases-top">
+          <label className="cases-search">
+            <Search size={20} aria-hidden="true" />
+            <input
+              type="search"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder="Busque por cliente, nicho ou resultado…"
+              aria-label="Buscar cases"
+            />
+            {typed && (
               <button
                 type="button"
-                key={n.niche}
-                className={`chip ${on ? "selected" : ""}`}
-                aria-pressed={on}
-                onClick={() => toggleNiche(n.niche)}
+                className="icon-btn"
+                aria-label="Limpar busca"
+                onClick={() => setTyped("")}
               >
-                {n.niche}
-                <small>{n.cases}</small>
+                <X size={16} />
               </button>
-            );
-          })}
-          {!!otherNiches.length && (
-            <MultiPick
-              label="Mais nichos"
-              allLabel={`+${otherNiches.length} nichos`}
-              noun="nichos"
-              options={otherNiches.map((n) => ({
-                value: n.niche,
-                label: `${n.niche} (${n.cases})`,
-              }))}
-              value={pickedNiches.filter((p) =>
-                otherNiches.some((n) => fold(n.niche) === fold(p)),
-              )}
-              onChange={(next) =>
-                setNicheParam(
-                  [
-                    ...pickedNiches.filter(
-                      (p) =>
-                        !otherNiches.some((n) => fold(n.niche) === fold(p)),
-                    ),
-                    ...next,
-                  ].join("|"),
-                )
-              }
-            />
-          )}
-        </div>
-        <div className="cases-filter-side">
-          {!!data.products.length && (
-            <MultiPick
-              label="Produtos"
-              allLabel="Todos os produtos"
-              noun="produtos"
-              options={data.products.map((p) => ({
-                value: p.id,
-                label: p.name,
-              }))}
-              value={products}
-              onChange={setProducts}
-            />
-          )}
-          {filtered && (
-            <button type="button" className="text-btn" onClick={clearFilters}>
-              <X size={14} /> Limpar filtros
-            </button>
-          )}
-        </div>
-      </div>
+            )}
+          </label>
+          <Button className="btn primary" onClick={() => openForm(null)}>
+            <Plus size={17} /> Cadastrar case
+          </Button>
+        </section>
 
-      {error && <p className="form-error">{error}</p>}
-      {rows === null && !error ? (
-        <Loading variant="grid" />
-      ) : rows && rows.length ? (
-        <>
-          <p className="cases-count">
-            {total === 1 ? "1 case" : `${total} cases`}
-            {pickedNiches.length ? ` em ${pickedNiches.join(", ")}` : ""}
-            {term ? ` para “${term}”` : ""}
-          </p>
-          <div className="cases-grid">
-            {rows.map((r) => (
-              <CaseCard
-                key={r.id}
-                row={r}
-                scope={scope}
-                cover={r.cover_id ? covers[r.cover_id] : undefined}
-                color={
-                  data.clients.find((c) => c.id === r.client_id)?.color ??
-                  tint(r.client_id)
+        <div className="cases-filters">
+          <div
+            className="cases-niche-row"
+            role="group"
+            aria-label="Filtrar por nicho"
+          >
+            {topNiches.map((n) => {
+              const on = pickedNiches.some((x) => fold(x) === fold(n.niche));
+              return (
+                <button
+                  type="button"
+                  key={n.niche}
+                  className={`chip ${on ? "selected" : ""}`}
+                  aria-pressed={on}
+                  onClick={() => toggleNiche(n.niche)}
+                >
+                  {n.niche}
+                  <small>{n.cases}</small>
+                </button>
+              );
+            })}
+            {!!otherNiches.length && (
+              <MultiPick
+                label="Mais nichos"
+                allLabel={`+${otherNiches.length} nichos`}
+                noun="nichos"
+                options={otherNiches.map((n) => ({
+                  value: n.niche,
+                  label: `${n.niche} (${n.cases})`,
+                }))}
+                value={pickedNiches.filter((p) =>
+                  otherNiches.some((n) => fold(n.niche) === fold(p)),
+                )}
+                onChange={(next) =>
+                  setNicheParam(
+                    [
+                      ...pickedNiches.filter(
+                        (p) =>
+                          !otherNiches.some((n) => fold(n.niche) === fold(p)),
+                      ),
+                      ...next,
+                    ].join("|"),
+                  )
                 }
-                onOpen={() => setOpenId(r.id)}
               />
-            ))}
+            )}
           </div>
-          {more && (
-            <div className="cases-more">
-              <Button
-                className="btn secondary"
-                onClick={() => load(rows.length)}
-              >
-                Carregar mais
-              </Button>
-            </div>
-          )}
-        </>
-      ) : rows ? (
-        <div className="panel">
-          {filtered ? (
-            <Empty
-              title="Nenhum case encontrado"
-              body="Tente outras palavras, menos filtros ou um nicho parecido."
-              action={
-                <Button className="btn secondary" onClick={clearFilters}>
-                  Limpar filtros
-                </Button>
-              }
-            />
-          ) : scope === "review" ? (
-            <Empty
-              title="Nada esperando aprovação"
-              body="Cases novos e alterações aparecem aqui para você aprovar."
-            />
-          ) : scope === "mine" ? (
-            <Empty
-              title="Você ainda não cadastrou cases"
-              body="Um bom resultado de cliente vira argumento de venda para todo o time."
-              action={
-                <Button className="btn primary" onClick={() => openForm(null)}>
-                  <Plus size={16} /> Cadastrar case
-                </Button>
-              }
-            />
-          ) : (
-            <Empty
-              title="A biblioteca ainda está vazia"
-              body="Cadastre o primeiro case de sucesso. Depois de aprovado, todo o time encontra por termo ou nicho."
-              action={
-                <Button className="btn primary" onClick={() => openForm(null)}>
-                  <Plus size={16} /> Cadastrar case
-                </Button>
-              }
-            />
-          )}
+          <div className="cases-filter-side">
+            {!!data.products.length && (
+              <MultiPick
+                label="Produtos"
+                allLabel="Todos os produtos"
+                noun="produtos"
+                options={data.products.map((p) => ({
+                  value: p.id,
+                  label: p.name,
+                }))}
+                value={products}
+                onChange={setProducts}
+              />
+            )}
+            {filtered && (
+              <button type="button" className="text-btn" onClick={clearFilters}>
+                <X size={14} /> Limpar filtros
+              </button>
+            )}
+          </div>
         </div>
-      ) : null}
 
-      {openId && !form && (
-        <CaseView
-          key={openId}
-          api={api}
-          id={openId}
-          products={data.products}
-          notify={notify}
-          internalUrl={internalUrl}
-          onClose={() => setOpenId("")}
-          onEdit={(d) => openForm(d)}
-          onChanged={refresh}
-          onPickNiche={(n) => {
-            setOpenId("");
-            setTab("");
-            setNicheParam(n);
-          }}
-        />
-      )}
-      {form && clients && (
-        <CaseForm
-          api={api}
-          company={company}
-          detail={form.detail}
-          clients={clients}
-          niches={niches}
-          products={data.products}
-          isLeader={isLeader}
-          onClose={() => setForm(null)}
-          onSaved={saved}
-        />
-      )}
-    </div>
+        {error && <p className="form-error">{error}</p>}
+        {rows === null && !error ? (
+          <Loading variant="grid" />
+        ) : rows && rows.length ? (
+          <>
+            <p className="cases-count">
+              {total === 1 ? "1 case" : `${total} cases`}
+              {pickedNiches.length ? ` em ${pickedNiches.join(", ")}` : ""}
+              {term ? ` para “${term}”` : ""}
+            </p>
+            <div className="cases-grid">
+              {rows.map((r) => (
+                <CaseCard
+                  key={r.id}
+                  row={r}
+                  scope={scope}
+                  cover={r.cover_id ? covers[r.cover_id] : undefined}
+                  color={
+                    data.clients.find((c) => c.id === r.client_id)?.color ??
+                    tint(r.client_id)
+                  }
+                  onOpen={() => setOpenId(r.id)}
+                />
+              ))}
+            </div>
+            {more && (
+              <div className="cases-more">
+                <Button
+                  className="btn secondary"
+                  onClick={() => load(rows.length)}
+                >
+                  Carregar mais
+                </Button>
+              </div>
+            )}
+          </>
+        ) : rows ? (
+          <div className="panel">
+            {filtered ? (
+              <Empty
+                title="Nenhum case encontrado"
+                body="Tente outras palavras, menos filtros ou um nicho parecido."
+                action={
+                  <Button className="btn secondary" onClick={clearFilters}>
+                    Limpar filtros
+                  </Button>
+                }
+              />
+            ) : scope === "review" ? (
+              <Empty
+                title="Nada esperando aprovação"
+                body="Cases novos e alterações aparecem aqui para você aprovar."
+              />
+            ) : scope === "mine" ? (
+              <Empty
+                title="Você ainda não cadastrou cases"
+                body="Um bom resultado de cliente vira argumento de venda para todo o time."
+                action={
+                  <Button className="btn primary" onClick={() => openForm(null)}>
+                    <Plus size={16} /> Cadastrar case
+                  </Button>
+                }
+              />
+            ) : (
+              <Empty
+                title="A biblioteca ainda está vazia"
+                body="Cadastre o primeiro case de sucesso. Depois de aprovado, todo o time encontra por termo ou nicho."
+                action={
+                  <Button className="btn primary" onClick={() => openForm(null)}>
+                    <Plus size={16} /> Cadastrar case
+                  </Button>
+                }
+              />
+            )}
+          </div>
+        ) : null}
+
+        {openId && !form && (
+          <CaseView
+            key={openId}
+            api={api}
+            id={openId}
+            products={data.products}
+            notify={notify}
+            internalUrl={internalUrl}
+            onClose={() => setOpenId("")}
+            onEdit={(d) => openForm(d)}
+            onChanged={refresh}
+            onPickNiche={(n) => {
+              setOpenId("");
+              setTab("");
+              setNicheParam(n);
+            }}
+          />
+        )}
+        {form && clients && (
+          <CaseForm
+            api={api}
+            company={company}
+            detail={form.detail}
+            clients={clients}
+            niches={niches}
+            products={data.products}
+            isLeader={isLeader}
+            onClose={() => setForm(null)}
+            onSaved={saved}
+          />
+        )}
+      </div>
+    </SectionLayout>
   );
 }
 

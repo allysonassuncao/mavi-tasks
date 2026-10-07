@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  CircleDot,
   Crosshair,
   CornerDownRight,
   ExternalLink,
@@ -22,6 +23,7 @@ import {
   Tag,
   Trash2,
   Users,
+  XCircle,
 } from "lucide-react";
 import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import { Empty, Modal } from "./components";
@@ -73,6 +75,7 @@ import { REMOVE_LABEL, removedMessage, type RemoveReason } from "./agent-check";
 import { ChoiceMenu, InlineAsk, NextStep } from "./PersonalRadarNextStep";
 import type { FormPreset } from "./forms";
 import { ProductLessons } from "./PersonalRadarProductLessons";
+import { SectionLayout } from "./SectionNav";
 import "./personal-radar.css";
 
 const ALL = "__all__";
@@ -260,7 +263,7 @@ export function PersonalRadarPage({
     setFocusId(list.items[position + 1]?.id ?? END);
   };
 
-  return (
+  const page = (
     <div className="pradar">
       {viewable && (
         <div className="pradar-viewing">
@@ -301,30 +304,6 @@ export function PersonalRadarPage({
         />
       ) : (
         <>
-          <section className="pradar-head" aria-label="Situações">
-            <nav className="pradar-tabs" aria-label="Situação">
-              {(
-                [
-                  ["open", "Em aberto"],
-                  ["resolved", "Resolvidas"],
-                  ["dismissed", "Descartadas"],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={status === value}
-                  className={status === value ? "selected" : ""}
-                  onClick={() => setStatus(value)}
-                >
-                  {label}
-                  <span className="pradar-count">
-                    {list ? list.counts[value] : "–"}
-                  </span>
-                </button>
-              ))}
-            </nav>
-          </section>
           <div className="thermo-filters pradar-filters">
             <span className="thermo-search">
               <Input
@@ -560,6 +539,30 @@ export function PersonalRadarPage({
         />
       )}
     </div>
+  );
+  // Antes de ligar (tela de configuração), sem o menu de situações.
+  if (!show) return page;
+  const count = (value: keyof PersonalList["counts"]) =>
+    list && list.counts[value] ? list.counts[value] : undefined;
+  return (
+    <SectionLayout
+      title="Radar pessoal"
+      label="Seções de Radar pessoal"
+      groups={[
+        {
+          items: [
+            { id: "open", label: "Em aberto", icon: CircleDot, badge: count("open") },
+            { id: "resolved", label: "Resolvidas", icon: CheckCircle2, badge: count("resolved") },
+            { id: "dismissed", label: "Descartadas", icon: XCircle, badge: count("dismissed") },
+          ],
+        },
+      ]}
+      current={status}
+      storageKey="radar-pessoal"
+      onSelect={(id) => setStatus(id as PersonalStatus)}
+    >
+      {page}
+    </SectionLayout>
   );
 }
 
