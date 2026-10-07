@@ -505,18 +505,7 @@ export default function App() {
     return () =>
       navigator.serviceWorker.removeEventListener("message", onMessage);
   }, []);
-  // The MAVI opens with the menu folded, like ChatGPT, without touching the
-  // saved choice; expanding it there lasts until the person leaves the page.
-  const [maviMenu, setMaviMenu] = useState(false);
-  useEffect(() => {
-    if (page !== "mavi") setMaviMenu(false);
-  }, [page]);
-  const menuCollapsed = page === "mavi" ? !maviMenu : collapsed;
   function toggleCollapsed() {
-    if (page === "mavi") {
-      setMaviMenu((open) => !open);
-      return;
-    }
     setCollapsed((was) => {
       try {
         localStorage.setItem(SIDEBAR_KEY, was ? "0" : "1");
@@ -2795,7 +2784,7 @@ export default function App() {
       />
     );
   return (
-    <div className={`app-shell ${menuCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
       {sidebar && (
         <Button
           className="sidebar-backdrop"
@@ -2824,7 +2813,7 @@ export default function App() {
           companies={data.companies}
           current={currentCompany}
           isAdmin={isAdmin}
-          collapsed={menuCollapsed}
+          collapsed={collapsed}
           onSelect={(value) => {
             setData({ ...emptySnapshot, companies: data.companies });
             setCompany(value);
@@ -2877,11 +2866,11 @@ export default function App() {
           <button
             type="button"
             className="sidebar-collapse"
-            aria-expanded={!menuCollapsed}
-            title={menuCollapsed ? "Expandir menu" : "Recolher menu"}
+            aria-expanded={!collapsed}
+            title={collapsed ? "Expandir menu" : "Recolher menu"}
             onClick={toggleCollapsed}
           >
-            {menuCollapsed ? (
+            {collapsed ? (
               <ChevronsRight size={18} />
             ) : (
               <ChevronsLeft size={18} />
