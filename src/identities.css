@@ -318,3 +318,87 @@
     order: -1;
   }
 }
+
+/* O card da conversa: a identidade ou os itens do guia que a MAVI propôs. */
+.mavi-identity-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 4px 14px 4px 54px;
+}
+.mavi-identity-body .mavi-action-fields {
+  padding: 0;
+  flex-direction: column;
+}
+.mavi-identity-art {
+  width: 220px;
+  flex: none;
+}
+.mavi-identity-body .mavi-action-fields {
+  flex: 1;
+  min-width: 200px;
+}
+.mavi-identity-guide {
+  flex-basis: 100%;
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f6f8f5;
+  font: inherit;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.mavi-identity-lines {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.84rem;
+}
+.mavi-identity-reason {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.76rem;
+  color: #6b7775;
+}
+@media (max-width: 640px) {
+  .mavi-identity-body {
+    padding-left: 14px;
+  }
+  .mavi-identity-art {
+    width: 100%;
+  }
+}
+
+.identity-draft {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+.identity-draft > p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.identity-mavi-notes {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f3f0ff;
+  color: #3b2f73;
+  font-size: 0.8rem;
+}
+.identity-mavi-notes strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.identity-mavi-notes ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}

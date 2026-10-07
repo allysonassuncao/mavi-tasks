@@ -232,7 +232,7 @@ export function robotsAllows(robots: string, path: string) {
 }
 
 // ------------------------------------------------------------ busca
-async function readBody(res: Response) {
+export async function readBody(res: Response) {
   if (!res.body) return new Uint8Array();
   const reader = res.body.getReader();
   const parts: Uint8Array[] = [];
@@ -251,7 +251,7 @@ async function readBody(res: Response) {
 }
 
 /** Busca com os redirecionamentos conferidos um a um (nada de rede interna). */
-async function get(url: string, deps: McpDeps, accept: string) {
+export async function get(url: string, deps: McpDeps, accept: string) {
   let current = url;
   for (let hop = 0; hop < 5; hop++) {
     await checkUrl(current, deps);

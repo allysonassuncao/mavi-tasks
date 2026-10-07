@@ -155,3 +155,41 @@ describe("arquivos com a identidade", () => {
     expect(Object.keys(files).some((f) => /^ppt\/media\/image/.test(f))).toBe(true);
   });
 });
+
+describe("Guia da marca vivo", () => {
+  it("põe os itens no fim da seção, tira os vazios do modelo e não repete", async () => {
+    const { addToGuide, GUIDE_TEMPLATE } = await import("./visual-identity");
+    const g1 = addToGuide(GUIDE_TEMPLATE, "Evite", ["Verde-limão nos títulos", "Emoji em proposta"]);
+    expect(g1).toContain("## Evite\n- Verde-limão nos títulos\n- Emoji em proposta\n\n## Exemplos aprovados");
+    expect(g1).not.toMatch(/## Evite\n-\n/);
+    // Repetido (com outra caixa) não entra de novo.
+    expect(addToGuide(g1, "evite", ["verde-limão nos títulos"])).toBe(g1);
+    // Aprendizados levam a data; o exemplo entre parênteses some.
+    const g2 = addToGuide(g1, "Aprendizados", ["Capa sempre escura"], "07/10/2026");
+    expect(g2).toContain("## Aprendizados\n- (07/10/2026) Capa sempre escura");
+    expect(g2).not.toContain("(correções do cliente, com a data)");
+    // Seção que não existe nasce no fim.
+    expect(addToGuide("## Essência\nTexto.", "Faça", ["Fotos reais"])).toBe("## Essência\nTexto.\n\n## Faça\n- Fotos reais\n");
+    expect(addToGuide("", "Faça", ["Fotos reais"])).toBe("## Faça\n- Fotos reais\n");
+  });
+
+  it("ajustar só as cores mantém o logo e as fontes da base", () => {
+    const base = { ...BUILTIN_LOOKS.claro.tokens, logo: { light: logo }, faces: [{ file: font, family: "Tomato", weight: 700, style: "normal" as const }] };
+    const t = sanitizeTokens({ colors: { primary: "#FF6E28" } }, base);
+    expect(t.logo).toEqual({ light: logo });
+    expect(t.faces).toHaveLength(1);
+    expect(t.colors.primary).toBe("#FF6E28");
+  });
+
+  it("a proposta da MAVI no formato fechado", async () => {
+    const { sanitizeAction } = await import("./mavi-artifacts");
+    const client = "00000000-0000-4000-8000-000000000002";
+    expect(sanitizeAction({ kind: "identity", op: "guide_add", scope: "client", client_id: client, identity_name: "Marca", section: "Evite", lines: ["Emoji", ""], reason: "pediu" })).toEqual({
+      kind: "identity", op: "guide_add", scope: "client", client_id: client, client_name: "", identity_name: "Marca", section: "Evite", lines: ["Emoji"], reason: "pediu",
+    });
+    expect(sanitizeAction({ kind: "identity", op: "guide_add", scope: "client", identity_name: "x", section: "Evite", lines: ["a"] })).toBeNull();
+    expect(sanitizeAction({ kind: "identity", op: "guide_add", scope: "company", identity_name: "x", section: "Evite", lines: [] })).toBeNull();
+    const save = sanitizeAction({ kind: "identity", op: "save", scope: "gallery", identity_name: "Noite", tokens: { colors: { bg: "#0b1020" } }, guide: "## Tom\nCurto." });
+    expect(save).toMatchObject({ op: "save", scope: "gallery", tokens: { mode: "dark", colors: { bg: "#0B1020" } }, guide: "## Tom\nCurto." });
+  });
+});

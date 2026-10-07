@@ -11,7 +11,7 @@
 
 // Com .js: este arquivo também roda no servidor (api/), que não completa a extensão.
 import { ruleFromInput, type CampaignAlertRule } from "./campaign-alerts.js";
-import { sanitizeLook, type Look } from "./visual-identity.js";
+import { sanitizeLook, sanitizeTokens, type IdentityScope, type IdentityTokens, type Look } from "./visual-identity.js";
 import { DESIGN_FORMAT_KEYS, cleanDesignHtml, countPages, type DesignFormat } from "./mavi-design.js";
 
 export type Power =
@@ -158,6 +158,28 @@ export type ActionProposal =
       rule: CampaignAlertRule;
     }
   | {
+      /**
+       * Identidade visual: salvar uma inteira (tema e Guia da marca) ou pôr
+       * itens numa seção do guia. Grava só quando a pessoa confirma.
+       */
+      kind: "identity";
+      op: "save" | "guide_add";
+      scope: IdentityScope;
+      client_id?: string;
+      client_name?: string;
+      /** A que muda (sem: nasce uma). */
+      identity_id?: string;
+      identity_name: string;
+      description?: string;
+      /** save: o tema e o guia inteiros. */
+      tokens?: IdentityTokens;
+      guide?: string;
+      /** guide_add: a seção e os itens. */
+      section?: string;
+      lines?: string[];
+      reason: string;
+    }
+  | {
       /** Uma ferramenta de uma conexão (MCP) que altera algo no serviço. */
       kind: "mcp_call";
       server_id: string;
@@ -203,6 +225,9 @@ export type ActionArtifact = Base & {
     comment_id?: string;
     /** O aviso de campanha criado ou mudado. */
     rule_id?: string;
+    /** A identidade salva e a versão. */
+    identity_id?: string;
+    version?: number;
     error?: string;
     /** O que a conexão (MCP) respondeu. */
     text?: string;
@@ -625,7 +650,7 @@ function sheetRows(raw: unknown, columns: TableColumn[]) {
     );
 }
 
-function sanitizeAction(raw: unknown): ActionProposal | null {
+export function sanitizeAction(raw: unknown): ActionProposal | null {
   const a = obj(raw);
   if (!a) return null;
   if (a.kind === "create_task") {
@@ -675,6 +700,33 @@ function sanitizeAction(raw: unknown): ActionProposal | null {
     if (op !== "create" && !rule.id) return null;
     if (op !== "delete" && error) return null;
     return { kind: "campaign_alert", op, rule };
+  }
+  if (a.kind === "identity") {
+    const op = pick(a.op, ["save", "guide_add"] as const, "guide_add");
+    const scope = pick(a.scope, ["company", "client", "gallery"] as const, "client");
+    const client_id = text(a.client_id, 40);
+    const identity_id = text(a.identity_id, 40);
+    const name = text(a.identity_name, 80);
+    const reason = text(a.reason, 300);
+    if (scope === "client" && !UUID.test(client_id)) return null;
+    const base = {
+      kind: "identity" as const,
+      op,
+      scope,
+      ...(scope === "client" ? { client_id, client_name: text(a.client_name, 160) } : {}),
+      ...(UUID.test(identity_id) ? { identity_id } : {}),
+      identity_name: name || "Identidade",
+      reason,
+    };
+    if (op === "save") {
+      const guide = typeof a.guide === "string" ? a.guide.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").slice(0, 30_000) : "";
+      const description = text(a.description, 300);
+      return { ...base, tokens: sanitizeTokens(a.tokens), guide, ...(description ? { description } : {}) };
+    }
+    const section = text(a.section, 60);
+    const lines = strings(a.lines, 8, 300);
+    if (!section || !lines.length) return null;
+    return { ...base, section, lines };
   }
   if (a.kind === "mcp_call") {
     const server_id = text(a.server_id, 40);
@@ -800,6 +852,8 @@ export function sanitizeArtifact(raw: unknown): AiArtifact | null {
           ...(UUID.test(text(r.task_id, 40)) ? { task_id: text(r.task_id, 40) } : {}),
           ...(text(r.comment_id, 40) ? { comment_id: text(r.comment_id, 40) } : {}),
           ...(UUID.test(text(r.rule_id, 40)) ? { rule_id: text(r.rule_id, 40) } : {}),
+          ...(UUID.test(text(r.identity_id, 40)) ? { identity_id: text(r.identity_id, 40) } : {}),
+          ...(num(r.version) !== null ? { version: num(r.version)! } : {}),
           ...(text(r.error, 300) ? { error: text(r.error, 300) } : {}),
           ...(text(r.text, 1600) ? { text: text(r.text, 1600) } : {}),
           ...(r.running === true ? { running: true } : {}),
@@ -879,7 +933,11 @@ export function artifactSummary(a: AiArtifact): string {
         ? `${a.action.server_name} › ${a.action.tool_title || a.action.tool}`
         : a.action.kind === "campaign_alert"
           ? `${{ create: "criar", update: "mudar", delete: "excluir" }[a.action.op]} o aviso de campanha “${a.action.rule.name}”`
-        : `comentar na tarefa “${a.action.task_title}”`;
+          : a.action.kind === "identity"
+            ? a.action.op === "save"
+              ? `salvar a identidade visual “${a.action.identity_name}”`
+              : `adicionar ao Guia da marca “${a.action.identity_name}” (${a.action.section}): ${(a.action.lines ?? []).join("; ").slice(0, 300)}`
+            : `comentar na tarefa “${a.action.task_title}”`;
   const said = a.result?.text
     ? ` (resposta: ${a.result.text.slice(0, 400)})`
     : a.result?.error

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Archive, Copy, Pencil, Plus } from "lucide-react";
+import { Archive, Copy, Pencil, Plus, Sparkles } from "lucide-react";
 import { Button, Loading } from "./ui";
 import { Empty } from "./components";
-import { IdentityEditor, IdentityPreview, draftOf, newDraft, type IdentityDraft } from "./IdentityEditor";
+import { IdentityEditor, IdentityPreview, MaviDraftForm, draftOf, newDraft, type IdentityDraft } from "./IdentityEditor";
 import { archiveIdentity, getIdentity, listIdentities, type IdentityList } from "./identities";
 import { BUILTIN_LOOKS, builtinLook, sanitizeTokens, type IdentityRow, type Look } from "./visual-identity";
 import "./identities.css";
@@ -34,6 +34,8 @@ export function IdentitiesPage({
   const [list, setList] = useState<IdentityList | null>(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<IdentityDraft | null>(null);
+  const [drafting, setDrafting] = useState<{ scope: "company" | "gallery"; current: IdentityDraft | null } | null>(null);
+  const [notes, setNotes] = useState<string[] | undefined>(undefined);
   const load = useCallback(
     () =>
       listIdentities(company)
@@ -63,6 +65,29 @@ export function IdentitiesPage({
 
   if (error) return <Empty title="Identidades indisponíveis" body={error} />;
   if (!list) return <Loading variant="form" />;
+  if (drafting)
+    return (
+      <section className="panel identities-page">
+        <header className="identities-section">
+          <h2>
+            <Sparkles size={16} aria-hidden="true" />{" "}
+            {drafting.scope === "company" ? "Identidade da empresa com a MAVI" : "Novo estilo a partir de um site"}
+          </h2>
+        </header>
+        <MaviDraftForm
+          company={company}
+          scope={drafting.scope}
+          client={null}
+          current={drafting.current}
+          onCancel={() => setDrafting(null)}
+          onDraft={(d, n) => {
+            setDrafting(null);
+            setNotes(n);
+            setEditing(d);
+          }}
+        />
+      </section>
+    );
   if (editing)
     return (
       <section className="panel identities-page">
@@ -80,9 +105,16 @@ export function IdentitiesPage({
           company={company}
           initial={editing}
           clients={clients}
+          maviNotes={notes}
           notify={notify}
-          onSaved={() => void load()}
-          onCancel={() => setEditing(null)}
+          onSaved={() => {
+            setNotes(undefined);
+            void load();
+          }}
+          onCancel={() => {
+            setEditing(null);
+            setNotes(undefined);
+          }}
         />
       </section>
     );
@@ -110,13 +142,26 @@ export function IdentitiesPage({
                 <Button className="btn secondary" onClick={() => void open(list.company!.id)}>
                   <Pencil size={13} /> Editar
                 </Button>
+                <Button
+                  className="btn secondary"
+                  onClick={() =>
+                    void getIdentity(list.company!.id).then((r) => setDrafting({ scope: "company", current: r ? draftOf(r) : null }))
+                  }
+                >
+                  <Sparkles size={13} /> Refazer com a MAVI
+                </Button>
               </div>
             </article>
           </div>
         ) : (
-          <button type="button" className="identity-new" onClick={() => setEditing(newDraft("company", null, { name: "Nossa identidade" }))}>
-            <Plus size={18} /> Criar a identidade da empresa
-          </button>
+          <div className="identities-grid">
+            <button type="button" className="identity-new" onClick={() => setDrafting({ scope: "company", current: null })}>
+              <Sparkles size={18} /> Gerar com a MAVI (a partir do site)
+            </button>
+            <button type="button" className="identity-new" onClick={() => setEditing(newDraft("company", null, { name: "Nossa identidade" }))}>
+              <Plus size={18} /> Criar do zero
+            </button>
+          </div>
         )}
       </section>
 
@@ -129,6 +174,9 @@ export function IdentitiesPage({
         <div className="identities-grid">
           <button type="button" className="identity-new" onClick={() => setEditing(newDraft("gallery", null))}>
             <Plus size={18} /> Novo estilo
+          </button>
+          <button type="button" className="identity-new" onClick={() => setDrafting({ scope: "gallery", current: null })}>
+            <Sparkles size={18} /> A partir de um site, com a MAVI
           </button>
           {list.gallery.map((r) => (
             <article key={r.id} className="identity-card">

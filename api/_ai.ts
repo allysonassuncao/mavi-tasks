@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { callRpc, signGcsUrl, type GcsCredentials } from "./_drive.js";
 import { extractFileText } from "./_ai-extract.js";
 import { canvasPages, canvasPdf, identityFileUrls } from "./_ai-identity.js";
+import { handleIdentityDraft } from "./_identity-draft.js";
 import {
   EmbeddingError,
   embeddingCost,
@@ -2340,6 +2341,11 @@ export async function handleAi(
       if (!authorization?.startsWith("Bearer "))
         return { status: 401, body: { error: "Entre na sua conta." } };
       return canvasPages(env, deps.fetch, authorization, req);
+    }
+    if (req.action === "ai-identity-draft") {
+      if (!authorization?.startsWith("Bearer "))
+        return { status: 401, body: { error: "Entre na sua conta." } };
+      return handleIdentityDraft(req, authorization, env, deps);
     }
     if (req.action === "ai-identity-files") {
       if (!authorization?.startsWith("Bearer "))

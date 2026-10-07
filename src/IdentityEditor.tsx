@@ -7,6 +7,7 @@ import { fileName, saveBlob } from "./mavi-export";
 import { brandUrls, loadBrand, type Brand } from "./brand";
 import {
   clientIdentity,
+  draftIdentity,
   getIdentity,
   identityVersion,
   restoreIdentity,
@@ -21,6 +22,7 @@ import {
   DECORS,
   DECOR_LABELS,
   GOOGLE_FONTS,
+  GUIDE_TEMPLATE,
   SYSTEM_FONTS,
   contrastIssues,
   readableOn,
@@ -52,30 +54,6 @@ export type IdentityDraft = {
   guide: string;
 };
 
-const GUIDE_TEMPLATE = `## Essência
-O que a marca é e como quer ser percebida, em 2 ou 3 frases.
-
-## Tom de voz
-- Como fala (ex.: próximo, direto, sem jargão)
-- Palavras que usa e que evita
-
-## Visual
-- Quando usar fundo escuro ou claro
-- Como usar a cor principal e o destaque
-- Fotos e ilustrações: estilo
-
-## Faça
--
-
-## Evite
--
-
-## Exemplos aprovados
-- (documentos, apresentações ou artes que o cliente aprovou)
-
-## Aprendizados
-- (correções do cliente, com a data)
-`;
 
 const SAMPLE_DOC = `## Resumo do mês
 Os leads cresceram **18%** com o mesmo investimento. A campanha de remarketing foi a que mais converteu.
@@ -114,6 +92,91 @@ export const draftOf = (r: IdentityFull): IdentityDraft => ({
   tokens: sanitizeTokens(r.tokens),
   guide: r.guide ?? "",
 });
+
+/**
+ * "Gerar com a MAVI": o site (opcional) e o que levar em conta; a MAVI lê a
+ * Marca, os logos, o site e o guia atual e devolve um rascunho para o editor.
+ */
+export function MaviDraftForm({
+  company,
+  scope,
+  client,
+  current,
+  onDraft,
+  onCancel,
+}: {
+  company: string;
+  scope: IdentityScope;
+  client: string | null;
+  current?: IdentityDraft | null;
+  onDraft: (draft: IdentityDraft, notes: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [url, setUrl] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function go() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await draftIdentity(company, { scope, client, url: url.trim() || undefined, notes: notes.trim() || undefined, current: current?.id ?? null });
+      onDraft(
+        {
+          id: current?.id ?? null,
+          scope,
+          client,
+          name: r.name,
+          description: r.description,
+          tokens: sanitizeTokens(r.tokens),
+          guide: r.guide,
+        },
+        r.notes ?? [],
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="identity-draft">
+      <p className="muted">
+        A MAVI lê {scope === "client" ? "a Marca deste cliente (cores, fontes, regras e logos), " : ""}o site e o que você pedir
+        {current ? ", mantém o que já está no guia" : ""} e monta o tema e o Guia da marca. Você revisa no editor antes de salvar.
+      </p>
+      <div className="identity-row">
+        <label className="identity-field">
+          <span className="identity-label">Site (opcional)</span>
+          <Input value={url} maxLength={300} placeholder="https://www.cliente.com.br" onChange={(e) => setUrl(e.target.value)} />
+        </label>
+      </div>
+      <label className="identity-field">
+        <span className="identity-label">O que levar em conta (opcional)</span>
+        <Textarea
+          rows={3}
+          maxLength={2000}
+          value={notes}
+          placeholder="Ex.: público jovem, tom descontraído; o cliente não gosta de fundo escuro."
+          onChange={(e) => setNotes(e.target.value)}
+        />
+      </label>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="identity-actions">
+        <Button className="btn secondary" disabled={busy} onClick={onCancel}>
+          Cancelar
+        </Button>
+        <Button className="btn primary" disabled={busy} onClick={() => void go()}>
+          <Sparkles size={14} /> {busy ? "A MAVI está montando… (até 1 min)" : "Gerar rascunho"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /** O código da cor: aceita enquanto a pessoa digita e grava quando fica válido. */
 function HexInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
@@ -173,9 +236,12 @@ export function IdentityEditor({
   notify,
   onSaved,
   onCancel,
+  maviNotes,
 }: {
   company: string;
   initial: IdentityDraft;
+  /** O que a MAVI pediu para conferir no rascunho dela. */
+  maviNotes?: string[];
   /** Os clientes cuja Marca dá para usar (logos e fontes), na empresa e na galeria. */
   clients?: { id: string; name: string }[];
   notify: (message: string) => void;
@@ -330,6 +396,20 @@ export function IdentityEditor({
   return (
     <div className="identity-editor">
       <div className="identity-form">
+        {maviNotes && (
+          <div className="identity-mavi-notes" role="status">
+            <strong>
+              <Sparkles size={13} aria-hidden="true" /> Rascunho da MAVI: confira antes de salvar.
+            </strong>
+            {maviNotes.length > 0 && (
+              <ul>
+                {maviNotes.map((n, i) => (
+                  <li key={i}>{n}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         <div className="identity-row">
           <label className="identity-field">
             <span className="identity-label">Nome</span>
@@ -542,6 +622,8 @@ export function ClientGuide({
 }) {
   const [identity, setIdentity] = useState<IdentityFull | null | undefined>(undefined);
   const [editing, setEditing] = useState<IdentityDraft | null>(null);
+  const [drafting, setDrafting] = useState(false);
+  const [notes, setNotes] = useState<string[] | undefined>(undefined);
   const load = () =>
     clientIdentity(company, client)
       .then(setIdentity)
@@ -566,13 +648,34 @@ export function ClientGuide({
         O tema que a MAVI aplica nos PDFs, PowerPoints, documentos do Word e páginas que gera para {clientName}, e o guia
         que ela segue ao escrever. Sem guia, ela monta o tema com as cores, fontes e logos acima.
       </small>
-      {editing ? (
+      {drafting ? (
+        <MaviDraftForm
+          company={company}
+          scope="client"
+          client={client}
+          current={identity ? draftOf(identity) : null}
+          onCancel={() => setDrafting(false)}
+          onDraft={(d, n) => {
+            setDrafting(false);
+            setNotes(n);
+            setEditing(d);
+          }}
+        />
+      ) : editing ? (
         <IdentityEditor
+          key={`${editing.id ?? "novo"}-${editing.name}-${notes?.length ?? -1}`}
           company={company}
           initial={editing}
+          maviNotes={notes}
           notify={notify}
-          onSaved={() => void load()}
-          onCancel={() => setEditing(null)}
+          onSaved={() => {
+            setNotes(undefined);
+            void load();
+          }}
+          onCancel={() => {
+            setEditing(null);
+            setNotes(undefined);
+          }}
         />
       ) : identity ? (
         <div className="identity-summary">
@@ -587,16 +690,24 @@ export function ClientGuide({
               {new Date(identity.updated_at).toLocaleDateString("pt-BR")}
               {identity.guide.trim() ? ` · guia com ${identity.guide.length.toLocaleString("pt-BR")} caracteres` : " · sem guia escrito"}
             </p>
-            <Button className="btn secondary" onClick={() => setEditing(draftOf(identity))}>
-              Abrir e editar
-            </Button>
+            <div className="identity-card-actions">
+              <Button className="btn secondary" onClick={() => setEditing(draftOf(identity))}>
+                Abrir e editar
+              </Button>
+              <Button className="btn secondary" onClick={() => setDrafting(true)}>
+                <Sparkles size={14} /> Refazer com a MAVI
+              </Button>
+            </div>
           </div>
         </div>
       ) : (
         <div className="identity-summary">
           <p className="muted">Este cliente ainda não tem Guia da marca.</p>
+          <Button className="btn primary" onClick={() => setDrafting(true)}>
+            <Sparkles size={14} /> Gerar com a MAVI
+          </Button>
           <Button className="btn secondary" onClick={() => setEditing(fromBrand())}>
-            <Sparkles size={14} /> Criar a partir da Marca
+            Criar a partir da Marca
           </Button>
         </div>
       )}

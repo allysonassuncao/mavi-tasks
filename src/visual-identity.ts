@@ -333,7 +333,8 @@ function font(raw: unknown, fallback: IdentityFont, faces: BrandFace[]): Identit
 export function sanitizeTokens(raw: unknown, fallback: IdentityTokens = BUILTIN_LOOKS.claro.tokens): IdentityTokens {
   const v = obj(raw) ?? {};
   const c = obj(v.colors) ?? {};
-  const faces = (Array.isArray(v.faces) ? v.faces : [])
+  // Sem fontes ou logo no pedido, ficam as do tema de base (um ajuste só de cores não perde o logo).
+  const faces = (Array.isArray(v.faces) ? v.faces : fallback.faces)
     .map((x) => {
       const f = obj(x);
       if (!f || typeof f.file !== "string" || !UUID.test(f.file)) return null;
@@ -354,7 +355,7 @@ export function sanitizeTokens(raw: unknown, fallback: IdentityTokens = BUILTIN_
   // Sem o texto sobre a principal: o que tiver mais contraste.
   if (!HEX.test(String(c.on_primary ?? "")) && HEX.test(String(c.primary ?? "")))
     colors.on_primary = readableOn(colors.primary, colors.ink);
-  const logo = obj(v.logo) ?? {};
+  const logo = obj(v.logo) ?? fallback.logo;
   const id = (x: unknown) => (typeof x === "string" && UUID.test(x) ? x.toLowerCase() : undefined);
   const radius = Number(v.radius);
   const mode = v.mode === "dark" || v.mode === "light" ? v.mode : luminance(colors.bg) < 0.4 ? "dark" : "light";
@@ -531,4 +532,65 @@ export function describeTokens(t: IdentityTokens) {
     `capa ${COVER_LABELS[t.cover].toLowerCase()}, detalhe ${DECOR_LABELS[t.decor].toLowerCase()}, cantos ${t.radius}px`,
     t.logo.light || t.logo.dark ? "com logo" : "sem logo",
   ].join("; ");
+}
+
+// ------------------------------------------------------------ Guia da marca
+export const GUIDE_SECTIONS = [
+  "Essência",
+  "Tom de voz",
+  "Visual",
+  "Faça",
+  "Evite",
+  "Exemplos aprovados",
+  "Aprendizados",
+] as const;
+export const GUIDE_TEMPLATE = `## Essência
+O que a marca é e como quer ser percebida, em 2 ou 3 frases.
+
+## Tom de voz
+- Como fala (ex.: próximo, direto, sem jargão)
+- Palavras que usa e que evita
+
+## Visual
+- Quando usar fundo escuro ou claro
+- Como usar a cor principal e o destaque
+- Fotos e ilustrações: estilo
+
+## Faça
+-
+
+## Evite
+-
+
+## Exemplos aprovados
+- (documentos, apresentações ou artes que o cliente aprovou)
+
+## Aprendizados
+- (correções do cliente, com a data)
+`;
+const foldText = (s: string) =>
+  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+/**
+ * Põe itens numa seção do guia ("## Faça"): no fim da seção, como tópicos;
+ * sem a seção, ela nasce no fim. Tira os tópicos vazios do modelo ("-") e
+ * os de exemplo entre parênteses; não repete um item que já está lá.
+ */
+export function addToGuide(guide: string, section: string, items: string[], date?: string) {
+  const lines = guide.replace(/\r\n?/g, "\n").split("\n");
+  const want = foldText(section.replace(/^#+\s*/, ""));
+  const start = lines.findIndex((l) => /^##\s+/.test(l) && foldText(l.replace(/^##\s+/, "")) === want);
+  const have = new Set(lines.map((l) => foldText(l.replace(/^\s*[-*]\s+(\(\d{2}\/\d{2}\/\d{4}\)\s*)?/, ""))));
+  const fresh = items
+    .map((i) => i.trim().replace(/^[-*]\s+/, ""))
+    .filter((i) => i && !have.has(foldText(i)))
+    .map((i) => `- ${date ? `(${date}) ` : ""}${i}`);
+  if (!fresh.length) return guide;
+  if (start < 0) return `${guide.trimEnd()}${guide.trim() ? "\n\n" : ""}## ${section.replace(/^#+\s*/, "").trim()}\n${fresh.join("\n")}\n`;
+  let end = lines.findIndex((l, i) => i > start && /^#{1,2}\s+/.test(l));
+  if (end < 0) end = lines.length;
+  const body = lines.slice(start + 1, end).filter((l) => !/^\s*[-*]\s*$/.test(l) && !/^\s*[-*]\s*\(.*\)\s*$/.test(l));
+  while (body.length && !body[body.length - 1].trim()) body.pop();
+  const next = [...lines.slice(0, start + 1), ...body, ...fresh, ...(end < lines.length ? [""] : []), ...lines.slice(end)];
+  return next.join("\n").replace(/\n{3,}/g, "\n\n");
 }

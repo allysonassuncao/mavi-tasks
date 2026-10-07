@@ -76,6 +76,21 @@ export const identityFileUrls = (company: string, files: string[]) =>
       )
     : Promise.resolve({} as Record<string, string>);
 
+/**
+ * "Gerar com a MAVI": um rascunho da identidade (tema e Guia da marca) a
+ * partir da Marca, do site e do que a pessoa pediu. Nada é gravado: a tela
+ * abre no editor.
+ */
+export const draftIdentity = (
+  company: string,
+  input: { scope: IdentityScope; client?: string | null; url?: string; notes?: string; current?: string | null },
+) =>
+  providerAction<{ name: string; description: string; tokens: IdentityTokens; guide: string; notes: string[]; model: string }>({
+    action: "ai-identity-draft",
+    company,
+    ...input,
+  });
+
 /** As páginas do design livre em imagem, para o PowerPoint (links de 15 min). */
 export const canvasPages = (company: string, html: string, files: string[], images: Record<string, string>, format: string) =>
   providerAction<{ urls: string[]; width: number; height: number }>({

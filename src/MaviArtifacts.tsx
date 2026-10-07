@@ -35,6 +35,7 @@ import { TaskCard } from "./MaviTaskCard";
 import { SearchCard, TutorialCard } from "./MaviSearchCard";
 import { runMcpAction } from "./mavi-mcp";
 import { CampaignAlertCard, StateChip } from "./MaviCampaignAlertCard";
+import { IdentityActionCard } from "./MaviIdentityCard";
 import type {
   ActionArtifact,
   ActionProposal,
@@ -115,6 +116,8 @@ export function ArtifactView({
     return <McpActionCard artifact={artifact} host={host} />;
   if (artifact.action.kind === "campaign_alert")
     return <CampaignAlertCard artifact={artifact} host={host} />;
+  if (artifact.action.kind === "identity")
+    return <IdentityActionCard artifact={artifact} host={host} />;
   return <ActionCard artifact={artifact} host={host} />;
 }
 
@@ -574,7 +577,7 @@ function ActionCard({ artifact, host }: { artifact: ActionArtifact; host: Artifa
   const [error, setError] = useState("");
   // "Criar e continuar" no formulário: só a primeira tarefa responde à proposta.
   const decided = useRef(false);
-  const a = artifact.action as Exclude<ActionProposal, { kind: "mcp_call" | "campaign_alert" }>;
+  const a = artifact.action as Exclude<ActionProposal, { kind: "mcp_call" | "campaign_alert" | "identity" }>;
   const waiting = host.streaming || !host.conversation;
   const decide = async (
     next: "confirmed" | "cancelled",
