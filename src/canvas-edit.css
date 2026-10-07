@@ -357,8 +357,7 @@
   white-space: nowrap;
 }
 .mavi-msg-edit {
-  margin-top: 8px;
-  min-width: min(320px, 100%);
+  width: min(360px, 78%);
 }
 .mavi-msg-edit .canvas-card {
   background: #fff;

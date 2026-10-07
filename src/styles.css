@@ -29015,7 +29015,8 @@ main:has(> .mavi-chat) > .error-banner {
   background: #e7ebe9;
   color: var(--ink);
 }
-.mavi-msg.user:has(.mavi-msg-files) {
+.mavi-msg.user:has(.mavi-msg-files),
+.mavi-msg.user:has(.mavi-msg-edit) {
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
@@ -30814,6 +30815,10 @@ a.radar-task-chip:hover {
 /* O rodapé não cobre o fim da página nem a barra de seleção em massa. */
 .app-shell:has(.task-dock) main {
   padding-bottom: 72px;
+}
+/* Na MAVI (tela cheia), as abas flutuam por cima, sem a faixa reservada. */
+.app-shell:has(.task-dock) main:has(> .mavi-chat) {
+  padding-bottom: 0;
 }
 .app-shell:has(.task-dock) .bulk-bar,
 .app-shell:has(.task-dock) .bulk-toast {
