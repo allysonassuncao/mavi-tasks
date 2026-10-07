@@ -729,13 +729,16 @@ export function CsPanelBlocks({ f, p, semana, onSemana, onReceiving, onYear }: {
                   <p className="cs-muted cs-small">
                     {pv.anomalias.length} {plural(pv.anomalias.length, "sinal", "sinais")} · regras: queda HS, queda meta, prob baixa 2x, PERDA recorrente, queda squad, pico churn, M3 com HS&lt;50, concentração de recebimento no fim do mês, ciclo replanejado, recebimento atrás da linha ideal
                   </p>
-                  <div className="cs-stack tight">
-                    {pv.anomalias.map((a, i) => (
-                      <div key={i} className="cs-tight cs-alert-row" {...profileRow(a.cliente_id)}>
-                        <span className={`cs-pill ${a.severidade === "alta" ? "bad" : "warn"}`}>{a.severidade === "alta" ? "ALTA" : "MÉDIA"}</span>
-                        <Html html={a.mensagem} />
-                      </div>
-                    ))}
+                  <div className="cs-anom-list">
+                    {pv.anomalias.map((a, i) => {
+                      const link = profileRow(a.cliente_id);
+                      return (
+                        <div key={i} {...link} className={`cs-anom-row ${link.className ?? ""}`}>
+                          <span className={`cs-pill ${a.severidade === "alta" ? "bad" : "warn"}`}>{a.severidade === "alta" ? "ALTA" : "MÉDIA"}</span>
+                          <Html html={a.mensagem} />
+                        </div>
+                      );
+                    })}
                   </div>
                 </Card>
               )}

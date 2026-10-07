@@ -813,6 +813,28 @@
 .cs-table tr.group.bad td {
   background: #fdf3f2;
 }
+/* Detector de anomalias: uma linha por sinal, selo de largura fixa. */
+.cs-anom-list {
+  display: grid;
+  margin-top: 6px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.cs-anom-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  border-top: 1px solid #f0f2f1;
+  border-radius: 6px;
+}
+.cs-anom-row:first-child {
+  border-top: 0;
+}
+.cs-anom-row > .cs-pill {
+  justify-self: start;
+}
 .cs-row-link {
   cursor: pointer;
 }
