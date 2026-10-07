@@ -58,7 +58,8 @@ describe("a MAVI e os tutoriais", () => {
     expect(calls[0].body).toMatchObject({ p_module: "tasks", p_strict: false, p_embedding: "[0.1]", p_limit: 6 });
     expect(out).toContain("[S1] Tutorial “Como criar uma tarefa” › Prazo · Tarefas\nSeção: Prazo");
     expect(out).toContain("[S3] Tutorial “Busca avançada” · Tarefas");
-    expect(out).toContain("Escreva [[B#]] do tutorial que respondeu");
+    expect(out).toContain("Escreva [[B#]] só do tutorial que responde à dúvida");
+    expect(out).toContain("se nenhum responde, não escreva [[B#]]");
     // Um cartão por tutorial, a melhor seção de cada um.
     expect(cards).toEqual([
       { tutorial, anchor: "prazo", title: "Como criar uma tarefa", section: "Prazo", summary: "O básico de Tarefas" },

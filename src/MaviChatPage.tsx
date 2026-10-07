@@ -1201,7 +1201,11 @@ function ChatThread({
     const revised = new Set(
       (t.artifacts ?? []).flatMap((a) => (a.type === "image" && a.art && a.edited_from ? [a.edited_from] : [])),
     );
-    return (t.artifacts ?? []).filter((a) => !placed.has(a.ref) && !revised.has(a.ref));
+    // Os cartões de tutorial só aparecem onde a resposta os citou: a busca
+    // traz os mais próximos mesmo quando nenhum responde à pergunta.
+    return (t.artifacts ?? []).filter(
+      (a) => a.type !== "tutorial" && !placed.has(a.ref) && !revised.has(a.ref),
+    );
   };
 
   const composer = readOnly ? (

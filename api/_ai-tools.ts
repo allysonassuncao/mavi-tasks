@@ -2136,7 +2136,7 @@ export async function searchTutorials(
       );
     }
   const card = cards.length
-    ? `\n\nCartões que abrem o tutorial na seção: ${cards.join("; ")}. Escreva [[B#]] do tutorial que respondeu, sozinho numa linha, no fim da resposta.`
+    ? `\n\nCartões que abrem o tutorial na seção: ${cards.join("; ")}. Escreva [[B#]] só do tutorial que responde à dúvida da pessoa, sozinho numa linha, no fim da resposta. Tutorial de outro assunto não vira cartão nem sugestão: se nenhum responde, não escreva [[B#]].`
     : "";
   return `${lines.join("\n\n")}\n\nResponda só com o que estas seções dizem e cite [S#]. Se nenhuma responde à dúvida, diga que ainda não há tutorial sobre isso (sem inventar passos) e chame report_missing_tutorial.${card}`;
 }
