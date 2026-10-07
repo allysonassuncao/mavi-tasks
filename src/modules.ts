@@ -60,6 +60,9 @@ export const MEMBER_PAGES: readonly Page[] = [
   "inbox",
   // Tutoriais: todos leem (cada tutorial tem o seu público); líderes escrevem.
   "tutorials",
+  // Customer Success: líderes e quem está num squad (a página confere,
+  // migração 20270525090000); o menu só mostra para eles.
+  "customerSuccess",
   ...MEMBER_OPT_IN,
 ];
 /**

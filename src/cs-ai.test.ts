@@ -36,6 +36,15 @@ describe("ferramentas de Customer Success", () => {
     const k = kpiStripData(engineFor(base), { mes_ref: monthStart(base.today), squad_id: null, dim: "tudo" });
     expect(run(all, "cs_kpi").data.kpi.fat_mes).toBe(k.fat_mes);
   });
+  it("fonte MAVI: o último lançamento no lugar da leitura, sem alerta de planilha velha", () => {
+    const old = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    const r = run({ ...all, sync: { source: "mavi", finished_at: old, status: "ok", warnings: 0 } }, "cs_kpi").contexto_dados;
+    expect(r.fonte).toMatch(/Lançamentos no MAVI/);
+    expect(r.ultimo_lancamento).toBe(old);
+    expect(r.alerta).toBeUndefined();
+    const sheet = run({ ...all, sync: { source: "sheet", finished_at: old, status: "ok", warnings: 0 } }, "cs_kpi").contexto_dados;
+    expect(sheet.alerta).toMatch(/desatualizados/);
+  });
   it("as regras trazem os valores em vigor", () => {
     expect(run(all, "cs_regras").data.regra_m1.resumo).toContain("3.000");
   });

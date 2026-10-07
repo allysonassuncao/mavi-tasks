@@ -544,3 +544,11 @@
   background: #fdf6ea;
   font-size: 0.78rem;
 }
+
+/* A fonte dos dados de CS (fase 5): planilha ou MAVI. */
+.cs-source.sheet {
+  border-left: 4px solid #b07a12;
+}
+.cs-source.mavi {
+  border-left: 4px solid #2f8a5b;
+}

@@ -32,6 +32,8 @@ import {
 } from "./cs";
 import type { Snapshot } from "./types";
 import { CsRulesCard } from "./CsRules";
+import { demoEntry, realEntry, type CsEntryAccess } from "./cs-entry";
+import { SourceSwitchDialog } from "./CsSourceSwitch";
 import "./cs.css";
 
 const RUN_ICON = { ok: CheckCircle2, warning: AlertTriangle, error: XCircle };
@@ -58,18 +60,22 @@ export function CsSettingsPanel({
   const [clients, setClients] = useState<CsClient[] | null>(null);
   const [squads, setSquads] = useState<CsSquad[]>([]);
   const [error, setError] = useState("");
+  const [access, setAccess] = useState<CsEntryAccess | null>(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const api = useMemo(() => (demo ? demoCs(data) : realCs), [demo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const entry = useMemo(() => (demo ? demoEntry() : realEntry), [demo]);
   const load = useCallback(() => {
-    Promise.all([api.settings(company), api.clients(company), api.squads(company)])
-      .then(([s, c, q]) => {
+    Promise.all([api.settings(company), api.clients(company), api.squads(company), entry.access(company).catch(() => null)])
+      .then(([s, c, q, a]) => {
         setSettings(s);
         setClients(c);
         setSquads(q);
+        setAccess(a);
         setError("");
       })
       .catch((e) => setError((e as Error).message));
-  }, [api, company]);
+  }, [api, entry, company]);
   useEffect(() => {
     load();
     let timer: number | undefined;
@@ -93,7 +99,12 @@ export function CsSettingsPanel({
   if (!settings || !clients) return <Loading compact />;
   return (
     <div className="cs-settings" id="config-cs">
-      <SheetCard api={api} company={company} settings={settings} onSettings={setSettings} onReload={load} notify={notify} />
+      {access && <SourceCard access={access} company={company} demo={demo} notify={notify} onSwitch={(a) => {
+        setAccess(a);
+        load();
+      }} />}
+      <SheetCard api={api} company={company} settings={settings} onSettings={setSettings} onReload={load} notify={notify}
+        fromMavi={access?.source === "mavi"} />
       <ClientsCard
         api={api}
         data={data}
@@ -110,6 +121,47 @@ export function CsSettingsPanel({
   );
 }
 
+// ------------------------------------------------------------ a chave (fase 5)
+function SourceCard({ access, onSwitch, company, demo, notify }: {
+  access: CsEntryAccess;
+  onSwitch: (a: CsEntryAccess) => void;
+  company: string;
+  demo: boolean;
+  notify: (message: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const mavi = access.source === "mavi";
+  return (
+    <section className={`panel cs-source ${mavi ? "mavi" : "sheet"}`}>
+      <div className="panel-heading">
+        <div>
+          <h2>Fonte dos dados de CS: {mavi ? "MAVI" : "planilha"}</h2>
+          <p>
+            {mavi
+              ? "Os lançamentos são feitos em Customer Success, no menu. A planilha não é mais lida; o histórico ficou."
+              : "A planilha manda: o MAVI lê a cada 10 minutos e a tela de Customer Success é só prévia. Quando o time estiver pronto, vire a chave."}
+            {access.source_changed_at && ` Trocada em ${new Date(access.source_changed_at).toLocaleDateString("pt-BR")}` +
+              `${access.source_changed_by ? ` por ${access.source_changed_by}` : ""}.`}
+          </p>
+        </div>
+        {access.can_switch && (
+          <Button className={`btn ${mavi ? "secondary" : "primary"}`} onClick={() => setOpen(true)}>
+            {mavi ? "Voltar para a planilha" : "Virar para o MAVI"}
+          </Button>
+        )}
+      </div>
+      {!access.can_switch && <small className="cs-hint">Só administradores trocam a fonte.</small>}
+      {open && (
+        <SourceSwitchDialog api={demo ? demoEntry() : realEntry} company={company} access={access} notify={notify}
+          onClose={() => setOpen(false)} onDone={(a) => {
+            setOpen(false);
+            onSwitch(a);
+          }} />
+      )}
+    </section>
+  );
+}
+
 // ------------------------------------------------------------ planilha
 function SheetCard({
   api,
@@ -118,6 +170,7 @@ function SheetCard({
   onSettings,
   onReload,
   notify,
+  fromMavi = false,
 }: {
   api: CsBackend;
   company: string;
@@ -125,6 +178,8 @@ function SheetCard({
   onSettings: (s: CsSettings) => void;
   onReload: () => void;
   notify: (message: string) => void;
+  /** A fonte virou o MAVI: a planilha não é mais lida. */
+  fromMavi?: boolean;
 }) {
   const [link, setLink] = useState(settings.sheet_id ? sheetUrl(settings.sheet_id) : "");
   const [enabled, setEnabled] = useState(settings.enabled || !settings.sheet_id);
@@ -181,11 +236,12 @@ function SheetCard({
         <div>
           <h2>Planilha mestre de CS</h2>
           <p>
-            A planilha continua sendo a fonte da verdade. O MAVI lê todas as abas a cada 10 minutos: o que muda lá
-            muda aqui, e o que some de lá some daqui (com as salvaguardas do dash antigo).
+            {fromMavi
+              ? "Desligada: a fonte dos dados de CS é o MAVI. O link fica guardado para voltar a ela, se preciso."
+              : "A planilha continua sendo a fonte da verdade. O MAVI lê todas as abas a cada 10 minutos: o que muda lá muda aqui, e o que some de lá some daqui (com as salvaguardas do dash antigo)."}
           </p>
         </div>
-        {settings.sheet_id && (
+        {settings.sheet_id && !fromMavi && (
           <Button className="btn secondary" loading={syncing || settings.running} onClick={() => void sync()}>
             <RefreshCw size={16} /> Sincronizar agora
           </Button>

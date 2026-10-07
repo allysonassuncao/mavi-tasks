@@ -55,6 +55,7 @@ import {
   Plug,
   HardDrive,
   PanelsTopLeft,
+  HeartHandshake,
   Megaphone,
   Rocket,
   Trophy,
@@ -319,6 +320,9 @@ const DashboardsPage = lazy(() =>
   import("./DashboardsPage").then((m) => ({ default: m.DashboardsPage })),
 );
 // Editor and reader of the guides: loaded when first opened.
+const CustomerSuccessPage = lazy(() =>
+  import("./CustomerSuccessPage").then((m) => ({ default: m.CustomerSuccessPage })),
+);
 const TutorialsPage = lazy(() =>
   import("./TutorialsPage").then((m) => ({ default: m.TutorialsPage })),
 );
@@ -350,6 +354,7 @@ const navigation = [
   { id: "storage", label: "Armazenamento", icon: Database },
   { id: "aiUsage", label: "Painel da MAVI", icon: Sparkles },
   { id: "dashboards", label: "Dashboards", icon: PanelsTopLeft },
+  { id: "customerSuccess", label: "Customer Success", icon: HeartHandshake },
   { id: "tutorials", label: "Tutoriais", icon: GraduationCap },
 ] as const;
 // Mutations that return the affected row (see the RPCs in
@@ -1284,6 +1289,33 @@ export default function App() {
       alive = false;
     };
   }, [demo, company, session, isLeader, skillsTick, skillNotices]);
+  // Customer Success no menu: líderes e quem está num squad, nas empresas
+  // com clientes de CS (cs_ai_access); relido quando os squads mudam.
+  const [csCompanies, setCsCompanies] = useState<string[]>([]);
+  const [csTick, setCsTick] = useState(0);
+  useEffect(() => {
+    const onCs = (e: Event) => {
+      const scope = (e as CustomEvent<{ scope?: string }>).detail?.scope;
+      if (scope === "squads" || scope === "sync") setCsTick((n) => n + 1);
+    };
+    window.addEventListener("mavi:cs", onCs);
+    return () => window.removeEventListener("mavi:cs", onCs);
+  }, []);
+  useEffect(() => {
+    if (demo || !session) return;
+    let alive = true;
+    api
+      .rpc("cs_ai_access")
+      .then((list) => {
+        if (alive)
+          setCsCompanies(((list ?? []) as { company_id: string }[]).map((x) => x.company_id));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [demo, session, csTick]);
+  const csAccess = demo ? isLeader : !!company && csCompanies.includes(company);
   // Tutoriais no menu: as trilhas obrigatórias que a pessoa ainda não
   // concluiu; relido pelos avisos ao vivo das trilhas e do progresso dela e
   // quando chega o aviso de uma trilha na caixa de entrada.
@@ -2826,6 +2858,7 @@ export default function App() {
             skillCount={pendingSkills}
             personalRadarCount={personalOpen}
             tutorialCount={pendingTrails}
+            csAccess={csAccess}
             noticeCount={noticeCount || undefined}
             products={data.products.filter(
               (p) =>
@@ -3116,6 +3149,8 @@ export default function App() {
                         : "Quanto a MAVI custou, os limites de gasto e o que o Assistente MAVI aprendeu com o feedback do time.",
                       dashboards:
                         "Indicadores personalizados de tarefas e horas, em painéis que você monta e compartilha.",
+                      customerSuccess:
+                        "Os lançamentos de CS do mês, como na planilha: ciclos, pagamentos, Health Score, clientes e metas dos squads.",
                       tutorials: isLeader
                         ? "Guias de uso do sistema: escreva passo a passos com seções, imagens e vídeos e escolha quem vê."
                         : "Guias de uso do sistema: aprenda cada tela com passo a passos, imagens e vídeos.",
@@ -3164,6 +3199,7 @@ export default function App() {
                   page !== "skills" &&
                   page !== "connections" &&
                   page !== "dashboards" &&
+                  page !== "customerSuccess" &&
                   page !== "tutorials" &&
                   page !== "settings" &&
                   (!["products", "contracts", "clients", "projects"].includes(
@@ -4330,6 +4366,16 @@ export default function App() {
                     key={company}
                     company={company}
                     data={catalogData}
+                  />
+                </Suspense>
+              )}
+              {page === "customerSuccess" && (
+                <Suspense fallback={<Loading variant="grid" />}>
+                  <CustomerSuccessPage
+                    key={company}
+                    company={company}
+                    demo={demo}
+                    notify={notify}
                   />
                 </Suspense>
               )}

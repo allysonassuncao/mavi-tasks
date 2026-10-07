@@ -10,7 +10,7 @@ import { csPill, useCs } from "./CsCommon";
  * A sugestão de Health Score da MAVI (fase 4b, migração 20270524090000): no
  * Bloco 3 do CS Make, a lista do mês com a nota lançada ao lado da sugerida;
  * no perfil do cliente, cada critério com o porquê e a evidência. O time
- * confere e lança na planilha.
+ * confere e lança (Customer Success › Health Score, ou a planilha enquanto ela for a fonte).
  */
 
 const MARK = (v: boolean | null | undefined) => (v === true ? "✓" : v === false ? "✗" : "?");
@@ -44,7 +44,7 @@ export function HsSuggestionsCard({ mes }: { mes: string }) {
           <div className="cs-label"><Sparkles size={13} /> Sugestão de Health Score da MAVI — {labelMesFull(mes)}</div>
           <span className="cs-muted cs-small">
             Pagamento e reunião pelos dados; meta, percepção de valor e criativos a MAVI lê nas campanhas, Termômetro, Social Leads,
-            WhatsApp e Radar. Confira e lance na planilha.
+            WhatsApp e Radar. Confira e lance (em Customer Success, ou na planilha enquanto ela for a fonte).
           </span>
         </div>
         {requestHs && (
@@ -154,7 +154,7 @@ export function HsProfileSection({ client }: { client: string }) {
           );
         })}
       </ul>
-      <small className="cs-muted">Sugestão para conferir: o Health Score que vale é o lançado na planilha.</small>
+      <small className="cs-muted">Sugestão para conferir: o Health Score que vale é o lançado.</small>
     </div>
   );
 }

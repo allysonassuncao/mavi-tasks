@@ -30,6 +30,7 @@ export const pagePaths = {
   skills: "/mavi/skills",
   connections: "/mavi/conexoes",
   dashboards: "/dashboards",
+  customerSuccess: "/customer-success",
   tutorials: "/tutoriais",
   profile: "/perfil",
   /** The profile of another person: /pessoas/<id> (personIdFromPath). */

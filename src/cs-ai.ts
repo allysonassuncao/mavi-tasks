@@ -25,7 +25,7 @@ import { engineFor } from "./cs-sources.js";
 
 export type CsAiData = CsData & {
   access: { scope: "all" | "squads"; squads?: string[] };
-  sync?: { finished_at: string | null; status: string; warnings: number } | null;
+  sync?: { source?: "sheet" | "mavi"; finished_at: string | null; status: string; warnings: number } | null;
 };
 type Schema = Record<string, unknown>;
 export type CsToolDef = { name: string; description: string; inputSchema: Schema };
@@ -197,7 +197,7 @@ export const CS_INSTRUCTIONS = `Customer Success (ferramentas cs_*): os dados do
 4. Trial: M1→M2→M3 (M4+ = estendido), depois gradua para Base. Trial vs Base usa a fase do cliente NAQUELE mês (histórica).
 5. ACL: o pagamento do mês de conclusão entra na categoria ACL (pode ser parcial).
 6. Net churn = entradas (novos + reativações) − saídas. Mensalidade pós-graduação é receita À PARTE: nunca some com o faturamento da meta.
-7. O mês corrente está SEMPRE em aberto (números parciais). Toda resposta traz contexto_dados com a última leitura da planilha e os avisos: cite quando importar.
+7. O mês corrente está SEMPRE em aberto (números parciais). Toda resposta traz contexto_dados com a fonte (planilha ou lançamento no MAVI), a última leitura ou o último lançamento e os avisos: cite quando importar.
 8. SQUAD É ATRIBUTO DO MÊS: o recorte por squad num mês passado usa o squad que o cliente tinha naquele mês. Um squad que operava aparecer zerado é erro: avise.
 9. CICLO ≠ COBRANÇA: o calendário de recebimento usa a data de cobrança; o fim do ciclo é o que se ajusta para mover a cobrança (use cs_recebimento).
 Fluxo: cs_regras (regras completas) → cs_listar (meses, métricas) → as ferramentas específicas. "Vamos bater a meta?" → cs_meta_gap; "de quem recebemos menos?" → cs_gap_recebimento; "vs o mesmo período do mês passado" → cs_ritmo; "recebimento concentrado / quem antecipar" → cs_recebimento.`;
@@ -229,6 +229,17 @@ function resolveSquad(e: CsEngine, data: CsAiData, raw: unknown): { id: string |
 
 function contextoDados(data: CsAiData, e: CsEngine, now: number) {
   const s = data.sync;
+  // Fonte MAVI (migração 20270525090000): lançado na tela de Customer Success, sem leitura da planilha.
+  if (s?.source === "mavi") {
+    const ctx: Record<string, unknown> = {
+      fonte: "Lançamentos no MAVI (Customer Success); a planilha não é mais lida",
+      ultimo_lancamento: s.finished_at,
+      mes_corrente: `${e.today.slice(0, 7)} está EM ABERTO — números do mês corrente são parciais`,
+    };
+    if (data.access.scope === "squads")
+      ctx.escopo = `Você vê só o seu squad: ${(data.access.squads ?? []).map((id) => e.squadName(id)).join(", ")}.`;
+    return ctx;
+  }
   const ctx: Record<string, unknown> = {
     ultima_leitura_da_planilha: s?.finished_at ?? null,
     status_da_leitura: s?.status ?? "nunca lida",

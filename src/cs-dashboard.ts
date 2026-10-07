@@ -29,7 +29,13 @@ import {
  * dash/lib/periodo.php) e os dados da demonstração.
  */
 
-export type CsSync = { finished_at: string | null; status: "ok" | "warning" | "error" | "running"; warnings: number } | null;
+export type CsSync = {
+  /** A fonte dos dados (migração 20270525090000): na fonte MAVI, finished_at é o último lançamento. */
+  source?: "sheet" | "mavi";
+  finished_at: string | null;
+  status: "ok" | "warning" | "error" | "running";
+  warnings: number;
+} | null;
 export type CsLoaded = CsData & { access: "editor" | "viewer"; sync: CsSync };
 /** De onde vêm os dados: o dashboard no app, o link (público/senha) ou a demonstração. */
 export type CsSource =

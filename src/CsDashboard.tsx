@@ -177,7 +177,7 @@ function CsDashboardScreen({ data, onReload, onSync, head, hsCompany, tick }: {
           {head}
           <div className="cs-dash-sync">
             <SyncChip sync={data.sync} />
-            {onSync && (
+            {onSync && data.sync?.source !== "mavi" && (
               <Button className="btn secondary small" onClick={() => void sync()} loading={syncing} title="Ler a planilha de CS agora">
                 <RefreshCw size={14} /> Sincronizar agora
               </Button>
@@ -275,6 +275,12 @@ function SyncChip({ sync }: { sync: CsLoaded["sync"] }) {
     if (s < 86400) return `há ${Math.round(s / 3600)} h`;
     return `em ${new Date(iso).toLocaleDateString("pt-BR")}`;
   };
+  if (sync?.source === "mavi")
+    return (
+      <span className="cs-sync" title="Os dados de CS são lançados em Customer Success, no menu">
+        ✍️ Lançado no MAVI{sync.finished_at ? ` · última alteração ${ago(sync.finished_at)}` : ""}
+      </span>
+    );
   if (!sync || !sync.finished_at)
     return <span className="cs-sync bad">⚠️ A planilha de CS ainda não foi lida</span>;
   if (sync.status === "error")

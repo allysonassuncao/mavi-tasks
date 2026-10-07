@@ -8,6 +8,7 @@ import {
   Database,
   FolderKanban,
   GraduationCap,
+  HeartHandshake,
   HardDrive,
   LayoutDashboard,
   PanelsTopLeft,
@@ -81,6 +82,7 @@ export function SidebarNav({
   noticeCount,
   personalRadarCount,
   tutorialCount,
+  csAccess = false,
   products,
   href,
   onNavigate,
@@ -104,6 +106,8 @@ export function SidebarNav({
   personalRadarCount?: number;
   /** Tutoriais: as trilhas obrigatórias que a pessoa ainda não concluiu. */
   tutorialCount?: number;
+  /** Customer Success: líderes e quem está num squad (cs_ai_access). */
+  csAccess?: boolean;
   products: Pick<Product, "id" | "name" | "color">[];
   href: (to: NavTarget) => string;
   onNavigate: (to: NavTarget) => void;
@@ -342,6 +346,16 @@ export function SidebarNav({
           icon: PanelsTopLeft,
           to: { page: "dashboards" },
         },
+        ...(csAccess
+          ? [
+              {
+                key: "customerSuccess",
+                label: "Customer Success",
+                icon: HeartHandshake,
+                to: { page: "customerSuccess" as const },
+              },
+            ]
+          : []),
       ],
     },
     {
