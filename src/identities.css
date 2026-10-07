@@ -242,71 +242,209 @@
   font-size: 0.78rem;
 }
 
-/* MAVI › Identidades */
+/* MAVI › Identidades (no padrão de Conexões da MAVI: seções com título
+   pequeno, grade de cartões e estado vazio num painel). */
 .identities-page {
   display: flex;
   flex-direction: column;
   gap: 22px;
 }
-.identities-section h2 {
-  margin: 0 0 4px;
-  font-size: 1rem;
+.identities-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
-.identities-section > p {
-  margin: 0 0 12px;
-  color: #4f5c5c;
+.identities-toolbar > p {
+  flex: 1;
+  min-width: 260px;
+  margin: 0;
   font-size: 0.82rem;
-  max-width: 70ch;
+  line-height: 1.55;
+  color: #4f5c5c;
+}
+.identities-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.identities-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: #4f5c5c;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.identities-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #eef2ee;
+  font-size: 0.7rem;
+  letter-spacing: 0;
+  color: #4f5c5c;
 }
 .identities-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
 }
 .identity-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid #e3e8e5;
-  border-radius: 12px;
-  background: #fff;
+  gap: 12px;
+  padding: 12px;
+  min-width: 0;
+}
+.identity-card-art {
+  border-radius: 9px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px #0000000d;
 }
 .identity-card-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 4px;
+}
+.identity-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
-.identity-card-body strong {
-  font-size: 0.85rem;
+.identity-card-title strong {
+  font-size: 0.9rem;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.identity-card-body small {
-  color: #6b7775;
-  font-size: 0.74rem;
-  line-height: 1.4;
+.identity-card-badge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #eef4e5;
+  color: #4f7d2d;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+.identity-card-body p {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: #5d6a68;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .identity-card-actions {
   display: flex;
-  gap: 6px;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin-top: auto;
+  padding: 0 4px 2px;
 }
-.identity-new {
+.identity-card-remove {
+  margin-left: auto;
+}
+/* A identidade da empresa: um cartão só, na horizontal. */
+.identities-grid.single {
+  grid-template-columns: minmax(0, 720px);
+}
+.identity-card.wide {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
+  gap: 8px 18px;
+}
+.identity-card.wide .identity-card-art {
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+.identity-card.wide .identity-card-body {
+  padding: 4px 0 0;
+}
+.identity-card.wide .identity-card-actions {
+  padding: 0 0 2px;
+}
+@media (max-width: 640px) {
+  .identities-toolbar > p {
+    flex-basis: 100%;
+  }
+  .identity-card.wide {
+    grid-template-columns: 1fr;
+  }
+  .identity-card.wide .identity-card-art {
+    grid-row: auto;
+  }
+}
+.identities-empty {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 18px 20px;
+}
+.identities-empty-icon {
   display: grid;
   place-items: center;
-  gap: 6px;
-  min-height: 160px;
-  border: 1.5px dashed #c9d3cf;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
   border-radius: 12px;
-  background: #fafcf9;
-  color: #4f5c5c;
-  font-size: 0.82rem;
-  cursor: pointer;
+  background: #263334;
+  color: #c8ec8e;
 }
-.identity-new:hover {
-  border-color: #4f7d2d;
-  color: #2f6b1e;
+.identities-empty-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 220px;
+}
+.identities-empty-text strong {
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+.identities-empty-text p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #5d6a68;
+}
+.identities-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* O editor e o "Gerar com a MAVI" num painel. */
+.identities-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px 22px 22px;
+}
+.identities-panel-head h2 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+.identities-panel-head p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #4f5c5c;
+  max-width: 70ch;
 }
 
 @media (max-width: 900px) {
