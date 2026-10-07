@@ -171,6 +171,39 @@ await check("a ação é decidida uma vez, só por quem começou a conversa", as
   );
 });
 
+await check("os cartões da Busca avançada e do tutorial ficam gravados", async () => {
+  // find_tasks (search) e search_tutorials (tutorial).
+  const cards = [
+    { id: "search-0001", ref: "B1", type: "search", query: "termo=site", request: "site", total: 3 },
+    {
+      id: "tutorial-0001",
+      ref: "B2",
+      type: "tutorial",
+      tutorial: uid(60),
+      anchor: "",
+      title: "Dashboards",
+      section: "",
+      summary: "Como montar",
+    },
+  ];
+  await one(
+    ana,
+    "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','Onde?','Veja [[B2]]','[]'::jsonb,'[]'::jsonb,$3::jsonb)",
+    [A, conversation, JSON.stringify(cards)],
+  );
+  const [saved] = await q(ana, "select artifacts from ai_messages where conversation_id = $1 and role = 'assistant' order by id desc limit 1", [conversation]);
+  assert.deepEqual(saved.artifacts.map((a) => a.type), ["search", "tutorial"]);
+  await assert.rejects(
+    () =>
+      q(ana, "select public.ai_save_turn($1,$2,'{}'::jsonb,'assistant','Q','R','[]'::jsonb,'[]'::jsonb,$3::jsonb)", [
+        A,
+        conversation,
+        JSON.stringify([{ ...cards[1], tutorial: "x" }]),
+      ]),
+    /Anexos da resposta inválidos/,
+  );
+});
+
 await check("cada chamada de ferramenta entra no Consumo (só líderes veem)", async () => {
   await q(ana, "select public.ai_log_tool_calls($1,$2,'assistant',$3::jsonb)", [
     A,
