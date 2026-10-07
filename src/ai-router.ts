@@ -78,6 +78,8 @@ export type RouterSettings = {
   /** Fase 5: no automático, só modelos aprovados no conjunto de avaliação (nota mínima de 0 a 1). */
   gate_enabled: boolean;
   gate_min: number;
+  /** Os modelos que o roteador pode escolher ("provedor|modelo"; o Servidor pelo id zero). null: todos. */
+  route_models: string[] | null;
   updated_at?: string | null;
   scopes: RouterScope[];
 };
@@ -208,6 +210,7 @@ export function demoRouter(): RouterApi {
     eval_daily_cap: 0.5,
     gate_enabled: false,
     gate_min: 0.8,
+    route_models: null,
     scopes: [],
   };
   return {

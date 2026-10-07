@@ -255,3 +255,20 @@
     align-items: stretch;
   }
 }
+
+.rtr-model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rtr-model-group > strong {
+  font-size: 0.82rem;
+}
+.rtr-providers label.cins-check[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+.rtr-off {
+  color: var(--muted);
+  font-size: 0.74rem;
+}

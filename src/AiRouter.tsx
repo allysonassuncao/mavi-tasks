@@ -5,7 +5,7 @@ import { Modal } from "./components";
 import { contractProductLabel } from "./domain";
 import type { Snapshot } from "./types";
 import type { AiLibrary } from "./ai";
-import { featureInfo, isLinkTranscriber } from "./ai-providers";
+import { CATALOG, featureInfo, isJevModel, isLinkTranscriber, isNonChatModel } from "./ai-providers";
 import { FieldHistory } from "./AiSettingsLog";
 import {
   LEVELS,
@@ -67,6 +67,7 @@ export function RouterPanel({
   library,
   reloadLibrary,
   notify,
+  serverKey = true,
 }: {
   api: RouterApi;
   /** A empresa (nulo na demonstração: o Automático das regras fica só na tela). */
@@ -75,6 +76,8 @@ export function RouterPanel({
   library: AiLibrary | null;
   reloadLibrary: () => Promise<void>;
   notify: (message: string) => void;
+  /** A Claude do servidor está configurada (os modelos dela entram na lista). */
+  serverKey?: boolean;
 }) {
   const [s, setS] = useState<RouterSettings | null>(null);
   const [error, setError] = useState("");
@@ -268,6 +271,14 @@ export function RouterPanel({
         </div>
       </section>
 
+      <ModelPicker
+        library={library}
+        serverKey={serverKey}
+        value={s.route_models}
+        disabled={saving}
+        onChange={(v) => void save({ route_models: v }, "Modelos do roteamento salvos.")}
+      />
+
       <section className="panel cins-block">
         <h3>Privacidade</h3>
         <ProviderPicker
@@ -389,6 +400,107 @@ export function RouterPanel({
         />
       )}
     </div>
+  );
+}
+
+type PickRow = { key: string; label: string; off?: string };
+
+/**
+ * Os modelos que o roteador pode escolher, a partir dos provedores e modelos
+ * cadastrados (e das Claudes do servidor). O Jev (validador) e os modelos que
+ * não conversam aparecem travados.
+ */
+function ModelPicker({
+  library,
+  serverKey,
+  value,
+  disabled,
+  onChange,
+}: {
+  library: AiLibrary | null;
+  serverKey: boolean;
+  value: string[] | null;
+  disabled?: boolean;
+  onChange: (v: string[] | null) => void;
+}) {
+  const groups = useMemo(() => {
+    const out: { id: string; name: string; note?: string; rows: PickRow[] }[] = [];
+    for (const p of library?.providers ?? []) {
+      if (isLinkTranscriber(p.kind)) continue;
+      out.push({
+        id: p.id,
+        name: p.name,
+        note: p.active ? undefined : "desligado",
+        rows: p.models.map((m) => ({
+          key: `${p.id}|${m.id}`,
+          label: m.label || m.id,
+          off: isJevModel(m.id) ? "Validador (não responde)" : isNonChatModel(m.id) ? "Não conversa" : undefined,
+        })),
+      });
+    }
+    if (serverKey)
+      out.push({
+        id: SERVER_PROVIDER,
+        name: "Servidor (Claude da Vercel)",
+        rows: (CATALOG.find((c) => c.kind === "anthropic")?.models ?? []).map((m) => ({
+          key: `${SERVER_PROVIDER}|${m.id}`,
+          label: m.label || m.id,
+        })),
+      });
+    return out;
+  }, [library, serverKey]);
+  const chat = groups.flatMap((g) => g.rows.filter((r) => !r.off).map((r) => r.key));
+  const all = value === null;
+  const picked = new Set(value ?? chat);
+  return (
+    <section className="panel cins-block">
+      <div className="rtr-head">
+        <h3>Modelos que o roteador pode escolher</h3>
+        <FieldHistory title="Modelos do roteamento" area="router" fields={["route_models"]} />
+      </div>
+      <p className="cins-help">
+        No automático, a MAVI só escolhe entre os modelos marcados (também na reserva e na segunda tentativa). Regras
+        travadas em <a href="#regras">Quem usa qual modelo</a> continuam valendo. O Jev confere e audita respostas (no
+        Termômetro e na autoavaliação) e não responde pela MAVI; modelos de transcrição, imagem e vetores também ficam de
+        fora. Para cadastrar mais modelos, use <a href="#provedores">Provedores e modelos</a>.
+      </p>
+      <fieldset className="rtr-providers" disabled={disabled}>
+        <label className="cins-check">
+          <Checkbox checked={all} onCheckedChange={(v) => onChange(v === true ? null : chat)} />
+          <span>
+            <strong>Todos os modelos de conversa</strong>
+            <small>Inclui os que forem cadastrados depois.</small>
+          </span>
+        </label>
+        {!all &&
+          groups.map((g) => (
+            <div key={g.id} className="rtr-model-group">
+              <strong>
+                {g.name}
+                {g.note && <small className="muted"> · {g.note}</small>}
+              </strong>
+              <div className="rtr-provider-list">
+                {g.rows.map((r) => (
+                  <label key={r.key} className="cins-check" aria-disabled={!!r.off}>
+                    <Checkbox
+                      checked={!r.off && picked.has(r.key)}
+                      disabled={!!r.off}
+                      onCheckedChange={(v) => {
+                        const next = v === true ? [...picked, r.key] : [...picked].filter((k) => k !== r.key);
+                        if (next.length) onChange(next);
+                      }}
+                    />
+                    <span>
+                      {r.label}
+                      {r.off && <small className="rtr-off"> · {r.off}</small>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+      </fieldset>
+    </section>
   );
 }
 

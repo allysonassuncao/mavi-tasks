@@ -233,6 +233,7 @@ function AdminTabs({
           library={library}
           reloadLibrary={reload}
           notify={notify}
+          serverKey={defaults?.claudeKey !== false}
         />
       ) : tab === "provedores" ? (
         <AiProvidersPanel

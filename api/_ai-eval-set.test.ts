@@ -144,3 +144,43 @@ describe("conjunto de avaliação", () => {
     expect(calls.some((u) => u.includes("ai_eval_fail"))).toBe(true);
   });
 });
+
+describe("modelos do roteamento e o Jev", () => {
+  const jev = { providerId: "or", provider: "OpenRouter", kind: "openrouter", model: "typesafe/jev-1", price: { id: "typesafe/jev-1", input: 0.1, output: 0.1 } };
+  const sonnet = { providerId: "or", provider: "OpenRouter", kind: "openrouter", model: "anthropic/claude-sonnet-4.5", price: { id: "x", input: 3, output: 15 } };
+
+  it("o Jev nunca responde: fica de fora como validador, mesmo sendo o mais barato", () => {
+    const ch = chooseRoute({ signals: simple, ctx: ctx({ candidates: [jev, sonnet] }), current: null });
+    expect(ch.pick?.model).toBe("anthropic/claude-sonnet-4.5");
+    expect(ch.decision.scored.find((x) => x.model === "typesafe/jev-1")?.out).toBe("validador (não responde)");
+    expect(ch.fallbacks.some((c) => c.model === "typesafe/jev-1")).toBe(false);
+    expect(strongerThan(ctx({ candidates: [jev] }), simple, { providerId: null, model: "claude-haiku-4-5", kind: "anthropic" })).toBeNull();
+  });
+
+  it("só os modelos marcados (o Servidor pelo id zero); nenhum disponível: todos, com aviso", () => {
+    const only = ctx({ routeModels: ["00000000-0000-0000-0000-000000000000|claude-opus-5"] });
+    const ch = chooseRoute({ signals: simple, ctx: only, current: null });
+    expect(ch.pick?.model).toBe("claude-opus-5");
+    expect(ch.fallbacks).toEqual([]);
+    const gone = chooseRoute({ signals: simple, ctx: ctx({ routeModels: ["x|y"] }), current: null });
+    expect(gone.pick?.model).toBe("claude-haiku-4-5");
+    expect(gone.decision.reason).toMatch(/nenhum dos modelos marcados/);
+    // Com a liberação junto: os marcados e aprovados.
+    const both = ctx({
+      routeModels: ["00000000-0000-0000-0000-000000000000|claude-opus-5", "00000000-0000-0000-0000-000000000000|claude-sonnet-5"],
+      gate: true,
+      approved: [{ providerId: null, model: "claude-sonnet-5" }],
+    });
+    expect(chooseRoute({ signals: simple, ctx: both, current: null }).pick?.model).toBe("claude-sonnet-5");
+  });
+
+  it("a regra travada continua valendo fora da lista", () => {
+    const locked = chooseRoute({
+      signals: simple,
+      ctx: ctx({ routeModels: ["00000000-0000-0000-0000-000000000000|claude-opus-5"] }),
+      current: { scope: "client", provider_id: "p9", model: "gpt-x", auto: false },
+    });
+    expect(locked.apply).toBe(false);
+    expect(locked.decision.mode).toBe("locked");
+  });
+});

@@ -256,5 +256,17 @@ describe("histórico do Roteamento", () => {
     expect(
       describeEntry(entry({ area: "router", subject: "", field: "gate_min", old: { gate_min: 0.8 }, new: { gate_min: 0.85 } }), withProviders),
     ).toMatchObject({ field: "Nota mínima para aprovar", from: "80%", to: "85%" });
+    expect(
+      describeEntry(
+        entry({
+          area: "router",
+          subject: "",
+          field: "route_models",
+          old: { route_models: null },
+          new: { route_models: ["00000000-0000-0000-0000-000000000000|claude-haiku-4-5", "p1|gpt-5-mini"] },
+        }),
+        withProviders,
+      ),
+    ).toMatchObject({ from: "Todos os modelos de conversa", to: "Servidor · claude-haiku-4-5, OpenAI da agência · gpt-5-mini" });
   });
 });

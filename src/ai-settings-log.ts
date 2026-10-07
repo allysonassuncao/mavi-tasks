@@ -45,7 +45,8 @@ export type LogField =
   | "eval_rate"
   | "eval_daily_cap"
   | "gate_enabled"
-  | "gate_min";
+  | "gate_min"
+  | "route_models";
 export type LogChoice = {
   provider_id: string;
   /** O nome do provedor na hora. */
@@ -152,6 +153,7 @@ const FIELD_LABELS: Record<LogField, string> = {
   eval_daily_cap: "Teto por dia dos testes",
   gate_enabled: "Só modelos aprovados no conjunto de avaliação",
   gate_min: "Nota mínima para aprovar",
+  route_models: "Modelos do roteamento",
 };
 
 const LEVEL_NAMES: Record<string, string> = {
@@ -417,6 +419,15 @@ function routerLine(
       case "providers":
       case "secret_providers":
         return Array.isArray(v) ? v.map((id) => provider(String(id))).join(", ") : "Todos";
+      case "route_models":
+        return Array.isArray(v)
+          ? v
+              .map((k) => {
+                const [pid, ...rest] = String(k).split("|");
+                return `${provider(pid)} · ${rest.join("|")}`;
+              })
+              .join(", ")
+          : "Todos os modelos de conversa";
       default:
         return v === undefined || v === null ? "—" : String(v);
     }

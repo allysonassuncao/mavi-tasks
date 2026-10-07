@@ -1,6 +1,6 @@
 import { waitUntil } from "@vercel/functions";
 import { callRpc } from "./_drive.js";
-import { CATALOG, providerBaseUrl, type ProviderModel } from "../src/ai-providers.js";
+import { CATALOG, isJevModel, isNonChatModel, providerBaseUrl, type ProviderModel } from "../src/ai-providers.js";
 import { routeConfig, type ProviderConfig, type ResolvedRoute } from "./_ai-providers.js";
 import { LlmError, type AgentRequest, type LlmAdapter } from "./_ai-llm.js";
 
@@ -183,8 +183,10 @@ export type ModelProfile = {
   tools: boolean;
   /** Janela de contexto, em milhares de tokens. */
   contextK: number;
-  /** Só transcrição/voz: nunca responde conversa. */
+  /** Não escreve respostas (transcrição, voz, imagem, vetores, validador): nunca responde. */
   speechOnly: boolean;
+  /** O Jev: confere e audita respostas (Termômetro, autoavaliação), não responde. */
+  validator: boolean;
 };
 
 /**
@@ -194,7 +196,10 @@ export type ModelProfile = {
 export function modelProfile(kind: string, id: string, price?: ProviderModel | null): ModelProfile {
   // No OpenRouter o nome vem com o dono na frente (anthropic/claude-…).
   const m = fold(id).split("/").pop()!.replace(/\./g, "-");
+  const validator = isJevModel(id);
   const speechOnly =
+    validator ||
+    isNonChatModel(id) ||
     kind === "deepgram" ||
     kind === "assemblyai" ||
     /(whisper|transcribe|voxtral|tts|embedding|nova-\d|universal|slam-|dall-e|gpt-image|imagen|flux)/.test(m);
@@ -209,7 +214,7 @@ export function modelProfile(kind: string, id: string, price?: ProviderModel | n
     /claude|gemini|gpt-4o|gpt-4-1|gpt-5|^o3|grok-4|vision|pixtral|llama-4|qwen.*vl/.test(m);
   const tools = !/(reasoner|^o1-mini|r1\b)/.test(m);
   const contextK = /gemini|gpt-4-1|llama-4/.test(m) ? 1000 : /gpt-5/.test(m) ? 400 : /claude/.test(m) || kind === "anthropic" ? 200 : 128;
-  return { tier, vision, tools, contextK, speechOnly };
+  return { tier, vision, tools, contextK, speechOnly, validator };
 }
 
 export type Candidate = {
@@ -404,7 +409,8 @@ export function decide(input: {
     const p = modelProfile(c.kind, c.model, c.price);
     const est = estimateCost(c, signals);
     let out: string | undefined;
-    if (p.speechOnly) out = "não conversa";
+    if (p.validator) out = "validador (não responde)";
+    else if (p.speechOnly) out = "não conversa";
     else if (signals.contextTokens > p.contextK * 1000 * 0.8) out = "contexto não cabe";
     else if (signals.tools && !p.tools) out = "sem ferramentas";
     else if (input.nativeImages && signals.modalities.includes("image") && !p.vision) out = "não enxerga imagens";
@@ -492,6 +498,8 @@ export type RouteContext = {
    */
   gate?: boolean;
   approved?: { providerId: string | null; model: string }[];
+  /** Os modelos que o roteador pode escolher ("provedor|modelo"; nulo: todos os de conversa). */
+  routeModels?: string[] | null;
 };
 
 const LEVELS: CostLevel[] = ["economico", "equilibrado", "maxima"];
@@ -522,6 +530,7 @@ export async function routeContext(
     person_bad?: string[];
     gate?: boolean;
     approved?: { provider_id: string | null; model: string }[];
+    route_models?: string[] | null;
   };
   const r = await callRpc<Row>(env, fetchImpl, auth, "ai_route_context", {
     p_company: company,
@@ -574,8 +583,31 @@ export async function routeContext(
       TASK_TYPES.includes(t as TaskType),
     ),
     gate: !!d.gate,
+    routeModels: Array.isArray(d.route_models) ? d.route_models : null,
     approved: (Array.isArray(d.approved) ? d.approved : []).map((a) => ({ providerId: a.provider_id ?? null, model: a.model })),
   };
+}
+
+/** A chave de um candidato na lista de modelos do roteamento (o Servidor pelo id zero). */
+export const modelKey = (c: Pick<Candidate, "providerId" | "model">) => `${c.providerId ?? SERVER_PROVIDER}|${c.model}`;
+
+/**
+ * Os candidatos que o roteador pode escolher sozinho: os modelos marcados
+ * em Roteamento (sem nenhum disponível, todos) e, com a liberação, só os
+ * aprovados no conjunto de avaliação.
+ */
+export function routableCandidates(ctx: RouteContext): { list: Candidate[]; note: string | null } {
+  const notes: string[] = [];
+  let base = ctx.candidates;
+  if (ctx.routeModels) {
+    const ok = new Set(ctx.routeModels);
+    const allowed = ctx.candidates.filter((c) => ok.has(modelKey(c)));
+    if (allowed.length) base = allowed;
+    else notes.push("nenhum dos modelos marcados para o roteamento está disponível: valeram todos");
+  }
+  const released = releasedCandidates({ ...ctx, candidates: base });
+  if (released.note) notes.push(released.note);
+  return { list: released.list, note: notes.join("; ") || null };
 }
 
 /**
@@ -660,7 +692,7 @@ export function chooseRoute(input: {
     ctx.restricted &&
     (current ? !ctx.candidates.some((c) => c.providerId === current.provider_id) : !ctx.server);
   const lockedScope = current && !current.auto && !blocked ? current.scope : null;
-  const released = releasedCandidates(ctx);
+  const released = routableCandidates(ctx);
   const decision = decide({
     signals,
     level: ctx.level,
@@ -669,7 +701,8 @@ export function chooseRoute(input: {
     stats: input.stats ?? ctx.stats,
     nativeImages: input.nativeImages,
   });
-  if (ctx.gate) decision.reason += released.note ? `; ${released.note}` : "; só modelos aprovados no conjunto de avaliação";
+  if (released.note) decision.reason += `; ${released.note}`;
+  else if (ctx.gate) decision.reason += "; só modelos aprovados no conjunto de avaliação";
   if (blocked)
     decision.reason += current
       ? `; a regra (${current.model}) não é permitida aqui${ctx.sigiloso ? " (cliente sigiloso)" : ""}`
@@ -697,7 +730,7 @@ export function strongerThan(
   opts: { vision?: boolean } = {},
 ): Candidate | null {
   const usedTier = modelProfile(used.kind, used.model).tier;
-  const list = releasedCandidates(ctx).list
+  const list = routableCandidates(ctx).list
     .map((c) => ({ c, p: modelProfile(c.kind, c.model, c.price), est: estimateCost(c, signals) }))
     .filter((x) => !x.p.speechOnly && x.p.tier > usedTier && (!signals.tools || x.p.tools))
     .filter((x) => !opts.vision || x.p.vision)
