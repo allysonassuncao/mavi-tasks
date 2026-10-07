@@ -146,7 +146,7 @@ export function classify(input: RouteInput): RouteSignals {
   else if (q.length <= 40 && GREETING.test(q) && !matched.length) taskType = "conversa";
   else if (matched.length) taskType = matched[0];
   // As conversas das reuniões e do WhatsApp são buscas no histórico.
-  else if (input.surface === "meetings" || input.surface === "whatsapp") taskType = "busca";
+  else if (["meetings", "meeting", "whatsapp"].includes(input.surface)) taskType = "busca";
   else taskType = "consulta";
   why.push(`tipo: ${taskType}${matched.length > 1 ? ` (também ${matched.slice(1).join(", ")})` : ""}`);
 
@@ -511,72 +511,110 @@ export function logDecision(
   }).catch(() => null);
 }
 
+/** Quem conversa, onde, e o que responde (para o registro em sombra). */
+export type ProbeOptions = {
+  env: { supabaseUrl: string; supabaseKey: string };
+  fetch: typeof fetch;
+  auth: string;
+  where: Omit<RouteWhere, "message" | "conversation">;
+  /** O provedor e o modelo que respondem (a regra ou o servidor). */
+  used: { providerId: string | null; model: string; scope?: string | null };
+  /** A pergunta da pessoa (sem as instruções da tela). */
+  question: string;
+  structured?: boolean;
+  level?: CostLevel;
+  hasServerKey: boolean;
+  /** Para os testes: sem registrar. */
+  log?: typeof logDecision;
+  /** O registro segue depois da resposta (na Vercel, waitUntil). */
+  later?: (work: Promise<unknown>) => void;
+};
+
+/**
+ * Uma resposta acompanhada pelo roteador (sombra), para quem chama o modelo
+ * do seu jeito: classifica na hora, marca a primeira palavra e, no fim,
+ * registra a decisão com a espera, o custo e o resultado.
+ */
+export function routeProbe(
+  opts: ProbeOptions,
+  size: { historyChars?: number; contextChars?: number; toolCount?: number } = {},
+) {
+  const started = Date.now();
+  let first: number | null = null;
+  const later = opts.later ?? ((work: Promise<unknown>) => waitUntil(work.catch(() => {})));
+  const pool = candidates(opts.env, opts.fetch, opts.auth, opts.where.company, opts.hasServerKey);
+  const signals = classify({
+    question: opts.question,
+    surface: opts.where.surface,
+    feature: opts.where.feature,
+    structured: opts.structured,
+    ...size,
+  });
+  let done = false;
+  return {
+    signals,
+    /** Chegou um pedaço do texto da resposta. */
+    text() {
+      if (first === null) first = Date.now() - started;
+    },
+    /** Terminou (ou falhou): o registro segue em segundo plano. */
+    finish(outcome: { model?: string; cost: number; rounds?: number; toolsOk?: number; toolsFailed?: number; capped?: boolean; error?: string | null }) {
+      if (done) return;
+      done = true;
+      const totalMs = Date.now() - started;
+      const firstTokenMs = first;
+      later(
+        pool.then((list) =>
+          (opts.log ?? logDecision)(
+            opts.env,
+            opts.fetch,
+            opts.auth,
+            opts.where,
+            signals,
+            decide({ signals, level: opts.level ?? DEFAULT_LEVEL, candidates: list, lockedScope: opts.used.scope ?? null }),
+            {
+              usedProviderId: opts.used.providerId,
+              usedModel: outcome.model || opts.used.model,
+              firstTokenMs,
+              totalMs,
+              rounds: outcome.rounds,
+              cost: outcome.cost,
+              toolsOk: outcome.toolsOk,
+              toolsFailed: outcome.toolsFailed,
+              capped: outcome.capped,
+              error: outcome.error ?? null,
+            },
+          ),
+        ),
+      );
+    },
+  };
+}
+
 /**
  * Para as telas de uma chamada só (Busca avançada, Dashboards, Tutoriais…):
  * embrulha o adaptador, classifica o pedido, mede a espera e registra a
  * decisão em sombra. A resposta não muda.
  */
-export function routedLlm(
-  llm: LlmAdapter,
-  opts: {
-    env: { supabaseUrl: string; supabaseKey: string };
-    fetch: typeof fetch;
-    auth: string;
-    where: Omit<RouteWhere, "message" | "conversation">;
-    /** O provedor e o modelo que respondem (a regra ou o servidor). */
-    used: { providerId: string | null; model: string; scope?: string | null };
-    /** A pergunta da pessoa (sem as instruções da tela). */
-    question: string;
-    structured?: boolean;
-    level?: CostLevel;
-    hasServerKey: boolean;
-    /** Para os testes: sem registrar. */
-    log?: typeof logDecision;
-    /** O registro segue depois da resposta (na Vercel, waitUntil). */
-    later?: (work: Promise<unknown>) => void;
-  },
-): LlmAdapter {
-  const later = opts.later ?? ((work: Promise<unknown>) => waitUntil(work.catch(() => {})));
+export function routedLlm(llm: LlmAdapter, opts: ProbeOptions): LlmAdapter {
   return async (request: AgentRequest) => {
-    const started = Date.now();
-    let first: number | null = null;
-    const pool = candidates(opts.env, opts.fetch, opts.auth, opts.where.company, opts.hasServerKey);
-    const signals = classify({
-      question: opts.question,
-      surface: opts.where.surface,
-      feature: opts.where.feature,
+    const probe = routeProbe(opts, {
       historyChars: request.messages.slice(0, -1).reduce((n, m) => n + m.content.length, 0),
       contextChars: request.instructions.length + request.context.length,
       toolCount: request.tools.length,
-      structured: opts.structured,
     });
-    const record = async (outcome: Omit<RouteOutcome, "usedProviderId" | "usedModel" | "totalMs" | "firstTokenMs">, model?: string) => {
-      const decision = decide({
-        signals,
-        level: opts.level ?? DEFAULT_LEVEL,
-        candidates: await pool,
-        lockedScope: opts.used.scope ?? null,
-      });
-      await (opts.log ?? logDecision)(opts.env, opts.fetch, opts.auth, opts.where, signals, decision, {
-        usedProviderId: opts.used.providerId,
-        usedModel: model || opts.used.model,
-        firstTokenMs: first,
-        totalMs: Date.now() - started,
-        ...outcome,
-      });
-    };
     try {
       const result = await llm({
         ...request,
         onEvent: (e) => {
-          if (first === null && e.type === "text") first = Date.now() - started;
+          if (e.type === "text") probe.text();
           request.onEvent?.(e);
         },
       });
-      later(record({ rounds: result.rounds, cost: result.meter.cost, capped: result.capped }, result.meter.model));
+      probe.finish({ model: result.meter.model, rounds: result.rounds, cost: result.meter.cost, capped: result.capped });
       return result;
     } catch (e) {
-      later(record({ cost: 0, error: (e as Error).message ?? "falhou" }));
+      probe.finish({ cost: 0, error: (e as Error).message ?? "falhou" });
       throw e;
     }
   };

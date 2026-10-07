@@ -15,6 +15,7 @@ import {
   type ProviderConfig,
 } from "./_ai-providers.js";
 import { serverModel } from "../src/ai-providers.js";
+import { routeProbe } from "./_ai-router.js";
 
 /**
  * Drive › Gravações da MAVI, no servidor (ações "meeting-*" de /api/drive):
@@ -591,13 +592,37 @@ async function meetingAsk(
     .filter(Boolean)
     .join("\n\n");
   const meter = newMeter(provider?.config.model ?? env.model);
+  // O roteador (sombra) registra o que escolheria para esta pergunta.
+  const probe = routeProbe(
+    {
+      env,
+      fetch: deps.fetch,
+      auth: authorization,
+      where: { company: recording.company_id, surface: "meeting", feature: "meetings_ask", client: recording.client_id },
+      used: { providerId: provider?.id ?? null, model: provider?.config.model || env.model, scope: provider?.scope },
+      question: messages[messages.length - 1].content,
+      hasServerKey: !!env.anthropicKey,
+    },
+    {
+      historyChars: messages.slice(0, -1).reduce((n, m) => n + m.content.length, 0),
+      contextChars: MEETING_SYSTEM.length + context.length,
+    },
+  );
   try {
-    return await deps.ask(
+    const answer = await deps.ask(
       { ...env, provider: provider?.config ?? null },
       { system: MEETING_SYSTEM, context, messages },
       meter,
-      emit,
+      (e) => {
+        if (e.type === "text") probe.text();
+        emit(e);
+      },
     );
+    probe.finish({ model: meter.model, cost: meter.cost, rounds: 1 });
+    return answer;
+  } catch (err) {
+    probe.finish({ model: meter.model, cost: meter.cost, error: (err as Error).message ?? "falhou" });
+    throw err;
   } finally {
     await logUsage(
       env,
