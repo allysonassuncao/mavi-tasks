@@ -22,9 +22,10 @@ import {
   type TrailsApi,
 } from "./tutorial-trails";
 import type { TutorialRow, TutorialsApi } from "./tutorials";
+import type { TourRow, ToursApi } from "./tours";
 import type { Snapshot } from "./types";
 
-type Picked = { title: string; status: "draft" | "published"; aud_all: boolean };
+type Picked = { title: string; status: "draft" | "published"; aud_all: boolean; tour?: boolean };
 
 /**
  * Montar uma trilha (administradores; gestores, as suas): título, resumo, a
@@ -35,6 +36,7 @@ type Picked = { title: string; status: "draft" | "published"; aud_all: boolean }
 export function TutorialTrailEditor({
   api,
   tutorials,
+  tours,
   company,
   data,
   user,
@@ -44,6 +46,8 @@ export function TutorialTrailEditor({
 }: {
   api: TrailsApi;
   tutorials: TutorialsApi;
+  /** Os onboardings que também podem entrar na trilha. */
+  tours?: ToursApi;
   company: string;
   data: Snapshot;
   user: string;
@@ -57,7 +61,10 @@ export function TutorialTrailEditor({
   const [required, setRequired] = useState(hasRequired(initial));
   const [known, setKnown] = useState<Record<string, Picked>>(() =>
     Object.fromEntries(
-      (detail?.items ?? []).map((i) => [i.tutorial_id, { title: i.title, status: i.status, aud_all: i.aud_all }]),
+      (detail?.items ?? []).map((i) => [
+        i.tutorial_id,
+        { title: i.title, status: i.status, aud_all: i.aud_all, tour: i.kind === "tour" },
+      ]),
     ),
   );
   const [id, setId] = useState<string | null>(detail?.id ?? null);
@@ -143,6 +150,11 @@ export function TutorialTrailEditor({
   const add = (row: TutorialRow) => {
     if (form.tutorials.includes(row.id) || form.tutorials.length >= MAX_TRAIL_TUTORIALS) return;
     setKnown((k) => ({ ...k, [row.id]: { title: row.title, status: row.status, aud_all: row.aud_all } }));
+    set({ tutorials: [...form.tutorials, row.id] });
+  };
+  const addTour = (row: TourRow) => {
+    if (form.tutorials.includes(row.id) || form.tutorials.length >= MAX_TRAIL_TUTORIALS) return;
+    setKnown((k) => ({ ...k, [row.id]: { title: row.title, status: row.status, aud_all: row.aud_all, tour: true } }));
     set({ tutorials: [...form.tutorials, row.id] });
   };
   const locked = !!busy;
@@ -243,7 +255,7 @@ export function TutorialTrailEditor({
 
           <div className="field">
             <span>
-              Tutoriais{" "}
+              Tutoriais e onboardings{" "}
               <small>
                 ({form.tutorials.length} de até {MAX_TRAIL_TUTORIALS})
               </small>
@@ -257,6 +269,7 @@ export function TutorialTrailEditor({
                       <span className="trail-edit-n">{i + 1}</span>
                       <span className="trail-edit-title">
                         {k?.title ?? "Tutorial"}
+                        {k?.tour && <small className="tutorial-restricted">Onboarding</small>}
                         {k?.status === "draft" && <small className="tutorial-status draft">Rascunho</small>}
                         {k && !k.aud_all && <small className="tutorial-restricted">Público restrito</small>}
                       </span>
@@ -307,6 +320,15 @@ export function TutorialTrailEditor({
               disabled={locked || form.tutorials.length >= MAX_TRAIL_TUTORIALS}
               onAdd={add}
             />
+            {tours && (
+              <TourAdder
+                api={tours}
+                company={company}
+                picked={form.tutorials}
+                disabled={locked || form.tutorials.length >= MAX_TRAIL_TUTORIALS}
+                onAdd={addTour}
+              />
+            )}
           </div>
         </div>
 
@@ -487,5 +509,55 @@ function TutorialAdder({
         </ul>
       )}
     </div>
+  );
+}
+
+/** Adiciona um onboarding (tour guiado) à trilha: os que quem edita vê. */
+function TourAdder({
+  api,
+  company,
+  picked,
+  disabled,
+  onAdd,
+}: {
+  api: ToursApi;
+  company: string;
+  picked: string[];
+  disabled: boolean;
+  onAdd: (row: TourRow) => void;
+}) {
+  const [rows, setRows] = useState<TourRow[]>([]);
+  useEffect(() => {
+    let alive = true;
+    api
+      .list(company, "admin")
+      .then((list) => alive && setRows(list))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [api, company]);
+  const options = rows.filter((r) => !picked.includes(r.id) && r.step_count > 0);
+  if (!rows.length) return null;
+  return (
+    <label className="trail-tour-adder">
+      <span>Onboarding (tour guiado pelas telas)</span>
+      <select
+        value=""
+        disabled={disabled || !options.length}
+        onChange={(e) => {
+          const row = options.find((r) => r.id === e.target.value);
+          if (row) onAdd(row);
+        }}
+      >
+        <option value="">{options.length ? "Adicionar onboarding…" : "Nenhum onboarding a adicionar"}</option>
+        {options.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.title}
+            {r.status === "draft" ? " (rascunho)" : ""} · {r.step_count} passos
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

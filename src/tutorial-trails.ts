@@ -1,6 +1,7 @@
 import { rpc } from "./api";
 import { fold } from "./domain";
 import type { TutorialAudience, TutorialsApi } from "./tutorials";
+import { demoTours } from "./tours";
 import type { Role, Snapshot } from "./types";
 
 /**
@@ -54,6 +55,8 @@ export interface TrailRow {
   people_overdue: number | null;
 }
 export interface TrailItem {
+  /** "tour": an onboarding (tutorial_id carries its id). Missing: a tutorial. */
+  kind?: "tutorial" | "tour";
   tutorial_id: string;
   title: string;
   summary: string;
@@ -66,6 +69,10 @@ export interface TrailItem {
   completed_at: string | null;
   completed_version: number | null;
   video_count: number;
+  /** Onboardings: how many steps and where the person stopped. */
+  step_count?: number;
+  my_status?: string | null;
+  my_step?: number | null;
 }
 export interface TrailDetail {
   id: string;
@@ -359,7 +366,30 @@ export function demoTrails(data: Snapshot, user: string, tutorials: TutorialsApi
     const out: TrailItem[] = [];
     for (const id of t.tutorials) {
       const d = await tutorials.detail(id);
-      if (!d) continue;
+      if (!d) {
+        // Um onboarding (os do demo ficam neste navegador).
+        const o = await demoTours(user).detail(id);
+        if (!o || (o.status !== "published" && !canEdit(t))) continue;
+        const done = o.progress?.status === "completed";
+        out.push({
+          kind: "tour",
+          tutorial_id: o.id,
+          title: o.title,
+          summary: o.summary,
+          modules: o.modules,
+          status: o.status,
+          version: o.version,
+          aud_all: o.audience?.aud_all ?? true,
+          visible: o.status === "published",
+          completed_at: done ? (o.progress?.completed_at ?? new Date().toISOString()) : null,
+          completed_version: done ? (o.progress?.version ?? o.version) : null,
+          video_count: 0,
+          step_count: o.steps.length,
+          my_status: o.progress?.status ?? null,
+          my_step: o.progress?.step ?? null,
+        });
+        continue;
+      }
       const visible = d.status === "published" && d.trackable !== false;
       if (!visible && !canEdit(t)) continue;
       out.push({

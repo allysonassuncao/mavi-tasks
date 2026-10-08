@@ -799,7 +799,8 @@ html.tour-active .toast {
   gap: 8px;
   color: var(--ink);
 }
-.tour-reach-option input[type="radio"] {
+.tour-reach-option input[type="radio"],
+.tour-reach-option input[type="checkbox"] {
   width: 16px;
   height: 16px;
   min-height: 0;
@@ -814,4 +815,19 @@ html.tour-active .toast {
   font-size: 0.8rem;
   color: #6e8060;
   font-weight: 500;
+}
+
+/* Trilhas: adicionar um onboarding */
+.trail-tour-adder {
+  margin-top: 10px;
+}
+.trail-tour-adder select {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 11px;
+  border: 1px solid #dfe6d8;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 0.85rem;
+  color: #495d3c;
 }

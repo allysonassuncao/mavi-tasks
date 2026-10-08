@@ -45,6 +45,7 @@ import { TutorialMetrics } from "./TutorialMetrics";
 import { RequiredTrails, TrailBar, TrailView, TrailsTab } from "./TutorialTrails";
 import { TutorialTrailEditor } from "./TutorialTrailEditor";
 import { TutorialTours } from "./TutorialTours";
+import { demoTours, playTour, serverTours } from "./tours";
 import {
   TRAIL_PARAM,
   demoTrails,
@@ -120,6 +121,7 @@ export function TutorialsPage({
     [demo],
   ); // eslint-disable-line react-hooks/exhaustive-deps
   const videoUrls = useMemo(() => videoUrlCache(api), [api]);
+  const toursApi = useMemo(() => (demo ? demoTours(user) : serverTours), [demo, user]);
   const trailsApi = useMemo(
     () => (demo ? demoTrails(data, user, api) : serverTrails),
     [api],
@@ -281,6 +283,7 @@ export function TutorialsPage({
       <TutorialTrailEditor
         api={trailsApi}
         tutorials={api}
+        tours={toursApi}
         company={company}
         data={data}
         user={user}
@@ -1256,7 +1259,9 @@ function TutorialReader({
                   </span>
                   <Button
                     className="btn secondary"
-                    onClick={() => onOpenTutorial(next.tutorial_id)}
+                    onClick={() =>
+                      next.kind === "tour" ? playTour(next.tutorial_id, 0) : onOpenTutorial(next.tutorial_id)
+                    }
                     disabled={nextLocked}
                   >
                     Próximo <ArrowRight size={15} />

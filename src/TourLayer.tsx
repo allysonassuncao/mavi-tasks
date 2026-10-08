@@ -1,10 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePage } from "./router";
 import {
   TOUR_EVENT,
   currentScreen,
   demoTours,
+  screenContext,
   serverTours,
   tourContentOf,
+  type TourAuto,
   type TourCommand,
   type TourStep,
 } from "./tours";
@@ -147,6 +150,84 @@ export function TourLayer({
       true,
     );
   }, [company]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ------------------------------------------------ disparos automáticos
+  // A lista dos automáticos que ainda não chegaram à pessoa: ao abrir e a
+  // cada aviso ao vivo dos tutoriais (sem consultas periódicas).
+  const page = usePage();
+  const [autos, setAutos] = useState<TourAuto[]>([]);
+  const loadAutos = useCallback(() => {
+    if (!company) return;
+    api
+      .autos(company)
+      .then(setAutos)
+      .catch(() => setAutos([]));
+  }, [api, company]);
+  useEffect(loadAutos, [loadAutos]);
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const on = () => {
+      clearTimeout(t);
+      t = setTimeout(loadAutos, 1500);
+    };
+    window.addEventListener("mavi:tutorials", on);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("mavi:tutorials", on);
+    };
+  }, [loadAutos]);
+  const tried = useRef(new Set<string>());
+  useEffect(() => {
+    if (!company || session || !autos.length || window.innerWidth < MIN_WIDTH) return;
+    const loginKey = `mavi:tour:entrada:${company}`;
+    let loginDone = false;
+    try {
+      loginDone = sessionStorage.getItem(loginKey) === "1";
+    } catch {
+      loginDone = false;
+    }
+    const due = autos.filter(
+      (a) => !tried.current.has(a.id) && ((a.trg_login && !loginDone) || (a.trg_visit && a.start_page === page)),
+    );
+    if (!due.length) return;
+    let alive = true;
+    let tries = 0;
+    // Espera a tela assentar e nenhum modal aberto (avisos do Mural, por exemplo).
+    const timer = window.setInterval(async () => {
+      if (!alive) return;
+      if (++tries > 60) return window.clearInterval(timer);
+      if (tries < 2 || document.querySelector("dialog[open]")) return;
+      window.clearInterval(timer);
+      for (const a of due) {
+        tried.current.add(a.id);
+        if (a.screen_only) {
+          // "Só nas telas de": a lista do banco diz se esta tela vale.
+          const here = await api
+            .list(company, "library", null, page, screenContext(window.location.pathname, window.location.search))
+            .catch(() => []);
+          if (!alive || !here.some((r) => r.id === a.id)) {
+            tried.current.delete(a.id);
+            continue;
+          }
+        }
+        if (!alive) return;
+        if (a.trg_login) {
+          try {
+            sessionStorage.setItem(loginKey, "1");
+          } catch {
+            // Sem armazenamento: vale a lista (o progresso tira o tour dela).
+          }
+        }
+        setAutos((list) => list.filter((x) => x.id !== a.id));
+        void open({ action: "play", id: a.id, from: 0 });
+        return;
+      }
+    }, 700);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [company, session, autos, page, api, open]);
 
   if (!session) return null;
   if (session.mode === "edit")

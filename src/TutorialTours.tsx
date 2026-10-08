@@ -486,6 +486,28 @@ function TourSettings({
             squads={squads}
             onChange={(patch) => setContent({ ...content, ...patch })}
           />
+          <fieldset className="notice-block tour-reach">
+            <legend>Começa sozinho</legend>
+            <small>Uma vez só para cada pessoa. Pelo “?” e pela aba Onboarding ele está sempre disponível.</small>
+            <label className="tour-reach-option">
+              <input
+                type="checkbox"
+                checked={content.trg_visit}
+                disabled={busy}
+                onChange={(e) => setContent({ ...content, trg_visit: e.target.checked })}
+              />
+              Na primeira vez que a pessoa abre a tela onde ele começa
+            </label>
+            <label className="tour-reach-option">
+              <input
+                type="checkbox"
+                checked={content.trg_login}
+                disabled={busy}
+                onChange={(e) => setContent({ ...content, trg_login: e.target.checked })}
+              />
+              Logo que a pessoa entra no sistema (bom para quem acabou de chegar)
+            </label>
+          </fieldset>
           <p className="tour-settings-note">
             {tourAudienceSummary(content, data, squads)} · {content.steps.length}{" "}
             {content.steps.length === 1 ? "passo" : "passos"}

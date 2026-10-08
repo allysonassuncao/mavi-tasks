@@ -58,7 +58,15 @@ export interface TourReach {
   scr_products: string[];
 }
 
-export interface TourContent extends TutorialAudience, TourReach {
+/** Starts by itself (once per person); the "?" and the tab always work. */
+export interface TourTriggers {
+  /** The first time the person opens the screen where it starts. */
+  trg_visit: boolean;
+  /** Right after the person enters the system. */
+  trg_login: boolean;
+}
+
+export interface TourContent extends TutorialAudience, TourReach, TourTriggers {
   title: string;
   summary: string;
   steps: TourStep[];
@@ -115,7 +123,7 @@ export interface TourDetail {
   status: TourStatus;
   version: number;
   revision: number;
-  audience: (TutorialAudience & Partial<TourReach>) | null;
+  audience: (TutorialAudience & Partial<TourReach> & Partial<TourTriggers>) | null;
   created_by: string;
   author_name: string;
   updated_at: string;
@@ -135,6 +143,16 @@ export type TourSaveResult = {
 };
 
 export type TourProgressAction = "start" | "step" | "complete" | "dismiss";
+
+/** An automatic tour that hasn't reached the person yet. */
+export interface TourAuto {
+  id: string;
+  title: string;
+  start_page: string;
+  trg_visit: boolean;
+  trg_login: boolean;
+  screen_only: boolean;
+}
 
 export interface ToursApi {
   list(
@@ -157,6 +175,8 @@ export interface ToursApi {
   remove(id: string): Promise<void>;
   progress(id: string, action: TourProgressAction, step: number, stepId: string): Promise<TourProgress | null>;
   miss(id: string, stepId: string, path: string): Promise<void>;
+  /** The automatic tours still to reach the person (oldest first). */
+  autos(company: string): Promise<TourAuto[]>;
 }
 
 export const MAX_STEPS = 60;
@@ -172,6 +192,8 @@ export const emptyTour = (): TourContent => ({
   aud_users: [],
   aud_exclude: [],
   ...emptyReach(),
+  trg_visit: false,
+  trg_login: false,
 });
 export const emptyReach = (): TourReach => ({
   aud_squads: [],
@@ -482,6 +504,9 @@ export const serverTours: ToursApi = {
   async miss(id, stepId, path) {
     await rpc("log_tutorial_tour_miss", { p_tour: id, p_step_id: stepId, p_path: path });
   },
+  async autos(company) {
+    return ((await rpc("my_auto_tutorial_tours", { p_company: company })) ?? []) as TourAuto[];
+  },
 };
 
 // ------------------------------------------------------------ demo
@@ -538,6 +563,8 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
       aud_products: t.live.aud_products ?? [],
       scr_clients: t.live.scr_clients ?? [],
       scr_products: t.live.scr_products ?? [],
+      trg_visit: !!t.live.trg_visit,
+      trg_login: !!t.live.trg_login,
     },
     created_by: t.created_by,
     author_name: userName,
@@ -691,6 +718,21 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
       if (!t) return;
       t.misses[stepId] = (t.misses[stepId] ?? 0) + 1;
       demoWrite(list);
+    },
+    async autos() {
+      return demoRead()
+        .filter(
+          (t) =>
+            t.status === "published" && (t.live.trg_visit || t.live.trg_login) && t.live.steps.length && !t.progress,
+        )
+        .map((t) => ({
+          id: t.id,
+          title: t.live.title,
+          start_page: t.live.steps[0]?.page ?? "",
+          trg_visit: !!t.live.trg_visit,
+          trg_login: !!t.live.trg_login,
+          screen_only: !!(t.live.scr_clients?.length || t.live.scr_products?.length),
+        }));
     },
   };
 }

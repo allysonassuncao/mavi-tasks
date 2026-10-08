@@ -4,6 +4,7 @@ import {
   ArrowRight,
   CalendarClock,
   CircleCheck,
+  Compass,
   Film,
   Lock,
   Pencil,
@@ -29,6 +30,7 @@ import {
   type TrailsApi,
 } from "./tutorial-trails";
 import { audienceSummary, moduleLabel } from "./tutorials";
+import { playTour } from "./tours";
 import type { Snapshot } from "./types";
 
 const shortDate = (iso: string | null) =>
@@ -295,6 +297,12 @@ export function TrailView({
     );
 
   const states = itemStates(detail, detail.items);
+  // Um onboarding toca por cima das telas (continua de onde parou).
+  const openItem = (item: TrailItem) =>
+    item.kind === "tour"
+      ? playTour(item.tutorial_id, item.my_status && item.my_status !== "completed" ? (item.my_step ?? 0) : 0)
+      : onOpenTutorial(item.tutorial_id);
+  const tours = detail.items.filter((i) => i.kind === "tour").length;
   const complete = detail.total > 0 && detail.done === detail.total;
   const nextAt = states.indexOf("next");
   const next = nextAt >= 0 ? detail.items[nextAt] : null;
@@ -318,7 +326,11 @@ export function TrailView({
         {detail.summary && <p className="tutorial-lead">{detail.summary}</p>}
         <div className="tutorial-meta">
           <span>
-            {detail.items.length === 1 ? "1 tutorial" : `${detail.items.length} tutoriais`}
+            {tours
+              ? `${detail.items.length} ${detail.items.length === 1 ? "item" : "itens"} · ${tours} ${tours === 1 ? "onboarding" : "onboardings"}`
+              : detail.items.length === 1
+                ? "1 tutorial"
+                : `${detail.items.length} tutoriais`}
           </span>
           <span>
             por <span data-person={detail.created_by}>{detail.author_name}</span>
@@ -344,7 +356,7 @@ export function TrailView({
                 <CircleCheck size={15} /> Você concluiu esta trilha
               </span>
             ) : next ? (
-              <Button className="btn primary" type="button" onClick={() => onOpenTutorial(next.tutorial_id)}>
+              <Button className="btn primary" type="button" onClick={() => openItem(next)}>
                 {started ? "Continuar" : "Começar"}: {next.title} <ArrowRight size={15} />
               </Button>
             ) : null}
@@ -381,7 +393,7 @@ export function TrailView({
               item={item}
               state={states[i]}
               canEdit={detail.can_edit}
-              onOpen={() => onOpenTutorial(item.tutorial_id)}
+              onOpen={() => openItem(item)}
             />
           ))}
           {!detail.items.length && (
@@ -438,6 +450,11 @@ function TrailStep({
                 {moduleLabel(m)}
               </span>
             ))}
+            {item.kind === "tour" && (
+              <span title="Onboarding: um tour guiado pelas telas">
+                <Compass size={12} /> Onboarding · {item.step_count ?? 0} passos
+              </span>
+            )}
             {item.video_count > 0 && (
               <span title="Vídeos">
                 <Film size={12} /> {item.video_count}
