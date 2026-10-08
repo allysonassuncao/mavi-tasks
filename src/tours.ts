@@ -1,6 +1,14 @@
 import { rpc } from "./api";
-import { pagePaths, resolvePage, routeParts, type Page } from "./router";
-import { tutorialModuleOf, type TutorialAudience } from "./tutorials";
+import {
+  campaignIdFromPath,
+  pagePaths,
+  resolvePage,
+  routeParts,
+  taskIdFromPath,
+  type Page,
+} from "./router";
+import { ROLE_LABEL, tutorialModuleOf, type TutorialAudience } from "./tutorials";
+import type { Snapshot } from "./types";
 import type { TourTarget } from "./tour-target";
 
 /**
@@ -28,9 +36,29 @@ export interface TourStep {
   body: string;
   kind: TourStepKind;
   placement: TourPlacement;
+  /**
+   * Inside a record (a campaign, a table row): "any" = any of the same kind
+   * (the first row instead of the recorded one); "same" = the recorded one.
+   */
+  record?: TourRecord;
+  /** "Esperar o clique": false = the click is only shown, never sent. */
+  real?: boolean;
+}
+export type TourRecord = "any" | "same";
+
+/** Who receives beyond roles, teams and people, and where it shows. */
+export interface TourReach {
+  aud_squads: string[];
+  /** People who serve these clients (the clients' teams). */
+  aud_clients: string[];
+  /** People who serve these products (the products' teams). */
+  aud_products: string[];
+  /** Only on screens of these clients / products (empty: anywhere). */
+  scr_clients: string[];
+  scr_products: string[];
 }
 
-export interface TourContent extends TutorialAudience {
+export interface TourContent extends TutorialAudience, TourReach {
   title: string;
   summary: string;
   steps: TourStep[];
@@ -65,6 +93,8 @@ export interface TourRow {
   my_status: TourProgressStatus | null;
   my_step: number | null;
   misses: number;
+  /** Only on screens of some clients / products. */
+  screen_only?: boolean;
 }
 
 export interface TourMiss {
@@ -85,7 +115,7 @@ export interface TourDetail {
   status: TourStatus;
   version: number;
   revision: number;
-  audience: TutorialAudience | null;
+  audience: (TutorialAudience & Partial<TourReach>) | null;
   created_by: string;
   author_name: string;
   updated_at: string;
@@ -107,7 +137,13 @@ export type TourSaveResult = {
 export type TourProgressAction = "start" | "step" | "complete" | "dismiss";
 
 export interface ToursApi {
-  list(company: string, scope: "library" | "admin", module?: string | null, page?: string | null): Promise<TourRow[]>;
+  list(
+    company: string,
+    scope: "library" | "admin",
+    module?: string | null,
+    page?: string | null,
+    context?: TourScreenContext | null,
+  ): Promise<TourRow[]>;
   detail(id: string): Promise<TourDetail | null>;
   save(
     company: string,
@@ -135,19 +171,62 @@ export const emptyTour = (): TourContent => ({
   aud_teams: [],
   aud_users: [],
   aud_exclude: [],
+  ...emptyReach(),
+});
+export const emptyReach = (): TourReach => ({
+  aud_squads: [],
+  aud_clients: [],
+  aud_products: [],
+  scr_clients: [],
+  scr_products: [],
 });
 
 /** What a tour being edited holds (its pending change, if there is one). */
 export function tourContentOf(d: TourDetail): TourContent {
   if (d.draft) return { ...emptyTour(), ...d.draft.content };
   return {
+    ...emptyTour(),
+    ...(d.audience ?? {}),
     title: d.title,
     summary: d.summary,
     steps: d.steps,
     modules: d.modules,
-    ...(d.audience ?? emptyTour()),
   };
 }
+
+/** Who receives, in a few words (the publish confirmation). */
+export function tourAudienceSummary(
+  a: TourContent,
+  data: Pick<Snapshot, "teams" | "members" | "clients" | "products">,
+  squads: { id: string; name: string }[] = [],
+) {
+  const where = [
+    ...a.scr_clients.map((c) => data.clients.find((x) => x.id === c)?.name ?? "Cliente"),
+    ...a.scr_products.map((p) => data.products.find((x) => x.id === p)?.name ?? "Produto"),
+  ];
+  const only = where.length ? ` · só nas telas de ${list(where)}` : "";
+  if (a.aud_all)
+    return (
+      (a.aud_exclude.length
+        ? `Todos, menos ${a.aud_exclude.length === 1 ? "1 pessoa" : `${a.aud_exclude.length} pessoas`}`
+        : "Todos") + only
+    );
+  const parts = [
+    ...a.aud_roles.map((r) => ROLE_LABEL[r]),
+    ...a.aud_teams.map((t) => data.teams.find((x) => x.id === t)?.name ?? "Equipe"),
+    ...a.aud_squads.map((q) => squads.find((x) => x.id === q)?.name ?? "Squad"),
+    ...a.aud_clients.map((c) => `quem atende ${data.clients.find((x) => x.id === c)?.name ?? "o cliente"}`),
+    ...a.aud_products.map((p) => `quem atende ${data.products.find((x) => x.id === p)?.name ?? "o produto"}`),
+    ...a.aud_users.map((u) => data.members.find((m) => m.user_id === u)?.name ?? "Pessoa"),
+  ];
+  return (parts.length ? list(parts) : "Ninguém escolhido ainda") + only;
+}
+const list = (parts: string[]) =>
+  parts.length > 3 ? `${parts.slice(0, 3).join(", ")} e mais ${parts.length - 3}` : parts.join(", ");
+
+/** A step inside a record: its screen has an id, or it points at a row. */
+export const stepInRecord = (s: Pick<TourStep, "url" | "target">) =>
+  screenShape(s.url).includes(":id") || /(^|\s)(tr|li)(\.|:|$|\s)/.test(s.target?.path ?? "");
 
 /** The modules of the screens a tour goes through (the "?" of each shows it). */
 export function tourModules(steps: TourStep[]) {
@@ -198,6 +277,30 @@ export function screenOf(pathname: string, search: string, hash: string) {
 export const currentScreen = () =>
   screenOf(window.location.pathname, window.location.search, window.location.hash);
 export const pageOfScreen = (url: string) => resolvePage(url.split(/[?#]/)[0]) ?? "";
+
+/** What the screen on display says about whose it is (the database resolves the rest). */
+export type TourScreenContext = {
+  clients: string[];
+  products: string[];
+  contracts: string[];
+  campaign: string | null;
+  task: string | null;
+};
+export function screenContext(pathname: string, search: string): TourScreenContext {
+  const params = new URLSearchParams(search);
+  const ids = (...keys: string[]) =>
+    keys
+      .flatMap((k) => (params.get(k) ?? "").split(/[|,]/))
+      .filter((v) => /^[0-9a-f-]{36}$/i.test(v))
+      .slice(0, 20);
+  return {
+    clients: ids("cliente", "cli"),
+    products: ids("produto"),
+    contracts: ids("contrato"),
+    campaign: campaignIdFromPath(pathname) ?? (ids("campanha")[0] || null),
+    task: taskIdFromPath(pathname),
+  };
+}
 
 const ID_SEGMENT = /[0-9a-f]{8}-[0-9a-f]{4}|\d{3,}|^demo-/i;
 /**
@@ -338,12 +441,13 @@ export const editTour = (id: string) =>
 // ------------------------------------------------------------ server
 
 export const serverTours: ToursApi = {
-  async list(company, scope, module, page) {
+  async list(company, scope, module, page, context) {
     return ((await rpc("list_tutorial_tours", {
       p_company: company,
       p_scope: scope,
       p_module: module ?? null,
       p_page: page ?? null,
+      p_context: context ?? null,
     })) ?? []) as TourRow[];
   },
   async detail(id) {
@@ -428,6 +532,12 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
       aud_teams: t.live.aud_teams,
       aud_users: t.live.aud_users,
       aud_exclude: t.live.aud_exclude,
+      ...emptyReach(),
+      aud_squads: t.live.aud_squads ?? [],
+      aud_clients: t.live.aud_clients ?? [],
+      aud_products: t.live.aud_products ?? [],
+      scr_clients: t.live.scr_clients ?? [],
+      scr_products: t.live.scr_products ?? [],
     },
     created_by: t.created_by,
     author_name: userName,
@@ -472,6 +582,7 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
           my_status: t.progress?.status ?? null,
           my_step: t.progress?.step ?? null,
           misses: Object.values(t.misses).reduce((a, b) => a + b, 0),
+          screen_only: !!(t.live.scr_clients?.length || t.live.scr_products?.length),
         }));
     },
     async detail(id) {

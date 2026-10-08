@@ -751,3 +751,67 @@ html.tour-active .toast {
 .tours-table td:first-child {
   min-width: 240px;
 }
+
+/* Gravar */
+.tour-rec-icon {
+  color: #e5484d;
+  fill: #e5484d;
+}
+.tour-rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e5484d;
+  animation: tour-rec 1.2s ease-in-out infinite;
+}
+@keyframes tour-rec {
+  50% {
+    opacity: 0.35;
+  }
+}
+.tour-step-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tour-step-flags span {
+  font-size: 0.64rem;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: #f1f4f3;
+  color: #5f6d6b;
+}
+
+/* Configurações: mais público e onde aparece */
+.tour-reach {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tour-reach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.tour-reach-option {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+.tour-reach-option input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  flex: none;
+  accent-color: #6e8a4c;
+}
+.tour-reach-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: #6e8060;
+  font-weight: 500;
+}

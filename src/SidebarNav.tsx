@@ -439,6 +439,8 @@ export function SidebarNav({
         onNavigate(to);
       }}
       {...props}
+      // Marcador fixo para os onboardings (Tutoriais › Onboarding).
+      data-tour={["menu", to.page, to.hash, ...Object.values(to.query ?? {})].filter(Boolean).join("-")}
     >
       {content}
     </a>

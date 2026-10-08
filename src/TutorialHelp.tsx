@@ -10,7 +10,7 @@ import {
   tutorialModuleOf,
   type TutorialRow,
 } from "./tutorials";
-import { demoTours, playTour, serverTours, type TourRow } from "./tours";
+import { demoTours, playTour, screenContext, serverTours, type TourRow } from "./tours";
 import type { Snapshot } from "./types";
 import "./tutorials.css";
 import "./tours.css";
@@ -72,7 +72,7 @@ export function TutorialHelp({
     // Os onboardings que passam por esta tela (ou começam nela).
     setTours([]);
     toursApi
-      .list(company, "library", module, page)
+      .list(company, "library", module, page, screenContext(window.location.pathname, window.location.search))
       .then((list) => alive && setTours(list.slice(0, 4)))
       .catch(() => {});
     return () => {

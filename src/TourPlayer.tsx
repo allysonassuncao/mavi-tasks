@@ -11,10 +11,11 @@ import { createPortal } from "react-dom";
 import { ArrowLeft, ArrowRight, Check, MousePointerClick, SearchX, TextCursorInput, X } from "lucide-react";
 import { RichTextContent } from "./RichTextContent";
 import { navigate } from "./router";
-import { TOUR_UI_ATTR, findTarget, topModal, type TourTarget } from "./tour-target";
+import { TOUR_UI_ATTR, findTarget, looksDestructive, topModal, type TourTarget } from "./tour-target";
 import {
   currentScreen,
   onStepScreen,
+  stepInRecord,
   placeBalloon,
   stepHref,
   type Box,
@@ -125,7 +126,13 @@ export function useViewport() {
  * Looks for a step's element on the screen for up to `wait` ms (the screen
  * may still be loading or animating). `missing` turns true when it gives up.
  */
-export function useStepElement(target: TourTarget | null, active: boolean, key: unknown, wait = 5000) {
+export function useStepElement(
+  target: TourTarget | null,
+  active: boolean,
+  key: unknown,
+  wait = 5000,
+  anyRecord = false,
+) {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [missing, setMissing] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -137,7 +144,7 @@ export function useStepElement(target: TourTarget | null, active: boolean, key: 
     let done = false;
     const look = () => {
       if (done) return;
-      const found = findTarget(target);
+      const found = findTarget(target, { anyRecord });
       if (found) {
         done = true;
         setEl(found);
@@ -157,7 +164,7 @@ export function useStepElement(target: TourTarget | null, active: boolean, key: 
       done = true;
       window.clearInterval(timer);
     };
-  }, [target, active, key, retry, wait]);
+  }, [target, active, key, retry, wait, anyRecord]);
   // The page redrew the element (a new node): look again.
   const relook = useCallback(() => setRetry((n) => n + 1), []);
   return { el, missing, relook };
@@ -261,6 +268,17 @@ export function pressElement(el: HTMLElement) {
 const hasText = (s: TourStep) => !!s.title || /"text"/.test(s.body);
 
 /**
+ * Whether the person is on the step's screen: any record of the kind
+ * counts, unless the step is about the recorded one.
+ */
+function onScreen(step: TourStep) {
+  const current = currentScreen();
+  if (step.record === "same" && stepInRecord(step))
+    return current.split(/[?#]/)[0] === step.url.split(/[?#]/)[0] && onStepScreen(current, step.url);
+  return onStepScreen(current, step.url);
+}
+
+/**
  * Plays a tour: goes to each step's screen, finds its element, dims around
  * it and shows the balloon. `test`: the editor trying its own steps (no
  * progress, no "not found" records).
@@ -300,7 +318,7 @@ export function TourPlayer({
     setFilled(false);
     setBusy(false);
     if (!step) return;
-    if (!onStepScreen(currentScreen(), step.url) && navigated.current !== index) {
+    if (!onScreen(step) && navigated.current !== index) {
       navigated.current = index;
       navigate(stepHref(step.url, companyPath));
     }
@@ -310,7 +328,8 @@ export function TourPlayer({
   }, [index, step, companyPath]);
 
   // 2) Its element.
-  const { el, missing, relook } = useStepElement(step?.target ?? null, ready, index);
+  const anyRecord = !!step && step.record !== "same";
+  const { el, missing, relook } = useStepElement(step?.target ?? null, ready, index, 5000, anyRecord);
   const box = useBox(el, relook);
   useEffect(() => {
     if (missing && step && !missLogged.current.has(step.id)) {
@@ -338,14 +357,35 @@ export function TourPlayer({
 
   // 3) "Esperar o clique": the person's click on the element moves on (the
   // app handles the click first: a modal opens, a screen changes).
+  // "Só mostrar": the click never reaches the app (nothing is saved or
+  // sent) and the tour moves on. Delete buttons are never pressed in a tour.
+  const shown = !!step && step.kind === "click" && step.real === false;
+  const guarded = !!step?.target && looksDestructive(step.target);
+  const [blocked, setBlocked] = useState(false);
   useEffect(() => {
-    if (!el || !step || step.kind !== "click") return;
-    const on = (e: MouseEvent) => {
-      if (e.target instanceof Node && el.contains(e.target)) window.setTimeout(next, 300);
+    if (!el || !step) return;
+    if (step.kind !== "click" && !guarded) return;
+    const inside = (e: Event) => e.target instanceof Node && el.contains(e.target);
+    const stop = (e: Event) => {
+      if (!inside(e) || !(shown || guarded)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
     };
+    const on = (e: MouseEvent) => {
+      if (!inside(e)) return;
+      stop(e);
+      if (guarded) return setBlocked(true);
+      window.setTimeout(next, shown ? 450 : 300);
+    };
+    const press = ["pointerdown", "mousedown", "pointerup", "mouseup", "keydown"];
+    for (const t of press) document.addEventListener(t, stop, true);
     document.addEventListener("click", on, true);
-    return () => document.removeEventListener("click", on, true);
-  }, [el, step, next]);
+    return () => {
+      for (const t of press) document.removeEventListener(t, stop, true);
+      document.removeEventListener("click", on, true);
+    };
+  }, [el, step, next, shown, guarded]);
+  useEffect(() => setBlocked(false), [index]);
 
   // 4) "Esperar preencher": a value typed or chosen in the field.
   useEffect(() => {
@@ -442,7 +482,15 @@ export function TourPlayer({
         )}
         {!missing && el && kind === "click" && (
           <p className="tour-hint">
-            <MousePointerClick size={14} /> Clique no destaque para continuar.
+            <MousePointerClick size={14} />{" "}
+            {shown
+              ? "Clique no destaque para continuar. Aqui o tour só mostra: nada é salvo nem enviado."
+              : "Clique no destaque para continuar."}
+          </p>
+        )}
+        {blocked && (
+          <p className="tour-hint warn">
+            <SearchX size={14} /> Durante o tour, este botão não é acionado.
           </p>
         )}
         {!missing && el && kind === "input" && !filled && (

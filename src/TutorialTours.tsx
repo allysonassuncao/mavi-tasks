@@ -16,8 +16,10 @@ import {
 import { Empty, Modal } from "./components";
 import { Button, Loading } from "./ui";
 import { AudiencePicker } from "./TutorialEditor";
+import { MultiPick } from "./MultiPick";
+import { rpc } from "./api";
 import { useUrlState } from "./router";
-import { audienceSummary, audienceOf } from "./tutorials";
+import { audienceOf } from "./tutorials";
 import {
   demoTours,
   editTour,
@@ -25,8 +27,10 @@ import {
   pageLabel,
   playTour,
   serverTours,
+  tourAudienceSummary,
   tourContentOf,
   type TourContent,
+  type TourReach,
   type TourRow,
   type ToursApi,
 } from "./tours";
@@ -305,7 +309,10 @@ function ManageTable({
                   </small>
                 )}
               </td>
-              <td data-label="Público">{r.aud_all ? "Todos" : "Escolhido"}</td>
+              <td data-label="Público">
+                {r.aud_all ? "Todos" : "Escolhido"}
+                {r.screen_only && <small>só em algumas telas</small>}
+              </td>
               <td data-label="Atualizado">{shortDate(r.updated_at)}</td>
               <td className="tours-row-actions">
                 {r.can_edit ? (
@@ -387,6 +394,16 @@ function TourSettings({
   const [meta, setMeta] = useState<{ revision: number; published: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [squads, setSquads] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    (rpc("cs_squads", { p_company: company }) as Promise<{ id: string; name: string; archived: boolean }[] | null>)
+      .then((list) => alive && setSquads((list ?? []).filter((q) => !q.archived)))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [company]);
   useEffect(() => {
     if (!id) return;
     api
@@ -462,8 +479,15 @@ function TourSettings({
             hint="Os públicos se somam. Quem entrar depois numa equipe escolhida passa a receber na hora."
             onChange={(a) => setContent({ ...content, ...a })}
           />
+          <ReachPicker
+            data={data}
+            value={content}
+            disabled={busy}
+            squads={squads}
+            onChange={(patch) => setContent({ ...content, ...patch })}
+          />
           <p className="tour-settings-note">
-            {audienceSummary(content, data)} · {content.steps.length}{" "}
+            {tourAudienceSummary(content, data, squads)} · {content.steps.length}{" "}
             {content.steps.length === 1 ? "passo" : "passos"}
           </p>
           {error && <p className="form-error">{error}</p>}
@@ -487,5 +511,137 @@ function TourSettings({
         </form>
       )}
     </Modal>
+  );
+}
+
+/**
+ * Mais público (squads e quem atende clientes ou produtos) e onde o
+ * onboarding aparece (qualquer tela, ou só nas telas de clientes/produtos).
+ */
+function ReachPicker({
+  data,
+  value,
+  disabled,
+  squads,
+  onChange,
+}: {
+  data: Snapshot;
+  value: TourContent;
+  disabled: boolean;
+  squads: { id: string; name: string }[];
+  onChange: (patch: Partial<TourReach>) => void;
+}) {
+  const clients = data.clients
+    .filter((c) => !c.archived || value.aud_clients.includes(c.id) || value.scr_clients.includes(c.id))
+    .map((c) => ({ value: c.id, label: c.name }))
+    .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  const products = data.products
+    .map((p) => ({ value: p.id, label: p.name }))
+    .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  const screenOnly = value.scr_clients.length + value.scr_products.length > 0;
+  const [restrict, setRestrict] = useState(screenOnly);
+  return (
+    <>
+      {!value.aud_all && (
+        <fieldset className="notice-block tour-reach">
+          <legend>Também recebem</legend>
+          <small>Somados ao público acima. Quem entra depois numa equipe ou squad passa a receber na hora.</small>
+          <div className="tour-reach-grid">
+            {squads.length > 0 && (
+              <div className="tour-reach-pick">
+                <span>Squads</span>
+                <MultiPick
+                  label="Squads"
+                  allLabel="Nenhum squad"
+                  noun="squads"
+                  options={squads.map((q) => ({ value: q.id, label: q.name }))}
+                  value={value.aud_squads}
+                  onChange={(v) => onChange({ aud_squads: v })}
+                  disabled={disabled}
+                />
+              </div>
+            )}
+            <div className="tour-reach-pick">
+              <span>Quem atende os clientes</span>
+              <MultiPick
+                label="Clientes"
+                allLabel="Nenhum cliente"
+                noun="clientes"
+                options={clients}
+                value={value.aud_clients}
+                onChange={(v) => onChange({ aud_clients: v })}
+                disabled={disabled}
+              />
+            </div>
+            <div className="tour-reach-pick">
+              <span>Quem atende os produtos</span>
+              <MultiPick
+                label="Produtos"
+                allLabel="Nenhum produto"
+                noun="produtos"
+                options={products}
+                value={value.aud_products}
+                onChange={(v) => onChange({ aud_products: v })}
+                disabled={disabled}
+              />
+            </div>
+          </div>
+        </fieldset>
+      )}
+      <fieldset className="notice-block tour-reach">
+        <legend>Onde aparece</legend>
+        <label className="tour-reach-option">
+          <input
+            type="radio"
+            name="tour-where"
+            checked={!restrict}
+            disabled={disabled}
+            onChange={() => {
+              setRestrict(false);
+              onChange({ scr_clients: [], scr_products: [] });
+            }}
+          />
+          Em qualquer tela
+        </label>
+        <label className="tour-reach-option">
+          <input type="radio" name="tour-where" checked={restrict} disabled={disabled} onChange={() => setRestrict(true)} />
+          Só nas telas de certos clientes ou produtos
+        </label>
+        {restrict && (
+          <>
+            <small>
+              No “?” e nos disparos automáticos, ele só aparece quando a tela é de um deles (a campanha, a tarefa, o
+              filtro de cliente…). Na aba Onboarding aparece sempre.
+            </small>
+            <div className="tour-reach-grid">
+              <div className="tour-reach-pick">
+                <span>Clientes</span>
+                <MultiPick
+                  label="Clientes"
+                  allLabel="Nenhum cliente"
+                  noun="clientes"
+                  options={clients}
+                  value={value.scr_clients}
+                  onChange={(v) => onChange({ scr_clients: v })}
+                  disabled={disabled}
+                />
+              </div>
+              <div className="tour-reach-pick">
+                <span>Produtos</span>
+                <MultiPick
+                  label="Produtos"
+                  allLabel="Nenhum produto"
+                  noun="produtos"
+                  options={products}
+                  value={value.scr_products}
+                  onChange={(v) => onChange({ scr_products: v })}
+                  disabled={disabled}
+                />
+              </div>
+            </div>
+          </>
+        )}
+      </fieldset>
+    </>
   );
 }

@@ -322,8 +322,26 @@ export function scoreCandidate(t: TourTarget, c: Candidate) {
 /** The least score that counts as "found". */
 export const threshold = (t: TourTarget) => Math.min(9, maxScore(t) * 0.45);
 
-/** The element of a step on this screen (null: not here). */
-export function findTarget(t: TourTarget, root: ParentNode = document): HTMLElement | null {
+/**
+ * The element of a step on this screen (null: not here). `anyRecord`: the
+ * step is about any record of the kind — the first match instead of the
+ * recorded position, and, if the recorded text (someone's data, like a
+ * task's title) isn't there, the same place by structure.
+ */
+export function findTarget(
+  t: TourTarget,
+  { anyRecord = false }: { anyRecord?: boolean } = {},
+  root: ParentNode = document,
+): HTMLElement | null {
+  if (!anyRecord) return findOne(t, false, root);
+  // The recorded one is on screen (same text): that one.
+  const same = findOne({ ...t, nth: 0 }, false, root);
+  if (same && (!t.text || sameText(t.text, textOf(same)))) return same;
+  // Someone else's data: the first one in the same place of the structure.
+  return findOne({ ...t, text: "", nth: 0 }, true, root);
+}
+
+function findOne(t: TourTarget, firstPassing: boolean, root: ParentNode): HTMLElement | null {
   const modal = topModal();
   const usable = (el: Element | null): el is HTMLElement =>
     el instanceof HTMLElement &&
@@ -345,11 +363,11 @@ export function findTarget(t: TourTarget, root: ParentNode = document): HTMLElem
   } catch {
     byPath = [];
   }
-  if (byPath.length === 1 && byPath[0].tagName.toLowerCase() === t.tag) {
+  // The very same place, with the same text: no need to compare the rest
+  // (looking for the first row, the recorded row's place doesn't count).
+  if (!firstPassing && byPath.length === 1 && byPath[0].tagName.toLowerCase() === t.tag) {
     const only = byPath[0];
-    // The same place with other text (another record) still counts when the
-    // text is not what identifies it.
-    if (!t.text || sameText(t.text, textOf(only)) || !t.label) return only;
+    if (!t.text || sameText(t.text, textOf(only))) return only;
   }
   const vw = window.innerWidth || 1;
   const vh = window.innerHeight || 1;
@@ -377,6 +395,8 @@ export function findTarget(t: TourTarget, root: ParentNode = document): HTMLElem
       nth,
       box: { x: r.left / vw, y: r.top / vh, w: r.width / vw, h: r.height / vh },
     });
+    // The first one that passes, in the order of the screen (the first row).
+    if (firstPassing && score >= threshold(t)) return el;
     if (score > bestScore) {
       bestScore = score;
       best = el;
@@ -423,6 +443,12 @@ export function describeTarget(t: Pick<TourTarget, "tag" | "role" | "text" | "la
   const name = t.label || t.text;
   return name ? `${kind} “${name.length > 40 ? `${name.slice(0, 40)}…` : name}”` : kind;
 }
+
+/** Buttons that save, send or publish something for real. */
+export const looksCommitting = (t: Pick<TourTarget, "text" | "label">) =>
+  /\b(salvar|enviar|publicar|criar|confirmar|concluir|entregar|aprovar|agendar|importar|cadastrar|gravar|finalizar|pagar|aplicar|adicionar|convidar)\b/i.test(
+    `${t.text} ${t.label ?? ""}`,
+  );
 
 /** Destructive buttons: a step never clicks them by itself nor waits on them. */
 export const looksDestructive = (t: Pick<TourTarget, "text" | "label">) =>

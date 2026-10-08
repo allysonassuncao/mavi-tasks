@@ -111,6 +111,8 @@ export function SectionLayout({
                 );
                 const common = {
                   className: `section-nav-item ${active ? "active" : ""}`,
+                  // Marcador fixo para os onboardings (Tutoriais › Onboarding).
+                  "data-tour": `secao-${item.id}`,
                   "aria-current": active ? ("page" as const) : undefined,
                   title: collapsed ? item.label : undefined,
                 };

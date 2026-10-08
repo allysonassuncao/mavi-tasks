@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  Circle,
   Crosshair,
   Expand,
   ListOrdered,
@@ -15,6 +16,7 @@ import {
   Pencil,
   Play,
   Send,
+  Square,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -23,9 +25,11 @@ import {
   captureTarget,
   describeTarget,
   isTourUi,
+  looksCommitting,
   looksDestructive,
   parentPick,
   pickable,
+  type TourTarget,
 } from "./tour-target";
 import {
   Balloon,
@@ -45,6 +49,8 @@ import {
   pageLabel,
   pageOfScreen,
   stepHref,
+  stepInRecord,
+  tourAudienceSummary,
   type Box,
   type TourContent,
   type TourMiss,
@@ -52,7 +58,6 @@ import {
   type TourStep,
   type ToursApi,
 } from "./tours";
-import { audienceSummary } from "./tutorials";
 import type { Snapshot } from "./types";
 
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
@@ -123,6 +128,8 @@ export default function TourEditor({
   const [hasDraft, setHasDraft] = useState(start.hasDraft);
   const [save, setSave] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [picking, setPicking] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recorded, setRecorded] = useState(0);
   const [form, setForm] = useState<Form | null>(null);
   const [listOpen, setListOpen] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
@@ -223,14 +230,42 @@ export default function TourEditor({
     setPicking(false);
     const where = { page: pageOfScreen(currentScreen()), url: currentScreen(), target: captureTarget(el) };
     if (form) {
-      const step = { ...form.step, ...where };
+      const step = { ...form.step, ...where, real: !looksCommitting(where.target) };
       if (step.target && looksDestructive(step.target) && step.kind !== "next" && step.kind !== "input")
         step.kind = "next";
       setForm({ ...form, step, chain: [el], at: 0 });
     } else {
       if (content.steps.length >= MAX_STEPS) return notify(`Um onboarding pode ter até ${MAX_STEPS} passos.`);
-      openForm(null, { ...blankStep(), ...where }, el);
+      openForm(null, { ...blankStep(), ...where, real: !looksCommitting(where.target) }, el);
     }
+  };
+  // "Gravar": each click on the app becomes a step (and still does what it does).
+  const onRecord = (el: HTMLElement, target: TourTarget, url: string) => {
+    const steps = contentRef.current.steps;
+    if (steps.length >= MAX_STEPS) {
+      setRecording(false);
+      return notify(`Um onboarding pode ter até ${MAX_STEPS} passos. A gravação parou.`);
+    }
+    const field = recordKind(el, target);
+    const last = steps[steps.length - 1];
+    // Clicks again on the field being filled: the same step.
+    if (last && last.url === url && last.target?.path === target.path && last.kind === "input") return;
+    const name = target.label || target.text;
+    const quoted = name ? `“${name.length > 50 ? `${name.slice(0, 50)}…` : name}”` : describeTarget(target);
+    const step: TourStep = {
+      id: newStepId(),
+      page: pageOfScreen(url),
+      url,
+      target,
+      title: field === "input" ? `Preencha ${quoted}` : field === "click" ? `Clique em ${quoted}` : quoted,
+      body: "",
+      kind: field,
+      placement: "auto",
+      record: "any",
+      real: !looksCommitting(target),
+    };
+    setSteps([...steps, step]);
+    setRecorded((n) => n + 1);
   };
   const addCentered = () => {
     if (content.steps.length >= MAX_STEPS) return notify(`Um onboarding pode ter até ${MAX_STEPS} passos.`);
@@ -317,6 +352,7 @@ export default function TourEditor({
   return (
     <TourPortal>
       {picking && <Picker onPick={onPick} onCancel={() => setPicking(false)} />}
+      {recording && <Recorder onRecord={onRecord} />}
       {form && !picking && (
         <FormHighlight
           form={form}
@@ -372,7 +408,23 @@ export default function TourEditor({
             )}
           </small>
         </div>
-        {picking ? (
+        {recording ? (
+          <div className="tour-bar-picking">
+            <span className="tour-rec-dot" aria-hidden="true" /> Gravando: use o sistema; cada clique vira um passo.
+            <b>{recorded} {recorded === 1 ? "passo" : "passos"}</b>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => {
+                setRecording(false);
+                setListOpen(true);
+                if (recorded) notify("Gravação parada. Revise os textos de cada passo na lista.");
+              }}
+            >
+              <Square size={13} /> Parar
+            </button>
+          </div>
+        ) : picking ? (
           <div className="tour-bar-picking">
             <Crosshair size={16} /> Clique no elemento do passo. <kbd>Esc</kbd> cancela.
             <button type="button" className="btn secondary" onClick={() => setPicking(false)}>
@@ -382,7 +434,7 @@ export default function TourEditor({
         ) : confirmPublish ? (
           <div className="tour-bar-confirm">
             <span>
-              Publicar para <b>{audienceSummary(content, data)}</b>?
+              Publicar para <b>{tourAudienceSummary(content, data)}</b>?
             </span>
             <button type="button" className="btn primary" onClick={() => void publish()}>
               <Send size={15} /> Publicar
@@ -394,6 +446,20 @@ export default function TourEditor({
         ) : (
           !collapsed && (
             <div className="tour-bar-actions">
+              {!form && (
+                <button
+                  type="button"
+                  className="btn secondary"
+                  onClick={() => {
+                    setRecorded(0);
+                    setListOpen(false);
+                    setRecording(true);
+                  }}
+                  title="Use o sistema normalmente: cada clique vira um passo, com o texto para revisar depois"
+                >
+                  <Circle size={13} className="tour-rec-icon" /> Gravar
+                </button>
+              )}
               <button
                 type="button"
                 className="btn primary"
@@ -450,6 +516,48 @@ export default function TourEditor({
       </div>
     </TourPortal>
   );
+}
+
+/** What a recorded click means: a field to fill, a click to wait for, or (delete buttons) just a look. */
+function recordKind(el: HTMLElement, t: TourTarget): TourStep["kind"] {
+  if (looksDestructive(t)) return "next";
+  const field =
+    /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) ||
+    el.getAttribute("role") === "combobox" ||
+    el.getAttribute("aria-haspopup") === "listbox" ||
+    el.isContentEditable;
+  if (!field) return "click";
+  const type = (el as HTMLInputElement).type;
+  return type === "checkbox" || type === "radio" ? "click" : "input";
+}
+
+/**
+ * Recording: every click on the app (not on the editor) becomes a step,
+ * read before the app reacts (the screen may change right after). The
+ * click goes on as usual. Choosing an option in a list is part of filling
+ * the field, not a step of its own.
+ */
+function Recorder({ onRecord }: { onRecord: (el: HTMLElement, target: TourTarget, url: string) => void }) {
+  const latest = useRef(onRecord);
+  latest.current = onRecord;
+  useEffect(() => {
+    const on = (e: MouseEvent) => {
+      if (e.button !== 0 || isTourUi(e.target as Element)) return;
+      const under = e.target instanceof Element ? e.target : null;
+      if (under?.closest("[role=option], [role=listbox], [role=gridcell], .rdp, [data-radix-popper-content-wrapper] [role=option]"))
+        return;
+      const el = pickable(under);
+      if (!el) return;
+      latest.current(el, captureTarget(el), currentScreen());
+    };
+    document.addEventListener("click", on, true);
+    document.documentElement.classList.add("tour-recording");
+    return () => {
+      document.removeEventListener("click", on, true);
+      document.documentElement.classList.remove("tour-recording");
+    };
+  }, []);
+  return null;
 }
 
 /**
@@ -589,6 +697,12 @@ function StepList({
                       {pageLabel(s.page)} · {s.target ? describeTarget(s.target) : "Balão no centro"} ·{" "}
                       {STEP_KINDS.find((k) => k.id === s.kind)?.label}
                     </small>
+                    {(s.real === false || (s.record === "same" && stepInRecord(s))) && (
+                      <span className="tour-step-flags">
+                        {s.real === false && <span>só mostrar</span>}
+                        {s.record === "same" && stepInRecord(s) && <span>este registro</span>}
+                      </span>
+                    )}
                     {miss && (
                       <small className="tour-miss">
                         <TriangleAlert size={12} /> Não encontrado {miss.misses}× ({miss.people}{" "}
@@ -751,6 +865,44 @@ function StepForm({
           </p>
         )}
       </fieldset>
+      {s.kind === "click" && !destructive && (
+        <fieldset className="tour-field tour-kinds">
+          <legend className="tour-label">O clique de quem faz o tour</legend>
+          <label>
+            <input type="radio" name="tour-real" checked={s.real !== false} onChange={() => set({ real: true })} />
+            <span>
+              <b>Faz de verdade</b>
+              <small>O botão funciona normalmente (salva, envia, abre).</small>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="tour-real" checked={s.real === false} onChange={() => set({ real: false })} />
+            <span>
+              <b>Só mostrar</b>
+              <small>O clique não chega ao sistema: nada é salvo nem enviado. O tour segue.</small>
+            </span>
+          </label>
+        </fieldset>
+      )}
+      {stepInRecord(s) && (
+        <fieldset className="tour-field tour-kinds">
+          <legend className="tour-label">Registro</legend>
+          <label>
+            <input type="radio" name="tour-record" checked={s.record !== "same"} onChange={() => set({ record: "any" })} />
+            <span>
+              <b>Qualquer um do mesmo tipo</b>
+              <small>Vale o que a pessoa tiver aberto (ou a 1ª linha da lista no lugar da gravada).</small>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="tour-record" checked={s.record === "same"} onChange={() => set({ record: "same" })} />
+            <span>
+              <b>Este registro</b>
+              <small>O tour abre exatamente o que foi gravado (quem não tem acesso a ele não vê o passo).</small>
+            </span>
+          </label>
+        </fieldset>
+      )}
       {s.target && (
         <label className="tour-field">
           <span className="tour-label">Posição do balão</span>

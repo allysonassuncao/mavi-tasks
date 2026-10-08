@@ -11,7 +11,20 @@ import {
   type Candidate,
   type TourTarget,
 } from "./tour-target";
-import { onStepScreen, placeBalloon, screenOf, screenShape, stepHref, tourModules, type TourStep } from "./tours";
+import {
+  emptyTour,
+  onStepScreen,
+  placeBalloon,
+  screenContext,
+  screenOf,
+  screenShape,
+  stepHref,
+  stepInRecord,
+  tourAudienceSummary,
+  tourModules,
+  type TourStep,
+} from "./tours";
+import { looksCommitting } from "./tour-target";
 
 const target: TourTarget = {
   tag: "button",
@@ -135,5 +148,44 @@ describe("posição do balão", () => {
   it("sem elemento (ou elemento enorme), no meio ou no pé da tela", () => {
     expect(placeBalloon(null, size, "auto", view)).toEqual({ left: 450, top: 325, side: "center" });
     expect(placeBalloon({ left: 0, top: 0, width: 1200, height: 800 }, size, "auto", view).side).toBe("center");
+  });
+});
+
+describe("Fase 2: tela, registro, público", () => {
+  const id1 = "a1b2c3d4-0000-4000-8000-000000000001";
+  const id2 = "a1b2c3d4-0000-4000-8000-000000000002";
+  it("a tela diz cliente, produto, contrato, campanha e tarefa (só ids)", () => {
+    expect(screenContext(`/agencias/make/campanhas/${id1}`, `?cliente=${id2}|lixo&produto=x`)).toEqual({
+      clients: [id2],
+      products: [],
+      contracts: [],
+      campaign: id1,
+      task: null,
+    });
+    expect(screenContext(`/tarefas/${id1}/minha-tarefa`, `?contrato=${id2}`)).toMatchObject({ task: id1, contracts: [id2] });
+  });
+  it("passo dentro de registro: endereço com id ou linha de tabela/lista", () => {
+    expect(stepInRecord({ url: `/campanhas/${id1}`, target: null })).toBe(true);
+    expect(stepInRecord({ url: "/tarefas", target: { path: "table > tbody > tr:nth-of-type(2) > td > button" } as never })).toBe(true);
+    expect(stepInRecord({ url: "/tarefas", target: { path: "ul.menu > li.item > a" } as never })).toBe(true);
+    expect(stepInRecord({ url: "/tarefas", target: { path: "main > div.head > button.btn" } as never })).toBe(false);
+  });
+  it("botões que gravam algo", () => {
+    expect(looksCommitting({ text: "Salvar alterações", label: null })).toBe(true);
+    expect(looksCommitting({ text: "Nova tarefa", label: "Criar tarefa" })).toBe(true);
+    expect(looksCommitting({ text: "Quadro", label: null })).toBe(false);
+  });
+  it("resumo do público com squads, quem atende e onde aparece", () => {
+    const data = {
+      teams: [],
+      members: [],
+      clients: [{ id: "c1", name: "Aurora" }],
+      products: [{ id: "p1", name: "Make Ads" }],
+    } as never;
+    const t = { ...emptyTour(), aud_all: false, aud_squads: ["s1"], aud_clients: ["c1"], scr_products: ["p1"] };
+    expect(tourAudienceSummary(t, data, [{ id: "s1", name: "Azul" }])).toBe(
+      "Azul, quem atende Aurora · só nas telas de Make Ads",
+    );
+    expect(tourAudienceSummary({ ...emptyTour(), aud_all: false }, data)).toBe("Ninguém escolhido ainda");
   });
 });
