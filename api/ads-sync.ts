@@ -4,6 +4,7 @@ import { handleAdsSync, syncEnv } from "./_ads-sync.js";
 import { handleAdsToday } from "./_ads-today.js";
 import { handleBudgetRefresh, handleBudgetSchedule } from "./_ads-budget.js";
 import { handleMakeLeads } from "./_make-leads.js";
+import { handleMakecrmAds } from "./_makecrm-ads.js";
 
 /**
  * Campanhas: the daily sync of the cycles' numbers (api/_ads-sync.ts), the
@@ -11,7 +12,8 @@ import { handleMakeLeads } from "./_make-leads.js";
  * reads the platforms' budgets, api/_ads-budget.ts), the list's "Atualizar"
  * of a campaign's budget ({"budget": "<campanha>"}) and,
  * at /api/make-leads (vercel.json), the leads the Make server sends
- * (api/_make-leads.ts).
+ * (api/_make-leads.ts) and, at /api/makecrm-ads, the numbers the MakeCRM
+ * asks for when the MASO has none (api/_makecrm-ads.ts).
  */
 export default async function handler(
   req: IncomingMessage & { body?: any },
@@ -34,10 +36,19 @@ export default async function handler(
   const makeLeads =
     url.pathname === "/api/make-leads" ||
     url.searchParams.get("make-leads") === "1";
+  const makecrmAds =
+    url.pathname === "/api/makecrm-ads" ||
+    url.searchParams.get("makecrm-ads") === "1";
   try {
     const body = JSON.parse(raw || "{}");
     const env = syncEnv(process.env, adsEnv());
-    const result = makeLeads
+    const result = makecrmAds
+      ? await handleMakecrmAds(
+          body,
+          (req.headers["x-mavi-secret"] as string | undefined) ?? null,
+          { ...env, makecrmSecret: process.env.MAKECRM_ADS_SECRET ?? "" },
+        )
+      : makeLeads
       ? await handleMakeLeads(
           body,
           (req.headers["x-mavi-secret"] as string | undefined) ?? null,

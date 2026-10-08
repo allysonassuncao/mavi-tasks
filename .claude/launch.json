@@ -356,6 +356,516 @@
         "--strictPort"
       ],
       "port": 5213
+    },
+    {
+      "name": "mavi-dev-conversoes",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5214",
+        "--strictPort"
+      ],
+      "port": 5214
+    },
+    {
+      "name": "mavi-dev-busca",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5215",
+        "--strictPort"
+      ],
+      "port": 5215
+    },
+    {
+      "name": "mavi-dev-virada",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5216",
+        "--strictPort"
+      ],
+      "port": 5216
+    },
+    {
+      "name": "mavi-dev-link-campanha",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5217",
+        "--strictPort"
+      ],
+      "port": 5217
+    },
+    {
+      "name": "mavi-dev-copiar-descricao",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5218",
+        "--strictPort"
+      ],
+      "port": 5218
+    },
+    {
+      "name": "mavi-dev-radar-pessoal",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5231",
+        "--strictPort"
+      ],
+      "port": 5231
+    },
+    {
+      "name": "mavi-dev-agendamento",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5232",
+        "--strictPort"
+      ],
+      "port": 5232
+    },
+    {
+      "name": "mavi-dev-bolinha-skills",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5233",
+        "--strictPort"
+      ],
+      "port": 5233
+    },
+    {
+      "name": "mavi-dev-crm",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5234",
+        "--strictPort"
+      ],
+      "port": 5234
+    },
+    {
+      "name": "mavi-dev-vincular-radar",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5235",
+        "--strictPort"
+      ],
+      "port": 5235
+    },
+    {
+      "name": "mavi-dev-indice-m",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5236",
+        "--strictPort"
+      ],
+      "port": 5236
+    },
+    {
+      "name": "mavi-dev-crm-utm",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5237",
+        "--strictPort"
+      ],
+      "port": 5237
+    },
+    {
+      "name": "mavi-dev-agentes",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5241",
+        "--strictPort"
+      ],
+      "port": 5241
+    },
+    {
+      "name": "mavi-dev-insights",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5242",
+        "--strictPort"
+      ],
+      "port": 5242
+    },
+    {
+      "name": "mavi-dev-armazenamento",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5243",
+        "--strictPort"
+      ],
+      "port": 5243
+    },
+    {
+      "name": "mavi-dev-colunas-campanhas",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5244",
+        "--strictPort"
+      ],
+      "port": 5244
+    },
+    {
+      "name": "mavi-dev-falhas",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5238",
+        "--strictPort"
+      ],
+      "port": 5238
+    },
+    {
+      "name": "mavi-dev-tutoriais",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5245",
+        "--strictPort"
+      ],
+      "port": 5245
+    },
+    {
+      "name": "mavi-dev-publico",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5246",
+        "--strictPort"
+      ],
+      "port": 5246
+    },
+    {
+      "name": "mavi-dev-massa-status",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5247",
+        "--strictPort"
+      ],
+      "port": 5247
+    },
+    {
+      "name": "mavi-dev-rq",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5251",
+        "--strictPort"
+      ],
+      "port": 5251
+    },
+    {
+      "name": "mavi-dev-termometro",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5253",
+        "--strictPort"
+      ],
+      "port": 5253
+    },
+    {
+      "name": "mavi-dev-radar-agentes",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5254",
+        "--strictPort"
+      ],
+      "port": 5254
+    },
+    {
+      "name": "mavi-dev-equipes-produto",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5255",
+        "--strictPort"
+      ],
+      "port": 5255
+    },
+    {
+      "name": "mavi-dev-copiloto-rapido",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5256",
+        "--strictPort"
+      ],
+      "port": 5256
+    },
+    {
+      "name": "mavi-dev-cs",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5258",
+        "--strictPort"
+      ],
+      "port": 5258
+    },
+    {
+      "name": "mavi-dev-roteador",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5259",
+        "--strictPort"
+      ],
+      "port": 5259
+    },
+    {
+      "name": "mavi-dev-api-reunioes",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5261",
+        "--strictPort"
+      ],
+      "port": 5261
+    },
+    {
+      "name": "mavi-dev-segundo-menu",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5262",
+        "--strictPort"
+      ],
+      "port": 5262
+    },
+    {
+      "name": "mavi-dev-desativar",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5263",
+        "--strictPort"
+      ],
+      "port": 5263
+    },
+    {
+      "name": "mavi-dev-avaliacao",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5263",
+        "--strictPort"
+      ],
+      "port": 5263
+    },
+    {
+      "name": "mavi-dev-radar-modal",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5264",
+        "--strictPort"
+      ],
+      "port": 5264
+    },
+    {
+      "name": "mavi-dev-falhas-campanha",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_SUPABASE_URL=",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=",
+        "npx",
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5265",
+        "--strictPort"
+      ],
+      "port": 5265
     }
   ]
 }

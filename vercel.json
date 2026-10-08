@@ -44,6 +44,10 @@
       "destination": "/api/ads-sync?make-leads=1"
     },
     {
+      "source": "/api/makecrm-ads",
+      "destination": "/api/ads-sync?makecrm-ads=1"
+    },
+    {
       "source": "/api/mcp",
       "destination": "/api/drive?mcp=1"
     },

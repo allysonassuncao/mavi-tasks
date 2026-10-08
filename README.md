@@ -120,6 +120,7 @@ Antes do primeiro deploy, configurar `VITE_SUPABASE_URL` e `VITE_SUPABASE_PUBLIS
 | `META_GRAPH_VERSION`, `GOOGLE_ADS_API_VERSION`     | Opcionais. Padrões: `v23.0` e `v25` (a v21 do Google Ads, usada pelo MASO, foi desligada em 05/08/2026)                                                               |
 | `ADS_REDIRECT_URI`                                 | Opcional. Padrão: `<APP_ORIGIN>/api/ads-callback`; em desenvolvimento, `http://localhost:5173/api/ads-callback`                                                       |
 | `ADS_SYNC_SECRET`                                  | Segredo aleatório (32+ caracteres) com que o banco chama `/api/ads-sync` (sincronização diária de Campanhas)                                                          |
+| `MAKECRM_ADS_SECRET`                               | Segredo aleatório (32+ caracteres) com que o MakeCRM pede os números das campanhas a `/api/makecrm-ads` (o `MAVI_ADS_SECRET` da edge function `ads-report` do MakeCRM) |
 | `ANTHROPIC_API_KEY`                                | Chave da API da Claude (console.anthropic.com), usada pelo Social Leads para escrever e ajustar o plano do mês (`/api/social-leads`). Cobrada por uso                 |
 | `SOCIAL_LEADS_MODEL`                               | Opcional. Padrão: `claude-opus-5-5`                                                                                                                                     |
 | `MEETINGS_MODEL`                                   | Opcional (pergunta sobre uma reunião, no player). Padrão: `claude-opus-5-5`                                                                                                                                     |
@@ -246,6 +247,17 @@ Em **Campanhas → Conexões e sincronização**:
 - **Sincronização diária:** agendamento (job `mavi-ads-sync` do pg_cron e a última execução), última sincronização automática, ciclos do dia (sincronizados, com erro, pendentes), quantos estão com os números de ontem e a lista dos que falharam ou ficaram para trás, com atalho para a campanha.
 
 Pelo SQL, a mesma conferência: `select * from cron.job where jobname = 'mavi-ads-sync';`, `select status, start_time, return_message from cron.job_run_details where jobid = (select jobid from cron.job where jobname = 'mavi-ads-sync') order by start_time desc limit 10;` e `select public.ad_sync_overview('<empresa>');` (como administrador) ou a tabela `public.ad_sync_runs`.
+
+### Campanhas: números para o MakeCRM (contas Make Ads)
+
+Na página **Anúncios** do MakeCRM, as contas Make Ads leem as campanhas do MASO pela ponte do n8n e somam os registros diários do MASO; uma campanha sem registro diário no período ficava de fora ("Nenhum dado retornado da plataforma"). Nesse caso a edge function `ads-report` do MakeCRM pede os números ao MAVI: `POST /api/makecrm-ads` (na Vercel, a mesma função de `/api/ads-sync`) com `X-Mavi-Secret` (`MAKECRM_ADS_SECRET`) e `{action, crm_company, refs, since, until}`; o servidor confere o segredo e chama as funções do banco com o `ADS_SYNC_SECRET` (migração `20270621090000_makecrm_ads_report`), como `/api/make-leads`.
+
+- **Quais campanhas:** as do MASO pedidas (o `id_campanha`, guardado em `ad_campaigns.legacy_id` pela importação) e todas as dos clientes ligados à empresa do MakeCRM em **Campanhas › Conexões** (`client_crm_links`), inclusive as criadas só no MAVI. Só entram as que têm dias no período (`ad_daily_metrics`), como no MASO.
+- **`campaigns`:** a soma dos dias do período (o investimento sem M e com o M de cada dia, como o MASO multiplicava o registro diário), o ciclo do período e os vínculos na plataforma (conta, campanha e o nome dela, para o MakeCRM casar com as UTMs). Quando o MASO tem registros da campanha, o MakeCRM fica com os do MASO.
+- **`ads`:** os anúncios do Meta de uma campanha, lidos ao vivo com o token da conta (os mesmos campos e criativos que o MakeCRM lê), e os totais do MAVI, que o MakeCRM reparte entre os anúncios pelas impressões.
+- **`audience`:** idade/gênero e região das campanhas do Meta pedidas, só das campanhas da plataforma vinculadas (numa conta compartilhada, as de outro cliente ficam de fora). O público do Google o MakeCRM continua lendo com a conexão do MASO, a partir dos vínculos devolvidos em `campaigns`.
+
+Os tokens nunca saem do MAVI. Conta do Meta sem conexão no MAVI vira aviso. Para ligar: gerar um segredo (`openssl rand -base64 32`), configurar `MAKECRM_ADS_SECRET` na Vercel (o mesmo valor do secret `MAVI_ADS_SECRET` da edge function `ads-report` no Supabase do MakeCRM) e fazer redeploy. Teste do banco: `npm run test:db:makecrm-ads`.
 
 ### Campanhas: importação do histórico do MASO
 
