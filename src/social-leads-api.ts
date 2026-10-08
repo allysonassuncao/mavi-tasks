@@ -91,8 +91,15 @@ export interface ProofFolder {
   upload: boolean;
   files: MediaFile[];
 }
-/** Who receives each post's art task: a team (distributed) or a person. */
-export type ReleaseTarget = { team: string } | { user: string };
+/**
+ * Who receives each post's art task: a team (distributed) or a person; with
+ * the delivery date (YYYY-MM-DD; none: today + the art days) and the reason
+ * when it is before the due rule's minimum.
+ */
+export type ReleaseTarget = ({ team: string } | { user: string }) & {
+  due?: string;
+  reason?: string;
+};
 export type ReleaseAssign = Record<number, ReleaseTarget>;
 /** Who gets the client's cycle tasks (only on the release that opens it). */
 export type ReleaseCycle = { followup: string; meeting: string };
@@ -1531,11 +1538,14 @@ export function demoSocialLeads(
         (x) => x.plan_id === planId && x.decision === "approved" && !x.task_id,
       );
       if (!todo.length) throw new Error("Nenhum post aprovado sem tarefa.");
-      const due = new Date(Date.now() + (settings?.artDays ?? 5) * 86_400_000)
+      const standard = new Date(
+        Date.now() + (settings?.artDays ?? 5) * 86_400_000,
+      )
         .toISOString()
         .slice(0, 10);
       todo.forEach((x, i) => {
         const target = assign[x.number];
+        const due = target?.due || standard;
         const members =
           target && "team" in target
             ? data.teamMembers

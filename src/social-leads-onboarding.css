@@ -683,3 +683,46 @@
     margin-left: auto;
   }
 }
+
+/* ------------------------------------------------------------ liberar a produção: prazo de entrega */
+/* "Para todos os posts" ganhou o prazo ao lado de quem recebe; cada post
+   também tem o seu. */
+.sl-release-all {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: #6e8060;
+  font-weight: 500;
+}
+.sl-release-all-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 215px;
+  gap: 12px;
+}
+.sl-release-all-fields > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.sl-release-field {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #5d6967;
+}
+.sl-release .sl-release-list li {
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 280px) 170px;
+}
+.sl-release-reason {
+  padding: 12px 14px;
+  border-radius: 11px;
+  background: #fff8ec;
+  border: 1px solid #f3dfbd;
+}
+@media (max-width: 760px) {
+  .sl-release-all-fields,
+  .sl-release .sl-release-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

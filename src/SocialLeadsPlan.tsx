@@ -57,6 +57,8 @@ import {
 } from "./ui";
 import { statuses, type Snapshot, type Status } from "./types";
 import { navigate, routeParts, useUrlState } from "./router";
+import { addDays, localDate } from "./schedule";
+import { isBusinessDay } from "./dueRules";
 import {
   monthFolder,
   serverLink,
@@ -2077,7 +2079,8 @@ function AdjustBox({
  * to whoever has the fewest open tasks) or a person. The creative team comes
  * chosen. A team that doesn't serve the client yet starts serving it; a
  * person outside the client's teams gets the task but can't send the arts to
- * the post.
+ * the post. The delivery date works the same way (it starts at today + the
+ * art days); before the due rule's minimum, the database asks for a reason.
  */
 function ReleaseModal({
   label,
@@ -2114,6 +2117,17 @@ function ReleaseModal({
     followup: user,
     meeting: user,
   });
+  // The delivery date: today + the art days from the settings, for all or
+  // post by post.
+  const today = localDate(new Date());
+  const standard = addDays(today, production.artDays);
+  const [allDue, setAllDue] = useState(standard);
+  const [dues, setDues] = useState<Record<number, string>>(() =>
+    Object.fromEntries(posts.map((p) => [p.number, standard])),
+  );
+  // Asked once a date falls before the due rule's minimum.
+  const [tight, setTight] = useState("");
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -2151,6 +2165,20 @@ function ReleaseModal({
   ];
   const missing = posts.filter((p) => !each[p.number]).map((p) => p.number);
   const perPost = new Set(Object.values(each)).size > 1;
+  const perPostDue = new Set(Object.values(dues)).size > 1;
+  const noDue = posts
+    .filter((p) => !dues[p.number] || dues[p.number] < today)
+    .map((p) => p.number);
+  const offDay = posts
+    .filter((p) => dues[p.number] && !isBusinessDay(data.calendarDays, dues[p.number]))
+    .map((p) => p.number);
+  const blocked = missing.length
+    ? `Escolha quem recebe o post ${missing.join(", ")}`
+    : noDue.length
+      ? `Escolha o prazo de entrega do post ${noDue.join(", ")} (de hoje em diante)`
+      : tight && reason.trim().length < 5
+        ? "Explique o motivo do prazo antes do mínimo da regra"
+        : "";
 
   return (
     <Modal
@@ -2163,26 +2191,39 @@ function ReleaseModal({
         className="entity-form sl-release"
         onSubmit={(e) => {
           e.preventDefault();
-          if (missing.length) return;
+          if (blocked) return;
           const assign: ReleaseAssign = {};
+          const why = tight ? reason.trim() : "";
           for (const p of posts) {
             const [kind, id] = each[p.number].split(":");
-            assign[p.number] = kind === "user" ? { user: id } : { team: id };
+            assign[p.number] = {
+              ...(kind === "user" ? { user: id } : { team: id }),
+              due: dues[p.number],
+              ...(why ? { reason: why } : {}),
+            };
           }
           setBusy(true);
           setError("");
           onRelease(assign, startsCycle ? cycle : undefined)
-            .catch((err) => setError((err as Error).message))
+            .catch((err) => {
+              const message = (err as Error).message;
+              // Before the due rule's minimum: the reason goes along.
+              if ((err as { code?: string }).code === "MV002") {
+                setTight(message);
+                setError("");
+              } else setError(message);
+            })
             .finally(() => setBusy(false));
         }}
       >
         <p>
           {posts.length}{" "}
           {posts.length === 1 ? "post aprovado vira" : "posts aprovados viram"}{" "}
-          tarefa de arte, com prazo de {production.artDays}{" "}
-          {production.artDays === 1 ? "dia" : "dias"}. Cada tarefa leva o
-          gancho, a copy, a direção visual, o formato e o CTA do post. Para uma
-          equipe, a tarefa vai para quem tem menos tarefas em aberto.
+          tarefa de arte. O prazo de entrega começa em {production.artDays}{" "}
+          {production.artDays === 1 ? "dia" : "dias"} (da configuração) e
+          pode mudar para todos ou post a post. Cada tarefa leva o gancho, a
+          copy, a direção visual, o formato e o CTA do post. Para uma equipe,
+          a tarefa vai para quem tem menos tarefas em aberto.
         </p>
         {startsCycle && (
           <section className="sl-release-cycle" aria-label="Ciclo do cliente">
@@ -2230,29 +2271,53 @@ function ReleaseModal({
             ))}
           </section>
         )}
-        <label className="sl-release-all">
+        <section className="sl-release-all" aria-label="Para todos os posts">
           <span className="sl-label">
             Para todos os posts
             <em>Muda todos de uma vez. Depois dá para trocar post a post.</em>
           </span>
-          <Select
-            value={perPost ? "" : all}
-            onValueChange={(v) => {
-              if (!v) return;
-              setAll(v);
-              setEach(Object.fromEntries(posts.map((p) => [p.number, v])));
-            }}
-          >
-            <SelectOption value="">
-              {perPost ? "Cada post com o seu" : "Escolha uma equipe ou pessoa"}
-            </SelectOption>
-            {options.map((o) => (
-              <SelectOption key={o.value} value={o.value}>
-                {o.label}
-              </SelectOption>
-            ))}
-          </Select>
-        </label>
+          <div className="sl-release-all-fields">
+            <div>
+              <span className="sl-release-field">Quem recebe</span>
+              <Select
+                value={perPost ? "" : all}
+                aria-label="Quem recebe todos os posts"
+                onValueChange={(v) => {
+                  if (!v) return;
+                  setAll(v);
+                  setEach(Object.fromEntries(posts.map((p) => [p.number, v])));
+                }}
+              >
+                <SelectOption value="">
+                  {perPost
+                    ? "Cada post com o seu"
+                    : "Escolha uma equipe ou pessoa"}
+                </SelectOption>
+                {options.map((o) => (
+                  <SelectOption key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectOption>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <span className="sl-release-field">Prazo de entrega</span>
+              <Input
+                type="date"
+                aria-label="Prazo de entrega de todos os posts"
+                value={perPostDue ? "" : allDue}
+                placeholder="Cada post com o seu"
+                min={today}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v) return;
+                  setAllDue(v);
+                  setDues(Object.fromEntries(posts.map((p) => [p.number, v])));
+                }}
+              />
+            </div>
+          </div>
+        </section>
         <ul className="sl-release-list">
           {posts.map((p) => (
             <li key={p.number}>
@@ -2283,6 +2348,15 @@ function ReleaseModal({
                   </SelectOption>
                 ))}
               </Select>
+              <Input
+                type="date"
+                aria-label={`Prazo de entrega do post ${p.number}`}
+                value={dues[p.number] ?? ""}
+                min={today}
+                onChange={(e) =>
+                  setDues((d) => ({ ...d, [p.number]: e.target.value }))
+                }
+              />
             </li>
           ))}
         </ul>
@@ -2293,6 +2367,31 @@ function ReleaseModal({
             consegue subir as artes no post. Escolha a equipe dele ou adicione a
             equipe ao cliente.
           </p>
+        )}
+        {offDay.length > 0 && (
+          <p className="sl-alert warn">
+            <TriangleAlert size={15} />
+            {offDay.length === 1
+              ? `O prazo do post ${offDay[0]} cai`
+              : `Os prazos dos posts ${offDay.join(", ")} caem`}{" "}
+            em fim de semana ou feriado.
+          </p>
+        )}
+        {tight && (
+          <label className="sl-release-reason">
+            <span className="sl-label">
+              Motivo do prazo apertado
+              <em>{tight}</em>
+            </span>
+            <Textarea
+              value={reason}
+              autoFocus
+              rows={2}
+              maxLength={500}
+              placeholder="Ex.: o cliente precisa das artes para o lançamento"
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </label>
         )}
         {waiting > 0 && (
           <p className="sl-muted">
@@ -2312,12 +2411,8 @@ function ReleaseModal({
             type="submit"
             className="btn primary"
             loading={busy}
-            disabled={!!missing.length}
-            title={
-              missing.length
-                ? `Escolha quem recebe o post ${missing.join(", ")}`
-                : ""
-            }
+            disabled={!!blocked}
+            title={blocked}
           >
             <Hammer size={15} /> Liberar {posts.length}{" "}
             {posts.length === 1 ? "tarefa" : "tarefas"}
