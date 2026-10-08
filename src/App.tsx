@@ -1,6 +1,7 @@
 import { calendarDays, monthRange } from "./schedule";
 import { EditEntityForm, type EntityEdit } from "./EditEntityForm";
 import { TutorialHelp } from "./TutorialHelp";
+import { TourLayer } from "./TourLayer";
 import {
   dashboardIdFromPath,
   maviChatIdFromPath,
@@ -5077,6 +5078,18 @@ export default function App() {
             taskHref={(task) => `${pageUrl("tasks", companyPath)}/${task}`}
           />
         )}
+      {company && member && (
+        <TourLayer
+          key={company}
+          company={company}
+          companyPath={companyPath}
+          user={user}
+          isLeader={isLeader}
+          demo={demo}
+          data={catalogData}
+          notify={notify}
+        />
+      )}
       {toast && (
         <div ref={toastRef} popover="manual" className="toast" role="status">
           <Check size={17} />

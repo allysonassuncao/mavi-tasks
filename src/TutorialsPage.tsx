@@ -14,6 +14,7 @@ import {
   CircleCheck,
   CircleHelp,
   Clock3,
+  Compass,
   Copy,
   Film,
   GraduationCap,
@@ -43,6 +44,7 @@ import { FeedbackDialog, TutorialFeedback } from "./TutorialFeedback";
 import { TutorialMetrics } from "./TutorialMetrics";
 import { RequiredTrails, TrailBar, TrailView, TrailsTab } from "./TutorialTrails";
 import { TutorialTrailEditor } from "./TutorialTrailEditor";
+import { TutorialTours } from "./TutorialTours";
 import {
   TRAIL_PARAM,
   demoTrails,
@@ -153,17 +155,18 @@ export function TutorialsPage({
   const gapsTab = tab === "duvidas" && isLeader;
   const trailsTab = tab === "trilhas";
   const metricsTab = tab === "metricas" && isLeader;
+  const toursTab = tab === "onboarding";
   const scope: TutorialScope = tab === "admin" && isLeader ? "admin" : "library";
   const tags = useMemo(() => tagParam.split("|").filter(Boolean), [tagParam]);
   // Na biblioteca, buscar é com a MAVI (Enter); a lista mostra os resultados dela.
-  const searching = !gapsTab && !trailsTab && !metricsTab && scope === "library" && !!term;
+  const searching = !gapsTab && !trailsTab && !metricsTab && !toursTab && scope === "library" && !!term;
   const request = useRef(0);
 
   useEffect(() => setTyped(term), [term]);
 
   const load = useCallback(
     (offset = 0) => {
-      if (searching || gapsTab || trailsTab || metricsTab) return;
+      if (searching || gapsTab || trailsTab || metricsTab || toursTab) return;
       const n = ++request.current;
       if (!offset) setError("");
       api
@@ -190,7 +193,7 @@ export function TutorialsPage({
         });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [api, company, scope, term, module, category, tagParam, searching, gapsTab, trailsTab, metricsTab],
+    [api, company, scope, term, module, category, tagParam, searching, gapsTab, trailsTab, metricsTab, toursTab],
   );
   const loadFacets = useCallback(() => {
     api
@@ -373,7 +376,9 @@ export function TutorialsPage({
     );
 
   // As seções no menu lateral; "Tutoriais" é a aba sem ?aba= (id próprio no menu).
-  const section = trailsTab
+  const section = toursTab
+    ? "onboarding"
+    : trailsTab
     ? "trilhas"
     : scope === "admin"
       ? "admin"
@@ -401,6 +406,7 @@ export function TutorialsPage({
   const learn = [
     item("biblioteca", "Tutoriais", BookOpen),
     item("trilhas", "Trilhas", Route, pendingTrails),
+    item("onboarding", "Onboarding", Compass),
   ];
   const groups = isLeader
     ? [
@@ -431,7 +437,7 @@ export function TutorialsPage({
         role="search"
         onSubmit={(e) => {
           e.preventDefault();
-          if (gapsTab || trailsTab || metricsTab) setTab("");
+          if (gapsTab || trailsTab || metricsTab || toursTab) setTab("");
           setTerm(typed.trim());
         }}
       >
@@ -462,7 +468,7 @@ export function TutorialsPage({
             Buscar
           </button>
         </label>
-        {isLeader && (
+        {isLeader && !toursTab && (
           <Button
             className="btn primary"
             onClick={() => setEditing({ detail: null })}
@@ -473,7 +479,16 @@ export function TutorialsPage({
         )}
       </form>
 
-      {metricsTab ? (
+      {toursTab ? (
+        <TutorialTours
+          company={company}
+          user={user}
+          isLeader={isLeader}
+          demo={demo}
+          data={data}
+          notify={notify}
+        />
+      ) : metricsTab ? (
         <TutorialMetrics
           api={api}
           company={company}

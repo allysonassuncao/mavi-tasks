@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { ArrowRight, CircleHelp, GraduationCap } from "lucide-react";
+import { ArrowRight, CircleHelp, Compass, GraduationCap, Play } from "lucide-react";
 import { Skeleton } from "./ui";
 import { navigate, pageUrl, type Page } from "./router";
 import {
@@ -10,8 +10,10 @@ import {
   tutorialModuleOf,
   type TutorialRow,
 } from "./tutorials";
+import { demoTours, playTour, serverTours, type TourRow } from "./tours";
 import type { Snapshot } from "./types";
 import "./tutorials.css";
+import "./tours.css";
 
 const SHOWN = 6;
 
@@ -39,9 +41,14 @@ export function TutorialHelp({
     () => (demo ? demoTutorials(data, user) : serverTutorials),
     [demo], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  const toursApi = useMemo(
+    () => (demo ? demoTours(user) : serverTours),
+    [demo, user],
+  );
   const module = tutorialModuleOf(page);
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<TutorialRow[] | null>(null);
+  const [tours, setTours] = useState<TourRow[]>([]);
   const [error, setError] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
@@ -62,10 +69,16 @@ export function TutorialHelp({
       })
       .then((list) => alive && setRows(list))
       .catch(() => alive && setError(true));
+    // Os onboardings que passam por esta tela (ou começam nela).
+    setTours([]);
+    toursApi
+      .list(company, "library", module, page)
+      .then((list) => alive && setTours(list.slice(0, 4)))
+      .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [open, api, company, module]);
+  }, [open, api, toursApi, company, module, page]);
 
   // Fecha ao clicar fora, com Esc e ao trocar de tela.
   useEffect(() => {
@@ -143,6 +156,38 @@ export function TutorialHelp({
                 ? "Ainda não há tutorial sobre esta tela."
                 : "Ainda não há tutoriais publicados."}
             </p>
+          )}
+          {tours.length > 0 && (
+            <div className="tutorial-help-tours">
+              <div className="tutorial-help-tours-head">
+                <Compass size={13} aria-hidden="true" /> Onboarding desta tela
+              </div>
+              {tours.map((t) => {
+                const paused = t.my_status !== "completed" && (t.my_step ?? 0) > 0;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      playTour(t.id, paused ? (t.my_step ?? 0) : 0);
+                    }}
+                  >
+                    <Play size={14} aria-hidden="true" />
+                    <span>
+                      <strong>{t.title}</strong>
+                      <small>
+                        {t.my_status === "completed"
+                          ? "Concluído · fazer de novo"
+                          : paused
+                            ? `Continuar do passo ${(t.my_step ?? 0) + 1} de ${t.step_count}`
+                            : `${t.step_count} ${t.step_count === 1 ? "passo" : "passos"}`}
+                      </small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           )}
           <div className="tutorial-help-foot">
             {module && total > SHOWN && (
