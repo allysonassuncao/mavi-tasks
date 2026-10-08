@@ -176,6 +176,23 @@ describe("avaliação dinâmica: repetir os registros", () => {
     expect(stats).toMatchObject({ cases: 0, failed: 1 });
     expect(calls.some((u) => u.includes("ai_eval_fail"))).toBe(true);
   });
+
+  it("perto do fim do worker: não pega registro novo; o que roda para antes e marca a falha", async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string) => {
+      calls.push(url);
+      return new Response(url.includes("ai_eval_claim") ? JSON.stringify([item()]) : "null");
+    }) as unknown as typeof fetch;
+    const deps = { fetch: fetchImpl, llm: vi.fn(), embed: vi.fn(), now: () => 1_000 };
+    // Faltam 80 s: nem pede à fila.
+    expect(await runEvalSet(env, deps, 120_000, 81_000)).toMatchObject({ cases: 0, failed: 0 });
+    expect(calls).toEqual([]);
+    // O registro já pego com 20 s de sobra: o modelo nem é chamado, a falha fica marcada.
+    const model = vi.fn();
+    const slow = { ...deps, providerLlm: (() => model) as any };
+    await expect(evalSetItem(env, slow, judge("{}"), item(), 21_000)).rejects.toThrow(/tempo do worker acabou/);
+    expect(model).not.toHaveBeenCalled();
+  });
 });
 
 describe("avaliação dinâmica: o gravador", () => {

@@ -303,6 +303,9 @@ export async function runLearning(env: LearningEnv, deps: AiDeps) {
   return stats;
 }
 
+/** O fim do worker: a função da Vercel (api/drive.ts) tem 300 s; 15 s para marcar as falhas. */
+export const LEARNING_STOP_MS = 285_000;
+
 export async function handleLearningWorker(
   authorization: string | null,
   env: LearningEnv,
@@ -326,8 +329,9 @@ export async function handleLearningWorker(
     const judged = await runMaviJudge(mavi.judge.env, mavi.judge.deps, now() + mavi.judge.budgetMs);
     // Os testes fora do ar do roteador de modelos (até 1 minuto, com o teto do dia).
     const routes = await runRouteEvals(mavi.judge.env, mavi.judge.deps, now() + 60_000);
-    // Os testes do conjunto de avaliação que um líder pediu (até 1 minuto por vez).
-    const evalSet = await runEvalSet(mavi.judge.env, mavi.judge.deps, now() + 60_000);
+    // Os testes do conjunto de avaliação que um líder pediu (até 1 minuto por vez,
+    // sem passar do fim da função).
+    const evalSet = await runEvalSet(mavi.judge.env, mavi.judge.deps, now() + 60_000, started + LEARNING_STOP_MS);
     // Por último, a base de comportamento das pessoas (até 1 minuto).
     const people = await runMaviPerson(mavi.env, mavi.deps, now() + 60_000);
     return { status: 200, body: { ...copilot, mavi: answers, judge: judged, routes, evalSet, people } };

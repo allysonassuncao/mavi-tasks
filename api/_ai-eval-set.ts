@@ -133,8 +133,24 @@ export function judgeMessage(item: EvalSetItem, a: string, b: string) {
     .join("\n\n");
 }
 
+/**
+ * O tempo de uma chamada: o dela, sem passar do fim do worker. Sem tempo, o
+ * registro falha aqui (e a falha fica marcada) em vez de a função cair no meio.
+ */
+function within(stopAt: number, now: number, ms: number, reserve = 0) {
+  const left = stopAt - now - reserve;
+  if (left < 5_000) throw new Error("O tempo do worker acabou antes de terminar este registro.");
+  return AbortSignal.timeout(Math.min(ms, left));
+}
+
 /** Um registro: o modelo responde com a mesma entrada, o juiz compara com a original. */
-export async function evalSetItem(env: AiEnv, deps: AiDeps, kit: CompanyKit, item: EvalSetItem): Promise<Outcome> {
+export async function evalSetItem(
+  env: AiEnv,
+  deps: AiDeps,
+  kit: CompanyKit,
+  item: EvalSetItem,
+  stopAt = Infinity,
+): Promise<Outcome> {
   if (!kit.llm) throw new Error("Sem modelo para comparar as respostas.");
   const r = item.sample.request;
   const usage: Usage[] = [];
@@ -149,7 +165,8 @@ export async function evalSetItem(env: AiEnv, deps: AiDeps, kit: CompanyKit, ite
     maxRounds: Math.min(r.max_rounds ?? (r.tools.length ? 6 : 0), 14),
     effort: (r.effort as Effort | null) ?? undefined,
     maxTokens: Math.min(r.max_tokens ?? 16000, 32000),
-    signal: AbortSignal.timeout(150_000),
+    // Guarda 20 s para o juiz.
+    signal: within(stopAt, started, 150_000, 20_000),
   });
   const ms = now() - started;
   usage.push(usageOf(out.meter, item.model, item.provider ? { id: item.provider.provider_id, name: item.provider.provider } : null));
@@ -175,7 +192,7 @@ export async function evalSetItem(env: AiEnv, deps: AiDeps, kit: CompanyKit, ite
       maxRounds: 0,
       effort: "low",
       maxTokens: 2000,
-      signal: AbortSignal.timeout(90_000),
+      signal: within(stopAt, now(), 90_000),
     });
     usage.push(usageOf(judged.meter, kit.model, kit.route ? { id: kit.route.provider_id, name: kit.route.provider } : null));
     const p = parsePairwise(judged.text);
@@ -194,12 +211,16 @@ export async function evalSetItem(env: AiEnv, deps: AiDeps, kit: CompanyKit, ite
   return outcome;
 }
 
-/** A fila dos testes, três registros por vez, até o prazo. */
-export async function runEvalSet(env: AiEnv, deps: AiDeps, deadline: number) {
+/**
+ * A fila dos testes, três registros por vez, até o prazo. `stopAt` é o fim do
+ * worker: com menos de 90 s não pega registro novo, e o que está rodando para
+ * antes dele (a falha fica marcada e o registro volta para a fila).
+ */
+export async function runEvalSet(env: AiEnv, deps: AiDeps, deadline: number, stopAt = Infinity) {
   const now = deps.now ?? Date.now;
   const stats = { cases: 0, wins: 0, ties: 0, losses: 0, failed: 0 };
   const kits = new Map<string, Promise<CompanyKit>>();
-  while (now() < deadline - 30_000) {
+  while (now() < deadline - 30_000 && stopAt - now() >= 90_000) {
     const items = await workerRpc<EvalSetItem[]>(env, deps, "ai_eval_claim", { p_limit: 3 }).catch((e) => {
       console.error("avaliação dinâmica", (e as Error).message);
       return [] as EvalSetItem[];
@@ -209,7 +230,7 @@ export async function runEvalSet(env: AiEnv, deps: AiDeps, deadline: number) {
       items.map(async (item) => {
         try {
           if (!kits.has(item.company)) kits.set(item.company, companyKit(env, deps, item.company));
-          const outcome = await evalSetItem(env, deps, await kits.get(item.company)!, item);
+          const outcome = await evalSetItem(env, deps, await kits.get(item.company)!, item, stopAt);
           stats.cases++;
           if (outcome === "win") stats.wins++;
           else if (outcome === "tie") stats.ties++;

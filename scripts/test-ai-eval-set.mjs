@@ -286,4 +286,30 @@ await check("teste semanal: só líderes salvam; até 3 modelos, os testados há
   assert.equal((await sql(`select mavi_private.ai_eval_weekly() as n`))[0].n, 0);
 });
 
+await check("teste preso: o agendamento fecha (registro sem resposta em 3 tentativas; teto sem o worker acordar)", async () => {
+  // O worker caiu 3 vezes no mesmo registro: pendente, 3 tentativas, prazo vencido. Os outros terminaram.
+  await as(admin);
+  const stuck = await rpc("ai_eval_run_start", [A, null, "claude-sonnet-5", 1, ["client_radar"]]);
+  const ids = (await sql(`select id from ai_eval_results where run_id = $1 order by id`, [stuck])).map((x) => x.id);
+  await sql(`update ai_eval_results set status = 'done', outcome = 'tie', score = 1, passed = true, ms = 10 where id = any($1)`, [ids.slice(1)]);
+  await sql(`update ai_eval_results set attempts = 3, claimed_until = now() - interval '1 minute', last_error = 'timeout' where id = $1`, [ids[0]]);
+  await sql(`select mavi_private.ai_learning_kick()`);
+  const [r] = await sql(`select status, cases_done, cases_failed from ai_eval_runs where id = $1`, [stuck]);
+  assert.deepEqual(Object.values(r), ["done", ids.length - 1, 1]);
+  const [x] = await sql(`select status, last_error from ai_eval_results where id = $1`, [ids[0]]);
+  assert.deepEqual(Object.values(x), ["error", "não terminou em 3 tentativas (timeout)"]);
+  // Bateu o teto com um registro ainda rodando: espera ele; depois fecha sem o worker.
+  await as(admin);
+  const capped = await rpc("ai_eval_run_start", [A, null, "claude-sonnet-5", 1, ["client_radar"]]);
+  await sql(`update ai_eval_runs set cost_usd = 1 where id = $1`, [capped]);
+  await sql(`update ai_eval_results set claimed_until = now() + interval '2 minutes', attempts = 1
+    where id = (select min(id) from ai_eval_results where run_id = $1)`, [capped]);
+  await sql(`select mavi_private.ai_learning_kick()`);
+  assert.equal((await sql(`select status from ai_eval_runs where id = $1`, [capped]))[0].status, "running");
+  await sql(`update ai_eval_results set claimed_until = now() - interval '1 second' where run_id = $1`, [capped]);
+  await sql(`select mavi_private.ai_learning_kick()`);
+  const [c] = await sql(`select status, cases_done, cases_failed, cases_total from ai_eval_runs where id = $1`, [capped]);
+  assert.deepEqual([c.status, c.cases_done, c.cases_failed], ["done", 0, c.cases_total]);
+});
+
 console.log(`\n${passed} verificações da avaliação dinâmica passaram.`);
