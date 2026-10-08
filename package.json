@@ -80,6 +80,7 @@
     "test:db:tutorial-tours": "node scripts/test-tutorial-tours.mjs",
     "test:db:tutorial-tours-reach": "node scripts/test-tutorial-tours-reach.mjs",
     "test:db:tutorial-tours-triggers": "node scripts/test-tutorial-tours-triggers.mjs",
+    "test:db:tutorial-tours-metrics": "node scripts/test-tutorial-tours-metrics.mjs",
     "test:db:notices": "node scripts/test-notice-board.mjs",
     "test:db:copilot": "node scripts/test-task-copilot.mjs",
     "test:db:copilot-learning": "node scripts/test-copilot-learning.mjs",

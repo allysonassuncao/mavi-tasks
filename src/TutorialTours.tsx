@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  BarChart3,
   CircleCheck,
+  ThumbsDown,
+  ThumbsUp,
   Compass,
   Crosshair,
   EyeOff,
@@ -19,7 +22,7 @@ import { AudiencePicker } from "./TutorialEditor";
 import { MultiPick } from "./MultiPick";
 import { rpc } from "./api";
 import { useUrlState } from "./router";
-import { audienceOf } from "./tutorials";
+import { VOTE_REASONS, audienceOf } from "./tutorials";
 import {
   demoTours,
   editTour,
@@ -30,6 +33,7 @@ import {
   tourAudienceSummary,
   tourContentOf,
   type TourContent,
+  type TourMetrics,
   type TourReach,
   type TourRow,
   type ToursApi,
@@ -71,6 +75,7 @@ export function TutorialTours({
   const [rows, setRows] = useState<TourRow[] | null>(null);
   const [error, setError] = useState("");
   const [settings, setSettings] = useState<{ id: string | null } | null>(null);
+  const [metrics, setMetrics] = useState<TourRow | null>(null);
   const request = useRef(0);
 
   const load = useCallback(() => {
@@ -171,6 +176,7 @@ export function TutorialTours({
           rows={rows}
           onSteps={(id) => editTour(id)}
           onSettings={(id) => setSettings({ id })}
+          onMetrics={(row) => setMetrics(row)}
           onTest={(id) => playTour(id)}
           onPublish={publish}
           onUnpublish={(id) => act(() => api.unpublish(id), "Onboarding tirado do ar.")}
@@ -185,6 +191,7 @@ export function TutorialTours({
         </div>
       ) : null}
 
+      {metrics && <TourMetricsDialog api={api} row={metrics} onClose={() => setMetrics(null)} />}
       {settings && (
         <TourSettings
           api={api}
@@ -256,6 +263,7 @@ function ManageTable({
   rows,
   onSteps,
   onSettings,
+  onMetrics,
   onTest,
   onPublish,
   onUnpublish,
@@ -265,6 +273,7 @@ function ManageTable({
   rows: TourRow[];
   onSteps: (id: string) => void;
   onSettings: (id: string) => void;
+  onMetrics: (row: TourRow) => void;
   onTest: (id: string) => void;
   onPublish: (id: string) => void;
   onUnpublish: (id: string) => void;
@@ -334,6 +343,11 @@ function ManageTable({
                       <button type="button" className="icon-btn" aria-label="Configurações" title="Nome, resumo e público" onClick={() => onSettings(r.id)}>
                         <Settings2 size={16} />
                       </button>
+                      {r.version > 0 && (
+                        <button type="button" className="icon-btn" aria-label="Métricas" title="Métricas: onde as pessoas param e o que acharam" onClick={() => onMetrics(r)}>
+                          <BarChart3 size={16} />
+                        </button>
+                      )}
                       <button type="button" className="icon-btn" aria-label="Testar" title="Testar" disabled={!r.step_count} onClick={() => onTest(r.id)}>
                         <Play size={16} />
                       </button>
@@ -665,5 +679,152 @@ function ReachPicker({
         )}
       </fieldset>
     </>
+  );
+}
+
+const pct = (n: number, of: number) => (of ? Math.round((n / of) * 100) : 0);
+const REASON = Object.fromEntries(VOTE_REASONS.map((r) => [r.id, r.label]));
+
+/**
+ * Métricas de um onboarding (quem edita), por versão: quantas pessoas
+ * começaram, concluíram e pararam; o funil por passo (quantas chegaram a
+ * cada um, quantas pararam ali e quantas vezes o elemento não apareceu) e o
+ * "Isso ajudou?".
+ */
+function TourMetricsDialog({ api, row, onClose }: { api: ToursApi; row: TourRow; onClose: () => void }) {
+  const [version, setVersion] = useState<number | null>(null);
+  const [m, setM] = useState<TourMetrics | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    setM(null);
+    api
+      .metrics(row.id, version)
+      .then((x) => {
+        if (!alive) return;
+        if (!x) throw Error("Sem métricas para esta versão.");
+        setM(x);
+      })
+      .catch((e) => alive && setError((e as Error).message));
+    return () => {
+      alive = false;
+    };
+  }, [api, row.id, version]);
+  // O passo onde mais gente parou (o destaque do funil).
+  const worst = m?.steps.reduce<TourMetrics["steps"][number] | null>(
+    (w, s) => (s.stopped > 0 && (!w || s.stopped > w.stopped) ? s : w),
+    null,
+  );
+  return (
+    <Modal title={`Métricas: ${row.title}`} onClose={onClose} wide={false} className="tour-metrics-modal">
+      <div className="tour-metrics">
+        {error ? (
+          <p className="form-error">{error}</p>
+        ) : !m ? (
+          <Loading variant="list" />
+        ) : (
+          <>
+            {m.versions.length > 1 && (
+              <label className="tour-metrics-version">
+                Versão
+                <select value={m.version} onChange={(e) => setVersion(Number(e.target.value))}>
+                  {m.versions.map((v) => (
+                    <option key={v} value={v}>
+                      {v === m.versions[0] ? `v${v} (no ar)` : `v${v}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div className="tour-tiles">
+              <div>
+                <strong>{m.started}</strong>
+                <span>começaram</span>
+              </div>
+              <div>
+                <strong>{m.completed}</strong>
+                <span>concluíram{m.started ? ` · ${pct(m.completed, m.started)}%` : ""}</span>
+              </div>
+              <div>
+                <strong>{m.dismissed}</strong>
+                <span>pararam no meio</span>
+              </div>
+              <div>
+                <strong>{m.in_progress}</strong>
+                <span>em andamento</span>
+              </div>
+              <div>
+                <strong>
+                  <ThumbsUp size={15} /> {m.up} <ThumbsDown size={15} /> {m.down}
+                </strong>
+                <span>isso ajudou?</span>
+              </div>
+            </div>
+
+            <h3>Onde as pessoas chegam</h3>
+            {!m.started ? (
+              <p className="tour-empty">Ninguém fez esta versão ainda.</p>
+            ) : (
+              <>
+                {worst && (
+                  <p className="tour-metrics-note">
+                    <TriangleAlert size={14} /> Mais gente parou no passo {worst.n}
+                    {worst.title ? ` (${worst.title})` : ""}: {worst.stopped}{" "}
+                    {worst.stopped === 1 ? "pessoa" : "pessoas"}.
+                  </p>
+                )}
+                <ol className="tour-funnel" aria-label="Pessoas que chegaram a cada passo">
+                  {m.steps.map((s) => {
+                    const share = pct(s.reached, m.started);
+                    const detail = `Passo ${s.n}: ${s.reached} de ${m.started} pessoas chegaram (${share}%)${
+                      s.stopped ? `, ${s.stopped} pararam aqui` : ""
+                    }${s.misses ? `, elemento não encontrado ${s.misses}×` : ""}`;
+                    return (
+                      <li key={s.step_id} title={detail}>
+                        <span className="tour-funnel-label">
+                          <b>{s.n}</b> {s.title || "Sem título"}
+                        </span>
+                        <span className="tour-funnel-bar" aria-hidden="true">
+                          <span style={{ width: `${Math.max(share, s.reached ? 2 : 0)}%` }} />
+                        </span>
+                        <span className="tour-funnel-value">
+                          {s.reached} · {share}%
+                        </span>
+                        {(s.stopped > 0 || s.misses > 0) && (
+                          <span className="tour-funnel-flags">
+                            {s.stopped > 0 && <em>parou aqui: {s.stopped}</em>}
+                            {s.misses > 0 && <em className="miss">não encontrado: {s.misses}×</em>}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </>
+            )}
+
+            <h3>O que disseram</h3>
+            {!m.feedback.length ? (
+              <p className="tour-empty">Nenhum comentário ou 👎 nesta versão.</p>
+            ) : (
+              <ul className="tour-feedback-list">
+                {m.feedback.map((f, i) => (
+                  <li key={i}>
+                    <span className={`chip ${f.vote === "up" ? "done" : ""}`}>
+                      {f.vote === "up" ? <ThumbsUp size={12} /> : <ThumbsDown size={12} />}
+                      {f.reason ? ` ${REASON[f.reason] ?? f.reason}` : ""}
+                    </span>
+                    {f.comment && <p>{f.comment}</p>}
+                    <small>
+                      {f.name} · {shortDate(f.at)}
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }

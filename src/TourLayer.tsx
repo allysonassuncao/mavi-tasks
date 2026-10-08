@@ -16,6 +16,7 @@ import type { Snapshot } from "./types";
 
 const TourPlayer = lazy(() => import("./TourPlayer").then((m) => ({ default: m.TourPlayer })));
 const TourEditor = lazy(() => import("./TourEditor"));
+const TourFeedback = lazy(() => import("./TourPlayer").then((m) => ({ default: m.TourFeedback })));
 
 type Session =
   | { mode: "play"; id: string; step: number; test: boolean; title: string; steps: TourStep[] }
@@ -54,6 +55,8 @@ export function TourLayer({
   );
   const key = `mavi:tour:${company}`;
   const [session, setSession] = useState<Session | null>(null);
+  // "Isso ajudou?" depois de concluir um onboarding de verdade.
+  const [ask, setAsk] = useState<{ id: string; title: string } | null>(null);
 
   const remember = useCallback(
     (s: Saved | null) => {
@@ -178,7 +181,7 @@ export function TourLayer({
   }, [loadAutos]);
   const tried = useRef(new Set<string>());
   useEffect(() => {
-    if (!company || session || !autos.length || window.innerWidth < MIN_WIDTH) return;
+    if (!company || session || ask || !autos.length || window.innerWidth < MIN_WIDTH) return;
     const loginKey = `mavi:tour:entrada:${company}`;
     let loginDone = false;
     try {
@@ -227,9 +230,26 @@ export function TourLayer({
       alive = false;
       window.clearInterval(timer);
     };
-  }, [company, session, autos, page, api, open]);
+  }, [company, session, ask, autos, page, api, open]);
 
-  if (!session) return null;
+  if (!session)
+    return ask ? (
+      <Suspense fallback={null}>
+        <TourFeedback
+          title={ask.title}
+          onClose={() => setAsk(null)}
+          onVote={async (vote, reason, comment) => {
+            try {
+              await api.vote(ask.id, vote, reason, comment);
+              notify(vote === "up" ? "Obrigado! Que bom que ajudou." : "Obrigado! Quem criou o onboarding vai ver.");
+              setAsk(null);
+            } catch (e) {
+              notify((e as Error).message || "Não foi possível enviar.");
+            }
+          }}
+        />
+      </Suspense>
+    ) : null;
   if (session.mode === "edit")
     return (
       <Suspense fallback={null}>
@@ -267,8 +287,10 @@ export function TourLayer({
         onMiss={(s) => void api.miss(id, s.id, currentScreen()).catch(() => {})}
         onFinish={() => {
           end();
-          if (!test) void api.progress(id, "complete", steps.length - 1, steps[steps.length - 1].id).catch(() => {});
-          notify(test ? "Fim do teste." : "Onboarding concluído. Bom trabalho!");
+          if (!test) {
+            void api.progress(id, "complete", steps.length - 1, steps[steps.length - 1].id).catch(() => {});
+            setAsk({ id, title: session.title });
+          } else notify("Fim do teste.");
         }}
         onClose={(i, s) => {
           end();

@@ -8,8 +8,19 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeft, ArrowRight, Check, MousePointerClick, SearchX, TextCursorInput, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  MousePointerClick,
+  SearchX,
+  TextCursorInput,
+  ThumbsDown,
+  ThumbsUp,
+  X,
+} from "lucide-react";
 import { RichTextContent } from "./RichTextContent";
+import { VOTE_REASONS, type VoteReason } from "./tutorials";
 import { navigate } from "./router";
 import { TOUR_UI_ATTR, findTarget, looksDestructive, topModal, type TourTarget } from "./tour-target";
 import {
@@ -518,6 +529,93 @@ export function TourPlayer({
           </div>
         </div>
       </Balloon>
+    </TourPortal>
+  );
+}
+
+/**
+ * "Isso ajudou?" no fim de um onboarding: 👍 fecha; no 👎, um motivo e um
+ * comentário opcionais. Fechar sem votar também vale.
+ */
+export function TourFeedback({
+  title,
+  onVote,
+  onClose,
+}: {
+  title: string;
+  onVote: (vote: "up" | "down", reason: VoteReason | null, comment: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [down, setDown] = useState(false);
+  const [reason, setReason] = useState<VoteReason | null>(null);
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const send = async (vote: "up" | "down") => {
+    setBusy(true);
+    try {
+      await onVote(vote, vote === "down" ? reason : null, vote === "down" ? comment : "");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <TourPortal>
+      <div className="tour-feedback" role="dialog" aria-label="Isso ajudou?">
+        <div className="tour-balloon-head">
+          <span className="tour-count">
+            <Check size={13} /> Onboarding concluído
+          </span>
+          <button type="button" className="icon-btn" aria-label="Fechar" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <h3 className="tour-balloon-title">{title}</h3>
+        {!down ? (
+          <>
+            <p className="tour-hint">Isso ajudou?</p>
+            <div className="tour-feedback-votes">
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => void send("up")}>
+                <ThumbsUp size={15} /> Ajudou
+              </button>
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => setDown(true)}>
+                <ThumbsDown size={15} /> Não ajudou
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="tour-hint">O que faltou? (opcional)</p>
+            <div className="tour-feedback-reasons" role="group" aria-label="Motivo">
+              {VOTE_REASONS.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className={`chip ${reason === r.id ? "selected" : ""}`}
+                  aria-pressed={reason === r.id}
+                  onClick={() => setReason(reason === r.id ? null : r.id)}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={comment}
+              maxLength={1000}
+              rows={3}
+              placeholder="Conte o que ficou confuso ou faltou (opcional)"
+              onChange={(e) => setComment(e.target.value)}
+            />
+            <div className="tour-actions">
+              <button type="button" className="btn secondary" onClick={() => setDown(false)} disabled={busy}>
+                Voltar
+              </button>
+              <button type="button" className="btn primary" onClick={() => void send("down")} disabled={busy}>
+                Enviar
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </TourPortal>
   );
 }

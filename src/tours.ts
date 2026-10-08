@@ -1,4 +1,5 @@
 import { rpc } from "./api";
+import { supabase } from "./supabase";
 import {
   campaignIdFromPath,
   pagePaths,
@@ -10,6 +11,8 @@ import {
 import { ROLE_LABEL, tutorialModuleOf, type TutorialAudience } from "./tutorials";
 import type { Snapshot } from "./types";
 import type { TourTarget } from "./tour-target";
+import type { VoteReason } from "./tutorials";
+import type { WriterBlock } from "./tutorial-writer";
 
 /**
  * Onboarding (Tutoriais › Onboarding): guided tours over the app's screens.
@@ -144,6 +147,51 @@ export type TourSaveResult = {
 
 export type TourProgressAction = "start" | "step" | "complete" | "dismiss";
 
+export interface TourStepMetric {
+  step_id: string;
+  n: number;
+  title: string;
+  kind: TourStepKind;
+  page: string;
+  /** People who reached the step. */
+  reached: number;
+  /** People who closed the tour on it. */
+  stopped: number;
+  /** Times its element didn't show. */
+  misses: number;
+}
+export interface TourMetrics {
+  version: number;
+  versions: number[];
+  started: number;
+  completed: number;
+  dismissed: number;
+  in_progress: number;
+  steps: TourStepMetric[];
+  up: number;
+  down: number;
+  feedback: { vote: "up" | "down"; reason: VoteReason | null; comment: string; name: string; at: string }[];
+}
+export type TourVote = { vote: "up" | "down"; reason: VoteReason | null; comment: string; version: number };
+/** What the editor tells the MAVI about a step (the balloon to write). */
+export type TourWriteRequest = {
+  mode: "write" | "improve";
+  idea?: string;
+  tour: string;
+  summary: string;
+  n: number;
+  total: number;
+  screen: string;
+  element: string;
+  context: string;
+  kind: TourStepKind;
+  title: string;
+  text: string;
+  before: string[];
+  after: string[];
+};
+export type TourWriteResult = { title: string; blocks: WriterBlock[]; notes: string };
+
 /** An automatic tour that hasn't reached the person yet. */
 export interface TourAuto {
   id: string;
@@ -177,6 +225,24 @@ export interface ToursApi {
   miss(id: string, stepId: string, path: string): Promise<void>;
   /** The automatic tours still to reach the person (oldest first). */
   autos(company: string): Promise<TourAuto[]>;
+  /** The funnel, votes and comments of a version (who edits). */
+  metrics(id: string, version?: number | null): Promise<TourMetrics | null>;
+  /** "Isso ajudou?" (null takes the vote back). */
+  vote(id: string, vote: "up" | "down" | null, reason?: VoteReason | null, comment?: string): Promise<TourVote | null>;
+  /** The MAVI suggests a step's balloon. */
+  write(company: string, request: TourWriteRequest): Promise<TourWriteResult>;
+}
+
+async function server<T>(body: Record<string, unknown>): Promise<T> {
+  const token = supabase ? (await supabase.auth.getSession()).data.session?.access_token : undefined;
+  const res = await fetch("/api/drive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Error(data.error ?? "Não foi possível falar com o servidor.");
+  return data as T;
 }
 
 export const MAX_STEPS = 60;
@@ -507,6 +573,20 @@ export const serverTours: ToursApi = {
   async autos(company) {
     return ((await rpc("my_auto_tutorial_tours", { p_company: company })) ?? []) as TourAuto[];
   },
+  async metrics(id, version) {
+    return (await rpc("tutorial_tour_metrics", { p_tour: id, p_version: version ?? null })) as TourMetrics | null;
+  },
+  async vote(id, vote, reason, comment) {
+    return (await rpc("vote_tutorial_tour", {
+      p_tour: id,
+      p_vote: vote,
+      p_reason: reason ?? null,
+      p_comment: comment ?? null,
+    })) as TourVote | null;
+  },
+  async write(company, request) {
+    return server<TourWriteResult>({ action: "tour-write", company, ...request });
+  },
 };
 
 // ------------------------------------------------------------ demo
@@ -523,6 +603,9 @@ type DemoTour = {
   published_at: string | null;
   progress: TourProgress | null;
   misses: Record<string, number>;
+  /** The demo's one person: steps reached and the vote. */
+  reached?: string[];
+  vote?: TourVote | null;
 };
 const DEMO_KEY = "mavi:demo:tours";
 function demoRead(): DemoTour[] {
@@ -695,6 +778,8 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
       const t = list.find((x) => x.id === id);
       if (!t || t.status !== "published") return null;
       const prev = t.progress;
+      const at = action === "start" ? 0 : Math.max(0, Math.min(step, t.live.steps.length - 1));
+      if (action !== "dismiss" && t.live.steps[at]) t.reached = [...new Set([...(t.reached ?? []), t.live.steps[at].id])];
       t.progress = {
         status:
           action === "complete"
@@ -718,6 +803,63 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
       if (!t) return;
       t.misses[stepId] = (t.misses[stepId] ?? 0) + 1;
       demoWrite(list);
+    },
+    async metrics(id) {
+      const t = demoRead().find((x) => x.id === id);
+      if (!t) return null;
+      const p = t.progress;
+      const reached = new Set(t.reached ?? []);
+      return {
+        version: t.version,
+        versions: Array.from({ length: t.version }, (_, i) => t.version - i),
+        started: reached.size ? 1 : 0,
+        completed: p?.status === "completed" ? 1 : 0,
+        dismissed: p?.status === "dismissed" ? 1 : 0,
+        in_progress: p?.status === "started" ? 1 : 0,
+        steps: t.live.steps.map((s, i) => ({
+          step_id: s.id,
+          n: i + 1,
+          title: s.title,
+          kind: s.kind,
+          page: s.page,
+          reached: reached.has(s.id) ? 1 : 0,
+          stopped: p?.status === "dismissed" && p.step_id === s.id ? 1 : 0,
+          misses: t.misses[s.id] ?? 0,
+        })),
+        up: t.vote?.vote === "up" ? 1 : 0,
+        down: t.vote?.vote === "down" ? 1 : 0,
+        feedback:
+          t.vote && (t.vote.vote === "down" || t.vote.comment)
+            ? [{ vote: t.vote.vote, reason: t.vote.reason, comment: t.vote.comment, name: userName, at: t.updated_at }]
+            : [],
+      };
+    },
+    async vote(id, vote, reason, comment) {
+      const list = demoRead();
+      const t = list.find((x) => x.id === id);
+      if (!t) return null;
+      t.vote = vote
+        ? { vote, reason: vote === "down" ? (reason ?? null) : null, comment: (comment ?? "").trim(), version: t.version }
+        : null;
+      demoWrite(list);
+      return t.vote;
+    },
+    async write(_company, r) {
+      await new Promise((ok) => setTimeout(ok, 600));
+      const name = r.element.replace(/^[^“]*“|”.*$/g, "") || "este item";
+      return {
+        title: r.kind === "click" ? `Clique em ${name}` : r.kind === "input" ? `Preencha ${name}` : `Conheça ${name}`,
+        blocks: [
+          {
+            type: "paragraph",
+            text:
+              r.kind === "click"
+                ? `Aqui você começa. Clique em **${name}** para continuar.`
+                : `Este é o lugar de **${name}** na tela ${r.screen}. [confirmar: o que a equipe faz aqui]`,
+          },
+        ],
+        notes: "Texto de demonstração.",
+      };
     },
     async autos() {
       return demoRead()

@@ -831,3 +831,191 @@ html.tour-active .toast {
   font-size: 0.85rem;
   color: #495d3c;
 }
+
+/* "Isso ajudou?" */
+.tour-feedback {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #dbe6cf;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px #12220f40;
+  animation: tour-pop 0.18s ease-out;
+}
+.tour-feedback .tour-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tour-feedback-votes,
+.tour-feedback-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+.tour-feedback-votes .btn {
+  min-height: 34px;
+  padding: 7px 12px;
+  gap: 6px;
+}
+.tour-feedback textarea {
+  width: 100%;
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  resize: vertical;
+}
+
+/* A MAVI no passo */
+.tour-mavi {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tour-mavi .btn {
+  min-height: 32px;
+  padding: 6px 11px;
+  gap: 6px;
+}
+
+/* Métricas */
+.tour-metrics {
+  padding: 18px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tour-metrics h3 {
+  margin: 8px 0 0;
+  font-size: 0.86rem;
+}
+.tour-metrics-version {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.tour-metrics-version select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+}
+.tour-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+}
+.tour-tiles > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.tour-tiles strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 1.15rem;
+  color: var(--ink);
+}
+.tour-tiles span {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.tour-metrics-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.78rem;
+  color: #9a6a1f;
+}
+.tour-funnel {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tour-funnel li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 70px;
+  gap: 4px 10px;
+  align-items: center;
+}
+.tour-funnel-label {
+  grid-column: 1 / -1;
+  font-size: 0.78rem;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tour-funnel-label b {
+  color: #6e8a4c;
+  margin-right: 4px;
+}
+.tour-funnel-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #eef1ef;
+  overflow: hidden;
+}
+.tour-funnel-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: #7fa456;
+}
+.tour-funnel li:hover .tour-funnel-bar > span {
+  background: #5f8240;
+}
+.tour-funnel-value {
+  font-size: 0.74rem;
+  color: #4d5b5a;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tour-funnel-flags {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  font-size: 0.7rem;
+}
+.tour-funnel-flags em {
+  font-style: normal;
+  color: #5f6d6b;
+}
+.tour-funnel-flags em.miss {
+  color: #a4651c;
+}
+.tour-feedback-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tour-feedback-list li {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.tour-feedback-list p {
+  margin: 6px 0 4px;
+  font-size: 0.82rem;
+}
+.tour-feedback-list small {
+  font-size: 0.7rem;
+  color: var(--muted);
+}

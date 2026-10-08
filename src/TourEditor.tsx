@@ -16,6 +16,7 @@ import {
   Pencil,
   Play,
   Send,
+  Sparkles,
   Square,
   Trash2,
   TriangleAlert,
@@ -59,6 +60,7 @@ import {
   type ToursApi,
 } from "./tours";
 import type { Snapshot } from "./types";
+import { draftBody, writerOutline } from "./tutorial-writer";
 
 const RichTextEditor = lazy(() => import("./RichTextEditor"));
 
@@ -136,6 +138,9 @@ export default function TourEditor({
   const [testing, setTesting] = useState<number | null>(null);
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [writing, setWriting] = useState(false);
+  /** The step as it was before the MAVI's suggestion ("Desfazer"). */
+  const [before, setBefore] = useState<TourStep | null>(null);
   // The panel moves to the left when the element is under it.
   const [panelLeft, setPanelLeft] = useState(false);
   const misses = useMemo(() => new Map(start.misses.map((m) => [m.step_id, m])), [start.misses]);
@@ -296,6 +301,46 @@ export default function TourEditor({
     if (looksDestructive(target) && (step.kind === "click" || step.kind === "auto")) step.kind = "next";
     setForm({ ...form, chain, at, step });
   };
+  // A MAVI escreve (ou melhora) o balão; vai para o formulário, não salva sozinho.
+  const suggest = async () => {
+    if (!form) return;
+    const s = form.step;
+    const steps = contentRef.current.steps;
+    const at = form.index ?? steps.length;
+    const filled = !!s.title || hasBodyText(s.body);
+    setWriting(true);
+    try {
+      const r = await api.write(company, {
+        mode: filled ? "improve" : "write",
+        tour: contentRef.current.title,
+        summary: contentRef.current.summary,
+        n: at + 1,
+        total: Math.max(steps.length, at + 1),
+        screen: pageLabel(s.page),
+        element: s.target ? describeTarget(s.target) : "",
+        context: s.target?.context ?? "",
+        kind: s.kind,
+        title: s.title,
+        text: hasBodyText(s.body) ? writerOutline(s.body).text : "",
+        before: steps.slice(Math.max(0, at - 3), at).map((x) => x.title).filter(Boolean),
+        after: steps.slice(form.index === null ? at : at + 1, at + 4).map((x) => x.title).filter(Boolean),
+      });
+      setBefore(s);
+      const body = draftBody(r.blocks, []);
+      setForm((f) => f && { ...f, step: { ...f.step, title: r.title, body }, key: f.key + 1 });
+      if (r.notes) notify(`A MAVI pede para conferir: ${r.notes}`);
+    } catch (e) {
+      notify((e as Error).message || "A MAVI não conseguiu escrever agora.");
+    } finally {
+      setWriting(false);
+    }
+  };
+  const undoSuggestion = () => {
+    if (!before) return;
+    setForm((f) => f && { ...f, step: { ...f.step, title: before.title, body: before.body }, key: f.key + 1 });
+    setBefore(null);
+  };
+
   const saveForm = () => {
     if (!form) return;
     const s = { ...form.step, title: form.step.title.replace(/\s+/g, " ").trim() };
@@ -307,6 +352,7 @@ export default function TourEditor({
     else steps[form.index] = s;
     setSteps(steps);
     setForm(null);
+    setBefore(null);
     setListOpen(true);
   };
   const removeStep = (i: number) => {
@@ -371,10 +417,16 @@ export default function TourEditor({
               onResize={resize}
               onRepick={() => setPicking(true)}
               onSave={saveForm}
-              onCancel={() => setForm(null)}
+              onCancel={() => {
+                setForm(null);
+                setBefore(null);
+              }}
               onRemove={form.index === null ? undefined : () => removeStep(form.index!)}
               onUploading={setUploading}
               uploading={uploading}
+              writing={writing}
+              onSuggest={() => void suggest()}
+              onUndoSuggestion={before ? undoSuggestion : undefined}
               number={form.index === null ? steps.length + 1 : form.index + 1}
             />
           ) : (
@@ -761,6 +813,9 @@ function StepForm({
   onCancel,
   onRemove,
   onUploading,
+  writing,
+  onSuggest,
+  onUndoSuggestion,
 }: {
   form: Form;
   number: number;
@@ -774,6 +829,9 @@ function StepForm({
   onCancel: () => void;
   onRemove?: () => void;
   onUploading: (busy: boolean) => void;
+  writing: boolean;
+  onSuggest: () => void;
+  onUndoSuggestion?: () => void;
 }) {
   const s = form.step;
   const set = onPatch;
@@ -813,6 +871,21 @@ function StepForm({
             </button>
           )}
         </div>
+      </div>
+      <div className="tour-mavi">
+        <button type="button" className="btn secondary" onClick={onSuggest} disabled={writing || uploading}>
+          <Sparkles size={14} />{" "}
+          {writing
+            ? "A MAVI está escrevendo…"
+            : s.title || /"text"/.test(s.body)
+              ? "Melhorar com a MAVI"
+              : "Escrever com a MAVI"}
+        </button>
+        {onUndoSuggestion && !writing && (
+          <button type="button" className="text-btn" onClick={onUndoSuggestion}>
+            Desfazer
+          </button>
+        )}
       </div>
       <label className="tour-field">
         <span className="tour-label">Título do balão</span>
