@@ -325,6 +325,19 @@ export async function likeReply(company: string, item: string, liked: boolean, t
   return rpc<PersonalItem>("personal_radar_reply_like", { p_company: company, p_item: item, p_liked: liked, p_tags: tags });
 }
 /** A tarefa sugerida foi criada (pelo formulário) ou não precisava. */
+/**
+ * As falas da situação no grupo (até 30, das mais antigas às mais novas) para
+ * as fontes da tarefa (migration 20270618090000). Sem a migração ou na
+ * demonstração, as da situação.
+ */
+export async function itemSources(company: string, item: PersonalItem): Promise<PersonalMention[]> {
+  if (offline(company)) return item.mentions ?? [];
+  try {
+    return (await rpc<PersonalMention[] | null>("personal_radar_item_sources", { p_company: company, p_item: item.id })) ?? [];
+  } catch {
+    return item.mentions ?? [];
+  }
+}
 export async function taskOutcome(company: string, item: string, outcome: "created" | "dismissed", task?: string, note = "") {
   if (offline(company)) {
     const i = demo.items.find((x) => x.id === item)!;
@@ -863,7 +876,8 @@ demo.items.splice(2, 0, {
     checks: [],
     task: {
       title: "Atualizar horário de sábado no robô da Clínica Sorriso",
-      description: "A clínica passou a atender aos sábados, das 8h às 12h. Ajustar o prompt do robô (fluxo [Clínica Sorriso] Atendimento WhatsApp) e confirmar com a Dra. Paula no grupo.",
+      description:
+        "Contexto: a Dra. Paula avisou no grupo que \"agora abrimos sábado das 8h às 12h\" e que o robô ainda diz que o atendimento é só durante a semana.\nO que fazer:\n- No prompt do robô (fluxo [Clínica Sorriso] Atendimento WhatsApp › AI Agent), trocar \"segunda a sexta, das 8h às 18h\" por \"segunda a sexta, das 8h às 18h, e sábado, das 8h às 12h\"\n- Publicar a versão nova e testar perguntando o horário de sábado\nPronto quando: o robô responder o horário de sábado certo e a Dra. Paula for avisada no grupo.\nAtenção: a cliente espera o ajuste ainda hoje.",
       team_id: "demo-team",
       team_name: "Automação",
       product_name: "MAVI",

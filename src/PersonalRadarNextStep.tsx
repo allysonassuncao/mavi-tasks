@@ -18,7 +18,7 @@ import {
 import { Button, Input, Textarea } from "./ui";
 import { navigate, taskUrl } from "./router";
 import { appPath } from "./temperature";
-import { sourceUrl } from "./ai";
+import { sourceUrl, type AiSource } from "./ai";
 import type { FormPreset } from "./forms";
 import { serializeDescription, type RichNode } from "./rich-text";
 import {
@@ -31,10 +31,13 @@ import {
   pendingKeys,
   replyFeedback,
   requestDraft,
+  itemSources,
+  messagePath,
   taskOutcome,
   whenBr,
   type LikeTag,
   type PersonalItem,
+  type PersonalMention,
   type RejectReason,
   type TaskSuggestion,
 } from "./personal-radar";
@@ -136,19 +139,105 @@ export function InlineAsk({
   );
 }
 
-/** O formulário de tarefa preenchido com a sugestão da MAVI (a descrição leva o pedido do cliente). */
-export function taskPreset(item: PersonalItem, t: TaskSuggestion, onCreated: (task: string) => void): FormPreset {
-  const quote = item.mentions?.filter((m) => m.role === "client").slice(-1)[0];
-  const paragraph = (text: string, marks: RichNode["marks"] = []): RichNode => ({
-    type: "paragraph",
-    content: text ? [{ type: "text", text, marks }] : [],
+const SECTION = /^(Contexto|O que fazer|Pronto quando|Atenção)\s*:\s*(.*)$/i;
+const ROLE_LABEL = { client: "cliente", team: "time" } as const;
+const pad = (n: number) => String(n).padStart(2, "0");
+const whenFull = (iso: string) => {
+  const d = new Date(iso);
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const minute = (s: number) => {
+  const t = Math.max(0, Math.floor(s));
+  const h = Math.floor(t / 3600);
+  return h ? `${h}:${pad(Math.floor((t % 3600) / 60))}:${pad(t % 60)}` : `${pad(Math.floor(t / 60))}:${pad(t % 60)}`;
+};
+/** Como a fonte aparece na tarefa ("Gravação “Reunião de setembro” em 12:34"). */
+export function sourceLabel(s: AiSource) {
+  if (s.type === "meeting") return `Gravação “${s.title}”${s.start && s.start > 0 ? ` em ${minute(s.start)}` : ""}`;
+  if (s.type === "whatsapp") return `Mensagem no WhatsApp${s.title ? ` (${s.title})` : ""}`;
+  if (s.type === "file") return `Arquivo “${s.title}”${s.page ? `, página ${s.page}` : ""}`;
+  if (s.type === "task") return `Tarefa “${s.title}”`;
+  return s.title;
+}
+
+/**
+ * O formulário de tarefa preenchido com a sugestão da MAVI. A descrição leva
+ * o texto da MAVI em seções (Contexto, O que fazer, Pronto quando, Atenção) e,
+ * no fim, as fontes: as falas da situação no grupo, com o link de cada
+ * mensagem, e as evidências que a MAVI usou (a gravação no minuto, o arquivo,
+ * a tarefa…), com o link (migration 20270618090000).
+ */
+export function taskPreset(
+  item: PersonalItem,
+  t: TaskSuggestion,
+  onCreated: (task: string) => void,
+  mentions: PersonalMention[] = item.mentions ?? [],
+): FormPreset {
+  const text = (value: string, marks?: RichNode["marks"]): RichNode => ({ type: "text", text: value, ...(marks ? { marks } : {}) });
+  const bold = [{ type: "bold" }] as RichNode["marks"];
+  const link = (href: string) => [{ type: "link", attrs: { href } }] as RichNode["marks"];
+  const paragraph = (...content: RichNode[]): RichNode => ({ type: "paragraph", content });
+  const list = (items: RichNode[][]): RichNode => ({
+    type: "bulletList",
+    content: items.map((c) => ({ type: "listItem", content: [paragraph(...c)] })),
   });
-  const content: RichNode[] = [
-    ...(t.description ? t.description.split("\n").map((line) => paragraph(line)) : []),
-    ...(quote
-      ? [paragraph(`${quote.speaker} no grupo "${item.group.title}": “${quote.quote}”`, [{ type: "italic" }])]
-      : []),
-  ];
+  const content: RichNode[] = [];
+  // O texto da MAVI: os rótulos em negrito, os passos "- " em lista.
+  let bullets: RichNode[][] = [];
+  const flush = () => {
+    if (bullets.length) content.push(list(bullets));
+    bullets = [];
+  };
+  for (const raw of (t.description ?? "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const step = line.match(/^[-•*]\s+(.*)$/);
+    if (step) {
+      bullets.push([text(step[1])]);
+      continue;
+    }
+    flush();
+    const section = line.match(SECTION);
+    content.push(section ? paragraph(text(`${section[1]}:`, bold), ...(section[2] ? [text(` ${section[2]}`)] : [])) : paragraph(text(line)));
+  }
+  flush();
+  // As fontes, montadas aqui (os links só do que existe).
+  const evidence = (item.reply?.evidence ?? []).filter((e) => e.title || e.detail);
+  if (mentions.length || evidence.length || item.radar) {
+    content.push(paragraph(text("Fontes", bold)));
+    if (mentions.length) {
+      content.push(paragraph(text(`Mensagens no grupo “${item.group.title}”:`)));
+      content.push(
+        list(
+          mentions.map((m) => [
+            text(whenFull(m.at), link(appPath(messagePath(item.group.id, m.message_id)))),
+            text(" · "),
+            text(`${m.speaker || "Sem nome"} (${ROLE_LABEL[m.role] ?? m.role}): `, bold),
+            text(`“${m.quote}”`),
+          ]),
+        ),
+      );
+    }
+    if (evidence.length) {
+      content.push(paragraph(text("O que a MAVI consultou:")));
+      content.push(
+        list(
+          evidence.map((e) => {
+            const href = e.source && e.source.type !== "attachment" ? sourceUrl(e.source) : null;
+            return [
+              ...(e.title ? [text(e.title, bold)] : []),
+              ...(e.detail ? [text(`${e.title ? " — " : ""}${e.detail}`)] : []),
+              ...(e.source ? [text(" · "), href ? text(sourceLabel(e.source), link(href)) : text(sourceLabel(e.source))] : []),
+            ];
+          }),
+        ),
+      );
+    }
+    if (item.radar)
+      content.push(
+        paragraph(text("Radar do cliente: "), text(item.radar.title, link(appPath(`/radar?item=${item.radar.id}`)))),
+      );
+  }
   const description = serializeDescription({ type: "doc", content });
   return {
     contract: t.contract_id,
@@ -271,11 +360,17 @@ export function NextStep({
     );
     if (thenTask) createTask();
   };
-  const createTask = () => {
+  const createTask = async () => {
     if (!task || !onNewTask) return;
+    // Todas as falas da situação (não só as 4 que a lista mostra) vão para as fontes.
+    const mentions = await itemSources(company, item);
     onNewTask(
-      taskPreset(item, task, (id) =>
-        work(() => taskOutcome(company, item.id, "created", id), "Tarefa criada e ligada à situação. A MAVI aprende com o que você mudou.", true),
+      taskPreset(
+        item,
+        task,
+        (id) =>
+          work(() => taskOutcome(company, item.id, "created", id), "Tarefa criada e ligada à situação. A MAVI aprende com o que você mudou.", true),
+        mentions.length ? mentions : item.mentions,
       ),
     );
   };

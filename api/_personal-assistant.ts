@@ -147,7 +147,12 @@ A resposta ("reply"):
 
 A tarefa ("task"), SÓ quando a situação pede trabalho operacional que a resposta sozinha não resolve (ajustar o robô, criar ou trocar uma arte, gerar um relatório, mexer numa campanha, configurar algo) e que ninguém já está fazendo (veja as tarefas abertas). Dúvida respondida, material só recebido, agradecimento ou o que a própria resposta já resolve: "task": null. Na dúvida, null.
 - "title": curto e acionável, começando pelo verbo ("Atualizar horário de sábado no robô"), sem o nome do cliente.
-- "description": o que fazer e o contexto que a pessoa precisa (o que o cliente pediu, com as palavras dele, e onde está o material), em poucas linhas.
+- "description": o suficiente para quem recebe fazer sem precisar perguntar nada, em linhas curtas e nesta ordem:
+  "Contexto:" o que o cliente pediu ou relatou, com as palavras dele entre aspas, quem falou e desde quando (e quantas vezes cobrou, se cobrou);
+  "O que fazer:" os passos concretos, um por linha começando com "- " (o que mudar, onde, com quais dados das fontes: números com o período, nomes de arquivos, o trecho do robô);
+  "Pronto quando:" o que entregar e como confirmar com o cliente;
+  "Atenção:" só se houver prazo combinado, dependência, quem aprova ou um risco.
+  Use só fatos das falas e das fontes. Não escreva links nem liste as fontes: as mensagens do grupo e as evidências entram sozinhas no fim da tarefa.
 - Para quem: "assignee" (P#) quando o assunto é claramente de uma pessoa (pelo que ela faz); senão "team" (E#), e a equipe passa para quem tem menos tarefas. Só pessoas e equipes da lista.
 - "product": o Q# do produto de que trata. "due": AAAA-MM-DD só quando o cliente deu prazo ou a urgência pede; senão null. "priority": low, normal, high ou urgent (urgent só com o cliente parado ou dinheiro em jogo).
 - "why": em uma frase, por que precisa de tarefa.
@@ -635,7 +640,7 @@ export async function writeDraft(
         execute,
         maxRounds: 6,
         effort: "medium",
-        maxTokens: 4000,
+        maxTokens: 5000,
       });
     } finally {
       await ads?.close().catch(() => {});

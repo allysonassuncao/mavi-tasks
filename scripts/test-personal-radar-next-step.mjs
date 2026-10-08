@@ -196,4 +196,25 @@ await check("lições de tarefa: a MAVI e a pessoa escrevem; entram na resposta 
   assert.deepEqual(c.feedback.map((f) => f.action).sort(), ["liked", "task_created", "task_dismissed"]);
 });
 
+await check("as fontes da tarefa: todas as falas da situação (até 30), em ordem, só para o dono", async () => {
+  for (let n = 2; n <= 6; n++) {
+    const id = uid(1000 + n);
+    await sql(
+      `insert into whatsapp_messages(id, company_id, group_id, wa_id, sent_at, sender, sender_phone, sender_name, from_me, kind, body)
+       values ($1,$2,$3,$4, now() + make_interval(mins => $5),'c@lid','5511911112222','Carla',false,'text',$6)`,
+      [id, A, GROUP, `W${n}`, n, `Mensagem ${n}`],
+    );
+    await sql(`insert into personal_radar_mentions(company_id, item_id, message_id, role, speaker, quote, at)
+      values ($1,$2,$3,$4,$5,$6, now() + make_interval(mins => $7))`,
+      [A, item.id, id, n === 4 ? "team" : "client", n === 4 ? "Gabi Gestora" : "Carla", `Mensagem ${n}`, n]);
+  }
+  await as(gabi);
+  const all = await rpc("personal_radar_item_sources", [A, item.id]);
+  assert.equal(all.length, 6, "mais que as 4 da situação");
+  assert.deepEqual(all.map((m) => m.quote), ["arte nova", "Mensagem 2", "Mensagem 3", "Mensagem 4", "Mensagem 5", "Mensagem 6"]);
+  assert.deepEqual([all[3].role, all[3].speaker, all[0].message_id], ["team", "Gabi Gestora", M1]);
+  await as(ana);
+  await rejects(() => rpc("personal_radar_item_sources", [A, item.id]), /Item não encontrado/);
+});
+
 console.log(`\n${passed} verificações do próximo passo passaram.`);
