@@ -930,6 +930,10 @@ export type PendingConnection = {
     /** The client the account already belongs to, if any. */
     client_id: string | null;
     client: string | null;
+    /** Already this client's (an account can be shared by several). */
+    mine?: boolean;
+    /** The other clients that also use the account. */
+    others?: string[];
   }[];
 };
 export type MetaClient = {

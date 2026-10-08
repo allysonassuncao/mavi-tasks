@@ -713,7 +713,7 @@ await check(
 );
 
 await check(
-  "uma conta é de um cliente só; reconectar o cliente renova o token",
+  "a conta de outro cliente fica compartilhada; reconectar o cliente renova o token",
   async () => {
     await sql("update memberships set active=true where user_id=$1", [admin2]);
     const other = await metaLogin(
@@ -727,10 +727,80 @@ await check(
     await as(admin2);
     const offer = await rpc("ad_meta_pending", [other.pending]);
     assert.equal(offer.accounts[0].client, "Vittalium");
-    await assert.rejects(
-      rpc("ad_confirm_meta_accounts", [other.pending, ["111"]]),
-      /A conta 111 já é do cliente Vittalium/,
+    assert.equal(offer.accounts[0].mine, false);
+    assert.deepEqual(offer.accounts[0].others, ["Vittalium"]);
+    assert.equal(
+      await rpc("ad_confirm_meta_accounts", [other.pending, ["111"]]),
+      1,
     );
+    // Both clients see it; the first stays in the column.
+    const shared = (await rows("ad_meta_account_list", [A])).filter(
+      (a) => a.account_id === "111",
+    );
+    assert.deepEqual(shared.map((a) => a.client_name).sort(), [
+      "Outro cliente",
+      "Vittalium",
+    ]);
+    const [owner] = await sql(
+      "select client_id from mavi_private.ad_meta_accounts where company_id=$1 and account_id='111'",
+      [A],
+    );
+    assert.equal(owner.client_id, client);
+    const both = Object.fromEntries(
+      (await rpc("ad_meta_clients", [A])).map((c) => [c.client, c]),
+    );
+    assert.ok(both["Outro cliente"].accounts.some((a) => a.account_id === "111"));
+    assert.ok(both["Vittalium"].accounts.some((a) => a.account_id === "111"));
+    const ai = await rpc("ad_ai_accounts", [A, otherClient]);
+    assert.ok(ai.some((a) => a.account_id === "111" && a.client === "Outro cliente"));
+    // Reconnecting from the second client: the account says it is already its.
+    const back = await metaLogin(
+      admin2,
+      otherClient,
+      "fb2",
+      "Beto no Facebook",
+      cipher(20),
+      [{ account_id: "111", name: "Vittalium" }],
+    );
+    await as(admin2);
+    const mine = (await rpc("ad_meta_pending", [back.pending])).accounts[0];
+    assert.equal(mine.mine, true);
+    assert.equal(mine.client_id, otherClient);
+    assert.deepEqual(mine.others, ["Vittalium"]);
+    // Removing the second client only unlinks it.
+    assert.equal(await rpc("ad_disconnect_meta_client", [A, otherClient]), 1);
+    const left = (await rows("ad_meta_account_list", [A])).filter(
+      (a) => a.account_id === "111",
+    );
+    assert.deepEqual(left.map((a) => a.client_name), ["Vittalium"]);
+    // Removing the first client hands the column to the one left; removing
+    // the last one deletes the account.
+    await as(admin);
+    const first = await rpc("create_client", [A, "Dono 1", ""]);
+    const second = await rpc("create_client", [A, "Dono 2", ""]);
+    for (const who of [first, second]) {
+      const c = await metaLogin(admin, who, "fb9", "Nove", cipher(9), [
+        { account_id: "999", name: "Compartilhada" },
+      ]);
+      await as(admin);
+      await rpc("ad_confirm_meta_accounts", [c.pending, ["999"]]);
+    }
+    assert.equal(await rpc("ad_disconnect_meta_client", [A, first]), 1);
+    const [moved] = await sql(
+      "select client_id from mavi_private.ad_meta_accounts where company_id=$1 and account_id='999'",
+      [A],
+    );
+    assert.equal(moved.client_id, second);
+    assert.equal(await rpc("ad_disconnect_meta_client", [A, second]), 1);
+    assert.deepEqual(
+      await sql(
+        "select 1 from mavi_private.ad_meta_accounts where company_id=$1 and account_id='999'",
+        [A],
+      ),
+      [],
+    );
+    await sql("delete from clients where id = any($1::uuid[])", [[first, second]]);
+    await as(admin2);
     const again = await metaLogin(
       admin2,
       client,

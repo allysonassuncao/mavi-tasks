@@ -1314,9 +1314,16 @@ export async function handleAds(
       >(env, fetchImpl, authorization, "ad_meta_account_list", {
         p_company: company,
       });
+      // One row per account and client (an account can be shared by
+      // several clients): the client's, or each account once.
       const client = String(req.client ?? "");
+      const seen = new Set<string>();
       const accounts: PlatformAccount[] = rows
-        .filter((a) => !client || a.client_id === client)
+        .filter((a) =>
+          client
+            ? a.client_id === client
+            : !seen.has(a.account_id) && !!seen.add(a.account_id),
+        )
         .map((a) => ({
           id: a.account_id,
           name: a.name || a.account_id,

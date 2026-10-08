@@ -846,6 +846,8 @@ const DEMO_CAMPAIGNS: Record<string, [string, string, boolean, string][]> = {
 const demoConnected = { meta: true, google: true };
 /** Connections waiting for the client's accounts to be chosen. */
 const demoPending = new Map<string, PendingConnection>();
+/** Meta accounts shared with more clients than their first one. */
+const demoShares = new Map<string, Set<string>>();
 function demoAds(store: Store, data: () => Snapshot): AdsBackend {
   const clientOf = (campaignId: string) => {
     const c = store.campaigns.find((x) => x.id === campaignId);
@@ -864,6 +866,27 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
           : a.id === "2345678901"
             ? clientOf("demo-campaign-2")
             : null;
+  /** Every client of a Meta account: its first one and those sharing it. */
+  const clientsOf = (a: PlatformAccount) => [
+    ...(a.client_id ? [a.client_id] : []),
+    ...(demoShares.get(a.id) ?? []),
+  ];
+  const offered = (a: PlatformAccount, client: string) => {
+    const mine = clientsOf(a).includes(client);
+    const others = clientsOf(a)
+      .filter((c) => c !== client)
+      .map(clientName);
+    return {
+      account_id: a.id,
+      name: a.name,
+      currency: "BRL",
+      account_status: 1,
+      client_id: mine ? client : (a.client_id ?? null),
+      client: others.join(", ") || null,
+      mine,
+      others,
+    };
+  };
   const wait = () => new Promise((r) => setTimeout(r, 250));
   const need = (provider: "meta" | "google") => {
     if (!demoConnected[provider])
@@ -917,14 +940,7 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
         expires_at: new Date(Date.now() + 60 * 86_400_000).toISOString(),
         accounts: [
           own
-            ? {
-                account_id: own.id,
-                name: own.name,
-                currency: "BRL",
-                account_status: 1,
-                client_id: own.client_id ?? null,
-                client: clientName(own.client_id),
-              }
+            ? offered(own, context.client)
             : {
                 account_id: "4567890123",
                 name: `${clientName(context.client)} · Make`,
@@ -933,17 +949,8 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
                 client_id: null,
                 client: null,
               },
-          ...(other && other.client_id !== own?.client_id
-            ? [
-                {
-                  account_id: other.id,
-                  name: other.name,
-                  currency: "BRL",
-                  account_status: 1,
-                  client_id: other.client_id ?? null,
-                  client: clientName(other.client_id),
-                },
-              ]
+          ...(other && other.id !== own?.id
+            ? [offered(other, context.client)]
             : []),
         ],
       });
@@ -951,9 +958,15 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
     },
     async disconnect(_company, provider, target) {
       if (provider === "meta" && target?.client) {
-        DEMO_ACCOUNTS.meta = DEMO_ACCOUNTS.meta.filter(
-          (a) => a.client_id !== target.client,
-        );
+        // A shared account stays with the other clients.
+        for (const shares of demoShares.values()) shares.delete(target.client);
+        DEMO_ACCOUNTS.meta = DEMO_ACCOUNTS.meta.flatMap((a) => {
+          if (a.client_id !== target.client) return [a];
+          const [next] = demoShares.get(a.id) ?? [];
+          if (!next) return [];
+          demoShares.get(a.id)!.delete(next);
+          return [{ ...a, client_id: next, client_name: clientName(next) }];
+        });
         return;
       }
       if (provider === "meta" && target?.profile) {
@@ -976,8 +989,14 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
       for (const a of p.accounts.filter((x) =>
         accounts.includes(x.account_id),
       )) {
-        if (a.client_id && a.client_id !== p.client_id)
-          throw Error(`A conta ${a.account_id} já é do cliente ${a.client}`);
+        const existing = DEMO_ACCOUNTS.meta.find((x) => x.id === a.account_id);
+        // Another client's account: shared, the other one keeps it.
+        if (existing?.client_id && existing.client_id !== p.client_id) {
+          const shares = demoShares.get(a.account_id) ?? new Set<string>();
+          shares.add(p.client_id);
+          demoShares.set(a.account_id, shares);
+          continue;
+        }
         const account: PlatformAccount = {
           id: a.account_id,
           name: a.name,
@@ -1007,10 +1026,13 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
           const id = clientOf(c.id);
           if (id) ids.add(id);
         }
-      for (const a of DEMO_ACCOUNTS.meta) if (a.client_id) ids.add(a.client_id);
+      for (const a of DEMO_ACCOUNTS.meta)
+        for (const id of clientsOf(a)) ids.add(id);
       return [...ids]
         .map((id) => {
-          const accounts = DEMO_ACCOUNTS.meta.filter((a) => a.client_id === id);
+          const accounts = DEMO_ACCOUNTS.meta.filter((a) =>
+            clientsOf(a).includes(id),
+          );
           return {
             client_id: id,
             client: clientName(id),
@@ -1082,8 +1104,16 @@ function demoAds(store: Store, data: () => Snapshot): AdsBackend {
       await wait();
       need(provider);
       return DEMO_ACCOUNTS[provider]
-        .filter((a) => !client || a.client_id === client)
-        .map((a) => ({ ...a }));
+        .filter(
+          (a) =>
+            !client ||
+            (provider === "meta" ? clientsOf(a).includes(client) : a.client_id === client),
+        )
+        .map((a) =>
+          client && a.client_id !== client
+            ? { ...a, client_id: client, client_name: clientName(client) }
+            : { ...a },
+        );
     },
     async campaigns(_company, provider, account) {
       await wait();

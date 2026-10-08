@@ -833,10 +833,18 @@ export function ClientMetaConnection({
   );
 }
 
+type PendingAccount = PendingConnection["accounts"][number];
+const isMine = (a: PendingAccount, client: string) =>
+  a.mine ?? a.client_id === client;
+/** The other clients that also use the account (shared accounts). */
+const otherClients = (a: PendingAccount, client: string) =>
+  a.others ??
+  (a.client_id && a.client_id !== client && a.client ? [a.client] : []);
+
 /**
  * After the client's Facebook login: the accounts the profile sees, to tick
- * the client's (the only one comes marked). An account that already belongs
- * to another client can't be taken — one account, one client.
+ * the client's (the only one comes marked). An account of another client
+ * can be ticked too: it is shared, and the other client keeps it.
  */
 export function MetaAccountChooser({
   ads,
@@ -860,15 +868,13 @@ export function MetaAccountChooser({
       .then((p) => {
         if (!live) return;
         setOffer(p);
+        const mine = p.accounts.filter((a) => isMine(a, p.client_id));
         const free = p.accounts.filter(
-          (a) => !a.client_id || a.client_id === p.client_id,
+          (a) =>
+            isMine(a, p.client_id) || !otherClients(a, p.client_id).length,
         );
         setPicked(
-          free.length === 1
-            ? [free[0].account_id]
-            : free
-                .filter((a) => a.client_id === p.client_id)
-                .map((a) => a.account_id),
+          (free.length === 1 ? free : mine).map((a) => a.account_id),
         );
       })
       .catch((e) => live && setError((e as Error).message));
@@ -907,13 +913,13 @@ export function MetaAccountChooser({
             </p>
             <ul className="campaign-pick-list" aria-label="Contas do perfil">
               {offer.accounts.map((a) => {
-                const taken = !!a.client_id && a.client_id !== offer.client_id;
+                const others = otherClients(a, offer.client_id);
                 return (
-                  <li key={a.account_id} className={taken ? "taken" : ""}>
+                  <li key={a.account_id}>
                     <label className="checkbox-label">
                       <Checkbox
                         checked={picked.includes(a.account_id)}
-                        disabled={taken || busy}
+                        disabled={busy}
                         onCheckedChange={(v) =>
                           setPicked((list) =>
                             v === true
@@ -927,7 +933,9 @@ export function MetaAccountChooser({
                         <small className="cell-note">
                           {a.account_id}
                           {a.currency ? ` · ${a.currency}` : ""}
-                          {taken ? ` · já é do cliente ${a.client}` : ""}
+                          {others.length
+                            ? ` · ${isMine(a, offer.client_id) ? "também" : "já"} é do cliente ${others.join(", ")}`
+                            : ""}
                         </small>
                       </span>
                     </label>
