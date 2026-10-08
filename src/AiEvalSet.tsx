@@ -1,25 +1,33 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { Button, Checkbox, Input, Loading, Select, SelectOption, Textarea } from "./ui";
-import { Modal } from "./components";
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { Button, Checkbox, Input, Loading, Select, SelectOption } from "./ui";
 import type { Snapshot } from "./types";
 import type { AiLibrary, ServerDefaults } from "./ai";
 import { CATALOG, isJevModel, isLinkTranscriber, isNonChatModel } from "./ai-providers";
 import { FieldHistory } from "./AiSettingsLog";
-import { TASK_TYPES, ms, pct, usd, type RouterApi, type RouterSettings } from "./ai-router";
-import type { CaseDraft, EvalApi, EvalCase, EvalOverview, EvalResult, EvalRun } from "./ai-eval-set";
+import { ms, pct, usd, type RouterApi, type RouterSettings } from "./ai-router";
+import { featureLabel, type EvalApi, type EvalOverview, type EvalResult, type EvalRun, type EvalSample } from "./ai-eval-set";
 import "./campaign-insights.css";
 import "./ai-router.css";
 
 const SERVER = "server";
 const STATUS: Record<EvalRun["status"], string> = { running: "Em andamento", done: "Concluído", cancelled: "Cancelado" };
+const OUTCOME: Record<NonNullable<EvalResult["outcome"]>, string> = {
+  win: "melhor que a original",
+  tie: "igual à original",
+  loss: "pior que a original",
+};
+const when = (iso: string) =>
+  new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 /**
- * Painel da MAVI › Avaliação: o conjunto de avaliação da empresa. Perguntas
- * reais com a resposta de referência (de respostas aprovadas, com o
- * material congelado, ou à mão); um líder testa um modelo antes de liberar e
- * vê a nota caso a caso. Com a liberação ligada, o roteador só usa sozinho
- * os modelos aprovados.
+ * Painel da MAVI › Avaliação: a avaliação dinâmica. Cada módulo que usa a
+ * MAVI grava os 10 registros mais recentes; um líder escolhe um modelo e os
+ * módulos, e o modelo repete esses registros com a mesma entrada (as
+ * consultas devolvem o que foi gravado). O juiz compara às cegas com a
+ * resposta original. Toda segunda, o teste semanal testa sozinho os modelos
+ * do roteador. Com a liberação ligada, o roteador só usa sozinho os modelos
+ * aprovados.
  */
 export function EvalSetPanel({
   api,
@@ -40,11 +48,13 @@ export function EvalSetPanel({
   const [s, setS] = useState<RouterSettings | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<EvalCase | "new" | null>(null);
   const [choice, setChoice] = useState("");
   const [cap, setCap] = useState("1");
   const [open, setOpen] = useState<string | null>(null);
+  const [shown, setShown] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [minScore, setMinScore] = useState("80");
+  const [weeklyCap, setWeeklyCap] = useState("1");
 
   const load = useCallback(
     () =>
@@ -53,6 +63,7 @@ export function EvalSetPanel({
           setO(ov);
           setS(st);
           setMinScore(String(Math.round(Number(st.gate_min) * 100)));
+          setWeeklyCap(String(Number(ov.settings.weekly_cap)));
           setError("");
         })
         .catch((e: Error) => setError(e.message)),
@@ -89,127 +100,148 @@ export function EvalSetPanel({
         list.push({ value: `${SERVER}|${m.id}`, label: `Servidor · ${m.label || m.id}`, provider: null, model: m.id });
     return list;
   }, [library, defaults]);
-  const clientName = (id: string | null) => (id ? (data.clients.find((c) => c.id === id)?.name ?? "Cliente removido") : "—");
+
+  // Os registros agrupados por módulo (os mais recentes primeiro).
+  const modules = useMemo(() => {
+    const by = new Map<string, EvalSample[]>();
+    for (const x of o?.samples ?? []) by.set(x.feature, [...(by.get(x.feature) ?? []), x]);
+    return [...by.entries()]
+      .map(([feature, list]) => ({ feature, label: featureLabel(feature), list }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  }, [o]);
+  const clientName = (id: string | null) => (id ? (data.clients.find((c) => c.id === id)?.name ?? "Cliente removido") : "");
 
   if (!o || !s)
     return error ? (
       <p className="form-error" role="alert">
-        Não foi possível carregar o conjunto de avaliação: {error}
+        Não foi possível carregar a avaliação: {error}
       </p>
     ) : (
       <Loading variant="field" />
     );
-  const active = o.cases.filter((c) => c.active).length;
-  const picked = models.find((m) => m.value === choice);
+  const chosen = models.find((m) => m.value === choice);
+  const features = modules.filter((m) => picked.has(m.feature));
+  const total = features.reduce((n, m) => n + Math.min(m.list.length, 10), 0);
+  const toggle = (feature: string, on: boolean) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(feature);
+      else next.delete(feature);
+      return next;
+    });
   return (
     <div className="thermo-settings cins-settings rtr" aria-busy={busy}>
       <section className="panel cins-block">
-        <h3>Conjunto de avaliação</h3>
+        <h3>Avaliação dinâmica</h3>
         <p className="cins-help">
-          Perguntas reais da agência com a resposta certa, para testar um modelo antes de liberar. Cada caso guarda o
-          material que a resposta usou (os trechos das fontes e o dossiê do cliente, congelados), então o teste se repete
-          igual com qualquer modelo. O modelo responde com esse material, sem ferramentas, e a autoavaliação dá a nota
-          comparando com a referência. A busca com ferramentas aparece no ranking real, em Roteamento.
+          Cada módulo que usa a MAVI guarda os 10 registros mais recentes: a entrada inteira (instruções, contexto, a
+          conversa e o que cada consulta ao sistema devolveu) e a resposta. Para testar um modelo, ele recebe a mesma
+          entrada de cada registro, e as consultas devolvem o que foi gravado — nada é executado de verdade. Um juiz
+          compara às cegas com a resposta original: o modelo vence, empata ou perde. A nota é a parte dos registros em que
+          ele foi igual ou melhor que o modelo de hoje.
         </p>
       </section>
 
       <section className="panel cins-block">
         <div className="rtr-head">
           <h3>
-            Casos <small className="muted">· {active} ativos de {o.cases.length}</small>
+            Registros por módulo <small className="muted">· {o.samples.length} registros</small>
           </h3>
-          <Button className="btn" type="button" onClick={() => setEditing("new")} disabled={busy}>
-            <Plus size={14} /> Novo caso
-          </Button>
+          {!!modules.length && (
+            <span className="evs-links">
+              <Button className="btn" type="button" onClick={() => setPicked(new Set(modules.map((m) => m.feature)))}>
+                Marcar todos
+              </Button>
+              <Button className="btn" type="button" disabled={!picked.size} onClick={() => setPicked(new Set())}>
+                Limpar
+              </Button>
+            </span>
+          )}
         </div>
-        {o.cases.length ? (
+        {modules.length ? (
           <div className="drive-table-wrap">
             <table className="drive-table ai-usage-table stack-mobile">
               <thead>
                 <tr>
-                  <th>Pergunta</th>
-                  <th>Pedido</th>
-                  <th>Cliente</th>
-                  <th>Origem</th>
-                  <th>Ativo</th>
-                  <th aria-label="Ações" />
+                  <th>Módulo</th>
+                  <th className="num">Registros</th>
+                  <th className="num">Consultas</th>
+                  <th>Respondeu</th>
+                  <th>Último</th>
+                  <th aria-label="Ver os registros" />
                 </tr>
               </thead>
               <tbody>
-                {o.cases.map((c) => (
-                  <tr key={c.id}>
-                    <td data-label="Pergunta" className="rtr-reason">
-                      {c.question}
-                    </td>
-                    <td data-label="Pedido">{c.task_type ? (TASK_TYPES[c.task_type] ?? c.task_type) : "—"}</td>
-                    <td data-label="Cliente">{clientName(c.client_id)}</td>
-                    <td data-label="Origem">
-                      {c.origin === "answer" ? `Resposta aprovada${c.sources ? ` · ${c.sources} fontes` : ""}` : "À mão"}
-                    </td>
-                    <td data-label="Ativo">
-                      <Checkbox
-                        checked={c.active}
-                        aria-label={`Caso ativo: ${c.question.slice(0, 60)}`}
-                        onCheckedChange={(v) =>
-                          void act(
-                            () =>
-                              api.saveCase({
-                                id: c.id,
-                                question: c.question,
-                                reference: c.reference,
-                                client_id: c.client_id,
-                                context: c.context ?? "",
-                                active: v === true,
-                              }),
-                            v === true ? "Caso ativado." : "Caso desativado.",
-                          )
-                        }
-                      />
-                    </td>
-                    <td className="num ai-log-actions">
-                      <button type="button" className="icon-btn" title="Editar" aria-label="Editar o caso" onClick={() => setEditing(c)}>
-                        <Pencil size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title="Excluir"
-                        aria-label="Excluir o caso"
-                        onClick={() => void act(() => api.deleteCase(c.id), "Caso excluído.")}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </td>
-                  </tr>
+                {modules.map((m) => (
+                  <Fragment key={m.feature}>
+                    <tr>
+                      <td data-label="Módulo">
+                        <label className="evs-module">
+                          <Checkbox
+                            checked={picked.has(m.feature)}
+                            aria-label={`Testar o módulo ${m.label}`}
+                            onCheckedChange={(v) => toggle(m.feature, v === true)}
+                          />
+                          <span>{m.label}</span>
+                        </label>
+                      </td>
+                      <td data-label="Registros" className="num">
+                        {m.list.length} de 10
+                      </td>
+                      <td data-label="Consultas" className="num">
+                        {m.list.reduce((n, x) => n + x.tools, 0)}
+                      </td>
+                      <td data-label="Respondeu" className="rtr-model">
+                        {[...new Set(m.list.map((x) => x.model))].join(", ")}
+                      </td>
+                      <td data-label="Último">{when(m.list[0].created_at)}</td>
+                      <td className="num">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          aria-label={shown === m.feature ? "Fechar os registros" : "Ver os registros"}
+                          onClick={() => setShown(shown === m.feature ? null : m.feature)}
+                        >
+                          {shown === m.feature ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                        </button>
+                      </td>
+                    </tr>
+                    {shown === m.feature && (
+                      <tr className="evs-samples-row">
+                        <td colSpan={6}>
+                          <ul className="evs-suggestions">
+                            {m.list.map((x) => (
+                              <li key={x.id}>
+                                <span>
+                                  <strong>{x.question || "(sem pergunta: pedido do próprio módulo)"}</strong>
+                                  <small className="muted">
+                                    {[
+                                      when(x.created_at),
+                                      clientName(x.client_id),
+                                      `${x.provider} · ${x.model}`,
+                                      x.tools ? `${x.tools} ${x.tools === 1 ? "consulta" : "consultas"}` : "",
+                                      x.sigiloso ? "cliente sigiloso" : "",
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </small>
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <p className="cins-help">Nenhum caso ainda. Comece pelas respostas aprovadas abaixo ou escreva um.</p>
-        )}
-        {!!o.suggestions.length && (
-          <>
-            <h4 className="rtr-sub">Respostas aprovadas (👍) que podem virar caso</h4>
-            <ul className="evs-suggestions">
-              {o.suggestions.map((x) => (
-                <li key={x.message}>
-                  <span>
-                    <strong>{x.question}</strong>
-                    <small className="muted">{x.answer}</small>
-                  </span>
-                  <Button
-                    className="btn"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void act(() => api.fromMessage(x.message), "Caso criado a partir da resposta.")}
-                  >
-                    <Plus size={14} /> Adicionar
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </>
+          <p className="cins-help">
+            Ainda não há registros. Eles aparecem conforme a equipe usa a MAVI: no máximo um a cada 5 minutos por módulo, e
+            ficam os 10 mais recentes (até 2 da mesma pessoa).
+          </p>
         )}
       </section>
 
@@ -239,21 +271,29 @@ export function EvalSetPanel({
           <Button
             className="btn primary"
             type="button"
-            disabled={busy || !picked || !active}
+            disabled={busy || !chosen || !total}
             onClick={() =>
-              picked &&
+              chosen &&
               void act(
-                () => api.start(picked.provider, picked.model, Math.min(Math.max(Number(cap) || 1, 0.05), 50)),
-                "Teste começou: a MAVI responde os casos em segundo plano.",
+                () =>
+                  api.start(
+                    chosen.provider,
+                    chosen.model,
+                    Math.min(Math.max(Number(cap) || 1, 0.05), 50),
+                    features.map((m) => m.feature),
+                  ),
+                "Teste começou: o modelo repete os registros em segundo plano.",
               )
             }
           >
-            Testar com {Math.min(active, 100)} {active === 1 ? "caso" : "casos"}
+            {total ? `Testar com ${total} ${total === 1 ? "registro" : "registros"}` : "Marque os módulos acima"}
           </Button>
         </div>
         <p className="cins-help">
-          Roda em segundo plano, alguns casos por vez; passou do teto, o teste fecha com os que deu tempo. Aprovado com nota
-          de 70% ou mais em cada caso.
+          Roda em segundo plano, alguns registros por vez; passou do teto, o teste fecha com os que deu tempo. Os registros
+          de clientes sigilosos só entram nos provedores de dados sigilosos do Roteamento. A espera da original inclui as
+          consultas de verdade; no teste elas voltam na hora, então compare a espera com cuidado. O gasto das respostas
+          não conta o juiz.
         </p>
         {o.runs.length ? (
           <div className="drive-table-wrap">
@@ -263,54 +303,65 @@ export function EvalSetPanel({
                   <th aria-label="Abrir" />
                   <th>Modelo</th>
                   <th>Situação</th>
-                  <th className="num">Nota</th>
-                  <th className="num">Aprovados</th>
+                  <th className="num">Igual ou melhor</th>
+                  <th className="num">Vence · Empata · Perde</th>
                   <th className="num">Espera média</th>
+                  <th className="num">Gasto das respostas</th>
                   <th className="num">Custo / teto</th>
                   <th aria-label="Ações" />
                 </tr>
               </thead>
               <tbody>
                 {o.runs.map((r) => (
-                  <Fragment key={r.id}>
-                    <tr>
-                      <td>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          aria-label={open === r.id ? "Fechar o resultado" : "Ver o resultado caso a caso"}
-                          onClick={() => setOpen(open === r.id ? null : r.id)}
-                        >
-                          {open === r.id ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                        </button>
-                      </td>
-                      <td data-label="Modelo" className="rtr-model">
-                        {r.provider} · {r.model}
-                      </td>
-                      <td data-label="Situação">
-                        {STATUS[r.status]}
-                        {r.status === "running" && ` · ${r.cases_done} de ${r.cases_total}`}
-                        {r.cases_failed > 0 && <small className="muted"> · {r.cases_failed} sem nota</small>}
-                      </td>
-                      <td data-label="Nota" className="num">
-                        <strong>{pct(r.score)}</strong>
-                      </td>
-                      <td data-label="Aprovados" className="num">
-                        {r.cases_done ? `${r.passed} de ${r.cases_done}` : "—"}
-                      </td>
-                      <td data-label="Espera média" className="num">{ms(r.avg_ms)}</td>
-                      <td data-label="Custo / teto" className="num">
-                        {usd(r.cost_usd)} / {usd(r.cap_usd)}
-                      </td>
-                      <td className="num">
-                        {r.status === "running" && (
-                          <Button className="btn" type="button" disabled={busy} onClick={() => void act(() => api.cancel(r.id), "Teste cancelado.")}>
-                            Cancelar
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  </Fragment>
+                  <tr key={r.id}>
+                    <td>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        aria-label={open === r.id ? "Fechar o resultado" : "Ver o resultado registro a registro"}
+                        onClick={() => setOpen(open === r.id ? null : r.id)}
+                      >
+                        {open === r.id ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                      </button>
+                    </td>
+                    <td data-label="Modelo" className="rtr-model">
+                      {r.provider} · {r.model}
+                      <small className="muted">
+                        {" "}
+                        · {r.features?.length ?? 0} {r.features?.length === 1 ? "módulo" : "módulos"}
+                        {r.auto && " · semanal"}
+                      </small>
+                    </td>
+                    <td data-label="Situação">
+                      {STATUS[r.status]}
+                      {r.status === "running" && ` · ${r.cases_done} de ${r.cases_total}`}
+                      {r.cases_failed > 0 && <small className="muted"> · {r.cases_failed} sem resultado</small>}
+                    </td>
+                    <td data-label="Igual ou melhor" className="num">
+                      <strong>{pct(r.score)}</strong>
+                    </td>
+                    <td data-label="Vence · Empata · Perde" className="num">
+                      {r.status === "running" || r.cases_done ? `${r.wins} · ${r.ties} · ${r.losses}` : "—"}
+                    </td>
+                    <td data-label="Espera média" className="num">
+                      {ms(r.avg_ms)}
+                      {r.base_ms !== null && <small className="muted"> (original {ms(r.base_ms)})</small>}
+                    </td>
+                    <td data-label="Gasto das respostas" className="num">
+                      {r.answer_cost !== null ? usd(r.answer_cost) : "—"}
+                      {r.base_cost !== null && <small className="muted"> (original {usd(r.base_cost)})</small>}
+                    </td>
+                    <td data-label="Custo / teto" className="num">
+                      {usd(r.cost_usd)} / {usd(r.cap_usd)}
+                    </td>
+                    <td className="num">
+                      {r.status === "running" && (
+                        <Button className="btn" type="button" disabled={busy} onClick={() => void act(() => api.cancel(r.id), "Teste cancelado.")}>
+                          Cancelar
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -321,7 +372,7 @@ export function EvalSetPanel({
         {open && o.runs.some((r) => r.id === open) && (
           <>
             <h4 className="rtr-sub">
-              Resultado caso a caso · {(() => {
+              Resultado registro a registro · {(() => {
                 const r = o.runs.find((x) => x.id === open)!;
                 return `${r.provider} · ${r.model}`;
               })()}
@@ -329,6 +380,48 @@ export function EvalSetPanel({
             <RunDetail api={api} run={open} />
           </>
         )}
+      </section>
+
+      <section className="panel cins-block">
+        <h3>Teste semanal</h3>
+        <label className="cins-check">
+          <Checkbox
+            checked={o.settings.weekly}
+            disabled={busy}
+            onCheckedChange={(v) =>
+              void act(
+                () => api.saveSettings(v === true, Number(o.settings.weekly_cap)),
+                v === true ? "Teste semanal ligado." : "Teste semanal desligado.",
+              )
+            }
+          />
+          <span>
+            <strong>Toda segunda, testar sozinho os modelos do roteador</strong>
+            <small>
+              Até 3 modelos por semana entre os que o roteador pode escolher (os testados há mais tempo primeiro), com todos
+              os módulos que têm registros. Sem a lista do roteador, os modelos de conversa dos provedores ligados.
+            </small>
+          </span>
+        </label>
+        <div className="cins-row" aria-disabled={!o.settings.weekly}>
+          <label>
+            <span>Teto por modelo (US$)</span>
+            <Input
+              type="number"
+              min={0.05}
+              max={20}
+              step="0.05"
+              value={weeklyCap}
+              disabled={busy || !o.settings.weekly}
+              onChange={(e) => setWeeklyCap(e.target.value)}
+              onBlur={() => {
+                const v = Math.min(Math.max(Number(weeklyCap) || 1, 0.05), 20);
+                if (v !== Number(o.settings.weekly_cap))
+                  void act(() => api.saveSettings(o.settings.weekly, v), "Teto do teste semanal salvo.");
+              }}
+            />
+          </label>
+        </div>
       </section>
 
       <section className="panel cins-block">
@@ -345,13 +438,14 @@ export function EvalSetPanel({
             }
           />
           <span>
-            <strong>No automático, só modelos aprovados no conjunto de avaliação</strong>
+            <strong>No automático, só modelos aprovados na avaliação</strong>
             <small>
-              O roteador escolhe entre os modelos cuja nota mais recente aqui chegou à nota mínima. Regras travadas em Quem
-              usa qual modelo continuam valendo. Sem nenhum aprovado, ele segue com todos e avisa no motivo.
+              O roteador escolhe entre os modelos cujo teste mais recente aqui chegou à nota mínima (a parte dos registros em
+              que foram iguais ou melhores que a original). Regras travadas em Quem usa qual modelo continuam valendo. Sem
+              nenhum aprovado, ele segue com todos e avisa no motivo.
             </small>
           </span>
-          <FieldHistory title="Liberação pelo conjunto de avaliação" area="router" fields={["gate_enabled", "gate_min"]} />
+          <FieldHistory title="Liberação pela avaliação" area="router" fields={["gate_enabled", "gate_min"]} />
         </label>
         <div className="cins-row" aria-disabled={!s.gate_enabled}>
           <label>
@@ -406,25 +500,11 @@ export function EvalSetPanel({
           {error}
         </p>
       )}
-
-      {editing && (
-        <CaseEditor
-          data={data}
-          initial={editing === "new" ? null : editing}
-          onClose={() => setEditing(null)}
-          onSave={async (d) => {
-            await api.saveCase(d);
-            await load();
-            notify("Caso salvo.");
-            setEditing(null);
-          }}
-        />
-      )}
     </div>
   );
 }
 
-/** O resultado de um teste, caso a caso (os que não passaram primeiro). */
+/** O resultado de um teste, módulo a módulo (as derrotas primeiro). */
 function RunDetail({ api, run }: { api: EvalApi; run: string }) {
   const [rows, setRows] = useState<EvalResult[] | null>(null);
   const [error, setError] = useState("");
@@ -441,131 +521,58 @@ function RunDetail({ api, run }: { api: EvalApi; run: string }) {
       </p>
     );
   if (!rows) return <Loading variant="field" />;
+  const groups = new Map<string, EvalResult[]>();
+  for (const r of rows) groups.set(r.feature ?? "", [...(groups.get(r.feature ?? "") ?? []), r]);
   return (
     <div className="evs-detail">
-      {rows.map((r) => (
-        <article key={r.id} className={r.status === "done" ? (r.passed ? "ok" : "bad") : "pending"}>
-          <header>
-            <strong>{r.question ?? "Caso excluído"}</strong>
-            <span>
-              {r.status === "done"
-                ? `${pct(r.score)} · ${r.passed ? "aprovado" : "não passou"}`
-                : r.status === "pending"
-                  ? "na fila"
-                  : r.status === "skipped"
-                    ? "pulado"
-                    : `não deu: ${r.error ?? ""}`}
-              {r.task_type && ` · ${TASK_TYPES[r.task_type] ?? r.task_type}`}
-              {r.ms !== null && ` · ${ms(r.ms)}`}
-            </span>
-          </header>
-          {r.explanation && <p className="evs-why">{r.explanation}</p>}
-          {r.status === "done" && (
-            <div className="evs-compare">
-              <div>
-                <small>Referência</small>
-                <p>{r.reference}</p>
-              </div>
-              <div>
-                <small>Resposta do modelo</small>
-                <p>{r.answer}</p>
-              </div>
-            </div>
-          )}
-        </article>
-      ))}
+      {[...groups.entries()].map(([feature, list]) => {
+        const done = list.filter((r) => r.status === "done");
+        const good = done.filter((r) => r.outcome !== "loss").length;
+        return (
+          <Fragment key={feature}>
+            <h5 className="evs-feature">
+              {featureLabel(feature)}
+              <small className="muted">
+                {done.length ? ` · ${good} de ${done.length} iguais ou melhores` : " · sem resultado ainda"}
+              </small>
+            </h5>
+            {list.map((r) => (
+              <article
+                key={r.id}
+                className={r.status !== "done" ? "pending" : r.outcome === "loss" ? "bad" : r.outcome === "tie" ? "tie" : "ok"}
+              >
+                <header>
+                  <strong>{r.question || "(pedido do próprio módulo)"}</strong>
+                  <span>
+                    {r.status === "done" && r.outcome
+                      ? OUTCOME[r.outcome]
+                      : r.status === "pending"
+                        ? "na fila"
+                        : r.status === "skipped"
+                          ? `pulado${r.error ? `: ${r.error}` : ""}`
+                          : `não deu: ${r.error ?? ""}`}
+                    {r.ms !== null && ` · ${ms(r.ms)} (original ${ms(r.base_ms)})`}
+                    {r.status === "done" && r.answer_cost !== null && ` · ${usd(r.answer_cost)} (original ${usd(r.base_cost ?? 0)})`}
+                  </span>
+                </header>
+                {r.explanation && <p className="evs-why">{r.explanation}</p>}
+                {r.status === "done" && (
+                  <div className="evs-compare">
+                    <div>
+                      <small>Original{r.base_model ? ` · ${r.base_model}` : ""}</small>
+                      <p>{r.reference}</p>
+                    </div>
+                    <div>
+                      <small>Resposta do modelo testado</small>
+                      <p>{r.answer}</p>
+                    </div>
+                  </div>
+                )}
+              </article>
+            ))}
+          </Fragment>
+        );
+      })}
     </div>
-  );
-}
-
-function CaseEditor({
-  data,
-  initial,
-  onClose,
-  onSave,
-}: {
-  data: Snapshot;
-  initial: EvalCase | null;
-  onClose: () => void;
-  onSave: (d: CaseDraft) => Promise<void>;
-}) {
-  const [d, setD] = useState<CaseDraft>(() => ({
-    id: initial?.id,
-    question: initial?.question ?? "",
-    reference: initial?.reference ?? "",
-    client_id: initial?.client_id ?? null,
-    context: initial?.context ?? "",
-    active: initial?.active ?? true,
-  }));
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState("");
-  const clients = useMemo(
-    () => data.clients.filter((c) => !c.archived).sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { numeric: true })),
-    [data],
-  );
-  return (
-    <Modal title={initial ? "Editar caso" : "Novo caso"} onClose={onClose} busy={busy}>
-      <form
-        className="entity-form rtr-editor"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setBusy(true);
-          setProblem("");
-          onSave(d)
-            .catch((err: Error) => setProblem(err.message))
-            .finally(() => setBusy(false));
-        }}
-      >
-        <label>
-          <span>Pergunta</span>
-          <Textarea value={d.question} rows={3} required onChange={(e) => setD({ ...d, question: e.target.value })} />
-        </label>
-        <label>
-          <span>Resposta de referência</span>
-          <Textarea value={d.reference} rows={5} required onChange={(e) => setD({ ...d, reference: e.target.value })} />
-          <small className="muted">A resposta certa, ou a lista do que ela precisa ter.</small>
-        </label>
-        {initial?.origin !== "answer" && (
-          <label>
-            <span>Material de apoio (opcional)</span>
-            <Textarea value={d.context} rows={4} onChange={(e) => setD({ ...d, context: e.target.value })} />
-            <small className="muted">O que o modelo pode consultar: trechos de briefing, combinados, dados.</small>
-          </label>
-        )}
-        <div className="cins-row">
-          <label>
-            <span>Cliente (opcional)</span>
-            <Select value={d.client_id ?? "none"} aria-label="Cliente do caso" onValueChange={(v) => setD({ ...d, client_id: v === "none" ? null : v })}>
-              <SelectOption value="none">Sem cliente</SelectOption>
-              {clients.map((c) => (
-                <SelectOption key={c.id} value={c.id}>
-                  {c.name}
-                </SelectOption>
-              ))}
-            </Select>
-          </label>
-        </div>
-        <label className="cins-check">
-          <Checkbox checked={d.active} onCheckedChange={(v) => setD({ ...d, active: v === true })} />
-          <span>
-            <strong>Ativo</strong>
-            <small>Entra nos próximos testes.</small>
-          </span>
-        </label>
-        {problem && (
-          <p className="form-error" role="alert">
-            {problem}
-          </p>
-        )}
-        <div className="rtr-editor-actions">
-          <Button className="btn" type="button" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button className="btn primary" type="submit" disabled={busy || d.question.trim().length < 3 || d.reference.trim().length < 3}>
-            Salvar
-          </Button>
-        </div>
-      </form>
-    </Modal>
   );
 }

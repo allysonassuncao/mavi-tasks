@@ -3,6 +3,7 @@ import { llmFriendlyError, type LlmAdapter } from "./_ai-llm.js";
 import { adapterFor, featureProvider } from "./_ai-providers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
+import { sampledLlm } from "./_ai-samples.js";
 
 /**
  * A MAVI na escrita de um aviso do Mural (ação "notice-mavi" de /api/drive,
@@ -291,11 +292,10 @@ export async function handleNoticeWriter(
         503,
         "A MAVI não está configurada no servidor. Escolha um provedor para o Mural de avisos no Painel da MAVI.",
       );
-    const llm: LlmAdapter = provider
-      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(
-          provider.config,
-        )
-      : deps.llm;
+    const llm: LlmAdapter = sampledLlm(
+      provider ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config) : deps.llm,
+      { db: env, fetch: deps.fetch, auth: authorization, company, feature: "notice_writer", client: null, providerId: provider?.id ?? null },
+    );
     const tz = companies[0]?.timezone || "America/Sao_Paulo";
     const today = new Date((deps.now ?? Date.now)()).toLocaleDateString(
       "pt-BR",

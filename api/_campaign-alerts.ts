@@ -17,6 +17,7 @@ import {
   suggestedName,
   type CampaignAlertRule,
 } from "../src/campaign-alerts.js";
+import { sampledLlm } from "./_ai-samples.js";
 
 /**
  * Campanhas › Meus avisos com a MAVI (migração 20270218090000):
@@ -241,9 +242,10 @@ export async function handleCampaignAlertWriter(
         503,
         "A MAVI não está configurada no servidor. Escolha um provedor para os avisos de campanhas no Painel da MAVI.",
       );
-    const llm: LlmAdapter = provider
-      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
-      : deps.llm;
+    const llm: LlmAdapter = sampledLlm(
+      provider ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config) : deps.llm,
+      { db: env, fetch: deps.fetch, auth: authorization, company, feature: "campaign_alerts", client: null, providerId: provider?.id ?? null },
+    );
     const result = await llm({
       instructions: ALERT_WRITER_INSTRUCTIONS,
       context: catalogText(cat, campaign),

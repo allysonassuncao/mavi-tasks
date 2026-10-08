@@ -4,6 +4,7 @@ import { adapterFor, featureProvider } from "./_ai-providers.js";
 import { embeddingCost, vectorLiteral } from "./_ai-embeddings.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
+import { sampledLlm } from "./_ai-samples.js";
 
 /**
  * A MAVI escreve um tutorial (ação "tutorial-write" de /api/drive,
@@ -214,9 +215,10 @@ export async function handleTutorialWriter(
           .join("\n\n")}`
       : "Referências: nenhum tutorial publicado fala deste assunto ainda.";
 
-    const llm: LlmAdapter = provider
-      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
-      : deps.llm;
+    const llm: LlmAdapter = sampledLlm(
+      provider ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config) : deps.llm,
+      { db: env, fetch: deps.fetch, auth: authorization, company, feature: "tutorial_writer", client: null, providerId: provider?.id ?? null },
+    );
     const result = await llm({
       instructions: TUTORIAL_WRITER_INSTRUCTIONS,
       context,

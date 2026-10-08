@@ -2,6 +2,7 @@ import { callRpc } from "./_drive.js";
 import { adapterFor, routeConfig, type ResolvedRoute } from "./_ai-providers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import { REASONS } from "./_radar-task-rules.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Radar do cliente · a tarefa sugerida no item (migration
@@ -249,7 +250,10 @@ export async function suggestTask(env: AiEnv & { tasksModel?: string }, deps: Ai
   });
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey) throw new SuggestError(503, "Sem provedor para as sugestões de tarefas do Radar.");
-  const llm = config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm;
+  const llm = sampledLlm(
+    config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm,
+    workerSpot(env, deps, c.company, "client_radar_tasks", { providerId: route?.provider_id }),
+  );
   const { text, refs } = suggestMessage(c);
   const result = await llm({
     instructions: SUGGEST_INSTRUCTIONS,

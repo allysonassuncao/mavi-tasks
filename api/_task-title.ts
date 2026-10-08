@@ -4,6 +4,7 @@ import { adapterFor, featureProvider } from "./_ai-providers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
 import { cleanTaskTitle } from "../src/task-title.js";
+import { sampledLlm } from "./_ai-samples.js";
 
 /**
  * O título de uma tarefa nova (ação "task-title" de /api/drive,
@@ -147,9 +148,10 @@ export async function handleTaskTitle(
         503,
         "A MAVI não está configurada no servidor. Escolha um provedor para o título das tarefas no Painel da MAVI.",
       );
-    const llm: LlmAdapter = provider
-      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config)
-      : deps.llm;
+    const llm: LlmAdapter = sampledLlm(
+      provider ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config) : deps.llm,
+      { db: env, fetch: deps.fetch, auth: authorization, company, feature: "task_title", client, providerId: provider?.id ?? null },
+    );
     const result = await llm({
       instructions: TITLE_INSTRUCTIONS,
       context: "",

@@ -14,6 +14,7 @@ import {
   type HsPack,
 } from "../src/cs-hs.js";
 import type { CsRules } from "../src/cs-engine.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Customer Success · sugestão de Health Score (ação "cs-hs" de /api/ai,
@@ -44,7 +45,10 @@ export async function suggestOne(env: CsHsEnv, deps: AiDeps, job: Job) {
   }).catch(() => null);
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey) throw new Error("Sem provedor de IA para a sugestão de Health Score.");
-  const llm = config ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(config) : deps.llm;
+  const llm = sampledLlm(
+    config ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(config) : deps.llm,
+    workerSpot(env, deps, job.company_id, "cs_health_score", { providerId: route?.provider_id }),
+  );
   const result = await llm({
     instructions: HS_INSTRUCTIONS,
     context: "",

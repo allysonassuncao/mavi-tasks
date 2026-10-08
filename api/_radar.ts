@@ -7,6 +7,7 @@ import type { LlmAdapter } from "./_ai-llm.js";
 import { checkWithAgents, knowledgeQuery, type AgentCase, type AgentKnowledge } from "./_agent-knowledge.js";
 import { runTaskRules } from "./_radar-task-rules.js";
 import { runTaskSuggestions } from "./_radar-task-suggest.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Radar do cliente · o worker (ação "ai-radar" de /api/ai, só o pg_cron com
@@ -897,7 +898,10 @@ async function writeReport(env: RadarEnv, deps: AiDeps, r: ClaimedReport) {
   });
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey) throw new RadarError(503, "Sem provedor para o relatório do Radar.");
-  const llm = config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm;
+  const llm = sampledLlm(
+    config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm,
+    workerSpot(env, deps, r.company_id, "client_radar_report", { providerId: route?.provider_id }),
+  );
   const result = await llm({
     instructions: REPORT_INSTRUCTIONS,
     context: "",
@@ -997,7 +1001,7 @@ async function readSignal(env: AiEnv, deps: AiDeps, company: Company, c: Claimed
   }).catch(() => []);
   const usage: Usage[] = [];
   const { text, refs } = extractionMessage(m);
-  const result = await company.llm({
+  const result = await sampledLlm(company.llm, workerSpot(env, deps, m.company_id, "client_radar", { client: m.client_id, providerId: company.route?.provider_id }))({
     instructions: RADAR_INSTRUCTIONS,
     context: "",
     messages: [{ role: "user", content: text }],
@@ -1139,7 +1143,10 @@ async function groupThemes(env: RadarEnv, deps: AiDeps, g: ThemeGroup) {
   });
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey) throw new RadarError(503, "Sem provedor para os temas do Radar.");
-  const llm = config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm;
+  const llm = sampledLlm(
+    config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm,
+    workerSpot(env, deps, g.company_id, "client_radar_themes", { providerId: route?.provider_id }),
+  );
   const result = await llm({
     instructions: THEMES_INSTRUCTIONS,
     context: "",

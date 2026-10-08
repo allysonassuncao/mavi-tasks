@@ -1,6 +1,7 @@
 import { callRpc } from "./_drive.js";
 import { adapterFor, routeConfig, type ProviderConfig, type ResolvedRoute } from "./_ai-providers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Campanhas › Insights da MAVI, Fase 4 (migração 20270329090000_campaign_insight_lifecycle):
@@ -182,7 +183,10 @@ export async function learnFromFeedback(env: AiEnv, deps: AiDeps): Promise<{ com
     });
     const config = route && route.key_cipher ? routeConfig(env, route) : null;
     if (!config && !env.anthropicKey) throw new Error("Sem provedor para o aprendizado dos insights.");
-    const llm = config ? (deps.providerLlm ?? ((p: ProviderConfig) => adapterFor(p, deps.fetch)))(config) : deps.llm;
+    const llm = sampledLlm(
+    config ? (deps.providerLlm ?? ((p: ProviderConfig) => adapterFor(p, deps.fetch)))(config) : deps.llm,
+    workerSpot(env, deps, c.company, "campaign_insights_learning", { providerId: route?.provider_id }),
+  );
     const result = await llm({
       instructions: LEARNING_INSTRUCTIONS,
       context: "",

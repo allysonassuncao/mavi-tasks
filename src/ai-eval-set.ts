@@ -1,25 +1,28 @@
 import { supabase } from "./supabase";
+import { FEATURES } from "./ai-providers";
 
 /**
- * Painel da MAVI › Avaliação (migração 20270601090000): o conjunto de
- * avaliação da empresa. Casos (pergunta + resposta de referência, com o
- * material congelado ou colado), testes de um modelo e o resultado caso a
- * caso. A liberação (só modelos aprovados no automático) fica nas
+ * Painel da MAVI › Avaliação (migração 20270617090000): a avaliação
+ * dinâmica. Cada módulo que usa a MAVI grava os 10 registros mais recentes
+ * (a entrada inteira, as consultas e a resposta); um teste repete esses
+ * registros com outro modelo e o juiz compara às cegas com a resposta
+ * original. A liberação (só modelos aprovados no automático) fica nas
  * configurações do roteador.
  */
 
-export type EvalCase = {
-  id: string;
+export type EvalSample = {
+  id: number;
+  feature: string;
   question: string;
-  reference: string;
-  context: string | null;
+  model: string;
+  provider: string;
   client_id: string | null;
-  task_type: string | null;
-  origin: "manual" | "answer";
-  active: boolean;
-  /** Quantos trechos de fontes o material congelado tem. */
-  sources: number;
-  updated_at: string;
+  sigiloso: boolean;
+  /** Quantas consultas ao sistema a resposta original fez. */
+  tools: number;
+  cost_usd: number;
+  ms: number | null;
+  created_at: string;
 };
 export type EvalRun = {
   id: string;
@@ -27,47 +30,65 @@ export type EvalRun = {
   provider: string;
   model: string;
   status: "running" | "done" | "cancelled";
+  features: string[] | null;
+  /** Do teste semanal. */
+  auto: boolean;
   cases_total: number;
   cases_done: number;
   cases_failed: number;
+  /** A parte dos registros em que o modelo foi igual ou melhor que a original (0 a 1). */
   score: number | null;
-  passed: number;
+  wins: number;
+  ties: number;
+  losses: number;
   cost_usd: number;
   cap_usd: number;
   avg_ms: number | null;
   created_by: string | null;
   created_at: string;
   finished_at: string | null;
+  /** O gasto só das respostas do modelo testado (sem o juiz) e o das originais, nos mesmos registros. */
+  answer_cost: number | null;
+  base_cost: number | null;
+  /** A espera média das respostas originais, nos mesmos registros. */
+  base_ms: number | null;
 };
 export type EvalOverview = {
-  cases: EvalCase[];
-  suggestions: { message: number; question: string; answer: string; at: string }[];
+  samples: EvalSample[];
   runs: EvalRun[];
   latest: { provider_id: string | null; model: string; score: number; run_id: string; finished_at: string }[];
+  settings: { weekly: boolean; weekly_cap: number };
 };
 export type EvalResult = {
   id: number;
-  case_id: string | null;
+  sample_id: number | null;
+  feature: string | null;
   question: string | null;
+  /** A resposta original. */
   reference: string | null;
-  task_type: string | null;
+  base_model: string | null;
+  base_cost: number | null;
+  base_ms: number | null;
   status: "pending" | "done" | "error" | "skipped";
   answer: string | null;
-  score: number | null;
-  passed: boolean | null;
+  /** O gasto só da resposta do modelo testado (sem o juiz). */
+  answer_cost: number | null;
+  outcome: "win" | "tie" | "loss" | null;
   explanation: string | null;
   ms: number | null;
   cost_usd: number;
   error: string | null;
 };
-export type CaseDraft = {
-  id?: string;
-  question: string;
-  reference: string;
-  client_id: string | null;
-  context: string;
-  active: boolean;
+
+/** Os registros que não são uma funcionalidade de "Quem usa qual modelo" (usam a regra de outra). */
+const EXTRA_LABELS: Record<string, string> = {
+  campaign_insights_learning: "Aprendizado dos Insights com o feedback do time",
+  client_temperature_lessons: "Regras do Termômetro a partir das correções",
+  client_radar_task_rules: "Regras das tarefas do Radar",
+  mavi_person: "Base de comportamento das pessoas",
 };
+/** O nome do módulo (as funcionalidades de "Quem usa qual modelo"). */
+export const featureLabel = (id: string) => FEATURES.find((f) => f.id === id)?.label ?? EXTRA_LABELS[id] ?? id;
 
 async function rpc<T>(name: string, args: Record<string, unknown>) {
   if (!supabase) throw Error("Supabase não configurado");
@@ -78,63 +99,45 @@ async function rpc<T>(name: string, args: Record<string, unknown>) {
 
 export type EvalApi = {
   overview: () => Promise<EvalOverview>;
-  saveCase: (d: CaseDraft) => Promise<unknown>;
-  fromMessage: (message: number) => Promise<unknown>;
-  deleteCase: (id: string) => Promise<unknown>;
-  start: (provider: string | null, model: string, cap: number) => Promise<unknown>;
+  start: (provider: string | null, model: string, cap: number, features: string[]) => Promise<unknown>;
   cancel: (run: string) => Promise<unknown>;
   detail: (run: string) => Promise<EvalResult[]>;
+  saveSettings: (weekly: boolean, cap: number) => Promise<unknown>;
 };
 
 export const serverEval = (company: string): EvalApi => ({
   overview: () => rpc<EvalOverview>("ai_eval_overview", { p_company: company }),
-  saveCase: (d) =>
-    rpc("ai_eval_case_save", {
-      p_company: company,
-      p_id: d.id ?? null,
-      p_question: d.question,
-      p_reference: d.reference,
-      p_client: d.client_id,
-      p_context: d.context,
-      p_active: d.active,
-    }),
-  fromMessage: (message) => rpc("ai_eval_case_from_message", { p_company: company, p_message: message }),
-  deleteCase: (id) => rpc("ai_eval_case_delete", { p_company: company, p_id: id }),
-  start: (provider, model, cap) =>
-    rpc("ai_eval_run_start", { p_company: company, p_provider: provider, p_model: model, p_cap: cap }),
+  start: (provider, model, cap, features) =>
+    rpc("ai_eval_run_start", { p_company: company, p_provider: provider, p_model: model, p_cap: cap, p_features: features }),
   cancel: (run) => rpc("ai_eval_run_cancel", { p_company: company, p_run: run }),
   detail: (run) => rpc<EvalResult[]>("ai_eval_run_detail", { p_company: company, p_run: run }),
+  saveSettings: (weekly, cap) => rpc("ai_eval_settings_save", { p_company: company, p_weekly: weekly, p_cap: cap }),
 });
 
-/** Na demonstração: em memória, com um teste de exemplo. */
+/** Na demonstração: em memória, com registros e um teste de exemplo. */
 export function demoEval(): EvalApi {
   const now = new Date().toISOString();
-  let cases: EvalCase[] = [
-    {
-      id: "demo-c1",
-      question: "Qual o prazo de entrega do relatório mensal da Aurora?",
-      reference: "Todo dia 5, até as 18h, por e-mail para a Marina.",
-      context: null,
-      client_id: null,
-      task_type: "consulta",
-      origin: "answer",
-      active: true,
-      sources: 2,
-      updated_at: now,
-    },
-    {
-      id: "demo-c2",
-      question: "Monte o plano de conteúdo de novembro para a Forma Living.",
-      reference: "Precisa ter: 12 posts, 2 por semana de Reels, datas comemorativas (Black Friday), o tom informal da marca.",
-      context: "Briefing: decoração, público 25-40, tom informal.",
-      client_id: null,
-      task_type: "planejamento",
-      origin: "manual",
-      active: true,
-      sources: 0,
-      updated_at: now,
-    },
+  const sample = (id: number, feature: string, question: string, model: string, tools: number): EvalSample => ({
+    id,
+    feature,
+    question,
+    model,
+    provider: "Servidor",
+    client_id: null,
+    sigiloso: false,
+    tools,
+    cost_usd: 0.02,
+    ms: 8000,
+    created_at: now,
+  });
+  const samples: EvalSample[] = [
+    sample(1, "assistant", "Quais tarefas da Aurora estão atrasadas?", "claude-sonnet-5", 2),
+    sample(2, "assistant", "Monte o resumo da última reunião com a Forma Living.", "claude-sonnet-5", 3),
+    sample(3, "client_radar", "Reunião de 06/10 com a Norte Coffee (transcrição)", "claude-sonnet-5", 0),
+    sample(4, "client_temperature_text", "Mensagens do grupo da Aurora em 06/10", "claude-haiku-4-5", 0),
+    sample(5, "campaign_insights", "Campanha Black Friday · Forma Living", "claude-opus-5", 4),
   ];
+  let settings = { weekly: true, weekly_cap: 1 };
   let runs: EvalRun[] = [
     {
       id: "demo-r1",
@@ -142,53 +145,62 @@ export function demoEval(): EvalApi {
       provider: "Servidor",
       model: "claude-haiku-4-5",
       status: "done",
-      cases_total: 2,
-      cases_done: 2,
+      features: ["assistant", "client_radar"],
+      auto: false,
+      cases_total: 3,
+      cases_done: 3,
       cases_failed: 0,
-      score: 0.71,
-      passed: 1,
-      cost_usd: 0.012,
+      score: 0.667,
+      wins: 1,
+      ties: 1,
+      losses: 1,
+      cost_usd: 0.031,
       cap_usd: 1,
       avg_ms: 4200,
       created_by: null,
       created_at: now,
       finished_at: now,
+      answer_cost: 0.018,
+      base_cost: 0.09,
+      base_ms: 9300,
     },
   ];
   return {
     overview: async () => ({
-      cases,
-      suggestions: [{ message: 1, question: "Quem aprova as artes da Norte Coffee?", answer: "A Bia aprova, até quarta.", at: now }],
+      samples,
       runs,
-      latest: runs.filter((r) => r.score !== null).map((r) => ({ provider_id: r.provider_id, model: r.model, score: r.score!, run_id: r.id, finished_at: r.finished_at! })),
+      latest: runs
+        .filter((r) => r.score !== null)
+        .map((r) => ({ provider_id: r.provider_id, model: r.model, score: r.score!, run_id: r.id, finished_at: r.finished_at! })),
+      settings,
     }),
-    saveCase: async (d) => {
-      const next: EvalCase = {
-        id: d.id ?? `demo-${Date.now()}`,
-        question: d.question,
-        reference: d.reference,
-        context: d.context || null,
-        client_id: d.client_id,
-        task_type: null,
-        origin: "manual",
-        active: d.active,
-        sources: 0,
-        updated_at: new Date().toISOString(),
-      };
-      cases = d.id ? cases.map((c) => (c.id === d.id ? { ...c, ...next, origin: c.origin } : c)) : [next, ...cases];
-    },
-    fromMessage: async () => {
-      cases = [
-        { id: `demo-${Date.now()}`, question: "Quem aprova as artes da Norte Coffee?", reference: "A Bia aprova, até quarta.", context: null, client_id: null, task_type: null, origin: "answer", active: true, sources: 1, updated_at: new Date().toISOString() },
-        ...cases,
-      ];
-    },
-    deleteCase: async (id) => {
-      cases = cases.filter((c) => c.id !== id);
-    },
-    start: async (provider, model, cap) => {
+    start: async (provider, model, cap, features) => {
       runs = [
-        { id: `demo-${Date.now()}`, provider_id: provider, provider: provider ? "Biblioteca" : "Servidor", model, status: "running", cases_total: cases.filter((c) => c.active).length, cases_done: 0, cases_failed: 0, score: null, passed: 0, cost_usd: 0, cap_usd: cap, avg_ms: null, created_by: null, created_at: new Date().toISOString(), finished_at: null },
+        {
+          id: `demo-${Date.now()}`,
+          provider_id: provider,
+          provider: provider ? "Biblioteca" : "Servidor",
+          model,
+          status: "running",
+          features,
+          auto: false,
+          cases_total: samples.filter((s) => features.includes(s.feature)).length,
+          cases_done: 0,
+          cases_failed: 0,
+          score: null,
+          wins: 0,
+          ties: 0,
+          losses: 0,
+          cost_usd: 0,
+          cap_usd: cap,
+          avg_ms: null,
+          created_by: null,
+          created_at: new Date().toISOString(),
+          finished_at: null,
+          answer_cost: null,
+          base_cost: null,
+          base_ms: null,
+        },
         ...runs,
       ];
     },
@@ -197,35 +209,62 @@ export function demoEval(): EvalApi {
     },
     detail: async () => [
       {
-        id: 2,
-        case_id: "demo-c2",
-        question: cases[1]?.question ?? "",
-        reference: cases[1]?.reference ?? "",
-        task_type: "planejamento",
+        id: 1,
+        sample_id: 1,
+        feature: "assistant",
+        question: samples[0].question,
+        reference: "São 3: o relatório mensal (venceu ontem), a arte do carrossel e o ajuste do site. [S1]",
+        base_model: "claude-sonnet-5",
+        base_cost: 0.02,
+        base_ms: 7000,
         status: "done",
-        answer: "Plano com 8 posts…",
-        score: 0.45,
-        passed: false,
-        explanation: "Faltaram a Black Friday e a frequência de Reels.",
-        ms: 6100,
-        cost_usd: 0.008,
+        answer_cost: 0.004,
+        answer: "A Aurora tem 2 tarefas atrasadas: o relatório mensal e a arte do carrossel. [S1]",
+        outcome: "loss",
+        explanation: "Faltou o ajuste do site, que aparece no resultado da consulta.",
+        ms: 3100,
+        cost_usd: 0.006,
         error: null,
       },
       {
-        id: 1,
-        case_id: "demo-c1",
-        question: cases[0]?.question ?? "",
-        reference: cases[0]?.reference ?? "",
-        task_type: "consulta",
+        id: 2,
+        sample_id: 2,
+        feature: "assistant",
+        question: samples[1].question,
+        reference: "Combinados: novo calendário até sexta; a Bia aprova as artes.",
+        base_model: "claude-sonnet-5",
+        base_cost: 0.03,
+        base_ms: 9000,
         status: "done",
-        answer: "Dia 5, até 18h, por e-mail para a Marina.",
-        score: 0.97,
-        passed: true,
-        explanation: "Completa.",
-        ms: 2300,
-        cost_usd: 0.004,
+        answer_cost: 0.005,
+        answer: "Ficou combinado o novo calendário até sexta e que a Bia aprova as artes.",
+        outcome: "tie",
+        explanation: "As duas trazem os mesmos combinados.",
+        ms: 4000,
+        cost_usd: 0.007,
+        error: null,
+      },
+      {
+        id: 3,
+        sample_id: 3,
+        feature: "client_radar",
+        question: samples[2].question,
+        reference: '{"items":[{"kind":"promessa","text":"Enviar o relatório até sexta"}]}',
+        base_model: "claude-sonnet-5",
+        base_cost: 0.04,
+        base_ms: 12000,
+        status: "done",
+        answer_cost: 0.007,
+        answer: '{"items":[{"kind":"promessa","text":"Enviar o relatório até sexta"},{"kind":"problema","text":"Leads sem qualificação"}]}',
+        outcome: "win",
+        explanation: "Achou também a reclamação sobre a qualidade dos leads, que está na transcrição.",
+        ms: 5600,
+        cost_usd: 0.009,
         error: null,
       },
     ],
+    saveSettings: async (weekly, cap) => {
+      settings = { weekly, weekly_cap: cap };
+    },
   };
 }

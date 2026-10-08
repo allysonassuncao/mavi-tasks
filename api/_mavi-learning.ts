@@ -1,6 +1,7 @@
 import { adapterFor, routeConfig, type ResolvedRoute } from "./_ai-providers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import { CopilotError, workerRpc } from "./_copilot.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * MAVI · aprendizado com as avaliações das respostas (migração
@@ -203,7 +204,10 @@ async function learnCompany(env: AiEnv, deps: AiDeps, c: MaviClaim) {
   });
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey) throw new CopilotError(503, "Sem provedor para o aprendizado.");
-  const llm = config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm;
+  const llm = sampledLlm(
+    config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm,
+    workerSpot(env, deps, c.company, "mavi_learning", { providerId: route?.provider_id }),
+  );
   const result = await llm({
     instructions: MAVI_LEARNING_INSTRUCTIONS,
     context: `Hoje: ${new Date((deps.now ?? Date.now)()).toISOString().slice(0, 10)}.`,

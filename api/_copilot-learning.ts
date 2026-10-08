@@ -15,6 +15,7 @@ import { runMaviJudge } from "./_mavi-judge.js";
 import { runRouteEvals } from "./_ai-route-evals.js";
 import { runEvalSet } from "./_ai-eval-set.js";
 import { runMaviPerson } from "./_mavi-person.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Assistente MAVI · aprendizado com o feedback do time ("ai-learning", só o
@@ -237,9 +238,12 @@ async function learnCompany(env: LearningEnv, deps: AiDeps, c: Claim) {
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey)
     throw new CopilotError(503, "Sem provedor para o aprendizado.");
-  const llm = config
-    ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config)
-    : deps.llm;
+  const llm = sampledLlm(
+    config
+      ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config)
+      : deps.llm,
+    workerSpot(env, deps, c.company, "copilot_learning", { providerId: route?.provider_id }),
+  );
   const result = await llm({
     instructions: LEARNING_INSTRUCTIONS,
     context: `Hoje: ${new Date((deps.now ?? Date.now)()).toISOString().slice(0, 10)}.`,

@@ -23,6 +23,7 @@ import {
   type Level,
   type Numbers,
 } from "./_campaign-insights.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Campanhas › lista: a Leitura do dia da MAVI (migração
@@ -520,7 +521,7 @@ export async function readDaily(
   let result: DailyResult | null = null;
   if (company && text) {
     try {
-      const r = await company.llm({
+      const r = await sampledLlm(company.llm, workerSpot(env, deps, m.company_id, "campaign_daily", { client: m.client?.id, providerId: company.route?.provider_id }))({
         instructions: DAILY_INSTRUCTIONS,
         context: "",
         messages: [{ role: "user", content: text }],

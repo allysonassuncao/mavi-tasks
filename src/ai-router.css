@@ -204,6 +204,33 @@
 .evs-detail article.bad {
   border-left-color: #c0573f;
 }
+.evs-detail article.tie {
+  border-left-color: #8a94a6;
+}
+.evs-detail article.pending {
+  border-left-color: var(--border);
+}
+.evs-feature {
+  margin: 6px 0 0;
+  font-size: 0.86rem;
+}
+.evs-feature small {
+  font-weight: 400;
+}
+.evs-links {
+  display: flex;
+  gap: 6px;
+}
+.evs-samples-row > td {
+  padding-top: 0;
+}
+.cins-block label.evs-module {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
 .evs-detail header {
   display: flex;
   justify-content: space-between;

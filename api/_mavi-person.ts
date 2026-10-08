@@ -3,6 +3,7 @@ import type { AiDeps, AiEnv } from "./_ai.js";
 import type { ToolSpec } from "./_ai-llm.js";
 import { CopilotError, workerRpc } from "./_copilot.js";
 import { MAVI_REASONS } from "./_mavi-learning.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * MAVI · base de comportamento por pessoa (migração 20270117090000_mavi_person).
@@ -188,7 +189,10 @@ async function buildPerson(env: AiEnv, deps: AiDeps, c: PersonClaim) {
   });
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey) throw new CopilotError(503, "Sem provedor para a base de comportamento.");
-  const llm = config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm;
+  const llm = sampledLlm(
+    config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm,
+    workerSpot(env, deps, c.company, "mavi_person", { providerId: route?.provider_id }),
+  );
   const result = await llm({
     instructions: PERSON_RULES,
     context: "",

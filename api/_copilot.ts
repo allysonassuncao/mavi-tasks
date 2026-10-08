@@ -31,6 +31,7 @@ import { CATALOG } from "../src/ai-providers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
 import { decideDossierOp, ruleRisk, type DossierRoute } from "./_dossier-risk.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Assistente MAVI nas tarefas (ações de /api/ai):
@@ -1605,9 +1606,12 @@ async function buildDossier(env: DossierEnv, deps: AiDeps, c: ClaimRow, check: D
     );
     const config: ProviderConfig | null =
       route && route.key_cipher ? routeConfig(env, route) : null;
-    const llm = config
-      ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config)
-      : deps.llm;
+    const llm = sampledLlm(
+      config
+        ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config)
+        : deps.llm,
+      workerSpot(env, deps, c.company_id, "client_dossier", { client: c.client_id, providerId: route?.provider_id }),
+    );
     if (!config && !env.anthropicKey)
       throw new CopilotError(503, "Sem provedor para o dossiê.");
     const result = await llm({

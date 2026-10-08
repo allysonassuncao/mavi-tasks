@@ -9,6 +9,7 @@ import {
 } from "./_ai-providers.js";
 import { workerAuthorized } from "./_copilot.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Termômetro do cliente · o worker (ação "ai-temperature" de /api/ai, só o
@@ -636,9 +637,12 @@ async function writeSummary(env: TemperatureEnv, deps: AiDeps, s: SummaryItem) {
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey)
     throw new TemperatureError(503, "Sem provedor para o texto da MAVI.");
-  const llm = config
-    ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config)
-    : deps.llm;
+  const llm = sampledLlm(
+    config
+      ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config)
+      : deps.llm,
+    workerSpot(env, deps, s.company_id, "client_temperature_text", { client: s.client_id, providerId: route?.provider_id }),
+  );
   const result = await llm({
     instructions: TEXT_INSTRUCTIONS,
     context: "",
@@ -805,9 +809,12 @@ async function writeLessons(env: TemperatureEnv, deps: AiDeps, c: LessonsClaim) 
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey)
     throw new TemperatureError(503, "Sem provedor para as regras da MAVI.");
-  const llm = config
-    ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config)
-    : deps.llm;
+  const llm = sampledLlm(
+    config
+      ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config)
+      : deps.llm,
+    workerSpot(env, deps, c.company, "client_temperature_lessons", { providerId: route?.provider_id }),
+  );
   const result = await llm({
     instructions: LESSONS_INSTRUCTIONS,
     context: "",

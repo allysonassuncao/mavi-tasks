@@ -5,6 +5,7 @@ import { workerAuthorized } from "./_copilot.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { LlmAdapter } from "./_ai-llm.js";
 import { checkWithAgents, knowledgeQuery, type AgentCase, type AgentKnowledge } from "./_agent-knowledge.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Radar pessoal · o worker (ação "ai-personal-radar" de /api/ai, só o pg_cron
@@ -485,7 +486,7 @@ async function readGroup(env: AiEnv, deps: AiDeps, company: Company, group: stri
   }).catch(() => ({}) as Record<string, { text: string }[]>);
   for (const p of m.people) p.lessons = (lessons[p.id] ?? []).map((l) => l.text);
   const { text, refs } = personalMessage(m);
-  const result = await company.llm({
+  const result = await sampledLlm(company.llm, workerSpot(env, deps, m.company_id, "personal_radar", { client: m.client_id, providerId: company.route?.provider_id }))({
     instructions: PERSONAL_RADAR_INSTRUCTIONS,
     context: "",
     messages: [{ role: "user", content: text }],

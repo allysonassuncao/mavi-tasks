@@ -3,6 +3,7 @@ import { callRpc } from "./_drive.js";
 import { CATALOG, isJevModel, isNonChatModel, providerBaseUrl, type ProviderModel } from "../src/ai-providers.js";
 import { routeConfig, type ProviderConfig, type ResolvedRoute } from "./_ai-providers.js";
 import { LlmError, type AgentRequest, type LlmAdapter } from "./_ai-llm.js";
+import { sampledLlm } from "./_ai-samples.js";
 
 /**
  * MAVI · roteador de modelos (pedido de 06/10/2026).
@@ -1066,7 +1067,9 @@ export function routeProbe(
  * reserva de outro provedor.
  */
 export function routedLlm(llm: LlmAdapter, opts: ProbeOptions): LlmAdapter {
-  return async (request: AgentRequest) => {
+  // Quem respondeu por último (o roteador pode trocar), para o registro da avaliação.
+  let answeredBy: string | null = opts.used.providerId;
+  const routed: LlmAdapter = async (request: AgentRequest) => {
     const probe = routeProbe(opts, {
       historyChars: request.messages.slice(0, -1).reduce((n, m) => n + m.content.length, 0),
       contextChars: request.instructions.length + request.context.length,
@@ -1090,6 +1093,7 @@ export function routedLlm(llm: LlmAdapter, opts: ProbeOptions): LlmAdapter {
     }
     const notes: string[] = [];
     for (let i = 0; ; i++) {
+      answeredBy = used.providerId;
       try {
         const result = await run({
           ...request,
@@ -1120,4 +1124,15 @@ export function routedLlm(llm: LlmAdapter, opts: ProbeOptions): LlmAdapter {
       }
     }
   };
+  // Os registros da avaliação dinâmica (Painel da MAVI › Avaliação).
+  return sampledLlm(routed, {
+    db: opts.env,
+    fetch: opts.fetch,
+    auth: opts.auth,
+    company: opts.where.company,
+    feature: opts.where.feature,
+    client: opts.where.client ?? opts.scope?.client ?? null,
+    providerId: () => answeredBy,
+    later: opts.later,
+  });
 }

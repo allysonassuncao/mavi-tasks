@@ -112,6 +112,7 @@ import {
   type Candidate,
   type RouteOpener,
 } from "./_ai-router.js";
+import { sampledLlm } from "./_ai-samples.js";
 import { byRelevance, FIND_TOOLS, findTools, selectTools, TOOLSET_RULES, USE_TOOL } from "./_ai-toolset.js";
 import type { Meter } from "./_social-leads.js";
 import { pageForMavi, scrapePage } from "./_ai-scrape.js";
@@ -1854,7 +1855,18 @@ async function ask(
     const by = who();
     // As imagens vão direto só para o modelo que enxerga (a descrição em texto já está na pergunta).
     const seen = nativeImages.length > 0 && modelProfile(by.kind, by.model).vision;
-    const r = await llm({
+    // Os registros da avaliação dinâmica (Painel da MAVI › Avaliação).
+    const sampled = sampledLlm(llm, {
+      db: env,
+      fetch: deps.fetch,
+      auth,
+      company,
+      feature,
+      client: scope.client ?? null,
+      providerId: by.providerId,
+      later: live?.later,
+    });
+    const r = await sampled({
       instructions: turnInstructions,
       context: turnContext,
       messages: seen ? [...turnMessages.slice(0, -1), { ...turnMessages[turnMessages.length - 1], images: nativeImages }] : turnMessages,

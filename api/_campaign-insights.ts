@@ -37,6 +37,7 @@ import { attachCreatives, type InsightCreative, type ToWebp } from "./_campaign-
 import { learnFromFeedback } from "./_campaign-insight-learning.js";
 import { watchPlatforms } from "./_campaign-watch.js";
 import { meteredFetch, newApiMeter, type ApiMeter, type Throttle } from "./_ads-meter.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Campanhas › Insights da MAVI (migração 20270327090000_campaign_insights).
@@ -2349,7 +2350,7 @@ export async function analyse(
     notes.push(`O teto por análise (US$ ${cap.toFixed(2)}) não cobre a leitura da MAVI desta campanha: só as detecções automáticas.`);
   } else {
     if (CUT_NOTES[fit.cut]) notes.push(CUT_NOTES[fit.cut]);
-    const result = await company.llm({
+    const result = await sampledLlm(company.llm, workerSpot(env, deps, m.company_id, "campaign_insights", { client: m.client?.id, providerId: company.route?.provider_id }))({
       instructions: INSIGHTS_INSTRUCTIONS,
       context: "",
       messages: [{ role: "user", content: fit.text }],

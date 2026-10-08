@@ -2,6 +2,7 @@ import { callRpc } from "./_drive.js";
 import { adapterFor, routeConfig, type ResolvedRoute } from "./_ai-providers.js";
 import { askJev, type JevQuestion } from "./_temperature.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
+import { sampledLlm, workerSpot } from "./_ai-samples.js";
 
 /**
  * Radar do cliente · as regras das tarefas (migration
@@ -323,7 +324,10 @@ export async function learnRules(env: AiEnv & { tasksModel?: string }, deps: AiD
   });
   const config = route && route.key_cipher ? routeConfig(env, route) : null;
   if (!config && !env.anthropicKey) throw new TaskRulesError(503, "Sem provedor para as regras das tarefas do Radar.");
-  const llm = config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm;
+  const llm = sampledLlm(
+    config ? (deps.providerLlm ?? ((p) => adapterFor(p, deps.fetch)))(config) : deps.llm,
+    workerSpot(env, deps, c.company, "client_radar_task_rules", { providerId: route?.provider_id }),
+  );
   const { text, refs } = rulesMessage(c);
   const result = await llm({
     instructions: RULES_INSTRUCTIONS,

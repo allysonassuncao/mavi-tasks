@@ -3,6 +3,7 @@ import { llmFriendlyError, type LlmAdapter } from "./_ai-llm.js";
 import { adapterFor, featureProvider } from "./_ai-providers.js";
 import type { AiDeps, AiEnv } from "./_ai.js";
 import type { Meter } from "./_social-leads.js";
+import { sampledLlm } from "./_ai-samples.js";
 
 /**
  * A MAVI na análise de um relatório de campanha (ação "campaign-report-mavi"
@@ -171,11 +172,10 @@ export async function handleReportWriter(
         503,
         "A MAVI não está configurada no servidor. Escolha um provedor para os relatórios de campanha no Painel da MAVI.",
       );
-    const llm: LlmAdapter = provider
-      ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(
-          provider.config,
-        )
-      : deps.llm;
+    const llm: LlmAdapter = sampledLlm(
+      provider ? (deps.providerLlm ?? ((c) => adapterFor(c, deps.fetch)))(provider.config) : deps.llm,
+      { db: env, fetch: deps.fetch, auth: authorization, company, feature: "campaign_report", client: null, providerId: provider?.id ?? null },
+    );
     const result = await llm({
       instructions: REPORT_INSTRUCTIONS,
       context: "",
