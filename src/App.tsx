@@ -1689,6 +1689,13 @@ export default function App() {
           );
           return;
         }
+        // Campanhas › detalhe: a faixa das rotinas que estão falhando.
+        if (change.kind === "campaign_jobs") {
+          window.dispatchEvent(
+            new CustomEvent("mavi:campaign-jobs", { detail: change }),
+          );
+          return;
+        }
         // Radar do cliente › Relatórios listens for its own notices.
         if (change.kind === "radar") {
           window.dispatchEvent(new CustomEvent("mavi:radar", { detail: change }));

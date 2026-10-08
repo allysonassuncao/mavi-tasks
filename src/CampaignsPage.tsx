@@ -176,6 +176,7 @@ import {
   cycleMediaBlocked,
   useMediaRoom,
 } from "./CampaignMediaBalance";
+import { CampaignJobFailures } from "./CampaignJobFailures";
 
 type Props = {
   demo: boolean;
@@ -1947,6 +1948,14 @@ function CampaignDetail({
         current={current}
         today={today}
         refresh={`${eventsTick}:${cycles.map((y) => `${y.id}.${y.version}`).join()}`}
+      />
+      {/* As rotinas desta campanha que estão falhando (o mesmo de Avisos de falhas). */}
+      <CampaignJobFailures
+        company={company}
+        campaign={campaign.id}
+        demo={demo}
+        timezone={insightsView?.timezone}
+        insightsTab={withInsights && !!insightsView?.places.tab}
       />
       {alertBanner}
     </>

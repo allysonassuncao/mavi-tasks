@@ -1402,6 +1402,8 @@ export type LiveChange =
   | { kind: "radar"; report?: string; status?: string }
   /** Campanhas › Insights da MAVI: uma análise entrou na fila, ficou pronta ou falhou. */
   | { kind: "campaign_insights"; campaign: string; run: string; status: string }
+  /** Campanhas › detalhe: uma rotina desta campanha falhou ou voltou a funcionar. */
+  | { kind: "campaign_jobs"; campaign: string }
   /** Campanhas › lista: o leitor em 2º plano gravou uma leitura nova de hoje. */
   | { kind: "campaign_today" }
   /** Financeiro › Mídia: lançamentos ou comprovantes dessas contas (null: de muitas). */

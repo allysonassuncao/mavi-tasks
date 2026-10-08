@@ -1,0 +1,7 @@
+/* Campanhas › detalhe: as rotinas desta campanha que estão falhando. */
+.campaign-job-failure small {
+  display: block;
+  margin-top: 3px;
+  opacity: 0.9;
+  overflow-wrap: anywhere;
+}

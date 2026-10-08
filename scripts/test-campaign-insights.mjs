@@ -953,4 +953,48 @@ await check("a campanha que não pode ser analisada diz por quê", async () => {
   assert.match(v.blocker, /não está ativa/);
 });
 
+// Migration 20270619120000_campaign_job_failures: a faixa no detalhe.
+await check("as rotinas falhando aparecem para quem vê a campanha, com aviso ao vivo", async () => {
+  const report = (job, ok, error = null) =>
+    sql(`select mavi_private.job_report($1,$2,$3,$4,$5,'Motion - Meta')`, [A, job, ok, error, campaign]);
+  const live = async () =>
+    (await sql(`select count(*)::int as n from realtime.messages where payload->>'kind'='campaign_jobs'
+      and payload->>'campaign'=$1`, [campaign]))[0].n;
+  await report("campaign_insights", false, "Nenhuma campanha vinculada foi encontrada na plataforma.");
+  // Inativa: nada.
+  await as(trafego);
+  assert.deepEqual(await rpc("campaign_job_failures", [A, campaign]), []);
+  await sql(`update ad_campaigns set status='active' where id=$1`, [campaign]);
+  await as(trafego);
+  let f = await rpc("campaign_job_failures", [A, campaign]);
+  assert.equal(f.length, 1);
+  assert.equal(f[0].job, "campaign_insights");
+  assert.equal(f[0].label, "Insights da MAVI nas campanhas");
+  assert.equal(f[0].streak, 1);
+  assert.match(f[0].error, /Nenhuma campanha vinculada/);
+  // Resultados de hoje: só depois das 4 falhas seguidas do aviso (ou do que o admin escolheu).
+  for (let k = 0; k < 3; k++) await report("ads_today", false, "timeout");
+  await as(trafego);
+  assert.equal((await rpc("campaign_job_failures", [A, campaign])).length, 1);
+  await sql(`insert into job_alert_settings(company_id, job, fail_after) values($1,'ads_today',2)`, [A]);
+  await as(trafego);
+  f = await rpc("campaign_job_failures", [A, campaign]);
+  assert.deepEqual(f.map((x) => x.job), ["ads_today", "campaign_insights"]);
+  // Voltou a funcionar: some; e cada mudança avisou a tela.
+  const before = await live();
+  await report("campaign_insights", true);
+  await report("ads_today", true);
+  assert.ok((await live()) >= before + 2);
+  await as(trafego);
+  assert.deepEqual(await rpc("campaign_job_failures", [A, campaign]), []);
+  // Erro antigo (a rotina parou de rodar para ela): nada.
+  await report("campaign_daily", false, "x");
+  await sql(`update mavi_private.job_failures set last_error_at = now() - interval '16 days' where job='campaign_daily'`);
+  await as(trafego);
+  assert.deepEqual(await rpc("campaign_job_failures", [A, campaign]), []);
+  // Quem não vê a campanha não lê.
+  await as(other);
+  await assert.rejects(rpc("campaign_job_failures", [A, campaign]), /Sem permissão/);
+});
+
 console.log(`\n${passed} checks passed`);
