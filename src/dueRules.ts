@@ -87,6 +87,20 @@ export function isBusinessDay(calendar: CalendarDay[] | undefined, day: string) 
   return !nationalHoliday(day) || !!calendarEntry(calendar, day, "workday");
 }
 
+/**
+ * Why `day` isn't a business day ("Sábado", "Natal", the company's day off),
+ * or null when it is one.
+ */
+export function offDayReason(calendar: CalendarDay[] | undefined, day: string) {
+  const weekday = new Date(toTime(day)).getUTCDay();
+  if (weekday === 0) return "Domingo";
+  if (weekday === 6) return "Sábado";
+  const off = calendarEntry(calendar, day, "off");
+  if (off) return off.name || "Folga da empresa";
+  const holiday = nationalHoliday(day);
+  return holiday && !calendarEntry(calendar, day, "workday") ? holiday : null;
+}
+
 /** Days a person doesn't work, on top of the company calendar. */
 export type OffDay = (day: string) => boolean;
 

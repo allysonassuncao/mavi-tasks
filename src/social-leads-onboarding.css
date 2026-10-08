@@ -726,3 +726,100 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Prazo em fim de semana ou feriado: o campo fica vermelho com o motivo, o
+   aviso fica logo abaixo de "Para todos os posts" e liberar pede confirmação. */
+.sl-release-due {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.sl-release-due[data-off] .ui-date {
+  border-color: #d4687a;
+  background: #fdf0f2;
+  color: #8d2a3d;
+  box-shadow: 0 0 0 3px #d4687a22;
+}
+.sl-release-due small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #b13a50;
+}
+.sl-release-offday {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 11px;
+  background: #fdecee;
+  border: 1.5px solid #e59aa7;
+  color: #7f2537;
+}
+.sl-release-offday > svg {
+  color: #c0394f;
+}
+.sl-release-offday strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.sl-release-offday ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 0.8rem;
+}
+.sl-release .sl-release-confirm {
+  position: sticky;
+  bottom: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 11px;
+  background: #fdecee;
+  border: 1.5px solid #e59aa7;
+  box-shadow: 0 -6px 18px #7f253714;
+}
+.sl-release-confirm > p {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0;
+  color: #7f2537;
+}
+.sl-release-confirm > p > svg {
+  flex-shrink: 0;
+  color: #c0394f;
+}
+.sl-release-confirm strong {
+  display: block;
+  font-size: 0.95rem;
+}
+.sl-release-confirm small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  color: #9a4153;
+}
+.sl-release-confirm > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 760px) {
+  .sl-release-offday {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .sl-release-offday > .btn {
+    grid-column: 1 / -1;
+  }
+  .sl-release-confirm > div > .btn {
+    flex: 1 1 100%;
+  }
+}

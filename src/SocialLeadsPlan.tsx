@@ -58,7 +58,7 @@ import {
 import { statuses, type Snapshot, type Status } from "./types";
 import { navigate, routeParts, useUrlState } from "./router";
 import { addDays, localDate } from "./schedule";
-import { isBusinessDay } from "./dueRules";
+import { isBusinessDay, nextBusinessDay, offDayReason } from "./dueRules";
 import {
   monthFolder,
   serverLink,
@@ -2117,14 +2117,27 @@ function ReleaseModal({
     followup: user,
     meeting: user,
   });
-  // The delivery date: today + the art days from the settings, for all or
-  // post by post.
+  // The delivery date: today + the art days from the settings (the next
+  // business day), for all or post by post.
+  const calendar = data.calendarDays;
   const today = localDate(new Date());
-  const standard = addDays(today, production.artDays);
+  const standard = nextBusinessDay(
+    calendar,
+    addDays(today, production.artDays),
+  );
   const [allDue, setAllDue] = useState(standard);
   const [dues, setDues] = useState<Record<number, string>>(() =>
     Object.fromEntries(posts.map((p) => [p.number, standard])),
   );
+  // A date on a weekend or holiday asks for a second confirmation; any
+  // change to the dates asks again.
+  const [confirmOff, setConfirmOff] = useState(false);
+  const changeDues = (
+    next: (d: Record<number, string>) => Record<number, string>,
+  ) => {
+    setDues(next);
+    setConfirmOff(false);
+  };
   // Asked once a date falls before the due rule's minimum.
   const [tight, setTight] = useState("");
   const [reason, setReason] = useState("");
@@ -2170,8 +2183,30 @@ function ReleaseModal({
     .filter((p) => !dues[p.number] || dues[p.number] < today)
     .map((p) => p.number);
   const offDay = posts
-    .filter((p) => dues[p.number] && !isBusinessDay(data.calendarDays, dues[p.number]))
+    .filter((p) => dues[p.number] && !isBusinessDay(calendar, dues[p.number]))
     .map((p) => p.number);
+  // The off days, in order, with their posts.
+  const offDays = [...new Set(offDay.map((n) => dues[n]))]
+    .sort()
+    .map((day) => ({
+      day,
+      why: offDayReason(calendar, day) ?? "Dia não útil",
+      posts: offDay.filter((n) => dues[n] === day),
+    }));
+  const offList = (list: number[]) =>
+    list.length === posts.length
+      ? "todos os posts"
+      : `${list.length === 1 ? "post" : "posts"} ${list.join(", ")}`;
+  /** Each date on an off day moved to the next business day. */
+  const toBusiness = (d: Record<number, string>) =>
+    Object.fromEntries(
+      Object.entries(d).map(([n, day]) => [
+        n,
+        day && !isBusinessDay(calendar, day)
+          ? nextBusinessDay(calendar, day)
+          : day,
+      ]),
+    ) as Record<number, string>;
   const blocked = missing.length
     ? `Escolha quem recebe o post ${missing.join(", ")}`
     : noDue.length
@@ -2179,6 +2214,58 @@ function ReleaseModal({
       : tight && reason.trim().length < 5
         ? "Explique o motivo do prazo antes do mínimo da regra"
         : "";
+
+  function release(d: Record<number, string>) {
+    if (blocked) return;
+    const assign: ReleaseAssign = {};
+    const why = tight ? reason.trim() : "";
+    for (const p of posts) {
+      const [kind, id] = each[p.number].split(":");
+      assign[p.number] = {
+        ...(kind === "user" ? { user: id } : { team: id }),
+        due: d[p.number],
+        ...(why ? { reason: why } : {}),
+      };
+    }
+    setBusy(true);
+    setError("");
+    onRelease(assign, startsCycle ? cycle : undefined)
+      .catch((err) => {
+        const message = (err as Error).message;
+        // Before the due rule's minimum: the reason goes along.
+        if ((err as { code?: string }).code === "MV002") {
+          setTight(message);
+          setError("");
+        } else setError(message);
+      })
+      .finally(() => setBusy(false));
+  }
+  /** The date field, in red with the reason when it falls on an off day. */
+  const dueField = (
+    value: string,
+    ariaLabel: string,
+    onChange: (v: string) => void,
+    placeholder?: string,
+  ) => {
+    const why = value ? offDayReason(calendar, value) : null;
+    return (
+      <span className="sl-release-due" data-off={why ? "" : undefined}>
+        <Input
+          type="date"
+          aria-label={ariaLabel}
+          value={value}
+          placeholder={placeholder}
+          min={today}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {why && (
+          <small>
+            <TriangleAlert size={12} /> {why}: não é dia útil
+          </small>
+        )}
+      </span>
+    );
+  };
 
   return (
     <Modal
@@ -2192,36 +2279,17 @@ function ReleaseModal({
         onSubmit={(e) => {
           e.preventDefault();
           if (blocked) return;
-          const assign: ReleaseAssign = {};
-          const why = tight ? reason.trim() : "";
-          for (const p of posts) {
-            const [kind, id] = each[p.number].split(":");
-            assign[p.number] = {
-              ...(kind === "user" ? { user: id } : { team: id }),
-              due: dues[p.number],
-              ...(why ? { reason: why } : {}),
-            };
-          }
-          setBusy(true);
-          setError("");
-          onRelease(assign, startsCycle ? cycle : undefined)
-            .catch((err) => {
-              const message = (err as Error).message;
-              // Before the due rule's minimum: the reason goes along.
-              if ((err as { code?: string }).code === "MV002") {
-                setTight(message);
-                setError("");
-              } else setError(message);
-            })
-            .finally(() => setBusy(false));
+          // Weekend or holiday: only the buttons of the confirmation release.
+          if (offDay.length) setConfirmOff(true);
+          else release(dues);
         }}
       >
         <p>
           {posts.length}{" "}
           {posts.length === 1 ? "post aprovado vira" : "posts aprovados viram"}{" "}
           tarefa de arte. O prazo de entrega começa em {production.artDays}{" "}
-          {production.artDays === 1 ? "dia" : "dias"} (da configuração) e
-          pode mudar para todos ou post a post. Cada tarefa leva o gancho, a
+          {production.artDays === 1 ? "dia" : "dias"} (da configuração, no
+          próximo dia útil) e pode mudar para todos ou post a post. Cada tarefa leva o gancho, a
           copy, a direção visual, o formato e o CTA do post. Para uma equipe,
           a tarefa vai para quem tem menos tarefas em aberto.
         </p>
@@ -2302,22 +2370,52 @@ function ReleaseModal({
             </div>
             <div>
               <span className="sl-release-field">Prazo de entrega</span>
-              <Input
-                type="date"
-                aria-label="Prazo de entrega de todos os posts"
-                value={perPostDue ? "" : allDue}
-                placeholder="Cada post com o seu"
-                min={today}
-                onChange={(e) => {
-                  const v = e.target.value;
+              {dueField(
+                perPostDue ? "" : allDue,
+                "Prazo de entrega de todos os posts",
+                (v) => {
                   if (!v) return;
                   setAllDue(v);
-                  setDues(Object.fromEntries(posts.map((p) => [p.number, v])));
-                }}
-              />
+                  changeDues(() =>
+                    Object.fromEntries(posts.map((p) => [p.number, v])),
+                  );
+                },
+                "Cada post com o seu",
+              )}
             </div>
           </div>
         </section>
+        {offDays.length > 0 && (
+          <div className="sl-release-offday" role="alert">
+            <TriangleAlert size={22} />
+            <div>
+              <strong>
+                {offDay.length === 1
+                  ? "1 tarefa vai vencer"
+                  : `${offDay.length} tarefas vão vencer`}{" "}
+                em fim de semana ou feriado
+              </strong>
+              <ul>
+                {offDays.map((g) => (
+                  <li key={g.day}>
+                    {g.why}, {g.day.slice(8, 10)}/{g.day.slice(5, 7)}:{" "}
+                    {offList(g.posts)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <Button
+              type="button"
+              className="btn secondary"
+              onClick={() => {
+                setAllDue((v) => toBusiness({ 0: v })[0]);
+                changeDues(toBusiness);
+              }}
+            >
+              <CalendarClock size={15} /> Mover para o próximo dia útil
+            </Button>
+          </div>
+        )}
         <ul className="sl-release-list">
           {posts.map((p) => (
             <li key={p.number}>
@@ -2348,15 +2446,11 @@ function ReleaseModal({
                   </SelectOption>
                 ))}
               </Select>
-              <Input
-                type="date"
-                aria-label={`Prazo de entrega do post ${p.number}`}
-                value={dues[p.number] ?? ""}
-                min={today}
-                onChange={(e) =>
-                  setDues((d) => ({ ...d, [p.number]: e.target.value }))
-                }
-              />
+              {dueField(
+                dues[p.number] ?? "",
+                `Prazo de entrega do post ${p.number}`,
+                (v) => changeDues((d) => ({ ...d, [p.number]: v })),
+              )}
             </li>
           ))}
         </ul>
@@ -2366,15 +2460,6 @@ function ReleaseModal({
             Quem está fora das equipes do cliente recebe a tarefa, mas não
             consegue subir as artes no post. Escolha a equipe dele ou adicione a
             equipe ao cliente.
-          </p>
-        )}
-        {offDay.length > 0 && (
-          <p className="sl-alert warn">
-            <TriangleAlert size={15} />
-            {offDay.length === 1
-              ? `O prazo do post ${offDay[0]} cai`
-              : `Os prazos dos posts ${offDay.join(", ")} caem`}{" "}
-            em fim de semana ou feriado.
           </p>
         )}
         {tight && (
@@ -2403,21 +2488,81 @@ function ReleaseModal({
           </p>
         )}
         {error && <p className="sl-alert bad">{error}</p>}
-        <div className="form-footer">
-          <Button type="button" className="btn secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button
-            type="submit"
-            className="btn primary"
-            loading={busy}
-            disabled={!!blocked}
-            title={blocked}
+        {confirmOff && offDay.length > 0 ? (
+          <div
+            className="form-footer sl-release-confirm"
+            role="alertdialog"
+            aria-label="Confirmar prazos em fim de semana ou feriado"
           >
-            <Hammer size={15} /> Liberar {posts.length}{" "}
-            {posts.length === 1 ? "tarefa" : "tarefas"}
-          </Button>
-        </div>
+            <p>
+              <TriangleAlert size={18} />
+              <span>
+                <strong>
+                  Tem certeza?{" "}
+                  {offDay.length === 1
+                    ? "1 tarefa vai vencer"
+                    : `${offDay.length} tarefas vão vencer`}{" "}
+                  em fim de semana ou feriado.
+                </strong>
+                <small>
+                  {offDays
+                    .map(
+                      (g) =>
+                        `${g.why}, ${g.day.slice(8, 10)}/${g.day.slice(5, 7)}: ${offList(g.posts)}`,
+                    )
+                    .join(" · ")}
+                </small>
+              </span>
+            </p>
+            <div>
+              <Button
+                type="button"
+                className="btn secondary"
+                disabled={busy}
+                onClick={() => setConfirmOff(false)}
+              >
+                Voltar e ajustar
+              </Button>
+              <Button
+                type="button"
+                className="btn danger"
+                loading={busy}
+                onClick={() => release(dues)}
+              >
+                Liberar mesmo assim
+              </Button>
+              <Button
+                type="button"
+                className="btn primary"
+                loading={busy}
+                onClick={() => {
+                  const fixed = toBusiness(dues);
+                  setAllDue((v) => toBusiness({ 0: v })[0]);
+                  setDues(fixed);
+                  release(fixed);
+                }}
+              >
+                <CalendarClock size={15} /> Mover para o dia útil e liberar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="form-footer">
+            <Button type="button" className="btn secondary" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              className="btn primary"
+              loading={busy}
+              disabled={!!blocked}
+              title={blocked}
+            >
+              <Hammer size={15} /> Liberar {posts.length}{" "}
+              {posts.length === 1 ? "tarefa" : "tarefas"}
+            </Button>
+          </div>
+        )}
       </form>
     </Modal>
   );

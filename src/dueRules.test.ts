@@ -6,6 +6,7 @@ import {
   dueRuleFor,
   easter,
   isBusinessDay,
+  offDayReason,
   nationalHoliday,
   nationalHolidays,
   ruleScope,
@@ -59,6 +60,18 @@ describe("calendário", () => {
     expect(isBusinessDay(calendar, "2023-12-08")).toBe(true);
     expect(isBusinessDay(calendar, "2026-06-04")).toBe(true);
     expect(isBusinessDay([], "2026-06-04")).toBe(false);
+  });
+  it("diz por que o dia não é útil", () => {
+    const calendar = [
+      day({ day: "2026-10-09", name: "Aniversário da cidade" }),
+      day({ day: "2026-06-04", kind: "workday" }),
+    ];
+    expect(offDayReason(calendar, "2026-10-10")).toBe("Sábado");
+    expect(offDayReason(calendar, "2026-10-11")).toBe("Domingo");
+    expect(offDayReason(calendar, "2026-10-12")).toBe("Nossa Senhora Aparecida");
+    expect(offDayReason(calendar, "2026-10-09")).toBe("Aniversário da cidade");
+    expect(offDayReason(calendar, "2026-06-04")).toBeNull();
+    expect(offDayReason(calendar, "2026-10-13")).toBeNull();
   });
 });
 
