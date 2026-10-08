@@ -5,6 +5,7 @@ import {
   dashboardIdFromPath,
   maviChatIdFromPath,
   personIdFromPath,
+  routeParts,
   skillIdFromPath,
   taskIdFromPath,
   taskUrl,
@@ -238,7 +239,8 @@ import { NoticeCenter } from "./NoticeCenter";
 import { useAlwaysOnTop } from "./ConnectionStatus";
 import { noticesApi, onDemoNoticesChange } from "./notices";
 import { useInboxTitle } from "./inbox-title";
-import { INBOX_PANEL_PAGE, mergeHead, pageOf } from "./inbox";
+import { INBOX_PANEL_PAGE, mergeHead, pageOf, radarItemOf } from "./inbox";
+import { RadarItemPanel } from "./RadarItemPanel";
 import { authErrorMessage } from "./auth-errors";
 import {
   ADMIN_PAGES,
@@ -501,6 +503,16 @@ export default function App() {
     // notify (declared below) is stable for the app's lifetime.
     [demo, company],
   );
+  // A Radar item opened from a notice: over the current page, like a task
+  // (on the Radar itself, the page opens it and keeps its list in step).
+  const [radarItem, setRadarItem] = useState<string | null>(null);
+  const openRadarItem = (link: string) => {
+    const item = radarItemOf(link);
+    if (!item || routeParts(window.location.pathname).path === "/radar")
+      return false;
+    setRadarItem(item);
+    return true;
+  };
   // A click on a push notification, with the app already open (sw.js).
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -509,7 +521,7 @@ export default function App() {
       if (data?.type !== "mavi:open" || !data.url) return;
       const id = taskIdFromPath(data.url);
       if (id) setSelected(id);
-      else navigate(data.url);
+      else if (!openRadarItem(data.url)) navigate(data.url);
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
     return () =>
@@ -1400,6 +1412,7 @@ export default function App() {
   useEffect(() => {
     // Another company (or person): nothing of the previous one stays.
     inboxRef.current = { items: [], more: false };
+    setRadarItem(null);
     setInbox([]);
     setInboxMore(false);
     setInboxUnread(0);
@@ -1434,8 +1447,9 @@ export default function App() {
   const appLink = (link: string) =>
     (companyPath ? `/agencias/${encodeURIComponent(companyPath)}` : "") + link;
   function openNotification(n: AppNotification) {
-    if (n.link) navigate(appLink(n.link));
-    else if (n.task_id) setSelected(n.task_id);
+    if (n.link) {
+      if (!openRadarItem(n.link)) navigate(appLink(n.link));
+    } else if (n.task_id) setSelected(n.task_id);
     readNotification(n);
   }
   function readNotification(n: AppNotification) {
@@ -1490,7 +1504,9 @@ export default function App() {
     tasks: data.tasks,
     selected,
     openTask: setSelected,
-    openLink: (link: string) => navigate(appLink(link)),
+    openLink: (link: string) => {
+      if (!openRadarItem(link)) navigate(appLink(link));
+    },
     loadInbox,
   };
   const live = useRef(liveState);
@@ -5199,6 +5215,19 @@ export default function App() {
             <Empty title="Tarefa indisponível" body={detailError} />
           )}
         </Modal>
+      )}
+      {radarItem && company && (
+        <RadarItemPanel
+          key={radarItem}
+          company={company}
+          itemId={radarItem}
+          members={data.members}
+          data={catalogData}
+          user={user}
+          notify={notify}
+          onNewTask={(preset) => openForm("task", preset)}
+          onClose={() => setRadarItem(null)}
+        />
       )}
       {mountedTasks.map((task) => (
         <TaskDetail

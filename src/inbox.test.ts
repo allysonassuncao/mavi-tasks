@@ -5,6 +5,7 @@ import {
   mergeHead,
   pageOf,
   periodRange,
+  radarItemOf,
 } from "./inbox";
 import type { AppNotification } from "./types";
 
@@ -86,5 +87,19 @@ describe("caixa de entrada", () => {
       from: null,
       to: null,
     });
+  });
+});
+
+describe("radarItemOf", () => {
+  it("reads the item of a Radar notice, with or without the company", () => {
+    expect(radarItemOf("/radar?item=abc")).toBe("abc");
+    expect(radarItemOf("/agencias/make/radar?item=abc")).toBe("abc");
+  });
+  it("leaves every other link to the router", () => {
+    expect(radarItemOf("/radar")).toBeNull();
+    expect(radarItemOf("/radar?relatorio=abc")).toBeNull();
+    expect(radarItemOf("/radar/pessoal?item=abc")).toBeNull();
+    expect(radarItemOf("/tarefas/abc")).toBeNull();
+    expect(radarItemOf(null)).toBeNull();
   });
 });

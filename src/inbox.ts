@@ -1,5 +1,6 @@
 import type { InboxFilters } from "./api";
 import { fold } from "./domain";
+import { routeParts } from "./router";
 import type { AppNotification } from "./types";
 
 /** The top bar's panel shows this many at a time ("Carregar mais"). */
@@ -134,4 +135,16 @@ export function pageOf(
     .sort(newestFirst)
     .filter((n) => !after || newestFirst(after, n) < 0)
     .slice(0, limit);
+}
+
+/**
+ * The Radar item a notice is about (its link is `/radar?item=<id>`, with or
+ * without the company in front): it opens over the current page, like a
+ * task, instead of taking the person to the Radar.
+ */
+export function radarItemOf(link: string | null | undefined) {
+  if (!link) return null;
+  const [path, query = ""] = link.split("?");
+  if (routeParts(path).path !== "/radar") return null;
+  return new URLSearchParams(query).get("item") || null;
 }
