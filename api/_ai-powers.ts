@@ -254,11 +254,11 @@ export const POWER_TOOLS: ToolSpec[] = [
   {
     name: "create_document",
     description:
-      "Escreve um documento no canvas ao lado da conversa (relatório, proposta, briefing, ata, plano, roteiro, e-mail longo), que a pessoa lê e baixa em Word ou PDF. Use Markdown completo: títulos (#, ##), listas, tabelas, negrito. Para ajustar um documento desta conversa, leia com read_canvas e mande a versão nova inteira com revises. Devolve a referência (ex.: D1).",
+      "Escreve um documento no canvas ao lado da conversa (relatório, proposta, briefing, ata, plano, roteiro, e-mail longo), que a pessoa lê e baixa em Word ou PDF. Use Markdown completo: títulos (#, ##), listas, tabelas, negrito. Só Markdown, sem HTML (<span>, <br>, <font>, style): não aparece no arquivo; para destacar, use negrito, e cor fica com a identidade visual (ou design_document). Para ajustar um documento desta conversa, leia com read_canvas e mande a versão nova inteira com revises. Devolve a referência (ex.: D1).",
     parameters: obj(
       {
         title: { type: "string", description: "O título do documento." },
-        markdown: { type: "string", description: "O documento inteiro, em Markdown." },
+        markdown: { type: "string", description: "O documento inteiro, em Markdown (sem tags HTML)." },
         revises: { type: "string", description: "Opcional: a referência do documento que esta versão ajusta (ex.: D1)." },
         ...IDENTITY_PARAMS,
       },

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   artifactSummary,
+  htmlToMarkdown,
   sanitizeArtifact,
+  sanitizeCanvas,
   sanitizeArtifacts,
   sanitizeVisual,
 } from "./mavi-artifacts";
@@ -251,5 +253,39 @@ describe("Whatsapp › Perguntar ao histórico em Quem usa qual modelo", () => {
     const active = new Set(["p1"]);
     expect(pickRoute(routes, { feature: "whatsapp_history", client: "c1" }, active)?.id).toBe("r2");
     expect(pickRoute(routes, { feature: "whatsapp_history" }, active)?.id).toBe("r1");
+  });
+});
+
+describe("HTML que a MAVI escreve no documento", () => {
+  it("vira Markdown: cor e destaque viram negrito, o resto fica só o texto", () => {
+    expect(htmlToMarkdown('## <span style="color:#C99A2E">Parcial</span> — 01/10 a 07/10')).toBe(
+      "## **Parcial** — 01/10 a 07/10",
+    );
+    expect(htmlToMarkdown("<b>Meta</b> e <em>prazo</em>, <span>sem cor</span>&nbsp;ok")).toBe("**Meta** e *prazo*, sem cor ok");
+    expect(htmlToMarkdown('<font color="red"><b>Atenção</b></font>')).toBe("Atenção");
+    expect(htmlToMarkdown('veja <a href="https://make.com.br/x">o site</a>')).toBe("veja [o site](https://make.com.br/x)");
+    expect(htmlToMarkdown("linha 1<br>linha 2")).toBe("linha 1\nlinha 2");
+    expect(htmlToMarkdown("| a<br/>b | c |")).toBe("| a · b | c |");
+  });
+
+  it("deixa o que não é tag e os blocos de código", () => {
+    const md = "Prazo <5 dias e a<b mas x>y\n```html\n<span>código</span>\n```";
+    expect(htmlToMarkdown(md)).toBe(md);
+  });
+
+  it("limpa o documento e os slides ao gravar e ao ler", () => {
+    const doc = sanitizeCanvas({
+      kind: "document",
+      title: "Relatório <b>semanal</b>",
+      markdown: '# Relatório\n\n## <span style="color:#C99A2E">Parcial</span> — 01/10 a 07/10\n\nTexto.',
+    });
+    expect(doc).toMatchObject({ title: "Relatório **semanal**" });
+    expect(doc?.kind === "document" && doc.markdown).toContain("## **Parcial** — 01/10 a 07/10");
+    const slides = sanitizeCanvas({
+      kind: "slides",
+      title: "Deck",
+      slides: [{ layout: "bullets", title: '<span style="color:red">Resultado</span>', bullets: ["um<br>dois"] }],
+    });
+    expect(slides?.kind === "slides" && slides.slides[0]).toMatchObject({ title: "**Resultado**", bullets: ["um dois"] });
   });
 });

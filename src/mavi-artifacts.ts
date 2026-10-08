@@ -453,6 +453,71 @@ const ID = /^[A-Za-z0-9_-]{4,64}$/;
 const REF = /^[VIADQTB]\d{1,2}$/;
 const DOSSIER_KINDS = ["prefers", "avoids", "rule", "style", "context", "history"];
 
+// As tags que a MAVI às vezes escreve no Markdown (só nomes de HTML: "<5 dias" fica).
+const HTML_TAG =
+  /<\/?(span|font|mark|b|strong|i|em|u|s|del|ins|small|big|sup|sub|br|p|div|center|a|code|h[1-6]|ul|ol|li|table|thead|tbody|tr|th|td|blockquote|hr|img|section|header|footer|article)((?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>]+))*)\s*\/?>/gi;
+const ENTITIES: Record<string, string> = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", "#39": "'" };
+
+/**
+ * O documento e os slides são Markdown: o HTML que a MAVI escrever (ex.:
+ * <span style="color:…">) sairia como texto na tela, no PDF e no Word. Vira
+ * Markdown — negrito, itálico e link ficam; cor e destaque viram negrito;
+ * <br> quebra a linha (numa tabela, separa com " · "); o resto sai e fica o
+ * texto. Os blocos de código ficam como estão.
+ */
+export function htmlToMarkdown(md: string) {
+  if (!/<\/?[a-z][^<>]*>|<!--|&(nbsp|amp|lt|gt|quot|apos|#39);/i.test(md)) return md;
+  const lines = md.split("\n");
+  let code = false;
+  return lines
+    .map((line) => {
+      if (/^\s*```/.test(line)) code = !code;
+      if (code || /^\s*```/.test(line)) return line;
+      const table = /^\s*\|/.test(line);
+      // Cor e destaque: a palavra que a MAVI quis realçar continua realçada.
+      const bold = new Set<number>();
+      let depth = 0;
+      let href = "";
+      return line
+        .replace(/<!--[\s\S]*?-->/g, "")
+        .replace(HTML_TAG, (_, tag: string, attrs: string) => {
+          const t = tag.toLowerCase();
+          const closing = _.startsWith("</");
+          if (t === "br") return table ? " · " : "\n";
+          if (t === "b" || t === "strong") return "**";
+          if (t === "i" || t === "em") return "*";
+          if (t === "hr") return table ? "" : "\n\n---\n\n";
+          if (t === "li") return closing ? "" : "\n- ";
+          if (closing && /^(p|div|center|h[1-6])$/.test(t)) return table ? " " : "\n\n";
+          if (t === "a") {
+            if (closing) {
+              const end = href ? `](${href})` : "";
+              href = "";
+              return end;
+            }
+            href = attrs.match(/href\s*=\s*["']?(https?:[^"'\s>]+)/i)?.[1] ?? "";
+            return href ? "[" : "";
+          }
+          if (t === "span" || t === "font" || t === "mark") {
+            if (closing) {
+              depth = Math.max(0, depth - 1);
+              return bold.delete(depth) ? "**" : "";
+            }
+            const strong = t === "mark" || /color|background/i.test(attrs);
+            if (strong) bold.add(depth);
+            depth++;
+            return strong ? "**" : "";
+          }
+          return "";
+        })
+        .replace(/&(nbsp|amp|lt|gt|quot|apos|#39);/gi, (_, e: string) => ENTITIES[e.toLowerCase()])
+        // "****" de dois realces encostados, e negrito dentro de negrito.
+        .replace(/\*{4,}/g, "")
+        .replace(/[ \t]+$/g, "");
+    })
+    .join("\n");
+}
+
 const text = (v: unknown, max: number) =>
   typeof v === "string"
     ? v.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, max)
@@ -595,6 +660,14 @@ const strings = (v: unknown, max: number, len: number) =>
     .map((x) => text(x, len))
     .filter(Boolean);
 
+/** Um texto de uma linha (título, tópico do slide): o HTML vira Markdown, as quebras viram espaço. */
+const plainLine = (v: unknown, max: number) =>
+  text(typeof v === "string" ? htmlToMarkdown(v).replace(/\s*\n+\s*/g, " ") : v, max);
+const plainLines = (v: unknown, max: number, len: number) =>
+  list(v, max)
+    .map((x) => plainLine(x, len))
+    .filter(Boolean);
+
 /** Até 3 perguntas, cada uma com 2 a 5 respostas prováveis (null: não dá). */
 export function sanitizeQuestions(raw: unknown): QuestionItem[] | null {
   const items = list(raw, 10)
@@ -621,11 +694,13 @@ export const DOCUMENT_MAX = 200_000;
 export function sanitizeCanvas(raw: unknown): Canvas | null {
   const v = obj(raw);
   if (!v) return null;
-  const title = text(v.title, 120);
+  const title = plainLine(v.title, 120);
   if (v.kind === "document") {
     const markdown =
       typeof v.markdown === "string"
-        ? v.markdown.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, DOCUMENT_MAX)
+        ? htmlToMarkdown(v.markdown.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ""))
+            .trim()
+            .slice(0, DOCUMENT_MAX)
         : "";
     const look = sanitizeLook(v.look);
     return markdown.length >= 20
@@ -638,32 +713,32 @@ export function sanitizeCanvas(raw: unknown): Canvas | null {
         const o = obj(x);
         if (!o) return null;
         const layout = pick(o.layout, SLIDE_LAYOUTS, "bullets");
-        const slide: Slide = { layout, title: text(o.title, 140) };
+        const slide: Slide = { layout, title: plainLine(o.title, 140) };
         const add = <K extends keyof Slide>(k: K, val: Slide[K] | "" | undefined) => {
           if (val !== undefined && val !== "" && !(Array.isArray(val) && !val.length))
             slide[k] = val as Slide[K];
         };
-        add("subtitle", text(o.subtitle, 240));
-        add("bullets", strings(o.bullets, 8, 300));
-        add("left_title", text(o.left_title, 80));
-        add("left", strings(o.left, 6, 240));
-        add("right_title", text(o.right_title, 80));
-        add("right", strings(o.right, 6, 240));
+        add("subtitle", plainLine(o.subtitle, 240));
+        add("bullets", plainLines(o.bullets, 8, 300));
+        add("left_title", plainLine(o.left_title, 80));
+        add("left", plainLines(o.left, 6, 240));
+        add("right_title", plainLine(o.right_title, 80));
+        add("right", plainLines(o.right, 6, 240));
         add(
           "stats",
           list(o.stats, 4)
             .map((st) => {
               const so = obj(st);
-              const value = so ? text(so.value, 24) : "";
-              return value ? { value, label: text(so!.label, 80) } : null;
+              const value = so ? plainLine(so.value, 24) : "";
+              return value ? { value, label: plainLine(so!.label, 80) } : null;
             })
             .filter((st): st is { value: string; label: string } => !!st),
         );
-        add("quote", text(o.quote, 400));
-        add("author", text(o.author, 80));
+        add("quote", plainLine(o.quote, 400));
+        add("author", plainLine(o.author, 80));
         const image = text(o.image, 4).toUpperCase();
         add("image", /^I\d{1,2}$/.test(image) ? image : "");
-        add("notes", text(o.notes, 2000));
+        add("notes", text(typeof o.notes === "string" ? htmlToMarkdown(o.notes) : o.notes, 2000));
         return slide.title || slide.bullets || slide.quote || slide.stats ? slide : null;
       })
       .filter((x): x is Slide => !!x);
