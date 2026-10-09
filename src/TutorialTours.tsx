@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
+  CalendarClock,
   CircleCheck,
+  Pencil,
+  X,
   ThumbsDown,
   ThumbsUp,
   Compass,
@@ -36,6 +39,8 @@ import {
   type TourMetrics,
   type TourReach,
   type TourRow,
+  type TourSend,
+  type TourSendInput,
   type ToursApi,
 } from "./tours";
 import type { Snapshot } from "./types";
@@ -76,6 +81,7 @@ export function TutorialTours({
   const [error, setError] = useState("");
   const [settings, setSettings] = useState<{ id: string | null } | null>(null);
   const [metrics, setMetrics] = useState<TourRow | null>(null);
+  const [sends, setSends] = useState<TourRow | null>(null);
   const request = useRef(0);
 
   const load = useCallback(() => {
@@ -177,6 +183,7 @@ export function TutorialTours({
           onSteps={(id) => editTour(id)}
           onSettings={(id) => setSettings({ id })}
           onMetrics={(row) => setMetrics(row)}
+          onSends={(row) => setSends(row)}
           onTest={(id) => playTour(id)}
           onPublish={publish}
           onUnpublish={(id) => act(() => api.unpublish(id), "Onboarding tirado do ar.")}
@@ -192,6 +199,17 @@ export function TutorialTours({
       ) : null}
 
       {metrics && <TourMetricsDialog api={api} row={metrics} onClose={() => setMetrics(null)} />}
+      {sends && (
+        <TourSendsDialog
+          api={api}
+          row={sends}
+          company={company}
+          data={data}
+          user={user}
+          notify={notify}
+          onClose={() => setSends(null)}
+        />
+      )}
       {settings && (
         <TourSettings
           api={api}
@@ -264,6 +282,7 @@ function ManageTable({
   onSteps,
   onSettings,
   onMetrics,
+  onSends,
   onTest,
   onPublish,
   onUnpublish,
@@ -274,6 +293,7 @@ function ManageTable({
   onSteps: (id: string) => void;
   onSettings: (id: string) => void;
   onMetrics: (row: TourRow) => void;
+  onSends: (row: TourRow) => void;
   onTest: (id: string) => void;
   onPublish: (id: string) => void;
   onUnpublish: (id: string) => void;
@@ -342,6 +362,16 @@ function ManageTable({
                       </button>
                       <button type="button" className="icon-btn" aria-label="Configurações" title="Nome, resumo e público" onClick={() => onSettings(r.id)}>
                         <Settings2 size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        aria-label="Envios agendados"
+                        title="Envios agendados: mandar em uma data para pessoas, equipes ou squads"
+                        disabled={!r.step_count}
+                        onClick={() => onSends(r)}
+                      >
+                        <CalendarClock size={16} />
                       </button>
                       {r.version > 0 && (
                         <button type="button" className="icon-btn" aria-label="Métricas" title="Métricas: onde as pessoas param e o que acharam" onClick={() => onMetrics(r)}>
@@ -818,6 +848,286 @@ function TourMetricsDialog({ api, row, onClose }: { api: ToursApi; row: TourRow;
                     <small>
                       {f.name} · {shortDate(f.at)}
                     </small>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ envios agendados
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+/** "AAAA-MM-DDTHH:mm" no fuso do navegador (o campo datetime-local). */
+const localInput = (d: Date) =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+const when = (iso: string) =>
+  new Date(iso).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  });
+const emptySend = (): TourSendInput => {
+  const at = new Date(Date.now() + 60 * 60_000);
+  at.setMinutes(0, 0, 0);
+  return {
+    starts_at: at.toISOString(),
+    aud_all: false,
+    aud_roles: [],
+    aud_teams: [],
+    aud_squads: [],
+    aud_users: [],
+    aud_exclude: [],
+    repeat_done: false,
+    notify_inbox: true,
+    notify_push: true,
+  };
+};
+const SEND_STATUS: Record<TourSend["status"], string> = {
+  scheduled: "Agendado",
+  sent: "Enviado",
+  canceled: "Cancelado",
+};
+
+/**
+ * Envios agendados de um onboarding: em uma data e hora, para pessoas,
+ * equipes, squads ou papéis (ex.: uma funcionalidade nova, no dia do
+ * lançamento). Na hora, ele começa sozinho para quem recebe — na hora se a
+ * pessoa estiver no sistema, senão na próxima vez — com aviso na caixa de
+ * entrada e/ou notificação do navegador, como quem cria escolher.
+ */
+function TourSendsDialog({
+  api,
+  row,
+  company,
+  data,
+  user,
+  notify,
+  onClose,
+}: {
+  api: ToursApi;
+  row: TourRow;
+  company: string;
+  data: Snapshot;
+  user: string;
+  notify: (message: string) => void;
+  onClose: () => void;
+}) {
+  const [list, setList] = useState<TourSend[] | null>(null);
+  const [form, setForm] = useState<{ id: string | null; input: TourSendInput } | null>(null);
+  const [squads, setSquads] = useState<{ id: string; name: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api
+      .sends(row.id)
+      .then(setList)
+      .catch((e) => setError((e as Error).message));
+  }, [api, row.id]);
+  useEffect(load, [load]);
+  useEffect(() => {
+    let alive = true;
+    (rpc("cs_squads", { p_company: company }) as Promise<{ id: string; name: string; archived: boolean }[] | null>)
+      .then((l) => alive && setSquads((l ?? []).filter((q) => !q.archived)))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [company]);
+
+  const summary = (s: TourSendInput) =>
+    tourAudienceSummary(
+      {
+        ...emptyTour(),
+        aud_all: s.aud_all,
+        aud_roles: s.aud_roles,
+        aud_teams: s.aud_teams,
+        aud_users: s.aud_users,
+        aud_exclude: s.aud_exclude,
+        aud_squads: s.aud_squads,
+      },
+      data,
+      squads,
+    );
+  const save = async () => {
+    if (!form) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await api.saveSend(row.id, form.id, form.input);
+      notify(
+        r.status === "sent"
+          ? r.people
+            ? `Enviado para ${r.people === 1 ? "1 pessoa" : `${r.people} pessoas`}. O onboarding já começa para quem está no sistema.`
+            : "Enviado, mas ninguém do público precisava receber (todos já tinham feito)."
+          : r.waiting
+            ? "Envio salvo. Ele sai assim que o onboarding for publicado."
+            : `Envio agendado para ${when(form.input.starts_at)}.`,
+      );
+      setForm(null);
+      load();
+    } catch (e) {
+      setError((e as Error).message || "Não foi possível salvar o envio.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const cancel = async (id: string) => {
+    try {
+      await api.cancelSend(id);
+      notify("Envio cancelado.");
+      load();
+    } catch (e) {
+      notify((e as Error).message || "Não foi possível cancelar.");
+    }
+  };
+  const set = (patch: Partial<TourSendInput>) => setForm((f) => f && { ...f, input: { ...f.input, ...patch } });
+  const now = form ? new Date(form.input.starts_at).getTime() <= Date.now() + 30_000 : false;
+
+  return (
+    <Modal title={`Envios: ${row.title}`} onClose={onClose} busy={busy} className="tour-sends-modal">
+      <div className="tour-sends">
+        {row.status !== "published" && (
+          <p className="tour-metrics-note">
+            <TriangleAlert size={14} /> O onboarding ainda é rascunho: os envios saem quando ele for publicado.
+          </p>
+        )}
+        {form ? (
+          <form
+            className="entity-form tour-send-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <label>
+              Data e hora
+              <input
+                type="datetime-local"
+                required
+                value={localInput(new Date(form.input.starts_at))}
+                onChange={(e) => e.target.value && set({ starts_at: new Date(e.target.value).toISOString() })}
+              />
+            </label>
+            <div className="tour-send-quick">
+              <button type="button" className="text-btn" onClick={() => set({ starts_at: new Date().toISOString() })}>
+                Agora
+              </button>
+            </div>
+            <AudiencePicker
+              data={data}
+              user={user}
+              value={form.input}
+              disabled={busy}
+              legend="Para quem"
+              allLabel="Todos da agência"
+              hint="Os públicos se somam. O envio dá acesso ao onboarding, mesmo para quem está fora do público dele."
+              estimate="sem contar os squads"
+              onChange={(a) => set(a)}
+            />
+            {!form.input.aud_all && squads.length > 0 && (
+              <div className="tour-reach-pick">
+                <span>Squads</span>
+                <MultiPick
+                  label="Squads"
+                  allLabel="Nenhum squad"
+                  noun="squads"
+                  options={squads.map((q) => ({ value: q.id, label: q.name }))}
+                  value={form.input.aud_squads}
+                  onChange={(v) => set({ aud_squads: v })}
+                  disabled={busy}
+                />
+              </div>
+            )}
+            <fieldset className="notice-block tour-reach">
+              <legend>Quem já fez este onboarding</legend>
+              <label className="tour-reach-option">
+                <input type="radio" name="tour-send-repeat" checked={!form.input.repeat_done} onChange={() => set({ repeat_done: false })} />
+                Não recebe de novo
+              </label>
+              <label className="tour-reach-option">
+                <input type="radio" name="tour-send-repeat" checked={form.input.repeat_done} onChange={() => set({ repeat_done: true })} />
+                Recebe de novo (bom para uma versão nova)
+              </label>
+            </fieldset>
+            <fieldset className="notice-block tour-reach">
+              <legend>Avisar a pessoa</legend>
+              <small>O onboarding começa sozinho de qualquer jeito: na hora, se a pessoa estiver no sistema, ou na próxima vez que entrar.</small>
+              <label className="tour-reach-option">
+                <input type="checkbox" checked={form.input.notify_inbox} onChange={(e) => set({ notify_inbox: e.target.checked })} />
+                Caixa de entrada (com o botão para fazer o onboarding)
+              </label>
+              <label className="tour-reach-option">
+                <input type="checkbox" checked={form.input.notify_push} onChange={(e) => set({ notify_push: e.target.checked })} />
+                Notificação do navegador (para quem ativou)
+              </label>
+            </fieldset>
+            <p className="tour-settings-note">Para: {summary(form.input)}</p>
+            {error && <p className="form-error">{error}</p>}
+            <div className="form-actions">
+              <button type="button" className="btn secondary" onClick={() => setForm(null)} disabled={busy}>
+                Voltar
+              </button>
+              <button type="submit" className="btn primary" disabled={busy}>
+                <Send size={15} /> {now ? "Enviar agora" : form.id ? "Salvar envio" : "Agendar envio"}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <div className="tour-sends-head">
+              <p>Mande este onboarding em uma data para pessoas, equipes, squads ou papéis.</p>
+              <Button className="btn primary" onClick={() => setForm({ id: null, input: emptySend() })} disabled={!row.step_count}>
+                <Plus size={16} /> Novo envio
+              </Button>
+            </div>
+            {error && <p className="form-error">{error}</p>}
+            {list === null ? (
+              <Loading variant="list" />
+            ) : !list.length ? (
+              <p className="tour-empty">Nenhum envio ainda.</p>
+            ) : (
+              <ul className="tour-send-list">
+                {list.map((x) => (
+                  <li key={x.id} className={x.status}>
+                    <div>
+                      <strong>
+                        <CalendarClock size={14} /> {when(x.starts_at)}
+                      </strong>
+                      <span className={`chip ${x.status === "sent" ? "done" : x.status === "scheduled" ? "new" : ""}`}>
+                        {SEND_STATUS[x.status]}
+                      </span>
+                    </div>
+                    <small>
+                      Para: {summary(x)}
+                      {x.repeat_done ? " · também quem já fez" : ""}
+                      {" · "}
+                      {[x.notify_inbox && "caixa de entrada", x.notify_push && "notificação"].filter(Boolean).join(" e ") ||
+                        "sem aviso"}
+                    </small>
+                    {x.status === "sent" && (
+                      <small>
+                        {x.people === 1 ? "1 pessoa recebeu" : `${x.people} pessoas receberam`} · {x.started}{" "}
+                        {x.started === 1 ? "começou" : "começaram"} · {x.completed}{" "}
+                        {x.completed === 1 ? "concluiu" : "concluíram"}
+                      </small>
+                    )}
+                    {x.status === "scheduled" && (
+                      <span className="tour-send-tools">
+                        <button type="button" className="text-btn" onClick={() => setForm({ id: x.id, input: { ...x } })}>
+                          <Pencil size={13} /> Editar
+                        </button>
+                        <button type="button" className="text-btn danger" onClick={() => void cancel(x.id)}>
+                          <X size={13} /> Cancelar envio
+                        </button>
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>

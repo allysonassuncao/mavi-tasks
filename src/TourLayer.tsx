@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePage } from "./router";
+import { navigate, usePage, useAddress } from "./router";
 import {
   TOUR_EVENT,
   currentScreen,
@@ -55,6 +55,8 @@ export function TourLayer({
   );
   const key = `mavi:tour:${company}`;
   const [session, setSession] = useState<Session | null>(null);
+  // Os onboardings já abertos nesta tela não começam sozinhos de novo.
+  const tried = useRef(new Set<string>());
   // "Isso ajudou?" depois de concluir um onboarding de verdade.
   const [ask, setAsk] = useState<{ id: string; title: string } | null>(null);
 
@@ -111,6 +113,7 @@ export function TourLayer({
           remember(null);
           return notify("Este onboarding ainda não tem passos.");
         }
+        tried.current.add(d.id);
         // Um rascunho (só quem edita o vê) toca como teste: não conta progresso.
         const test = d.status !== "published";
         const step = Math.max(0, Math.min(cmd.from ?? 0, d.steps.length - 1));
@@ -155,6 +158,18 @@ export function TourLayer({
     );
   }, [company]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // O link dos avisos de envio (?iniciar=<onboarding>): começa e limpa o endereço.
+  const address = useAddress();
+  useEffect(() => {
+    if (!company) return;
+    const url = new URL(address || window.location.href, window.location.origin);
+    const id = url.searchParams.get("iniciar");
+    if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return;
+    url.searchParams.delete("iniciar");
+    navigate(url.pathname + url.search + url.hash, true);
+    void open({ action: "play", id, from: 0 });
+  }, [address, company]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ------------------------------------------------ disparos automáticos
   // A lista dos automáticos que ainda não chegaram à pessoa: ao abrir e a
   // cada aviso ao vivo dos tutoriais (sem consultas periódicas).
@@ -180,7 +195,6 @@ export function TourLayer({
       window.removeEventListener("mavi:tutorials", on);
     };
   }, [loadAutos]);
-  const tried = useRef(new Set<string>());
   useEffect(() => {
     if (!company || session || ask || !autos.length || window.innerWidth < MIN_WIDTH) return;
     const loginKey = `mavi:tour:entrada:${company}`;
@@ -190,8 +204,11 @@ export function TourLayer({
     } catch {
       loginDone = false;
     }
+    // Envios agendados recebidos começam em qualquer tela; os outros, como antes.
     const due = autos.filter(
-      (a) => !tried.current.has(a.id) && ((a.trg_login && !loginDone) || (a.trg_visit && a.start_page === page)),
+      (a) =>
+        !tried.current.has(a.id) &&
+        (!!a.send_id || (a.trg_login && !loginDone) || (a.trg_visit && a.start_page === page)),
     );
     if (!due.length) return;
     let alive = true;
@@ -204,7 +221,7 @@ export function TourLayer({
       window.clearInterval(timer);
       for (const a of due) {
         tried.current.add(a.id);
-        if (a.screen_only) {
+        if (a.screen_only && !a.send_id) {
           // "Só nas telas de": a lista do banco diz se esta tela vale.
           const here = await api
             .list(company, "library", null, page, screenContext(window.location.pathname, window.location.search))

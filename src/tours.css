@@ -1041,3 +1041,73 @@ html.tour-active .toast {
   background: #f6f7f8;
   font-size: 0.68rem;
 }
+
+/* Envios agendados */
+.tour-sends {
+  padding: 18px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tour-sends .tour-send-form {
+  padding: 0;
+}
+.tour-sends-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tour-sends-head p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #5f6d6b;
+}
+.tour-send-quick {
+  margin-top: -10px;
+}
+.tour-send-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tour-send-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.tour-send-list li.canceled {
+  opacity: 0.6;
+}
+.tour-send-list li > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tour-send-list strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+}
+.tour-send-list small {
+  font-size: 0.72rem;
+  color: #5f6d6b;
+}
+.tour-send-tools {
+  display: flex;
+  gap: 12px;
+}
+.tour-send-tools .text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.74rem;
+}

@@ -202,7 +202,34 @@ export interface TourAuto {
   trg_visit: boolean;
   trg_login: boolean;
   screen_only: boolean;
+  /** A scheduled send received and not started yet: starts on any screen. */
+  send_id?: string | null;
 }
+
+/** A scheduled send of a tour: when, to whom, who already did it, how to tell. */
+export interface TourSendInput {
+  starts_at: string;
+  aud_all: boolean;
+  aud_roles: TutorialAudience["aud_roles"];
+  aud_teams: string[];
+  aud_squads: string[];
+  aud_users: string[];
+  aud_exclude: string[];
+  /** Also people who already did the tour. */
+  repeat_done: boolean;
+  notify_inbox: boolean;
+  notify_push: boolean;
+}
+export interface TourSend extends TourSendInput {
+  id: string;
+  status: "scheduled" | "sent" | "canceled";
+  sent_at: string | null;
+  people: number;
+  started: number;
+  completed: number;
+  created_by_name: string;
+}
+export type TourSendResult = { id: string; status: TourSend["status"]; people: number | null; waiting: boolean };
 
 export interface ToursApi {
   list(
@@ -233,6 +260,10 @@ export interface ToursApi {
   vote(id: string, vote: "up" | "down" | null, reason?: VoteReason | null, comment?: string): Promise<TourVote | null>;
   /** The MAVI suggests a step's balloon. */
   write(company: string, request: TourWriteRequest): Promise<TourWriteResult>;
+  /** Scheduled sends (who edits). */
+  sends(id: string): Promise<TourSend[]>;
+  saveSend(id: string, send: string | null, input: TourSendInput): Promise<TourSendResult>;
+  cancelSend(send: string): Promise<void>;
 }
 
 async function server<T>(body: Record<string, unknown>): Promise<T> {
@@ -589,6 +620,15 @@ export const serverTours: ToursApi = {
   async write(company, request) {
     return server<TourWriteResult>({ action: "tour-write", company, ...request });
   },
+  async sends(id) {
+    return ((await rpc("tutorial_tour_sends", { p_tour: id })) ?? []) as TourSend[];
+  },
+  async saveSend(id, send, input) {
+    return (await rpc("save_tutorial_tour_send", { p_tour: id, p_send: send, p_content: input })) as TourSendResult;
+  },
+  async cancelSend(send) {
+    await rpc("cancel_tutorial_tour_send", { p_send: send });
+  },
 };
 
 // ------------------------------------------------------------ demo
@@ -608,6 +648,8 @@ type DemoTour = {
   /** The demo's one person: steps reached and the vote. */
   reached?: string[];
   vote?: TourVote | null;
+  /** Scheduled sends (the demo's person receives every one that went out). */
+  sends?: (TourSend & { received?: boolean; started_at?: string | null })[];
 };
 const DEMO_KEY = "mavi:demo:tours";
 function demoRead(): DemoTour[] {
@@ -780,6 +822,11 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
       const t = list.find((x) => x.id === id);
       if (!t || t.status !== "published") return null;
       const prev = t.progress;
+      // Começar dá os envios recebidos como feitos (como no banco).
+      for (const x of t.sends ?? []) if (x.received && !x.started_at) {
+        x.started_at = new Date().toISOString();
+        x.started = 1;
+      }
       const at = action === "start" ? 0 : Math.max(0, Math.min(step, t.live.steps.length - 1));
       if (action !== "dismiss" && t.live.steps[at]) t.reached = [...new Set([...(t.reached ?? []), t.live.steps[at].id])];
       t.progress = {
@@ -863,20 +910,70 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
         notes: "Texto de demonstração.",
       };
     },
+    async sends(id) {
+      return demoRead().find((x) => x.id === id)?.sends ?? [];
+    },
+    async saveSend(id, send, input) {
+      const list = demoRead();
+      const t = list.find((x) => x.id === id);
+      if (!t) return demoFail("Onboarding não encontrado.");
+      if (!input.starts_at) return demoFail("Escolha a data e a hora do envio.");
+      t.sends = t.sends ?? [];
+      let s = send ? t.sends.find((x) => x.id === send) : undefined;
+      if (send && (!s || s.status !== "scheduled")) return demoFail("Este envio já saiu ou foi cancelado.");
+      if (!s) {
+        s = { ...input, id: crypto.randomUUID(), status: "scheduled", sent_at: null, people: 0, started: 0, completed: 0, created_by_name: userName };
+        t.sends.unshift(s);
+      } else Object.assign(s, input);
+      // No demo, um envio vencido sai na hora (sem rotina).
+      const due = new Date(s.starts_at).getTime() <= Date.now();
+      if (due && t.status === "published") {
+        s.status = "sent";
+        s.sent_at = new Date().toISOString();
+        s.people = 1;
+        s.received = true;
+        s.started_at = null;
+      }
+      demoWrite(list);
+      return { id: s.id, status: s.status, people: s.status === "sent" ? s.people : null, waiting: due && s.status === "scheduled" };
+    },
+    async cancelSend(send) {
+      const list = demoRead();
+      for (const t of list) {
+        const s = t.sends?.find((x) => x.id === send);
+        if (s && s.status === "scheduled") s.status = "canceled";
+      }
+      demoWrite(list);
+    },
     async autos() {
-      return demoRead()
-        .filter(
-          (t) =>
-            t.status === "published" && (t.live.trg_visit || t.live.trg_login) && t.live.steps.length && !t.progress,
-        )
-        .map((t) => ({
-          id: t.id,
-          title: t.live.title,
-          start_page: t.live.steps[0]?.page ?? "",
-          trg_visit: !!t.live.trg_visit,
-          trg_login: !!t.live.trg_login,
-          screen_only: !!(t.live.scr_clients?.length || t.live.scr_products?.length),
-        }));
+      const sent = demoRead().flatMap((t) =>
+        (t.sends ?? [])
+          .filter((s) => s.received && !s.started_at && t.status === "published")
+          .map((s) => ({
+            id: t.id,
+            title: t.live.title,
+            start_page: t.live.steps[0]?.page ?? "",
+            trg_visit: false,
+            trg_login: false,
+            screen_only: false,
+            send_id: s.id,
+          })),
+      );
+      return [...sent, ...(await autoTours())];
     },
   };
+  async function autoTours(): Promise<TourAuto[]> {
+    return demoRead()
+      .filter(
+        (t) => t.status === "published" && (t.live.trg_visit || t.live.trg_login) && t.live.steps.length && !t.progress,
+      )
+      .map((t) => ({
+        id: t.id,
+        title: t.live.title,
+        start_page: t.live.steps[0]?.page ?? "",
+        trg_visit: !!t.live.trg_visit,
+        trg_login: !!t.live.trg_login,
+        screen_only: !!(t.live.scr_clients?.length || t.live.scr_products?.length),
+      }));
+  }
 }
