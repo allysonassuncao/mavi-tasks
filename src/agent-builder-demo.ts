@@ -283,8 +283,38 @@ export async function demoOp(agentId: string, op: string, extra: Record<string, 
       return { turn: turns.find((t) => t.id === extra.turn), messages: [] };
     case "usage":
       return { usage: [] };
-    case "conversations":
-      return { conversations: [] };
+    case "conversations": {
+      const q = String(extra.q ?? "").toLowerCase();
+      const digits = q.replace(/\D/g, "");
+      return {
+        conversations: demoConversations
+          .filter((c) => !q || (c.contact_name ?? "").toLowerCase().includes(q) || (digits && (c.phone ?? "").includes(digits)))
+          .map((c) => ({
+            id: c.conversation_id, external_id: c.external_id, phone: c.phone, contact_name: c.contact_name, facts: {}, summary: "",
+            last_inbound_at: c.activity_at, last_reply_at: c.activity_at, created_at: c.activity_at,
+            messages: demoReset.has(c.conversation_id) ? 0 : 3,
+            memory_reset_at: demoReset.get(c.conversation_id) ?? null, memory_reset_by: demoReset.has(c.conversation_id) ? "demo@makevendas.com.br" : null,
+          })),
+      };
+    }
+    case "integration-failures":
+      return {
+        days: 7,
+        groups: [{ integration: "google_calendar", code: "wrong_app", n: 3, last_at: now(), notified: 1,
+          last_message: "O aplicativo Google do motor (GOOGLE_OAUTH_CLIENT_ID) não é o mesmo que conectou esta agenda no MakeCRM: use o mesmo cliente OAuth do MakeCRM no motor." }],
+        recent: [],
+      };
+    case "calendar-test":
+      return {
+        results: (extra.user_ids as string[]).map((u, i) =>
+          i === 0
+            ? { user_id: u, email: "allyson@makevendas.com.br", status: "wrong_app", message: "O aplicativo Google do motor (GOOGLE_OAUTH_CLIENT_ID) não é o mesmo que conectou esta agenda no MakeCRM." }
+            : { user_id: u, email: "bruna@makevendas.com.br", status: "ok", message: "Agenda conectada e lida agora." },
+        ),
+      };
+    case "conversation-reset":
+      demoReset.set(String(extra.conversation), now());
+      return { ok: true, removed_messages: 3 };
     case "gaps":
     case "gap":
     case "gap-update":
@@ -444,6 +474,7 @@ const demoReport = (from: string, to: string): AgentReport => {
   };
 };
 let demoReading: AgentReading | null = null;
+const demoReset = new Map<string, string>();
 const demoSettings = { sample: 20, weekly: true, recipients: ["u1"] };
 
 function demoInsightsOp(op: string, extra: Record<string, any>): unknown {

@@ -1,7 +1,17 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { ArrowRightLeft, BellRing, CalendarDays, Plus, Trash2, UserCog, X, type LucideIcon } from "lucide-react";
+import { ArrowRightLeft, BellRing, CalendarDays, CircleCheck, Plug, Plus, Trash2, TriangleAlert, UserCog, X, type LucideIcon } from "lucide-react";
 import { Button, Checkbox, Input, Loading, Select, SelectOption, Textarea } from "./ui";
-import { agentOp, errorOf, type AgentDraft, type MakecrmInbox } from "./agent-builder";
+import {
+  agentOp,
+  errorOf,
+  FAILURE_FIX,
+  INTEGRATION_LABEL,
+  when,
+  type AgentDraft,
+  type CalendarCheck,
+  type IntegrationFailures,
+  type MakecrmInbox,
+} from "./agent-builder";
 import { WeeklyHoursEditor } from "./AgentBuilderFields";
 
 /**
@@ -113,6 +123,7 @@ export function IntegrationsPanel({
         O que o agente pode fazer além de conversar. Cada integração roda direto no Google e no MakeCRM. Na aba Testar nada é
         gravado: a agenda é lida de verdade, mas marcar, mover e trocar só mostram o que aconteceria.
       </p>
+      <FailuresAlert company={company} agentId={agentId} />
       {error && <p className="form-error" role="alert">{error}</p>}
       {canEdit && !error && (!pipelines || !users) && <Loading variant="list" />}
       {CATALOG.map((c) => {
@@ -162,9 +173,101 @@ export function IntegrationsPanel({
                 {c.type === "team_notify" && <NotifyForm cfg={cfg} inboxes={inboxes} onChange={(v) => update(i, v)} />}
               </fieldset>
             )}
+            {cfg && c.type === "google_calendar" && <CalendarTest company={company} agentId={agentId} hosts={cfg.hosts ?? []} users={users} />}
           </section>
         );
       })}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ saúde
+/** As falhas das integrações nas conversas reais (últimos 7 dias), com como corrigir. */
+function FailuresAlert({ company, agentId }: { company: string; agentId: string }) {
+  const [data, setData] = useState<IntegrationFailures | null>(null);
+  useEffect(() => {
+    agentOp<IntegrationFailures>(company, agentId, "integration-failures", { days: 7 })
+      .then(setData)
+      .catch(() => setData(null));
+  }, [company, agentId]);
+  if (!data?.groups.length) return null;
+  return (
+    <section className="ab-notice warn int-failures" role="alert">
+      <strong>
+        <TriangleAlert size={15} aria-hidden="true" /> Integrações falharam em conversas reais nos últimos {data.days} dias
+      </strong>
+      <ul className="ai-plain">
+        {data.groups.map((g) => (
+          <li key={`${g.integration}:${g.code}`}>
+            <strong>{INTEGRATION_LABEL[g.integration] ?? g.integration}</strong> · {g.n} vez(es), a última em {when(g.last_at)}
+            {g.notified > 0 && " · equipe avisada"}
+            <br />
+            <span>{g.last_message}</span>
+            <br />
+            <span className="muted">Como corrigir: {FAILURE_FIX[g.code] ?? FAILURE_FIX.error}</span>
+          </li>
+        ))}
+      </ul>
+      <span className="muted ai-small">
+        Quando uma integração falha, o agente diz ao lead que a equipe vai confirmar (não inventa). Com "Avisar a equipe" ligada, a equipe recebe o aviso no
+        WhatsApp (no máximo um a cada 6 horas por motivo).
+      </span>
+    </section>
+  );
+}
+
+/** Testa agora a agenda de cada pessoa que recebe as reuniões. */
+function CalendarTest({ company, agentId, hosts, users }: { company: string; agentId: string; hosts: RotationUser[]; users: CrmUser[] | null }) {
+  const [results, setResults] = useState<CalendarCheck[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const name = (id: string) => users?.find((u) => u.id === id)?.name ?? id;
+  const test = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await agentOp<{ results: CalendarCheck[] }>(company, agentId, "calendar-test", { user_ids: hosts.map((h) => h.user_id) });
+      setResults(r.results);
+    } catch (e) {
+      setError(errorOf(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="int-test">
+      <div className="ab-toolbar">
+        <span className="muted ai-small">Confere agora, de verdade, se o motor lê a agenda de cada pessoa (as próximas 24 h).</span>
+        <Button type="button" className="btn secondary" loading={busy} disabled={!hosts.length} onClick={() => void test()}>
+          <Plug size={14} aria-hidden="true" /> Testar conexão
+        </Button>
+      </div>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {results && (
+        <ul className="ai-plain">
+          {results.map((r) => (
+            <li key={r.user_id} className={`int-check ${r.status === "ok" && !r.warning ? "ok" : "bad"}`}>
+              {r.status === "ok" && !r.warning ? <CircleCheck size={15} aria-hidden="true" /> : <TriangleAlert size={15} aria-hidden="true" />}
+              <span>
+                <strong>{name(r.user_id)}</strong>
+                {r.email ? ` (${r.email})` : ""}: {r.message}
+                {r.warning && (
+                  <>
+                    <br />
+                    <span>Atenção: {r.warning}</span>
+                  </>
+                )}
+                {r.status !== "ok" && (
+                  <>
+                    <br />
+                    <span className="muted">Como corrigir: {FAILURE_FIX[r.status] ?? FAILURE_FIX.error}</span>
+                  </>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

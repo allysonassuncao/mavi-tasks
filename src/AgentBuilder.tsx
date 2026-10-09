@@ -539,7 +539,7 @@ function AgentEditor({
           )}
           {tab === "inboxes" && <InboxesPanel company={company} detail={detail} canEdit={canEdit} notify={notify} reload={load} />}
           {tab === "versions" && <VersionsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} reload={load} />}
-          {tab === "conversations" && <ConversationsPanel company={company} agentId={agentId} />}
+          {tab === "conversations" && <ConversationsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} />}
           {tab === "insights" && (
             <InsightsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} initial={linked.period} onOpenGaps={() => setTab("gaps")} />
           )}

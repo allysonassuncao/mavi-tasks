@@ -180,6 +180,29 @@ describe("construtor de agentes (servidor)", () => {
     expect((await run({ action: "builder-agent", agent: agentId, op: "test-run-start" }, ro.f)).status).toBe(403);
   });
 
+  it("zerar a memória de uma conversa: só quem edita, com quem zerou; busca por nome/telefone", async () => {
+    const conv = "00000000-0000-4000-8000-0000000000e1";
+    const ro = fake({ read: true, write: false });
+    expect((await run({ action: "builder-agent", agent: agentId, op: "conversation-reset", conversation: conv }, ro.f)).status).toBe(403);
+    expect((await run({ action: "builder-agent", agent: agentId, op: "conversations", q: "(11) 99999" }, ro.f)).status).toBe(200);
+    expect(ro.calls.some((c) => c.url.endsWith(`/v1/agents/${agentId}/conversations?q=${encodeURIComponent("(11) 99999")}`))).toBe(true);
+    const rw = fake({ write: true });
+    expect((await run({ action: "builder-agent", agent: agentId, op: "conversation-reset", conversation: conv }, rw.f)).status).toBe(200);
+    const r = rw.calls.find((c) => c.url.endsWith(`/v1/agents/${agentId}/conversations/${conv}/reset`))!;
+    expect(r.method).toBe("POST");
+    expect(r.body).toEqual({ by: "ana@x.com" });
+    expect((await run({ action: "builder-agent", agent: agentId, op: "conversation-reset", conversation: "x" }, rw.f)).status).toBe(400);
+  });
+
+  it("saúde das integrações: testar a agenda e ver as falhas (leitura basta)", async () => {
+    const ro = fake({ read: true, write: false });
+    expect((await run({ action: "builder-agent", agent: agentId, op: "calendar-test", user_ids: ["u1", "u2"] }, ro.f)).status).toBe(200);
+    expect(ro.calls.find((c) => c.url.endsWith(`/v1/agents/${agentId}/integrations/google/test`))!.body).toEqual({ user_ids: ["u1", "u2"] });
+    expect((await run({ action: "builder-agent", agent: agentId, op: "calendar-test", user_ids: [] }, ro.f)).status).toBe(400);
+    expect((await run({ action: "builder-agent", agent: agentId, op: "integration-failures", days: 7 }, ro.f)).status).toBe(200);
+    expect(ro.calls.some((c) => c.url.endsWith(`/v1/agents/${agentId}/integration-failures?days=7`))).toBe(true);
+  });
+
   it("operação desconhecida", async () => {
     const { f } = fake();
     expect((await run({ action: "builder-agent", agent: agentId, op: "apagar-tudo" }, f)).status).toBe(400);

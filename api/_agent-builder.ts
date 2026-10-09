@@ -387,10 +387,34 @@ const OPS: Record<string, Op> = {
     },
   },
   usage: { write: false, run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/usage${qs({ from: body.from, to: body.to })}`) },
-  conversations: { write: false, run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/conversations${qs({ limit: body.limit })}`) },
+  conversations: {
+    write: false,
+    run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/conversations${qs({ limit: body.limit, q: typeof body.q === "string" ? body.q.slice(0, 80) : undefined })}`),
+  },
+  /** Zera a memória do agente numa conversa (mensagens, resumo, dados do contato); rastros e custos ficam. */
+  "conversation-reset": {
+    write: true,
+    run: ({ a, body, access, call }) =>
+      call("POST", `/v1/agents/${a.id}/conversations/${uuid(body.conversation, "a conversa")}/reset`, { by: access.user_label }),
+  },
   "conversation-messages": {
     write: false,
     run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/conversations/${uuid(body.conversation, "a conversa")}/messages`),
+  },
+
+  // ---------------------------------------------------------------- saúde das integrações
+  /** Testa agora o Google Agenda dos anfitriões (lê as próximas 24 h). */
+  "calendar-test": {
+    write: false,
+    run: ({ a, body, call }) => {
+      const ids = Array.isArray(body.user_ids) ? body.user_ids.map(String).filter((x) => x && x.length <= 64).slice(0, 20) : [];
+      if (!ids.length) throw new BuilderError(400, "Escolha quem recebe as reuniões.");
+      return call("POST", `/v1/agents/${a.id}/integrations/google/test`, { user_ids: ids });
+    },
+  },
+  "integration-failures": {
+    write: false,
+    run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/integration-failures${qs({ days: body.days })}`),
   },
 
   // ---------------------------------------------------------------- custos

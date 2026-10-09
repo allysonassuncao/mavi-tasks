@@ -1008,6 +1008,44 @@
   vertical-align: -2px;
 }
 
+/* ------------------------------------------------ Zerar a memória (AgentConversationModal.tsx) */
+.reset-box {
+  justify-content: space-between;
+}
+.reset-box > span:first-child {
+  flex: 1;
+  min-width: 220px;
+}
+
+/* ------------------------------------------------ Saúde das integrações (AgentIntegrations.tsx) */
+.int-failures {
+  flex-direction: column;
+  align-items: stretch;
+}
+.int-failures > strong,
+.int-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.int-test {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.int-check svg {
+  flex: none;
+  margin-top: 2px;
+}
+.int-check.ok svg {
+  color: #2f7a52;
+}
+.int-check.bad svg {
+  color: #b7791f;
+}
+
 @media (max-width: 640px) {
   .ab-two {
     grid-template-columns: 1fr;

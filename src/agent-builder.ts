@@ -159,6 +159,11 @@ export type AgentConversation = {
   last_inbound_at: string | null;
   last_reply_at: string | null;
   created_at: string;
+  /** Quando e quem zerou a memória do agente nesta conversa. */
+  memory_reset_at?: string | null;
+  memory_reset_by?: string | null;
+  /** Mensagens do lead e do agente que o agente guarda (o que ele relê). */
+  messages?: number;
 };
 
 export class BuilderError extends Error {
@@ -848,4 +853,30 @@ export const TEST_STATUS_LABEL: Record<TestRun["status"], string> = {
   done: "Concluída",
   stopped: "Parada",
   error: "Falhou",
+};
+
+// ------------------------------------------------------------ saúde das integrações
+export type CalendarCheckStatus = "ok" | "not_connected" | "disconnected" | "wrong_app" | "no_app" | "no_permission" | "not_found" | "error";
+export type CalendarCheck = { user_id: string; email: string | null; status: CalendarCheckStatus; message: string; warning?: string };
+export type IntegrationFailures = {
+  days: number;
+  groups: { integration: string; code: string; n: number; last_at: string; last_message: string; notified: number }[];
+  recent: { id: string; integration: string; tool: string; code: string; message: string; created_at: string; conversation_id: string | null; contact_name: string | null }[];
+};
+export const INTEGRATION_LABEL: Record<string, string> = {
+  google_calendar: "Google Agenda",
+  makecrm_move_deal: "Mover oportunidade",
+  makecrm_change_owner: "Trocar responsável",
+  team_notify: "Avisar a equipe",
+};
+/** Como corrigir, pelo motivo da falha. */
+export const FAILURE_FIX: Record<string, string> = {
+  wrong_app:
+    "No motor (Portainer), GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_CLIENT_SECRET precisam ser os do aplicativo Google que o MakeCRM usa para conectar a agenda.",
+  disconnected: "A pessoa precisa conectar o Google Agenda de novo no MakeCRM (Configurações › Google Agenda).",
+  not_connected: "Conecte o Google Agenda dessa pessoa no MakeCRM ou escolha outra pessoa para receber as reuniões.",
+  no_app: "Configure GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_CLIENT_SECRET no motor (Portainer).",
+  no_permission: "A conta Google conectada não acessa essa agenda: reconecte com a conta certa no MakeCRM.",
+  not_found: "O evento ou a agenda não existe mais no Google.",
+  error: "Tente de novo; se continuar, veja o rastro da resposta na aba Conversas.",
 };

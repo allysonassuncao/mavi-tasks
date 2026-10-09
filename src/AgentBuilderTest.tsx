@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, RotateCcw, Send, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, Eraser, RotateCcw, Send, TriangleAlert } from "lucide-react";
 import { Modal } from "./components";
+import { ResetMemoryModal } from "./AgentConversationModal";
 import { Button, Checkbox, Loading, Select, SelectOption, Textarea } from "./ui";
 import {
   agentOp,
@@ -264,7 +265,18 @@ export function SimulatorPanel({
 }
 
 // ------------------------------------------------------------ conversas reais
-export function ConversationsPanel({ company, agentId }: { company: string; agentId: string }) {
+export function ConversationsPanel({
+  company,
+  agentId,
+  canEdit = false,
+  notify = () => {},
+}: {
+  company: string;
+  agentId: string;
+  canEdit?: boolean;
+  notify?: (m: string) => void;
+}) {
+  const [resetting, setResetting] = useState(false);
   const [turns, setTurns] = useState<TurnTrace[] | null>(null);
   const [usage, setUsage] = useState<UsageDay[] | null>(null);
   const [error, setError] = useState("");
@@ -323,10 +335,18 @@ export function ConversationsPanel({ company, agentId }: { company: string; agen
           <Checkbox id="ab-only-errors" checked={onlyErrors} onCheckedChange={(c) => setOnlyErrors(c === true)} />
           <label htmlFor="ab-only-errors">Só as com erro</label>
         </span>
-        <button type="button" className="agent-link-btn" onClick={load}>
-          Atualizar
-        </button>
+        <span className="ab-toolbar-right">
+          {canEdit && (
+            <Button type="button" className="btn secondary" onClick={() => setResetting(true)}>
+              <Eraser size={14} aria-hidden="true" /> Zerar memória de um lead
+            </Button>
+          )}
+          <button type="button" className="agent-link-btn" onClick={load}>
+            Atualizar
+          </button>
+        </span>
       </div>
+      {resetting && <ResetMemoryModal company={company} agentId={agentId} notify={notify} onClose={() => setResetting(false)} />}
       {!turns && !error && <Loading variant="table" />}
       {turns && !turns.length && <p className="muted">Nenhuma resposta no WhatsApp ainda.</p>}
       <ul className="ab-list">

@@ -260,7 +260,9 @@ export function InsightsPanel({
           onOpen={setConversation}
         />
       )}
-      {conversation && <ConversationInsightModal company={company} agentId={agentId} conversationId={conversation} onClose={() => setConversation(null)} />}
+      {conversation && (
+        <ConversationInsightModal company={company} agentId={agentId} conversationId={conversation} canReset={canEdit} notify={notify} onClose={() => setConversation(null)} />
+      )}
       {settings && (
         <SettingsModal
           company={company}

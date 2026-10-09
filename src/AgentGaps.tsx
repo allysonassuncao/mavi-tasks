@@ -450,7 +450,7 @@ function TopicModal({
         )}
       </div>
       {conversation && (
-        <ConversationInsightModal company={company} agentId={agentId} conversationId={conversation} onClose={() => setConversation(null)} />
+        <ConversationInsightModal company={company} agentId={agentId} conversationId={conversation} canReset={canEdit} notify={notify} onClose={() => setConversation(null)} />
       )}
     </Modal>
   );
