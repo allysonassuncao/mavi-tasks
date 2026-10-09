@@ -13,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   Server,
+  Sparkles,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -49,6 +50,7 @@ import {
 } from "./agents";
 import { diffLines, diffStats, type DiffLine } from "./text-diff";
 import { applySuggestion } from "./agent-check";
+import { AgentBuilderSection } from "./AgentBuilder";
 import "./agents.css";
 
 const when = (iso: string | null | undefined) =>
@@ -1204,7 +1206,7 @@ function InstanceForm({
 }
 
 // ------------------------------------------------------------ módulo
-type Tab = "agents" | "unlinked" | "instances";
+type Tab = "builder" | "agents" | "unlinked" | "instances";
 
 /** O prompt aberto pelo link (?prompt=<id>), e o fechar limpa o link. */
 function usePromptParam() {
@@ -1233,7 +1235,10 @@ export function AgentsPage({
   notify: (message: string) => void;
 }) {
   const [status, setStatus] = useState<AgentStatus | null>(null);
-  const [tab, setTab] = useState<Tab>("agents");
+  // Link de um agente do motor (?agente=) abre direto em Agentes MAVI.
+  const [tab, setTab] = useState<Tab>(() =>
+    new URLSearchParams(window.location.search).get("agente") ? "builder" : "agents",
+  );
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [open, setOpen] = usePromptParam();
@@ -1257,10 +1262,11 @@ export function AgentsPage({
     if ((tab === "unlinked" && !linker) || (tab === "instances" && !leader))
       setTab("agents");
   }, [status, tab, linker, leader]);
-  // Sem poder ligar fluxos só existe Agentes: fica sem o menu lateral.
-  const items: SectionNavItem[] = status?.linker
+  // Agentes MAVI (motor próprio) para todos; do n8n, Agentes para todos e o
+  // resto para quem liga fluxos / líderes.
+  const n8nItems: SectionNavItem[] = status?.linker
     ? [
-        { id: "agents", label: "Agentes", icon: BotMessageSquare },
+        { id: "agents", label: "Agentes do n8n", icon: BotMessageSquare },
         {
           id: "unlinked",
           label: "Sem cliente",
@@ -1278,19 +1284,24 @@ export function AgentsPage({
             ]
           : []),
       ]
-    : [];
+    : [{ id: "agents", label: "Agentes do n8n", icon: BotMessageSquare }];
+  const groups = [
+    { label: "Motor MAVI", items: [{ id: "builder", label: "Agentes MAVI", icon: Sparkles }] },
+    { label: "n8n", items: n8nItems },
+  ];
 
   return (
     <SectionLayout
       title="Agente Conversacional"
       label="Seções de Agente Conversacional"
-      groups={[{ items }]}
+      groups={groups}
       current={tab}
       storageKey="agentes"
       onSelect={(id) => setTab(id as Tab)}
     >
       <div className="agents-page">
-        {status?.linker && leader && (
+        {tab === "builder" && <AgentBuilderSection company={company} data={data} notify={notify} />}
+        {tab !== "builder" && status?.linker && leader && (
           <div className="agent-top">
             <span className="muted agent-last-sync">
               {status.instances

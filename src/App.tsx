@@ -3169,7 +3169,7 @@ export default function App() {
                       radar:
                         "O que os clientes reclamam e o que o time promete, anotado pela MAVI nas reuniões e nos grupos de WhatsApp, por produto.",
                       agents:
-                        "O prompt do assistente de WhatsApp de cada cliente (os fluxos do n8n): leia, compare as versões e publique as mudanças.",
+                        "Os assistentes de WhatsApp dos clientes: crie e teste agentes no motor MAVI, ou leia e publique os prompts dos fluxos do n8n.",
                       personalRadar:
                         "A MAVI como sua assistente: o que os clientes pedem, perguntam e reclamam com você nos grupos de WhatsApp. Só leitura.",
                       notices: isLeader
