@@ -77,6 +77,10 @@ const groupHeading: Record<GroupBy, string> = {
   cs_reason: "Motivo",
   cs_band: "Faixa do HS",
   cs_phase: "Mês do trial",
+  agent: "Agente",
+  inbox: "Caixa",
+  cost_group: "Tipo de gasto",
+  model: "Modelo",
 };
 
 /** Metrics that count distinct things (each record is one of them). */
@@ -128,6 +132,7 @@ const nouns: Record<RecordKind, [string, string]> = {
   sl_contract: ["cliente", "clientes"],
   radar_item: ["item", "itens"],
   mention: ["ocorrência", "ocorrências"],
+  agent_cost: ["dia de gasto de um agente", "dias de gasto dos agentes"],
   cs: ["registro", "registros"],
 };
 const noun = (kind: RecordKind, n: number) =>
@@ -497,6 +502,9 @@ function kindColumns(
         },
         dateCol("occurred_at", "Quando", true),
       ];
+    case "agent_cost":
+      // Agentes MAVI › Custos: um registro por agente e dia (o id já diz os dois).
+      return [textCol("id", "Agente · dia", true)];
     case "cs":
       return [
         textCol("title", "Cliente", true),

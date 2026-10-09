@@ -29,7 +29,7 @@ export const INBOX_KINDS: { id: string; label: string; kinds: AppNotification["k
   { id: "mavi", label: "MAVI", kinds: ["ai_share", "ai_answer", "ai_skill"] },
   { id: "lessons", label: "Aprendizados da MAVI", kinds: ["copilot_lessons", "mavi_lessons"] },
   { id: "memory", label: "Memória da MAVI", kinds: ["memory_week"] },
-  { id: "agent_report", label: "Agentes MAVI", kinds: ["agent_report"] },
+  { id: "agent_report", label: "Agentes MAVI", kinds: ["agent_report", "agent_test"] },
   { id: "job_alert", label: "Falhas nas rotinas", kinds: ["job_alert"] },
   { id: "tutorial_trail", label: "Tutoriais e trilhas", kinds: ["tutorial", "tutorial_trail"] },
 ];

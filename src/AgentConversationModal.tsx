@@ -11,6 +11,9 @@ import {
   when,
   type ChatMessage,
   type ConversationInsight,
+  type CostEvent,
+  COST_SOURCE_LABEL,
+  money,
 } from "./agent-builder";
 
 /**
@@ -31,6 +34,7 @@ export function ConversationInsightModal({
 }) {
   const [data, setData] = useState<ConversationInsight | null>(null);
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
+  const [costs, setCosts] = useState<CostEvent[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
     Promise.all([
@@ -43,6 +47,22 @@ export function ConversationInsightModal({
       })
       .catch((e) => setError(errorOf(e)));
   }, [company, agentId, conversationId]);
+  // O custo de cada mensagem (mídia recebida, resposta, modelo aprovado), quando houver.
+  useEffect(() => {
+    agentOp<{ events: CostEvent[] }>(company, agentId, "conversation-costs", { conversation: conversationId })
+      .then((r) => setCosts(r.events))
+      .catch(() => setCosts([]));
+  }, [company, agentId, conversationId]);
+  const costTotal = costs.reduce((s, e) => s + Number(e.cost_usd), 0);
+  // Mídia: pela mensagem; resposta: pela vez (vai na última mensagem do agente daquela vez).
+  const costOf = (m: ChatMessage, next?: ChatMessage) => {
+    const byMessage = costs.filter((e) => e.message_id && String(e.message_id) === String(m.id));
+    const byTurn =
+      m.role === "assistant" && m.turn_id && (!next || next.turn_id !== m.turn_id || next.role !== "assistant")
+        ? costs.filter((e) => !e.message_id && e.turn_id === m.turn_id)
+        : [];
+    return [...byMessage, ...byTurn];
+  };
 
   const c = data?.conversation;
   const i = data?.insight;
@@ -116,12 +136,27 @@ export function ConversationInsightModal({
                 </ul>
               </section>
             )}
+            {costTotal > 0 && (
+              <p className="muted ai-small">
+                Custo desta conversa: <strong>{money(costTotal, "usd")}</strong> ({costs.length} gasto(s)). Passe o mouse no valor embaixo de cada mensagem para
+                ver o detalhe.
+              </p>
+            )}
             <div className="ab-chat static">
-              {(messages ?? []).map((m) => (
-                <div key={m.id} className={`ab-bubble ${m.role === "user" ? "user" : m.role === "assistant" ? "agent" : "note"}`} title={when(m.created_at)}>
-                  {m.content}
-                </div>
-              ))}
+              {(messages ?? []).map((m, i, all) => {
+                const c = costOf(m, all[i + 1]);
+                const sum = c.reduce((s, e) => s + Number(e.cost_usd), 0);
+                return (
+                  <div key={m.id} className={`ab-bubble ${m.role === "user" ? "user" : m.role === "assistant" ? "agent" : "note"}`} title={when(m.created_at)}>
+                    {m.content}
+                    {sum > 0 && (
+                      <span className="cost-bubble" title={c.map((e) => `${COST_SOURCE_LABEL[e.source] ?? e.source}${e.model ? ` (${e.model})` : ""}: ${money(Number(e.cost_usd), "usd")}`).join("\n")}>
+                        {money(sum, "usd")}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

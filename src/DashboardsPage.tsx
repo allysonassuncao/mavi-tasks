@@ -824,6 +824,8 @@ function useLookups(
       sources: [
         ...(noNotices ? sourceOrder.filter((k) => k !== "notices") : sourceOrder),
         ...(csSquads ? CS_SOURCES : []),
+        // Custos dos Agentes MAVI: só administradores e gestores (migração 20270706090000).
+        ...(noNotices ? [] : (["agent_costs"] as Source[])),
       ],
     } satisfies Record<FilterField, PickOption[]> & {
       indicators: PickOption[];

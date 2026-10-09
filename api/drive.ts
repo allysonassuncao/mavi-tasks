@@ -65,6 +65,8 @@ import { agentEnv, handleAgents } from "./_agents.js";
 import { builderEnv, handleAgentBuilder } from "./_agent-builder.js";
 import { handleAgentBuilderMavi } from "./_agent-builder-mavi.js";
 import { handleAgentWeekly, weeklyEnv } from "./_agent-weekly.js";
+import { costsSyncEnv, handleAgentCostsSync } from "./_agent-costs.js";
+import { handleAgentTests, testsWorkerEnv } from "./_agent-tests.js";
 import { handleCsSync } from "./_cs-sync.js";
 import { handleCsHsWorker } from "./_cs-hs.js";
 import {
@@ -410,6 +412,20 @@ export default async function handler(
           : action === "ai-dossier"
             ? await handleDossierWorker(authorization, env, aiDeps(env), checkDossierOps)
             : await handleLearningWorker(authorization, env, aiDeps(env), maviLearning());
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+    // Agentes MAVI › Testes: periódicas e avisos (pg_cron, migração 20270707090000).
+    if (action === "agent-tests") {
+      const result = await handleAgentTests(authorization, testsWorkerEnv(builderEnv(driveEnv())), { fetch });
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+    // Agentes MAVI › Custos: PTAX e somas do motor (pg_cron, migração 20270706090000).
+    if (action === "agent-costs-sync") {
+      const result = await handleAgentCostsSync(authorization, costsSyncEnv(builderEnv(driveEnv())), { fetch });
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

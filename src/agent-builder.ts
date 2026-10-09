@@ -678,3 +678,174 @@ export function deltaText(cur: number, prev: number): string {
   return d === 0 ? "=" : `${d > 0 ? "+" : "−"}${Math.abs(d)}%`;
 }
 export const percent = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v * 100)}%`);
+
+// ------------------------------------------------------------ custos
+export type CostSum = { events: number; cost_usd: number; cost_brl: number; tokens_in: number; tokens_out: number; units: number; conversations?: number };
+export type CostGroupKey = "ia" | "midias" | "conhecimento" | "analises" | "whatsapp" | "testes";
+export type CostReport = {
+  totals: CostSum | null;
+  rows: (CostSum & { key: string; label: string | null })[];
+  daily: { day: string; group: CostGroupKey; cost_usd: number; cost_brl: number }[];
+  messages: { lead_messages: number; agent_messages: number; conversations: number } | null;
+  rates: Record<string, number>;
+  agents?: { id: string; name: string; client_id: string | null; contract_id: string | null }[];
+};
+export type CostFilters = {
+  from: string;
+  to: string;
+  group: "day" | "agent" | "inbox" | "conversation" | "source" | "group" | "model" | "company";
+  sources?: string[];
+  inbox_ids?: string[];
+  simulation?: "exclude" | "include" | "only";
+  clients?: string[];
+  agents?: string[];
+  conversation?: string;
+};
+export type CostEvent = {
+  id: string;
+  message_id: string | null;
+  turn_id: string | null;
+  source: string;
+  model: string | null;
+  tokens_in: number;
+  tokens_out: number;
+  units: number;
+  cost_usd: number;
+  meta: Record<string, unknown>;
+  created_at: string;
+};
+export type WabaPrice = { country: string; category: "marketing" | "utility" | "authentication"; price_usd: number; updated_by?: string | null; updated_at?: string };
+
+export const builderCosts = (company: string, f: CostFilters) =>
+  (demo()?.then((m) => m.demoCostsAll(f)) as Promise<CostReport & { leader?: boolean }> | undefined) ??
+  server<CostReport & { leader?: boolean }>({ action: "builder-costs", company, ...f });
+export const wabaPrices = (company: string, prices?: WabaPrice[]) =>
+  (demo()?.then((m) => m.demoWabaPrices(prices)) as Promise<{ prices: WabaPrice[]; can_edit: boolean }> | undefined) ??
+  server<{ prices: WabaPrice[]; can_edit: boolean }>({ action: "builder-waba-prices", company, ...(prices ? { prices } : {}) });
+
+export const COST_SOURCE_LABEL: Record<string, string> = {
+  reply: "Respostas da IA",
+  followup: "Follow-up (IA)",
+  media_audio: "Áudios (transcrição)",
+  media_image: "Imagens (leitura)",
+  media_video: "Vídeos (fala)",
+  media_document: "Documentos",
+  retrieval: "Busca no conhecimento",
+  summary: "Resumo da conversa",
+  knowledge: "Processar o conhecimento",
+  gaps: "Lacunas",
+  insight: "Leitura das conversas",
+  reading: "Leitura da MAVI",
+  waba_template: "WhatsApp oficial (modelos aprovados)",
+  test_persona: "Testes: perfis",
+  test_lead: "Testes: lead simulado",
+  test_judge: "Testes: avaliação",
+};
+export const COST_GROUPS: { key: CostGroupKey; label: string; sources: string[] }[] = [
+  { key: "ia", label: "IA nas conversas", sources: ["reply", "followup"] },
+  { key: "midias", label: "Mídias", sources: ["media_audio", "media_image", "media_video", "media_document"] },
+  { key: "conhecimento", label: "Conhecimento", sources: ["retrieval", "knowledge"] },
+  { key: "analises", label: "Análises da MAVI", sources: ["summary", "gaps", "insight", "reading"] },
+  { key: "whatsapp", label: "WhatsApp oficial", sources: ["waba_template"] },
+  { key: "testes", label: "Testes", sources: ["test_persona", "test_lead", "test_judge"] },
+];
+export const COST_GROUP_LABEL = Object.fromEntries(COST_GROUPS.map((g) => [g.key, g.label])) as Record<CostGroupKey, string>;
+
+/** Dinheiro: até 4 casas para valores pequenos (custos de IA são frações de centavo). */
+export function money(v: number | null | undefined, currency: "usd" | "brl"): string {
+  const n = Number(v ?? 0);
+  const digits = Math.abs(n) >= 100 ? 2 : Math.abs(n) >= 1 ? 2 : 4;
+  return `${currency === "usd" ? "US$" : "R$"} ${n.toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+/** A cotação de um dia (a do dia ou a última antes dele). */
+export function rateOn(rates: Record<string, number>, day: string): number | null {
+  const keys = Object.keys(rates).sort();
+  const before = keys.filter((k) => k <= day);
+  const k = before.length ? before[before.length - 1] : keys[0];
+  return k ? rates[k]! : null;
+}
+
+// ------------------------------------------------------------ testes com leads simulados
+export type TestProfile = { key: string; label: string; hint: string };
+export type TestPersona = { nome: string; perfil: string; descricao: string; objetivo: string; conhece: string; objecoes: string[]; estilo: string; fim_quando: string };
+export type TestVerdict = {
+  score: number;
+  goal_reached: boolean;
+  outcome: Outcome;
+  issues: { type: string; severity: number; detail: string; quote: string }[];
+  gaps: { kind: "question" | "objection"; text: string }[];
+  strengths: string[];
+  summary: string;
+};
+export type TestSummary = {
+  conversations: number;
+  evaluated: number;
+  errors: number;
+  score: number | null;
+  goal_rate: number | null;
+  outcomes: Record<string, number>;
+  issues: Record<string, { n: number; examples: string[] }>;
+  gaps: number;
+  severe: number;
+  conclusion?: string;
+  actions?: { title: string; text: string; where: string }[];
+  concluding?: boolean;
+};
+export type TestRun = {
+  id: string;
+  kind: "manual" | "publish" | "scheduled";
+  agent_version: number | null;
+  compare_to: string | null;
+  profiles: string[];
+  focus: string;
+  conversations: number;
+  max_turns: number;
+  cost_cap_usd: number;
+  cost_usd: number;
+  status: "queued" | "running" | "done" | "stopped" | "error";
+  stop_reason: string | null;
+  summary: TestSummary | null;
+  error: string | null;
+  created_by: string | null;
+  created_at: string;
+  finished_at: string | null;
+  finished?: number;
+};
+export type TestConversation = {
+  id: string;
+  idx: number;
+  persona: TestPersona;
+  conversation_id: string | null;
+  status: "queued" | "running" | "done" | "error" | "skipped";
+  turns: number;
+  verdict: TestVerdict | null;
+  cost_usd: number;
+  error: string | null;
+};
+export type TestLimits = {
+  max_conversations: number;
+  max_turns: number;
+  run_cap_usd: number;
+  monthly_cap_usd: number;
+  publish_conversations: number;
+  scheduled_enabled: boolean;
+  scheduled_every_days: number;
+  scheduled_conversations: number;
+  can_edit?: boolean;
+  updated_at?: string | null;
+};
+export type TestRunsResult = { runs: TestRun[]; month_cost_usd: number; limits: TestLimits; profiles: TestProfile[] };
+
+export const testSettings = (company: string, settings?: Omit<TestLimits, "can_edit" | "updated_at">) =>
+  (demo()?.then((m) => m.demoTestSettings(settings)) as Promise<TestLimits> | undefined) ??
+  server<TestLimits>({ action: "builder-test-settings", company, ...(settings ? { settings } : {}) });
+
+export const TEST_ISSUE_LABEL: Record<string, string> = { ...ISSUE_LABEL, rule_violation: "Quebrou uma regra", off_script: "Saiu do roteiro" };
+export const TEST_KIND_LABEL: Record<TestRun["kind"], string> = { manual: "Sob demanda", publish: "Antes de publicar", scheduled: "Periódica" };
+export const TEST_STATUS_LABEL: Record<TestRun["status"], string> = {
+  queued: "Na fila",
+  running: "Rodando",
+  done: "Concluída",
+  stopped: "Parada",
+  error: "Falhou",
+};

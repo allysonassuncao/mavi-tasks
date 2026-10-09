@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Server,
   Sparkles,
+  Coins,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -51,6 +52,7 @@ import {
 import { diffLines, diffStats, type DiffLine } from "./text-diff";
 import { applySuggestion } from "./agent-check";
 import { AgentBuilderSection } from "./AgentBuilder";
+import { AgentCostsPage } from "./AgentCosts";
 import "./agents.css";
 
 const when = (iso: string | null | undefined) =>
@@ -1206,7 +1208,7 @@ function InstanceForm({
 }
 
 // ------------------------------------------------------------ módulo
-type Tab = "builder" | "agents" | "unlinked" | "instances";
+type Tab = "builder" | "costs" | "agents" | "unlinked" | "instances";
 
 /** O prompt aberto pelo link (?prompt=<id>), e o fechar limpa o link. */
 function usePromptParam() {
@@ -1286,7 +1288,13 @@ export function AgentsPage({
       ]
     : [{ id: "agents", label: "Agentes do n8n", icon: BotMessageSquare }];
   const groups = [
-    { label: "Motor MAVI", items: [{ id: "builder", label: "Agentes MAVI", icon: Sparkles }] },
+    {
+      label: "Motor MAVI",
+      items: [
+        { id: "builder", label: "Agentes MAVI", icon: Sparkles },
+        { id: "costs", label: "Custos", icon: Coins },
+      ],
+    },
     { label: "n8n", items: n8nItems },
   ];
 
@@ -1301,7 +1309,8 @@ export function AgentsPage({
     >
       <div className="agents-page">
         {tab === "builder" && <AgentBuilderSection company={company} data={data} notify={notify} />}
-        {tab !== "builder" && status?.linker && leader && (
+        {tab === "costs" && <AgentCostsPage company={company} data={data} />}
+        {tab !== "builder" && tab !== "costs" && status?.linker && leader && (
           <div className="agent-top">
             <span className="muted agent-last-sync">
               {status.instances

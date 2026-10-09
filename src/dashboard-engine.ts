@@ -72,7 +72,8 @@ function prepare(
     q.source === "reviews" ||
     q.source === "notices" ||
     q.source === "temperature" ||
-    q.source === "radar"
+    q.source === "radar" ||
+    q.source === "agent_costs"
   )
     return null;
   const today = dateKey(now, tz);

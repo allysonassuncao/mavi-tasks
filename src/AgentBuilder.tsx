@@ -4,6 +4,7 @@ import {
   BookOpen,
   Bot,
   ChartColumn,
+  Coins,
   FlaskConical,
   History,
   Inbox,
@@ -19,6 +20,7 @@ import {
   Sparkles,
   TriangleAlert,
   UserRound,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 import { Modal } from "./components";
@@ -51,6 +53,8 @@ import { FIELD_BY_PATH, FIELDS } from "./agent-fields";
 import { ConversationsPanel, SimulatorPanel } from "./AgentBuilderTest";
 import { GapsPanel } from "./AgentGaps";
 import { InsightsPanel } from "./AgentInsights";
+import { AgentCostsPanel } from "./AgentCosts";
+import { PublishTestBox, TestRunsPanel } from "./AgentTestRuns";
 import "./agent-builder.css";
 
 /**
@@ -295,7 +299,9 @@ type Tab =
   | "versions"
   | "conversations"
   | "insights"
-  | "gaps";
+  | "gaps"
+  | "costs"
+  | "simulated";
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "Perfil", icon: UserRound },
   { id: "instructions", label: "Instruções", icon: Sparkles },
@@ -304,14 +310,16 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "integrations", label: "Integrações", icon: Plug },
   { id: "followup", label: "Follow-up", icon: Repeat },
   { id: "test", label: "Testar", icon: FlaskConical },
+  { id: "simulated", label: "Leads simulados", icon: UsersRound },
   { id: "inboxes", label: "Caixas", icon: Inbox },
   { id: "versions", label: "Versões", icon: History },
   { id: "conversations", label: "Conversas", icon: MessagesSquare },
   { id: "insights", label: "Insights", icon: ChartColumn },
   { id: "gaps", label: "Lacunas", icon: MessageCircleQuestion },
+  { id: "costs", label: "Custos", icon: Coins },
 ];
 /** A aba pelo link (?aba=insights|lacunas, como no resumo semanal). */
-const TAB_PARAM: Record<string, Tab> = { insights: "insights", lacunas: "gaps" };
+const TAB_PARAM: Record<string, Tab> = { insights: "insights", lacunas: "gaps", custos: "costs", testes: "simulated" };
 /** As abas do rascunho (o que "Salvar rascunho" grava); as três primeiras vêm do catálogo dos campos. */
 const DRAFT_TABS = new Set<Tab>(["profile", "instructions", "behavior", "integrations", "followup"]);
 const FORM_TABS = new Set<Tab>(["profile", "instructions", "behavior"]);
@@ -337,7 +345,11 @@ function AgentEditor({
     const de = q.get("de") ?? "";
     const ate = q.get("ate") ?? "";
     const ymd = /^\d{4}-\d{2}-\d{2}$/;
-    return { tab: TAB_PARAM[q.get("aba") ?? ""] ?? null, period: ymd.test(de) && ymd.test(ate) ? { from: de, to: ate } : null };
+    return {
+      tab: TAB_PARAM[q.get("aba") ?? ""] ?? null,
+      period: ymd.test(de) && ymd.test(ate) ? { from: de, to: ate } : null,
+      run: q.get("bateria"),
+    };
   });
   const [tab, setTab] = useState<Tab>(linked.tab ?? "profile");
   // Com muitas abas, a aberta (pelo link ou pelo "Ver lacunas") fica à vista na barra.
@@ -361,8 +373,8 @@ function AgentEditor({
   }, [company]);
   useEffect(() => {
     const url = new URL(window.location.href);
-    if (["mavi", "aba", "de", "ate"].some((k) => url.searchParams.has(k))) {
-      for (const k of ["mavi", "aba", "de", "ate"]) url.searchParams.delete(k);
+    if (["mavi", "aba", "de", "ate", "bateria"].some((k) => url.searchParams.has(k))) {
+      for (const k of ["mavi", "aba", "de", "ate", "bateria"]) url.searchParams.delete(k);
       window.history.replaceState(window.history.state, "", url);
     }
   }, []);
@@ -531,6 +543,10 @@ function AgentEditor({
           {tab === "insights" && (
             <InsightsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} initial={linked.period} onOpenGaps={() => setTab("gaps")} />
           )}
+          {tab === "costs" && <AgentCostsPanel company={company} agentId={agentId} bindings={detail.bindings} />}
+          {tab === "simulated" && (
+            <TestRunsPanel company={company} agentId={agentId} canEdit={canEdit} published={a.published_version} notify={notify} openRun={linked.run} />
+          )}
           {tab === "gaps" && (
             <GapsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} onTrained={() => setKnowledgeKey((k) => k + 1)} />
           )}
@@ -555,6 +571,7 @@ function AgentEditor({
         <PublishModal
           dirty={dirty}
           errors={errors}
+          test={canEdit ? { company, agentId, published: a.published_version, saveFirst: () => (dirty ? save() : Promise.resolve(true)) } : undefined}
           onClose={() => setPublishing(false)}
           onPublish={async (note) => {
             if (dirty && !(await save())) return;
@@ -598,11 +615,14 @@ function PublishModal({
   errors,
   onClose,
   onPublish,
+  test,
 }: {
   dirty: boolean;
   errors: DraftError[];
   onClose: () => void;
   onPublish: (note: string) => Promise<void>;
+  /** A bateria rápida com leads simulados antes de publicar. */
+  test?: { company: string; agentId: string; published: number | null; saveFirst: () => Promise<boolean> };
 }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -625,6 +645,7 @@ function PublishModal({
             <TriangleAlert size={15} aria-hidden="true" /> Complete antes: {errors.map((x) => FIELD_LABEL[x.path] ?? x.path).join(", ")}.
           </p>
         )}
+        {test && errors.length === 0 && <PublishTestBox {...test} />}
         <label>
           <span>O que mudou (opcional)</span>
           <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Ex.: novo roteiro de qualificação" />

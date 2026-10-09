@@ -159,6 +159,27 @@ describe("construtor de agentes (servidor)", () => {
     expect((await run({ action: "builder-agent", agent: agentId, op: "insights-settings-set", sample_percent: 150 }, f)).status).toBe(400);
   });
 
+  it("bateria de testes: tetos do Painel e quem pediu", async () => {
+    const calls: { url: string; method: string; body: any }[] = [];
+    const base = fake({ write: true });
+    const f = (async (u: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(u);
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ url, method: init?.method ?? "GET", body });
+      if (url.endsWith("/rpc/agent_test_settings"))
+        return new Response(JSON.stringify({ max_conversations: 5, max_turns: 6, run_cap_usd: 0.4, monthly_cap_usd: 10, publish_conversations: 3, scheduled_enabled: true, scheduled_every_days: 7, scheduled_conversations: 4 }));
+      if (url.includes("/test-runs?limit=1")) return new Response(JSON.stringify({ runs: [], month_cost_usd: 9.9 }));
+      return base.f(u, init);
+    }) as typeof fetch;
+    const r = await run({ action: "builder-agent", agent: agentId, op: "test-run-start", conversations: 50, profiles: ["preco"], focus: "boleto" }, f);
+    expect(r.status).toBe(200);
+    const post = calls.find((c) => c.method === "POST" && c.url.endsWith(`/v1/agents/${agentId}/test-runs`))!;
+    expect(post.body).toMatchObject({ kind: "manual", use: "draft", conversations: 5, max_turns: 6, profiles: ["preco"], focus: "boleto", created_by: "ana@x.com" });
+    expect(post.body.cost_cap_usd).toBeCloseTo(0.1);
+    const ro = fake({ read: true, write: false });
+    expect((await run({ action: "builder-agent", agent: agentId, op: "test-run-start" }, ro.f)).status).toBe(403);
+  });
+
   it("operação desconhecida", async () => {
     const { f } = fake();
     expect((await run({ action: "builder-agent", agent: agentId, op: "apagar-tudo" }, f)).status).toBe(400);

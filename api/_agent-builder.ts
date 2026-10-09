@@ -8,6 +8,8 @@
  * do agente para mudar, publicar e ligar caixas.
  */
 
+import { planRun, type TestLimits } from "./_agent-test-plan.js";
+
 type Fetch = typeof fetch;
 type Result = { status: number; body: unknown };
 
@@ -391,6 +393,61 @@ const OPS: Record<string, Op> = {
     run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/conversations/${uuid(body.conversation, "a conversa")}/messages`),
   },
 
+  // ---------------------------------------------------------------- custos
+  costs: {
+    write: false,
+    run: async ({ a, body, call, settings }) => {
+      const q = costQuery(body);
+      const rates = await settings<Record<string, number>>("fx_ptax_rates", { p_from: q.from, p_to: q.to }).catch(() => ({}));
+      return { ...(await call<Record<string, unknown>>("POST", "/v1/costs/query", { ...q, agent_ids: [a.id], rates })), rates };
+    },
+  },
+  "conversation-costs": {
+    write: false,
+    run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/conversations/${uuid(body.conversation, "a conversa")}/costs`),
+  },
+
+  // ---------------------------------------------------------------- testes com leads simulados
+  "test-runs": {
+    write: false,
+    run: async ({ a, body, call, settings }) => {
+      const [runs, limits, profiles] = await Promise.all([
+        call<{ runs: unknown[]; month_cost_usd: number }>("GET", `/v1/agents/${a.id}/test-runs${qs({ limit: body.limit })}`),
+        settings<TestLimits & { can_edit: boolean }>("agent_test_settings", { p_company: a.external_ref.mavi_company_id }),
+        call<{ profiles: unknown[] }>("GET", "/v1/test-profiles"),
+      ]);
+      return { ...runs, limits, profiles: profiles.profiles };
+    },
+  },
+  "test-run": {
+    write: false,
+    run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/test-runs/${uuid(body.run, "a bateria")}`),
+  },
+  "test-run-start": {
+    write: true,
+    run: async ({ a, body, access, call, settings }) => {
+      const kind = body.kind === "publish" ? "publish" : "manual";
+      const [limits, month] = await Promise.all([
+        settings<TestLimits>("agent_test_settings", { p_company: a.external_ref.mavi_company_id }),
+        call<{ month_cost_usd: number }>("GET", `/v1/agents/${a.id}/test-runs?limit=1`),
+      ]);
+      const p = planRun(limits, month.month_cost_usd, { kind, conversations: Number(body.conversations) || undefined });
+      if (!p.ok) throw new BuilderError(400, p.message);
+      return call("POST", `/v1/agents/${a.id}/test-runs`, {
+        kind,
+        use: kind === "publish" ? "draft" : body.use === "published" ? "published" : "draft",
+        ...p.plan,
+        profiles: Array.isArray(body.profiles) ? body.profiles.map(String).slice(0, 20) : [],
+        focus: String(body.focus ?? "").slice(0, 1000),
+        created_by: access.user_label,
+      });
+    },
+  },
+  "test-run-stop": {
+    write: true,
+    run: ({ a, body, call }) => call("POST", `/v1/agents/${a.id}/test-runs/${uuid(body.run, "a bateria")}/stop`, {}),
+  },
+
   // ---------------------------------------------------------------- lacunas do treinamento
   gaps: {
     write: false,
@@ -491,6 +548,41 @@ const OPS: Record<string, Op> = {
 
 export const BUILDER_OPS = Object.keys(OPS);
 
+/** O e-mail do login (só para registrar quem mudou; o acesso já foi conferido no banco). */
+function jwtEmail(authorization: string): string | undefined {
+  try {
+    const payload = JSON.parse(Buffer.from(authorization.replace(/^Bearer\s+/, "").split(".")[1] ?? "", "base64url").toString("utf8"));
+    return typeof payload.email === "string" ? payload.email : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const COST_GROUPS = ["day", "agent", "inbox", "conversation", "source", "group", "model", "company"];
+const COST_SOURCES = [
+  "reply", "followup", "media_audio", "media_image", "media_video", "media_document", "retrieval", "summary",
+  "knowledge", "gaps", "insight", "reading", "waba_template", "test_persona", "test_lead", "test_judge",
+];
+
+/** O filtro do relatório de custos, conferido antes de ir ao motor. */
+export function costQuery(body: Record<string, unknown>) {
+  const from = String(body.from ?? "");
+  const to = String(body.to ?? "");
+  if (!YMD.test(from) || !YMD.test(to) || from > to) throw new BuilderError(400, "Período inválido.");
+  const list = (v: unknown, ok: (x: string) => boolean) => (Array.isArray(v) ? v.map(String).filter(ok).slice(0, 200) : undefined);
+  return {
+    from,
+    to,
+    group: COST_GROUPS.includes(String(body.group)) ? String(body.group) : "source",
+    sources: list(body.sources, (x) => COST_SOURCES.includes(x)),
+    inbox_ids: list(body.inbox_ids, (x) => x.length > 0 && x.length <= 64),
+    ...(body.conversation && UUID.test(String(body.conversation)) ? { conversation_id: String(body.conversation) } : {}),
+    simulation: ["exclude", "include", "only"].includes(String(body.simulation)) ? String(body.simulation) : "exclude",
+    limit: Math.min(Math.max(Number(body.limit) || 200, 1), 1000),
+  };
+}
+
 /**
  * O agente do motor e o que a pessoa pode nele (regra do Drive). Agente de
  * outra empresa ou de cliente que a pessoa não vê: "não encontrado".
@@ -539,6 +631,46 @@ export async function handleAgentBuilder(
         (a) => a.external_ref?.mavi_company_id === company && (scope.all || allowed.has(a.external_ref?.mavi_client_id ?? "")),
       );
       return { status: 200, body: { agents, leader: scope.leader, configured: true } };
+    }
+
+    // Custos de todos os agentes que a pessoa vê (Agente Conversacional › Custos).
+    if (action === "builder-costs") {
+      const scope = await rpc<{ all: boolean; leader: boolean; clients: string[] }>(env, f, authorization, "agent_builder_clients", { p_company: company });
+      const q = costQuery(body);
+      const r = await call<{ agents: EngineAgent[] }>("GET", "/v1/agents");
+      const allowed = new Set(scope.clients);
+      const visible = r.agents.filter(
+        (a) => a.external_ref?.mavi_company_id === company && (scope.all || allowed.has(a.external_ref?.mavi_client_id ?? "")),
+      );
+      const pick = (v: unknown) => (Array.isArray(v) ? new Set(v.map(String)) : null);
+      const clients = pick(body.clients);
+      const agentsFilter = pick(body.agents);
+      const ids = visible
+        .filter((a) => (!clients || clients.has(a.external_ref?.mavi_client_id ?? "")) && (!agentsFilter || agentsFilter.has(a.id)))
+        .map((a) => a.id);
+      const agents = visible.map((a) => ({ id: a.id, name: a.name, client_id: a.external_ref?.mavi_client_id ?? null, contract_id: a.external_ref?.mavi_contract_id ?? null }));
+      if (!ids.length) return { status: 200, body: { agents, totals: null, rows: [], daily: [], messages: null, rates: {} } };
+      const rates = await rpc<Record<string, number>>(env, f, authorization, "fx_ptax_rates", { p_from: q.from, p_to: q.to }).catch(() => ({}));
+      const data = await call<Record<string, unknown>>("POST", "/v1/costs/query", { ...q, agent_ids: ids, rates });
+      return { status: 200, body: { ...data, agents, rates, leader: scope.leader } };
+    }
+
+    // Painel da MAVI › Agentes MAVI: os tetos dos testes com leads simulados (líderes mudam).
+    if (action === "builder-test-settings") {
+      if (body.settings && typeof body.settings === "object")
+        await rpc(env, f, authorization, "agent_test_settings_set", { p_company: company, p_settings: body.settings });
+      return { status: 200, body: await rpc(env, f, authorization, "agent_test_settings", { p_company: company }) };
+    }
+
+    // Painel da MAVI › Agentes MAVI: a tabela de preços do WhatsApp Business API (líderes mudam).
+    if (action === "builder-waba-prices") {
+      const scope = await rpc<{ leader: boolean }>(env, f, authorization, "agent_builder_clients", { p_company: company });
+      if (Array.isArray(body.prices)) {
+        if (!scope.leader) throw new BuilderError(403, "Só administradores e gestores mudam a tabela de preços.");
+        await call("PUT", "/v1/settings/waba-prices", { prices: body.prices, updated_by: jwtEmail(authorization) });
+      }
+      const r = await call<{ prices: unknown[] }>("GET", "/v1/settings/waba-prices");
+      return { status: 200, body: { ...r, can_edit: scope.leader } };
     }
 
     if (action === "builder-create") {

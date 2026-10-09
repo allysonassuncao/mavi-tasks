@@ -9,6 +9,13 @@ import type {
   GapTopic,
   InsightConversation,
   InsightsSettings,
+  CostFilters,
+  CostReport,
+  CostEvent,
+  WabaPrice,
+  TestConversation,
+  TestLimits,
+  TestRun,
   MaviReply,
   AgentDetail,
   AgentDraft,
@@ -292,6 +299,15 @@ export async function demoOp(agentId: string, op: string, extra: Record<string, 
     case "insights-settings":
     case "insights-settings-set":
       return demoInsightsOp(op, extra);
+    case "costs":
+      return demoCosts(extra as CostFilters);
+    case "conversation-costs":
+      return { events: demoConvCosts() };
+    case "test-runs":
+    case "test-run":
+    case "test-run-start":
+    case "test-run-stop":
+      return demoTestOp(op, extra);
     default:
       return {};
   }
@@ -547,4 +563,122 @@ function demoInsightsOp(op: string, extra: Record<string, any>): unknown {
       return { ok: true };
   }
   return {};
+}
+
+// ------------------------------------------------------------ custos (demonstração)
+const DEMO_SOURCES: [string, string, number][] = [
+  ["reply", "openai/gpt-5.2", 0.42],
+  ["followup", "openai/gpt-5.2", 0.05],
+  ["media_audio", "gpt-4o-mini-transcribe", 0.06],
+  ["media_image", "openai/gpt-5-mini", 0.02],
+  ["retrieval", "text-embedding-3-small", 0.004],
+  ["insight", "openai/gpt-5-mini", 0.03],
+  ["waba_template", "", 0.31],
+  ["test_lead", "openai/gpt-5-mini", 0.08],
+];
+const groupOfSource = (s: string) =>
+  s === "reply" || s === "followup" ? "ia" : s.startsWith("media_") ? "midias" : s === "retrieval" || s === "knowledge" ? "conhecimento"
+    : s === "waba_template" ? "whatsapp" : s.startsWith("test_") ? "testes" : "analises";
+function demoCosts(f: CostFilters): CostReport {
+  const days: string[] = [];
+  for (let d = Date.parse(f.from); d <= Date.parse(f.to); d += 86_400_000) days.push(new Date(d).toISOString().slice(0, 10));
+  const sources = DEMO_SOURCES.filter(([s]) => (!f.sources?.length || f.sources.includes(s)) && (f.simulation === "only" ? s.startsWith("test_") : f.simulation === "include" || !s.startsWith("test_")));
+  const rates = Object.fromEntries(days.map((d, i) => [d, 5.4 + (i % 5) * 0.03]));
+  const ev = days.flatMap((day, i) => sources.map(([source, model, base]) => ({ day, source, model, usd: base * (0.6 + ((i * 7) % 10) / 10), group: groupOfSource(source) })));
+  const sum = (xs: typeof ev) => ({
+    events: xs.length * 37,
+    cost_usd: xs.reduce((a, x) => a + x.usd, 0),
+    cost_brl: xs.reduce((a, x) => a + x.usd * (rates[x.day] ?? 5.4), 0),
+    tokens_in: xs.length * 18000,
+    tokens_out: xs.length * 900,
+    units: 0,
+  });
+  const keyOf = (x: (typeof ev)[number]) =>
+    f.group === "day" ? x.day : f.group === "source" ? x.source : f.group === "group" ? x.group : f.group === "model" ? x.model
+      : f.group === "inbox" ? "i1" : f.group === "agent" ? "demo-agent-1" : f.group === "conversation" ? ["c1", "c2", "c3"][x.day.charCodeAt(9) % 3]! : "crm-demo";
+  const label = (k: string) => (f.group === "inbox" ? "MAVI (WhatsApp)" : f.group === "agent" ? "Clara (atendimento)" : f.group === "conversation" ? ({ c1: "Marina Souza", c2: "Rafael Lima", c3: "Ana Paula" } as Record<string, string>)[k] ?? k : null);
+  const keys = [...new Set(ev.map(keyOf))];
+  const rows = keys.map((k) => ({ key: k, label: label(k), ...sum(ev.filter((x) => keyOf(x) === k)) })).sort((a, b) => (f.group === "day" ? a.key.localeCompare(b.key) : b.cost_usd - a.cost_usd));
+  const groups = [...new Set(ev.map((x) => x.group))];
+  const daily = days.flatMap((day) =>
+    groups.map((g) => {
+      const xs = ev.filter((x) => x.day === day && x.group === g);
+      return { day, group: g as CostReport["daily"][number]["group"], cost_usd: xs.reduce((a, x) => a + x.usd, 0), cost_brl: xs.reduce((a, x) => a + x.usd * (rates[day] ?? 5.4), 0) };
+    }),
+  );
+  return { totals: sum(ev), rows, daily, messages: { lead_messages: days.length * 104, agent_messages: days.length * 128, conversations: days.length * 14 }, rates };
+}
+export async function demoCostsAll(f: CostFilters) {
+  return { ...demoCosts(f), agents: [{ id: "demo-agent-1", name: "Clara (atendimento)", client_id: "demo-client", contract_id: "demo-contract" }], leader: true };
+}
+function demoConvCosts(): CostEvent[] {
+  const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+  return [
+    { id: "1", message_id: "1", turn_id: null, source: "media_audio", model: "gpt-4o-mini-transcribe", tokens_in: 410, tokens_out: 32, units: 410, cost_usd: 0.0014, meta: {}, created_at: at(51) },
+    { id: "2", message_id: null, turn_id: "t", source: "retrieval", model: "text-embedding-3-small", tokens_in: 40, tokens_out: 0, units: 0, cost_usd: 0.000001, meta: {}, created_at: at(51) },
+    { id: "3", message_id: null, turn_id: "t", source: "reply", model: "openai/gpt-5.2", tokens_in: 9800, tokens_out: 210, units: 0, cost_usd: 0.0061, meta: {}, created_at: at(51) },
+    { id: "4", message_id: null, turn_id: "t2", source: "reply", model: "openai/gpt-5.2", tokens_in: 10400, tokens_out: 180, units: 0, cost_usd: 0.0063, meta: {}, created_at: at(50) },
+    { id: "5", message_id: null, turn_id: "t3", source: "waba_template", model: null, tokens_in: 0, tokens_out: 0, units: 1, cost_usd: 0.0625, meta: { template: "retomada_1", category: "marketing", country: "BR" }, created_at: at(10) },
+  ];
+}
+let demoPrices: WabaPrice[] = [
+  { country: "BR", category: "marketing", price_usd: 0.0625 },
+  { country: "BR", category: "utility", price_usd: 0.0068 },
+  { country: "BR", category: "authentication", price_usd: 0.0068 },
+  { country: "*", category: "marketing", price_usd: 0.0625 },
+  { country: "*", category: "utility", price_usd: 0.0068 },
+  { country: "*", category: "authentication", price_usd: 0.0068 },
+];
+export async function demoWabaPrices(prices?: WabaPrice[]) {
+  if (prices) demoPrices = prices;
+  return { prices: demoPrices, can_edit: true };
+}
+
+// ------------------------------------------------------------ testes com leads simulados (demonstração)
+let demoLimits: TestLimits = {
+  max_conversations: 10, max_turns: 8, run_cap_usd: 1, monthly_cap_usd: 20, publish_conversations: 4,
+  scheduled_enabled: true, scheduled_every_days: 7, scheduled_conversations: 6, can_edit: true, updated_at: null,
+};
+export async function demoTestSettings(settings?: Omit<TestLimits, "can_edit" | "updated_at">) {
+  if (settings) demoLimits = { ...demoLimits, ...settings };
+  return demoLimits;
+}
+const DEMO_PROFILES = [
+  { key: "interessado", label: "Interessado", hint: "Quer resolver logo" },
+  { key: "cetico", label: "Cético", hint: "Quer provas e garantias" },
+  { key: "preco", label: "Objeção de preço", hint: "Acha caro" },
+  { key: "confuso", label: "Confuso", hint: "Perguntas vagas" },
+  { key: "fora_do_perfil", label: "Fora do perfil", hint: "Procura outra coisa" },
+  { key: "dificil", label: "Difícil", hint: "Impaciente" },
+];
+const demoConvs: TestConversation[] = [
+  {
+    id: "tc1", idx: 0, conversation_id: "c3", status: "done", turns: 3, cost_usd: 0.017, error: null,
+    persona: { nome: "Mariana Costa", perfil: "preco", descricao: "Dona de 3 clínicas de estética em SP, já testou chatbot.", objetivo: "Saber preço com desconto para 3 unidades", conhece: "Pouco", objecoes: ["concorrente a R$ 400"], estilo: "direta", fim_quando: "receber proposta" },
+    verdict: { score: 8, goal_reached: false, outcome: "handed_off", summary: "Passou para a equipe sem responder a comparação com o concorrente.", strengths: ["Educado", "Não inventou preço"],
+      issues: [{ type: "ignored_question", severity: 2, detail: "Não respondeu por que pagar mais que o concorrente.", quote: "Não encontrei uma comparação na base" }],
+      gaps: [{ kind: "question", text: "Integra com AgendaFit?" }, { kind: "objection", text: "Concorrente cobra menos" }] },
+  },
+  {
+    id: "tc2", idx: 1, conversation_id: "c2", status: "done", turns: 2, cost_usd: 0.016, error: null,
+    persona: { nome: "Rogério Almeida", perfil: "fora_do_perfil", descricao: "Dono de transportadora procurando TMS.", objetivo: "Integração com rastreadores", conhece: "Nada", objecoes: [], estilo: "formal", fim_quando: "entender que não é o produto" },
+    verdict: { score: 9, goal_reached: true, outcome: "disqualified", summary: "Explicou que não é o foco e passou para a equipe.", strengths: ["Honesto"], issues: [], gaps: [] },
+  },
+];
+let demoRuns: TestRun[] = [
+  {
+    id: "run1", kind: "scheduled", agent_version: 2, compare_to: null, profiles: [], focus: "", conversations: 2, max_turns: 8, cost_cap_usd: 1, cost_usd: 0.033,
+    status: "done", stop_reason: null, error: null, created_by: "MAVI (teste periódico)", created_at: new Date(Date.now() - 86400000).toISOString(), finished_at: new Date(Date.now() - 86000000).toISOString(), finished: 2,
+    summary: { conversations: 2, evaluated: 2, errors: 0, score: 8.5, goal_rate: 0.5, outcomes: { handed_off: 1, disqualified: 1 }, issues: { ignored_question: { n: 1, examples: ["Não respondeu por que pagar mais que o concorrente."] } }, gaps: 2, severe: 0,
+      conclusion: "O agente é educado e não inventa, mas trava em comparação de preço e integrações específicas.",
+      actions: [{ title: "Responder comparação de preço com valor", text: "Inclua no conhecimento os diferenciais frente a concorrentes mais baratos.", where: "conhecimento" }, { title: "Listar integrações", text: "Diga quais sistemas de agenda integram.", where: "conhecimento" }] },
+  },
+];
+function demoTestOp(op: string, extra: Record<string, any>): unknown {
+  if (op === "test-runs") return { runs: demoRuns, month_cost_usd: 0.033, limits: demoLimits, profiles: DEMO_PROFILES };
+  if (op === "test-run") return { run: demoRuns.find((r) => r.id === extra.run) ?? demoRuns[0], conversations: demoConvs };
+  if (op === "test-run-stop") return { ok: true };
+  const run: TestRun = { ...demoRuns[0]!, id: `run${demoRuns.length + 1}`, kind: extra.kind === "publish" ? "publish" : "manual", status: "done", created_by: "demo@makevendas.com.br", created_at: new Date().toISOString() };
+  demoRuns = [run, ...demoRuns];
+  return { runs: [run.id] };
 }

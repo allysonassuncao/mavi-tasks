@@ -108,7 +108,7 @@ export function InboxList({
                 <span className="inbox-system" aria-hidden="true">
                   <BookMarked size={15} />
                 </span>
-              ) : n.kind === "agent_report" ? (
+              ) : n.kind === "agent_report" || n.kind === "agent_test" ? (
                 <span className="inbox-system" aria-hidden="true">
                   <Bot size={15} />
                 </span>
@@ -172,6 +172,7 @@ export function InboxList({
                 n.kind === "radar_task_auto" ||
                 n.kind === "memory_week" ||
                 n.kind === "agent_report" ||
+                n.kind === "agent_test" ||
                 n.kind === "media_balance" ||
                 n.kind === "rq_closing" ||
                 n.kind === "campaign_alert" ||

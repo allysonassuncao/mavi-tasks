@@ -220,6 +220,8 @@ export interface AppNotification {
     | "memory_week"
     /** Agentes MAVI: o resumo da semana de um agente (link /agente-conversacional?agente=<id>&aba=insights&de=&ate=). */
     | "agent_report"
+    /** Agentes MAVI: a bateria periódica com leads simulados achou problemas (link /agente-conversacional?agente=<id>&aba=testes&bateria=<id>). */
+    | "agent_test"
     /** Financeiro › Mídia: o saldo de uma conta ficou baixo ou negativo (link /financeiro/midia?contrato=<id>). */
     | "media_balance"
     /** Financeiro › Make Ads RQ: dia 1, os clientes do mês anterior para validar (link /financeiro/make-ads-rq?mes=AAAA-MM). */

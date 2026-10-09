@@ -881,6 +881,133 @@
   overflow: auto;
 }
 
+/* ------------------------------------------------ Custos (AgentCosts.tsx) */
+.cost-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cost-filters > .ui-select {
+  flex: 0 1 220px;
+  width: auto;
+  min-width: 180px;
+}
+.ab-kpis small {
+  font-size: 0.7rem;
+}
+.cost-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 0.72rem;
+  color: #5d6b6a;
+}
+.cost-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.cost-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.cost-days {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 120px;
+}
+.cost-days span {
+  display: flex;
+  flex: 1;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  height: 100%;
+  min-width: 2px;
+}
+.cost-days i {
+  display: block;
+  width: 100%;
+}
+.cost-days i:last-child {
+  border-radius: 3px 3px 0 0;
+}
+.cost-table-wrap {
+  overflow-x: auto;
+}
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.cost-table th,
+.cost-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.cost-table th {
+  color: #5d6b6a;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.cost-table td:first-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.cost-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cost-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.cost-price {
+  width: 96px;
+  padding: 4px 6px;
+  text-align: right;
+}
+.cost-bubble {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.66rem;
+  color: #7a8786;
+  text-align: right;
+  cursor: help;
+}
+
+/* ------------------------------------------------ Leads simulados (AgentTestRuns.tsx) */
+.pt-box {
+  flex-direction: column;
+  align-items: stretch;
+}
+.pt-box > span:first-child {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.pt-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.pt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.78rem;
+}
+.ab-section h3 svg {
+  vertical-align: -2px;
+}
+
 @media (max-width: 640px) {
   .ab-two {
     grid-template-columns: 1fr;

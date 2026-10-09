@@ -917,7 +917,8 @@ export type RecordKind =
   | "radar_item"
   | "mention"
   // Migration 20270523090000: a Customer Success item (cycle, score, client in the month…).
-  | "cs";
+  | "cs"
+  | "agent_cost";
 /**
  * One record: its id, category (k, l: the bar it is in), its part of the
  * value (v: the metric over this record alone), its date (d, the panel's

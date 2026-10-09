@@ -112,6 +112,8 @@ const SOURCE_NOTES: Record<Source, string> = {
   radar:
     "Radar do cliente: itens (assuntos de um cliente num tópico: problemas, promessas…). Pessoa: o responsável pelo item. 'Ocorrências' conta cada vez que o assunto apareceu.",
   due_changes: "Mudanças de prazo das tarefas, com motivo. Pessoa: quem mudou o prazo.",
+  agent_costs:
+    "Agentes MAVI · Custos: o que os agentes de WhatsApp gastam por dia (IA das conversas, mídias, conhecimento, análises, modelos aprovados do WhatsApp oficial, testes). R$ pela PTAX do dia. Agrupe por agent, inbox, cost_group (tipo de gasto), model, client ou time. Só administradores e gestores.",
   cs_finance:
     "Customer Success · Financeiro: os ciclos de cobrança de cada cliente por mês de competência. Faturamento efetivo desconta R$ 3 mil do 1º mês de trial (regra M1); meta e atingimento só por mês e squad. 'Cliente' é o cliente de CS.",
   cs_portfolio:
@@ -538,7 +540,7 @@ export async function handleDashboardBuilder(
     const leader = me[0].role === "admin" || me[0].role === "manager";
     // Dashboards de colaboradores ficam nos clientes deles: sem o Mural.
     // Colaboradores: sem o Mural nem as fontes de Customer Success.
-    const allowed = (Object.keys(sources) as Source[]).filter((k) => leader || (k !== "notices" && !isCsSource(k)));
+    const allowed = (Object.keys(sources) as Source[]).filter((k) => leader || (k !== "notices" && k !== "agent_costs" && !isCsSource(k)));
     const [limits, route, tz] = await Promise.all([
       callRpc<{ blocked: boolean; message: string | null }>(env, deps.fetch, authorization, "ai_check_limits", {
         p_company: company,

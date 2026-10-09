@@ -16,6 +16,8 @@ export type Source =
   | "temperature"
   | "radar"
   | "due_changes"
+  // Migration 20270706090000: Agentes MAVI › Custos (só administradores e gestores).
+  | "agent_costs"
   // Migration 20270523090000: Customer Success (computed by src/cs-sources.ts).
   | "cs_finance"
   | "cs_portfolio"
@@ -48,7 +50,12 @@ export type GroupBy =
   | "cs_adimplencia"
   | "cs_reason"
   | "cs_band"
-  | "cs_phase";
+  | "cs_phase"
+  // Agentes MAVI › Custos.
+  | "agent"
+  | "inbox"
+  | "cost_group"
+  | "model";
 export type Interval = "auto" | "day" | "week" | "month";
 /** "money" (R$) is only drawn by Campanhas' charts, not a dashboard metric. */
 export type Unit = "number" | "hours" | "days" | "percent" | "money";
@@ -650,6 +657,23 @@ export const sources: Record<
     dateFields: [{ key: "created_at", label: "Data da mudança" }],
     filters: ["priority", "client", "product", "project", "team", "person", "creator"],
   },
+  // Migration 20270706090000: what the Agentes MAVI spend (copied hourly from
+  // the engine): one row per day × agent × inbox × type × model. R$ by the
+  // day's PTAX. Only admins and managers.
+  agent_costs: {
+    label: "Agentes MAVI · Custos",
+    metrics: [
+      { key: "cost_brl", label: "Custo total (R$, PTAX do dia)", unit: "money", additive: true },
+      { key: "ai_brl", label: "Custo de IA (R$)", unit: "money", additive: true },
+      { key: "whatsapp_brl", label: "Custo do WhatsApp oficial (R$)", unit: "money", additive: true },
+      { key: "cost_usd", label: "Custo total (US$)", unit: "number", additive: true },
+      { key: "events", label: "Gastos registrados", unit: "number", additive: true },
+      { key: "tokens", label: "Tokens (entrada + saída)", unit: "number", additive: true },
+      { key: "agents", label: "Agentes com gasto", unit: "number", additive: false },
+    ],
+    dateFields: [{ key: "day", label: "Dia" }],
+    filters: ["client", "product", "team", "person"],
+  },
   // Customer Success (migration 20270523090000): the CS Make panel's engine
   // (src/cs-engine.ts) computes these on the screen, by month. "Cliente" is
   // the CS client; the dashboard's client filter uses its MAVI client.
@@ -755,6 +779,7 @@ export const groupOptions: {
       "radar",
       "due_changes",
       ...CS_SOURCES,
+      "agent_costs",
     ],
   },
   {
@@ -771,6 +796,7 @@ export const groupOptions: {
       "radar",
       "due_changes",
       ...CS_SOURCES,
+      "agent_costs",
     ],
   },
   {
@@ -786,6 +812,7 @@ export const groupOptions: {
       "radar",
       "due_changes",
       ...CS_SOURCES,
+      "agent_costs",
     ],
   },
   {
@@ -800,6 +827,7 @@ export const groupOptions: {
       "temperature",
       "radar",
       "due_changes",
+      "agent_costs",
     ],
   },
   {
@@ -819,6 +847,7 @@ export const groupOptions: {
       "temperature",
       "radar",
       "due_changes",
+      "agent_costs",
     ],
   },
   {
@@ -879,6 +908,11 @@ export const groupOptions: {
   { key: "cs_reason", label: "Motivo do churn", sources: ["cs_portfolio"] },
   { key: "cs_band", label: "Faixa do Health Score", sources: ["cs_health"] },
   { key: "cs_phase", label: "Mês do trial (M1, M2, M3, M4+)", sources: ["cs_trial"] },
+  // Agentes MAVI › Custos (migration 20270706090000).
+  { key: "agent", label: "Agente MAVI", sources: ["agent_costs"] },
+  { key: "inbox", label: "Caixa de entrada", sources: ["agent_costs"] },
+  { key: "cost_group", label: "Tipo de gasto", sources: ["agent_costs"] },
+  { key: "model", label: "Modelo de IA", sources: ["agent_costs"] },
 ];
 /** Groupings every query of the panel supports. */
 export const groupsFor = (queries: Pick<Query, "source">[]) =>

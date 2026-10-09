@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot } from "lucide-react";
 import { Button, Checkbox, Loading, Select, SelectOption } from "./ui";
 import { agentModels, errorOf, priceText, setAgentModels, when, type AgentModels } from "./agent-builder";
+import { WabaPricesSection } from "./AgentCosts";
+import { TestLimitsSection } from "./AgentTestRuns";
 import "./agent-builder.css";
 
 /**
@@ -157,6 +159,8 @@ export function AgentModelsPanel({ company, notify }: { company: string; notify:
           </Button>
         </div>
       )}
+      <TestLimitsSection company={company} notify={notify} />
+      <WabaPricesSection company={company} notify={notify} />
     </div>
   );
 }
