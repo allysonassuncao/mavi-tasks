@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Eraser, RotateCcw, Send, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, Eraser, RotateCcw, Search, Send, TriangleAlert } from "lucide-react";
 import { Modal } from "./components";
-import { ResetMemoryModal } from "./AgentConversationModal";
-import { Button, Checkbox, Loading, Select, SelectOption, Textarea } from "./ui";
+import { ConversationInsightModal, ResetMemoryModal } from "./AgentConversationModal";
+import { Button, Checkbox, Input, Loading, Select, SelectOption, Textarea } from "./ui";
+import { ActionDiagnosis } from "./AgentActionDiagnosis";
 import {
+  ACTION_LABEL,
+  OUTCOME_INFO,
   agentOp,
   errorOf,
   usd,
   when,
-  type AgentConversation,
+  type AgentLead,
   type ChatMessage,
   type SimulateResult,
   type TurnTrace,
@@ -25,12 +28,7 @@ type Bubble =
   | { role: "user"; text: string }
   | { role: "assistant"; texts: string[]; trace: TurnTrace | null; handoff?: string; silent?: string; error?: string };
 
-const TOOL_LABEL: Record<string, string> = {
-  responder: "Respondeu",
-  buscar_conhecimento: "Pesquisou na base",
-  registrar_dados_do_contato: "Guardou dados do contato",
-  transferir_para_humano: "Passou para a equipe",
-};
+const TOOL_LABEL = ACTION_LABEL;
 const KIND: Record<string, string> = {
   faq: "pergunta",
   product: "produto",
@@ -91,7 +89,17 @@ export function TraceDetails({ trace }: { trace: TurnTrace }) {
                     .map((t, i) => (
                       <li key={i}>
                         {TOOL_LABEL[t.name] ?? t.name}
-                        {t.args ? `: ${JSON.stringify(t.args)}` : ""}
+                        {t.debug ? (
+                          <>
+                            {" "}
+                            <span className={`ab-badge ${OUTCOME_INFO[t.debug.outcome]?.tone ?? ""}`}>{OUTCOME_INFO[t.debug.outcome]?.label}</span> {t.debug.summary}
+                            <ActionDiagnosis debug={t.debug} />
+                          </>
+                        ) : t.args ? (
+                          `: ${JSON.stringify(t.args)}`
+                        ) : (
+                          ""
+                        )}
                       </li>
                     ))}
                 </ul>
@@ -277,27 +285,50 @@ export function ConversationsPanel({
   notify?: (m: string) => void;
 }) {
   const [resetting, setResetting] = useState(false);
-  const [turns, setTurns] = useState<TurnTrace[] | null>(null);
+  const [leads, setLeads] = useState<AgentLead[] | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
+  const [next, setNext] = useState<string | null>(null);
+  const [more, setMore] = useState(false);
   const [usage, setUsage] = useState<UsageDay[] | null>(null);
   const [error, setError] = useState("");
-  const [open, setOpen] = useState<TurnTrace | null>(null);
+  const [open, setOpen] = useState<AgentLead | null>(null);
+  const [trace, setTrace] = useState<string | null>(null);
   const [onlyErrors, setOnlyErrors] = useState(false);
+  const [term, setTerm] = useState("");
+  const [search, setSearch] = useState("");
+  // Busca enquanto digita, sem uma consulta por letra.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(term.trim()), 350);
+    return () => clearTimeout(t);
+  }, [term]);
+  const filters = { limit: 50, q: search || undefined, errors: onlyErrors || undefined };
   const load = useCallback(() => {
-    Promise.all([
-      agentOp<{ turns: TurnTrace[] }>(company, agentId, "turns", { simulation: "false", limit: 100, status: onlyErrors ? "error" : undefined }),
-      agentOp<{ usage: UsageDay[] }>(company, agentId, "usage"),
-    ])
-      .then(([t, u]) => {
-        setTurns(t.turns);
+    Promise.all([agentOp<LeadPage>(company, agentId, "leads", filters), agentOp<{ usage: UsageDay[] }>(company, agentId, "usage")])
+      .then(([l, u]) => {
+        setLeads(l.leads);
+        setNext(l.next);
+        setTotal(l.total);
         setUsage(u.usage);
         setError("");
       })
       .catch((e) => setError(errorOf(e)));
-  }, [company, agentId, onlyErrors]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company, agentId, onlyErrors, search]);
   useEffect(load, [load]);
+  const loadMore = () => {
+    if (!next) return;
+    setMore(true);
+    agentOp<LeadPage>(company, agentId, "leads", { ...filters, before: next })
+      .then((l) => {
+        setLeads((cur) => [...(cur ?? []), ...l.leads.filter((x) => !(cur ?? []).some((y) => y.lead_key === x.lead_key))]);
+        setNext(l.next);
+      })
+      .catch((e) => setError(errorOf(e)))
+      .finally(() => setMore(false));
+  };
 
   const live = (usage ?? []).filter((u) => !u.simulation);
-  const total = live.reduce(
+  const sum = live.reduce(
     (s, u) => ({ turns: s.turns + u.turns, errors: s.errors + u.errors, cost: s.cost + Number(u.cost_usd) }),
     { turns: 0, errors: 0, cost: 0 },
   );
@@ -309,20 +340,24 @@ export function ConversationsPanel({
       {usage && (
         <div className="ab-kpis">
           <div>
+            <span className="muted">Leads</span>
+            <strong>{total == null ? "—" : total.toLocaleString("pt-BR")}</strong>
+          </div>
+          <div>
             <span className="muted">Respostas (30 dias)</span>
-            <strong>{total.turns.toLocaleString("pt-BR")}</strong>
+            <strong>{sum.turns.toLocaleString("pt-BR")}</strong>
           </div>
           <div>
             <span className="muted">Custo (30 dias)</span>
-            <strong>{usd(total.cost)}</strong>
+            <strong>{usd(sum.cost)}</strong>
           </div>
           <div>
             <span className="muted">Custo por resposta</span>
-            <strong>{total.turns ? usd(total.cost / total.turns) : "—"}</strong>
+            <strong>{sum.turns ? usd(sum.cost / sum.turns) : "—"}</strong>
           </div>
           <div>
             <span className="muted">Erros</span>
-            <strong>{total.errors}</strong>
+            <strong>{sum.errors}</strong>
           </div>
           <div>
             <span className="muted">Testes (30 dias)</span>
@@ -331,9 +366,12 @@ export function ConversationsPanel({
         </div>
       )}
       <div className="ab-toolbar">
+        <span className="ab-lead-search">
+          <Input icon={Search} value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Buscar por nome ou telefone" aria-label="Buscar lead" />
+        </span>
         <span className="ab-check compact">
           <Checkbox id="ab-only-errors" checked={onlyErrors} onCheckedChange={(c) => setOnlyErrors(c === true)} />
-          <label htmlFor="ab-only-errors">Só as com erro</label>
+          <label htmlFor="ab-only-errors">Só com erro</label>
         </span>
         <span className="ab-toolbar-right">
           {canEdit && (
@@ -347,102 +385,78 @@ export function ConversationsPanel({
         </span>
       </div>
       {resetting && <ResetMemoryModal company={company} agentId={agentId} notify={notify} onClose={() => setResetting(false)} />}
-      {!turns && !error && <Loading variant="table" />}
-      {turns && !turns.length && <p className="muted">Nenhuma resposta no WhatsApp ainda.</p>}
+      {!leads && !error && <Loading variant="table" />}
+      {leads && !leads.length && <p className="muted">{search || onlyErrors ? "Nenhum lead com esse filtro." : "Nenhuma conversa no WhatsApp ainda."}</p>}
       <ul className="ab-list">
-        {(turns ?? []).map((t) => (
-          <li key={t.id} className="ab-row">
-            <button type="button" className="ab-row-main ab-row-button" onClick={() => setOpen(t)}>
+        {(leads ?? []).map((l) => (
+          <li key={l.lead_key} className="ab-row">
+            <button type="button" className="ab-row-main ab-row-button" onClick={() => setOpen(l)}>
               <span className="ab-row-title">
-                <strong>{t.contact_name || t.phone || "Contato"}</strong>
+                <strong>{l.contact_name || l.phone || "Contato"}</strong>
                 <span className="muted">
-                  {when(t.created_at)} · v{t.agent_version ?? "?"} · {usd(t.cost_usd)} · {seconds(t.timings?.total)}
+                  {l.contact_name && l.phone ? `${l.phone} · ` : ""}
+                  {when(l.last_at)} · {l.messages} mensage{l.messages === 1 ? "m" : "ns"} · {usd(l.cost_usd)}
+                  {l.conversations.length > 1 ? ` · ${l.conversations.length} conversas` : ""}
                 </span>
               </span>
               <span className="muted ab-clamp">
-                {t.status === "error" ? `Erro: ${t.error}` : (t.messages ?? []).map((m) => m.text).join(" · ") || "(sem resposta)"}
+                {l.last_content ? `${l.last_role === "assistant" ? "Agente: " : ""}${l.last_content}` : "(sem mensagens guardadas)"}
               </span>
             </button>
-            <span
-              className={`ab-badge ${t.status === "done" ? "on" : t.status === "error" ? "danger" : ""}`}
-              title={
-                t.superseded
-                  ? "O lead mandou outra mensagem antes do envio: esta resposta foi descartada e a seguinte respondeu tudo junto."
-                  : t.interrupted
-                    ? "O lead escreveu no meio do envio: o agente parou de mandar o resto e respondeu à mensagem nova."
-                    : undefined
-              }
-            >
-              {t.superseded
-                ? "Refeita"
-                : t.status === "done"
-                  ? t.interrupted
-                    ? "Interrompida"
-                    : "Respondeu"
-                  : t.status === "silent"
-                    ? "Silêncio"
-                    : t.status === "error"
-                      ? "Erro"
-                      : "Ignorada"}
-            </span>
+            {l.errors > 0 ? (
+              <span className="ab-badge danger">{l.errors === 1 ? "1 erro" : `${l.errors} erros`}</span>
+            ) : l.last_role === "user" ? (
+              <span className="ab-badge" title="A última mensagem é do lead">Aguardando</span>
+            ) : (
+              <span className="ab-badge on">{l.replies === 1 ? "1 resposta" : `${l.replies} respostas`}</span>
+            )}
           </li>
         ))}
       </ul>
-      {open && <TurnModal company={company} agentId={agentId} turn={open} onClose={() => setOpen(null)} />}
+      {next && (
+        <div className="ab-toolbar">
+          <Button type="button" className="btn secondary" onClick={loadMore} disabled={more}>
+            {more ? "Carregando…" : "Carregar mais"}
+          </Button>
+        </div>
+      )}
+      {open && (
+        <ConversationInsightModal
+          company={company}
+          agentId={agentId}
+          conversationId={open.conversations[0]!.id}
+          conversations={open.conversations}
+          canReset={canEdit}
+          notify={notify}
+          onTrace={setTrace}
+          onClose={() => {
+            setOpen(null);
+            load();
+          }}
+        />
+      )}
+      {trace && <TraceModal company={company} agentId={agentId} turnId={trace} onClose={() => setTrace(null)} />}
     </div>
   );
 }
 
-function TurnModal({ company, agentId, turn, onClose }: { company: string; agentId: string; turn: TurnTrace; onClose: () => void }) {
-  const [data, setData] = useState<{ turn: TurnTrace & { conversation_id: string }; messages: ChatMessage[] } | null>(null);
-  const [conv, setConv] = useState<AgentConversation | null>(null);
+type LeadPage = { leads: AgentLead[]; next: string | null; total: number | null };
+
+/** O que aconteceu por dentro numa resposta do agente (ferramentas, trechos, modelo, custo, tempo). */
+function TraceModal({ company, agentId, turnId, onClose }: { company: string; agentId: string; turnId: string; onClose: () => void }) {
+  const [turn, setTurn] = useState<TurnTrace | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    agentOp<{ turn: TurnTrace & { conversation_id: string }; messages: ChatMessage[] }>(company, agentId, "turn", { turn: turn.id })
-      .then(async (r) => {
-        setData(r);
-        const c = await agentOp<{ conversations: AgentConversation[] }>(company, agentId, "conversations", { limit: 200 });
-        setConv(c.conversations.find((x) => x.id === r.turn.conversation_id) ?? null);
-      })
+    agentOp<{ turn: TurnTrace }>(company, agentId, "turn", { turn: turnId })
+      .then((r) => setTurn(r.turn))
       .catch((e) => setError(errorOf(e)));
-  }, [company, agentId, turn.id]);
+  }, [company, agentId, turnId]);
   return (
-    <Modal title={`Resposta de ${when(turn.created_at)}`} onClose={onClose} wide>
+    <Modal title={turn ? `Resposta de ${when(turn.created_at)}` : "Resposta"} onClose={onClose} wide>
       <div className="ab-stack">
         {error && <p className="form-error" role="alert">{error}</p>}
-        {!data && !error && <Loading variant="list" />}
-        {data && (
-          <>
-            <div className="ab-chat static">
-              {data.messages.map((m) => (
-                <div key={m.id} className={`ab-bubble ${m.role === "user" ? "user" : m.role === "assistant" ? "agent" : "note"}`}>
-                  {m.content}
-                </div>
-              ))}
-            </div>
-            <TraceDetails trace={data.turn} />
-            {conv && (Object.keys(conv.facts).length > 0 || conv.summary) && (
-              <dl className="ab-trace-body">
-                {Object.keys(conv.facts).length > 0 && (
-                  <>
-                    <dt>Dados do contato</dt>
-                    <dd>
-                      {Object.entries(conv.facts)
-                        .map(([k, v]) => `${k}: ${v}`)
-                        .join(" · ")}
-                    </dd>
-                  </>
-                )}
-                {conv.summary && (
-                  <>
-                    <dt>Resumo da conversa</dt>
-                    <dd className="ab-pre">{conv.summary}</dd>
-                  </>
-                )}
-              </dl>
-            )}
-          </>
-        )}
+        {!turn && !error && <Loading variant="list" />}
+        {turn && <TraceDetails trace={turn} />}
       </div>
     </Modal>
   );

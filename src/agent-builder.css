@@ -413,6 +413,10 @@
   flex-direction: column;
   gap: 8px;
 }
+.ab-lead-search {
+  flex: 1 1 240px;
+  max-width: 360px;
+}
 .ab-search-row {
   display: flex;
   gap: 8px;
@@ -490,6 +494,11 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   box-shadow: 0 1px 0.5px rgb(0 0 0 / 0.12);
+}
+.ab-bubble-trace {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.72rem;
 }
 .ab-bubble.user {
   align-self: flex-end;
@@ -1651,4 +1660,93 @@ body.ab-assistant-open .ai-fab {
   display: inline-block;
   width: 190px;
   max-width: 100%;
+}
+
+/* ------------------------------------------------ registro técnico */
+.ab-log-row + .ab-log-row {
+  border-top: 1px solid var(--border);
+}
+.ab-log-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+.ab-log-head:hover {
+  background: #f6f9f8;
+}
+.ab-log-when {
+  color: var(--muted, #6b7877);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+.ab-log-tool {
+  font-weight: 600;
+}
+.ab-log-summary {
+  flex: 1 1 260px;
+  min-width: 0;
+  color: #4d5b5a;
+}
+.ab-log-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px 33px;
+  font-size: 0.8rem;
+}
+.ab-log-row.is-error .ab-log-head {
+  box-shadow: inset 3px 0 0 #e6a3a3;
+}
+.ab-log-row.is-empty .ab-log-head {
+  box-shadow: inset 3px 0 0 #ecd193;
+}
+.ab-diagnosis ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.ab-diagnosis li {
+  margin: 2px 0;
+}
+.ab-diagnosis-hint {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #f3f8ec;
+  color: #3f5a20;
+  font-size: 0.78rem;
+}
+.ab-diagnosis-hint svg {
+  flex: none;
+  margin-top: 2px;
+}
+.ab-patterns ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.ab-patterns li + li {
+  margin-top: 6px;
+}
+.ab-filter {
+  min-width: 170px;
+}
+@media (max-width: 640px) {
+  .ab-log-body {
+    padding-left: 12px;
+  }
+  .ab-filter {
+    flex: 1 1 100%;
+  }
 }

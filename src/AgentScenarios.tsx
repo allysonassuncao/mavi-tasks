@@ -14,10 +14,12 @@ import {
   Check,
   Choice,
   DEFAULT_ASSIGNEE,
+  RepeatPicker,
   Row,
   type ActivityAssignee,
   type CrmUser,
   type Pipeline,
+  type Repeat,
 } from "./AgentIntegrations";
 
 /**
@@ -41,6 +43,7 @@ type Scenario = {
   when: string;
   reply: "agent" | "fixed" | "none";
   message: string;
+  repeat?: Repeat;
   actions: {
     turn_off_ai: boolean;
     stop_followup: boolean;
@@ -522,6 +525,16 @@ function ScenarioEditor({
               hasNotify
                 ? undefined
                 : 'Precisa da integração "Avisar a equipe no WhatsApp" (aba Integrações).'
+            }
+          />
+          <RepeatPicker
+            value={s.repeat}
+            onChange={(v) => onChange({ ...s, repeat: v })}
+            label="Acionar de novo na mesma conversa"
+            hint={
+              (s.repeat?.mode ?? "window") === "always"
+                ? "As ações se repetem toda vez que o lead se encaixar."
+                : "Se o lead repetir, a resposta segue o combinado, mas as ações não se repetem dentro do intervalo."
             }
           />
           <p className="ab-hint">

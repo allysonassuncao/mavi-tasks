@@ -15,7 +15,7 @@ type Step = {
   after_minutes: number;
   mode: "ai" | "fixed";
   text: string;
-  template: { template_id: string; params: string[] } | null;
+  template: StepTemplate | null;
 };
 type Followup = {
   enabled?: boolean;
@@ -24,7 +24,8 @@ type Followup = {
   skip_if_meeting?: boolean;
   on_finish?: { move: { pipeline_id: string; stage_id: string } | null; notify: string | null; turn_off_ai: boolean };
 };
-type Template = { template_id: string; name: string; category: string | null; language: string; text: string; params: number; examples: string[] };
+export type StepTemplate = { template_id: string; params: string[] };
+export type Template = { template_id: string; name: string; category: string | null; language: string; text: string; params: number; examples: string[] };
 type Pipeline = { id: string; name: string; stages: { id: string; name: string }[] };
 
 const DELAYS: [number, string][] = [
@@ -83,6 +84,78 @@ function Row({ label, hint, children, wide }: { label: string; hint?: ReactNode;
       <span className="ab-label">{label}</span>
       {children}
       {hint && <small className="ab-hint">{hint}</small>}
+    </div>
+  );
+}
+
+/** O modelo aprovado de uma etapa (WhatsApp oficial com a janela de 24h fechada) e as variáveis dele. */
+export function StepTemplatePicker({
+  templates,
+  error,
+  value,
+  onChange,
+}: {
+  templates: Template[] | null;
+  error: string;
+  value: StepTemplate | null;
+  onChange: (v: StepTemplate | null) => void;
+}) {
+  const tpl = templates?.find((t) => t.template_id === value?.template_id);
+  return (
+    <div className="ab-step-template">
+      <Row
+        label="WhatsApp oficial com a janela de 24h fechada"
+        hint={
+          value
+            ? "Nas caixas da API oficial, depois de 24h sem o lead falar, vai este modelo aprovado no lugar da mensagem."
+            : "Sem modelo, esta etapa é pulada nas caixas da API oficial quando a janela de 24h estiver fechada (nas de QR Code vai normal)."
+        }
+        wide
+      >
+        {!templates && !error ? (
+          <Loading variant="inline" />
+        ) : (
+          <Select
+            value={value?.template_id ?? ""}
+            aria-label="Modelo aprovado"
+            onValueChange={(v) => {
+              const t = templates?.find((x) => x.template_id === v);
+              onChange(t ? { template_id: t.template_id, params: t.examples.length ? t.examples.map((_, k) => (k === 0 ? "{primeiro_nome}" : "")) : Array.from({ length: t.params }, () => "") } : null);
+            }}
+          >
+            <SelectOption value="">Pular a etapa</SelectOption>
+            {(templates ?? []).map((t) => (
+              <SelectOption key={t.template_id} value={t.template_id}>
+                {`${t.name}${t.category ? ` · ${t.category.toLowerCase()}` : ""}`}
+              </SelectOption>
+            ))}
+          </Select>
+        )}
+      </Row>
+      {tpl && (
+        <div className="ab-template-preview">
+          <FileText size={14} aria-hidden="true" />
+          <span>{tpl.text || "(modelo sem texto)"}</span>
+        </div>
+      )}
+      {tpl && value && tpl.params > 0 && (
+        <div className="ab-grid">
+          {Array.from({ length: tpl.params }, (_, k) => (
+            <Row key={k} label={`Variável {{${k + 1}}}`} hint={tpl.examples[k] ? `Exemplo aprovado: ${tpl.examples[k]}` : undefined}>
+              <Input
+                value={value.params[k] ?? ""}
+                maxLength={500}
+                placeholder="{primeiro_nome}"
+                onChange={(e) => {
+                  const params = [...value.params];
+                  params[k] = e.target.value;
+                  onChange({ ...value, params });
+                }}
+              />
+            </Row>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -172,7 +245,6 @@ export function FollowupPanel({
 
         <ol className="ab-steps">
           {fu.steps.map((s, i) => {
-            const tpl = templates?.find((t) => t.template_id === s.template?.template_id);
             return (
               <li key={s.id} className="ab-step">
                 <div className="ab-step-head">
@@ -227,61 +299,7 @@ export function FollowupPanel({
                     onChange={(e) => setStep(i, { text: e.target.value })}
                   />
                 </Row>
-                <div className="ab-step-template">
-                  <Row
-                    label="WhatsApp oficial com a janela de 24h fechada"
-                    hint={
-                      s.template
-                        ? "Nas caixas da API oficial, depois de 24h sem o lead falar, vai este modelo aprovado no lugar da mensagem."
-                        : "Sem modelo, esta etapa é pulada nas caixas da API oficial quando a janela de 24h estiver fechada (nas de QR Code vai normal)."
-                    }
-                    wide
-                  >
-                    {!templates && !error ? (
-                      <Loading variant="inline" />
-                    ) : (
-                      <Select
-                        value={s.template?.template_id ?? ""}
-                        aria-label="Modelo aprovado"
-                        onValueChange={(v) => {
-                          const t = templates?.find((x) => x.template_id === v);
-                          setStep(i, { template: t ? { template_id: t.template_id, params: t.examples.length ? t.examples.map((_, k) => (k === 0 ? "{primeiro_nome}" : "")) : Array.from({ length: t.params }, () => "") } : null });
-                        }}
-                      >
-                        <SelectOption value="">Pular a etapa</SelectOption>
-                        {(templates ?? []).map((t) => (
-                          <SelectOption key={t.template_id} value={t.template_id}>
-                            {`${t.name}${t.category ? ` · ${t.category.toLowerCase()}` : ""}`}
-                          </SelectOption>
-                        ))}
-                      </Select>
-                    )}
-                  </Row>
-                  {tpl && (
-                    <div className="ab-template-preview">
-                      <FileText size={14} aria-hidden="true" />
-                      <span>{tpl.text || "(modelo sem texto)"}</span>
-                    </div>
-                  )}
-                  {tpl && s.template && tpl.params > 0 && (
-                    <div className="ab-grid">
-                      {Array.from({ length: tpl.params }, (_, k) => (
-                        <Row key={k} label={`Variável {{${k + 1}}}`} hint={tpl.examples[k] ? `Exemplo aprovado: ${tpl.examples[k]}` : undefined}>
-                          <Input
-                            value={s.template!.params[k] ?? ""}
-                            maxLength={500}
-                            placeholder="{primeiro_nome}"
-                            onChange={(e) => {
-                              const params = [...s.template!.params];
-                              params[k] = e.target.value;
-                              setStep(i, { template: { ...s.template!, params } });
-                            }}
-                          />
-                        </Row>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <StepTemplatePicker templates={templates} error={error} value={s.template} onChange={(template) => setStep(i, { template })} />
                 {i < fu.steps.length - 1 && <ArrowDown size={16} className="ab-step-arrow" aria-hidden="true" />}
               </li>
             );

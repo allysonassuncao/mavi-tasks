@@ -297,6 +297,33 @@ export async function demoOp(agentId: string, op: string, extra: Record<string, 
           })),
       };
     }
+    case "leads": {
+      const q = String(extra.q ?? "").toLowerCase();
+      const digits = q.replace(/\D/g, "");
+      const list = demoConversations
+        .filter((c) => !q || (c.contact_name ?? "").toLowerCase().includes(q) || (digits && (c.phone ?? "").includes(digits)))
+        .map((c, i) => ({
+          lead_key: c.phone ?? c.conversation_id,
+          last_at: c.activity_at,
+          first_at: c.activity_at,
+          conversations:
+            i === 0
+              ? [
+                  { id: c.conversation_id, created_at: c.activity_at, last_at: c.activity_at },
+                  { id: demoConversations[1]?.conversation_id ?? c.conversation_id, created_at: c.activity_at, last_at: c.activity_at },
+                ]
+              : [{ id: c.conversation_id, created_at: c.activity_at, last_at: c.activity_at }],
+          contact_name: c.contact_name,
+          phone: c.phone,
+          last_role: i % 2 ? "user" : "assistant",
+          last_content: i % 2 ? "Mas aceita boleto ou não?" : "Oi! Eu sou a Clara, da Make Vendas 😊 Me conta um pouco do seu negócio?",
+          messages: demoReset.has(c.conversation_id) ? 0 : 3 + i,
+          replies: 1 + i,
+          errors: i === 2 ? 1 : 0,
+          cost_usd: 0.0021 * (i + 1),
+        }));
+      return { leads: extra.errors ? list.filter((l) => l.errors) : list, next: null, total: list.length };
+    }
     case "integration-failures":
       return {
         days: 7,
@@ -304,6 +331,84 @@ export async function demoOp(agentId: string, op: string, extra: Record<string, 
           last_message: "O aplicativo Google do motor (GOOGLE_OAUTH_CLIENT_ID) não é o mesmo que conectou esta agenda no MakeCRM: use o mesmo cliente OAuth do MakeCRM no motor." }],
         recent: [],
       };
+    case "action-log": {
+      const conv = demoConversations[0]!;
+      const base = { conversation_id: conv.conversation_id, contact_name: conv.contact_name, phone: conv.phone, ms: 640 };
+      const entries = [
+        {
+          ...base,
+          turn_id: "t9",
+          ord: 2,
+          created_at: now(),
+          tool: "agenda_horarios_livres",
+          args: { a_partir_de: "2026-10-13", periodo: "qualquer" },
+          result: "Só consigo marcar até 3 dias à frente. Ofereça uma data mais próxima.",
+          debug: {
+            outcome: "empty",
+            code: "calendar_limit",
+            summary: "O lead pediu a partir de ter 13/10, depois do limite de 3 dias à frente (último dia: seg 12/10).",
+            hint: 'Aumente "Marca até … dias à frente" na integração Google Agenda (hoje: 3 dias).',
+          },
+        },
+        {
+          ...base,
+          turn_id: "t9",
+          ord: 1,
+          created_at: now(),
+          tool: "agenda_horarios_livres",
+          args: { a_partir_de: "2026-10-09", periodo: "qualquer" },
+          result: "Não há horários livres no período. Ofereça outro dia ou diga que a equipe vai retornar.",
+          debug: {
+            outcome: "empty",
+            code: "calendar_full",
+            summary: "Nenhum horário livre no período buscado.",
+            details: [
+              "Buscou de sex 09/10 a seg 12/10; limite de 3 dias à frente.",
+              "Agenda de Allyson Assunção: sex 09/10 sem tempo hábil (antecedência mínima de 60 min) · sáb 10/10 fora dos horários permitidos · dom 11/10 fora dos horários permitidos · seg 12/10 ocupada 09:00–18:00.",
+            ],
+            hint: 'A agenda está cheia no período: libere horários na agenda do anfitrião ou inclua mais anfitriões. Aumente "Marca até … dias à frente" na integração Google Agenda (hoje: 3 dias).',
+          },
+        },
+        {
+          ...base,
+          turn_id: "t8",
+          ord: 1,
+          created_at: ago(30),
+          tool: "avisar_equipe",
+          args: { mensagem: "Lead quente: quer automatizar 300 conversas/mês" },
+          result: "Já foi feito nesta conversa e não se repete agora.",
+          debug: { outcome: "blocked", code: "repeat_blocked", summary: "O aviso à equipe sobre este lead: já feito nesta conversa; não repetiu (liberado de novo em 09/10, 18:01).", hint: "Configurado para no máximo uma vez a cada 60 min." },
+        },
+        {
+          ...base,
+          turn_id: "t7",
+          ord: 1,
+          created_at: ago(90),
+          tool: "agenda_marcar",
+          args: { horario: "H1", email: "lead@exemplo.com" },
+          result: "Reunião marcada para sexta-feira, 09/10 às 17:30.",
+          debug: { outcome: "ok", summary: "Reunião marcada para sexta-feira, 09/10 às 17:30." },
+        },
+      ].filter((e) => (!extra.outcome || e.debug.outcome === extra.outcome) && (!Array.isArray(extra.tools) || (extra.tools as string[]).includes(e.tool)));
+      return {
+        days: Number(extra.days ?? 7),
+        entries,
+        next: null,
+        patterns: extra.conversation
+          ? []
+          : [
+              {
+                code: "calendar_full",
+                tool: "agenda_horarios_livres",
+                n: 5,
+                leads: 3,
+                last_at: now(),
+                summary: "Nenhum horário livre no período buscado.",
+                hint: 'A agenda está cheia no período: libere horários na agenda do anfitrião ou inclua mais anfitriões. Aumente "Marca até … dias à frente" na integração Google Agenda (hoje: 3 dias).',
+              },
+            ],
+      };
+    }
     case "crm-deal-catalog":
       return {
         lost_reasons: [

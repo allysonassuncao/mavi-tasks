@@ -392,6 +392,20 @@ const OPS: Record<string, Op> = {
     write: false,
     run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/conversations${qs({ limit: body.limit, q: typeof body.q === "string" ? body.q.slice(0, 80) : undefined })}`),
   },
+  /** Os leads (um por telefone), com a última mensagem; página por "before". */
+  leads: {
+    write: false,
+    run: ({ a, body, call }) =>
+      call(
+        "GET",
+        `/v1/agents/${a.id}/leads${qs({
+          limit: body.limit,
+          before: typeof body.before === "string" ? body.before.slice(0, 40) : undefined,
+          q: typeof body.q === "string" ? body.q.slice(0, 80) : undefined,
+          errors: body.errors === true ? "true" : undefined,
+        })}`,
+      ),
+  },
   /** Zera a memória do agente numa conversa (mensagens, resumo, dados do contato); rastros e custos ficam. */
   "conversation-reset": {
     write: true,
@@ -416,6 +430,22 @@ const OPS: Record<string, Op> = {
   "integration-failures": {
     write: false,
     run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/integration-failures${qs({ days: body.days })}`),
+  },
+  /** Registro técnico: cada ação do agente com o diagnóstico; "patterns" = o que se repetiu em 7 dias. */
+  "action-log": {
+    write: false,
+    run: ({ a, body, call }) =>
+      call(
+        "GET",
+        `/v1/agents/${a.id}/action-log${qs({
+          days: body.days,
+          limit: body.limit,
+          before: typeof body.before === "string" ? body.before.slice(0, 40) : undefined,
+          tools: Array.isArray(body.tools) ? body.tools.map(String).filter((t) => /^[a-z_]{2,40}$/.test(t)).slice(0, 20).join(",") : undefined,
+          outcome: typeof body.outcome === "string" ? body.outcome.slice(0, 12) : undefined,
+          conversation: typeof body.conversation === "string" ? uuid(body.conversation, "a conversa") : undefined,
+        })}`,
+      ),
   },
   "scenario-runs": {
     write: false,

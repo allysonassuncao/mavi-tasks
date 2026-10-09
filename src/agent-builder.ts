@@ -102,7 +102,7 @@ export type TurnTrace = {
   tokens_cached: number;
   cost_usd: string | number;
   timings: Record<string, number>;
-  tools: { name: string; args?: unknown; result: string; ms: number }[];
+  tools: { name: string; args?: unknown; result: string; ms: number; debug?: ActionDebug }[];
   retrieved: { ref: string; kind: string; title: string; score: number; via: string }[];
   output: { messages: ReplyMessage[]; silent_reason: string | null; handoff: string | null } | null;
   /** O lead escreveu antes do envio: descartada e refeita junto com a nova. */
@@ -147,6 +147,21 @@ export type UsageDay = {
   tokens_in: string | number;
   tokens_out: string | number;
   tokens_cached: string | number;
+  cost_usd: string | number;
+};
+/** Um lead do agente (um por telefone), com as conversas dele (uma por caixa). */
+export type AgentLead = {
+  lead_key: string;
+  last_at: string;
+  first_at: string;
+  conversations: { id: string; created_at: string; last_at: string }[];
+  contact_name: string | null;
+  phone: string | null;
+  last_role: "user" | "assistant" | null;
+  last_content: string | null;
+  messages: number;
+  replies: number;
+  errors: number;
   cost_usd: string | number;
 };
 export type AgentConversation = {
@@ -730,7 +745,7 @@ export const wabaPrices = (company: string, prices?: WabaPrice[]) =>
 
 export const COST_SOURCE_LABEL: Record<string, string> = {
   reply: "Respostas da IA",
-  followup: "Follow-up (IA)",
+  followup: "Follow-up e lembretes (IA)",
   media_audio: "Áudios (transcrição)",
   media_image: "Imagens (leitura)",
   media_video: "Vídeos (fala)",
@@ -863,6 +878,80 @@ export type IntegrationFailures = {
   groups: { integration: string; code: string; n: number; last_at: string; last_message: string; notified: number }[];
   recent: { id: string; integration: string; tool: string; code: string; message: string; created_at: string; conversation_id: string | null; contact_name: string | null }[];
 };
+/** Diagnóstico de uma ação do agente (Registro técnico). */
+export type ActionDebug = {
+  outcome: "ok" | "empty" | "blocked" | "error" | "simulated";
+  code?: string;
+  summary: string;
+  details?: string[];
+  hint?: string;
+};
+export type ActionLogEntry = {
+  turn_id: string;
+  created_at: string;
+  conversation_id: string;
+  contact_name: string | null;
+  phone: string | null;
+  ord: number;
+  tool: string;
+  args: Record<string, unknown> | null;
+  result: string | null;
+  debug: ActionDebug;
+  ms: number | null;
+};
+export type ActionPattern = { code: string; tool: string; n: number; leads: number; last_at: string; summary: string | null; hint: string | null };
+export type ActionLog = { days: number; entries: ActionLogEntry[]; next: string | null; patterns: ActionPattern[] };
+/** O nome de cada ação do agente, para quem lê. */
+export const ACTION_LABEL: Record<string, string> = {
+  responder: "Respondeu",
+  buscar_conhecimento: "Pesquisou na base",
+  registrar_dados_do_contato: "Guardou dados do contato",
+  transferir_para_humano: "Passou para a equipe",
+  agenda_horarios_livres: "Buscou horários na agenda",
+  agenda_marcar: "Marcou reunião",
+  agenda_remarcar: "Remarcou reunião",
+  agenda_cancelar: "Cancelou reunião",
+  agenda_convidar: "Incluiu convidados",
+  agenda_remover_convidado: "Tirou convidados",
+  mover_oportunidade: "Moveu a oportunidade",
+  trocar_responsavel: "Trocou o responsável",
+  avisar_equipe: "Avisou a equipe",
+  dar_como_perdido: "Deu como perdida",
+  dar_como_ganho: "Deu como ganha",
+  registrar_orcamento: "Registrou orçamento",
+  registrar_no_historico: "Anotou no histórico",
+  criar_atividade: "Criou atividade",
+  acionar_cenario: "Acionou um cenário",
+  registrar_confirmacao: "Registrou a confirmação da reunião",
+  lembrete_reuniao: "Lembrete da reunião",
+  resposta: "A resposta falhou",
+};
+export const OUTCOME_INFO: Record<ActionDebug["outcome"], { label: string; tone: "on" | "danger" | "warn" | "" }> = {
+  ok: { label: "Fez", tone: "on" },
+  empty: { label: "Sem resultado", tone: "warn" },
+  blocked: { label: "Segurada", tone: "" },
+  error: { label: "Falhou", tone: "danger" },
+  simulated: { label: "Simulação", tone: "" },
+};
+/** Grupos do filtro de ações. */
+export const ACTION_GROUPS: { id: string; label: string; tools: string[] }[] = [
+  {
+    id: "agenda",
+    label: "Google Agenda",
+    tools: ["agenda_horarios_livres", "agenda_marcar", "agenda_remarcar", "agenda_cancelar", "agenda_convidar", "agenda_remover_convidado", "registrar_confirmacao"],
+  },
+  { id: "pre", label: "Pré-reunião", tools: ["lembrete_reuniao"] },
+  {
+    id: "crm",
+    label: "MakeCRM",
+    tools: ["mover_oportunidade", "trocar_responsavel", "dar_como_perdido", "dar_como_ganho", "registrar_orcamento", "registrar_no_historico", "criar_atividade"],
+  },
+  { id: "aviso", label: "Aviso à equipe", tools: ["avisar_equipe"] },
+  { id: "cenario", label: "Cenários", tools: ["acionar_cenario"] },
+  { id: "humano", label: "Passou para a equipe", tools: ["transferir_para_humano"] },
+  { id: "resposta", label: "Respostas que falharam", tools: ["resposta"] },
+];
+
 /** Catálogo do MakeCRM para as ações na oportunidade e os cenários. */
 export type DealCatalog = {
   lost_reasons: { id: string; name: string }[];

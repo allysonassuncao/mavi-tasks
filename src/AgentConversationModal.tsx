@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Eraser, Search } from "lucide-react";
 import { Modal } from "./components";
+import { ConversationActionLog } from "./AgentActionDiagnosis";
 import { Button, Input, Loading } from "./ui";
 import {
   agentOp,
@@ -26,7 +27,9 @@ import {
 export function ConversationInsightModal({
   company,
   agentId,
-  conversationId,
+  conversationId: initialId,
+  conversations,
+  onTrace,
   onClose,
   canReset = false,
   notify,
@@ -34,17 +37,25 @@ export function ConversationInsightModal({
   company: string;
   agentId: string;
   conversationId: string;
+  /** As conversas do mesmo lead (caixas diferentes): escolhe qual ver. */
+  conversations?: { id: string; created_at: string; last_at: string }[];
+  /** Abre o rastro de uma resposta do agente (o que aconteceu por dentro). */
+  onTrace?: (turnId: string) => void;
   onClose: () => void;
   /** Quem edita o agente pode zerar a memória dele nesta conversa. */
   canReset?: boolean;
   notify?: (m: string) => void;
 }) {
+  const [conversationId, setConversationId] = useState(initialId);
   const [data, setData] = useState<ConversationInsight | null>(null);
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [costs, setCosts] = useState<CostEvent[]>([]);
   const [error, setError] = useState("");
   const [loadKey, setLoadKey] = useState(0);
   useEffect(() => {
+    setData(null);
+    setMessages(null);
+    setError("");
     Promise.all([
       agentOp<ConversationInsight>(company, agentId, "conversation-insight", { conversation: conversationId }),
       agentOp<{ messages: ChatMessage[] }>(company, agentId, "conversation-messages", { conversation: conversationId }),
@@ -81,6 +92,22 @@ export function ConversationInsightModal({
         {!data && !error && <Loading variant="list" />}
         {data && (
           <>
+            {conversations && conversations.length > 1 && (
+              <div className="ab-suggest" role="tablist" aria-label="Conversas deste lead">
+                {conversations.map((x, k) => (
+                  <button
+                    key={x.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={x.id === conversationId}
+                    className={`ab-chip ${x.id === conversationId ? "on" : ""}`}
+                    onClick={() => setConversationId(x.id)}
+                  >
+                    Conversa {conversations.length - k} · {when(x.last_at)}
+                  </button>
+                ))}
+              </div>
+            )}
             {canReset && (
               <ResetMemoryBox
                 company={company}
@@ -154,6 +181,27 @@ export function ConversationInsightModal({
                 </ul>
               </section>
             )}
+            {(Object.keys(c?.facts ?? {}).length > 0 || c?.summary) && (
+              <dl className="ab-trace-body">
+                {Object.keys(c?.facts ?? {}).length > 0 && (
+                  <>
+                    <dt>Dados do contato</dt>
+                    <dd>
+                      {Object.entries(c!.facts)
+                        .map(([k, v]) => `${k}: ${v}`)
+                        .join(" · ")}
+                    </dd>
+                  </>
+                )}
+                {c?.summary && (
+                  <>
+                    <dt>Resumo das mensagens antigas</dt>
+                    <dd className="ab-pre">{c.summary}</dd>
+                  </>
+                )}
+              </dl>
+            )}
+            <ConversationActionLog company={company} agentId={agentId} conversationId={conversationId} />
             {costTotal > 0 && (
               <p className="muted ai-small">
                 Custo desta conversa: <strong>{money(costTotal, "usd")}</strong> ({costs.length} gasto(s)). Passe o mouse no valor embaixo de cada mensagem para
@@ -167,6 +215,11 @@ export function ConversationInsightModal({
                 return (
                   <div key={m.id} className={`ab-bubble ${m.role === "user" ? "user" : m.role === "assistant" ? "agent" : "note"}`} title={when(m.created_at)}>
                     {m.content}
+                    {onTrace && m.role === "assistant" && m.turn_id && (!all[i + 1] || all[i + 1]!.turn_id !== m.turn_id) && (
+                      <button type="button" className="agent-link-btn ab-bubble-trace" onClick={() => onTrace(m.turn_id!)}>
+                        Ver o que aconteceu
+                      </button>
+                    )}
                     {sum > 0 && (
                       <span className="cost-bubble" title={c.map((e) => `${COST_SOURCE_LABEL[e.source] ?? e.source}${e.model ? ` (${e.model})` : ""}: ${money(Number(e.cost_usd), "usd")}`).join("\n")}>
                         {money(sum, "usd")}

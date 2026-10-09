@@ -14,6 +14,7 @@ import {
   type MakecrmInbox,
 } from "./agent-builder";
 import { WeeklyHoursEditor } from "./AgentBuilderFields";
+import { IntegrationPatternsAlert } from "./AgentActionDiagnosis";
 
 /**
  * Agentes MAVI › Integrações: o que o agente pode FAZER na conversa. Tudo é
@@ -152,6 +153,7 @@ export function IntegrationsPanel({
         gravado: a agenda é lida de verdade, mas marcar, mover e trocar só mostram o que aconteceria.
       </p>
       <FailuresAlert company={company} agentId={agentId} />
+      <IntegrationPatternsAlert company={company} agentId={agentId} />
       {error && <p className="form-error" role="alert">{error}</p>}
       {canEdit && !error && (!pipelines || !users) && <Loading variant="list" />}
       {CATALOG.map((c) => {
@@ -563,6 +565,7 @@ function MoveDealForm({ cfg, pipelines, onChange }: { cfg: Integration; pipeline
         label="Disparar as automações do MakeCRM ao mover"
         hint="As mesmas de quando alguém move pela tela do MakeCRM (ex.: mensagens, conversões)."
       />
+      <RepeatPicker value={cfg.repeat} onChange={(v) => onChange({ ...cfg, repeat: v })} label="Repetir a mesma regra na conversa" />
       <p className="ab-hint">Sem oportunidade aberta para o lead, nada acontece.</p>
     </div>
   );
@@ -639,6 +642,7 @@ function ChangeOwnerForm({ cfg, users, onChange }: { cfg: Integration; users: Cr
           <Plus size={14} aria-hidden="true" /> Nova regra
         </Button>
       </div>
+      <RepeatPicker value={cfg.repeat} onChange={(v) => onChange({ ...cfg, repeat: v })} label="Repetir a mesma regra na conversa" />
       <p className="ab-hint">Sem oportunidade aberta para o lead, nada acontece.</p>
     </div>
   );
@@ -695,6 +699,70 @@ function NotifyForm({ cfg, inboxes, onChange }: { cfg: Integration; inboxes: Mak
           onBlur={() => phone && add()}
         />
       </Row>
+      <Row label=" " wide>
+        <RepeatPicker
+          value={cfg.repeat}
+          onChange={(v) => onChange({ ...cfg, repeat: v })}
+          label="Avisar de novo sobre o mesmo lead"
+          hint={
+            (cfg.repeat?.mode ?? "window") === "always"
+              ? "Toda vez que o agente decidir, mesmo seguidas e com o mesmo assunto."
+              : "Qualquer aviso sobre este lead conta, mesmo com outras palavras."
+          }
+        />
+      </Row>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ repetição
+export type Repeat = { mode: "always" | "window" | "conversation"; minutes: number };
+export const REPEAT_DEFAULT: Repeat = { mode: "window", minutes: 60 };
+const WINDOWS: [number, string][] = [
+  [15, "15 minutos"],
+  [30, "30 minutos"],
+  [60, "1 hora"],
+  [180, "3 horas"],
+  [360, "6 horas"],
+  [720, "12 horas"],
+  [1440, "24 horas"],
+  [4320, "3 dias"],
+  [10080, "7 dias"],
+];
+
+/** Quantas vezes a mesma ação pode acontecer na mesma conversa. */
+export function RepeatPicker({ value, onChange, label = "Repetir na mesma conversa", hint }: { value: Repeat | undefined; onChange: (v: Repeat) => void; label?: string; hint?: string }) {
+  const v = { ...REPEAT_DEFAULT, ...value };
+  const windows: [number, string][] = WINDOWS.some(([m]) => m === v.minutes) ? WINDOWS : [...WINDOWS, [v.minutes, `${v.minutes} minutos`]];
+  return (
+    <div className="ab-grid">
+      <Row
+        label={label}
+        hint={
+          hint ??
+          (v.mode === "always"
+            ? "Toda vez que o agente decidir, mesmo seguidas."
+            : v.mode === "conversation"
+              ? "Uma vez só com este lead (volta a valer se zerar a memória dele)."
+              : "Depois de fazer, segura pelo intervalo, mesmo que o agente decida de novo.")
+        }
+      >
+        <Choice
+          label={label}
+          value={v.mode}
+          onChange={(mode) => onChange({ ...v, mode })}
+          options={[
+            ["window", "No máximo 1 vez a cada…"],
+            ["conversation", "Só 1 vez por conversa"],
+            ["always", "Sempre que acontecer"],
+          ]}
+        />
+      </Row>
+      {v.mode === "window" && (
+        <Row label="Intervalo">
+          <Choice label="Intervalo" value={v.minutes} onChange={(minutes) => onChange({ ...v, minutes })} options={windows} />
+        </Row>
+      )}
     </div>
   );
 }
@@ -825,6 +893,7 @@ function DealActionsForm({ cfg, catalog, users, onChange }: { cfg: Integration; 
             </Row>
             <Check checked={part("lost").cancel_meetings !== false} onChange={(v) => setPart("lost", { cancel_meetings: v })} label="Cancelar as reuniões futuras" />
             <Check checked={part("lost").complete_activities !== false} onChange={(v) => setPart("lost", { complete_activities: v })} label="Concluir as atividades em aberto" />
+            <RepeatPicker value={part("lost").repeat} onChange={(v) => setPart("lost", { repeat: v })} />
           </>
         )}
       </div>
@@ -886,6 +955,7 @@ function DealActionsForm({ cfg, catalog, users, onChange }: { cfg: Integration; 
                 </div>
               )}
             </Row>
+            <RepeatPicker value={part("quote").repeat} onChange={(v) => setPart("quote", { repeat: v })} label="Repetir o orçamento do mesmo produto" />
           </>
         )}
       </div>
@@ -897,11 +967,20 @@ function DealActionsForm({ cfg, catalog, users, onChange }: { cfg: Integration; 
           hint="Pelos orçamentos da oportunidade (sem orçamento, não dá). Dispara as automações de ganho do MakeCRM."
         />
         {part("won").enabled && when("won", "quando o lead enviar o comprovante de pagamento")}
+        {part("won").enabled && <RepeatPicker value={part("won").repeat} onChange={(v) => setPart("won", { repeat: v })} />}
         {part("won").enabled && !part("quote").enabled && <p className="ab-notice warn">Sem "Registrar orçamento", só dá como ganha quando a equipe já tiver registrado o orçamento.</p>}
       </div>
       <div className="ab-rule">
         <Check checked={!!part("note").enabled} onChange={(v) => setPart("note", { enabled: v })} label="Anotar no histórico" hint="Observações úteis para a equipe no histórico da oportunidade." />
         {part("note").enabled && when("note", "quando o lead contar o tamanho da empresa ou o prazo de decisão")}
+        {part("note").enabled && (
+          <RepeatPicker
+            value={part("note").repeat}
+            onChange={(v) => setPart("note", { repeat: v })}
+            label="Anotar de novo na mesma conversa"
+            hint={(part("note").repeat?.mode ?? "window") === "always" ? "Toda observação que o agente achar útil." : "Qualquer observação conta, mesmo com outras palavras."}
+          />
+        )}
       </div>
       <div className="ab-rule">
         <Check checked={!!part("activity").enabled} onChange={(v) => setPart("activity", { enabled: v })} label="Criar atividade" hint="Uma tarefa para a equipe na oportunidade (ligar, mandar e-mail…), com prazo." />
@@ -912,6 +991,7 @@ function DealActionsForm({ cfg, catalog, users, onChange }: { cfg: Integration; 
               <NamedPicker options={catalog?.activity_types ?? null} value={part("activity").types ?? []} onChange={(v) => setPart("activity", { types: v })} empty="Nenhum tipo de atividade ativo no MakeCRM." />
             </Row>
             <AssigneeEditor value={part("activity").assignee} users={users} onChange={(v) => setPart("activity", { assignee: v })} />
+            <RepeatPicker value={part("activity").repeat} onChange={(v) => setPart("activity", { repeat: v })} label="Repetir atividade do mesmo tipo" />
             <Row label="Prazo quando o lead não combinar um momento">
               <Choice
                 label="Prazo padrão"

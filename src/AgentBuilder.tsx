@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   BookOpen,
   Bot,
+  CalendarClock,
   ChartColumn,
   Coins,
   FlaskConical,
@@ -13,6 +14,7 @@ import {
   Pause,
   Play,
   Plug,
+  ScrollText,
   Signpost,
   Repeat,
   Plus,
@@ -49,6 +51,8 @@ import { CatalogForm, ModelOptionsContext } from "./AgentBuilderFields";
 import { AgentKeysSection } from "./AgentKeys";
 import { IntegrationsPanel } from "./AgentIntegrations";
 import { ScenariosPanel } from "./AgentScenarios";
+import { RemindersPanel } from "./AgentReminders";
+import { ActionLogPanel } from "./AgentActionLog";
 import { FollowupPanel } from "./AgentFollowup";
 import { AgentAssistant } from "./AgentAssistant";
 import { FIELD_BY_PATH, FIELDS } from "./agent-fields";
@@ -297,6 +301,7 @@ type Tab =
   | "integrations"
   | "scenarios"
   | "followup"
+  | "reminders"
   | "test"
   | "inboxes"
   | "versions"
@@ -304,6 +309,7 @@ type Tab =
   | "insights"
   | "gaps"
   | "costs"
+  | "log"
   | "simulated";
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "Perfil", icon: UserRound },
@@ -313,6 +319,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "integrations", label: "Integrações", icon: Plug },
   { id: "scenarios", label: "Cenários", icon: Signpost },
   { id: "followup", label: "Follow-up", icon: Repeat },
+  { id: "reminders", label: "Pré-reunião", icon: CalendarClock },
   { id: "test", label: "Testar", icon: FlaskConical },
   { id: "simulated", label: "Leads simulados", icon: UsersRound },
   { id: "inboxes", label: "Caixas", icon: Inbox },
@@ -321,11 +328,12 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "insights", label: "Insights", icon: ChartColumn },
   { id: "gaps", label: "Lacunas", icon: MessageCircleQuestion },
   { id: "costs", label: "Custos", icon: Coins },
+  { id: "log", label: "Registro técnico", icon: ScrollText },
 ];
 /** A aba pelo link (?aba=insights|lacunas, como no resumo semanal). */
 const TAB_PARAM: Record<string, Tab> = { insights: "insights", lacunas: "gaps", custos: "costs", testes: "simulated" };
 /** As abas do rascunho (o que "Salvar rascunho" grava); as três primeiras vêm do catálogo dos campos. */
-const DRAFT_TABS = new Set<Tab>(["profile", "instructions", "behavior", "integrations", "scenarios", "followup"]);
+const DRAFT_TABS = new Set<Tab>(["profile", "instructions", "behavior", "integrations", "scenarios", "followup", "reminders"]);
 const FORM_TABS = new Set<Tab>(["profile", "instructions", "behavior"]);
 
 function AgentEditor({
@@ -528,6 +536,9 @@ function AgentEditor({
             {tab === "behavior" && <AgentKeysSection company={company} agentId={agentId} draft={draft} canEdit={canEdit} notify={notify} />}
               {tab === "integrations" && <IntegrationsPanel company={company} agentId={agentId} draft={draft} canEdit={canEdit} change={change} errorFor={errorFor} />}
               {tab === "scenarios" && <ScenariosPanel company={company} agentId={agentId} draft={draft} canEdit={canEdit} change={change} errorFor={errorFor} />}
+              {tab === "reminders" && (
+                <RemindersPanel company={company} agentId={agentId} detail={detail} draft={draft} canEdit={canEdit} change={change} errorFor={errorFor} />
+              )}
               {tab === "followup" && <FollowupPanel company={company} agentId={agentId} detail={detail} draft={draft} canEdit={canEdit} change={change} errorFor={errorFor} />}
           </ModelOptionsContext.Provider>
           {tab === "knowledge" && <KnowledgePanel key={knowledgeKey} company={company} agentId={agentId} canEdit={canEdit} notify={notify} />}
@@ -548,6 +559,7 @@ function AgentEditor({
           {tab === "insights" && (
             <InsightsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} initial={linked.period} onOpenGaps={() => setTab("gaps")} />
           )}
+          {tab === "log" && <ActionLogPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} />}
           {tab === "costs" && <AgentCostsPanel company={company} agentId={agentId} bindings={detail.bindings} />}
           {tab === "simulated" && (
             <TestRunsPanel company={company} agentId={agentId} canEdit={canEdit} published={a.published_version} notify={notify} openRun={linked.run} />
@@ -614,6 +626,8 @@ const TAB_OF = (path: string): Tab =>
       ? "scenarios"
       : path.startsWith("followup")
       ? "followup"
+      : path.startsWith("meeting_reminders")
+        ? "reminders"
       : ((FIELD_BY_PATH.get(path)?.tab as Tab | undefined) ?? (path.startsWith("persona") ? "profile" : path.startsWith("instructions") ? "instructions" : "behavior"));
 
 // ------------------------------------------------------------ publicar e versões
