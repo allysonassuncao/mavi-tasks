@@ -218,6 +218,8 @@ export interface AppNotification {
     | "radar_task_auto"
     /** Memória da MAVI: o resumo da semana dos dossiês dos clientes da pessoa (link /drive/cliente/<id>/dossie). */
     | "memory_week"
+    /** Agentes MAVI: o resumo da semana de um agente (link /agente-conversacional?agente=<id>&aba=insights&de=&ate=). */
+    | "agent_report"
     /** Financeiro › Mídia: o saldo de uma conta ficou baixo ou negativo (link /financeiro/midia?contrato=<id>). */
     | "media_balance"
     /** Financeiro › Make Ads RQ: dia 1, os clientes do mês anterior para validar (link /financeiro/make-ads-rq?mes=AAAA-MM). */

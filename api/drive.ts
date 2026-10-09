@@ -64,6 +64,7 @@ import { handleRadarSuggest } from "./_radar-link.js";
 import { agentEnv, handleAgents } from "./_agents.js";
 import { builderEnv, handleAgentBuilder } from "./_agent-builder.js";
 import { handleAgentBuilderMavi } from "./_agent-builder-mavi.js";
+import { handleAgentWeekly, weeklyEnv } from "./_agent-weekly.js";
 import { handleCsSync } from "./_cs-sync.js";
 import { handleCsHsWorker } from "./_cs-hs.js";
 import {
@@ -409,6 +410,13 @@ export default async function handler(
           : action === "ai-dossier"
             ? await handleDossierWorker(authorization, env, aiDeps(env), checkDossierOps)
             : await handleLearningWorker(authorization, env, aiDeps(env), maviLearning());
+      res.statusCode = result.status;
+      res.end(JSON.stringify(result.body));
+      return;
+    }
+    // Agentes MAVI › Insights: o resumo semanal (pg_cron, migração 20270705090000).
+    if (action === "agent-weekly") {
+      const result = await handleAgentWeekly(authorization, weeklyEnv(builderEnv(driveEnv())), { fetch });
       res.statusCode = result.status;
       res.end(JSON.stringify(result.body));
       return;

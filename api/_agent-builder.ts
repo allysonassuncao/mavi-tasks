@@ -139,6 +139,8 @@ type Op = {
     call: Call;
     /** Os modelos liberados no Painel da MAVI (com o login da pessoa). */
     models: () => Promise<AgentModels>;
+    /** Uma função do banco com o login da pessoa (o resumo semanal fica aqui, não no motor). */
+    settings: <T>(name: string, args: Record<string, unknown>) => Promise<T>;
   }) => Promise<unknown>;
 };
 
@@ -388,6 +390,103 @@ const OPS: Record<string, Op> = {
     write: false,
     run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/conversations/${uuid(body.conversation, "a conversa")}/messages`),
   },
+
+  // ---------------------------------------------------------------- lacunas do treinamento
+  gaps: {
+    write: false,
+    run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/gaps${qs({ from: body.from, to: body.to, status: body.status, kind: body.kind })}`),
+  },
+  gap: { write: false, run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/gap-topics/${uuid(body.topic, "o tema")}`) },
+  "gap-update": {
+    write: true,
+    run: ({ a, body, access, call }) =>
+      call("PATCH", `/v1/agents/${a.id}/gap-topics/${uuid(body.topic, "o tema")}`, {
+        ...(body.status === "open" || body.status === "ignored" ? { status: body.status } : {}),
+        ...(typeof body.title === "string" && body.title.trim() ? { title: body.title.trim().slice(0, 300) } : {}),
+        by: access.user_label,
+      }),
+  },
+  "gap-suggest": { write: true, run: ({ a, body, call }) => call("POST", `/v1/agents/${a.id}/gap-topics/${uuid(body.topic, "o tema")}/suggest`, {}) },
+  "gap-apply": {
+    write: true,
+    run: ({ a, body, access, call }) =>
+      call("POST", `/v1/agents/${a.id}/gap-topics/${uuid(body.topic, "o tema")}/apply`, {
+        question: String(body.question ?? ""),
+        answer: String(body.answer ?? ""),
+        by: access.user_label,
+      }),
+  },
+  "gap-merge": {
+    write: true,
+    run: ({ a, body, call }) =>
+      call("POST", `/v1/agents/${a.id}/gap-topics/${uuid(body.topic, "o tema")}/merge`, { into: uuid(body.into, "o tema de destino") }),
+  },
+
+  // ---------------------------------------------------------------- insights e relatório
+  report: { write: false, run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/report${qs({ from: body.from, to: body.to })}`) },
+  reading: {
+    write: false,
+    run: ({ a, body, access, call }) => call("POST", `/v1/agents/${a.id}/reading`, { from: body.from, to: body.to, by: access.user_label }),
+  },
+  "insight-conversations": {
+    write: false,
+    run: ({ a, body, call }) =>
+      call(
+        "GET",
+        `/v1/agents/${a.id}/insights/conversations${qs({
+          from: body.from,
+          to: body.to,
+          outcome: body.outcome,
+          sentiment: body.sentiment,
+          objection: body.objection,
+          reason: body.reason,
+          issue: body.issue,
+          topic: body.topic,
+          limit: body.limit,
+          offset: body.offset,
+        })}`,
+      ),
+  },
+  "conversation-insight": {
+    write: false,
+    run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/conversations/${uuid(body.conversation, "a conversa")}/insight`),
+  },
+  /** Quanto das conversas a MAVI lê (no motor) e o resumo semanal (aqui). */
+  "insights-settings": {
+    write: false,
+    run: async ({ a, access, settings }) => ({
+      sample_percent: Number((a as { insights_sample_percent?: number }).insights_sample_percent ?? 20),
+      weekly: await settings("agent_report_settings", {
+        p_company: a.external_ref.mavi_company_id,
+        p_client: a.external_ref.mavi_client_id,
+        p_agent: a.id,
+        p_creator: String((a as { draft_updated_by?: string }).draft_updated_by ?? ""),
+      }),
+      can_edit: access.write,
+    }),
+  },
+  "insights-settings-set": {
+    write: true,
+    run: async ({ a, body, call, settings }) => {
+      const pct = Number(body.sample_percent);
+      if (body.sample_percent !== undefined) {
+        if (!Number.isInteger(pct) || pct < 0 || pct > 100) throw new BuilderError(400, "A amostra vai de 0 a 100%.");
+        await call("PATCH", `/v1/agents/${a.id}`, { insights_sample_percent: pct });
+      }
+      if (typeof body.weekly === "boolean") {
+        const recipients = Array.isArray(body.recipients) ? body.recipients.filter((x) => typeof x === "string" && UUID.test(x)) : [];
+        await settings("agent_report_settings_set", {
+          p_company: a.external_ref.mavi_company_id,
+          p_client: a.external_ref.mavi_client_id,
+          p_contract: a.external_ref.mavi_contract_id ?? null,
+          p_agent: a.id,
+          p_weekly: body.weekly,
+          p_recipients: recipients,
+        });
+      }
+      return { ok: true };
+    },
+  },
 };
 
 export const BUILDER_OPS = Object.keys(OPS);
@@ -472,7 +571,8 @@ export async function handleAgentBuilder(
       const { a, access } = await loadAgentAccess(env, f, authorization, company, String(body.agent ?? ""));
       if (op.write && !access.write) throw new BuilderError(403, "Só quem edita este produto do cliente no Drive pode mudar o agente.");
       const models = () => rpc<AgentModels>(env, f, authorization, "agent_models", { p_company: company });
-      const data = await op.run({ a, body, access, call, models });
+      const settings = <T>(name: string, args: Record<string, unknown>) => rpc<T>(env, f, authorization, name, args);
+      const data = await op.run({ a, body, access, call, models, settings });
       return { status: 200, body: data };
     }
 

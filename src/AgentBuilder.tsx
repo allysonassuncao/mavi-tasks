@@ -3,9 +3,11 @@ import {
   ArrowLeft,
   BookOpen,
   Bot,
+  ChartColumn,
   FlaskConical,
   History,
   Inbox,
+  MessageCircleQuestion,
   MessagesSquare,
   Pause,
   Play,
@@ -47,6 +49,8 @@ import { FollowupPanel } from "./AgentFollowup";
 import { AgentAssistant } from "./AgentAssistant";
 import { FIELD_BY_PATH, FIELDS } from "./agent-fields";
 import { ConversationsPanel, SimulatorPanel } from "./AgentBuilderTest";
+import { GapsPanel } from "./AgentGaps";
+import { InsightsPanel } from "./AgentInsights";
 import "./agent-builder.css";
 
 /**
@@ -279,7 +283,19 @@ function NewAgentModal({
 }
 
 // ------------------------------------------------------------ construtor
-type Tab = "profile" | "instructions" | "knowledge" | "behavior" | "integrations" | "followup" | "test" | "inboxes" | "versions" | "conversations";
+type Tab =
+  | "profile"
+  | "instructions"
+  | "knowledge"
+  | "behavior"
+  | "integrations"
+  | "followup"
+  | "test"
+  | "inboxes"
+  | "versions"
+  | "conversations"
+  | "insights"
+  | "gaps";
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "Perfil", icon: UserRound },
   { id: "instructions", label: "Instruções", icon: Sparkles },
@@ -291,7 +307,11 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "inboxes", label: "Caixas", icon: Inbox },
   { id: "versions", label: "Versões", icon: History },
   { id: "conversations", label: "Conversas", icon: MessagesSquare },
+  { id: "insights", label: "Insights", icon: ChartColumn },
+  { id: "gaps", label: "Lacunas", icon: MessageCircleQuestion },
 ];
+/** A aba pelo link (?aba=insights|lacunas, como no resumo semanal). */
+const TAB_PARAM: Record<string, Tab> = { insights: "insights", lacunas: "gaps" };
 /** As abas do rascunho (o que "Salvar rascunho" grava); as três primeiras vêm do catálogo dos campos. */
 const DRAFT_TABS = new Set<Tab>(["profile", "instructions", "behavior", "integrations", "followup"]);
 const FORM_TABS = new Set<Tab>(["profile", "instructions", "behavior"]);
@@ -311,7 +331,19 @@ function AgentEditor({
 }) {
   const [detail, setDetail] = useState<AgentDetail | null>(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<Tab>("profile");
+  // A aba e o período vindos do link (?aba=insights&de=…&ate=…), lidos uma vez.
+  const [linked] = useState(() => {
+    const q = new URLSearchParams(window.location.search);
+    const de = q.get("de") ?? "";
+    const ate = q.get("ate") ?? "";
+    const ymd = /^\d{4}-\d{2}-\d{2}$/;
+    return { tab: TAB_PARAM[q.get("aba") ?? ""] ?? null, period: ymd.test(de) && ymd.test(ate) ? { from: de, to: ate } : null };
+  });
+  const [tab, setTab] = useState<Tab>(linked.tab ?? "profile");
+  // Com muitas abas, a aberta (pelo link ou pelo "Ver lacunas") fica à vista na barra.
+  useEffect(() => {
+    document.querySelector(".ab-tabs button.selected")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [tab, !!detail]);
   const [draft, setDraft] = useState<AgentDraft>({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -329,8 +361,8 @@ function AgentEditor({
   }, [company]);
   useEffect(() => {
     const url = new URL(window.location.href);
-    if (url.searchParams.has("mavi")) {
-      url.searchParams.delete("mavi");
+    if (["mavi", "aba", "de", "ate"].some((k) => url.searchParams.has(k))) {
+      for (const k of ["mavi", "aba", "de", "ate"]) url.searchParams.delete(k);
       window.history.replaceState(window.history.state, "", url);
     }
   }, []);
@@ -496,6 +528,12 @@ function AgentEditor({
           {tab === "inboxes" && <InboxesPanel company={company} detail={detail} canEdit={canEdit} notify={notify} reload={load} />}
           {tab === "versions" && <VersionsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} reload={load} />}
           {tab === "conversations" && <ConversationsPanel company={company} agentId={agentId} />}
+          {tab === "insights" && (
+            <InsightsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} initial={linked.period} onOpenGaps={() => setTab("gaps")} />
+          )}
+          {tab === "gaps" && (
+            <GapsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} onTrained={() => setKnowledgeKey((k) => k + 1)} />
+          )}
         </div>
         {assistant && canEdit && (
           <AgentAssistant

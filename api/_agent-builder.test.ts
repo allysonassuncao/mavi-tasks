@@ -37,6 +37,7 @@ function fake(opts: { read?: boolean; write?: boolean; all?: boolean; clients?: 
     calls.push({ url, method, body, auth: headers.Authorization ?? null });
     if (url.endsWith("/rpc/agent_builder_access"))
       return json(200, { read: opts.read ?? true, write: opts.write ?? false, leader: false, client_name: "774 - Make Vendas", user_id: "u1", user_label: "ana@x.com" });
+    if (url.includes("/rpc/agent_report_settings")) return json(200, { weekly: true, recipients: [] });
     if (url.endsWith("/rpc/agent_builder_clients")) return json(200, { all: opts.all ?? false, leader: false, clients: opts.clients ?? [client] });
     if (url.startsWith(env.engineUrl!)) {
       const path = url.slice(env.engineUrl!.length);
@@ -130,6 +131,32 @@ describe("construtor de agentes (servidor)", () => {
     expect((await run({ action: "builder-agent", agent: agentId, op: "unbind", binding: "00000000-0000-4000-8000-0000000000c2" }, f)).status).toBe(404);
     expect((await run({ action: "builder-agent", agent: agentId, op: "unbind", binding: "00000000-0000-4000-8000-0000000000c1" }, f)).status).toBe(200);
     expect(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/v1/bindings/00000000-0000-4000-8000-0000000000c1"))).toBe(true);
+  });
+
+  it("lacunas e insights: temas pelo endereço do agente; mudar exige edição", async () => {
+    const topic = "00000000-0000-4000-8000-0000000000d1";
+    const ro = fake({ read: true, write: false });
+    expect((await run({ action: "builder-agent", agent: agentId, op: "gaps", from: "2026-10-01", to: "2026-10-07", status: "open" }, ro.f)).status).toBe(200);
+    expect(ro.calls.some((c) => c.url.endsWith(`/v1/agents/${agentId}/gaps?from=2026-10-01&to=2026-10-07&status=open`))).toBe(true);
+    expect((await run({ action: "builder-agent", agent: agentId, op: "report", from: "2026-10-01", to: "2026-10-07" }, ro.f)).status).toBe(200);
+    expect((await run({ action: "builder-agent", agent: agentId, op: "gap-apply", topic, question: "q", answer: "a" }, ro.f)).status).toBe(403);
+    expect((await run({ action: "builder-agent", agent: agentId, op: "gap", topic: "não-é-uuid" }, ro.f)).status).toBe(400);
+
+    const rw = fake({ write: true });
+    expect((await run({ action: "builder-agent", agent: agentId, op: "gap-apply", topic, question: "Aceita boleto?", answer: "Sim." }, rw.f)).status).toBe(200);
+    const apply = rw.calls.find((c) => c.url.endsWith(`/v1/agents/${agentId}/gap-topics/${topic}/apply`))!;
+    expect(apply.body).toEqual({ question: "Aceita boleto?", answer: "Sim.", by: "ana@x.com" });
+  });
+
+  it("configurar insights: amostra no motor, resumo semanal no banco", async () => {
+    const { f, calls } = fake({ write: true });
+    const r = await run({ action: "builder-agent", agent: agentId, op: "insights-settings-set", sample_percent: 30, weekly: true, recipients: [client, "x"] }, f);
+    expect(r.status).toBe(200);
+    expect(calls.find((c) => c.method === "PATCH" && c.url.endsWith(`/v1/agents/${agentId}`))!.body).toEqual({ insights_sample_percent: 30 });
+    const set = calls.find((c) => c.url.endsWith("/rpc/agent_report_settings_set"))!;
+    expect(set.auth).toBe(auth);
+    expect(set.body).toMatchObject({ p_company: company, p_client: client, p_contract: contract, p_agent: agentId, p_weekly: true, p_recipients: [client] });
+    expect((await run({ action: "builder-agent", agent: agentId, op: "insights-settings-set", sample_percent: 150 }, f)).status).toBe(400);
   });
 
   it("operação desconhecida", async () => {

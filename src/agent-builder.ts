@@ -105,6 +105,10 @@ export type TurnTrace = {
   tools: { name: string; args?: unknown; result: string; ms: number }[];
   retrieved: { ref: string; kind: string; title: string; score: number; via: string }[];
   output: { messages: ReplyMessage[]; silent_reason: string | null; handoff: string | null } | null;
+  /** O lead escreveu antes do envio: descartada e refeita junto com a nova. */
+  superseded?: boolean;
+  /** O lead escreveu no meio do envio: parou de mandar o resto. */
+  interrupted?: boolean;
   error: string | null;
   created_at: string;
   simulation?: boolean;
@@ -470,3 +474,207 @@ export const when = (iso: string | null | undefined) =>
       })
     : "—";
 export const errorOf = (e: unknown) => (e as Error)?.message ?? "Algo deu errado.";
+
+// ------------------------------------------------------------ lacunas e insights
+/** Um tema de lacuna: perguntas/objeções parecidas que o treinamento não cobria. */
+export type GapTopic = {
+  id: string;
+  kind: "question" | "objection";
+  title: string;
+  title_source: "first" | "mavi" | "person";
+  category: string;
+  status: "open" | "trained" | "ignored";
+  occurrences: number;
+  conversations: number;
+  after_trained: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  trained_at: string | null;
+  trained_by: string | null;
+  knowledge_item_id: string | null;
+  has_suggestion: boolean;
+  in_period: number;
+  in_previous: number;
+  conversations_in_period: number;
+};
+export type GapStats = { turns: number; gap_turns: number; gaps: number; new_topics: number; coverage: number | null };
+export type GapsResult = {
+  period: { from: string; to: string };
+  previous: { from: string; to: string };
+  topics: GapTopic[];
+  stats: GapStats;
+  previous_stats: GapStats;
+  pending: number;
+};
+export type GapSuggestion = { question: string; answer: string; note: string; sources: string[]; model: string; generated_at: string };
+export type GapExample = {
+  id: string;
+  text: string;
+  lead_text: string;
+  created_at: string;
+  conversation_id: string;
+  external_id: string;
+  contact_name: string | null;
+  phone: string | null;
+};
+export type GapDetail = {
+  topic: GapTopic & { suggestion: GapSuggestion | null };
+  examples: GapExample[];
+  similar: { id: string; title: string; kind: GapTopic["kind"]; status: GapTopic["status"]; occurrences: number; similarity: number | null }[];
+};
+
+export type Outcome = "scheduled" | "purchased" | "qualified" | "handed_off" | "in_progress" | "not_interested" | "ghosted" | "disqualified" | "other";
+export type AgentIssue = { type: string; detail: string };
+export type InsightMetrics = {
+  conversations: number;
+  new_conversations: number;
+  lead_messages: number;
+  agent_messages: number;
+  followup_messages: number;
+  followup_recovered: number;
+  turns: number;
+  errors: number;
+  handoffs: number;
+  meetings: number;
+  reply_ms_p50: number | null;
+  cost_usd: number;
+  insights_cost_usd: number;
+};
+type Counted = { label: string; n: number; conversations?: string[] };
+export type AgentReport = {
+  period: { from: string; to: string };
+  previous: { from: string; to: string };
+  days: number;
+  sample_percent: number;
+  metrics: InsightMetrics;
+  previous_metrics: InsightMetrics;
+  series: {
+    days: { day: string; conversations: number; lead_messages: number; handoffs: number; meetings: number }[];
+    hours: { hour: number; lead_messages: number }[];
+  };
+  insights: {
+    analyzed: number;
+    outcomes: { outcome: Outcome; n: number }[];
+    sentiment: { sentiment: "positive" | "neutral" | "negative"; n: number }[];
+    reasons: Counted[];
+    objections: Counted[];
+    topics: Counted[];
+    issues: { type: string; n: number; examples: { conversation_id: string; detail: string }[] }[];
+  };
+  previous_insights: { analyzed: number; outcomes: { outcome: Outcome; n: number }[] };
+  look_at: {
+    conversation_id: string;
+    external_id: string;
+    contact_name: string | null;
+    phone: string | null;
+    outcome: Outcome;
+    sentiment: string;
+    summary: string;
+    agent_issues: AgentIssue[];
+    activity_at: string;
+  }[];
+  gaps: GapStats & { top: { id: string; kind: GapTopic["kind"]; title: string; category: string; in_period: number; occurrences: number }[] };
+  previous_gaps: GapStats;
+};
+export type AgentReading = {
+  reading: {
+    summary: string;
+    points: { kind: "good" | "attention" | "action"; title: string; text: string; conversations: string[] }[];
+  };
+  model: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+export type InsightConversation = {
+  conversation_id: string;
+  external_id: string;
+  contact_name: string | null;
+  phone: string | null;
+  intent: string;
+  outcome: Outcome;
+  outcome_reason: string;
+  reason_label: string;
+  sentiment: "positive" | "neutral" | "negative";
+  objections: string[];
+  topics: string[];
+  agent_issues: AgentIssue[];
+  summary: string;
+  lead_messages: number;
+  activity_at: string;
+};
+export type ConversationInsight = {
+  conversation: AgentConversation;
+  insight: (Omit<InsightConversation, "external_id" | "contact_name" | "phone"> & { analyzed_at: string }) | null;
+  gaps: { id: string; kind: GapTopic["kind"]; text: string; created_at: string; topic_id: string | null; topic_title: string | null; topic_status: string | null }[];
+};
+export type InsightsSettings = {
+  sample_percent: number;
+  can_edit: boolean;
+  weekly: {
+    weekly: boolean;
+    custom: boolean;
+    recipients: string[];
+    candidates: { id: string; name: string; email: string }[];
+    last_sent: string | null;
+  };
+};
+
+export const OUTCOME_LABEL: Record<Outcome, string> = {
+  scheduled: "Agendou",
+  purchased: "Comprou",
+  qualified: "Interessado, sem compromisso",
+  handed_off: "Passou para a equipe",
+  in_progress: "Em andamento",
+  not_interested: "Sem interesse",
+  ghosted: "Parou de responder",
+  disqualified: "Fora do perfil",
+  other: "Outro",
+};
+/** Bons, neutros e perdidos (a cor das barras). */
+export const OUTCOME_TONE: Record<Outcome, "good" | "neutral" | "bad"> = {
+  scheduled: "good",
+  purchased: "good",
+  qualified: "good",
+  handed_off: "neutral",
+  in_progress: "neutral",
+  other: "neutral",
+  not_interested: "bad",
+  ghosted: "bad",
+  disqualified: "bad",
+};
+export const SENTIMENT_LABEL: Record<string, string> = { positive: "Positivo", neutral: "Neutro", negative: "Negativo" };
+export const ISSUE_LABEL: Record<string, string> = {
+  wrong_info: "Informação errada",
+  ignored_question: "Pergunta sem resposta",
+  repetition: "Repetição",
+  overpromise: "Prometeu demais",
+  tone: "Tom inadequado",
+  missed_handoff: "Não passou para a equipe",
+  other: "Outra falha",
+};
+export const OBJECTION_CATEGORY_LABEL: Record<string, string> = {
+  preco: "Preço",
+  prazo: "Prazo",
+  confianca: "Confiança",
+  concorrente: "Concorrente",
+  momento: "Momento",
+  decisor: "Decisor",
+  necessidade: "Necessidade",
+  outro: "Outra",
+};
+
+/** "AAAA-MM-DD" de hoje − n dias, em Brasília. */
+export function ymdDaysAgo(n: number, now = new Date()): string {
+  const sp = new Date(now.getTime() - 3 * 3600_000 - n * 86_400_000);
+  return sp.toISOString().slice(0, 10);
+}
+/** Os últimos n dias (hoje incluído). */
+export const lastDays = (n: number, now = new Date()) => ({ from: ymdDaysAgo(n - 1, now), to: ymdDaysAgo(0, now) });
+export const dayMonth = (ymd: string) => `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}`;
+/** Variação em relação ao período anterior: "+12%", "−5%", "novo" ou "". */
+export function deltaText(cur: number, prev: number): string {
+  if (!prev) return cur ? "novo" : "";
+  const d = Math.round(((cur - prev) / prev) * 100);
+  return d === 0 ? "=" : `${d > 0 ? "+" : "−"}${Math.abs(d)}%`;
+}
+export const percent = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v * 100)}%`);

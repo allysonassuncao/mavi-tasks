@@ -343,8 +343,27 @@ export function ConversationsPanel({ company, agentId }: { company: string; agen
                 {t.status === "error" ? `Erro: ${t.error}` : (t.messages ?? []).map((m) => m.text).join(" · ") || "(sem resposta)"}
               </span>
             </button>
-            <span className={`ab-badge ${t.status === "done" ? "on" : t.status === "error" ? "danger" : ""}`}>
-              {t.status === "done" ? "Respondeu" : t.status === "silent" ? "Silêncio" : t.status === "error" ? "Erro" : "Ignorada"}
+            <span
+              className={`ab-badge ${t.status === "done" ? "on" : t.status === "error" ? "danger" : ""}`}
+              title={
+                t.superseded
+                  ? "O lead mandou outra mensagem antes do envio: esta resposta foi descartada e a seguinte respondeu tudo junto."
+                  : t.interrupted
+                    ? "O lead escreveu no meio do envio: o agente parou de mandar o resto e respondeu à mensagem nova."
+                    : undefined
+              }
+            >
+              {t.superseded
+                ? "Refeita"
+                : t.status === "done"
+                  ? t.interrupted
+                    ? "Interrompida"
+                    : "Respondeu"
+                  : t.status === "silent"
+                    ? "Silêncio"
+                    : t.status === "error"
+                      ? "Erro"
+                      : "Ignorada"}
             </span>
           </li>
         ))}
