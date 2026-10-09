@@ -132,10 +132,62 @@ export function starterDraft(name: string) {
  */
 type Op = {
   write: boolean;
-  run: (ctx: { a: EngineAgent; body: Record<string, unknown>; access: Access; call: Call }) => Promise<unknown>;
+  run: (ctx: {
+    a: EngineAgent;
+    body: Record<string, unknown>;
+    access: Access;
+    call: Call;
+    /** Os modelos liberados no Painel da MAVI (com o login da pessoa). */
+    models: () => Promise<AgentModels>;
+  }) => Promise<unknown>;
 };
 
 const q = (v: unknown) => encodeURIComponent(String(v ?? ""));
+
+/** Painel da MAVI › Agentes MAVI (migração 20270702090000_agent_models). */
+export type AgentModel = {
+  key: string;
+  ref: string;
+  kind: string;
+  label: string;
+  provider_name: string;
+  input: number | null;
+  output: number | null;
+  cached: number | null;
+  allowed: boolean;
+};
+export type AgentModels = { models: AgentModel[]; default: string | null; fallback: string | null };
+
+const KINDS = ["openrouter", "openai", "anthropic", "google", "deepseek", "groq", "mistral", "xai"];
+/** "openai/gpt-5.2" (formato antigo) vira "openrouter:openai/gpt-5.2". */
+export function normalizeRef(v: unknown): string | null {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!s) return null;
+  const i = s.indexOf(":");
+  if (i > 0 && KINDS.includes(s.slice(0, i))) return s;
+  return s.includes("/") ? `openrouter:${s}` : `openai:${s}`;
+}
+
+/** Confere o modelo do rascunho contra os liberados e monta o padrão e os preços para o motor. */
+export function modelPublishOptions(draft: Record<string, any>, m: AgentModels) {
+  const allowed = m.models.filter((x) => x.allowed);
+  const refs = new Set(allowed.map((x) => x.ref));
+  const label = (ref: string) => allowed.find((x) => x.ref === ref)?.label ?? ref;
+  for (const [path, name] of [["model", "Modelo de IA"], ["fallback_model", "Modelo reserva"]] as const) {
+    const ref = normalizeRef(draft?.model?.[path]);
+    if (ref && !refs.has(ref))
+      throw new BuilderError(422, `${name}: "${label(ref)}" não está liberado no Painel da MAVI › Agentes MAVI. Escolha outro em Comportamento › Inteligência.`);
+  }
+  const byKey = new Map(allowed.map((x) => [x.key, x]));
+  const pricing = Object.fromEntries(
+    allowed.filter((x) => x.input != null && x.output != null).map((x) => [x.ref, { input: Number(x.input), output: Number(x.output), cached: x.cached == null ? null : Number(x.cached) }]),
+  );
+  return {
+    ...(m.default && byKey.get(m.default) ? { default_model: byKey.get(m.default)!.ref } : {}),
+    ...(m.fallback && byKey.get(m.fallback) ? { default_fallback: byKey.get(m.fallback)!.ref } : {}),
+    pricing,
+  };
+}
 const qs = (params: Record<string, unknown>) => {
   const s = Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== null && v !== "")
@@ -173,12 +225,36 @@ const OPS: Record<string, Op> = {
   },
   publish: {
     write: true,
-    run: ({ a, body, access, call }) =>
-      call("POST", `/v1/agents/${a.id}/publish`, {
+    run: async ({ a, body, access, call, models }) => {
+      const restore = Number.isInteger(body.restore_version);
+      // Voltar a uma versão antiga não confere o modelo (ela já rodou assim).
+      const opts = restore
+        ? {}
+        : modelPublishOptions((await call<{ agent: { draft: Record<string, unknown> } }>("GET", `/v1/agents/${a.id}`)).agent.draft ?? {}, await models());
+      return call("POST", `/v1/agents/${a.id}/publish`, {
         note: String(body.note ?? "").slice(0, 500),
         published_by: access.user_label,
-        ...(Number.isInteger(body.restore_version) ? { restore_version: body.restore_version } : {}),
-      }),
+        ...(restore ? { restore_version: body.restore_version } : {}),
+        ...opts,
+      });
+    },
+  },
+  keys: { write: false, run: ({ a, call }) => call("GET", `/v1/agents/${a.id}/secrets`) },
+  "key-set": {
+    write: true,
+    run: ({ a, body, access, call }) => {
+      const provider = String(body.provider ?? "");
+      if (!KINDS.includes(provider)) throw new BuilderError(400, "Escolha o provedor.");
+      return call("PUT", `/v1/agents/${a.id}/secrets/${provider}`, { key: String(body.key ?? "").trim(), updated_by: access.user_label });
+    },
+  },
+  "key-delete": {
+    write: true,
+    run: ({ a, body, call }) => {
+      const provider = String(body.provider ?? "");
+      if (!KINDS.includes(provider)) throw new BuilderError(400, "Escolha o provedor.");
+      return call("DELETE", `/v1/agents/${a.id}/secrets/${provider}`);
+    },
   },
   delete: { write: true, run: ({ a, call }) => call("DELETE", `/v1/agents/${a.id}`) },
 
@@ -392,7 +468,8 @@ export async function handleAgentBuilder(
       if (!op) throw new BuilderError(400, "Operação desconhecida.");
       const { a, access } = await loadAgentAccess(env, f, authorization, company, String(body.agent ?? ""));
       if (op.write && !access.write) throw new BuilderError(403, "Só quem edita este produto do cliente no Drive pode mudar o agente.");
-      const data = await op.run({ a, body, access, call });
+      const models = () => rpc<AgentModels>(env, f, authorization, "agent_models", { p_company: company });
+      const data = await op.run({ a, body, access, call, models });
       return { status: 200, body: data };
     }
 

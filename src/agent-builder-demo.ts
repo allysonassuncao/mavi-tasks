@@ -1,4 +1,5 @@
 import type {
+  AgentModels,
   MaviReply,
   AgentDetail,
   AgentDraft,
@@ -228,6 +229,10 @@ export async function demoOp(agentId: string, op: string, extra: Record<string, 
     case "unbind":
     case "binding-toggle":
       return { ok: true };
+    case "keys":
+    case "key-set":
+    case "key-delete":
+      return demoSecretsOp(op, extra);
     case "turns":
       return { turns: extra.simulation === "false" ? [] : turns };
     case "turn":
@@ -269,5 +274,38 @@ export async function demoMavi(messages: { role: string; content: string }[]): P
       skipped: [],
     },
     files: [],
+  };
+}
+
+const DEMO_MODELS: AgentModels = {
+  can_edit: true,
+  default: "p1|openai/gpt-5.2",
+  fallback: "p1|openai/gpt-4.1",
+  updated_at: null,
+  models: [
+    { key: "p1|openai/gpt-5.2", ref: "openrouter:openai/gpt-5.2", provider_id: "p1", provider_name: "OpenRouter (Make)", kind: "openrouter", model: "openai/gpt-5.2", label: "GPT-5.2", input: 1.25, output: 10, cached: 0.13, allowed: true },
+    { key: "p1|openai/gpt-4.1", ref: "openrouter:openai/gpt-4.1", provider_id: "p1", provider_name: "OpenRouter (Make)", kind: "openrouter", model: "openai/gpt-4.1", label: "GPT-4.1", input: 2, output: 8, cached: 0.5, allowed: true },
+    { key: "p1|anthropic/claude-sonnet-4.6", ref: "openrouter:anthropic/claude-sonnet-4.6", provider_id: "p1", provider_name: "OpenRouter (Make)", kind: "openrouter", model: "anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6", input: 3, output: 15, cached: 0.3, allowed: true },
+    { key: "p2|gpt-5-mini", ref: "openai:gpt-5-mini", provider_id: "p2", provider_name: "OpenAI", kind: "openai", model: "gpt-5-mini", label: "GPT-5 mini", input: 0.25, output: 2, cached: 0.03, allowed: false },
+  ],
+};
+export const demoModels = async () => DEMO_MODELS;
+const demoSecrets: { provider: string; key_hint: string }[] = [];
+export function demoSecretsOp(op: string, extra: Record<string, any>) {
+  if (op === "key-set") {
+    const i = demoSecrets.findIndex((x) => x.provider === extra.provider);
+    const row = { provider: extra.provider, key_hint: String(extra.key).slice(-4) };
+    if (i >= 0) demoSecrets[i] = row;
+    else demoSecrets.push(row);
+    return { provider: extra.provider, key_hint: row.key_hint, check_ok: true, check_error: null };
+  }
+  if (op === "key-delete") {
+    const i = demoSecrets.findIndex((x) => x.provider === extra.provider);
+    if (i >= 0) demoSecrets.splice(i, 1);
+    return { ok: true };
+  }
+  return {
+    secrets: demoSecrets.map((s) => ({ ...s, checked_at: new Date().toISOString(), check_ok: true, check_error: null, updated_by: "demo", updated_at: new Date().toISOString() })),
+    server_providers: ["openrouter", "openai"],
   };
 }

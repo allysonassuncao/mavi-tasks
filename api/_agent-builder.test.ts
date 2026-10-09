@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clientCode, handleAgentBuilder, starterDraft, type BuilderEnv } from "./_agent-builder";
+import { clientCode, handleAgentBuilder, modelPublishOptions, normalizeRef, starterDraft, type BuilderEnv } from "./_agent-builder";
 
 const env: BuilderEnv = {
   supabaseUrl: "https://db.test",
@@ -135,5 +135,34 @@ describe("construtor de agentes (servidor)", () => {
   it("operação desconhecida", async () => {
     const { f } = fake();
     expect((await run({ action: "builder-agent", agent: agentId, op: "apagar-tudo" }, f)).status).toBe(400);
+  });
+});
+
+describe("modelos liberados ao publicar", () => {
+  const models = {
+    default: "p1|openai/gpt-5.2",
+    fallback: null,
+    models: [
+      { key: "p1|openai/gpt-5.2", ref: "openrouter:openai/gpt-5.2", kind: "openrouter", label: "GPT-5.2", provider_name: "OR", input: 1.25, output: 10, cached: 0.13, allowed: true },
+      { key: "p2|claude", ref: "anthropic:claude", kind: "anthropic", label: "Claude", provider_name: "A", input: 3, output: 15, cached: null, allowed: false },
+    ],
+  };
+
+  it("formato antigo vira referência do OpenRouter", () => {
+    expect(normalizeRef("openai/gpt-5.2")).toBe("openrouter:openai/gpt-5.2");
+    expect(normalizeRef("anthropic:claude")).toBe("anthropic:claude");
+    expect(normalizeRef("")).toBeNull();
+  });
+
+  it("padrão e preços dos liberados vão para o motor", () => {
+    expect(modelPublishOptions({}, models)).toEqual({
+      default_model: "openrouter:openai/gpt-5.2",
+      pricing: { "openrouter:openai/gpt-5.2": { input: 1.25, output: 10, cached: 0.13 } },
+    });
+  });
+
+  it("modelo não liberado impede publicar", () => {
+    expect(() => modelPublishOptions({ model: { model: "anthropic:claude" } }, models)).toThrow(/não está liberado/);
+    expect(() => modelPublishOptions({ model: { model: "openai/gpt-5.2" } }, models)).not.toThrow();
   });
 });

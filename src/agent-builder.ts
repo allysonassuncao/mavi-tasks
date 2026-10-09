@@ -1,3 +1,4 @@
+import { rpc } from "./api";
 import { supabase } from "./supabase";
 
 /**
@@ -202,6 +203,70 @@ export function agentOp<T>(company: string, agent: string, op: string, extra: Re
     server<T>({ action: "builder-agent", company, agent, op, ...extra })
   );
 }
+
+// ------------------------------------------------------------ modelos e chaves
+/** Painel da MAVI › Agentes MAVI: um modelo de conversa cadastrado num provedor. */
+export type AgentModel = {
+  /** "<provedor_id>|<modelo>" (o que o Painel guarda). */
+  key: string;
+  /** "<tipo>:<modelo>" (o que vai para o motor). */
+  ref: string;
+  provider_id: string;
+  provider_name: string;
+  kind: string;
+  model: string;
+  label: string;
+  input: number | null;
+  output: number | null;
+  cached: number | null;
+  allowed: boolean;
+};
+export type AgentModels = {
+  can_edit: boolean;
+  default: string | null;
+  fallback: string | null;
+  updated_at: string | null;
+  models: AgentModel[];
+};
+
+export const agentModels = (company: string) =>
+  demo()?.then((m) => m.demoModels()) ?? (rpc("agent_models", { p_company: company }) as Promise<AgentModels>);
+export const setAgentModels = (company: string, models: string[], def: string | null, fallback: string | null) =>
+  demo()?.then(() => undefined) ??
+  (rpc("agent_models_set", { p_company: company, p_models: models, p_default: def, p_fallback: fallback }) as Promise<void>);
+
+export const PROVIDER_LABEL: Record<string, string> = {
+  openrouter: "OpenRouter",
+  openai: "OpenAI",
+  anthropic: "Anthropic (Claude)",
+  google: "Google (Gemini)",
+  deepseek: "DeepSeek",
+  groq: "Groq",
+  mistral: "Mistral",
+  xai: "xAI (Grok)",
+};
+/** O tipo do provedor de uma referência ("openrouter:openai/gpt-5.2" → openrouter; antigo com "/" → openrouter). */
+export function refKind(ref: string | null | undefined): string | null {
+  if (!ref) return null;
+  const i = ref.indexOf(":");
+  if (i > 0 && ref.slice(0, i) in PROVIDER_LABEL) return ref.slice(0, i);
+  return ref.includes("/") ? "openrouter" : "openai";
+}
+export const priceText = (m: Pick<AgentModel, "input" | "output">) =>
+  m.input != null && m.output != null
+    ? `US$ ${Number(m.input).toLocaleString("pt-BR")} / ${Number(m.output).toLocaleString("pt-BR")} por milhão de tokens (entrada/saída)`
+    : "preço não informado no Painel";
+
+export type AgentSecret = {
+  provider: string;
+  key_hint: string;
+  checked_at: string | null;
+  check_ok: boolean | null;
+  check_error: string | null;
+  updated_by: string | null;
+  updated_at: string;
+};
+export type AgentSecrets = { secrets: AgentSecret[]; server_providers: string[] };
 
 // ------------------------------------------------------------ a MAVI monta o agente
 export type MaviQuestion = { text: string; options: string[]; multiple: boolean };

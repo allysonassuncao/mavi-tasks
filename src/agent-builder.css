@@ -988,3 +988,40 @@ body.ab-assistant-open .ai-fab {
     border-radius: 0;
   }
 }
+
+/* ------------------------------------------------ modelos e chaves */
+.ab-section h3,
+.ab-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ab-code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #f1f4f3;
+  color: #4d5b5a;
+  font-size: 0.72rem;
+}
+.ab-model-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ab-model-list .ab-check {
+  grid-column: auto;
+}
+.ab-key-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+@media (max-width: 640px) {
+  .ab-key-form {
+    grid-template-columns: 1fr;
+  }
+}

@@ -22,6 +22,7 @@ import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { contractProductLabel } from "./domain";
 import type { Snapshot } from "./types";
 import {
+  agentModels,
   agentOp,
   createBuilderAgent,
   draftSet,
@@ -30,13 +31,15 @@ import {
   listBuilderAgents,
   type AgentDetail,
   type AgentDraft,
+  type AgentModels,
   type AgentVersion,
   type BuilderAgent,
   type DraftError,
   type MakecrmInbox,
 } from "./agent-builder";
 import { KnowledgePanel } from "./AgentBuilderKnowledge";
-import { CatalogForm } from "./AgentBuilderFields";
+import { CatalogForm, ModelOptionsContext } from "./AgentBuilderFields";
+import { AgentKeysSection } from "./AgentKeys";
 import { AgentAssistant } from "./AgentAssistant";
 import { FIELD_BY_PATH, FIELDS } from "./agent-fields";
 import { ConversationsPanel, SimulatorPanel } from "./AgentBuilderTest";
@@ -309,6 +312,13 @@ function AgentEditor({
   // A conversa com a MAVI: aberta pelo botão ou ao criar com "Criar e montar com a MAVI" (?mavi=1).
   const [assistant, setAssistant] = useState(() => new URLSearchParams(window.location.search).get("mavi") === "1");
   const [knowledgeKey, setKnowledgeKey] = useState(0);
+  // Os modelos liberados no Painel da MAVI (para os menus de modelo e as chaves).
+  const [models, setModels] = useState<AgentModels | null>(null);
+  useEffect(() => {
+    agentModels(company)
+      .then(setModels)
+      .catch(() => setModels(null));
+  }, [company]);
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.has("mavi")) {
@@ -455,9 +465,12 @@ function AgentEditor({
             ))}
           </nav>
 
-          <fieldset className="ab-panel" disabled={!canEdit && DRAFT_TABS.has(tab)}>
-            {DRAFT_TABS.has(tab) && <CatalogForm tab={tab as "profile" | "instructions" | "behavior"} p={{ draft, change, errorFor }} />}
-          </fieldset>
+          <ModelOptionsContext.Provider value={models}>
+            <fieldset className="ab-panel" disabled={!canEdit && DRAFT_TABS.has(tab)}>
+              {DRAFT_TABS.has(tab) && <CatalogForm tab={tab as "profile" | "instructions" | "behavior"} p={{ draft, change, errorFor }} />}
+            </fieldset>
+            {tab === "behavior" && <AgentKeysSection company={company} agentId={agentId} draft={draft} canEdit={canEdit} notify={notify} />}
+          </ModelOptionsContext.Provider>
           {tab === "knowledge" && <KnowledgePanel key={knowledgeKey} company={company} agentId={agentId} canEdit={canEdit} notify={notify} />}
           {tab === "test" && (
             <SimulatorPanel

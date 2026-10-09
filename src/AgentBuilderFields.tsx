@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Plus, X } from "lucide-react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Plus, TriangleAlert, X } from "lucide-react";
 import { Checkbox, Input, Select, SelectOption, Textarea } from "./ui";
-import { draftGet, linesOf, type AgentDraft } from "./agent-builder";
+import { draftGet, linesOf, priceText, PROVIDER_LABEL, refKind, type AgentDraft, type AgentModels } from "./agent-builder";
 import { DAYS, FIELDS, HALF_HOURS, type DayKey, type FieldDef, type FieldOption, type WeeklyHours } from "./agent-fields";
 
 /**
@@ -74,22 +74,19 @@ function PresetText({ f, p }: { f: Extract<FieldDef, { kind: "text" }>; p: FormP
   );
 }
 
-function OptionSelect({ f, p }: { f: Extract<FieldDef, { kind: "enum" | "number" | "model" }>; p: FormProps }) {
+function OptionSelect({ f, p }: { f: Extract<FieldDef, { kind: "enum" | "number" }>; p: FormProps }) {
   const raw = draftGet(p.draft, f.path);
-  const fallback = f.kind === "model" ? "" : String(f.fallback);
+  const fallback = String(f.fallback);
   const current = raw === undefined || raw === null ? fallback : String(raw);
   const known = f.options.find((o) => o.value === current);
-  const [custom, setCustom] = useState(f.kind === "model" && !known);
-  const options: FieldOption[] = known || f.kind === "model" ? f.options : [...f.options, { value: current, label: `Personalizado (${current})` }];
+  const options: FieldOption[] = known ? f.options : [...f.options, { value: current, label: `Personalizado (${current})` }];
   const chosen = options.find((o) => o.value === current);
   return (
     <Field label={f.label} hint={chosen?.hint ?? f.hint} error={p.errorFor(f.path)}>
       <Select
-        value={custom ? OTHER : current}
+        value={current}
         aria-label={f.label}
         onValueChange={(v) => {
-          if (v === OTHER) return setCustom(true);
-          setCustom(false);
           const val = f.kind === "number" ? Number(v) : v;
           p.change(f.path, v === fallback ? undefined : val);
         }}
@@ -99,14 +96,54 @@ function OptionSelect({ f, p }: { f: Extract<FieldDef, { kind: "enum" | "number"
             {o.label}
           </SelectOption>
         ))}
-        {f.kind === "model" ? <SelectOption value={OTHER}>Outro modelo (código do OpenRouter)…</SelectOption> : null}
       </Select>
-      {custom && (
-        <Input
-          value={known ? "" : current}
-          placeholder="ex.: openai/gpt-5.6-luna"
-          onChange={(e) => p.change(f.path, e.target.value.trim() || undefined)}
-        />
+    </Field>
+  );
+}
+
+/** Os modelos liberados no Painel da MAVI › Agentes MAVI (o editor carrega e passa). */
+export const ModelOptionsContext = createContext<AgentModels | null>(null);
+
+/** "openai/gpt-5.2" (formato antigo) vira "openrouter:openai/gpt-5.2". */
+export function normalizeRef(v: unknown): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!s) return "";
+  const i = s.indexOf(":");
+  if (i > 0 && s.slice(0, i) in PROVIDER_LABEL) return s;
+  return s.includes("/") ? `openrouter:${s}` : `openai:${s}`;
+}
+
+function ModelField({ f, p }: { f: Extract<FieldDef, { kind: "model" }>; p: FormProps }) {
+  const ctx = useContext(ModelOptionsContext);
+  const ref = normalizeRef(draftGet(p.draft, f.path));
+  const allowed = (ctx?.models ?? []).filter((m) => m.allowed);
+  const defKey = f.path === "model.model" ? ctx?.default : ctx?.fallback;
+  const def = ctx?.models.find((m) => m.key === defKey);
+  const current = allowed.find((m) => m.ref === ref);
+  const blocked = !!ref && !current;
+  const hint = current
+    ? `${PROVIDER_LABEL[current.kind] ?? current.kind} · ${priceText(current)}`
+    : !ref
+      ? def
+        ? `Hoje: ${def.label} (${PROVIDER_LABEL[def.kind] ?? def.kind}) · ${priceText(def)}`
+        : "O motor usa o modelo dele."
+      : undefined;
+  return (
+    <Field label={f.label} hint={hint ?? f.hint} error={p.errorFor(f.path)}>
+      <Select value={ref} aria-label={f.label} onValueChange={(v) => p.change(f.path, v || undefined)}>
+        <SelectOption value="">{`Padrão do Painel${def ? ` (${def.label})` : ""}`}</SelectOption>
+        {allowed.map((m) => (
+          <SelectOption key={m.key} value={m.ref}>
+            {`${m.label} — ${m.provider_name}`}
+          </SelectOption>
+        ))}
+        {blocked ? <SelectOption value={ref}>{`${ref} (não liberado)`}</SelectOption> : null}
+      </Select>
+      {blocked && (
+        <small className="ab-error">
+          <TriangleAlert size={12} aria-hidden="true" /> Este modelo não está liberado no Painel da MAVI. A versão publicada continua
+          rodando, mas para publicar de novo escolha um liberado.
+        </small>
       )}
     </Field>
   );
@@ -336,8 +373,9 @@ export function FieldControl({ f, p }: { f: FieldDef; p: FormProps }) {
       return <ChipsField f={f} p={p} />;
     case "enum":
     case "number":
-    case "model":
       return <OptionSelect f={f} p={p} />;
+    case "model":
+      return <ModelField f={f} p={p} />;
     case "bool":
       return <BoolField f={f} p={p} />;
     case "hours":

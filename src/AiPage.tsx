@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import {
+  Bot,
   BookMarked,
   BarChart3,
   BellRing,
@@ -31,6 +32,7 @@ import { RadarTaskLearning } from "./RadarTaskLearning";
 import { CampaignInsightSettings } from "./CampaignInsightSettings";
 import { CampaignDailySettings } from "./CampaignDailySettings";
 import { AiPowersPanel } from "./AiPowersPanel";
+import { AgentModelsPanel } from "./AgentModelsPanel";
 import { NoticeAnimationAdmin } from "./NoticeAnimationAdmin";
 import { noticesApi } from "./notices";
 import { SettingsHistory, SettingsLogProvider } from "./AiSettingsLog";
@@ -77,6 +79,7 @@ const SECTIONS: { label: string; items: Section[] }[] = [
       { id: "regras", label: "Quem usa qual modelo", icon: Route, admin: false },
       { id: "roteamento", label: "Roteamento", icon: Shuffle, admin: false },
       { id: "avaliacao", label: "Avaliação", icon: ClipboardCheck, admin: false },
+      { id: "agentes", label: "Agentes MAVI", icon: Bot, admin: false },
     ],
   },
 ];
@@ -144,6 +147,8 @@ export function AiPage({
           demo={demo}
           notify={notify}
         />
+      ) : tab === "agentes" ? (
+        <AgentModelsPanel company={company} notify={notify} />
       ) : tab === "poderes" ? (
         <AiPowersPanel
           company={company}

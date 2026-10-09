@@ -28,7 +28,8 @@ export type FieldDef = Base &
     | { kind: "number"; min: number; max: number; fallback: number; options: FieldOption[] }
     | { kind: "bool"; fallback: boolean }
     | { kind: "hours" }
-    | { kind: "model"; options: FieldOption[] }
+    /** As opções vêm do Painel da MAVI › Agentes MAVI (modelos liberados). */
+    | { kind: "model" }
   );
 
 export const DAYS = [
@@ -46,13 +47,7 @@ export type WeeklyHours = Partial<Record<DayKey, { from: string; to: string } | 
 /** Horários de meia em meia hora para os menus. */
 export const HALF_HOURS = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`);
 
-const MODELS: FieldOption[] = [
-  { value: "", label: "Padrão do motor (recomendado)", hint: "Um modelo equilibrado entre qualidade, velocidade e custo." },
-  { value: "openai/gpt-5.2", label: "Equilibrado — GPT-5.2", hint: "Boa qualidade com custo médio." },
-  { value: "anthropic/claude-sonnet-4.6", label: "Mais caprichado — Claude Sonnet 4.6", hint: "Escreve mais natural; custa mais." },
-  { value: "openai/gpt-5-mini", label: "Econômico — GPT-5 mini", hint: "Mais barato; bom para conversas simples." },
-  { value: "google/gemini-3.1-flash-lite", label: "Mais rápido — Gemini Flash Lite", hint: "Responde rápido e custa pouco; menos caprichado." },
-];
+
 
 export const FIELDS: FieldDef[] = [
   // ------------------------------------------------------------ perfil
@@ -448,17 +443,16 @@ export const FIELDS: FieldDef[] = [
     tab: "behavior",
     section: "Inteligência",
     label: "Modelo de IA",
+    hint: "Só aparecem os modelos liberados no Painel da MAVI.",
     kind: "model",
-    options: MODELS,
   },
   {
     path: "model.fallback_model",
     tab: "behavior",
     section: "Inteligência",
     label: "Modelo reserva",
-    hint: "Usado se o principal falhar.",
+    hint: "Usado se o principal falhar ou estiver sem chave.",
     kind: "model",
-    options: MODELS,
   },
   {
     path: "model.effort",
@@ -552,7 +546,7 @@ export function describeValue(path: string, value: unknown): string {
     case "bool":
       return value ? "Sim" : "Não";
     case "model":
-      return f.options.find((o) => o.value === value)?.label ?? String(value);
+      return String(value);
     case "list":
     case "chips":
       return Array.isArray(value) ? value.join(" · ") : String(value);
@@ -599,7 +593,7 @@ export function fieldsGuide(): string {
             : f.kind === "hours"
               ? 'objeto por dia {"mon"|"tue"|"wed"|"thu"|"fri"|"sat"|"sun": {"from":"HH:MM","to":"HH:MM"} ou null = fechado}'
               : f.kind === "model"
-                ? `id do modelo (vazio = padrão): ${f.options.map((o) => JSON.stringify(o.value)).join(", ")}`
+                ? 'referência "<provedor>:<modelo>" de um modelo liberado (lista "Modelos liberados" no estado) ou null = padrão do Painel. Só mude se a pessoa pedir.'
                 : `texto até ${f.max} caracteres${f.kind === "text" && f.presets ? `; opções sugeridas: ${f.presets.map((p) => JSON.stringify(p.value)).join(", ")}` : ""}`;
     return `- ${f.path} — ${f.label}${f.hint ? ` (${f.hint})` : ""}: ${type}`;
   }).join("\n");

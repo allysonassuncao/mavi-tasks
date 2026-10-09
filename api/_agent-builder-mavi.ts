@@ -162,7 +162,7 @@ const getPath = (draft: Row, path: string) =>
   path.split(".").reduce<unknown>((o, k) => (o && typeof o === "object" ? (o as Row)[k] : undefined), draft);
 
 /** Confere a proposta contra o catálogo dos campos e as regras dos itens. */
-export function parseBuilderReply(text: string, draft: Row, files: string[]): BuilderReply {
+export function parseBuilderReply(text: string, draft: Row, files: string[], modelRefs: string[] | null = null): BuilderReply {
   const j = jsonOf(text);
   const message = str(j.message, 6000) || "Pronto.";
   const questions: BuilderQuestion[] = (Array.isArray(j.questions) ? j.questions : [])
@@ -192,6 +192,10 @@ export function parseBuilderReply(text: string, draft: Row, files: string[]): Bu
     const checked = checkFieldValue(path, f.value);
     if (!checked.ok) {
       skipped.push(checked.error);
+      continue;
+    }
+    if (def.kind === "model" && typeof checked.value === "string" && modelRefs && !modelRefs.includes(checked.value)) {
+      skipped.push(`${def.label}: modelo não liberado no Painel (${checked.value})`);
       continue;
     }
     const before = getPath(draft, path);
@@ -355,7 +359,7 @@ export async function handleAgentBuilderMavi(
     const attachments = await readAttachments(req.attachments);
     const files = [...new Set([...heldFiles, ...attachments.names])];
 
-    const [limits, route, knowledge] = await Promise.all([
+    const [limits, route, knowledge, allowedModels] = await Promise.all([
       callRpc<{ blocked: boolean; message: string | null }>(env, f, authorization, "ai_check_limits", {
         p_company: company,
         p_client: ref.mavi_client_id ?? null,
@@ -364,6 +368,9 @@ export async function handleAgentBuilderMavi(
       }),
       featureProvider(env, f, authorization, company, "agent_builder"),
       engine<KnowledgeSummary>(builder, f, "GET", `/v1/agents/${a.id}/knowledge?limit=300`).catch(() => null),
+      callRpc<{ models: { ref: string; label: string; provider_name: string; allowed: boolean }[] }>(env, f, authorization, "agent_models", { p_company: company })
+        .then((r) => (r.ok ? (r.data?.models ?? []).filter((m) => m.allowed) : null))
+        .catch(() => null),
     ]);
     provider = route;
     if (limits.ok && limits.data?.blocked) throw new BuilderError(429, limits.data.message ?? "Limite de uso da MAVI atingido.");
@@ -426,6 +433,9 @@ export async function handleAgentBuilderMavi(
       `Rascunho atual:\n${draftText(draft)}`,
       `Base de conhecimento:\n${knowledgeText(knowledge)}`,
       files.length ? `Arquivos anexados nesta conversa (podem ir para a base como "file"): ${files.join(", ")}` : "",
+      allowedModels
+        ? `Modelos liberados no Painel (para model.model e model.fallback_model; null = padrão do Painel): ${allowedModels.map((m) => `${m.label} — ${m.provider_name} = "${m.ref}"`).join("; ") || "(nenhum)"}`
+        : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -467,7 +477,7 @@ export async function handleAgentBuilderMavi(
       maxTokens: 16_000,
     });
     meter = result.meter;
-    const reply = parseBuilderReply(result.text, draft, files);
+    const reply = parseBuilderReply(result.text, draft, files, allowedModels ? allowedModels.map((m) => m.ref) : null);
     return { status: 200, body: { ...reply, files, model: meter?.model || provider?.config.model || env.model } };
   } catch (err) {
     if (err instanceof BuilderError) return fail(err.status, err.message);
