@@ -63,6 +63,7 @@ import { handleTaskSearch } from "./_task-search.js";
 import { handleRadarSuggest } from "./_radar-link.js";
 import { agentEnv, handleAgents } from "./_agents.js";
 import { builderEnv, handleAgentBuilder } from "./_agent-builder.js";
+import { handleAgentBuilderMavi } from "./_agent-builder-mavi.js";
 import { handleCsSync } from "./_cs-sync.js";
 import { handleCsHsWorker } from "./_cs-hs.js";
 import {
@@ -535,6 +536,14 @@ export default async function handler(
       result = await handleCsSync(body, authorization, driveEnv(), fetch);
     // Agente Conversacional: a leitura das VPS do n8n (o agendamento ou um
     // administrador), reler um fluxo e publicar um prompt.
+    // Agentes MAVI › a MAVI monta o agente (funcionalidade 'agent_builder').
+    else if (action === "builder-mavi") {
+      const env = {
+        ...aiEnv(driveEnv()),
+        model: serverModel("agent_builder", process.env),
+      };
+      result = await handleAgentBuilderMavi(body, authorization, env, aiDeps(env), builderEnv(driveEnv()));
+    }
     // Agentes MAVI: o construtor fala com o motor próprio (mavi-agentes).
     else if (action.startsWith("builder-"))
       result = await handleAgentBuilder(

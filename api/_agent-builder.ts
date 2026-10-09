@@ -30,7 +30,7 @@ export function builderEnv(
   };
 }
 
-class BuilderError extends Error {
+export class BuilderError extends Error {
   constructor(
     public status: number,
     message: string,
@@ -57,10 +57,10 @@ export type EngineAgent = {
   [k: string]: unknown;
 };
 
-type Access = { read: boolean; write: boolean; leader: boolean; client_name: string; user_id: string; user_label: string };
+export type Access = { read: boolean; write: boolean; leader: boolean; client_name: string; user_id: string; user_label: string };
 
 // ------------------------------------------------------------ banco (como a pessoa)
-async function rpc<T>(env: BuilderEnv, f: Fetch, authorization: string, name: string, args: Record<string, unknown>): Promise<T> {
+export async function rpc<T>(env: BuilderEnv, f: Fetch, authorization: string, name: string, args: Record<string, unknown>): Promise<T> {
   const res = await f(`${env.supabaseUrl}/rest/v1/rpc/${name}`, {
     method: "POST",
     headers: { apikey: env.supabaseKey, Authorization: authorization, "Content-Type": "application/json" },
@@ -76,7 +76,7 @@ async function rpc<T>(env: BuilderEnv, f: Fetch, authorization: string, name: st
 }
 
 // ------------------------------------------------------------ motor
-async function engine<T>(env: BuilderEnv, f: Fetch, method: string, path: string, body?: unknown): Promise<T> {
+export async function engine<T>(env: BuilderEnv, f: Fetch, method: string, path: string, body?: unknown): Promise<T> {
   if (!env.engineUrl || !env.engineKey)
     throw new BuilderError(503, "O motor de agentes ainda não está configurado (AGENTS_ENGINE_URL e AGENTS_ENGINE_KEY na Vercel).");
   let res: Response;
@@ -313,6 +313,30 @@ const OPS: Record<string, Op> = {
 
 export const BUILDER_OPS = Object.keys(OPS);
 
+/**
+ * O agente do motor e o que a pessoa pode nele (regra do Drive). Agente de
+ * outra empresa ou de cliente que a pessoa não vê: "não encontrado".
+ */
+export async function loadAgentAccess(
+  env: BuilderEnv,
+  f: Fetch,
+  authorization: string,
+  company: string,
+  agentId: string,
+): Promise<{ a: EngineAgent; access: Access }> {
+  const got = await engine<{ agent: EngineAgent }>(env, f, "GET", `/v1/agents/${uuid(agentId, "o agente")}`);
+  const a = got.agent;
+  const ref = a.external_ref ?? {};
+  if (ref.mavi_company_id !== company || !ref.mavi_client_id) throw new BuilderError(404, "Agente não encontrado.");
+  const access = await rpc<Access>(env, f, authorization, "agent_builder_access", {
+    p_company: company,
+    p_client: ref.mavi_client_id,
+    p_contract: ref.mavi_contract_id ?? null,
+  });
+  if (!access.read) throw new BuilderError(404, "Agente não encontrado.");
+  return { a, access };
+}
+
 // ------------------------------------------------------------ ações
 export async function handleAgentBuilder(
   body: Record<string, unknown>,
@@ -366,17 +390,7 @@ export async function handleAgentBuilder(
     if (action === "builder-agent") {
       const op = OPS[String(body.op ?? "")];
       if (!op) throw new BuilderError(400, "Operação desconhecida.");
-      const agentId = uuid(body.agent, "o agente");
-      const got = await call<{ agent: EngineAgent }>("GET", `/v1/agents/${agentId}`);
-      const a = got.agent;
-      const ref = a.external_ref ?? {};
-      if (ref.mavi_company_id !== company || !ref.mavi_client_id) throw new BuilderError(404, "Agente não encontrado.");
-      const access = await rpc<Access>(env, f, authorization, "agent_builder_access", {
-        p_company: company,
-        p_client: ref.mavi_client_id,
-        p_contract: ref.mavi_contract_id ?? null,
-      });
-      if (!access.read) throw new BuilderError(404, "Agente não encontrado.");
+      const { a, access } = await loadAgentAccess(env, f, authorization, company, String(body.agent ?? ""));
       if (op.write && !access.write) throw new BuilderError(403, "Só quem edita este produto do cliente no Drive pode mudar o agente.");
       const data = await op.run({ a, body, access, call });
       return { status: 200, body: data };

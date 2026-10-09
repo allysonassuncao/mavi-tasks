@@ -203,6 +203,39 @@ export function agentOp<T>(company: string, agent: string, op: string, extra: Re
   );
 }
 
+// ------------------------------------------------------------ a MAVI monta o agente
+export type MaviQuestion = { text: string; options: string[]; multiple: boolean };
+export type MaviField = { path: string; label: string; before: string; after: string; value: unknown; why: string };
+export type MaviKnowledge = {
+  kind: "faq" | "product" | "text" | "example" | "document" | "file";
+  title: string;
+  preview: string;
+  why: string;
+  item: Record<string, unknown>;
+  file?: string;
+};
+export type MaviProposal = { summary: string; fields: MaviField[]; knowledge: MaviKnowledge[]; skipped: string[] };
+export type MaviReply = { message: string; questions: MaviQuestion[]; proposal: MaviProposal | null; files: string[]; model?: string };
+
+/** Uma vez da conversa com a MAVI (api/_agent-builder-mavi.ts). */
+export const askBuilderMavi = (input: {
+  company: string;
+  agent: string;
+  messages: { role: "user" | "assistant"; content: string }[];
+  draft: AgentDraft;
+  attachments: { name: string; mime: string; data: string }[];
+  files: string[];
+}) => demo()?.then((m) => m.demoMavi(input.messages)) ?? server<MaviReply>({ action: "builder-mavi", ...input });
+
+/** O arquivo em base64 (para mandar à MAVI na conversa). */
+export const fileBase64 = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+    r.onerror = () => reject(new Error("Não consegui ler o arquivo."));
+    r.readAsDataURL(file);
+  });
+
 /** Envia o arquivo direto ao armazenamento do motor e registra o item. */
 export async function uploadKnowledgeFile(
   company: string,

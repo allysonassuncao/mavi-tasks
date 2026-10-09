@@ -40,6 +40,7 @@ const ROUTED_FEATURES = [
   "task_search",
   "task_copilot",
   "dashboard_builder",
+  "agent_builder",
   "tutorial_search",
   "skill_coach",
   "personal_assistant",

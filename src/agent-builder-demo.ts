@@ -1,4 +1,5 @@
 import type {
+  MaviReply,
   AgentDetail,
   AgentDraft,
   BuilderAgent,
@@ -238,4 +239,35 @@ export async function demoOp(agentId: string, op: string, extra: Record<string, 
     default:
       return {};
   }
+}
+
+/** A MAVI na demonstração: uma pergunta e uma proposta de exemplo. */
+export async function demoMavi(messages: { role: string; content: string }[]): Promise<MaviReply> {
+  await new Promise((r) => setTimeout(r, 600));
+  if (!messages.some((m) => m.role === "user"))
+    return {
+      message: "Oi! Vou te ajudar a montar o agente. Para começar:",
+      questions: [
+        { text: "O cliente tem site?", options: ["Sim, vou colar o endereço", "Não tem site"], multiple: false },
+        { text: "Qual o objetivo principal do atendimento?", options: ["Agendar reunião", "Vender pelo WhatsApp", "Tirar dúvidas", "Suporte"], multiple: false },
+      ],
+      proposal: null,
+      files: [],
+    };
+  return {
+    message: "Com o que você me contou, preparei o perfil e duas perguntas frequentes. Confira e aplique o que fizer sentido.",
+    questions: [{ text: "Qual o horário de atendimento?", options: ["Comercial (seg a sex, 9h às 18h)", "Inclui sábado", "Todos os dias"], multiple: false }],
+    proposal: {
+      summary: "Perfil e primeiras perguntas da base",
+      fields: [
+        { path: "persona.tone", label: "Tom de voz", before: "Cordial e natural", after: "Consultivo", value: "consultivo, seguro e especialista", why: "Vendas B2B, segundo você" },
+        { path: "instructions.goal", label: "Objetivo", before: "(padrão)", after: "Qualificar e agendar uma reunião com o time comercial.", value: "Qualificar e agendar uma reunião com o time comercial.", why: "Sua resposta" },
+      ],
+      knowledge: [
+        { kind: "faq", title: "Tem fidelidade?", preview: "Não, os planos são mensais e sem fidelidade.", why: "Site do cliente", item: { kind: "faq", data: { question: "Tem fidelidade?", answer: "Não, os planos são mensais e sem fidelidade." } } },
+      ],
+      skipped: [],
+    },
+    files: [],
+  };
 }

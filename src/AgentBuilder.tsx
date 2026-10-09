@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -18,16 +18,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Modal } from "./components";
-import { Button, Input, Loading, Select, SelectOption, Textarea } from "./ui";
+import { Button, Input, Loading, Select, SelectOption } from "./ui";
 import { contractProductLabel } from "./domain";
 import type { Snapshot } from "./types";
 import {
   agentOp,
   createBuilderAgent,
-  draftGet,
   draftSet,
   errorOf,
-  linesOf,
   when,
   listBuilderAgents,
   type AgentDetail,
@@ -38,6 +36,9 @@ import {
   type MakecrmInbox,
 } from "./agent-builder";
 import { KnowledgePanel } from "./AgentBuilderKnowledge";
+import { CatalogForm } from "./AgentBuilderFields";
+import { AgentAssistant } from "./AgentAssistant";
+import { FIELD_BY_PATH, FIELDS } from "./agent-fields";
 import { ConversationsPanel, SimulatorPanel } from "./AgentBuilderTest";
 import "./agent-builder.css";
 
@@ -161,9 +162,14 @@ function AgentBuilderList({
           company={company}
           data={data}
           onClose={() => setCreating(false)}
-          onCreated={(id) => {
+          onCreated={(id, withMavi) => {
             setCreating(false);
-            notify("Agente criado. Preencha o perfil e as instruções.");
+            notify(withMavi ? "Agente criado. A MAVI vai te ajudar a montar." : "Agente criado. Preencha o perfil e as instruções.");
+            if (withMavi) {
+              const url = new URL(window.location.href);
+              url.searchParams.set("mavi", "1");
+              window.history.replaceState(window.history.state, "", url);
+            }
             onOpen(id);
           }}
         />
@@ -187,7 +193,7 @@ function NewAgentModal({
   company: string;
   data: Snapshot;
   onClose: () => void;
-  onCreated: (id: string) => void;
+  onCreated: (id: string, withMavi: boolean) => void;
 }) {
   const clients = useMemo(
     () => data.clients.filter((c) => !c.archived).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
@@ -210,10 +216,12 @@ function NewAgentModal({
         className="ab-form"
         onSubmit={(e) => {
           e.preventDefault();
+          // Qual botão enviou: "Criar e montar com a MAVI" abre a conversa com ela.
+          const withMavi = (e.nativeEvent as SubmitEvent).submitter?.getAttribute("data-mavi") === "1";
           setBusy(true);
           setError("");
           createBuilderAgent(company, { client, contract, name: name.trim() })
-            .then((r) => onCreated(r.agent.id))
+            .then((r) => onCreated(r.agent.id, withMavi))
             .catch((err) => setError(errorOf(err)))
             .finally(() => setBusy(false));
         }}
@@ -245,13 +253,17 @@ function NewAgentModal({
           <span>Nome do agente</span>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Clara (atendimento)" maxLength={120} required />
         </label>
+        <p className="ab-hint">Com a MAVI, ela faz perguntas, lê o site do cliente e o agente do n8n (se houver) e preenche tudo com você.</p>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="agent-editor-foot">
           <Button type="button" className="btn secondary" onClick={onClose} disabled={busy}>
             Cancelar
           </Button>
-          <Button type="submit" className="btn primary" loading={busy} disabled={!client || !contract || !name.trim()}>
-            Criar agente
+          <Button type="submit" className="btn secondary" loading={busy} disabled={!client || !contract || !name.trim()}>
+            Criar e preencher
+          </Button>
+          <Button type="submit" data-mavi="1" className="btn primary" loading={busy} disabled={!client || !contract || !name.trim()}>
+            <Sparkles size={15} aria-hidden="true" /> Criar e montar com a MAVI
           </Button>
         </div>
       </form>
@@ -294,6 +306,16 @@ function AgentEditor({
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<DraftError[]>([]);
   const [publishing, setPublishing] = useState(false);
+  // A conversa com a MAVI: aberta pelo botão ou ao criar com "Criar e montar com a MAVI" (?mavi=1).
+  const [assistant, setAssistant] = useState(() => new URLSearchParams(window.location.search).get("mavi") === "1");
+  const [knowledgeKey, setKnowledgeKey] = useState(0);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("mavi")) {
+      url.searchParams.delete("mavi");
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, []);
 
   const load = useCallback(() => {
     agentOp<AgentDetail>(company, agentId, "get")
@@ -322,13 +344,13 @@ function AgentEditor({
     setDirty(true);
   };
 
-  const save = async (): Promise<boolean> => {
+  const save = async (toSave: AgentDraft = draft): Promise<boolean> => {
     setSaving(true);
     try {
-      const r = await agentOp<{ draft_validation: { errors: DraftError[] } }>(company, agentId, "draft", { draft });
+      const r = await agentOp<{ draft_validation: { errors: DraftError[] } }>(company, agentId, "draft", { draft: toSave });
       setErrors(r.draft_validation.errors);
       setDirty(false);
-      setDetail((d) => (d ? { ...d, agent: { ...d.agent, draft, draft_updated_at: new Date().toISOString() } } : d));
+      setDetail((d) => (d ? { ...d, agent: { ...d.agent, draft: toSave, draft_updated_at: new Date().toISOString() } } : d));
       return true;
     } catch (e) {
       notify(errorOf(e));
@@ -397,6 +419,9 @@ function AgentEditor({
                 {a.status === "active" ? <Pause size={15} aria-hidden="true" /> : <Play size={15} aria-hidden="true" />}
                 {a.status === "active" ? "Pausar" : "Ativar"}
               </Button>
+              <Button type="button" className={`btn secondary ab-mavi-btn ${assistant ? "on" : ""}`} onClick={() => setAssistant(!assistant)}>
+                <Sparkles size={15} aria-hidden="true" /> Montar com a MAVI
+              </Button>
               <Button type="button" className="btn primary" onClick={() => setPublishing(true)}>
                 Publicar
               </Button>
@@ -412,43 +437,59 @@ function AgentEditor({
         </p>
       )}
 
-      <nav className="ab-tabs" role="tablist" aria-label="Partes do agente">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            className={tab === t.id ? "selected" : ""}
-            onClick={() => setTab(t.id)}
-          >
-            <t.icon size={15} aria-hidden="true" /> {t.label}
-            {DRAFT_TABS.has(t.id) && errors.some((e) => TAB_OF(e.path) === t.id) && <span className="ab-dot" aria-label="tem pendência" />}
-          </button>
-        ))}
-      </nav>
+      <div className={`ab-editor-layout ${assistant && canEdit ? "with-assistant" : ""}`}>
+        <div className="ab-editor-main">
+          <nav className="ab-tabs" role="tablist" aria-label="Partes do agente">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                className={tab === t.id ? "selected" : ""}
+                onClick={() => setTab(t.id)}
+              >
+                <t.icon size={15} aria-hidden="true" /> {t.label}
+                {DRAFT_TABS.has(t.id) && errors.some((e) => TAB_OF(e.path) === t.id) && <span className="ab-dot" aria-label="tem pendência" />}
+              </button>
+            ))}
+          </nav>
 
-      <fieldset className="ab-panel" disabled={!canEdit && DRAFT_TABS.has(tab)}>
-        {tab === "profile" && <ProfileForm draft={draft} change={change} errorFor={errorFor} />}
-        {tab === "instructions" && <InstructionsForm draft={draft} change={change} errorFor={errorFor} />}
-        {tab === "behavior" && <BehaviorForm draft={draft} change={change} errorFor={errorFor} />}
-      </fieldset>
-      {tab === "knowledge" && <KnowledgePanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} />}
-      {tab === "test" && (
-        <SimulatorPanel
-          company={company}
-          agentId={agentId}
-          dirty={dirty}
-          saveFirst={save}
-          published={a.published_version}
-          valid={!errors.length}
-          notify={notify}
-        />
-      )}
-      {tab === "inboxes" && <InboxesPanel company={company} detail={detail} canEdit={canEdit} notify={notify} reload={load} />}
-      {tab === "versions" && <VersionsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} reload={load} />}
-      {tab === "conversations" && <ConversationsPanel company={company} agentId={agentId} />}
-
+          <fieldset className="ab-panel" disabled={!canEdit && DRAFT_TABS.has(tab)}>
+            {DRAFT_TABS.has(tab) && <CatalogForm tab={tab as "profile" | "instructions" | "behavior"} p={{ draft, change, errorFor }} />}
+          </fieldset>
+          {tab === "knowledge" && <KnowledgePanel key={knowledgeKey} company={company} agentId={agentId} canEdit={canEdit} notify={notify} />}
+          {tab === "test" && (
+            <SimulatorPanel
+              company={company}
+              agentId={agentId}
+              dirty={dirty}
+              saveFirst={save}
+              published={a.published_version}
+              valid={!errors.length}
+              notify={notify}
+            />
+          )}
+          {tab === "inboxes" && <InboxesPanel company={company} detail={detail} canEdit={canEdit} notify={notify} reload={load} />}
+          {tab === "versions" && <VersionsPanel company={company} agentId={agentId} canEdit={canEdit} notify={notify} reload={load} />}
+          {tab === "conversations" && <ConversationsPanel company={company} agentId={agentId} />}
+        </div>
+        {assistant && canEdit && (
+          <AgentAssistant
+            company={company}
+            agentId={agentId}
+            draft={draft}
+            notify={notify}
+            onClose={() => setAssistant(false)}
+            onKnowledgeChanged={() => setKnowledgeKey((k) => k + 1)}
+            applyFields={async (changes) => {
+              const next = changes.reduce<AgentDraft>((d, c) => draftSet(d, c.path, c.value ?? undefined), draft);
+              setDraft(next);
+              return save(next);
+            }}
+          />
+        )}
+      </div>
       {publishing && (
         <PublishModal
           dirty={dirty}
@@ -479,311 +520,11 @@ function AgentEditor({
 
 // ------------------------------------------------------------ campos
 const FIELD_LABEL: Record<string, string> = {
-  "persona.name": "nome do agente",
-  "persona.company": "nome da empresa",
-  "instructions.goal": "objetivo",
+  ...Object.fromEntries(FIELDS.map((f) => [f.path, f.label.toLowerCase()])),
   persona: "perfil",
   instructions: "instruções",
 };
-const TAB_OF = (path: string): Tab =>
-  path.startsWith("persona") ? "profile" : path.startsWith("instructions") ? "instructions" : "behavior";
-
-type FormProps = {
-  draft: AgentDraft;
-  change: (path: string, value: unknown) => void;
-  errorFor: (path: string) => string | undefined;
-};
-
-function Field({
-  label,
-  hint,
-  error,
-  children,
-}: {
-  label: string;
-  hint?: ReactNode;
-  error?: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className={`ab-field ${error ? "invalid" : ""}`}>
-      <span className="ab-label">{label}</span>
-      {children}
-      {hint && !error && <small className="muted">{hint}</small>}
-      {error && <small className="ab-error">{error}</small>}
-    </label>
-  );
-}
-
-function TextField({ p, path, label, hint, placeholder, max, area, rows }: {
-  p: FormProps;
-  path: string;
-  label: string;
-  hint?: ReactNode;
-  placeholder?: string;
-  max?: number;
-  area?: boolean;
-  rows?: number;
-}) {
-  const value = String(draftGet(p.draft, path) ?? "");
-  return (
-    <Field label={label} hint={hint} error={p.errorFor(path)}>
-      {area ? (
-        <Textarea value={value} onChange={(e) => p.change(path, e.target.value)} placeholder={placeholder} maxLength={max} rows={rows ?? 4} />
-      ) : (
-        <Input value={value} onChange={(e) => p.change(path, e.target.value)} placeholder={placeholder} maxLength={max} />
-      )}
-    </Field>
-  );
-}
-
-/** Lista editada como texto, uma por linha. */
-function ListField({ p, path, label, hint, placeholder }: { p: FormProps; path: string; label: string; hint?: ReactNode; placeholder?: string }) {
-  const list: string[] = draftGet(p.draft, path) ?? [];
-  const [text, setText] = useState(list.join("\n"));
-  useEffect(() => {
-    if (linesOf(text).join("\n") !== list.join("\n")) setText(list.join("\n"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list.join("\n")]);
-  return (
-    <Field label={label} hint={hint ?? "Uma por linha."} error={p.errorFor(path)}>
-      <Textarea
-        value={text}
-        rows={Math.min(10, Math.max(3, list.length + 1))}
-        placeholder={placeholder}
-        onChange={(e) => {
-          setText(e.target.value);
-          p.change(path, linesOf(e.target.value));
-        }}
-      />
-    </Field>
-  );
-}
-
-function ChoiceField({ p, path, label, options, fallback }: { p: FormProps; path: string; label: string; options: [string, string][]; fallback: string }) {
-  return (
-    <Field label={label}>
-      <Select value={String(draftGet(p.draft, path) ?? fallback)} onValueChange={(v) => p.change(path, v === fallback ? undefined : v)} aria-label={label}>
-        {options.map(([v, l]) => (
-          <SelectOption key={v} value={v}>
-            {l}
-          </SelectOption>
-        ))}
-      </Select>
-    </Field>
-  );
-}
-
-function NumberField({ p, path, label, hint, min, max, fallback, step }: {
-  p: FormProps;
-  path: string;
-  label: string;
-  hint?: ReactNode;
-  min: number;
-  max: number;
-  fallback: number;
-  step?: number;
-}) {
-  const v = draftGet(p.draft, path);
-  return (
-    <Field label={label} hint={hint} error={p.errorFor(path)}>
-      <Input
-        type="number"
-        min={min}
-        max={max}
-        step={step ?? 1}
-        value={v ?? ""}
-        placeholder={String(fallback)}
-        onChange={(e) => p.change(path, e.target.value === "" ? undefined : Number(e.target.value))}
-      />
-    </Field>
-  );
-}
-
-function CheckField({ p, path, label, fallback, hint }: { p: FormProps; path: string; label: string; fallback: boolean; hint?: string }) {
-  const v = draftGet(p.draft, path);
-  const checked = v === undefined ? fallback : !!v;
-  return (
-    <label className="agent-check ab-check">
-      <input type="checkbox" checked={checked} onChange={(e) => p.change(path, e.target.checked === fallback ? undefined : e.target.checked)} />
-      <span>
-        {label}
-        {hint && <small className="muted"> — {hint}</small>}
-      </span>
-    </label>
-  );
-}
-
-function Group({ title, children, intro }: { title: string; intro?: string; children: ReactNode }) {
-  return (
-    <section className="ab-section">
-      <h3>{title}</h3>
-      {intro && <p className="muted ab-section-intro">{intro}</p>}
-      <div className="ab-grid">{children}</div>
-    </section>
-  );
-}
-
-function ProfileForm(p: FormProps) {
-  return (
-    <>
-      <Group title="Quem é o agente">
-        <TextField p={p} path="persona.name" label="Nome do agente" placeholder="Clara" max={60} hint="Como ele se apresenta ao lead." />
-        <TextField p={p} path="persona.role" label="Papel" placeholder="assistente virtual" max={120} />
-        <TextField p={p} path="persona.tone" label="Tom de voz" placeholder="cordial, natural e direto, como uma pessoa real no WhatsApp" max={300} />
-        <ChoiceField
-          {...p}
-          p={p}
-          path="persona.reply_size"
-          label="Tamanho das respostas"
-          fallback="short"
-          options={[
-            ["short", "Curtas (1 a 2 frases)"],
-            ["medium", "Médias (até 4 frases)"],
-            ["long", "Mais detalhadas"],
-          ]}
-        />
-        <ChoiceField
-          {...p}
-          p={p}
-          path="persona.emoji"
-          label="Emojis"
-          fallback="few"
-          options={[
-            ["none", "Nenhum"],
-            ["few", "Poucos"],
-            ["many", "À vontade"],
-          ]}
-        />
-        <TextField p={p} path="persona.language" label="Idioma" placeholder="português do Brasil" max={60} />
-      </Group>
-      <Group title="A empresa">
-        <TextField p={p} path="persona.company" label="Nome da empresa" placeholder="Make Vendas" max={120} />
-        <TextField p={p} path="persona.segment" label="Segmento" placeholder="Marketing digital" max={120} />
-        <TextField p={p} path="persona.address" label="Endereço" max={400} />
-        <TextField
-          {...p}
-          p={p}
-          path="persona.company_summary"
-          label="Sobre a empresa"
-          area
-          rows={5}
-          max={4000}
-          hint="O essencial que o agente precisa saber sempre. Detalhes (preços, políticas, catálogo) vão na base de conhecimento."
-        />
-      </Group>
-    </>
-  );
-}
-
-function InstructionsForm(p: FormProps) {
-  return (
-    <>
-      <Group title="Objetivo e roteiro">
-        <TextField
-          {...p}
-          p={p}
-          path="instructions.goal"
-          label="Objetivo"
-          area
-          rows={3}
-          max={4000}
-          placeholder="Ex.: Entender o que o lead procura, tirar dúvidas e agendar uma reunião com o time comercial."
-        />
-        <TextField
-          {...p}
-          p={p}
-          path="instructions.conversation_guide"
-          label="Roteiro da conversa"
-          area
-          rows={8}
-          max={20000}
-          placeholder={"1. Cumprimente e pergunte o nome.\n2. Entenda o negócio do lead.\n3. ..."}
-          hint="As etapas e perguntas, na ordem. O agente segue como guia, sem copiar as frases."
-        />
-        <TextField p={p} path="instructions.business_hours" label="Horários de funcionamento" area rows={2} max={2000} placeholder="Segunda a sexta, 9h às 18h" />
-      </Group>
-      <Group title="Regras">
-        <ListField p={p} path="instructions.rules" label="Regras" placeholder="Só agende reuniões em dias úteis." />
-        <ListField p={p} path="instructions.never" label="O agente nunca deve" placeholder="Prometer desconto." />
-      </Group>
-      <Group title="Texto livre" intro="Para trazer um prompt pronto (do n8n, por exemplo) enquanto ele não é dividido nos campos acima.">
-        <TextField p={p} path="instructions.extra" label="Instruções adicionais" area rows={10} max={60000} />
-      </Group>
-    </>
-  );
-}
-
-const MODELS = [
-  "openai/gpt-5.2",
-  "openai/gpt-5.6-luna",
-  "openai/gpt-5-mini",
-  "openai/gpt-4.1",
-  "anthropic/claude-sonnet-4.6",
-  "google/gemini-3.1-flash-lite",
-  "deepseek/deepseek-v4-pro",
-];
-
-function BehaviorForm(p: FormProps) {
-  return (
-    <>
-      <Group title="Conhecimento" intro="Como o agente usa a base de conhecimento a cada mensagem.">
-        <CheckField p={p} path="knowledge.enabled" label="Usar a base de conhecimento" fallback />
-        <NumberField p={p} path="knowledge.prefetch_k" label="Trechos buscados a cada mensagem" min={0} max={20} fallback={6} hint="0 = só quando o agente pesquisar." />
-        <CheckField p={p} path="knowledge.search_tool" label="Deixar o agente pesquisar mais quando precisar" fallback />
-        <CheckField p={p} path="knowledge.rerank" label="Reordenar os resultados com IA" fallback={false} hint="mais preciso, cerca de 1 s a mais" />
-      </Group>
-      <Group title="Memória">
-        <NumberField p={p} path="memory.history_messages" label="Mensagens recentes lembradas inteiras" min={4} max={100} fallback={30} hint="As mais antigas viram um resumo." />
-        <CheckField p={p} path="memory.summary" label="Resumir as mensagens antigas" fallback />
-        <ListField p={p} path="memory.contact_fields" label="Dados do contato a guardar" placeholder={"nome\ne-mail\ncidade"} hint="Um por linha. O agente registra quando o lead informar e não pergunta de novo." />
-      </Group>
-      <Group title="Mensagens do lead">
-        <NumberField p={p} path="buffer.seconds" label="Espera antes de responder (segundos)" min={0} max={60} fallback={8} hint="Junta as mensagens que o lead manda em sequência." />
-        <CheckField p={p} path="media.audio" label="Ouvir áudios (transcrição)" fallback />
-        <CheckField p={p} path="media.images" label="Ver imagens" fallback />
-        <CheckField p={p} path="media.documents" label="Ler documentos (PDF, DOCX)" fallback />
-      </Group>
-      <Group title="Respostas">
-        <NumberField p={p} path="output.max_messages" label="Máximo de mensagens por resposta" min={1} max={8} fallback={4} />
-        <CheckField p={p} path="output.typing_delay" label="Pausa de digitação entre as mensagens" fallback />
-        <CheckField p={p} path="output.strip_trailing_period" label="Tirar o ponto final das mensagens" fallback />
-        <CheckField p={p} path="output.no_em_dash" label="Não usar travessão (—)" fallback />
-      </Group>
-      <Group title="Passar para uma pessoa">
-        <CheckField p={p} path="handoff.enabled" label="O agente pode passar a conversa para a equipe" fallback hint="desliga a IA na conversa e deixa uma nota no MakeCRM" />
-        <TextField p={p} path="handoff.when" label="Quando passar (além de quando o lead pedir)" area rows={2} max={2000} placeholder="Ex.: quando o lead quiser negociar valores." />
-        <TextField p={p} path="handoff.message" label="O que dizer ao passar" max={500} placeholder="Vou te passar para alguém da equipe, tá? Já já te respondem por aqui." />
-      </Group>
-      <Group title="Modelo" intro="Deixe em branco para usar o padrão do motor.">
-        <Field label="Modelo">
-          <Input list="ab-models" value={draftGet(p.draft, "model.model") ?? ""} placeholder="padrão do motor" onChange={(e) => p.change("model.model", e.target.value.trim() || undefined)} />
-        </Field>
-        <Field label="Modelo reserva (se o principal falhar)">
-          <Input list="ab-models" value={draftGet(p.draft, "model.fallback_model") ?? ""} placeholder="padrão do motor" onChange={(e) => p.change("model.fallback_model", e.target.value.trim() || undefined)} />
-        </Field>
-        <ChoiceField
-          {...p}
-          p={p}
-          path="model.effort"
-          label="Esforço de raciocínio"
-          fallback=""
-          options={[
-            ["", "Padrão do modelo"],
-            ["low", "Baixo (mais rápido)"],
-            ["medium", "Médio"],
-            ["high", "Alto (mais caro)"],
-          ]}
-        />
-        <datalist id="ab-models">
-          {MODELS.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
-      </Group>
-    </>
-  );
-}
+const TAB_OF = (path: string): Tab => (FIELD_BY_PATH.get(path)?.tab as Tab | undefined) ?? (path.startsWith("persona") ? "profile" : path.startsWith("instructions") ? "instructions" : "behavior");
 
 // ------------------------------------------------------------ publicar e versões
 function PublishModal({

@@ -253,6 +253,7 @@ export type AiFeature =
   | "conversation_summary"
   | "skill_coach"
   | "dashboard_builder"
+  | "agent_builder"
   | "client_radar"
   | "client_radar_check"
   | "client_radar_themes"
@@ -406,6 +407,14 @@ export const FEATURES: FeatureInfo[] = [
     conversation: false,
     env: "AI_MODEL",
     note: "A conversa ao lado do dashboard: pergunta o que falta, confere os nomes e roda a prévia de cada painel antes de propor. Um modelo forte acerta mais os painéis. Sem escolha, usa o padrão da empresa.",
+  },
+  {
+    id: "agent_builder",
+    group: "MAVI · poderes",
+    label: "Agentes MAVI: montar o agente com a MAVI",
+    conversation: false,
+    env: "AI_MODEL",
+    note: "A conversa ao lado do construtor de agentes: entrevista a pessoa, lê o site, os arquivos e o prompt do n8n e propõe os campos e a base de conhecimento. Um modelo forte monta agentes melhores. Sem escolha, usa o padrão da empresa.",
   },
   {
     id: "image_generation",
@@ -809,6 +818,7 @@ export function serverModel(
     case "conversation_summary":
     case "skill_coach":
     case "dashboard_builder":
+    case "agent_builder":
       return env.AI_MODEL || fallback;
     case "meetings_ask":
       return env.MEETINGS_MODEL || fallback;

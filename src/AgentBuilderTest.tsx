@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, RotateCcw, Send, TriangleAlert } from "lucide-react";
 import { Modal } from "./components";
-import { Button, Loading, Select, SelectOption, Textarea } from "./ui";
+import { Button, Checkbox, Loading, Select, SelectOption, Textarea } from "./ui";
 import {
   agentOp,
   errorOf,
@@ -319,9 +319,10 @@ export function ConversationsPanel({ company, agentId }: { company: string; agen
         </div>
       )}
       <div className="ab-toolbar">
-        <label className="agent-check">
-          <input type="checkbox" checked={onlyErrors} onChange={(e) => setOnlyErrors(e.target.checked)} /> Só as com erro
-        </label>
+        <span className="ab-check compact">
+          <Checkbox id="ab-only-errors" checked={onlyErrors} onCheckedChange={(c) => setOnlyErrors(c === true)} />
+          <label htmlFor="ab-only-errors">Só as com erro</label>
+        </span>
         <button type="button" className="agent-link-btn" onClick={load}>
           Atualizar
         </button>
