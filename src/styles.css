@@ -18512,6 +18512,21 @@ label .sl-money .ui-input,
   transform: translateY(-2px) scale(1.04);
   box-shadow: 0 2px 4px #1c27282e, 0 8px 16px -4px #1c272840;
 }
+/* A bolinha ocupa até 72px acima da borda: no fim da página o último cartão
+   e o rodapé ficam livres dela, em vez de terem o canto coberto. */
+body:has(.ai-fab) .app-footer {
+  padding-right: 50px;
+  padding-bottom: 34px;
+}
+/* Agenda ocupa a tela toda: o calendário termina acima da bolinha. */
+body:has(.ai-fab) main:has(> .agenda) {
+  padding-bottom: 84px;
+}
+/* Some onde já é a própria MAVI ou onde um painel lateral ocupa o canto. */
+body:has(.mavi-chat) .ai-fab,
+body:has(.mplat-drawer) .ai-fab {
+  display: none;
+}
 .ai-drawer {
   position: fixed;
   top: 12px;
