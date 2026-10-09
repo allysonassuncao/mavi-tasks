@@ -19,7 +19,7 @@ const TourEditor = lazy(() => import("./TourEditor"));
 const TourFeedback = lazy(() => import("./TourPlayer").then((m) => ({ default: m.TourFeedback })));
 
 type Session =
-  | { mode: "play"; id: string; step: number; test: boolean; title: string; steps: TourStep[] }
+  | { mode: "play"; id: string; step: number; test: boolean; title: string; steps: TourStep[]; opened: number }
   | { mode: "edit"; id: string; start: EditorStart };
 type Saved = { mode: "play"; id: string; step: number } | { mode: "edit"; id: string };
 
@@ -119,7 +119,8 @@ export function TourLayer({
             .progress(d.id, step ? "step" : "start", step, d.steps[step].id)
             .catch(() => {});
         remember({ mode: "play", id: d.id, step });
-        setSession({ mode: "play", id: d.id, step, test, title: d.title, steps: d.steps });
+        // Cada abertura recomeça o player (tocar de novo o mesmo vai ao passo pedido).
+        setSession({ mode: "play", id: d.id, step, test, title: d.title, steps: d.steps, opened: Date.now() });
       } catch (e) {
         if (!resumed) notify((e as Error).message || "Não foi possível abrir o onboarding.");
       }
@@ -274,7 +275,7 @@ export function TourLayer({
   return (
     <Suspense fallback={null}>
       <TourPlayer
-        key={id}
+        key={`${id}:${session.opened}`}
         title={session.title}
         steps={steps}
         start={session.step}

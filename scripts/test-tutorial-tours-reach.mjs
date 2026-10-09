@@ -152,8 +152,8 @@ await check("passo: registro e clique de verdade conferidos", async () => {
       title: "Passos",
       aud_all: true,
       steps: [
-        step("passo1", { kind: "click", record: "same", real: false }),
-        step("passo2", { kind: "auto", record: "outro", real: false }),
+        step("passo1", { kind: "click", record: "same", real: false, skip: false }),
+        step("passo2", { kind: "auto", record: "outro", real: false, skip: false }),
         step("passo3"),
       ],
     }),
@@ -161,6 +161,8 @@ await check("passo: registro e clique de verdade conferidos", async () => {
     null,
   ]);
   const d = await rpc("tutorial_tour_detail", [r.id]);
+  // "Pular" (migração 20270628090000): só o clique esperado pode tirar.
+  assert.deepEqual(d.steps.map((s) => s.skip), [false, true, true]);
   assert.deepEqual(
     d.steps.map((s) => [s.record, s.real]),
     [

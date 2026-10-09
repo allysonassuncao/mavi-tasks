@@ -46,6 +46,8 @@ export interface TourStep {
   record?: TourRecord;
   /** "Esperar o clique": false = the click is only shown, never sent. */
   real?: boolean;
+  /** "Esperar o clique": false = no "Pular" button (the click is required). */
+  skip?: boolean;
 }
 export type TourRecord = "any" | "same";
 

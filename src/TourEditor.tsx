@@ -811,9 +811,12 @@ function StepList({
                       {pageLabel(s.page)} · {s.target ? describeTarget(s.target) : "Balão no centro"} ·{" "}
                       {STEP_KINDS.find((k) => k.id === s.kind)?.label}
                     </small>
-                    {(s.real === false || (s.record === "same" && stepInRecord(s))) && (
+                    {(s.real === false ||
+                      (s.kind === "click" && s.skip === false) ||
+                      (s.record === "same" && stepInRecord(s))) && (
                       <span className="tour-step-flags">
                         {s.real === false && <span>só mostrar</span>}
+                        {s.kind === "click" && s.skip === false && <span>sem pular</span>}
                         {s.record === "same" && stepInRecord(s) && <span>este registro</span>}
                       </span>
                     )}
@@ -1015,6 +1018,22 @@ function StepForm({
             <span>
               <b>Só mostrar</b>
               <small>O clique não chega ao sistema: nada é salvo nem enviado. O tour segue.</small>
+            </span>
+          </label>
+        </fieldset>
+      )}
+      {s.kind === "click" && (
+        <fieldset className="tour-field tour-kinds">
+          <legend className="tour-label">Botão “Pular”</legend>
+          <label>
+            <input type="checkbox" checked={s.skip !== false} onChange={(e) => set({ skip: e.target.checked })} />
+            <span>
+              <b>Mostrar o botão “Pular”</b>
+              <small>
+                {s.skip !== false
+                  ? "A pessoa pode seguir sem clicar no destaque."
+                  : "Desligado: só avança clicando no destaque (se o elemento não aparecer, o tour mostra “Próximo”)."}
+              </small>
             </span>
           </label>
         </fieldset>

@@ -483,7 +483,8 @@ html.tour-active .toast {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.tour-kinds label input[type="radio"] {
+.tour-kinds label input[type="radio"],
+.tour-kinds label input[type="checkbox"] {
   flex: none;
   width: 16px;
   height: 16px;

@@ -554,7 +554,7 @@ export function TourPlayer({
                 <ArrowLeft size={15} /> Voltar
               </button>
             )}
-            {kind === "click" && (
+            {kind === "click" && step.skip !== false && (
               <button type="button" className="text-btn" onClick={next}>
                 Pular
               </button>
