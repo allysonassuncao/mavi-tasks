@@ -1195,11 +1195,17 @@ export default function App() {
     liveTick,
     countedScopes,
   ]);
+  // O resumo do período (report_summary) só nas páginas que o mostram:
+  // Visão geral e Relatórios (números, horas por cliente e pessoa), Clientes
+  // e Projetos (andamento dos projetos). Quem salva já limpa o cache
+  // (invalidateCompanyCache/invalidateSummaryCache), então a volta usa o
+  // cache de 5 minutos em vez de ir ao banco a cada mudança.
+  const needsSummary = page === "overview" || page === "reports" || page === "clients" || page === "projects";
   useEffect(() => {
-    if (demo || !company || !session) return;
+    if (demo || !company || !session || !needsSummary) return;
     let alive = true;
     api
-      .reportSummary(company, period, refresh > 0 || reportRefresh > 0)
+      .reportSummary(company, period)
       .then((s) => {
         if (alive) setSummary(s);
       })
@@ -1207,7 +1213,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [demo, company, session, period, refresh, reportRefresh]);
+  }, [demo, company, session, period, refresh, reportRefresh, needsSummary]);
   // Sidebar badge on Tarefas: the person's own open tasks ("Para você").
   const [myOpenTasks, setMyOpenTasks] = useState<number | undefined>();
   useEffect(() => {
