@@ -5065,7 +5065,8 @@ export default function App() {
         member &&
         moduleOn("assistant", member.role, hiddenPages) && (
           <AiAssistant
-            key={company}
+            // Chave própria: irmã do TourLayer, chave repetida duplicava a bolinha.
+            key={`assistant-${company}`}
             company={company}
             data={catalogData}
             user={user}
@@ -5080,7 +5081,7 @@ export default function App() {
         )}
       {company && member && (
         <TourLayer
-          key={company}
+          key={`tours-${company}`}
           company={company}
           companyPath={companyPath}
           user={user}
