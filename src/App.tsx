@@ -3243,6 +3243,8 @@ export default function App() {
                   page !== "customerSuccess" &&
                   page !== "tutorials" &&
                   page !== "settings" &&
+                  // Agente Conversacional (Agentes MAVI e do n8n): configuração, sem tarefas.
+                  page !== "agents" &&
                   (!["products", "contracts", "clients", "projects"].includes(
                     page,
                   ) ||
