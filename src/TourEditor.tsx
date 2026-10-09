@@ -18,6 +18,7 @@ import {
   Send,
   Sparkles,
   Square,
+  Timer,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -131,6 +132,8 @@ export default function TourEditor({
   const [save, setSave] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [picking, setPicking] = useState(false);
   const [recording, setRecording] = useState(false);
+  /** "Escolher em 3 s": seconds left to open a list or menu before choosing. */
+  const [countdown, setCountdown] = useState<number | null>(null);
   const [recorded, setRecorded] = useState(0);
   const [form, setForm] = useState<Form | null>(null);
   const [listOpen, setListOpen] = useState(true);
@@ -373,6 +376,18 @@ export default function TourEditor({
     openForm(i, s, null);
   };
 
+  // "Escolher em 3 s": a contagem não exige clique (a lista aberta não fecha).
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown <= 0) {
+      setCountdown(null);
+      setPicking(true);
+      return;
+    }
+    const t = window.setTimeout(() => setCountdown((n) => (n === null ? null : n - 1)), 1000);
+    return () => window.clearTimeout(t);
+  }, [countdown]);
+
   // While testing, the editor steps aside.
   if (testing !== null)
     return (
@@ -398,6 +413,8 @@ export default function TourEditor({
   return (
     <TourPortal>
       {picking && <Picker onPick={onPick} onCancel={() => setPicking(false)} />}
+      {/* Alt (Option) + clique escolhe a qualquer momento, sem clicar na barra. */}
+      {!picking && !recording && countdown === null && <Picker requireAlt onPick={onPick} onCancel={() => {}} />}
       {recording && <Recorder onRecord={onRecord} />}
       {form && !picking && (
         <FormHighlight
@@ -460,7 +477,14 @@ export default function TourEditor({
             )}
           </small>
         </div>
-        {recording ? (
+        {countdown !== null ? (
+          <div className="tour-bar-picking">
+            <Timer size={16} /> Abra a lista ou o menu agora. A escolha começa em <b>{countdown}</b>…
+            <button type="button" className="btn secondary" onClick={() => setCountdown(null)}>
+              Cancelar
+            </button>
+          </div>
+        ) : recording ? (
           <div className="tour-bar-picking">
             <span className="tour-rec-dot" aria-hidden="true" /> Gravando: use o sistema; cada clique vira um passo.
             <b>{recorded} {recorded === 1 ? "passo" : "passos"}</b>
@@ -525,6 +549,14 @@ export default function TourEditor({
                   <MessageSquare size={15} /> Balão no centro
                 </button>
               )}
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setCountdown(3)}
+                title="Para opções de listas e menus: clique aqui, abra a lista e espere. Ou segure Alt (Option) e clique no elemento."
+              >
+                <Timer size={15} /> Em 3 s
+              </button>
               <button
                 type="button"
                 className={`btn secondary ${listOpen ? "selected" : ""}`}
@@ -614,60 +646,86 @@ function Recorder({ onRecord }: { onRecord: (el: HTMLElement, target: TourTarget
 
 /**
  * Choosing an element: the hovered one lights up and the click picks it
- * (the click never reaches the app). Esc cancels.
+ * (the click never reaches the app). Esc cancels. `requireAlt`: always on
+ * while the editor is open, but only with Alt (Option) held — the way to
+ * pick an option of an open list or menu, which would close if the person
+ * clicked the editor's bar.
  */
-function Picker({ onPick, onCancel }: { onPick: (el: HTMLElement) => void; onCancel: () => void }) {
+function Picker({
+  onPick,
+  onCancel,
+  requireAlt = false,
+}: {
+  onPick: (el: HTMLElement) => void;
+  onCancel: () => void;
+  requireAlt?: boolean;
+}) {
   const [hover, setHover] = useState<HTMLElement | null>(null);
   const box = useBox(hover);
   const latest = useRef({ onPick, onCancel });
   latest.current = { onPick, onCancel };
   useEffect(() => {
     let current: HTMLElement | null = null;
-    const at = (e: MouseEvent) => {
-      const under = document.elementFromPoint(e.clientX, e.clientY);
+    let pointer: { x: number; y: number } | null = null;
+    const on = (e: { altKey: boolean }) => !requireAlt || e.altKey;
+    const at = (x: number, y: number) => {
+      const under = document.elementFromPoint(x, y);
       return isTourUi(under) ? null : pickable(under);
     };
-    const move = (e: MouseEvent) => {
-      const el = at(e);
+    const show = (el: HTMLElement | null) => {
       if (el !== current) {
         current = el;
         setHover(el);
       }
     };
+    const move = (e: MouseEvent) => {
+      pointer = { x: e.clientX, y: e.clientY };
+      show(on(e) ? at(e.clientX, e.clientY) : null);
+    };
     // Nothing reaches the app while choosing (menus open on pointerdown).
     const block = (e: Event) => {
-      if (isTourUi(e.target as Element)) return;
+      if (isTourUi(e.target as Element) || !on(e as MouseEvent)) return;
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
     };
     const click = (e: MouseEvent) => {
-      if (isTourUi(e.target as Element)) return;
+      if (isTourUi(e.target as Element) || !on(e)) return;
       block(e);
-      const el = at(e);
+      const el = at(e.clientX, e.clientY);
       if (el) latest.current.onPick(el);
+      show(null);
     };
     const key = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (requireAlt) {
+        // Alt pressed or released: light (or not) what is under the pointer.
+        if (e.key === "Alt" && pointer) show(e.type === "keydown" ? at(pointer.x, pointer.y) : null);
+        return;
+      }
+      if (e.type !== "keydown" || e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
       latest.current.onCancel();
     };
+    const blur = () => show(null);
+    const presses = ["pointerdown", "mousedown", "pointerup", "mouseup", "dblclick", "contextmenu"];
     document.addEventListener("mousemove", move, true);
-    for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "dblclick", "contextmenu"])
-      document.addEventListener(t, block, true);
+    for (const t of presses) document.addEventListener(t, block, true);
     document.addEventListener("click", click, true);
     document.addEventListener("keydown", key, true);
-    document.documentElement.classList.add("tour-picking");
+    document.addEventListener("keyup", key, true);
+    window.addEventListener("blur", blur);
+    if (!requireAlt) document.documentElement.classList.add("tour-picking");
     return () => {
       document.removeEventListener("mousemove", move, true);
-      for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "dblclick", "contextmenu"])
-        document.removeEventListener(t, block, true);
+      for (const t of presses) document.removeEventListener(t, block, true);
       document.removeEventListener("click", click, true);
       document.removeEventListener("keydown", key, true);
-      document.documentElement.classList.remove("tour-picking");
+      document.removeEventListener("keyup", key, true);
+      window.removeEventListener("blur", blur);
+      if (!requireAlt) document.documentElement.classList.remove("tour-picking");
     };
-  }, []);
+  }, [requireAlt]);
   if (!hover || !box) return null;
   const t = captureTarget(hover);
   return (
@@ -730,6 +788,10 @@ function StepList({
   return (
     <div className="tour-steps">
       <h2>Passos</h2>
+      <p className="tour-tip">
+        Opção de lista ou menu: clique em <b>Em 3 s</b> e abra a lista, ou segure <kbd>Alt</kbd> (<kbd>Option</kbd>{" "}
+        no Mac) e clique nela.
+      </p>
       {!steps.length ? (
         <p className="tour-empty">
           Navegue até a tela onde o onboarding começa e clique em <b>Escolher elemento</b>. Use{" "}

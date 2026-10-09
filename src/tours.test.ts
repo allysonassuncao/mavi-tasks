@@ -102,6 +102,9 @@ describe("impressões digitais", () => {
   it("nome do elemento para o editor e botões perigosos", () => {
     expect(describeTarget({ tag: "button", role: null, text: "Nova tarefa", label: null })).toBe("Botão “Nova tarefa”");
     expect(describeTarget({ tag: "div", role: "tab", text: "", label: "Plataforma" })).toBe("Aba “Plataforma”");
+    expect(describeTarget({ tag: "div", role: "option", text: "Prazo mais distante", label: null })).toBe(
+      "Opção da lista “Prazo mais distante”",
+    );
     expect(looksDestructive({ text: "Excluir tarefa", label: null })).toBe(true);
     expect(looksDestructive({ text: "Salvar", label: "Remover filtro" })).toBe(true);
     expect(looksDestructive({ text: "Nova tarefa", label: null })).toBe(false);

@@ -430,16 +430,25 @@ const TAG_NAMES: Record<string, string> = {
   h2: "Título",
   h3: "Título",
 };
+const ROLE_NAMES: Record<string, string> = {
+  tab: "Aba",
+  menuitem: "Item do menu",
+  menuitemcheckbox: "Item do menu",
+  menuitemradio: "Item do menu",
+  option: "Opção da lista",
+  listbox: "Lista de opções",
+  menu: "Menu",
+  combobox: "Lista",
+  checkbox: "Caixa de seleção",
+  switch: "Chave",
+  radio: "Opção",
+  button: "Botão",
+  link: "Link",
+  dialog: "Janela",
+};
 /** "Botão “Nova tarefa”" — how the editor names an element. */
 export function describeTarget(t: Pick<TourTarget, "tag" | "role" | "text" | "label">) {
-  const kind =
-    t.role === "tab"
-      ? "Aba"
-      : t.role === "menuitem"
-        ? "Item do menu"
-        : t.role === "combobox"
-          ? "Lista"
-          : (TAG_NAMES[t.tag] ?? "Elemento");
+  const kind = (t.role && ROLE_NAMES[t.role]) || TAG_NAMES[t.tag] || "Elemento";
   const name = t.label || t.text;
   return name ? `${kind} “${name.length > 40 ? `${name.slice(0, 40)}…` : name}”` : kind;
 }

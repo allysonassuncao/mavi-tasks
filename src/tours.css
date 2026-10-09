@@ -24,31 +24,37 @@
 }
 
 /* ------------------------------------------------ destaque */
-.tour-dim {
-  position: fixed;
-  inset: 0;
-  background: #121c1a8c;
-  pointer-events: none;
-  animation: tour-fade 0.2s ease-out;
-}
-.tour-dim.blocking {
-  pointer-events: auto;
-}
 .tour-ring {
   position: fixed;
   border-radius: 10px;
   pointer-events: none !important;
   box-shadow: 0 0 0 3px #a8d86a, 0 0 0 7px #a8d86a55;
-  transition:
-    left 0.18s,
-    top 0.18s,
-    width 0.18s,
-    height 0.18s;
 }
 .tour-ring.dim {
   box-shadow:
     0 0 0 3px #a8d86a,
     0 0 0 9999px #121c1a8c;
+  animation: tour-fade 0.2s ease-out;
+}
+/* Sem elemento: o furo fecha no meio (tudo escuro), sem o contorno verde. */
+.tour-ring.dim.closed {
+  box-shadow:
+    0 0 0 0 transparent,
+    0 0 0 9999px #121c1a8c;
+}
+/* Só na troca de passo a luz desliza; seguindo a tela (rolagem), acompanha na hora. */
+.tour-ring.moving {
+  transition:
+    left 0.28s ease,
+    top 0.28s ease,
+    width 0.28s ease,
+    height 0.28s ease,
+    box-shadow 0.28s ease;
+}
+.tour-balloon.moving {
+  transition:
+    left 0.28s ease,
+    top 0.28s ease;
 }
 .tour-blocker {
   position: fixed;
@@ -1018,4 +1024,19 @@ html.tour-active .toast {
 .tour-feedback-list small {
   font-size: 0.7rem;
   color: var(--muted);
+}
+
+/* Dica: opções de listas e menus */
+.tour-tip {
+  margin: -4px 0 12px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: #5f6d6b;
+}
+.tour-tip kbd {
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #f6f7f8;
+  font-size: 0.68rem;
 }

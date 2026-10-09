@@ -182,28 +182,41 @@ export function useStepElement(
 }
 
 /** The dimmed screen with a hole on the element; `block` stops clicks outside it. */
-export function Spotlight({ box, block, dim = true }: { box: Box | null; block: boolean; dim?: boolean }) {
+export function Spotlight({
+  box,
+  block,
+  dim = true,
+  moving = false,
+}: {
+  box: Box | null;
+  block: boolean;
+  dim?: boolean;
+  /** Between steps: the light slides from one element to the next. */
+  moving?: boolean;
+}) {
   const pad = 6;
-  if (!box)
-    return dim ? <div className={`tour-dim ${block ? "blocking" : ""}`} /> : null;
-  const hole = {
-    left: box.left - pad,
-    top: box.top - pad,
-    width: box.width + pad * 2,
-    height: box.height + pad * 2,
-  };
+  const view = useViewport();
+  if (!box && !dim) return null;
+  // Always the same piece: without an element the hole closes in the middle
+  // of the screen (all dark), so changing steps never flashes.
+  const hole = box
+    ? { left: box.left - pad, top: box.top - pad, width: box.width + pad * 2, height: box.height + pad * 2 }
+    : { left: view.width / 2, top: view.height / 2, width: 0, height: 0 };
+  const ring = (
+    <div
+      key="ring"
+      className={`tour-ring ${dim ? "dim" : ""} ${box ? "" : "closed"} ${moving ? "moving" : ""}`}
+      style={hole}
+    />
+  );
+  if (!box) return block ? [ring, <div key="all" className="tour-blocker" style={{ inset: 0 }} />] : ring;
   const bars: CSSProperties[] = [
     { left: 0, top: 0, right: 0, height: Math.max(0, hole.top) },
     { left: 0, top: hole.top + hole.height, right: 0, bottom: 0 },
     { left: 0, top: hole.top, width: Math.max(0, hole.left), height: hole.height },
     { left: hole.left + hole.width, top: hole.top, right: 0, height: hole.height },
   ];
-  return (
-    <>
-      <div className={`tour-ring ${dim ? "dim" : ""}`} style={hole} />
-      {block && bars.map((s, i) => <div key={i} className="tour-blocker" style={s} />)}
-    </>
-  );
+  return [ring, ...(block ? bars.map((s, i) => <div key={i} className="tour-blocker" style={s} />) : [])];
 }
 
 /** A balloon beside a box (or in the middle of the screen). */
@@ -323,25 +336,45 @@ export function TourPlayer({
   const [busy, setBusy] = useState(false);
   const missLogged = useRef(new Set<string>());
 
-  // 1) The step's screen: opens it when the person is elsewhere.
+  // 1) The step's screen: opens it when the person is elsewhere (and lets
+  // it draw before looking). On the same screen it looks right away.
   useEffect(() => {
-    setReady(false);
     setFilled(false);
     setBusy(false);
     if (!step) return;
     if (!onScreen(step) && navigated.current !== index) {
       navigated.current = index;
+      setReady(false);
       navigate(stepHref(step.url, companyPath));
+      const t = window.setTimeout(() => setReady(true), 120);
+      return () => window.clearTimeout(t);
     }
-    // Lets the screen draw before looking for the element.
-    const t = window.setTimeout(() => setReady(true), 120);
-    return () => window.clearTimeout(t);
+    setReady(true);
   }, [index, step, companyPath]);
 
   // 2) Its element.
   const anyRecord = !!step && step.record !== "same";
   const { el, missing, relook } = useStepElement(step?.target ?? null, ready, index, 5000, anyRecord);
   const box = useBox(el, relook);
+  // Between steps the light keeps the last element until it finds the new
+  // one and slides there (no flash of a fully dark screen); only a slow
+  // search (another screen loading) moves the balloon to the middle.
+  const lastBox = useRef<Box | null>(null);
+  if (box) lastBox.current = box;
+  const searchingNow = !!step?.target && !el && !missing;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!searchingNow) return;
+    const t = window.setTimeout(() => setSlow(true), 450);
+    return () => window.clearTimeout(t);
+  }, [searchingNow, index]);
+  const [moving, setMoving] = useState(false);
+  useEffect(() => {
+    setMoving(true);
+    const t = window.setTimeout(() => setMoving(false), 400);
+    return () => window.clearTimeout(t);
+  }, [index]);
   useEffect(() => {
     if (missing && step && !missLogged.current.has(step.id)) {
       missLogged.current.add(step.id);
@@ -435,7 +468,8 @@ export function TourPlayer({
 
   if (!step) return null;
   const centered = !step.target || missing;
-  const searching = !!step.target && !el && !missing;
+  const searching = searchingNow;
+  const lit = centered ? null : (box ?? (slow ? null : lastBox.current));
   const last = index === steps.length - 1;
   const kind = missing ? "next" : step.kind;
   const nextLabel = last ? "Concluir" : "Próximo";
@@ -456,13 +490,13 @@ export function TourPlayer({
   return (
     <TourPortal>
       {/* Ao preencher, listas e calendários abrem fora do destaque: só o contorno. */}
-      <Spotlight box={centered ? null : box} block={kind !== "input"} dim={kind !== "input" || centered} />
+      <Spotlight box={lit} block={kind !== "input"} dim={kind !== "input" || centered} moving={moving} />
       <Balloon
-        box={centered ? null : box}
+        box={lit}
         // Listas abrem para baixo: ao preencher, o balão prefere o lado.
         placement={step.placement === "auto" && kind === "input" ? "right" : step.placement}
         label={`${title}: passo ${index + 1} de ${steps.length}`}
-        className={test ? "testing" : ""}
+        className={`${test ? "testing" : ""} ${moving ? "moving" : ""}`}
       >
         <div className="tour-balloon-head">
           <span className="tour-count">
