@@ -18503,11 +18503,14 @@ label .sl-money .ui-input,
   border-radius: 50%;
   background: #263334;
   color: #c8ec8e;
-  box-shadow: 0 8px 24px #1c272840;
-  transition: transform 0.15s;
+  /* Sombra curta e em camadas: a antiga (24px de desfoque) virava uma
+     auréola cinza em volta da bolinha nos fundos claros. */
+  box-shadow: 0 1px 2px #1c27282e, 0 4px 12px -2px #1c272838;
+  transition: transform 0.15s, box-shadow 0.15s;
 }
 .ai-fab:hover {
   transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 2px 4px #1c27282e, 0 8px 16px -4px #1c272840;
 }
 .ai-drawer {
   position: fixed;
