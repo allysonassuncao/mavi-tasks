@@ -532,7 +532,10 @@ function TourSettings({
           />
           <fieldset className="notice-block tour-reach">
             <legend>Começa sozinho</legend>
-            <small>Uma vez só para cada pessoa. Pelo “?” e pela aba Onboarding ele está sempre disponível.</small>
+            <small>
+              Os dois primeiros valem uma vez só para cada pessoa; “Até concluir” insiste até ela terminar. Pelo “?” e
+              pela aba Onboarding ele está sempre disponível.
+            </small>
             <label className="tour-reach-option">
               <input
                 type="checkbox"
@@ -550,6 +553,16 @@ function TourSettings({
                 onChange={(e) => setContent({ ...content, trg_login: e.target.checked })}
               />
               Logo que a pessoa entra no sistema (bom para quem acabou de chegar)
+            </label>
+            <label className="tour-reach-option">
+              <input
+                type="checkbox"
+                checked={content.trg_until_done}
+                disabled={busy}
+                onChange={(e) => setContent({ ...content, trg_until_done: e.target.checked })}
+              />
+              Até concluir: enquanto a pessoa não concluir, ele volta toda vez que ela abre a tela onde ele começa
+              (do passo onde parou)
             </label>
           </fieldset>
           <p className="tour-settings-note">

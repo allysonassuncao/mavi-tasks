@@ -186,4 +186,28 @@ await check("trilha com tutorial e onboarding: ordem, conclusão e próximo", as
   assert.deepEqual(d.items.map((i) => i.kind), ["tutorial"]);
 });
 
+await check("volta até concluir: começa de novo do passo onde parou", async () => {
+  const until = await saveTour(manager, tour({ title: "Até concluir", trg_visit: true, trg_until_done: true }));
+  const mine = async (user) => {
+    await as(user);
+    return (await rows("my_auto_tutorial_tours", [A])).find((r) => r.id === until.id);
+  };
+  let a = await mine(beto);
+  assert.equal(a.until_done, true);
+  assert.equal(a.my_step, 0);
+  await as(beto);
+  await rpc("set_tutorial_tour_progress", [until.id, "start", 0, "passo1"]);
+  await rpc("set_tutorial_tour_progress", [until.id, "step", 1, "passo2"]);
+  await rpc("set_tutorial_tour_progress", [until.id, "dismiss", 1, "passo2"]);
+  a = await mine(beto);
+  assert.ok(a, "fechou sem concluir: continua na lista");
+  assert.equal(a.my_step, 1);
+  await as(beto);
+  await rpc("set_tutorial_tour_progress", [until.id, "complete", 1, "passo2"]);
+  assert.equal(await mine(beto), undefined);
+  // A opção volta no detalhe de quem edita.
+  await as(manager);
+  assert.equal((await rpc("tutorial_tour_detail", [until.id])).audience.trg_until_done, true);
+});
+
 console.log(`\n${passed} verificações passaram.`);

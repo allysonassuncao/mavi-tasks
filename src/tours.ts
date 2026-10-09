@@ -69,6 +69,8 @@ export interface TourTriggers {
   trg_visit: boolean;
   /** Right after the person enters the system. */
   trg_login: boolean;
+  /** Until the person completes it: again on every visit to its first screen, from where they stopped. */
+  trg_until_done: boolean;
 }
 
 export interface TourContent extends TutorialAudience, TourReach, TourTriggers {
@@ -204,6 +206,10 @@ export interface TourAuto {
   screen_only: boolean;
   /** A scheduled send received and not started yet: starts on any screen. */
   send_id?: string | null;
+  /** Comes back on every visit to its first screen until completed. */
+  until_done?: boolean;
+  /** Where the person stopped (to resume). */
+  my_step?: number;
 }
 
 /** A scheduled send of a tour: when, to whom, who already did it, how to tell. */
@@ -293,6 +299,7 @@ export const emptyTour = (): TourContent => ({
   ...emptyReach(),
   trg_visit: false,
   trg_login: false,
+  trg_until_done: false,
 });
 export const emptyReach = (): TourReach => ({
   aud_squads: [],
@@ -692,6 +699,7 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
       scr_products: t.live.scr_products ?? [],
       trg_visit: !!t.live.trg_visit,
       trg_login: !!t.live.trg_login,
+      trg_until_done: !!t.live.trg_until_done,
     },
     created_by: t.created_by,
     author_name: userName,
@@ -965,7 +973,11 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
   async function autoTours(): Promise<TourAuto[]> {
     return demoRead()
       .filter(
-        (t) => t.status === "published" && (t.live.trg_visit || t.live.trg_login) && t.live.steps.length && !t.progress,
+        (t) =>
+          t.status === "published" &&
+          (t.live.trg_visit || t.live.trg_login || t.live.trg_until_done) &&
+          t.live.steps.length &&
+          (!t.progress || (t.live.trg_until_done && t.progress.status !== "completed")),
       )
       .map((t) => ({
         id: t.id,
@@ -974,6 +986,8 @@ export function demoTours(user: string, userName = "Você"): ToursApi {
         trg_visit: !!t.live.trg_visit,
         trg_login: !!t.live.trg_login,
         screen_only: !!(t.live.scr_clients?.length || t.live.scr_products?.length),
+        until_done: !!t.live.trg_until_done,
+        my_step: t.progress && t.progress.status !== "completed" ? t.progress.step : 0,
       }));
   }
 }

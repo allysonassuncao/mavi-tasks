@@ -183,6 +183,16 @@ export function TourLayer({
       .catch(() => setAutos([]));
   }, [api, company]);
   useEffect(loadAutos, [loadAutos]);
+  // Ao fechar ou concluir um tour, a lista volta do banco (o passo onde a
+  // pessoa parou; quem concluiu sai dos que voltam até concluir).
+  useEffect(() => {
+    if (!session) loadAutos();
+  }, [session, loadAutos]);
+  // Cada entrada numa tela (vinda de outra) conta como uma visita nova: os
+  // que voltam até concluir começam de novo uma vez por visita.
+  const visit = useRef({ page: null as string | null, n: 0 });
+  if (visit.current.page !== page) visit.current = { page, n: visit.current.n + 1 };
+  const visited = useRef(new Set<string>());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
     const on = () => {
@@ -204,11 +214,15 @@ export function TourLayer({
     } catch {
       loginDone = false;
     }
-    // Envios agendados recebidos começam em qualquer tela; os outros, como antes.
+    // Envios agendados recebidos começam em qualquer tela; os outros, como
+    // antes; os que voltam até concluir, a cada visita à tela onde começam.
+    const visitKey = (a: TourAuto) => `${a.id}@${visit.current.n}`;
+    const again = (a: TourAuto) => !!a.until_done && a.start_page === page && !visited.current.has(visitKey(a));
     const due = autos.filter(
       (a) =>
-        !tried.current.has(a.id) &&
-        (!!a.send_id || (a.trg_login && !loginDone) || (a.trg_visit && a.start_page === page)),
+        (!tried.current.has(a.id) &&
+          (!!a.send_id || (a.trg_login && !loginDone) || (a.trg_visit && a.start_page === page))) ||
+        again(a),
     );
     if (!due.length) return;
     let alive = true;
@@ -221,6 +235,7 @@ export function TourLayer({
       window.clearInterval(timer);
       for (const a of due) {
         tried.current.add(a.id);
+        visited.current.add(visitKey(a));
         if (a.screen_only && !a.send_id) {
           // "Só nas telas de": a lista do banco diz se esta tela vale.
           const here = await api
@@ -228,6 +243,7 @@ export function TourLayer({
             .catch(() => []);
           if (!alive || !here.some((r) => r.id === a.id)) {
             tried.current.delete(a.id);
+            visited.current.delete(visitKey(a));
             continue;
           }
         }
@@ -239,8 +255,9 @@ export function TourLayer({
             // Sem armazenamento: vale a lista (o progresso tira o tour dela).
           }
         }
-        setAutos((list) => list.filter((x) => x.id !== a.id));
-        void open({ action: "play", id: a.id, from: 0 });
+        // Os que voltam até concluir ficam na lista (e retomam de onde parou).
+        if (!a.until_done) setAutos((list) => list.filter((x) => x.id !== a.id));
+        void open({ action: "play", id: a.id, from: a.until_done && !a.send_id ? (a.my_step ?? 0) : 0 });
         return;
       }
     }, 700);
