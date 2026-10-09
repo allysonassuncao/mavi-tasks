@@ -1025,3 +1025,74 @@ body.ab-assistant-open .ai-fab {
     grid-template-columns: 1fr;
   }
 }
+
+/* ------------------------------------------------ integrações */
+.ab-integration.off {
+  opacity: 0.7;
+}
+.ab-integration-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ab-integration-head > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #56793a;
+}
+.ab-integration-title {
+  flex: 1;
+  min-width: 0;
+}
+.ab-integration-title p {
+  margin: 2px 0 0;
+}
+.ab-rule {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfcfb;
+}
+.ab-rule-remove {
+  align-self: flex-end;
+}
+.ab-role {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.ab-rotation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ab-rotation-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 14px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.ab-rotation-row.off {
+  opacity: 0.55;
+}
+.ab-rotation-row > .ab-check {
+  grid-column: auto;
+  flex: 1 1 220px;
+}
+.ab-rotation-opts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.ab-rotation-opts .ab-check {
+  grid-column: auto;
+}

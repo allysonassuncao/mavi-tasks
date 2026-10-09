@@ -229,6 +229,27 @@ export async function demoOp(agentId: string, op: string, extra: Record<string, 
     case "unbind":
     case "binding-toggle":
       return { ok: true };
+    case "crm-pipelines":
+      return {
+        pipelines: [
+          { id: "11111111-1111-4111-8111-111111111111", name: "Funil Principal", stages: [
+            { id: "21111111-1111-4111-8111-111111111111", name: "Novo lead", pipeline_id: "11111111-1111-4111-8111-111111111111", order: 1 },
+            { id: "31111111-1111-4111-8111-111111111111", name: "Qualificado", pipeline_id: "11111111-1111-4111-8111-111111111111", order: 2 },
+            { id: "41111111-1111-4111-8111-111111111111", name: "Reunião agendada", pipeline_id: "11111111-1111-4111-8111-111111111111", order: 3 },
+          ] },
+          { id: "12111111-1111-4111-8111-111111111111", name: "Pós-venda", stages: [
+            { id: "22111111-1111-4111-8111-111111111111", name: "Onboarding", pipeline_id: "12111111-1111-4111-8111-111111111111", order: 1 },
+          ] },
+        ],
+      };
+    case "crm-users":
+      return {
+        users: [
+          { id: "a1111111-1111-4111-8111-111111111111", name: "Ana Souza", email: "ana@cliente.com", google: "ana@cliente.com" },
+          { id: "b1111111-1111-4111-8111-111111111111", name: "Bruno Lima", email: "bruno@cliente.com", google: "bruno@cliente.com" },
+          { id: "c1111111-1111-4111-8111-111111111111", name: "Carla Dias", email: "carla@cliente.com", google: null },
+        ],
+      };
     case "keys":
     case "key-set":
     case "key-delete":

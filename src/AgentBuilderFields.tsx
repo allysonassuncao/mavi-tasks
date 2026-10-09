@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { Plus, TriangleAlert, X } from "lucide-react";
 import { Checkbox, Input, Select, SelectOption, Textarea } from "./ui";
 import { draftGet, linesOf, priceText, PROVIDER_LABEL, refKind, type AgentDraft, type AgentModels } from "./agent-builder";
@@ -291,9 +291,11 @@ const HOUR_PRESETS: { label: string; value: WeeklyHours }[] = [
   { label: "Todos os dias, 8h às 22h", value: Object.fromEntries(DAYS.map(([d]) => [d, { from: "08:00", to: "22:00" }])) as WeeklyHours },
 ];
 
-function HoursField({ f, p }: { f: Extract<FieldDef, { kind: "hours" }>; p: FormProps }) {
-  const hours: WeeklyHours = draftGet(p.draft, f.path) ?? {};
-  const set = (next: WeeklyHours) => p.change(f.path, Object.keys(next).length ? next : undefined);
+/** O horário da semana dia a dia (usado nos horários da empresa e nos da agenda). */
+export function WeeklyHoursEditor({ value, onChange }: { value: WeeklyHours | null | undefined; onChange: (v: WeeklyHours | undefined) => void }) {
+  const uid = useId();
+  const hours: WeeklyHours = value ?? {};
+  const set = (next: WeeklyHours) => onChange(Object.keys(next).length ? next : undefined);
   const day = (d: DayKey, v: { from: string; to: string } | null | undefined) => {
     const next = { ...hours };
     if (v === undefined) delete next[d];
@@ -301,7 +303,7 @@ function HoursField({ f, p }: { f: Extract<FieldDef, { kind: "hours" }>; p: Form
     set(next);
   };
   return (
-    <Field label={f.label} hint={f.hint} error={p.errorFor(f.path)} wide>
+    <>
       <div className="ab-suggest">
         <span className="ab-hint">Atalhos:</span>
         {HOUR_PRESETS.map((h) => (
@@ -319,7 +321,7 @@ function HoursField({ f, p }: { f: Extract<FieldDef, { kind: "hours" }>; p: Form
         {DAYS.map(([d, name]) => {
           const v = hours[d];
           const open = !!v;
-          const id = `ab-hours-${d}`;
+          const id = `${uid}-${d}`;
           return (
             <div key={d} className={`ab-hours-row ${open ? "" : "closed"}`}>
               <span className="ab-check compact">
@@ -328,13 +330,13 @@ function HoursField({ f, p }: { f: Extract<FieldDef, { kind: "hours" }>; p: Form
               </span>
               {open ? (
                 <span className="ab-hours-times">
-                  <select className="ui-input ab-time" aria-label={`${name}: abre às`} value={v.from} onChange={(e) => day(d, { ...v, from: e.target.value })}>
+                  <select className="ui-input ab-time" aria-label={`${name}: das`} value={v.from} onChange={(e) => day(d, { ...v, from: e.target.value })}>
                     {HALF_HOURS.filter((t) => t < v.to).map((t) => (
                       <option key={t}>{t}</option>
                     ))}
                   </select>
                   <span className="ab-hint">às</span>
-                  <select className="ui-input ab-time" aria-label={`${name}: fecha às`} value={v.to} onChange={(e) => day(d, { ...v, to: e.target.value })}>
+                  <select className="ui-input ab-time" aria-label={`${name}: às`} value={v.to} onChange={(e) => day(d, { ...v, to: e.target.value })}>
                     {[...HALF_HOURS.filter((t) => t > v.from), "23:59"].map((t) => (
                       <option key={t}>{t}</option>
                     ))}
@@ -347,6 +349,14 @@ function HoursField({ f, p }: { f: Extract<FieldDef, { kind: "hours" }>; p: Form
           );
         })}
       </div>
+    </>
+  );
+}
+
+function HoursField({ f, p }: { f: Extract<FieldDef, { kind: "hours" }>; p: FormProps }) {
+  return (
+    <Field label={f.label} hint={f.hint} error={p.errorFor(f.path)} wide>
+      <WeeklyHoursEditor value={draftGet(p.draft, f.path)} onChange={(v) => p.change(f.path, v)} />
     </Field>
   );
 }
