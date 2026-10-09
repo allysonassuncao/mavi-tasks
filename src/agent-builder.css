@@ -312,6 +312,17 @@
   background: #fff;
   overflow: hidden;
 }
+.ab-runs li {
+  padding: 8px 12px;
+  font-size: 0.8rem;
+}
+.ab-runs li + li {
+  border-top: 1px solid var(--border);
+}
+.ab-subtitle {
+  margin: 14px 0 6px;
+  font-size: 0.85rem;
+}
 .ab-list:empty {
   display: none;
 }
@@ -1142,6 +1153,20 @@
   border: 1px solid #c8ed8d;
   background: #eef8dd;
   color: #3f5a20;
+}
+.ab-chip.warn {
+  border: 1px solid #f1d38a;
+  background: #fff8e6;
+  color: #7a5a12;
+  cursor: default;
+}
+.ab-chip.warn button {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
 }
 .ab-chip.on button {
   display: inline-flex;

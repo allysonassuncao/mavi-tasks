@@ -266,6 +266,7 @@ const OPS: Record<string, Op> = {
   "crm-pipelines": { write: true, run: ({ a, call }) => call("GET", `/v1/makecrm/companies/${q(a.company_id)}/pipelines`) },
   "crm-users": { write: true, run: ({ a, call }) => call("GET", `/v1/makecrm/companies/${q(a.company_id)}/users`) },
   "crm-templates": { write: true, run: ({ a, call }) => call("GET", `/v1/makecrm/companies/${q(a.company_id)}/templates`) },
+  "crm-deal-catalog": { write: true, run: ({ a, call }) => call("GET", `/v1/makecrm/companies/${q(a.company_id)}/deal-catalog`) },
   bind: {
     write: true,
     run: ({ a, body, access, call }) => call("POST", `/v1/agents/${a.id}/bindings`, { inbox_id: String(body.inbox_id ?? ""), created_by: access.user_label }),
@@ -415,6 +416,10 @@ const OPS: Record<string, Op> = {
   "integration-failures": {
     write: false,
     run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/integration-failures${qs({ days: body.days })}`),
+  },
+  "scenario-runs": {
+    write: false,
+    run: ({ a, body, call }) => call("GET", `/v1/agents/${a.id}/scenario-runs${qs({ days: body.days })}`),
   },
 
   // ---------------------------------------------------------------- custos

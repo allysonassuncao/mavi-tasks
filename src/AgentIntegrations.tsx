@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { ArrowRightLeft, BellRing, CalendarDays, CircleCheck, Plug, Plus, Trash2, TriangleAlert, UserCog, X, type LucideIcon } from "lucide-react";
+import { ArrowRightLeft, BellRing, Briefcase, CalendarDays, CircleCheck, Plug, Plus, Trash2, TriangleAlert, UserCog, X, type LucideIcon } from "lucide-react";
 import { Button, Checkbox, Input, Loading, Select, SelectOption, Textarea } from "./ui";
 import {
   agentOp,
@@ -9,6 +9,7 @@ import {
   when,
   type AgentDraft,
   type CalendarCheck,
+  type DealCatalog,
   type IntegrationFailures,
   type MakecrmInbox,
 } from "./agent-builder";
@@ -21,9 +22,12 @@ import { WeeklyHoursEditor } from "./AgentBuilderFields";
  * WhatsApp. A configuração fica no rascunho (Salvar rascunho / Publicar).
  */
 
-type Pipeline = { id: string; name: string; stages: { id: string; name: string }[] };
-type CrmUser = { id: string; name: string; email: string | null; google: string | null };
+export type Pipeline = { id: string; name: string; stages: { id: string; name: string }[] };
+export type CrmUser = { id: string; name: string; email: string | null; google: string | null };
 type RotationUser = { user_id: string; weight: number; work_hours: boolean };
+/** Quem fica com a atividade criada pelo agente. */
+export type ActivityAssignee = { mode: "deal_role" | "fixed" | "round_robin"; role: "owner" | "sdr" | "closer"; user_id: string | null; users: RotationUser[] };
+export const DEFAULT_ASSIGNEE: ActivityAssignee = { mode: "deal_role", role: "owner", user_id: null, users: [] };
 type RoleTarget = { mode: "fixed" | "round_robin"; user_id?: string; users: RotationUser[] };
 type Integration = Record<string, any> & { type: string; enabled?: boolean };
 
@@ -64,6 +68,21 @@ const CATALOG: { type: string; icon: LucideIcon; title: string; text: string; ma
     make: () => ({ type: "makecrm_change_owner", enabled: true, rules: [] }),
   },
   {
+    type: "makecrm_deal_actions",
+    icon: Briefcase,
+    title: "Ações na oportunidade do MakeCRM",
+    text: "Dar como perdida ou ganha, registrar orçamento, anotar no histórico e criar atividades, como na tela do MakeCRM (mesmo histórico e automações).",
+    make: () => ({
+      type: "makecrm_deal_actions",
+      enabled: true,
+      lost: { enabled: false, when: "", reasons: [], cancel_meetings: true, complete_activities: true },
+      won: { enabled: false, when: "" },
+      quote: { enabled: false, when: "", products: [] },
+      note: { enabled: true, when: "" },
+      activity: { enabled: false, when: "", types: [], assignee: DEFAULT_ASSIGNEE, default_due_hours: 24 },
+    }),
+  },
+  {
     type: "team_notify",
     icon: BellRing,
     title: "Avisar a equipe no WhatsApp",
@@ -97,7 +116,16 @@ export function IntegrationsPanel({
   const [pipelines, setPipelines] = useState<Pipeline[] | null>(null);
   const [users, setUsers] = useState<CrmUser[] | null>(null);
   const [inboxes, setInboxes] = useState<MakecrmInbox[] | null>(null);
+  const [catalog, setCatalog] = useState<DealCatalog | null>(null);
   const [error, setError] = useState("");
+  const wantsCatalog = list.some((x) => x.type === "makecrm_deal_actions");
+
+  useEffect(() => {
+    if (!canEdit || !wantsCatalog || catalog) return;
+    agentOp<DealCatalog>(company, agentId, "crm-deal-catalog")
+      .then(setCatalog)
+      .catch((e) => setError(errorOf(e)));
+  }, [company, agentId, canEdit, wantsCatalog, catalog]);
 
   useEffect(() => {
     if (!canEdit) return;
@@ -171,6 +199,7 @@ export function IntegrationsPanel({
                 {c.type === "makecrm_move_deal" && <MoveDealForm cfg={cfg} pipelines={pipelines} onChange={(v) => update(i, v)} />}
                 {c.type === "makecrm_change_owner" && <ChangeOwnerForm cfg={cfg} users={users} onChange={(v) => update(i, v)} />}
                 {c.type === "team_notify" && <NotifyForm cfg={cfg} inboxes={inboxes} onChange={(v) => update(i, v)} />}
+                {c.type === "makecrm_deal_actions" && <DealActionsForm cfg={cfg} catalog={catalog} users={users} onChange={(v) => update(i, v)} />}
               </fieldset>
             )}
             {cfg && c.type === "google_calendar" && <CalendarTest company={company} agentId={agentId} hosts={cfg.hosts ?? []} users={users} />}
@@ -274,7 +303,7 @@ function CalendarTest({ company, agentId, hosts, users }: { company: string; age
 
 // ------------------------------------------------------------ peças
 
-function Row({ label, hint, children, wide }: { label: string; hint?: ReactNode; children: ReactNode; wide?: boolean }) {
+export function Row({ label, hint, children, wide }: { label: string; hint?: ReactNode; children: ReactNode; wide?: boolean }) {
   return (
     <div className={`ab-field ${wide ? "wide" : ""}`}>
       <span className="ab-label">{label}</span>
@@ -284,7 +313,7 @@ function Row({ label, hint, children, wide }: { label: string; hint?: ReactNode;
   );
 }
 
-function Check({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+export function Check({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   const id = useId();
   return (
     <div className="ab-check">
@@ -297,7 +326,7 @@ function Check({ checked, onChange, label, hint }: { checked: boolean; onChange:
   );
 }
 
-function Choice<T extends string | number>({
+export function Choice<T extends string | number>({
   value,
   options,
   onChange,
@@ -320,7 +349,7 @@ function Choice<T extends string | number>({
 }
 
 /** Quem entra (com peso e horário de trabalho do MakeCRM). */
-function RotationPicker({
+export function RotationPicker({
   users,
   value,
   onChange,
@@ -450,6 +479,28 @@ function CalendarForm({ cfg, users, onChange }: { cfg: Integration; users: CrmUs
         <Input value={cfg.title ?? ""} maxLength={200} onChange={(e) => set("title", e.target.value)} placeholder="Reunião com {lead}" />
       </Row>
       <Check checked={cfg.invite_lead !== false} onChange={(v) => set("invite_lead", v)} label="Convidar o lead por e-mail" hint="O agente pede o e-mail antes de marcar." />
+      <Row
+        label="Outras pessoas no convite"
+        hint="Quando o lead pede para incluir o sócio ou um colega, o agente pede o e-mail e convida (também depois de marcar). Ele só tira do convite quem o lead incluiu."
+      >
+        <Choice
+          label="Convidados extras"
+          value={cfg.max_guests ?? 3}
+          onChange={(v) => set("max_guests", v)}
+          options={[
+            [0, "Não permitir"],
+            ...[1, 2, 3, 5, 10].map((n) => [n, `Até ${n} além do lead`] as [number, string]),
+          ]}
+        />
+      </Row>
+      {(cfg.max_guests ?? 3) > 0 && (
+        <Check
+          checked={cfg.guests_see_others !== false}
+          onChange={(v) => set("guests_see_others", v)}
+          label="Convidados veem os e-mails uns dos outros"
+          hint="Desligado: cada um vê só a reunião, sem a lista de quem mais foi convidado."
+        />
+      )}
       <Check checked={cfg.meet_link !== false} onChange={(v) => set("meet_link", v)} label="Criar link do Google Meet" />
       <Check checked={cfg.add_summary !== false} onChange={(v) => set("add_summary", v)} label="Pôr o resumo da conversa na descrição" hint="Quem conduz a reunião chega sabendo o contexto." />
     </div>
@@ -644,6 +695,243 @@ function NotifyForm({ cfg, inboxes, onChange }: { cfg: Integration; inboxes: Mak
           onBlur={() => phone && add()}
         />
       </Row>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ ações na oportunidade
+const ASSIGNEE_ROLES: [ActivityAssignee["role"], string][] = [
+  ["owner", "Proprietário"],
+  ["sdr", "SDR"],
+  ["closer", "Closer"],
+];
+
+/** Quem fica com a atividade: papel da oportunidade (com quem assume), pessoa fixa ou rodízio. */
+export function AssigneeEditor({ value, users, onChange }: { value: ActivityAssignee | undefined; users: CrmUser[] | null; onChange: (v: ActivityAssignee) => void }) {
+  const v = { ...DEFAULT_ASSIGNEE, ...value };
+  const people = (users ?? []).map((u) => [u.id, u.name] as [string, string]);
+  return (
+    <div className="ab-grid">
+      <Row label="Responsável pela atividade">
+        <Choice
+          label="Responsável pela atividade"
+          value={v.mode}
+          onChange={(mode) => onChange({ ...v, mode })}
+          options={[
+            ["deal_role", "Quem está na oportunidade"],
+            ["fixed", "Uma pessoa fixa"],
+            ["round_robin", "Rodízio entre pessoas"],
+          ]}
+        />
+      </Row>
+      {v.mode === "deal_role" && (
+        <>
+          <Row label="Papel">
+            <Choice label="Papel" value={v.role} onChange={(role) => onChange({ ...v, role })} options={ASSIGNEE_ROLES} />
+          </Row>
+          <Row label="Se o papel estiver vazio" hint="Sem ninguém escolhido aqui, fica com o proprietário da oportunidade.">
+            <Select value={v.user_id ?? ""} aria-label="Se o papel estiver vazio" onValueChange={(id) => onChange({ ...v, user_id: id || null })}>
+              <SelectOption value="">O proprietário</SelectOption>
+              {people.map(([id, name]) => (
+                <SelectOption key={id} value={id}>
+                  {name}
+                </SelectOption>
+              ))}
+            </Select>
+          </Row>
+        </>
+      )}
+      {v.mode === "fixed" && (
+        <Row label="Quem">
+          <Select value={v.user_id ?? ""} aria-label="Quem fica com a atividade" onValueChange={(id) => onChange({ ...v, user_id: id || null })}>
+            <SelectOption value="">Escolha</SelectOption>
+            {people.map(([id, name]) => (
+              <SelectOption key={id} value={id}>
+                {name}
+              </SelectOption>
+            ))}
+          </Select>
+        </Row>
+      )}
+      {v.mode === "round_robin" && (
+        <Row label="Quem entra no rodízio" wide>
+          <RotationPicker users={users} value={v.users} onChange={(list) => onChange({ ...v, users: list })} />
+        </Row>
+      )}
+    </div>
+  );
+}
+
+type Named = { id: string; name: string };
+
+/** Lista de escolha (motivos, tipos) guardando o nome junto, para o agente ler. */
+function NamedPicker({ options, value, onChange, empty }: { options: Named[] | null; value: Named[]; onChange: (v: Named[]) => void; empty: string }) {
+  if (!options) return <Loading variant="inline" />;
+  const picked = new Set(value.map((x) => x.id));
+  const gone = value.filter((x) => !options.some((o) => o.id === x.id));
+  return (
+    <div className="ab-suggest">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          className={`ab-chip ${picked.has(o.id) ? "on" : ""}`}
+          aria-pressed={picked.has(o.id)}
+          onClick={() => onChange(picked.has(o.id) ? value.filter((x) => x.id !== o.id) : [...value, { id: o.id, name: o.name }])}
+        >
+          {o.name}
+        </button>
+      ))}
+      {gone.map((o) => (
+        <span key={o.id} className="ab-chip warn" title="Não existe mais no MakeCRM">
+          {o.name || o.id} (removido)
+          <button type="button" aria-label={`Tirar ${o.name}`} onClick={() => onChange(value.filter((x) => x.id !== o.id))}>
+            <X size={12} />
+          </button>
+        </span>
+      ))}
+      {!options.length && <p className="ab-hint">{empty}</p>}
+    </div>
+  );
+}
+
+const fmtMoney = (v: number, code: string) => {
+  try {
+    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: code || "BRL" }).format(v);
+  } catch {
+    return `${code} ${v}`;
+  }
+};
+
+function DealActionsForm({ cfg, catalog, users, onChange }: { cfg: Integration; catalog: DealCatalog | null; users: CrmUser[] | null; onChange: (v: Integration) => void }) {
+  const part = (k: string) => (cfg[k] ?? {}) as Record<string, any>;
+  const setPart = (k: string, patch: Record<string, unknown>) => onChange({ ...cfg, [k]: { ...part(k), ...patch } });
+  // Função (não componente): um componente criado aqui remontaria o campo a cada letra.
+  const when = (k: string, example: string) => (
+    <Row label="Quando (opcional)" hint={`Ex.: "${example}". Sem nada, o agente decide pela conversa.`} wide>
+      <Textarea value={part(k).when ?? ""} rows={2} maxLength={1000} onChange={(e) => setPart(k, { when: e.target.value })} />
+    </Row>
+  );
+  const products: { product_id: string; name: string; max_discount_pct: number }[] = part("quote").products ?? [];
+  return (
+    <div className="ab-stack">
+      <div className="ab-rule">
+        <Check checked={!!part("lost").enabled} onChange={(v) => setPart("lost", { enabled: v })} label="Dar como perdida" hint="Registra a perda com o motivo, como na tela do MakeCRM, e dispara as automações de perda." />
+        {part("lost").enabled && (
+          <>
+            {when("lost", "quando o lead disser que já fechou com outra empresa")}
+            <Row label="Motivos que o agente pode usar" wide>
+              <NamedPicker options={catalog?.lost_reasons ?? null} value={part("lost").reasons ?? []} onChange={(v) => setPart("lost", { reasons: v })} empty="Nenhum motivo de perda ativo no MakeCRM deste cliente." />
+            </Row>
+            <Check checked={part("lost").cancel_meetings !== false} onChange={(v) => setPart("lost", { cancel_meetings: v })} label="Cancelar as reuniões futuras" />
+            <Check checked={part("lost").complete_activities !== false} onChange={(v) => setPart("lost", { complete_activities: v })} label="Concluir as atividades em aberto" />
+          </>
+        )}
+      </div>
+      <div className="ab-rule">
+        <Check checked={!!part("quote").enabled} onChange={(v) => setPart("quote", { enabled: v })} label="Registrar orçamento" hint="Só produtos do catálogo, pelo preço cadastrado; desconto até o limite de cada um." />
+        {part("quote").enabled && (
+          <>
+            {when("quote", "quando o lead escolher o plano e pedir o valor final")}
+            <Row label="Produtos e desconto máximo" wide>
+              {!catalog ? (
+                <Loading variant="inline" />
+              ) : (
+                <div className="ab-rotation">
+                  {catalog.products.map((p) => {
+                    const it = products.find((x) => x.product_id === p.id);
+                    return (
+                      <div key={p.id} className="ab-rotation-row">
+                        <Check
+                          checked={!!it}
+                          onChange={(v) =>
+                            setPart("quote", { products: v ? [...products, { product_id: p.id, name: p.name, max_discount_pct: 0 }] : products.filter((x) => x.product_id !== p.id) })
+                          }
+                          label={p.name}
+                          hint={fmtMoney(p.price, p.currency)}
+                        />
+                        {it && (
+                          <span className="ab-rotation-opts">
+                            <Input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={1}
+                              aria-label={`Desconto máximo de ${p.name} (%)`}
+                              value={String(it.max_discount_pct)}
+                              onChange={(e) => {
+                                const n = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                                setPart("quote", { products: products.map((x) => (x.product_id === p.id ? { ...x, max_discount_pct: n } : x)) });
+                              }}
+                            />
+                            <small className="ab-hint">
+                              % de desconto máximo{it.max_discount_pct > 0 ? ` (mínimo ${fmtMoney(p.price * (1 - it.max_discount_pct / 100), p.currency)})` : ""}
+                            </small>
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {products
+                    .filter((x) => !catalog.products.some((p) => p.id === x.product_id))
+                    .map((x) => (
+                      <div key={x.product_id} className="ab-rotation-row off">
+                        <span>{x.name || x.product_id} (inativo ou removido do catálogo)</span>
+                        <button type="button" className="agent-link-btn danger" onClick={() => setPart("quote", { products: products.filter((y) => y.product_id !== x.product_id) })}>
+                          <X size={14} aria-hidden="true" /> Tirar
+                        </button>
+                      </div>
+                    ))}
+                  {!catalog.products.length && <p className="ab-hint">Nenhum produto ativo no catálogo do MakeCRM deste cliente.</p>}
+                </div>
+              )}
+            </Row>
+          </>
+        )}
+      </div>
+      <div className="ab-rule">
+        <Check
+          checked={!!part("won").enabled}
+          onChange={(v) => setPart("won", { enabled: v })}
+          label="Dar como ganha"
+          hint="Pelos orçamentos da oportunidade (sem orçamento, não dá). Dispara as automações de ganho do MakeCRM."
+        />
+        {part("won").enabled && when("won", "quando o lead enviar o comprovante de pagamento")}
+        {part("won").enabled && !part("quote").enabled && <p className="ab-notice warn">Sem "Registrar orçamento", só dá como ganha quando a equipe já tiver registrado o orçamento.</p>}
+      </div>
+      <div className="ab-rule">
+        <Check checked={!!part("note").enabled} onChange={(v) => setPart("note", { enabled: v })} label="Anotar no histórico" hint="Observações úteis para a equipe no histórico da oportunidade." />
+        {part("note").enabled && when("note", "quando o lead contar o tamanho da empresa ou o prazo de decisão")}
+      </div>
+      <div className="ab-rule">
+        <Check checked={!!part("activity").enabled} onChange={(v) => setPart("activity", { enabled: v })} label="Criar atividade" hint="Uma tarefa para a equipe na oportunidade (ligar, mandar e-mail…), com prazo." />
+        {part("activity").enabled && (
+          <>
+            {when("activity", "quando o lead pedir para ser ligado em outro horário")}
+            <Row label="Tipos que o agente pode criar" wide>
+              <NamedPicker options={catalog?.activity_types ?? null} value={part("activity").types ?? []} onChange={(v) => setPart("activity", { types: v })} empty="Nenhum tipo de atividade ativo no MakeCRM." />
+            </Row>
+            <AssigneeEditor value={part("activity").assignee} users={users} onChange={(v) => setPart("activity", { assignee: v })} />
+            <Row label="Prazo quando o lead não combinar um momento">
+              <Choice
+                label="Prazo padrão"
+                value={part("activity").default_due_hours ?? 24}
+                onChange={(v) => setPart("activity", { default_due_hours: v })}
+                options={[
+                  [0, "Agora"],
+                  [1, "Em 1 hora"],
+                  [4, "Em 4 horas"],
+                  [24, "Em 1 dia"],
+                  [48, "Em 2 dias"],
+                  [72, "Em 3 dias"],
+                  [168, "Em 1 semana"],
+                ]}
+              />
+            </Row>
+          </>
+        )}
+      </div>
+      <p className="ab-hint">Valem para a oportunidade aberta do lead; sem oportunidade, nada acontece. Tudo fica no histórico com "(pela MAVI)".</p>
     </div>
   );
 }

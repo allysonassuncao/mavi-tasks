@@ -304,6 +304,42 @@ export async function demoOp(agentId: string, op: string, extra: Record<string, 
           last_message: "O aplicativo Google do motor (GOOGLE_OAUTH_CLIENT_ID) não é o mesmo que conectou esta agenda no MakeCRM: use o mesmo cliente OAuth do MakeCRM no motor." }],
         recent: [],
       };
+    case "crm-deal-catalog":
+      return {
+        lost_reasons: [
+          { id: "d0000000-0000-4000-8000-000000000001", name: "Sem interesse" },
+          { id: "d0000000-0000-4000-8000-000000000002", name: "Concorrência" },
+          { id: "d0000000-0000-4000-8000-000000000003", name: "Telefone errado" },
+        ],
+        products: [
+          { id: "d0000000-0000-4000-8000-000000000011", name: "Plano mensal", price: 497, currency: "BRL" },
+          { id: "d0000000-0000-4000-8000-000000000012", name: "Plano anual", price: 4970, currency: "BRL" },
+        ],
+        activity_types: [
+          { id: "d0000000-0000-4000-8000-000000000021", name: "Ligação" },
+          { id: "d0000000-0000-4000-8000-000000000022", name: "E-mail" },
+          { id: "d0000000-0000-4000-8000-000000000023", name: "Reunião" },
+          { id: "d0000000-0000-4000-8000-000000000024", name: "Whatsapp" },
+        ],
+      };
+    case "scenario-runs":
+      return {
+        days: 30,
+        groups: [{ scenario_id: "cenario_1", scenario_name: "Não quer mais contato", n: 2, last_at: now() }],
+        recent: [
+          {
+            id: "1",
+            scenario_id: "cenario_1",
+            scenario_name: "Não quer mais contato",
+            reason: "pediu para não mandar mais mensagens",
+            actions: ["motivo registrado no histórico", "oportunidade dada como perdida", "follow-up parado", "MAVI desligada nesta conversa"],
+            created_at: now(),
+            conversation_id: null,
+            contact_name: "Marina Souza",
+            phone: null,
+          },
+        ],
+      };
     case "calendar-test":
       return {
         results: (extra.user_ids as string[]).map((u, i) =>

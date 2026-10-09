@@ -13,6 +13,7 @@ import {
   Pause,
   Play,
   Plug,
+  Signpost,
   Repeat,
   Plus,
   Save,
@@ -47,6 +48,7 @@ import { KnowledgePanel } from "./AgentBuilderKnowledge";
 import { CatalogForm, ModelOptionsContext } from "./AgentBuilderFields";
 import { AgentKeysSection } from "./AgentKeys";
 import { IntegrationsPanel } from "./AgentIntegrations";
+import { ScenariosPanel } from "./AgentScenarios";
 import { FollowupPanel } from "./AgentFollowup";
 import { AgentAssistant } from "./AgentAssistant";
 import { FIELD_BY_PATH, FIELDS } from "./agent-fields";
@@ -293,6 +295,7 @@ type Tab =
   | "knowledge"
   | "behavior"
   | "integrations"
+  | "scenarios"
   | "followup"
   | "test"
   | "inboxes"
@@ -308,6 +311,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "knowledge", label: "Conhecimento", icon: BookOpen },
   { id: "behavior", label: "Comportamento", icon: SlidersHorizontal },
   { id: "integrations", label: "Integrações", icon: Plug },
+  { id: "scenarios", label: "Cenários", icon: Signpost },
   { id: "followup", label: "Follow-up", icon: Repeat },
   { id: "test", label: "Testar", icon: FlaskConical },
   { id: "simulated", label: "Leads simulados", icon: UsersRound },
@@ -321,7 +325,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
 /** A aba pelo link (?aba=insights|lacunas, como no resumo semanal). */
 const TAB_PARAM: Record<string, Tab> = { insights: "insights", lacunas: "gaps", custos: "costs", testes: "simulated" };
 /** As abas do rascunho (o que "Salvar rascunho" grava); as três primeiras vêm do catálogo dos campos. */
-const DRAFT_TABS = new Set<Tab>(["profile", "instructions", "behavior", "integrations", "followup"]);
+const DRAFT_TABS = new Set<Tab>(["profile", "instructions", "behavior", "integrations", "scenarios", "followup"]);
 const FORM_TABS = new Set<Tab>(["profile", "instructions", "behavior"]);
 
 function AgentEditor({
@@ -523,6 +527,7 @@ function AgentEditor({
             </fieldset>
             {tab === "behavior" && <AgentKeysSection company={company} agentId={agentId} draft={draft} canEdit={canEdit} notify={notify} />}
               {tab === "integrations" && <IntegrationsPanel company={company} agentId={agentId} draft={draft} canEdit={canEdit} change={change} errorFor={errorFor} />}
+              {tab === "scenarios" && <ScenariosPanel company={company} agentId={agentId} draft={draft} canEdit={canEdit} change={change} errorFor={errorFor} />}
               {tab === "followup" && <FollowupPanel company={company} agentId={agentId} detail={detail} draft={draft} canEdit={canEdit} change={change} errorFor={errorFor} />}
           </ModelOptionsContext.Provider>
           {tab === "knowledge" && <KnowledgePanel key={knowledgeKey} company={company} agentId={agentId} canEdit={canEdit} notify={notify} />}
@@ -605,7 +610,9 @@ const FIELD_LABEL: Record<string, string> = {
 const TAB_OF = (path: string): Tab =>
   path.startsWith("integrations")
     ? "integrations"
-    : path.startsWith("followup")
+    : path.startsWith("scenarios")
+      ? "scenarios"
+      : path.startsWith("followup")
       ? "followup"
       : ((FIELD_BY_PATH.get(path)?.tab as Tab | undefined) ?? (path.startsWith("persona") ? "profile" : path.startsWith("instructions") ? "instructions" : "behavior"));
 

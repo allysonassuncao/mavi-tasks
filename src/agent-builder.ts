@@ -863,11 +863,24 @@ export type IntegrationFailures = {
   groups: { integration: string; code: string; n: number; last_at: string; last_message: string; notified: number }[];
   recent: { id: string; integration: string; tool: string; code: string; message: string; created_at: string; conversation_id: string | null; contact_name: string | null }[];
 };
+/** Catálogo do MakeCRM para as ações na oportunidade e os cenários. */
+export type DealCatalog = {
+  lost_reasons: { id: string; name: string }[];
+  products: { id: string; name: string; price: number; currency: string }[];
+  activity_types: { id: string; name: string }[];
+};
+/** Cenários acionados nas conversas reais. */
+export type ScenarioRuns = {
+  days: number;
+  groups: { scenario_id: string; scenario_name: string; n: number; last_at: string }[];
+  recent: { id: string; scenario_id: string; scenario_name: string; reason: string; actions: string[]; created_at: string; conversation_id: string | null; contact_name: string | null; phone: string | null }[];
+};
 export const INTEGRATION_LABEL: Record<string, string> = {
   google_calendar: "Google Agenda",
   makecrm_move_deal: "Mover oportunidade",
   makecrm_change_owner: "Trocar responsável",
   team_notify: "Avisar a equipe",
+  makecrm_deal_actions: "Ações na oportunidade",
 };
 /** Como corrigir, pelo motivo da falha. */
 export const FAILURE_FIX: Record<string, string> = {
