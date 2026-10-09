@@ -250,6 +250,13 @@ export async function demoOp(agentId: string, op: string, extra: Record<string, 
           { id: "c1111111-1111-4111-8111-111111111111", name: "Carla Dias", email: "carla@cliente.com", google: null },
         ],
       };
+    case "crm-templates":
+      return {
+        templates: [
+          { template_id: "t1", name: "retomada_conversa", category: "MARKETING", language: "pt_BR", text: "Oi {{1}}, tudo bem? Ficou alguma dúvida sobre {{2}}?", params: 2, examples: ["Ana", "a proposta"] },
+          { template_id: "t2", name: "ultimo_contato", category: "MARKETING", language: "pt_BR", text: "Vou encerrar seu atendimento por aqui. Se quiser retomar, é só responder esta mensagem!", params: 0, examples: [] },
+        ],
+      };
     case "keys":
     case "key-set":
     case "key-delete":

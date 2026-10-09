@@ -10,6 +10,7 @@ import {
   Pause,
   Play,
   Plug,
+  Repeat,
   Plus,
   Save,
   SlidersHorizontal,
@@ -42,6 +43,7 @@ import { KnowledgePanel } from "./AgentBuilderKnowledge";
 import { CatalogForm, ModelOptionsContext } from "./AgentBuilderFields";
 import { AgentKeysSection } from "./AgentKeys";
 import { IntegrationsPanel } from "./AgentIntegrations";
+import { FollowupPanel } from "./AgentFollowup";
 import { AgentAssistant } from "./AgentAssistant";
 import { FIELD_BY_PATH, FIELDS } from "./agent-fields";
 import { ConversationsPanel, SimulatorPanel } from "./AgentBuilderTest";
@@ -277,20 +279,21 @@ function NewAgentModal({
 }
 
 // ------------------------------------------------------------ construtor
-type Tab = "profile" | "instructions" | "knowledge" | "behavior" | "integrations" | "test" | "inboxes" | "versions" | "conversations";
+type Tab = "profile" | "instructions" | "knowledge" | "behavior" | "integrations" | "followup" | "test" | "inboxes" | "versions" | "conversations";
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "Perfil", icon: UserRound },
   { id: "instructions", label: "Instruções", icon: Sparkles },
   { id: "knowledge", label: "Conhecimento", icon: BookOpen },
   { id: "behavior", label: "Comportamento", icon: SlidersHorizontal },
   { id: "integrations", label: "Integrações", icon: Plug },
+  { id: "followup", label: "Follow-up", icon: Repeat },
   { id: "test", label: "Testar", icon: FlaskConical },
   { id: "inboxes", label: "Caixas", icon: Inbox },
   { id: "versions", label: "Versões", icon: History },
   { id: "conversations", label: "Conversas", icon: MessagesSquare },
 ];
 /** As abas do rascunho (o que "Salvar rascunho" grava); as três primeiras vêm do catálogo dos campos. */
-const DRAFT_TABS = new Set<Tab>(["profile", "instructions", "behavior", "integrations"]);
+const DRAFT_TABS = new Set<Tab>(["profile", "instructions", "behavior", "integrations", "followup"]);
 const FORM_TABS = new Set<Tab>(["profile", "instructions", "behavior"]);
 
 function AgentEditor({
@@ -448,7 +451,7 @@ function AgentEditor({
       {errors.length > 0 && DRAFT_TABS.has(tab) && (
         <p className="ab-notice warn">
           <TriangleAlert size={15} aria-hidden="true" /> Faltam {errors.length === 1 ? "1 campo" : `${errors.length} campos`} para
-          publicar: {[...new Set(errors.map((e) => FIELD_LABEL[e.path] ?? (e.path.startsWith("integrations") ? "integrações" : e.path)))].join(", ")}.
+          publicar: {[...new Set(errors.map((e) => FIELD_LABEL[e.path] ?? (e.path.startsWith("integrations") ? "integrações" : e.path.startsWith("followup") ? "follow-up" : e.path)))].join(", ")}.
         </p>
       )}
 
@@ -476,6 +479,7 @@ function AgentEditor({
             </fieldset>
             {tab === "behavior" && <AgentKeysSection company={company} agentId={agentId} draft={draft} canEdit={canEdit} notify={notify} />}
               {tab === "integrations" && <IntegrationsPanel company={company} agentId={agentId} draft={draft} canEdit={canEdit} change={change} errorFor={errorFor} />}
+              {tab === "followup" && <FollowupPanel company={company} agentId={agentId} detail={detail} draft={draft} canEdit={canEdit} change={change} errorFor={errorFor} />}
           </ModelOptionsContext.Provider>
           {tab === "knowledge" && <KnowledgePanel key={knowledgeKey} company={company} agentId={agentId} canEdit={canEdit} notify={notify} />}
           {tab === "test" && (
@@ -546,7 +550,9 @@ const FIELD_LABEL: Record<string, string> = {
 const TAB_OF = (path: string): Tab =>
   path.startsWith("integrations")
     ? "integrations"
-    : ((FIELD_BY_PATH.get(path)?.tab as Tab | undefined) ?? (path.startsWith("persona") ? "profile" : path.startsWith("instructions") ? "instructions" : "behavior"));
+    : path.startsWith("followup")
+      ? "followup"
+      : ((FIELD_BY_PATH.get(path)?.tab as Tab | undefined) ?? (path.startsWith("persona") ? "profile" : path.startsWith("instructions") ? "instructions" : "behavior"));
 
 // ------------------------------------------------------------ publicar e versões
 function PublishModal({

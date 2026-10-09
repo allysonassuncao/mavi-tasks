@@ -261,6 +261,7 @@ const OPS: Record<string, Op> = {
   inboxes: { write: true, run: ({ a, call }) => call("GET", `/v1/makecrm/companies/${q(a.company_id)}/inboxes`) },
   "crm-pipelines": { write: true, run: ({ a, call }) => call("GET", `/v1/makecrm/companies/${q(a.company_id)}/pipelines`) },
   "crm-users": { write: true, run: ({ a, call }) => call("GET", `/v1/makecrm/companies/${q(a.company_id)}/users`) },
+  "crm-templates": { write: true, run: ({ a, call }) => call("GET", `/v1/makecrm/companies/${q(a.company_id)}/templates`) },
   bind: {
     write: true,
     run: ({ a, body, access, call }) => call("POST", `/v1/agents/${a.id}/bindings`, { inbox_id: String(body.inbox_id ?? ""), created_by: access.user_label }),
